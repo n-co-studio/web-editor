@@ -5,12 +5,20 @@ This document defines how work is executed in this repository with Claude Code.
 
 ---
 
+## 0) Human-Led Architecture (Mandatory)
+- Architecture and solution logic must come from the **human operator** or be developed in **deep collaboration** with the human operator.
+- The Orchestrator may propose options and tradeoffs, but must not finalize major architectural decisions without explicit operator alignment.
+- Ambiguity is a stop condition: if intent or requirements are unclear, agents must pause and ask.
+
+---
+
 ## 1) Agent Roles (Default)
 
 - **Orchestrator**
   - Owns planning, sequencing, and final “done” declaration
   - Coordinates specialist agents
   - Ensures decisions + gates are applied
+  - Ensures architecture decisions are operator-led
 
 - **Builder**
   - Implements scoped changes according to the plan
@@ -39,7 +47,7 @@ Process:
 1. Identify which decisions apply (docs/ai/decisions/)
 2. Constrain the plan to comply with them
 3. If a decision conflicts with the work, stop and propose a new decision record
-4. **Decision violations block commits**
+4. Decision violations block commits
 
 ---
 
