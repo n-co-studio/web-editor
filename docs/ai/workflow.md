@@ -83,10 +83,16 @@ HVST is not required for simple, low-risk feature work unless instability appear
 
 ## 5) Session Lifecycle
 
-- A “session” is a bounded unit of work with a clear goal.
+- A "session" is a bounded unit of work with a clear goal.
 - At session close:
   - all changes are verified
   - commits are made (and pushes as appropriate)
   - the session log is updated
+
+---
+
+## Reference
+
+For detailed workflow diagram and handoff protocols, see: `.claude/agents/_agent-workflow.md`
 
 EOF

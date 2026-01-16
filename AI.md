@@ -30,6 +30,11 @@ Agent-allowed (inside this repo):
 - docs/ai/decisions/
 - docs/ai/logs/session-log.md
 
+## Agent Definitions (source of truth)
+- .claude/agents/_agent-glossary.md — shared terminology
+- .claude/agents/_agent-workflow.md — agent interaction patterns
+- .claude/agents/*.md — role definitions (orchestrator, builder, qa-verifier, reviewer, security-privacy, accessibility)
+
 ## Prompts
 - Prompt A: Repo OS / agents / workflow initialization (no product code)
 - Prompt B: Product build operating prompt (ecosystem rules only; project description changes per project)

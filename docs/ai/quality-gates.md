@@ -7,6 +7,8 @@ Gates are **blocking conditions**. If a required gate is not satisfied, you may 
 
 If a gate cannot be met yet (e.g., tests not set up), it must be explicitly documented in the session log with a follow-up task.
 
+> **Implementation Details:** See `.claude/agents/qa-verifier.md` for specific verification commands, evidence format templates, and examples.
+
 ---
 
 ## A) Commit Gates (Required)

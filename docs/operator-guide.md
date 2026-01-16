@@ -8,6 +8,21 @@ This is a reference for you.
 
 ---
 
+## Quick Start — New Repo Setup
+
+1. **Create repo from template**
+   - Go to template repo on GitHub
+   - Click "Use this template" → "Create a new repository"
+   - Set repo name, owner, and visibility
+   - Click "Create repository"
+2. **Clone locally** — `git clone <REPO_URL> && cd <REPO_NAME>`
+3. **Run Prompt A** — Initialize Repo OS (one-time setup)
+4. **Run Prompt B** — Begin development work
+
+See Section 3 for detailed steps.
+
+---
+
 ## 1) Mental Model (Read Once)
 
 - You (the operator) own intent, architecture, and final authority
@@ -52,6 +67,29 @@ Action:
 Action:
 - Stop
 - Re-run Prompt A or explicitly reference docs/ai/workflow.md
+
+---
+
+## 2.5) Agent Definitions
+
+The `.claude/agents/` directory contains comprehensive agent definitions:
+
+**Shared files** (read by all agents):
+- `_agent-glossary.md` — defines terms like "small scope", "high-risk", "gate"
+- `_agent-workflow.md` — shows how agents coordinate and hand off work
+
+**Agent roles**:
+
+| Agent | Purpose | Blocks Commits? |
+|-------|---------|-----------------|
+| Orchestrator | Plans, coordinates, ensures human-led architecture | No |
+| Builder | Implements scoped changes per plan | No |
+| QA/Verifier | Verifies all gates before commits | **Yes** |
+| Reviewer | Reviews code quality (high-risk/structural) | **Yes** (when required) |
+| Security | Checks for secrets, auth risks, vulnerabilities | **Yes** (when required) |
+| Accessibility | Reviews UI for WCAG compliance | No (advisory) |
+
+Each agent definition includes: authority boundaries, required reading, invocation criteria, responsibilities, constraints, escalation paths, and examples.
 
 ---
 

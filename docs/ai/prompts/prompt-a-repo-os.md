@@ -14,6 +14,8 @@ You must:
 - Read docs/ai/quality-gates.md
 - Read all accepted decisions in docs/ai/decisions/
 - Read all agent definitions in .claude/agents/
+- Read .claude/agents/_agent-glossary.md (shared terminology)
+- Read .claude/agents/_agent-workflow.md (agent interactions)
 - Read docs/ai/workflow.md when establishing or changing workflow behavior
 
 You must define or confirm:

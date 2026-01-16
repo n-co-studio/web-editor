@@ -24,8 +24,19 @@ This directory defines how the repository operates when using Claude Code.
 
 ## Agents
 
-- **.claude/agents/**  
-  Project-local Claude Code agents (orchestrator, builder, QA, reviewer, etc.).
-  Agent definitions live here and are version-controlled with the repo.
+- **.claude/agents/_agent-glossary.md**
+  Shared terminology definitions used across all agents.
+
+- **.claude/agents/_agent-workflow.md**
+  Visual workflow diagram and handoff protocols.
+
+- **.claude/agents/*.md**
+  Individual agent definitions:
+  - `orchestrator.md` — planning, coordination, architecture alignment
+  - `builder.md` — scoped implementation
+  - `qa-verifier.md` — gate verification (commit blocker)
+  - `reviewer.md` — code quality review (conditional)
+  - `security-privacy.md` — security assessment (conditional)
+  - `accessibility.md` — a11y review (advisory)
 
 EOF

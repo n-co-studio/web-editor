@@ -13,6 +13,7 @@ You must:
 - Read and follow AI.md
 - Enforce docs/ai/quality-gates.md
 - Comply with all accepted decisions in docs/ai/decisions/
+- Read .claude/agents/_agent-glossary.md for shared terminology
 - Respect agent role boundaries in .claude/agents/
 - Use docs/ai/workflow.md as needed to execute correctly
 
