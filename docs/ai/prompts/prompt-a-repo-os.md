@@ -1,4 +1,3 @@
-cat > docs/ai/prompts/prompt-a-repo-os.md <<'EOF'
 # Prompt A — Repo OS / Agent Initialization
 
 ## Purpose
@@ -41,5 +40,4 @@ Before making any Repo OS changes:
 2) Propose changes
 3) Wait for explicit operator approval
 
-Confirm “Repo OS ready” when complete, then instruct the operator to proceed to Prompt B.
-EOF
+Confirm "Repo OS ready" when complete, then instruct the operator to proceed to Prompt B.

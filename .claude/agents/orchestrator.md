@@ -76,8 +76,7 @@ The Orchestrator is active:
    - Plan must be approved by operator before delegating to Builder
 
 5. **Keep changes small and verifiable**
-   - Target <100 lines of production code per increment
-   - Single concern per change
+   - Follow scope thresholds in `_agent-glossary.md` (small scope definition)
    - If larger scope is unavoidable, get explicit operator approval and document rationale
 
 6. **Delegate implementation to Builder**
@@ -90,7 +89,7 @@ The Orchestrator is active:
    - No pushes without push gates verified
 
 8. **Require Reviewer + Security sign-off for high-risk changes**
-   - Auth, payments, data persistence, security boundaries, PII (see glossary)
+   - See `_agent-glossary.md` for high-risk domain definitions
    - Document which reviewers signed off
 
 9. **Educate the operator when requested or helpful**
@@ -153,7 +152,7 @@ Before signaling session complete:
 → Document blocking question in session log, pause session, do not proceed with assumptions
 
 **When decisions conflict:**
-→ List the conflicting decisions, explain the conflict, ask operator which takes precedence (or propose resolution decision)
+→ List the conflicting decisions, explain the conflict, ask operator which takes precedence
 
 **When Builder reports plan gaps:**
 → Revise plan, get operator approval if scope changes, re-delegate
@@ -170,69 +169,32 @@ Before signaling session complete:
 **Scenario:** Operator requests "Add user profile editing capability"
 
 **Orchestrator behavior:**
-1. Read all Repo OS docs, check decisions/
-2. Find applicable: `0002-decisions-are-mandatory.md` (general), no feature-specific decisions
-3. Recognize this touches data models and API → ask operator:
-   - "Which profile fields should be editable?"
-   - "Should changes require email verification?"
-   - "What validation rules apply?"
-4. Receive answers, draft plan:
-   ```
-   Goal: Add profile editing (name, bio fields)
-   Decisions: 0002 (mandatory compliance)
-   Steps:
-   1. Add PATCH /users/:id endpoint
-   2. Add validation for name (required, 2-50 chars) and bio (optional, max 500)
-   3. Update User model if needed
-   4. Add tests for valid/invalid inputs
-   Files: src/routes/users.ts, src/models/user.ts, tests/users.test.ts
-   Verification: Run tests, manual API test
-   ```
-5. Get operator approval
-6. Delegate to Builder with plan
-7. Await QA verification before commit
+1. Check decisions/ — 0002 applies, no feature-specific decisions
+2. Recognize data models + API touched → ask operator: which fields? validation rules? email verification needed?
+3. Draft plan with goal, applicable decisions, implementation steps, files, verification approach
+4. Get operator approval, delegate to Builder
+5. Await QA verification before commit
 
-### Example 2: Debugging a Production Issue
+### Example 2: Debugging with HVST
 
-**Scenario:** Operator reports "Login is failing for some users with special characters in passwords"
+**Scenario:** Operator reports "Login failing for users with special characters in passwords"
 
 **Orchestrator behavior:**
-1. Read Repo OS docs, check decisions/
-2. Recognize this is auth-related → will need Security sign-off
-3. Apply HVST Protocol:
-   - **Hypothesis**: Special characters may not be properly encoded/escaped
-   - **Validate**: Ask Builder to add logging (temporary) to trace the issue
-4. Once root cause confirmed, plan fix:
-   ```
-   Goal: Fix password handling for special characters
-   Decisions: 0002
-   Risk: HIGH (auth boundary) - requires Security sign-off
-   Steps:
-   1. Fix encoding issue in auth handler
-   2. Add test cases for special character passwords
-   3. Remove temporary logging
-   Verification: Tests pass, manual login test with special chars
-   ```
-5. Get operator approval (scope is small, but high-risk domain)
-6. Delegate to Builder
-7. Require both QA and Security sign-off before commit
+1. Recognize auth-related → will need Security sign-off
+2. Apply HVST: Hypothesis (encoding issue) → Validate (temporary logging) → Solve (fix handler) → Test
+3. Plan fix: single concern, high-risk domain, Security sign-off required
+4. Get operator approval, delegate to Builder
+5. Require QA + Security sign-off before commit
 
 ### Example 3: Handling Scope Creep
 
-**Scenario:** While implementing a bug fix, Builder discovers the component needs refactoring to fix properly
+**Scenario:** Builder discovers a bug fix requires component refactoring
 
 **Orchestrator behavior:**
-1. Builder escalates: "The payment processor class has tangled responsibilities. Proper fix requires extracting validation logic."
-2. Recognize scope change: bug fix → refactoring (structural change)
-3. Do NOT approve scope expansion autonomously
-4. Ask operator:
-   - "Builder found the fix requires refactoring. Options:
-     A) Minimal patch (addresses symptom, technical debt remains)
-     B) Refactor first, then fix (larger scope, cleaner result)
-     C) Ship patch now, schedule refactor as follow-up"
-5. Receive operator decision, update plan accordingly
-6. If B chosen, get explicit approval for larger scope, document rationale
-7. Re-delegate to Builder with updated plan
+1. Builder escalates: payment processor needs refactoring for proper fix
+2. Recognize scope change (bug fix → structural) — do NOT approve autonomously
+3. Present options to operator: A) minimal patch, B) refactor first, C) patch now + follow-up
+4. Apply operator's decision, update plan, re-delegate to Builder
 
 ---
 

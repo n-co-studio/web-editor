@@ -109,241 +109,30 @@ Visual reference for how agents coordinate during the standard execution loop.
 
 ---
 
-## Handoff Protocols
+## Handoff Chain
 
-### Orchestrator → Builder Handoff
+Each agent's definition file contains its specific handoff format (what it sends and receives). The standard handoff chain is:
 
-**What Orchestrator provides:**
-```
-## Implementation Request
+1. **Operator → Orchestrator**: Task request
+2. **Orchestrator → Builder**: Approved plan with instructions, applicable decisions, scope boundaries
+3. **Builder → QA/Verifier**: Completion signal with changes made, local check results
+4. **QA → Reviewer** (when required): Code diff with risk assessment for sign-off
+5. **QA → Security** (when required): Code diff with risk assessment for sign-off
+6. **Orchestrator → Accessibility** (when applicable): UI code with component context
 
-**Plan Reference:** [link or inline plan]
-**Goal:** [single sentence]
-
-### Scope
-- Files to modify: [list]
-- Estimated changes: [X lines, Y files]
-- Constraints: [any limits]
-
-### Applicable Decisions
-- [decision file]: [specific constraint]
-- [decision file]: [specific constraint]
-
-### Implementation Steps
-1. [Step 1]
-2. [Step 2]
-3. [Step 3]
-
-### Verification
-- Run: [commands]
-- Check: [conditions]
-
-### Notes
-- [Any clarifications or warnings]
-```
-
-**What Builder returns:**
-```
-## Implementation Complete
-
-**Status:** Complete / Blocked (reason)
-
-### Changes Made
-- [file]: [what changed]
-
-### Lines Changed
-- Added: X
-- Modified: Y
-- Deleted: Z
-
-### Local Checks
-| Check | Status |
-|-------|--------|
-| Format | PASS |
-| Lint | PASS |
-| Build | PASS |
-
-### Notes
-- [Any discoveries or follow-up recommendations]
-
-**Ready for QA:** YES / NO
-```
+See individual agent files in `.claude/agents/` for detailed handoff format templates.
 
 ---
 
-### Builder → QA/Verifier Handoff
+## Escalation Paths
 
-**What QA receives:**
-- Implementation completion signal
-- List of files changed
-- Local check results
-- Any notes from Builder
+- **Builder → Orchestrator**: Plan gaps, scope expansion needed, ambiguity, bugs outside scope
+- **QA → Orchestrator**: Gate failures requiring plan revision, ambiguous gate requirements
+- **Orchestrator → Operator**: Clarification needed, architectural decisions, scope changes, risk acceptance
+- **Security → Orchestrator → Operator**: Risk acceptance decisions, security/functionality conflicts
+- **Reviewer → Orchestrator**: Fundamental approach disagreements, decision violations requiring resolution
 
-**What QA returns:**
-```
-## Verification Report
-
-**Status:** APPROVED / BLOCKED
-
-### Commit Gates
-| Gate | Status | Evidence |
-|------|--------|----------|
-| A1: Decision Compliance | PASS | Checked 0001, 0002 |
-| A2: Process | PASS | Plan exists, scope small |
-| A3: Quality | PASS | `npm run lint` - no errors |
-| A4: Safety | PASS | No secrets found |
-
-### Push Gates (if pushing)
-| Gate | Status | Evidence |
-|------|--------|----------|
-| B1: Sign-offs | PASS | Reviewer + Security approved |
-| B2: Tests | PASS | 42 tests passed |
-| B3: Audit | N/A | No dependency changes |
-
-**Verdict:** [COMMIT ALLOWED / BLOCKED - reason]
-```
-
----
-
-### QA → Reviewer Handoff (When Required)
-
-**Triggers:**
-- High-risk domain (auth, payments, data, security)
-- Structural change
-- Push gate B1 requires sign-off
-
-**What Reviewer receives:**
-- Code diff
-- Risk level assessment
-- Context from Orchestrator's plan
-
-**What Reviewer returns:**
-```
-## Code Review
-
-**Verdict:** APPROVE / APPROVE WITH NOTES / REQUEST CHANGES / BLOCK
-
-### Blocking Issues
-[list or "None"]
-
-### Suggestions
-[list or "None"]
-
-**Sign-off:** GRANTED / WITHHELD
-```
-
----
-
-### QA → Security Handoff (When Required)
-
-**Triggers:**
-- Auth/security boundaries touched
-- PII/sensitive data involved
-- Dependencies changed
-- Push gate B1 requires sign-off
-
-**What Security receives:**
-- Code diff
-- Risk level assessment
-- Dependency change list (if applicable)
-
-**What Security returns:**
-```
-## Security Review
-
-**Severity:** CRITICAL / HIGH / MEDIUM / LOW / NONE
-**Verdict:** APPROVE / REQUEST CHANGES / BLOCK
-
-### Secrets Scan
-PASS / FAIL
-
-### Vulnerabilities
-[list with CWE/OWASP reference or "None"]
-
-### Dependency Audit
-PASS / FAIL / N/A
-
-**Sign-off:** GRANTED / WITHHELD
-```
-
----
-
-### Orchestrator → Accessibility Handoff (When Applicable)
-
-**Triggers:**
-- UI components created or modified
-- Forms or interactive elements added
-- Public-facing changes
-
-**What Accessibility receives:**
-- UI code for review
-- Context on component purpose
-
-**What Accessibility returns:**
-```
-## Accessibility Review
-
-**Verdict:** PASS / PASS WITH NOTES / RECOMMEND CHANGES / ESCALATE
-
-### Issues
-[list with WCAG reference and severity]
-
-### Recommendations
-[prioritized fixes]
-```
-
----
-
-## Escalation Flow
-
-```
-Builder                 Orchestrator                  Operator
-   │                         │                           │
-   │  "Plan gap found"       │                           │
-   ├────────────────────────►│                           │
-   │                         │                           │
-   │                         │  "Clarification needed"   │
-   │                         ├──────────────────────────►│
-   │                         │                           │
-   │                         │  "Here's the answer"      │
-   │                         │◄──────────────────────────┤
-   │                         │                           │
-   │  "Revised plan"         │                           │
-   │◄────────────────────────┤                           │
-   │                         │                           │
-
-
-QA                      Orchestrator                  Operator
-   │                         │                           │
-   │  "Gate failed"          │                           │
-   ├────────────────────────►│                           │
-   │                         │                           │
-   │                         │  Plan revision            │
-   │                         │  (may need approval)      │
-   │                         ├──────────────────────────►│
-   │                         │                           │
-   │                         │◄──────────────────────────┤
-   │                         │                           │
-   │  Revised code from      │                           │
-   │  Builder, re-verify     │                           │
-   │◄────────────────────────┤                           │
-
-
-Security                Orchestrator                  Operator
-   │                         │                           │
-   │  "Risk acceptance       │                           │
-   │   needed"               │                           │
-   ├────────────────────────►│                           │
-   │                         │                           │
-   │                         │  "Accept risk?"           │
-   │                         ├──────────────────────────►│
-   │                         │                           │
-   │                         │  "Accepted" / "Fix it"    │
-   │                         │◄──────────────────────────┤
-   │                         │                           │
-   │  Decision recorded      │                           │
-   │◄────────────────────────┤                           │
-```
+If operator is unresponsive (>2 prompts without response): pause session, document blocking question in session log, do not proceed with assumptions.
 
 ---
 
@@ -358,24 +147,3 @@ Security                Orchestrator                  Operator
 | **Security** | Verdict, risk decisions | (via Orchestrator) | Sign-off | - | - | - | - |
 | **Accessibility** | Findings, escalations | (via Orchestrator) | - | - | - | - | - |
 | **Operator** | Tasks, approvals, decisions | - | - | - | - | - | - |
-
----
-
-## Quick Reference: Who Does What
-
-| Action | Who | Blocks? |
-|--------|-----|---------|
-| Receive task | Orchestrator | - |
-| Read Repo OS docs | Orchestrator, all agents | - |
-| Create plan | Orchestrator | - |
-| Approve plan | Operator | - |
-| Implement code | Builder | - |
-| Run local checks | Builder | - |
-| Verify gates | QA | **YES** |
-| Block commit | QA | **YES** |
-| Review code quality | Reviewer | **YES** (when required) |
-| Review security | Security | **YES** (when required) |
-| Review accessibility | Accessibility | No (advisory) |
-| Approve commit | QA | **YES** |
-| Update session log | Orchestrator | - |
-| Accept risk | Operator | - |

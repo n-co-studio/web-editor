@@ -1,4 +1,3 @@
-cat > docs/ai/prompts/prompt-b-product-build.md <<'EOF'
 # Prompt B — Product Build Operating Prompt
 
 ## Project Description
@@ -31,5 +30,3 @@ You must NOT:
 - Make large, unverified changes
 - Skip verification steps
 - Proceed on ambiguity (stop and ask the operator)
-
-EOF

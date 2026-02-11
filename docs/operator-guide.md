@@ -168,6 +168,26 @@ If a gate cannot be met yet:
 
 ---
 
+## 6.5) Mechanical Enforcement
+
+Some gates are enforced automatically by hooks — scripts that run regardless of agent behavior.
+
+**What's automatic:**
+- Secret scanning runs before every commit (blocks if secrets found)
+- Session log reminder runs when Claude stops responding
+- Agent tool boundaries are enforced by frontmatter (e.g., Builder cannot spawn subagents, QA cannot edit files)
+
+**What you customize per project:**
+- Add lint, test, and build checks to `.claude/hooks/pre-commit-gates.sh`
+- Adjust permissions in `.claude/settings.json` (team-shared) or `.claude/settings.local.json` (personal)
+
+**Key files:**
+- `.claude/settings.json` — team-shared hooks and permissions (committed to git)
+- `.claude/settings.local.json` — personal overrides (gitignored)
+- `.claude/hooks/` — verification scripts
+
+---
+
 ## 7) Session Hygiene
 
 At the end of a session:

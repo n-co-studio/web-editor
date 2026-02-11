@@ -125,6 +125,19 @@ Routing a decision or issue to a higher authority when:
 
 ---
 
+## Enforcement Terminology
+
+### Hook
+An automated script triggered by Claude Code lifecycle events (e.g., before a commit, when a session stops). Hooks run regardless of agent behavior — they are mechanical enforcement, not voluntary compliance.
+
+### Subagent
+An agent invocable via the Task tool with an isolated context and enforced tool restrictions defined in YAML frontmatter. Subagents cannot exceed their declared tool boundaries.
+
+### Settings (Shared)
+`.claude/settings.json` — team-wide permissions and hooks, committed to git. Applies to every session automatically. Personal overrides go in `.claude/settings.local.json` (gitignored).
+
+---
+
 ## Agent Roles (Summary)
 
 | Agent | Primary Responsibility | Blocks Commits? |

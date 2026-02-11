@@ -1,9 +1,6 @@
-cat > docs/ai/quality-gates.md <<'EOF'
 # Gates (Process + Quality + Safety)
 
 Gates are **blocking conditions**. If a required gate is not satisfied, you may not commit (or push).
-
-**Decisions are mandatory constraints.** If an accepted decision applies and is not satisfied, that is a **gate failure** and **commits are blocked**.
 
 If a gate cannot be met yet (e.g., tests not set up), it must be explicitly documented in the session log with a follow-up task.
 
@@ -20,7 +17,7 @@ If a gate cannot be met yet (e.g., tests not set up), it must be explicitly docu
 
 ### A2) Process Gates (Required)
 - A plan exists before code changes begin
-- Scope is small and reviewable (no “big bang” edits)
+- Scope is small and reviewable (no "big bang" edits)
 - Changes are explainable: what changed + why
 - Session log will be updated at session close (required)
 
@@ -64,7 +61,7 @@ Examples:
 
 If a project defines conditional gates, they must be documented in:
 - a decision record (recommended), and/or
-- the project’s workflow docs
+- the project's workflow docs
 
 Once defined, they are enforceable and **block commits/pushes** when triggered.
 
@@ -78,5 +75,3 @@ To be defined per project when needed:
 - Accessibility review checklist
 - Security scanning / SAST
 - Migration + rollback plan
-
-EOF

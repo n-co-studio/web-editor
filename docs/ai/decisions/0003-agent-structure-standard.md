@@ -14,6 +14,7 @@ All agent definitions in `.claude/agents/` must follow a standardized structure:
    - `_agent-workflow.md` — workflow diagram and handoff protocols
 
 2. **Agent Definition Structure** (each agent file):
+   - YAML frontmatter (for invocable agents): `name`, `description`, `tools`, `disallowedTools`, and optionally `model`. Orchestrator and shared reference files are exempt (see Decision 0004).
    - Role, Authority, Required Reading, Invocation Criteria
    - Must (numbered responsibilities), Must Not (constraints)
    - Verification Checklist, Escalation Paths

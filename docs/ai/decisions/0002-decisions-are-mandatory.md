@@ -1,4 +1,3 @@
-cat > docs/ai/decisions/0002-decisions-are-mandatory.md <<'EOF'
 # Decision 0002 — Decisions Are Mandatory (Commit-Blocking)
 
 ## Status
@@ -15,10 +14,8 @@ Without enforcement, decision records degrade into suggestions and are ignored o
 - **Decision violations block commits** (and therefore pushes).
 
 ## Consequences
-- Decisions function as binding constraints (“laws”) for both operator and agents.
+- Decisions function as binding constraints ("laws") for both operator and agents.
 - Enforcement occurs through:
   - Prompt compliance requirements
   - Gates that treat decision violations as failures
   - Session logging that records decisions applied per session
-
-EOF

@@ -1,4 +1,3 @@
-cat > docs/ai/decisions/0001-repo-os-baseline.md <<'EOF'
 # Decision 0001 — Repo OS Baseline
 
 ## Status
@@ -30,5 +29,3 @@ This baseline is committed as **Commit 0** and must exist before any product cod
 - Repo OS changes are deliberate and version-controlled
 - Agents operate only within defined boundaries
 - Product logic is never mixed with Repo OS definition
-
-EOF

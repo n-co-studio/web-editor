@@ -1,4 +1,3 @@
-cat > AI.md <<'EOF'
 # Repo OS (Claude Code)
 
 This repository uses a Repo Operating System (Repo OS) to govern how Claude Code and the operator work together.
@@ -24,7 +23,6 @@ Agent-allowed (inside this repo):
 - Push only when gates pass and Repo OS allows it
 
 ## Repo OS docs (source of truth)
-- docs/README.md
 - docs/ai/workflow.md
 - docs/ai/quality-gates.md
 - docs/ai/decisions/
@@ -35,8 +33,10 @@ Agent-allowed (inside this repo):
 - .claude/agents/_agent-workflow.md — agent interaction patterns
 - .claude/agents/*.md — role definitions (orchestrator, builder, qa-verifier, reviewer, security-privacy, accessibility)
 
+## Enforcement (source of truth)
+- .claude/settings.json — team-shared permissions and lifecycle hooks
+- .claude/hooks/ — verification scripts for automated gate checks
+
 ## Prompts
 - Prompt A: Repo OS / agents / workflow initialization (no product code)
 - Prompt B: Product build operating prompt (ecosystem rules only; project description changes per project)
-
-EOF

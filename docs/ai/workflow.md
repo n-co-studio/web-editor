@@ -1,4 +1,3 @@
-cat > docs/ai/workflow.md <<'EOF'
 # Workflow (Repo OS)
 
 This document defines how work is executed in this repository with Claude Code.
@@ -15,7 +14,7 @@ This document defines how work is executed in this repository with Claude Code.
 ## 1) Agent Roles (Default)
 
 - **Orchestrator**
-  - Owns planning, sequencing, and final “done” declaration
+  - Owns planning, sequencing, and final "done" declaration
   - Coordinates specialist agents
   - Ensures decisions + gates are applied
   - Ensures architecture decisions are operator-led
@@ -94,5 +93,3 @@ HVST is not required for simple, low-risk feature work unless instability appear
 ## Reference
 
 For detailed workflow diagram and handoff protocols, see: `.claude/agents/_agent-workflow.md`
-
-EOF
