@@ -215,7 +215,42 @@ If those aren't true, the session isn't done.
 
 ---
 
-## 8) Rule Overrides
+## 8) Branch Categories
+
+Work happens on categorized branches. Category determines gate strictness.
+
+| Branch | Purpose | Gates |
+|--------|---------|-------|
+| `main` | Production-ready | All gates. Protected — merge via PR only. |
+| `release/*` | Release candidates | All gates + release checklist. Reviewer + Security on every merge. |
+| `feature/*` | New functionality | Standard gates (A + B). |
+| `fix/*` | Bug fixes | Standard gates (A + B). |
+| `hotfix/*` | Urgent production fixes | Expedited: A2 scope relaxed. A1, A3, A4 enforced. |
+| `experiment/*` | Spikes, prototypes | A4 (safety) only. Never merge to main — rewrite into `feature/*`. |
+
+Naming: `<category>/<short-description>`. Unrecognized branches default to `feature/*` rules.
+
+---
+
+## 9) Scaling: Multi-Agent Teams
+
+You can run parallel agent teams — one Claude Code session per branch, each following the same Repo OS governance independently.
+
+**Operator responsibilities for parallel teams:**
+- Define clear file/module ownership per branch (avoid overlap)
+- Use per-branch session logs: `docs/ai/logs/session-log-<branch-name>.md`
+- Coordinate shared model/schema changes sequentially (one branch first, merge, rebase others)
+- Review cross-branch integration at PR time — agents only see their own branch
+
+**What Repo OS handles:** Gates, secret scanning, agent boundaries, and decision compliance all run independently per session.
+
+**What it does not handle:** Cross-branch signaling, automatic conflict detection, and merge-time gate escalation. These are operator responsibilities.
+
+See the HTML explainer (`repo-os-explainer.html` → Scaling) for the full setup checklist.
+
+---
+
+## 10) Rule Overrides
 
 Rules may be overridden only when:
 - you explicitly decide to

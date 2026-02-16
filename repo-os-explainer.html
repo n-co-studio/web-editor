@@ -259,6 +259,9 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
     <a href="#gates">Quality Gates</a>
     <a href="#decisions">Decisions</a>
     <a href="#hooks">Hooks &amp; Files</a>
+    <div class="sb-group">Scaling</div>
+    <a href="#branches">Branch Categories</a>
+    <a href="#multi-team">Multi-Agent Teams</a>
     <div class="sb-group">Reference</div>
     <a href="#session">Session Hygiene</a>
     <a href="#glossary">Glossary</a>
@@ -653,6 +656,108 @@ Read AI.md, docs/ai/quality-gates.md, docs/ai/decisions/,
 <span class="p">│           ├── </span><span class="f">prompt-a-repo-os.md</span> <span class="n">&mdash; initialization prompt</span>
 <span class="p">│           └── </span><span class="f">prompt-b-product-build.md</span> <span class="n">&mdash; development prompt</span>
 <span class="p">└── </span><span class="d">src/</span> <span class="n">&mdash; your product code</span></div>
+</section>
+
+<!-- ══════ BRANCH CATEGORIES ══════ -->
+<section id="branches">
+  <div class="sec-num">Branching Model</div>
+  <h2>Branch Categories</h2>
+  <p>Every branch has a category that determines which gates apply and at what strictness. Use the naming convention <code>&lt;category&gt;/&lt;short-description&gt;</code>.</p>
+
+  <table class="ref">
+    <thead><tr><th>Pattern</th><th>Purpose</th><th>Gate Profile</th></tr></thead>
+    <tbody>
+      <tr><td><code>main</code></td><td>Production-ready code</td><td>All gates (A + B). <strong>Protected</strong> &mdash; no direct commits. Merge via PR only.</td></tr>
+      <tr><td><code>release/*</code></td><td>Release candidates</td><td>All gates (A + B) + release checklist (D). Reviewer + Security required on every merge.</td></tr>
+      <tr><td><code>feature/*</code></td><td>New functionality</td><td>Standard gates (A + B). Normal workflow.</td></tr>
+      <tr><td><code>fix/*</code></td><td>Bug fixes</td><td>Standard gates (A + B). Normal workflow.</td></tr>
+      <tr><td><code>hotfix/*</code></td><td>Urgent production fixes</td><td>Expedited: A2 scope limit relaxed (operator discretion). A1, A3, A4 still enforced.</td></tr>
+      <tr><td><code>experiment/*</code></td><td>Spikes &amp; prototypes</td><td>A4 (safety) only. <strong>Never merge to main</strong> &mdash; rewrite into <code>feature/*</code>.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <strong>Default:</strong> Branches not matching a category are treated as <code>feature/*</code>. Never commit directly to <code>main</code> &mdash; all work flows through a categorized branch.
+  </div>
+
+  <h3>Examples</h3>
+  <div class="cmd">feature/user-auth
+fix/stripe-webhook-timeout
+hotfix/payment-double-charge
+release/v1.2.0
+experiment/new-caching-strategy</div>
+</section>
+
+<!-- ══════ MULTI-AGENT TEAMS ══════ -->
+<section id="multi-team">
+  <div class="sec-num">Scaling</div>
+  <h2>Multi-Agent Teams</h2>
+  <p>Repo OS is designed for one operator, one session, one branch at a time. But you can scale to <strong>parallel agent teams</strong> working on separate branches. Here&rsquo;s how.</p>
+
+  <h3>When to use parallel teams</h3>
+  <ul class="tight">
+    <li>Multiple independent features in flight simultaneously</li>
+    <li>Time-sensitive delivery where sequential work is too slow</li>
+    <li>Large projects where features have clear ownership boundaries</li>
+  </ul>
+
+  <h3>How it works</h3>
+  <p>Each team is a <strong>separate Claude Code session on a separate branch</strong>. The Repo OS governance model runs independently in each session &mdash; same gates, same agents, same enforcement. No special configuration needed to start.</p>
+
+  <div class="flow">
+    <div class="flow-node fn-op">Operator</div>
+    <span class="flow-arr">&rarr;</span>
+    <div class="fn-branch" style="border-style:solid;border-color:var(--b2);">
+      <span style="font-size:.72rem;font-weight:600;color:var(--t2);">Parallel Sessions</span>
+      <div style="display:flex;gap:.4rem;margin-top:.2rem;">
+        <div class="flow-node fn-orch" style="font-size:.72rem;">feature/auth</div>
+        <div class="flow-node fn-build" style="font-size:.72rem;">feature/dashboard</div>
+        <div class="flow-node fn-rev" style="font-size:.72rem;">fix/api-timeout</div>
+      </div>
+    </div>
+    <span class="flow-arr">&rarr;</span>
+    <div class="flow-node fn-done">PRs &rarr; main</div>
+  </div>
+
+  <h3>What you must set up</h3>
+  <table class="ref">
+    <thead><tr><th>Concern</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Session logs</strong></td><td>Use per-branch session logs to avoid collisions: <code>docs/ai/logs/session-log-&lt;branch-name&gt;.md</code>. Each session writes to its own file.</td></tr>
+      <tr><td><strong>Branch scope</strong></td><td>Define clear ownership boundaries upfront. Each branch should own distinct files/modules. Overlapping file ownership across branches creates merge pain.</td></tr>
+      <tr><td><strong>Merge governance</strong></td><td>PRs into <code>main</code> require full gate verification (B-series). The operator reviews cross-branch integration &mdash; agents only see their own branch.</td></tr>
+      <tr><td><strong>Shared model changes</strong></td><td>If two branches need to change the same schema, API contract, or shared module &mdash; <strong>stop</strong>. Do those changes first on one branch, merge to main, then rebase the others.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>What Repo OS handles</h3>
+  <ul class="tight">
+    <li>Each session independently enforces all gates (A1&ndash;A4, B1&ndash;B3)</li>
+    <li>Secret scanning runs per-session before every commit</li>
+    <li>Agent tool boundaries apply identically across all sessions</li>
+    <li>Decision compliance is checked per-session</li>
+  </ul>
+
+  <h3>What Repo OS does NOT handle</h3>
+  <div class="callout warn">
+    <strong>Cross-branch coordination is the operator&rsquo;s job.</strong> The system has no mechanism for:
+    <ul class="tight" style="margin-top:.3rem;">
+      <li>Signaling between branches (&ldquo;team A changed the user model&rdquo;)</li>
+      <li>Automatic conflict detection before merge time</li>
+      <li>Merge-time gate escalation (you define this per project)</li>
+      <li>Shared state or progress tracking across sessions</li>
+    </ul>
+  </div>
+
+  <h3>Practical setup checklist</h3>
+  <div class="checks">
+    <div class="chk"><div class="chk-ico">1</div><div><div class="chk-txt">Create branches</div><div class="chk-sub">One <code>feature/*</code> or <code>fix/*</code> branch per workstream</div></div></div>
+    <div class="chk"><div class="chk-ico">2</div><div><div class="chk-txt">Define ownership</div><div class="chk-sub">Document which files/modules each branch owns</div></div></div>
+    <div class="chk"><div class="chk-ico">3</div><div><div class="chk-txt">Separate sessions</div><div class="chk-sub">One terminal per branch, each runs Prompt B independently</div></div></div>
+    <div class="chk"><div class="chk-ico">4</div><div><div class="chk-txt">Per-branch logs</div><div class="chk-sub">Each session writes to its own session log file</div></div></div>
+    <div class="chk"><div class="chk-ico">5</div><div><div class="chk-txt">Merge via PR</div><div class="chk-sub">Full gate verification on every PR to <code>main</code></div></div></div>
+    <div class="chk"><div class="chk-ico">6</div><div><div class="chk-txt">Rebase regularly</div><div class="chk-sub">Keep branches current with <code>main</code> to minimize merge conflicts</div></div></div>
+  </div>
 </section>
 
 <!-- ══════ SESSION HYGIENE ══════ -->
