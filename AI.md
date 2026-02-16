@@ -1,6 +1,4 @@
-# Repo OS (Claude Code)
-
-This repository uses a Repo Operating System (Repo OS) to govern how Claude Code and the operator work together.
+# Repo OS
 
 ## Non-negotiables
 - The operator creates and manages GitHub repositories (org/visibility/credentials). Agents must not do this.
@@ -12,31 +10,25 @@ This repository uses a Repo Operating System (Repo OS) to govern how Claude Code
 
 ## Authority
 Operator-only:
-- Create GitHub repo
-- Manage org/user, visibility, credentials
-- Decide when/where to push (staging/production decisions)
+- Create GitHub repo, manage org/user/visibility/credentials
+- Decide when/where to push
 
-Agent-allowed (inside this repo):
-- Read/write files
-- Run local commands
-- Run git commands (status/add/commit) once gates pass
-- Push only when gates pass and Repo OS allows it
+Agent-allowed:
+- Read/write files, run local commands
+- Git operations (status/add/commit) once gates pass
+- Push only when gates pass
 
-## Repo OS docs (source of truth)
+## Source of Truth
+- docs/spec/
 - docs/ai/workflow.md
 - docs/ai/quality-gates.md
 - docs/ai/decisions/
 - docs/ai/logs/session-log.md
-
-## Agent Definitions (source of truth)
-- .claude/agents/_agent-glossary.md — shared terminology
-- .claude/agents/_agent-workflow.md — agent interaction patterns
-- .claude/agents/*.md — role definitions (orchestrator, builder, qa-verifier, reviewer, security-privacy, accessibility)
-
-## Enforcement (source of truth)
-- .claude/settings.json — team-shared permissions and lifecycle hooks
-- .claude/hooks/ — verification scripts for automated gate checks
+- .claude/agents/
+- .claude/settings.json
+- .claude/hooks/
 
 ## Prompts
-- Prompt A: Repo OS / agents / workflow initialization (no product code)
-- Prompt B: Product build operating prompt (ecosystem rules only; project description changes per project)
+- docs/ai/prompts/prompt-0-spec-builder.md
+- docs/ai/prompts/prompt-a-repo-os.md
+- docs/ai/prompts/prompt-b-product-build.md

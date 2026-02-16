@@ -16,8 +16,9 @@ This is a reference for you.
    - Set repo name, owner, and visibility
    - Click "Create repository"
 2. **Clone locally** — `git clone <REPO_URL> && cd <REPO_NAME>`
-3. **Run Prompt A** — Initialize Repo OS (one-time setup)
-4. **Run Prompt B** — Begin development work
+3. **Run Prompt 0** — Build your project spec (guided interview, no code)
+4. **Run Prompt A** — Initialize Repo OS (one-time setup)
+5. **Run Prompt B** — Begin development work
 
 See Section 3 for detailed steps.
 
@@ -41,12 +42,12 @@ pause and clarify before proceeding.
 
 ### Trigger: New project (fresh repo from template)
 Action:
-- Run Prompt A once
+- Run Prompt 0 first (build project spec)
+- Then run Prompt A once (initialize Repo OS)
 
 Why:
-- Verify Repo OS
-- Define any project-specific conditional gates
-- Confirm agents and workflow are aligned
+- Prompt 0 defines every detail of what you're building before any code exists
+- Prompt A then verifies Repo OS, defines conditional gates, aligns agents
 
 ---
 
@@ -109,9 +110,23 @@ cd <REPO_NAME>
 
 ---
 
-### Step 3 — Start Claude Code session
+### Step 3 — Build your project spec (Prompt 0)
 
-Starter line to paste:
+Start a Claude Code session and paste:
+
+> Follow docs/ai/prompts/prompt-0-spec-builder.md. Read all files in docs/spec/ before proceeding.
+
+The AI interviews you to fill out every spec file — product, architecture, design system, data models, features, integrations, and boundaries. No code is written. You define everything.
+
+**Design system:** Defaults are baked into `docs/spec/design-system.md` (spacing, typography, breakpoints, colors, radii, shadows, layout patterns). You can accept them as-is, override with your brand values, or replace them via Figma MCP.
+
+When the AI confirms "Spec complete", move to Step 4.
+
+---
+
+### Step 4 — Initialize Repo OS (Prompt A)
+
+Paste:
 
 > Follow docs/ai/prompts/prompt-a-repo-os.md.
 > Read AI.md, docs/ai/quality-gates.md, docs/ai/decisions/, and .claude/agents/ before proceeding.
@@ -120,12 +135,12 @@ Complete Prompt A once.
 
 ---
 
-### Step 4 — Begin development
+### Step 5 — Begin development (Prompt B)
 
-For normal work, paste:
+For every development session, paste:
 
 > Follow docs/ai/prompts/prompt-b-product-build.md.
-> Read AI.md, docs/ai/quality-gates.md, docs/ai/decisions/, and .claude/agents/ before proceeding.
+> Read AI.md, docs/ai/quality-gates.md, docs/ai/decisions/, .claude/agents/, and docs/spec/ before proceeding.
 
 ---
 

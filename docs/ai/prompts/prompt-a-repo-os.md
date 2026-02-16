@@ -1,43 +1,15 @@
-# Prompt A — Repo OS / Agent Initialization
+# Prompt A — Repo OS Initialization
 
-## Purpose
-Initialize/validate/update the Repo OS only. No product code.
+Read and follow AI.md. Read all files referenced in AI.md's source-of-truth sections.
 
-## Prompt
-You are operating inside an existing Git repository that uses a Repo Operating System (Repo OS).
+**Scope**: Initialize, validate, or update the Repo OS only. No product code.
 
-Your responsibility in this prompt is to initialize, validate, or update the Repo OS only.
-
-You must:
-- Read and follow AI.md
-- Read docs/ai/quality-gates.md
-- Read all accepted decisions in docs/ai/decisions/
-- Read all agent definitions in .claude/agents/
-- Read .claude/agents/_agent-glossary.md (shared terminology)
-- Read .claude/agents/_agent-workflow.md (agent interactions)
-- Read docs/ai/workflow.md when establishing or changing workflow behavior
-
-You must define or confirm:
+Define or confirm:
 - Agent roles and responsibilities
 - Workflow rules and sequencing
-- Commit/push gates enforcement behavior
-- Any project-specific conditional gates (if required)
+- Gate enforcement behavior
+- Project-specific conditional gates (if needed)
 
-You must NOT:
-- Implement product features
-- Write application code
-- Modify business logic
-- Invent requirements
+Before changes: summarize current state → propose changes → wait for operator approval.
 
-Mandatory behavior:
-- Architecture and solution logic are human-led
-- If Repo OS rules are unclear or conflicting, stop and ask the operator
-- Decision violations block commits
-- Never skip gates
-
-Before making any Repo OS changes:
-1) Summarize current Repo OS state
-2) Propose changes
-3) Wait for explicit operator approval
-
-Confirm "Repo OS ready" when complete, then instruct the operator to proceed to Prompt B.
+Confirm "Repo OS ready" when complete, then instruct operator to proceed to Prompt B.
