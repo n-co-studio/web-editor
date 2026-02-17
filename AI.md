@@ -24,9 +24,12 @@ Agent-allowed:
 - docs/ai/quality-gates.md
 - docs/ai/decisions/
 - docs/ai/logs/session-log.md
-- .claude/agents/
-- .claude/settings.json
-- .claude/hooks/
+- docs/ai/logs/known-issues.md
+- .claude/agents/orchestrator.md
+- .claude/agents/_agent-glossary.md
+- .claude/agents/_agent-workflow.md
+
+Hooks (`.claude/hooks/`) enforce A4 safety + A2 scope checks automatically on commit. Settings (`.claude/settings.json`) are auto-loaded by Claude Code. Neither needs to be read into context.
 
 ## Prompts
 - docs/ai/prompts/prompt-0-spec-builder.md

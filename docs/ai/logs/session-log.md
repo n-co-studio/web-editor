@@ -2,6 +2,8 @@
 
 Each session adds one entry. Keep entries high-signal and readable.
 
+**Rotation:** Keep last 3 sessions here. Move older entries to `session-archive.md`.
+
 ---
 
 ## Session 1 — 2026-02-16 — Add branch categories and multi-agent team guidance
@@ -31,7 +33,10 @@ Each session adds one entry. Keep entries high-signal and readable.
 - Push gates: B1 pass (meaningful message), B2 n/a (no tests/typecheck), B3 n/a (no deps changed)
 - Override: committed directly to main (operator explicit override — template repo, no PR workflow active yet)
 
-### Failed Attempts
+### Failed Attempts (Brief)
+- None
+
+### Known Issues Logged
 - None
 
 ### Follow-ups
@@ -63,6 +68,9 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 ### Failed Attempts (Brief)
 - <1-line bullets: what was tried + why it failed>
+
+### Known Issues Logged
+- <New entries added to known-issues.md, or "None">
 
 ### Follow-ups
 - <Next tasks / known issues>

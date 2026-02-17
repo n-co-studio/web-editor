@@ -3,6 +3,7 @@ name: reviewer
 description: Code quality review agent. Use for high-risk, structural, or cross-cutting changes requiring quality sign-off.
 tools: Read, Glob, Grep
 disallowedTools: Edit, Write, Bash, Task
+model: sonnet
 ---
 
 # Agent: Reviewer

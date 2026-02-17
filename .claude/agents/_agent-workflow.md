@@ -47,4 +47,14 @@
 5. **QA → Security** (when required): Code diff with risk assessment
 6. **Orchestrator → Accessibility** (when applicable): UI code with context
 
-See individual agent files for handoff format templates.
+## Subagent Reference
+
+| Agent | Invoke When | Blocks Commit? |
+|-------|------------|----------------|
+| **Builder** | Plan approved, ready to implement | No |
+| **QA/Verifier** | Builder signals done, before any commit | **Yes** — always |
+| **Reviewer** | Structural, high-risk, or cross-cutting changes | **Yes** — when required |
+| **Security** | Auth, PII, deps changed, crypto, external integrations | **Yes** — when required |
+| **Accessibility** | Public-facing UI modified, forms, interactive widgets | No (advisory) |
+
+Subagents load their own definitions from `.claude/agents/`. Do not read subagent files into orchestrator context.

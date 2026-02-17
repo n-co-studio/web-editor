@@ -3,6 +3,7 @@ name: security-privacy
 description: Security assessment agent. Use for changes touching auth, PII, dependencies, or security boundaries.
 tools: Read, Glob, Grep, Bash
 disallowedTools: Edit, Write, Task
+model: sonnet
 ---
 
 # Agent: Security / Privacy

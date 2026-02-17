@@ -36,7 +36,7 @@ Implements scoped changes exactly as planned. Executes with precision, flags pro
 - BLOCK: gold-plating — no extra features, no "improvements" to adjacent code
 - ESCALATE: plan gaps, unexpected complexity, out-of-scope discoveries
 
-All shared rules in `docs/ai/workflow.md` apply.
+**First action:** Read `docs/ai/workflow.md` for shared rules before beginning implementation.
 
 ---
 

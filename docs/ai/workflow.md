@@ -11,21 +11,13 @@
 
 Use when: fixing bugs, failing tests, unstable behavior. Not required for simple feature work.
 
-Loop: **Hypothesis** → **Validate** (smallest experiment) → **Solve** (minimal fix) → **Test** (rerun checks)
+Loop: **Hypothesis** → **Validate** (smallest experiment) → **Solve** (minimal fix) → **Test** (rerun checks) → **Record**
+
+**Record** (after 2+ failed cycles): When resolved, add entry to `docs/ai/logs/known-issues.md` if not already present. At 2 consecutive failures, check `known-issues.md` for matches before continuing.
 
 ## Branch Categories
 
-Work happens on categorized branches. Category determines gate strictness — see `docs/ai/quality-gates.md` for the full mapping.
-
-| Branch | When to use |
-|--------|------------|
-| `feature/*` | New functionality (default) |
-| `fix/*` | Bug fixes |
-| `hotfix/*` | Urgent production fixes (expedited gates) |
-| `release/*` | Release candidates (all gates + release checklist) |
-| `experiment/*` | Spikes and prototypes (safety gates only, never merge to main) |
-
-**Rule:** Never commit directly to `main`. All work flows through a categorized branch and merges via PR.
+Work happens on categorized branches. Never commit directly to `main` — merge via PR only. See `docs/ai/quality-gates.md` for branch types and gate mapping.
 
 ## Session Lifecycle
 

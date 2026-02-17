@@ -68,21 +68,15 @@ Base unit: **4px** — all spacing is a multiple of 4.
 
 ## Colors
 
-### Neutrals (Zinc scale)
+### Neutrals (Tailwind Zinc scale)
 
-| Token | Value | Use |
-|-------|-------|-----|
-| gray-50 | #fafafa | Page backgrounds |
-| gray-100 | #f4f4f5 | Subtle backgrounds, stripes |
-| gray-200 | #e4e4e7 | Borders, dividers |
-| gray-300 | #d4d4d8 | Disabled states, subtle borders |
-| gray-400 | #a1a1aa | Placeholder text |
-| gray-500 | #71717a | Secondary text |
-| gray-600 | #52525b | Body text |
-| gray-700 | #3f3f46 | Headings (light mode) |
-| gray-800 | #27272a | Primary text |
-| gray-900 | #18181b | High contrast text |
-| gray-950 | #09090b | Near black |
+| Token Range | Values | Use |
+|-------------|--------|-----|
+| gray-50–100 | #fafafa, #f4f4f5 | Page backgrounds, subtle fills |
+| gray-200–300 | #e4e4e7, #d4d4d8 | Borders, dividers, disabled states |
+| gray-400–500 | #a1a1aa, #71717a | Placeholder text, secondary text |
+| gray-600–700 | #52525b, #3f3f46 | Body text, headings (light mode) |
+| gray-800–950 | #27272a, #18181b, #09090b | Primary text, high contrast, near black |
 
 ### Brand Colors
 <!-- Replace [DEFINE] with your hex values. -->
@@ -146,34 +140,9 @@ Base unit: **4px** — all spacing is a multiple of 4.
 
 ## Component Patterns
 
-### Buttons
-- Padding: 8px vertical, 16px horizontal
-- Border radius: sm (4px)
-- Font: body-sm (14px), weight 500
-- Min height: 36px (sm) / 40px (md) / 44px (lg)
-- Touch target: minimum 44px
+| Component | Padding | Radius | Font | Min Height | Notes |
+|-----------|---------|--------|------|------------|-------|
+| Button | 8px / 16px | sm (4px) | body-sm, 500 | 36/40/44px (sm/md/lg) | Touch target ≥44px |
+| Input | 8px / 12px | sm (4px) | body (16px) | 40px | 16px prevents iOS zoom |
+| Card | 20–24px | md (8px) | — | — | Border: gray-200, shadow: sm/md |
 
-### Inputs
-- Padding: 8px vertical, 12px horizontal
-- Border: 1px solid gray-300
-- Border radius: sm (4px)
-- Font: body (16px) — prevents zoom on iOS
-- Min height: 40px
-
-### Cards
-- Padding: 20px or 24px
-- Border: 1px solid gray-200
-- Border radius: md (8px)
-- Shadow: sm or md
-
----
-
-## Figma MCP Integration
-
-If using Figma as the design source:
-
-1. Connect the Figma MCP server to your IDE
-2. During Prompt 0, the AI will query Figma for design tokens, component specs, and layout details
-3. Extracted values replace the defaults above
-4. Every extracted value is presented for operator review before being written
-5. Use Code Connect to map Figma components to your actual codebase components

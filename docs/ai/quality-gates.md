@@ -30,7 +30,7 @@ Branch type determines which gates apply and at what strictness.
 | Branch Pattern | Purpose | Gate Profile |
 |----------------|---------|-------------|
 | `main` | Production-ready code | All gates (A + B). Protected — no direct commits. Merge via PR only. |
-| `release/*` | Release candidates | All gates (A + B) + release checklist (D gates). Reviewer + Security required on every merge. |
+| `release/*` | Release candidates | All gates (A + B) + release checklist (C gates). Reviewer + Security required on every merge. |
 | `feature/*` | New functionality | Standard gates (A + B). Normal workflow. |
 | `fix/*` | Bug fixes | Standard gates (A + B). Normal workflow. |
 | `hotfix/*` | Urgent production fixes | Expedited: A2 scope limit relaxed (operator discretion). A1, A3, A4 still enforced. Push gates still apply. |

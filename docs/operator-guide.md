@@ -87,7 +87,7 @@ The `.claude/agents/` directory contains comprehensive agent definitions:
 | Builder | Implements scoped changes per plan | No |
 | QA/Verifier | Verifies all gates before commits | **Yes** |
 | Reviewer | Reviews code quality (high-risk/structural) | **Yes** (when required) |
-| Security | Checks for secrets, auth risks, vulnerabilities | **Yes** (when required) |
+| Security / Privacy | Checks for secrets, auth risks, vulnerabilities | **Yes** (when required) |
 | Accessibility | Reviews UI for WCAG compliance | No (advisory) |
 
 Each agent definition includes: authority boundaries, required reading, invocation criteria, responsibilities, constraints, escalation paths, and examples.
@@ -140,7 +140,7 @@ Complete Prompt A once.
 For every development session, paste:
 
 > Follow docs/ai/prompts/prompt-b-product-build.md.
-> Read AI.md, docs/ai/quality-gates.md, docs/ai/decisions/, .claude/agents/, and docs/spec/ before proceeding.
+> Read AI.md and all files it references before proceeding.
 
 ---
 
@@ -189,7 +189,8 @@ Some gates are enforced automatically by hooks — scripts that run regardless o
 
 **What's automatic:**
 - Secret scanning runs before every commit (blocks if secrets found)
-- Session log reminder runs when Claude stops responding
+- HVST failure tracking on every Bash command (reminds agent to check `known-issues.md` after 2+ consecutive failures)
+- Session log + known-issues reminder runs when Claude stops responding
 - Agent tool boundaries are enforced by frontmatter (e.g., Builder cannot spawn subagents, QA cannot edit files)
 
 **What you customize per project:**

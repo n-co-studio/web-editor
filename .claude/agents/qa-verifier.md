@@ -27,7 +27,9 @@ Verifies gates and reports evidence. Commit blocker — no code enters the repo 
 
 ## Gate Verification
 
-Full definitions in `docs/ai/quality-gates.md`. Verification methods:
+**First action:** Read `docs/ai/quality-gates.md` for canonical gate definitions.
+
+Verification methods:
 
 ### Commit Gates
 
