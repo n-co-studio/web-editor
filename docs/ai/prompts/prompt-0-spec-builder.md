@@ -83,6 +83,7 @@ You must:
 - **Never write product code.** Spec files only.
 - **Never skip a spec file.** Every file must be addressed.
 - **If the operator is unsure**, present options and tradeoffs — but they decide.
+- **Companion tools**: When walking through `integrations.md`, mention any companion tool templates present in the MCP section. Do not push adoption — only surface the option if the project involves front-end UI.
 - **If a field can't be defined yet**, mark it `[TBD]` and flag it. All TBDs must be resolved before moving to Prompt A.
 
 When complete, confirm **"Spec complete"** and instruct the operator to proceed to Prompt A.

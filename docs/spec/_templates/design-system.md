@@ -3,6 +3,10 @@
 The visual language for the project. Defaults are baked in and ready to use as-is.
 Override any value with your brand, or replace entirely via Figma MCP.
 
+<!-- Tokens defined here can be consumed by companion tools (e.g., Visual Bridge)
+     that read this file to enable design-system-aware editing. Use the table format
+     consistently: | Token | Value | Use | -->
+
 ## Source
 <!-- Check one. Delete the others. -->
 

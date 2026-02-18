@@ -333,6 +333,56 @@ To avoid this for files you always want to customize, add them to `.templatesync
 
 ---
 
+## 9.7) Companion Tools
+
+Repo OS is a governance framework. Companion tools extend the development workflow without modifying the core system.
+
+### Visual Bridge (Optional)
+
+A Chrome extension + MCP server for visually editing live front-end UI and feeding precise change requests back to Claude Code.
+
+**What it does:**
+- Operator selects and adjusts elements in the browser (spacing, typography, colors, sizing)
+- Edits snap to the project's design system tokens
+- Structured diffs with exact source file and line number are sent to Claude Code
+- Claude Code applies the precise edit — no fuzzy matching, no guessing
+
+**Setup (per project):**
+
+1. Install the dev plugin in your project:
+   ```bash
+   npm install -D @visual-bridge/dev-plugin
+   ```
+
+2. Add it to your build config:
+   ```ts
+   // vite.config.ts
+   import { visualBridge } from '@visual-bridge/dev-plugin'
+   export default defineConfig({
+     plugins: [visualBridge()]
+   })
+   ```
+
+3. Add the MCP server to `.claude/settings.json`:
+   ```json
+   {
+     "mcpServers": {
+       "visual-bridge": {
+         "command": "npx",
+         "args": ["@visual-bridge/mcp-server"]
+       }
+     }
+   }
+   ```
+
+4. Install the Chrome extension from the Chrome Web Store
+
+**Design token discovery:** The MCP server auto-reads tokens from your project's Tailwind config, tokens.json, or `docs/spec/compiled/{active}/design-system.md`. No additional configuration needed.
+
+**Not required:** Visual Bridge is entirely optional. Projects that don't install it are completely unaffected. No Repo OS files depend on it.
+
+---
+
 ## 10) Rule Overrides
 
 Rules may be overridden only when:

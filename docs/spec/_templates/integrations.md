@@ -25,6 +25,16 @@
 - **Purpose**: [What it provides]
 - **Server**: [Name / URL]
 
+### Visual Bridge MCP (if applicable)
+
+<!-- Optional: Enable visual editing in the browser with deterministic source mapping.
+     See: docs/ai/references/visual-bridge-spec.md -->
+
+- **Purpose**: Visual editing of live front-end UI → structured diffs to Claude Code
+- **Server**: `@visual-bridge/mcp-server` (npm, via `npx`)
+- **Requires**: `@visual-bridge/dev-plugin` as devDependency + Chrome extension installed
+- **What it provides**: `get_pending_visual_changes`, `get_design_tokens`, `resolve_to_token` MCP tools
+
 ---
 
 ## Environment Variables
