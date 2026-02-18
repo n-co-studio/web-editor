@@ -1,0 +1,12 @@
+# OS
+.DS_Store
+
+# Office
+*.pptx
+~$*
+
+# Claude Code personal settings
+.claude/settings.local.json
+
+# HVST failure counter (session-scoped temp file)
+.claude/.hvst-fail-count
