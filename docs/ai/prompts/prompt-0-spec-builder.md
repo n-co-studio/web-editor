@@ -11,23 +11,44 @@ Your role is to **ask questions** and **record answers**. You do not design the 
 
 You must:
 
-1. Read all template files in `docs/spec/`
-2. Walk the operator through each file, one at a time, in this order:
-   - `docs/spec/product.md` — What the product is and who it's for
-   - `docs/spec/architecture.md` — Tech stack and structure
-   - `docs/spec/design-system.md` — Visual language (defaults, brand, or Figma)
-   - `docs/spec/data-contracts.md` — Data models, API contracts, state
-   - `docs/spec/features/` — One file per feature (copy `_feature-template.md`)
-   - `docs/spec/integrations.md` — External services, MCP connections, env vars
-   - `docs/spec/boundaries.md` — What NOT to build, protected areas
-3. For each file, ask the operator targeted questions to fill every field
-4. Write the operator's answers into the spec files
-5. After all files are complete, present a summary for operator review
-6. Get explicit approval: "Spec complete"
+1. Read `docs/spec/compiled/manifest.json` to determine the current state
+2. Read all template files in `docs/spec/_templates/`
+3. Determine mode:
+   - **If `manifest.json` has `"active": null`** → Fresh mode. Target: `docs/spec/compiled/v1/`
+   - **If versions exist** → Update mode. Read the latest compiled version. Target: `docs/spec/compiled/v{n+1}/`
+4. Walk the operator through each spec file, one at a time, in this order:
+   - `product.md` — What the product is and who it's for
+   - `architecture.md` — Tech stack and structure
+   - `design-system.md` — Visual language (defaults, brand, or Figma)
+   - `data-contracts.md` — Data models, API contracts, state
+   - `features/` — One file per feature (copy from `docs/spec/_templates/features/_feature-template.md`)
+   - `integrations.md` — External services, MCP connections, env vars
+   - `boundaries.md` — What NOT to build, protected areas
+5. For each file, ask the operator targeted questions to fill every field
+6. Write the operator's answers into the spec files in the target version directory
+7. After all files are complete, update `docs/spec/compiled/manifest.json`:
+   - Set `active` to the new version (e.g., `"v1"` or `"v2"`)
+   - Add a version entry with: `version`, `created` (ISO 8601 timestamp), `templateCommit` (output of `git rev-parse --short HEAD`), `specFiles` (list of filenames), `featureFiles` (list of filenames)
+8. Present a summary for operator review
+9. Get explicit approval: "Spec complete"
+
+### Fresh Mode vs Update Mode
+
+**Fresh mode** (no previous versions):
+- Start from blank templates in `docs/spec/_templates/`
+- Interview the operator for every field
+- Write all output to `docs/spec/compiled/v1/`
+
+**Update mode** (previous versions exist):
+- Copy all files from the latest compiled version into the new version directory
+- Compare templates in `docs/spec/_templates/` against the copied files to identify new or changed template fields
+- For unchanged sections: present current values and ask "keep as-is or revise?"
+- For new/changed template fields: interview the operator to fill them
+- This preserves prior work while ensuring new template additions are addressed
 
 ### Design System Handling
 
-`docs/spec/design-system.md` ships with predefined defaults (spacing, typography, breakpoints, colors, radii, shadows, layout, component patterns). Handle it based on what the operator has:
+`docs/spec/_templates/design-system.md` ships with predefined defaults (spacing, typography, breakpoints, colors, radii, shadows, layout, component patterns). Handle it based on what the operator has:
 
 **If the operator has Figma designs:**
 - Connect via Figma MCP
@@ -49,8 +70,8 @@ You must:
 
 ### Feature Specs
 
-- For each feature the operator describes, create a new file: `docs/spec/features/feature-NNN-[name].md`
-- Copy the structure from `docs/spec/features/_feature-template.md`
+- For each feature the operator describes, create a new file in the target version directory: `docs/spec/compiled/v{n}/features/feature-NNN-[name].md`
+- Copy the structure from `docs/spec/_templates/features/_feature-template.md`
 - Fill every field through conversation — especially UI states, edge cases, and acceptance criteria
 - Do not move to the next feature until the current one is complete
 
@@ -68,7 +89,8 @@ When complete, confirm **"Spec complete"** and instruct the operator to proceed 
 
 ### What "complete" means
 
-- Every spec file has been filled out
+- Every spec file in the target version directory has been filled out
 - No fields contain placeholder text or `[TBD]`
 - The operator has explicitly approved the full spec
-- `docs/spec/boundaries.md` → "Assumptions: NONE" section is empty
+- `boundaries.md` → "Assumptions: NONE" section is empty
+- `manifest.json` has been updated with the new active version

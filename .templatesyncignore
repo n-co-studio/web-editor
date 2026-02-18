@@ -1,0 +1,11 @@
+# Compiled specs — versioned locally, never overwritten
+docs/spec/compiled/
+
+# Session logs and known issues
+docs/ai/logs/
+
+# Decision records (project-specific)
+docs/ai/decisions/
+
+# Local Claude settings
+.claude/settings.local.json

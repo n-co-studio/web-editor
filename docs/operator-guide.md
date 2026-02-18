@@ -71,6 +71,19 @@ Action:
 
 ---
 
+### Trigger: Template sync (automatic)
+Sync PRs are created and auto-merged weekly. No operator action needed unless spec templates changed.
+
+Action (only if `docs/spec/_templates/` was updated):
+- Re-run Prompt 0 (enters update mode, creates new version)
+
+Why:
+- Governance updates (agents, gates, prompts) land automatically
+- Your compiled specs, logs, and decisions are never overwritten (protected by `.templatesyncignore`)
+- See Section 9.5 for full setup and details
+
+---
+
 ## 2.5) Agent Definitions
 
 The `.claude/agents/` directory contains comprehensive agent definitions:
@@ -114,11 +127,11 @@ cd <REPO_NAME>
 
 Start a Claude Code session and paste:
 
-> Follow docs/ai/prompts/prompt-0-spec-builder.md. Read all files in docs/spec/ before proceeding.
+> Follow docs/ai/prompts/prompt-0-spec-builder.md. Read docs/spec/compiled/manifest.json and all files in docs/spec/_templates/ before proceeding.
 
-The AI interviews you to fill out every spec file — product, architecture, design system, data models, features, integrations, and boundaries. No code is written. You define everything.
+The AI interviews you to fill out every spec file — product, architecture, design system, data models, features, integrations, and boundaries. No code is written. You define everything. Output goes to a versioned directory under `docs/spec/compiled/`.
 
-**Design system:** Defaults are baked into `docs/spec/design-system.md` (spacing, typography, breakpoints, colors, radii, shadows, layout patterns). You can accept them as-is, override with your brand values, or replace them via Figma MCP.
+**Design system:** Defaults are baked into `docs/spec/_templates/design-system.md` (spacing, typography, breakpoints, colors, radii, shadows, layout patterns). You can accept them as-is, override with your brand values, or replace them via Figma MCP.
 
 When the AI confirms "Spec complete", move to Step 4.
 
@@ -248,6 +261,75 @@ You can run parallel agent teams — one Claude Code session per branch, each fo
 **What it does not handle:** Cross-branch signaling, automatic conflict detection, and merge-time gate escalation. These are operator responsibilities.
 
 See the HTML explainer (`repo-os-explainer.html` → Scaling) for the full setup checklist.
+
+---
+
+## 9.5) Template Sync — Keeping Governance Up to Date
+
+If your repo was created from a template, you can sync governance updates (workflow rules, agent definitions, gates, prompts) without losing your project-specific specs or decisions.
+
+**Sync is one-way: template → your repo.** The template repo is the upstream authority for governance. Your project repo receives updates from it but never pushes changes back. If you need to improve the template itself, do that directly in the template repo — not from a project instance.
+
+### How It Works
+
+- `.github/workflows/template-sync.yml` runs weekly (Monday 04:00 UTC) or on manual trigger
+- It compares your repo against the template, creates a PR, and auto-merges it
+- `.templatesyncignore` protects your compiled specs, logs, and decisions from being overwritten
+- Every sync is recorded as a merged PR in your repo's GitHub history for audit
+
+By default, syncs are fully automatic — no operator action needed. The workflow creates a PR (for audit trail) and immediately merges it. Your compiled specs, logs, and decisions are never touched thanks to `.templatesyncignore`.
+
+### GitHub Prerequisites
+
+The sync workflow uses GitHub Actions (CI/CD automation built into GitHub). Before setup:
+
+1. **GitHub Actions must be enabled** on your project repo. It's on by default for all repos — you only need to check this if your org has explicitly disabled it. Go to repo **Settings → Actions → General** and confirm actions are allowed.
+2. **Workflow permissions** must allow read/write. Go to repo **Settings → Actions → General → Workflow permissions** and select **Read and write permissions**. The workflow declares its own permissions (`contents: write`, `pull-requests: write`), but the repo-level setting must allow it.
+3. **Branch protection (if used)**: If `main` has branch protection rules requiring PR reviews or status checks, the auto-merge step will not be able to bypass them. Either:
+   - Allow the "github-actions" bot to bypass protection rules (Settings → Branches → Edit rule → "Allow specified actors to bypass"), or
+   - Use manual merge mode instead (see "Want to review before merge?" below)
+
+### Setup (One-Time)
+
+1. Open `.github/workflows/template-sync.yml`
+2. Replace `OWNER/repo-OS-template` with the actual path to your template repo (e.g., `your-org/repo-OS-template`)
+3. If the template repo is private, create a Personal Access Token with repo read access and add it as a repository secret named `TEMPLATE_SYNC_TOKEN`, then replace `${{ secrets.GITHUB_TOKEN }}` with `${{ secrets.TEMPLATE_SYNC_TOKEN }}`
+
+**Note:** The template repo itself should NOT have this workflow. Only project repos created from the template need it. The template is the source — it doesn't sync from itself.
+
+### Want to review before merge?
+
+If you prefer to manually review sync PRs before they merge, remove the `Auto-merge sync PR` step from `.github/workflows/template-sync.yml`. Sync PRs will then stay open until you merge them:
+- Go to your project repo on GitHub → **Pull requests** tab
+- Sync PRs have the title `chore: sync with upstream template` and the label `template-sync`
+- Review the diff, then click **Merge** when satisfied
+
+### After a Template Sync
+
+Syncs happen automatically. The only time you need to take action is if spec templates changed:
+- Check the merged PR diff — if `docs/spec/_templates/` has new fields or files, re-run Prompt 0
+  - It will detect the existing compiled version and enter **update mode**
+  - It copies your latest version, shows new/changed fields, and asks what to fill in
+  - Output goes to a new version (e.g., `v2`) — your previous version is preserved
+- If only governance files changed (agents, gates, prompts), no action needed — they're already live
+
+### Merge Conflicts
+
+If your project has locally modified a governance file that the template also updated (e.g., you customized `.claude/hooks/pre-commit-gates.sh` and the template also changed it), the auto-merge will fail. The sync PR stays open and you resolve the conflict manually — same as any git merge conflict.
+
+To avoid this for files you always want to customize, add them to `.templatesyncignore`. That way the template sync skips them entirely.
+
+### What Syncs vs What Stays
+
+| Syncs from template | Protected (never overwritten) |
+|---|---|
+| `AI.md` | `docs/spec/compiled/` |
+| `docs/ai/prompts/` | `docs/ai/logs/` |
+| `docs/ai/workflow.md` | `docs/ai/decisions/` |
+| `docs/ai/quality-gates.md` | `.claude/settings.local.json` |
+| `.claude/agents/` | |
+| `.claude/hooks/` | |
+| `docs/spec/_templates/` | |
 
 ---
 

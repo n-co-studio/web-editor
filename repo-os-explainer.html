@@ -262,6 +262,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
     <div class="sb-group">Scaling</div>
     <a href="#branches">Branch Categories</a>
     <a href="#multi-team">Multi-Agent Teams</a>
+    <a href="#template-sync">Template Sync</a>
     <div class="sb-group">Reference</div>
     <a href="#session">Session Hygiene</a>
     <a href="#glossary">Glossary</a>
@@ -315,10 +316,10 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
   <h3>Step 3 &mdash; Build your project spec <span class="tag t-grn">prompt 0</span></h3>
   <p>Start a Claude Code session and paste:</p>
   <div class="cmd">Follow docs/ai/prompts/prompt-0-spec-builder.md.
-Read all files in docs/spec/ before proceeding.</div>
-  <p>The AI interviews you to fill out every spec file &mdash; product, architecture, design system, data models, features, integrations, and boundaries. <strong>No code is written.</strong> You define everything.</p>
+Read docs/spec/compiled/manifest.json and all files in docs/spec/_templates/ before proceeding.</div>
+  <p>The AI interviews you to fill out every spec file &mdash; product, architecture, design system, data models, features, integrations, and boundaries. <strong>No code is written.</strong> You define everything. Output goes to a versioned directory under <code>docs/spec/compiled/</code>.</p>
   <div class="callout">
-    <strong>Design system:</strong> Defaults are baked into <code>docs/spec/design-system.md</code> (spacing on 4px base, typography scale, breakpoints, colors, radii, shadows, layout patterns). Accept as-is, override with your brand, or replace via Figma MCP.
+    <strong>Design system:</strong> Defaults are baked into <code>docs/spec/_templates/design-system.md</code> (spacing on 4px base, typography scale, breakpoints, colors, radii, shadows, layout patterns). Accept as-is, override with your brand, or replace via Figma MCP.
   </div>
   <p>When the AI confirms &ldquo;Spec complete&rdquo;, move to Step 4.</p>
 
@@ -333,8 +334,8 @@ and .claude/agents/ before proceeding.</div>
   <p>For every development session going forward, paste:</p>
   <div class="cmd">Follow docs/ai/prompts/prompt-b-product-build.md.
 Read AI.md, docs/ai/quality-gates.md, docs/ai/decisions/,
-.claude/agents/, and docs/spec/ before proceeding.</div>
-  <p>Prompt B enforces the development operating model: plan before code, small changes, gates before commits, session log at close. The spec in <code>docs/spec/</code> is the source of truth for what to build.</p>
+.claude/agents/, and docs/spec/compiled/ before proceeding.</div>
+  <p>Prompt B enforces the development operating model: plan before code, small changes, gates before commits, session log at close. The compiled spec in <code>docs/spec/compiled/</code> (active version per manifest.json) is the source of truth for what to build.</p>
 
   <div class="callout warn">
     <strong>When do I re-run Prompt A?</strong> Only when Repo OS itself changes (agents, gates, decisions) or when agents start drifting. For normal dev work, always use Prompt B.
@@ -353,6 +354,7 @@ Read AI.md, docs/ai/quality-gates.md, docs/ai/decisions/,
       <tr><td><span class="tag t-acc">Normal work</span></td><td>Prompt B</td><td>Standard dev: features, bug fixes, regular coding</td></tr>
       <tr><td><span class="tag t-red">Drift / confusion</span></td><td>STOP &rarr; re-run Prompt A</td><td>Reset agents, restore enforcement, correct behavior</td></tr>
       <tr><td><span class="tag t-pnk">Spec changes</span></td><td>Re-run Prompt 0</td><td>Requirements changed, new features, design updates</td></tr>
+      <tr><td><span class="tag t-cyn">Template sync</span></td><td>Automatic &mdash; Prompt 0 only if spec templates changed</td><td>Governance updates auto-merge weekly</td></tr>
     </tbody>
   </table>
 </section>
@@ -619,6 +621,10 @@ Read AI.md, docs/ai/quality-gates.md, docs/ai/decisions/,
   <div class="tree"><span class="d">your-repo/</span>
 <span class="p">├── </span><span class="f">AI.md</span> <span class="n">&mdash; root contract, authority model, source of truth index</span>
 <span class="p">├── </span><span class="f">CLAUDE.md</span> <span class="n">&mdash; Claude Code instructions pointer</span>
+<span class="p">├── </span><span class="f">.templatesyncignore</span> <span class="n">&mdash; protects compiled specs, logs, decisions from sync</span>
+<span class="p">├── </span><span class="d">.github/</span>
+<span class="p">│   └── </span><span class="d">workflows/</span>
+<span class="p">│       └── </span><span class="f">template-sync.yml</span> <span class="n">&mdash; weekly sync from upstream template</span>
 <span class="p">├── </span><span class="d">.claude/</span>
 <span class="p">│   ├── </span><span class="f">settings.json</span> <span class="n">&mdash; team hooks &amp; permissions (committed)</span>
 <span class="p">│   ├── </span><span class="f">settings.local.json</span> <span class="n">&mdash; personal overrides (gitignored)</span>
@@ -636,15 +642,19 @@ Read AI.md, docs/ai/quality-gates.md, docs/ai/decisions/,
 <span class="p">│       └── </span><span class="f">accessibility.md</span> <span class="n">&mdash; executable, advisory</span>
 <span class="p">├── </span><span class="d">docs/</span>
 <span class="p">│   ├── </span><span class="f">operator-guide.md</span> <span class="n">&mdash; this guide (humans only)</span>
-<span class="p">│   ├── </span><span class="d">spec/</span> <span class="n">&mdash; project specification (Prompt 0 output)</span>
-<span class="p">│   │   ├── </span><span class="f">product.md</span> <span class="n">&mdash; what, who, why</span>
-<span class="p">│   │   ├── </span><span class="f">architecture.md</span> <span class="n">&mdash; tech stack, structure</span>
-<span class="p">│   │   ├── </span><span class="f">design-system.md</span> <span class="n">&mdash; visual language (defaults baked in)</span>
-<span class="p">│   │   ├── </span><span class="f">data-contracts.md</span> <span class="n">&mdash; entities, APIs, state</span>
-<span class="p">│   │   ├── </span><span class="d">features/</span> <span class="n">&mdash; one file per feature</span>
-<span class="p">│   │   │   └── </span><span class="f">_feature-template.md</span> <span class="n">&mdash; copyable template</span>
-<span class="p">│   │   ├── </span><span class="f">integrations.md</span> <span class="n">&mdash; services, MCP, env vars</span>
-<span class="p">│   │   └── </span><span class="f">boundaries.md</span> <span class="n">&mdash; exclusions, protected areas</span>
+<span class="p">│   ├── </span><span class="d">spec/</span>
+<span class="p">│   │   ├── </span><span class="d">_templates/</span> <span class="n">&mdash; blank spec templates (synced from upstream)</span>
+<span class="p">│   │   │   ├── </span><span class="f">product.md</span> <span class="n">&mdash; what, who, why</span>
+<span class="p">│   │   │   ├── </span><span class="f">architecture.md</span> <span class="n">&mdash; tech stack, structure</span>
+<span class="p">│   │   │   ├── </span><span class="f">design-system.md</span> <span class="n">&mdash; visual language (defaults baked in)</span>
+<span class="p">│   │   │   ├── </span><span class="f">data-contracts.md</span> <span class="n">&mdash; entities, APIs, state</span>
+<span class="p">│   │   │   ├── </span><span class="d">features/</span>
+<span class="p">│   │   │   │   └── </span><span class="f">_feature-template.md</span> <span class="n">&mdash; copyable template</span>
+<span class="p">│   │   │   ├── </span><span class="f">integrations.md</span> <span class="n">&mdash; services, MCP, env vars</span>
+<span class="p">│   │   │   └── </span><span class="f">boundaries.md</span> <span class="n">&mdash; exclusions, protected areas</span>
+<span class="p">│   │   └── </span><span class="d">compiled/</span> <span class="n">&mdash; operator-filled specs, versioned (never synced)</span>
+<span class="p">│   │       ├── </span><span class="f">manifest.json</span> <span class="n">&mdash; tracks active version</span>
+<span class="p">│   │       └── </span><span class="d">v1/</span> <span class="n">&mdash; first Prompt 0 run (v2, v3&hellip; after re-runs)</span>
 <span class="p">│   └── </span><span class="d">ai/</span>
 <span class="p">│       ├── </span><span class="f">workflow.md</span> <span class="n">&mdash; execution model, HVST protocol</span>
 <span class="p">│       ├── </span><span class="f">quality-gates.md</span> <span class="n">&mdash; gate definitions (A/B/C/D)</span>
@@ -760,6 +770,85 @@ experiment/new-caching-strategy</div>
   </div>
 </section>
 
+<!-- ══════ TEMPLATE SYNC ══════ -->
+<section id="template-sync">
+  <div class="sec-num">Governance Updates</div>
+  <h2>Template Sync</h2>
+  <p>If your repo was created from a template, you can pull governance updates (workflow rules, agent definitions, gates, prompts) without losing your project-specific specs or decisions.</p>
+
+  <div class="callout">
+    <strong>One-way sync: template &rarr; your repo.</strong> The template repo is the upstream authority for governance. Your project repo receives updates from it but never pushes changes back. To improve the template itself, edit the template repo directly &mdash; not from a project instance.
+  </div>
+
+  <h3>How it works</h3>
+  <div class="flow">
+    <div class="flow-node fn-op">Template repo<br><span style="font-size:.68rem;color:var(--t3)">governance updated</span></div>
+    <span class="flow-arr">&rarr;</span>
+    <div class="flow-node fn-orch">Weekly sync<br><span style="font-size:.68rem;color:var(--t3)">detects changes</span></div>
+    <span class="flow-arr">&rarr;</span>
+    <div class="flow-node fn-build">PR created<br><span style="font-size:.68rem;color:var(--t3)">for audit trail</span></div>
+    <span class="flow-arr">&rarr;</span>
+    <div class="flow-node fn-done">Auto-merged &#10003;</div>
+  </div>
+
+  <p>A GitHub Actions workflow (<code>.github/workflows/template-sync.yml</code>) runs weekly (Monday 04:00 UTC) and compares your repo against the template. When differences are found, it creates a PR and auto-merges it. Your compiled specs, logs, and decisions are never touched &mdash; protected by <code>.templatesyncignore</code>. Every sync is recorded as a merged PR for audit.</p>
+
+  <h3>One-time setup</h3>
+  <ol class="tight">
+    <li>Open <code>.github/workflows/template-sync.yml</code></li>
+    <li>Replace <code>OWNER/repo-OS-template</code> with your actual template repo path</li>
+    <li>If the template is private: create a PAT with repo read access, add it as a secret named <code>TEMPLATE_SYNC_TOKEN</code>, replace <code>GITHUB_TOKEN</code> with it in the workflow</li>
+  </ol>
+  <p style="font-size:.875rem;color:var(--t3)"><strong>Note:</strong> The template repo itself should not have this workflow. Only project repos created from the template need it.</p>
+
+  <h3>Want to review before merge?</h3>
+  <p>Remove the <code>Auto-merge sync PR</code> step from the workflow. Sync PRs will stay open until you merge them from the <strong>Pull requests</strong> tab on GitHub.</p>
+
+  <h3>What syncs vs what stays</h3>
+  <table class="ref">
+    <thead><tr><th>Syncs from template</th><th>Protected (never overwritten)</th></tr></thead>
+    <tbody>
+      <tr><td><code>AI.md</code></td><td><code>docs/spec/compiled/</code></td></tr>
+      <tr><td><code>docs/ai/prompts/</code></td><td><code>docs/ai/logs/</code></td></tr>
+      <tr><td><code>docs/ai/workflow.md</code></td><td><code>docs/ai/decisions/</code></td></tr>
+      <tr><td><code>docs/ai/quality-gates.md</code></td><td><code>.claude/settings.local.json</code></td></tr>
+      <tr><td><code>.claude/agents/</code></td><td></td></tr>
+      <tr><td><code>.claude/hooks/</code></td><td></td></tr>
+      <tr><td><code>docs/spec/_templates/</code></td><td></td></tr>
+    </tbody>
+  </table>
+
+  <h3>GitHub prerequisites</h3>
+  <p>The sync workflow uses GitHub Actions. Before setup, confirm these settings on your <strong>project repo</strong> (not the template):</p>
+  <ol class="tight">
+    <li><strong>Actions enabled</strong> &mdash; On by default. Check at <em>Settings &rarr; Actions &rarr; General</em>.</li>
+    <li><strong>Workflow permissions</strong> &mdash; Go to <em>Settings &rarr; Actions &rarr; General &rarr; Workflow permissions</em> and select <strong>Read and write permissions</strong>. The workflow declares its own permissions, but the repo-level setting must allow it.</li>
+    <li><strong>Branch protection (if used)</strong> &mdash; If <code>main</code> has branch protection requiring PR reviews or status checks, the auto-merge step cannot bypass them. Either allow the <em>github-actions</em> bot to bypass protection rules, or use manual merge mode.</li>
+  </ol>
+
+  <h3>Merge conflicts</h3>
+  <p>If your project has locally modified a governance file that the template also updated (e.g., you customized <code>.claude/hooks/pre-commit-gates.sh</code> and the template changed it too), the auto-merge will fail. The sync PR stays open and you resolve the conflict manually &mdash; same as any git merge conflict.</p>
+  <p>To avoid this for files you always want to customize, add them to <code>.templatesyncignore</code>. The template sync will skip them entirely.</p>
+
+  <h3>When you need to act</h3>
+  <p>Syncs are automatic. The only time you need to act is if spec templates were updated with new fields:</p>
+  <ol class="tight">
+    <li>Check the merged PR diff &mdash; look for changes in <code>docs/spec/_templates/</code></li>
+    <li>If templates changed, re-run Prompt 0:
+      <ul class="tight" style="margin-top:.2rem;">
+        <li>It detects existing compiled versions and enters <strong>update mode</strong></li>
+        <li>Copies your latest version, highlights new/changed fields, asks what to fill in</li>
+        <li>Output goes to a new version (e.g., <code>v2</code>) &mdash; previous version preserved</li>
+      </ul>
+    </li>
+    <li>If only governance files changed (agents, gates, prompts) &mdash; no action needed, already live</li>
+  </ol>
+
+  <div class="callout">
+    <strong>Spec versioning:</strong> Compiled specs live in <code>docs/spec/compiled/v1/</code>, <code>v2/</code>, etc. A <code>manifest.json</code> tracks the active version. Prompt B always reads from the active version. Previous versions are kept for reference and rollback.
+  </div>
+</section>
+
 <!-- ══════ SESSION HYGIENE ══════ -->
 <section id="session">
   <div class="sec-num">Closing a Session</div>
@@ -871,7 +960,7 @@ const DT = {
             'Complete the guided interview (product, architecture, design system, data, features, integrations, boundaries)',
             'When AI confirms "Spec complete", switch to Prompt A to initialize Repo OS',
             'Then switch to Prompt B for development'
-          ],cmd:'Follow docs/ai/prompts/prompt-0-spec-builder.md.\nRead all files in docs/spec/ before proceeding.'}},
+          ],cmd:'Follow docs/ai/prompts/prompt-0-spec-builder.md.\nRead docs/spec/compiled/manifest.json and all files in docs/spec/_templates/ before proceeding.'}},
         {ico:'&#9989;',lbl:'Yes, already cloned',dsc:'Ready to start',
           next:{q:'Have you built your project spec yet?',opts:[
             {ico:'&#10060;',lbl:'No',dsc:'Need to define the project first',
@@ -881,7 +970,7 @@ const DT = {
                 'AI interviews you to fill out every spec file',
                 'Design system defaults are baked in — accept, override, or replace via Figma',
                 'When AI confirms "Spec complete", switch to Prompt A'
-              ],cmd:'Follow docs/ai/prompts/prompt-0-spec-builder.md.\nRead all files in docs/spec/ before proceeding.'}},
+              ],cmd:'Follow docs/ai/prompts/prompt-0-spec-builder.md.\nRead docs/spec/compiled/manifest.json and all files in docs/spec/_templates/ before proceeding.'}},
             {ico:'&#9989;',lbl:'Yes, spec is done',dsc:'Ready to initialize Repo OS',
               res:{act:'Run Prompt A',title:'Initialize Repo OS',steps:[
                 'Start Claude Code session in repo directory',
@@ -909,6 +998,23 @@ const DT = {
             'Wait for "Repo OS ready"',
             'Switch to Prompt B for development',
           ],cmd:'Follow docs/ai/prompts/prompt-a-repo-os.md.\nRead AI.md, docs/ai/quality-gates.md, docs/ai/decisions/,\nand .claude/agents/ before proceeding.'}}
+      ]}},
+    {ico:'&#128260;',lbl:'Template sync happened',dsc:'Governance auto-updated from template',
+      next:{q:'Did the sync update spec templates (docs/spec/_templates/)?',opts:[
+        {ico:'&#9989;',lbl:'Yes, templates changed',dsc:'New fields or files in spec templates',
+          res:{act:'Re-run Prompt 0',title:'Update Your Specs',steps:[
+            'Check the merged sync PR to see what template fields changed',
+            'Start Claude Code session and run Prompt 0',
+            'Prompt 0 enters <strong>update mode</strong>: copies your latest compiled specs into a new version',
+            'Walk through new/changed template fields — keep existing values or revise',
+            'New version saved (e.g., v2) — previous version preserved'
+          ],cmd:'Follow docs/ai/prompts/prompt-0-spec-builder.md.\nRead docs/spec/compiled/manifest.json and all files in docs/spec/_templates/ before proceeding.',nxt:{href:'#template-sync',lbl:'See Template Sync details'}}},
+        {ico:'&#10060;',lbl:'No, just governance files',dsc:'Agents, gates, workflow, prompts only',
+          res:{act:'Nothing to do',title:'Already Up to Date',steps:[
+            'Governance files (agents, gates, prompts) were updated automatically',
+            'Your compiled specs are unchanged',
+            'Continue development with Prompt B as normal'
+          ],cmd:null,nxt:{href:'#template-sync',lbl:'See Template Sync details'}}}
       ]}},
     {ico:'&#9881;&#65039;',lbl:'Change Repo OS config',dsc:'Modify agents, gates, decisions, hooks',
       res:{act:'Prompt A + New Decision',title:'Re-initialize and Document',steps:[
