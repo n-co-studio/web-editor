@@ -606,15 +606,17 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
   <table class="ref">
     <thead><tr><th>Hook</th><th>When</th><th>What it does</th><th>Blocks?</th></tr></thead>
     <tbody>
-      <tr><td><code>pre-commit-gates.sh</code></td><td>Before every <code>git commit</code></td><td>Pattern scans for secrets (Stripe, GitHub, AWS, Google keys, private keys, passwords). Advisory scope warning if &gt;100 lines.</td><td><span class="tag t-red">yes</span> (secrets)</td></tr>
+      <tr><td><code>pre-commit-gates.sh</code></td><td>Before every <code>git commit</code></td><td>A4: Secret pattern scanning. Branch protection: blocks commits on <code>main</code> (override: <code>REPO_OS_ALLOW_MAIN=1</code>). A2: Advisory scope warning if &gt;100 lines.</td><td><span class="tag t-red">yes</span> (secrets + branch)</td></tr>
+      <tr><td><code>pre-push-gates.sh</code></td><td>Before every <code>git push</code></td><td>B1: Branch naming convention check (advisory). Stubs for B2 tests/typecheck and B3 dependency audit &mdash; activate per project.</td><td><span class="tag t-grn">no</span> (template default)</td></tr>
+      <tr><td><code>agent-git-guard.sh</code></td><td>Builder/QA/Security Bash calls</td><td>Blocks <code>git commit</code> and <code>git push</code> commands in subagents. Only the Orchestrator can commit/push.</td><td><span class="tag t-red">yes</span> (exit 2)</td></tr>
       <tr><td><code>hvst-failure-tracker.sh</code></td><td>After every Bash command</td><td>Tracks consecutive failures. After 2+ failures, reminds agent to check <code>known-issues.md</code> and follow HVST protocol.</td><td><span class="tag t-grn">no</span> (advisory)</td></tr>
-      <tr><td><code>session-close-check.sh</code></td><td>When Claude stops responding</td><td>Checks if session log has uncommitted changes, reminds to update.</td><td><span class="tag t-grn">no</span> (advisory)</td></tr>
-      <tr><td>YAML frontmatter</td><td>Agent invocation</td><td>Restricts tools per agent (e.g., Builder can&rsquo;t use Task, QA can&rsquo;t use Edit/Write).</td><td><span class="tag t-red">yes</span> (runtime)</td></tr>
+      <tr><td><code>session-close-check.sh</code></td><td>When Claude stops responding</td><td>Blocks session close if session log not updated (override: <code>SKIP_SESSION_LOG=1</code>). Advisory HVST known-issues reminder.</td><td><span class="tag t-red">yes</span> (session log)</td></tr>
+      <tr><td>YAML frontmatter</td><td>Agent invocation</td><td>Restricts tools per agent (e.g., Builder can&rsquo;t use Task, QA can&rsquo;t use Edit/Write). Frontmatter hooks wire <code>agent-git-guard.sh</code>.</td><td><span class="tag t-red">yes</span> (runtime)</td></tr>
     </tbody>
   </table>
 
   <h3>Customizing hooks</h3>
-  <p>Add your project&rsquo;s lint, format, build, and test commands to <code>.claude/hooks/pre-commit-gates.sh</code>. Adjust permissions in <code>.claude/settings.json</code> (team-shared, committed) or <code>.claude/settings.local.json</code> (personal, gitignored).</p>
+  <p>Add your project&rsquo;s lint, format, and build commands to <code>.claude/hooks/pre-commit-gates.sh</code> (A3 stubs). Add test, typecheck, and dependency audit commands to <code>.claude/hooks/pre-push-gates.sh</code> (B2/B3 stubs). Adjust permissions in <code>.claude/settings.json</code> (team-shared, committed) or <code>.claude/settings.local.json</code> (personal, gitignored).</p>
 
   <h3>Repository structure</h3>
   <div class="tree"><span class="d">your-repo/</span>
@@ -628,9 +630,11 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
 <span class="p">│   ├── </span><span class="f">settings.json</span> <span class="n">&mdash; team hooks &amp; permissions (committed)</span>
 <span class="p">│   ├── </span><span class="f">settings.local.json</span> <span class="n">&mdash; personal overrides (gitignored)</span>
 <span class="p">│   ├── </span><span class="d">hooks/</span>
-<span class="p">│   │   ├── </span><span class="f">pre-commit-gates.sh</span> <span class="n">&mdash; secret scan + scope check</span>
+<span class="p">│   │   ├── </span><span class="f">pre-commit-gates.sh</span> <span class="n">&mdash; secret scan + branch protection + scope check</span>
+<span class="p">│   │   ├── </span><span class="f">pre-push-gates.sh</span> <span class="n">&mdash; branch naming + B-gate stubs</span>
+<span class="p">│   │   ├── </span><span class="f">agent-git-guard.sh</span> <span class="n">&mdash; blocks git commit/push in subagents</span>
 <span class="p">│   │   ├── </span><span class="f">hvst-failure-tracker.sh</span> <span class="n">&mdash; consecutive failure tracking</span>
-<span class="p">│   │   └── </span><span class="f">session-close-check.sh</span> <span class="n">&mdash; session log reminder</span>
+<span class="p">│   │   └── </span><span class="f">session-close-check.sh</span> <span class="n">&mdash; session log enforcement (blocking)</span>
 <span class="p">│   └── </span><span class="d">agents/</span>
 <span class="p">│       ├── </span><span class="f">_agent-glossary.md</span> <span class="n">&mdash; shared terms (all agents read)</span>
 <span class="p">│       ├── </span><span class="f">_agent-workflow.md</span> <span class="n">&mdash; handoff flow (all agents read)</span>

@@ -6,45 +6,6 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 ---
 
-## Session 1 — 2026-02-16 — Add branch categories and multi-agent team guidance
-
-**Status:** complete
-**Decisions applied:** 0001, 0002, 0004
-**Commits:** (pending)
-
-### Goal
-- Bring back branch categories with gate mapping from prior governance model
-- Add operator guidance for scaling to multi-agent teams per branch
-
-### Plan Summary
-- Add branch category table with gate profiles to quality-gates.md (agent-readable)
-- Add branch quick-reference to workflow.md (agent-readable)
-- Add Branch Categories section + Multi-Agent Teams section to explainer HTML (operator-facing, primary reference)
-- Add corresponding sections to operator-guide.md (brief, points to HTML for detail)
-
-### Changes Made
-- `docs/ai/quality-gates.md` — Added Branch Categories section: 6 branch types, gate mapping, naming convention, default behavior
-- `docs/ai/workflow.md` — Added Branch Categories section: quick-reference table, "never commit to main" rule
-- `repo-os-explainer.html` — Added Scaling sidebar group, Branch Categories section (table + examples), Multi-Agent Teams section (when/how, flow diagram, setup table, handles/doesn't handle, 6-step checklist)
-- `docs/operator-guide.md` — Added Section 8 (Branch Categories) and Section 9 (Scaling: Multi-Agent Teams), renumbered Rule Overrides to Section 10
-
-### Verification (Gates Evidence)
-- Commit gates: A1 pass (decisions 0001/0002/0004 followed), A2 pass (plan existed, 4 files, changes documented), A3 n/a (no tooling), A4 pass (no secrets)
-- Push gates: B1 pass (meaningful message), B2 n/a (no tests/typecheck), B3 n/a (no deps changed)
-- Override: committed directly to main (operator explicit override — template repo, no PR workflow active yet)
-
-### Failed Attempts (Brief)
-- None
-
-### Known Issues Logged
-- None
-
-### Follow-ups
-- Consider adding branch category awareness to pre-commit-gates.sh (validate branch name pattern)
-- Decision 0005 was created for the Companion Tool Pattern (not branch categories — branch categories are covered by existing governance)
-
----
-
 ## Session 2 — 2026-02-18 — Cohesion audit and cross-reference fixes
 
 **Status:** complete
@@ -96,8 +57,59 @@ Each session adds one entry. Keep entries high-signal and readable.
 - None
 
 ### Follow-ups
-- Consider adding branch category awareness to pre-commit-gates.sh (carried from Session 1)
-- Builder commit/push enforcement is behavioral-only (no hook) — documented for separate enforcement audit session
+- Consider adding branch category awareness to pre-commit-gates.sh (carried from Session 1) → resolved in Session 3
+- Builder commit/push enforcement is behavioral-only (no hook) → resolved in Session 3
+
+---
+
+## Session 3 — 2026-02-18 — Mechanical enforcement audit and implementation
+
+**Status:** complete
+**Decisions applied:** 0002, 0004
+**Commits:** (pending)
+
+### Goal
+- Audit all Repo OS rules for enforcement gaps (rules stated as blocking but with no mechanical enforcement)
+- Implement mechanical enforcement for the critical gaps identified
+
+### Plan Summary
+- Add branch protection to `pre-commit-gates.sh` (block commits on `main`)
+- Create `pre-push-gates.sh` with B1 naming convention check and B2/B3 stubs, wire in `settings.json`
+- Create `agent-git-guard.sh` and add frontmatter `PreToolUse` hooks to Builder, QA, Security (block `git commit`/`git push`)
+- Upgrade `session-close-check.sh` from advisory to blocking (`exit 2` with `stop_hook_active` guard)
+- Update Decision 0004, AI.md, HTML explainer to reflect new enforcement layer
+- Archive Session 1 per rotation policy
+
+### Changes Made
+- `.claude/hooks/pre-commit-gates.sh` — Added branch protection: blocks commits on `main` unless `REPO_OS_ALLOW_MAIN=1`
+- `.claude/hooks/pre-push-gates.sh` — New: B1 branch naming convention (advisory), stubs for B2/B3 project-specific checks
+- `.claude/hooks/agent-git-guard.sh` — New: blocks `git commit` and `git push` in subagents via `exit 2`
+- `.claude/hooks/session-close-check.sh` — Upgraded from advisory to blocking: reads stdin JSON for `stop_hook_active` guard, exits 2 if session log not modified, override via `SKIP_SESSION_LOG=1`
+- `.claude/settings.json` — Added `PreToolUse` matcher for `Bash(git push:*)`
+- `.claude/agents/builder.md` — Added frontmatter `hooks.PreToolUse` wiring `agent-git-guard.sh`
+- `.claude/agents/qa-verifier.md` — Added frontmatter `hooks.PreToolUse` wiring `agent-git-guard.sh`
+- `.claude/agents/security-privacy.md` — Added frontmatter `hooks.PreToolUse` wiring `agent-git-guard.sh`
+- `docs/ai/decisions/0004-mechanical-enforcement.md` — Expanded with all new enforcement mechanisms, override env vars, hook details
+- `AI.md` — Updated hooks description to reflect full enforcement scope
+- `repo-os-explainer.html` — Updated hooks table (6 rows), file tree (2 new files), customizing hooks paragraph
+- `docs/ai/logs/session-archive.md` — Archived Session 1
+- `docs/ai/logs/session-log.md` — Added Session 3, rotated Session 1 to archive
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass (decisions 0002/0004 followed), A2 pass (plan existed, scope documented), A3 n/a (no tooling), A4 pass (no secrets)
+- Push gates: B1 pass (meaningful message), B2 n/a (no tests/typecheck), B3 n/a (no deps changed)
+- Override: committed directly to main (operator explicit override — template repo, no PR workflow active yet)
+
+### Failed Attempts (Brief)
+- Investigated `disallowedTools` frontmatter for granular `Bash(git commit:*)` patterns — not supported, frontmatter only accepts full tool names. Used frontmatter `hooks` with `PreToolUse` matcher instead (documented pattern for this use case)
+
+### Known Issues Logged
+- None
+
+### Follow-ups
+- A1 (decision compliance) remains behavioral-only — shell scripts cannot meaningfully verify semantic decision compliance
+- A3 quality gate stubs remain operator-customizable by design
+- Orchestrator has no mechanical tool restrictions (by design per Decision 0004) — all constraints are behavioral
 
 ---
 

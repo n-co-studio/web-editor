@@ -1,10 +1,25 @@
 #!/usr/bin/env bash
-# Session close check (advisory)
+# Session close check (blocking)
 # Runs via Stop hook in .claude/settings.json.
-# Checks whether the session log was updated.
-# Advisory only — prints a reminder, does not block.
+# Blocks session close (exit 2) if session log was not updated.
+# Override: SKIP_SESSION_LOG=1
 
 set -euo pipefail
+
+INPUT=$(cat)
+
+# --- Infinite loop guard ---
+# When a Stop hook blocks (exit 2), Claude continues working.
+# On the next stop attempt, stop_hook_active=true. Allow it to prevent loops.
+STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
+if [ "$STOP_HOOK_ACTIVE" = "true" ]; then
+  exit 0
+fi
+
+# --- Operator override ---
+if [ "${SKIP_SESSION_LOG:-0}" = "1" ]; then
+  exit 0
+fi
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo ".")"
 SESSION_LOG="$REPO_ROOT/docs/ai/logs/session-log.md"
@@ -14,18 +29,22 @@ if [ ! -f "$SESSION_LOG" ]; then
 fi
 
 # Check if session log has uncommitted changes (modified or staged)
+SESSION_LOG_MODIFIED=false
 if git diff --name-only "$SESSION_LOG" 2>/dev/null | grep -q .; then
-  exit 0
+  SESSION_LOG_MODIFIED=true
 fi
 if git diff --cached --name-only "$SESSION_LOG" 2>/dev/null | grep -q .; then
-  exit 0
+  SESSION_LOG_MODIFIED=true
 fi
 
-# Session log not modified — print reminder
-echo "Reminder: Session log (docs/ai/logs/session-log.md) has not been updated this session."
-echo "Repo OS requires a session log entry at session close."
+if [ "$SESSION_LOG_MODIFIED" = false ]; then
+  echo "BLOCKED: Session log (docs/ai/logs/session-log.md) has not been updated." >&2
+  echo "  Update the session log before closing the session." >&2
+  echo "  Operator override: SKIP_SESSION_LOG=1" >&2
+  exit 2
+fi
 
-# --- HVST known-issues check ---
+# --- HVST known-issues check (advisory) ---
 # If HVST failures occurred this session, check if known-issues.md was updated.
 COUNTER_FILE="$REPO_ROOT/.claude/.hvst-fail-count"
 KNOWN_ISSUES="$REPO_ROOT/docs/ai/logs/known-issues.md"
@@ -33,7 +52,6 @@ KNOWN_ISSUES="$REPO_ROOT/docs/ai/logs/known-issues.md"
 if [ -f "$COUNTER_FILE" ]; then
   FAIL_COUNT=$(cat "$COUNTER_FILE" 2>/dev/null || echo "0")
   if [ "$FAIL_COUNT" -ge 2 ]; then
-    # Check if known-issues.md has uncommitted changes
     KI_MODIFIED=false
     if git diff --name-only "$KNOWN_ISSUES" 2>/dev/null | grep -q .; then
       KI_MODIFIED=true

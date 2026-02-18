@@ -4,6 +4,12 @@ description: Gate verification agent. Use after implementation to verify all com
 tools: Read, Glob, Grep, Bash
 disallowedTools: Edit, Write, Task
 model: sonnet
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: ".claude/hooks/agent-git-guard.sh"
 ---
 
 # Agent: QA / Verifier

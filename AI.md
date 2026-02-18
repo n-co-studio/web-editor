@@ -31,7 +31,7 @@ Agent-allowed:
 - .claude/agents/_agent-glossary.md
 - .claude/agents/_agent-workflow.md
 
-Hooks (`.claude/hooks/`) enforce A4 safety + A2 scope checks automatically on commit. Settings (`.claude/settings.json`) are auto-loaded by Claude Code. Neither needs to be read into context.
+Hooks (`.claude/hooks/`) enforce automatically: A4 secret scanning + branch protection on commit, B1 naming convention on push, session log check on stop. Subagent frontmatter hooks block Builder/QA/Security from running git commit/push. Settings (`.claude/settings.json`) are auto-loaded by Claude Code. Neither hooks nor settings need to be read into context.
 
 ## Spec Convention
 - **Templates** (`docs/spec/_templates/`): Blank spec files with placeholder fields. Synced from the upstream template repo. Do not fill these directly.

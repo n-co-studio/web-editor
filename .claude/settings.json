@@ -16,6 +16,15 @@
             "command": ".claude/hooks/pre-commit-gates.sh"
           }
         ]
+      },
+      {
+        "matcher": "Bash(git push:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/pre-push-gates.sh"
+          }
+        ]
       }
     ],
     "PostToolUse": [

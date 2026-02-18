@@ -4,6 +4,12 @@ description: Implementation agent. Use after a plan is approved to implement sco
 tools: Read, Edit, Write, Glob, Grep, Bash
 disallowedTools: Task
 model: sonnet
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: ".claude/hooks/agent-git-guard.sh"
 ---
 
 # Agent: Builder
