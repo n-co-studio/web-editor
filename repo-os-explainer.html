@@ -263,6 +263,8 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
     <a href="#branches">Branch Categories</a>
     <a href="#multi-team">Multi-Agent Teams</a>
     <a href="#template-sync">Template Sync</a>
+    <div class="sb-group">Extending</div>
+    <a href="#companion">Companion Tools</a>
     <div class="sb-group">Reference</div>
     <a href="#session">Session Hygiene</a>
     <a href="#glossary">Glossary</a>
@@ -315,8 +317,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
 
   <h3>Step 3 &mdash; Build your project spec <span class="tag t-grn">prompt 0</span></h3>
   <p>Start a Claude Code session and paste:</p>
-  <div class="cmd">Follow docs/ai/prompts/prompt-0-spec-builder.md.
-Read docs/spec/compiled/manifest.json and all files in docs/spec/_templates/ before proceeding.</div>
+  <div class="cmd">Follow docs/ai/prompts/prompt-0-spec-builder.md.</div>
   <p>The AI interviews you to fill out every spec file &mdash; product, architecture, design system, data models, features, integrations, and boundaries. <strong>No code is written.</strong> You define everything. Output goes to a versioned directory under <code>docs/spec/compiled/</code>.</p>
   <div class="callout">
     <strong>Design system:</strong> Defaults are baked into <code>docs/spec/_templates/design-system.md</code> (spacing on 4px base, typography scale, breakpoints, colors, radii, shadows, layout patterns). Accept as-is, override with your brand, or replace via Figma MCP.
@@ -325,16 +326,12 @@ Read docs/spec/compiled/manifest.json and all files in docs/spec/_templates/ bef
 
   <h3>Step 4 &mdash; Initialize Repo OS <span class="tag t-acc">prompt A</span></h3>
   <p>Paste:</p>
-  <div class="cmd">Follow docs/ai/prompts/prompt-a-repo-os.md.
-Read AI.md, docs/ai/quality-gates.md, docs/ai/decisions/,
-and .claude/agents/ before proceeding.</div>
+  <div class="cmd">Follow docs/ai/prompts/prompt-a-repo-os.md.</div>
   <p>Prompt A reads every Repo OS file, summarizes the state, proposes changes, and waits for your approval. It will <strong>not</strong> write product code. When it says &ldquo;Repo OS ready&rdquo;, move to Step 5.</p>
 
   <h3>Step 5 &mdash; Start building <span class="tag t-cyn">prompt B</span></h3>
   <p>For every development session going forward, paste:</p>
-  <div class="cmd">Follow docs/ai/prompts/prompt-b-product-build.md.
-Read AI.md, docs/ai/quality-gates.md, docs/ai/decisions/,
-.claude/agents/, and docs/spec/compiled/ before proceeding.</div>
+  <div class="cmd">Follow docs/ai/prompts/prompt-b-product-build.md.</div>
   <p>Prompt B enforces the development operating model: plan before code, small changes, gates before commits, session log at close. The compiled spec in <code>docs/spec/compiled/</code> (active version per manifest.json) is the source of truth for what to build.</p>
 
   <div class="callout warn">
@@ -433,7 +430,9 @@ Read AI.md, docs/ai/quality-gates.md, docs/ai/decisions/,
     <span class="flow-arr">&rarr;</span>
     <div class="flow-node" style="border-color:rgba(245,158,11,.3);color:var(--orn)">Solve<br><span style="font-size:.68rem;color:var(--t3)">minimal fix</span></div>
     <span class="flow-arr">&rarr;</span>
-    <div class="flow-node" style="border-color:rgba(245,158,11,.3);color:var(--orn)">Test<br><span style="font-size:.68rem;color:var(--t3)">verify, loop if needed</span></div>
+    <div class="flow-node" style="border-color:rgba(245,158,11,.3);color:var(--orn)">Test<br><span style="font-size:.68rem;color:var(--t3)">verify fix</span></div>
+    <span class="flow-arr">&rarr;</span>
+    <div class="flow-node" style="border-color:rgba(245,158,11,.3);color:var(--orn)">Record<br><span style="font-size:.68rem;color:var(--t3)">log in known-issues</span></div>
   </div>
 </section>
 
@@ -457,7 +456,7 @@ Read AI.md, docs/ai/quality-gates.md, docs/ai/decisions/,
       <h4>Key Rules</h4>
       <p>Read all Repo OS docs before planning. Identify applicable decisions. Stop on ambiguity and ask you. Produce clear plans (goal, decisions, steps, files, verification). Delegate implementation to Builder. Require QA before commits. Require Reviewer + Security for high-risk.</p>
       <h4>Tools</h4>
-      <p style="font-size:.82rem;color:var(--t3)">Behavioral reference only (no YAML frontmatter, not invocable as subagent).</p>
+      <p style="font-size:.82rem;color:var(--t3)">Behavioral reference only (no YAML frontmatter, not invocable as subagent). The Orchestrator is the main Claude Code session itself, operating under <code>orchestrator.md</code> behavioral guidance.</p>
     </div></div>
   </div>
 
@@ -556,18 +555,17 @@ Read AI.md, docs/ai/quality-gates.md, docs/ai/decisions/,
 <section id="gates">
   <div class="sec-num">Verification</div>
   <h2>Quality Gates</h2>
-  <p>Gates must pass before code moves forward. Four tiers &mdash; click to switch:</p>
+  <p>Gates must pass before code moves forward. Three tiers &mdash; click to switch:</p>
 
   <div class="g-tabs" id="gTabs">
     <div class="g-tab on" data-t="ga">A &mdash; Commit</div>
     <div class="g-tab" data-t="gb">B &mdash; Push</div>
-    <div class="g-tab" data-t="gc">C &mdash; Conditional</div>
-    <div class="g-tab" data-t="gd">D &mdash; Release</div>
+    <div class="g-tab" data-t="gc">C &mdash; Conditional + Release</div>
   </div>
 
   <div class="g-panel on" id="ga">
     <div class="gate"><div class="gate-id gi-a">A1</div><div class="gate-text"><h3>Decision Compliance</h3><p>All decisions from <code>docs/ai/decisions/</code> identified and followed.</p><div class="gate-note">Violation &rarr; commit blocked. No exceptions.</div></div></div>
-    <div class="gate"><div class="gate-id gi-a">A2</div><div class="gate-text"><h3>Process</h3><p>Plan exists. Scope is small (&lt;100 lines, &le;3 files, single concern). Changes explainable. Session log will be updated.</p><div class="gate-note">Large scope requires explicit operator approval.</div></div></div>
+    <div class="gate"><div class="gate-id gi-a">A2</div><div class="gate-text"><h3>Process</h3><p>Plan exists before code. Changes explainable (what + why). Session log updated at close. Scope is small/reviewable &mdash; scope threshold (&gt;100 lines, &gt;3 files) triggers <strong>advisory warning</strong>, not a block.</p><div class="gate-note">Large scope requires documented operator approval.</div></div></div>
     <div class="gate"><div class="gate-id gi-a">A3</div><div class="gate-text"><h3>Quality</h3><p>Formatting, linting, and build pass. Each check documented with command and result.</p><div class="gate-note">Applies when tooling exists in repo.</div></div></div>
     <div class="gate"><div class="gate-id gi-a">A4</div><div class="gate-text"><h3>Safety</h3><p>No secrets (API keys, tokens, passwords, private keys). No PII in logs/fixtures.</p><div class="gate-note">Enforced automatically by pre-commit hook.</div></div></div>
   </div>
@@ -579,11 +577,10 @@ Read AI.md, docs/ai/quality-gates.md, docs/ai/decisions/,
   </div>
 
   <div class="g-panel" id="gc">
-    <div class="gate"><div class="gate-id gi-c">C</div><div class="gate-text"><h3>Project-Defined</h3><p>Defined during Prompt A init. Activated by change type. Examples: GPS testing with mock coordinates, auth flow verification, payments sandbox, data migration rollback plans.</p></div></div>
-  </div>
-
-  <div class="g-panel" id="gd">
-    <div class="gate"><div class="gate-id gi-d">D</div><div class="gate-text"><h3>Release Gates (optional)</h3><p>For production releases. Integration/E2E suites, performance budgets, accessibility audit, security scanning. Don&rsquo;t block daily commits &mdash; required before releases.</p></div></div>
+    <div class="gate"><div class="gate-id gi-c">C</div><div class="gate-text"><h3>Conditional Gates</h3><p>Project-specific gates defined in decision records or project docs. When trigger conditions are met, they block commits or pushes. Examples: GPS testing with mock coordinates, auth flow verification, payments sandbox, data migration rollback plans.</p></div></div>
+    <div class="gate"><div class="gate-id gi-c">C1</div><div class="gate-text"><h3>Release Checklist</h3><p>Version bumped. Changelog updated. Release notes drafted.</p><div class="gate-note">Applies to <code>release/*</code> branches before merge to <code>main</code>.</div></div></div>
+    <div class="gate"><div class="gate-id gi-c">C2</div><div class="gate-text"><h3>Full Verification</h3><p>All A + B gates pass. Full test suite (not just related tests).</p></div></div>
+    <div class="gate"><div class="gate-id gi-c">C3</div><div class="gate-text"><h3>Release Sign-offs</h3><p>Reviewer + Security sign-off required on every release merge.</p></div></div>
   </div>
 </section>
 
@@ -593,10 +590,11 @@ Read AI.md, docs/ai/quality-gates.md, docs/ai/decisions/,
   <h2>Decisions</h2>
   <p>Version-controlled constraints in <code>docs/ai/decisions/</code>. They are <strong>laws, not notes</strong>. Violations block commits. If one no longer fits, create a new decision &mdash; never silently ignore the old one.</p>
 
-  <div class="card dec"><div class="dec-id">0001</div><h3>Repo OS Baseline</h3><p>Establishes authority model (operator vs agent), two-prompt system (A for init, B for dev), mandatory gates, session-based work, GitHub template as source of truth.</p></div>
+  <div class="card dec"><div class="dec-id">0001</div><h3>Repo OS Baseline</h3><p>Establishes authority model (operator vs agent), three-prompt system (Prompt 0 for spec, A for init, B for dev), mandatory gates, session-based work, GitHub template as source of truth. Baseline must exist (Commit 0) before any product code.</p></div>
   <div class="card dec"><div class="dec-id">0002</div><h3>Decisions Are Mandatory</h3><p>Decisions are binding constraints. Applicable decisions must be identified and followed for every change. Conflicts require a new decision before proceeding. Violations block commits.</p></div>
-  <div class="card dec"><div class="dec-id">0003</div><h3>Agent Structure Standard</h3><p>All agent definitions follow standardized structure: YAML frontmatter, role, authority, required reading, invocation criteria, responsibilities, constraints, verification checklist, escalation paths, examples.</p></div>
+  <div class="card dec"><div class="dec-id">0003</div><h3>Agent Structure Standard</h3><p>Agent definitions use YAML frontmatter for tool boundaries. Shared files (<code>_agent-glossary.md</code>, <code>_agent-workflow.md</code>) are mandatory reading. Orchestrator is behavioral guidance only (no frontmatter, not invocable as subagent).</p></div>
   <div class="card dec"><div class="dec-id">0004</div><h3>Mechanical Enforcement</h3><p>Automated enforcement via Claude Code features: executable subagents with tool boundaries, team-shared settings, verification hooks (secret scanning, session log reminders).</p></div>
+  <div class="card dec"><div class="dec-id">0005</div><h3>Companion Tool Pattern</h3><p>Companion tools extend the dev workflow without modifying Repo OS core governance. They integrate via MCP servers in <code>.claude/settings.json</code>. The template ships clean &mdash; no companion tools pre-configured.</p></div>
 </section>
 
 <!-- ══════ HOOKS & FILES ══════ -->
@@ -609,6 +607,7 @@ Read AI.md, docs/ai/quality-gates.md, docs/ai/decisions/,
     <thead><tr><th>Hook</th><th>When</th><th>What it does</th><th>Blocks?</th></tr></thead>
     <tbody>
       <tr><td><code>pre-commit-gates.sh</code></td><td>Before every <code>git commit</code></td><td>Pattern scans for secrets (Stripe, GitHub, AWS, Google keys, private keys, passwords). Advisory scope warning if &gt;100 lines.</td><td><span class="tag t-red">yes</span> (secrets)</td></tr>
+      <tr><td><code>hvst-failure-tracker.sh</code></td><td>After every Bash command</td><td>Tracks consecutive failures. After 2+ failures, reminds agent to check <code>known-issues.md</code> and follow HVST protocol.</td><td><span class="tag t-grn">no</span> (advisory)</td></tr>
       <tr><td><code>session-close-check.sh</code></td><td>When Claude stops responding</td><td>Checks if session log has uncommitted changes, reminds to update.</td><td><span class="tag t-grn">no</span> (advisory)</td></tr>
       <tr><td>YAML frontmatter</td><td>Agent invocation</td><td>Restricts tools per agent (e.g., Builder can&rsquo;t use Task, QA can&rsquo;t use Edit/Write).</td><td><span class="tag t-red">yes</span> (runtime)</td></tr>
     </tbody>
@@ -620,7 +619,7 @@ Read AI.md, docs/ai/quality-gates.md, docs/ai/decisions/,
   <h3>Repository structure</h3>
   <div class="tree"><span class="d">your-repo/</span>
 <span class="p">├── </span><span class="f">AI.md</span> <span class="n">&mdash; root contract, authority model, source of truth index</span>
-<span class="p">├── </span><span class="f">CLAUDE.md</span> <span class="n">&mdash; Claude Code instructions pointer</span>
+<span class="p">├── </span><span class="f">repo-os-explainer.html</span> <span class="n">&mdash; this guide (operator-facing, open in browser)</span>
 <span class="p">├── </span><span class="f">.templatesyncignore</span> <span class="n">&mdash; protects compiled specs, logs, decisions from sync</span>
 <span class="p">├── </span><span class="d">.github/</span>
 <span class="p">│   └── </span><span class="d">workflows/</span>
@@ -630,6 +629,7 @@ Read AI.md, docs/ai/quality-gates.md, docs/ai/decisions/,
 <span class="p">│   ├── </span><span class="f">settings.local.json</span> <span class="n">&mdash; personal overrides (gitignored)</span>
 <span class="p">│   ├── </span><span class="d">hooks/</span>
 <span class="p">│   │   ├── </span><span class="f">pre-commit-gates.sh</span> <span class="n">&mdash; secret scan + scope check</span>
+<span class="p">│   │   ├── </span><span class="f">hvst-failure-tracker.sh</span> <span class="n">&mdash; consecutive failure tracking</span>
 <span class="p">│   │   └── </span><span class="f">session-close-check.sh</span> <span class="n">&mdash; session log reminder</span>
 <span class="p">│   └── </span><span class="d">agents/</span>
 <span class="p">│       ├── </span><span class="f">_agent-glossary.md</span> <span class="n">&mdash; shared terms (all agents read)</span>
@@ -641,7 +641,6 @@ Read AI.md, docs/ai/quality-gates.md, docs/ai/decisions/,
 <span class="p">│       ├── </span><span class="f">security-privacy.md</span> <span class="n">&mdash; executable</span>
 <span class="p">│       └── </span><span class="f">accessibility.md</span> <span class="n">&mdash; executable, advisory</span>
 <span class="p">├── </span><span class="d">docs/</span>
-<span class="p">│   ├── </span><span class="f">operator-guide.md</span> <span class="n">&mdash; this guide (humans only)</span>
 <span class="p">│   ├── </span><span class="d">spec/</span>
 <span class="p">│   │   ├── </span><span class="d">_templates/</span> <span class="n">&mdash; blank spec templates (synced from upstream)</span>
 <span class="p">│   │   │   ├── </span><span class="f">product.md</span> <span class="n">&mdash; what, who, why</span>
@@ -657,10 +656,12 @@ Read AI.md, docs/ai/quality-gates.md, docs/ai/decisions/,
 <span class="p">│   │       └── </span><span class="d">v1/</span> <span class="n">&mdash; first Prompt 0 run (v2, v3&hellip; after re-runs)</span>
 <span class="p">│   └── </span><span class="d">ai/</span>
 <span class="p">│       ├── </span><span class="f">workflow.md</span> <span class="n">&mdash; execution model, HVST protocol</span>
-<span class="p">│       ├── </span><span class="f">quality-gates.md</span> <span class="n">&mdash; gate definitions (A/B/C/D)</span>
-<span class="p">│       ├── </span><span class="d">decisions/</span> <span class="n">&mdash; 0001&ndash;0004 baseline decisions</span>
+<span class="p">│       ├── </span><span class="f">quality-gates.md</span> <span class="n">&mdash; gate definitions (A/B/C)</span>
+<span class="p">│       ├── </span><span class="d">decisions/</span> <span class="n">&mdash; 0001&ndash;0005 baseline decisions</span>
 <span class="p">│       ├── </span><span class="d">logs/</span>
-<span class="p">│       │   └── </span><span class="f">session-log.md</span> <span class="n">&mdash; session audit trail</span>
+<span class="p">│       │   ├── </span><span class="f">session-log.md</span> <span class="n">&mdash; session audit trail (last 3 sessions)</span>
+<span class="p">│       │   ├── </span><span class="f">session-archive.md</span> <span class="n">&mdash; older sessions (rotated from log)</span>
+<span class="p">│       │   └── </span><span class="f">known-issues.md</span> <span class="n">&mdash; HVST failure log</span>
 <span class="p">│       └── </span><span class="d">prompts/</span>
 <span class="p">│           ├── </span><span class="f">prompt-0-spec-builder.md</span> <span class="n">&mdash; project spec interview</span>
 <span class="p">│           ├── </span><span class="f">prompt-a-repo-os.md</span> <span class="n">&mdash; initialization prompt</span>
@@ -678,7 +679,7 @@ Read AI.md, docs/ai/quality-gates.md, docs/ai/decisions/,
     <thead><tr><th>Pattern</th><th>Purpose</th><th>Gate Profile</th></tr></thead>
     <tbody>
       <tr><td><code>main</code></td><td>Production-ready code</td><td>All gates (A + B). <strong>Protected</strong> &mdash; no direct commits. Merge via PR only.</td></tr>
-      <tr><td><code>release/*</code></td><td>Release candidates</td><td>All gates (A + B) + release checklist (D). Reviewer + Security required on every merge.</td></tr>
+      <tr><td><code>release/*</code></td><td>Release candidates</td><td>All gates (A + B) + release checklist (C). Reviewer + Security required on every merge.</td></tr>
       <tr><td><code>feature/*</code></td><td>New functionality</td><td>Standard gates (A + B). Normal workflow.</td></tr>
       <tr><td><code>fix/*</code></td><td>Bug fixes</td><td>Standard gates (A + B). Normal workflow.</td></tr>
       <tr><td><code>hotfix/*</code></td><td>Urgent production fixes</td><td>Expedited: A2 scope limit relaxed (operator discretion). A1, A3, A4 still enforced.</td></tr>
@@ -849,6 +850,38 @@ experiment/new-caching-strategy</div>
   </div>
 </section>
 
+<!-- ══════ COMPANION TOOLS ══════ -->
+<section id="companion">
+  <div class="sec-num">Extending the Workflow</div>
+  <h2>Companion Tools</h2>
+  <p>Repo OS is a governance framework. Companion tools extend the development workflow without modifying the core system. They integrate via MCP servers registered in <code>.claude/settings.json</code>.</p>
+
+  <div class="callout">
+    <strong>The template ships clean</strong> &mdash; no companion tools pre-configured. These are opt-in per project. Installing or removing a companion tool has zero impact on Repo OS governance.
+  </div>
+
+  <h3>Visual Bridge <span class="tag t-acc">optional</span></h3>
+  <p>A Chrome extension + MCP server for visually editing live front-end UI and feeding precise change requests back to Claude Code.</p>
+
+  <h4>What it does</h4>
+  <ul class="tight">
+    <li>Operator selects and adjusts elements in the browser (spacing, typography, colors, sizing)</li>
+    <li>Edits snap to the project&rsquo;s design system tokens</li>
+    <li>Structured diffs with exact source file and line number are sent to Claude Code</li>
+    <li>Claude Code applies the precise edit &mdash; no fuzzy matching, no guessing</li>
+  </ul>
+
+  <h4>Setup (per project)</h4>
+  <ol class="tight">
+    <li>Install the dev plugin: <code>npm install -D @visual-bridge/dev-plugin</code></li>
+    <li>Add to your build config (e.g., <code>import { visualBridge } from '@visual-bridge/dev-plugin'</code> in vite.config.ts)</li>
+    <li>Add the MCP server to <code>.claude/settings.json</code>: <code>"visual-bridge": {"command": "npx", "args": ["@visual-bridge/mcp-server"]}</code></li>
+    <li>Install the Chrome extension from the Chrome Web Store</li>
+  </ol>
+
+  <p style="font-size:.875rem;color:var(--t3)"><strong>Design token discovery:</strong> The MCP server auto-reads tokens from your project&rsquo;s Tailwind config, tokens.json, or <code>docs/spec/compiled/{active}/design-system.md</code>. No additional configuration needed.</p>
+</section>
+
 <!-- ══════ SESSION HYGIENE ══════ -->
 <section id="session">
   <div class="sec-num">Closing a Session</div>
@@ -901,7 +934,7 @@ experiment/new-caching-strategy</div>
     <dl class="gl"><dt>Hook</dt><dd>Automated script at lifecycle events (pre-commit, session stop). Runs regardless of agent behavior.</dd></dl>
     <dl class="gl"><dt>Handoff</dt><dd>Formal work transition between agents. Includes summary, status, verification items.</dd></dl>
     <dl class="gl"><dt>Structural Change</dt><dd>New modules, API contracts, schemas, build system changes. Requires Reviewer sign-off.</dd></dl>
-    <dl class="gl"><dt>HVST</dt><dd>Hypothesis &rarr; Validate &rarr; Solve &rarr; Test. Debugging protocol. Loop until resolved.</dd></dl>
+    <dl class="gl"><dt>HVST</dt><dd>Hypothesis &rarr; Validate &rarr; Solve &rarr; Test &rarr; Record. 5-step debugging protocol. Prevents random-fix loops.</dd></dl>
   </div>
 </section>
 
@@ -960,7 +993,7 @@ const DT = {
             'Complete the guided interview (product, architecture, design system, data, features, integrations, boundaries)',
             'When AI confirms "Spec complete", switch to Prompt A to initialize Repo OS',
             'Then switch to Prompt B for development'
-          ],cmd:'Follow docs/ai/prompts/prompt-0-spec-builder.md.\nRead docs/spec/compiled/manifest.json and all files in docs/spec/_templates/ before proceeding.'}},
+          ],cmd:'Follow docs/ai/prompts/prompt-0-spec-builder.md.'}},
         {ico:'&#9989;',lbl:'Yes, already cloned',dsc:'Ready to start',
           next:{q:'Have you built your project spec yet?',opts:[
             {ico:'&#10060;',lbl:'No',dsc:'Need to define the project first',
@@ -970,7 +1003,7 @@ const DT = {
                 'AI interviews you to fill out every spec file',
                 'Design system defaults are baked in — accept, override, or replace via Figma',
                 'When AI confirms "Spec complete", switch to Prompt A'
-              ],cmd:'Follow docs/ai/prompts/prompt-0-spec-builder.md.\nRead docs/spec/compiled/manifest.json and all files in docs/spec/_templates/ before proceeding.'}},
+              ],cmd:'Follow docs/ai/prompts/prompt-0-spec-builder.md.'}},
             {ico:'&#9989;',lbl:'Yes, spec is done',dsc:'Ready to initialize Repo OS',
               res:{act:'Run Prompt A',title:'Initialize Repo OS',steps:[
                 'Start Claude Code session in repo directory',
@@ -978,7 +1011,7 @@ const DT = {
                 'Prompt A reads all files, summarizes state, proposes changes',
                 'Approve when satisfied',
                 'Switch to Prompt B for development'
-              ],cmd:'Follow docs/ai/prompts/prompt-a-repo-os.md.\nRead AI.md, docs/ai/quality-gates.md, docs/ai/decisions/,\nand .claude/agents/ before proceeding.'}}
+              ],cmd:'Follow docs/ai/prompts/prompt-a-repo-os.md.'}}
           ]}}
       ]}},
     {ico:'&#128187;',lbl:'Normal dev work',dsc:'Features, fixes, daily coding',
@@ -991,13 +1024,13 @@ const DT = {
             'Orchestrator proposes plan, you approve',
             'Builder implements, QA verifies gates',
             'Session ends: commits clean, gates pass, log updated'
-          ],cmd:'Follow docs/ai/prompts/prompt-b-product-build.md.\nRead AI.md, docs/ai/quality-gates.md, docs/ai/decisions/,\nand .claude/agents/ before proceeding.',nxt:{href:'#workflow',lbl:'See the Daily Workflow'}}},
+          ],cmd:'Follow docs/ai/prompts/prompt-b-product-build.md.',nxt:{href:'#workflow',lbl:'See the Daily Workflow'}}},
         {ico:'&#10060;',lbl:'No / Not sure',dsc:'',
           res:{act:'Prompt A first, then B',title:'Initialize Then Develop',steps:[
             'Run Prompt A to initialize Repo OS (one time)',
             'Wait for "Repo OS ready"',
             'Switch to Prompt B for development',
-          ],cmd:'Follow docs/ai/prompts/prompt-a-repo-os.md.\nRead AI.md, docs/ai/quality-gates.md, docs/ai/decisions/,\nand .claude/agents/ before proceeding.'}}
+          ],cmd:'Follow docs/ai/prompts/prompt-a-repo-os.md.'}}
       ]}},
     {ico:'&#128260;',lbl:'Template sync happened',dsc:'Governance auto-updated from template',
       next:{q:'Did the sync update spec templates (docs/spec/_templates/)?',opts:[
@@ -1008,7 +1041,7 @@ const DT = {
             'Prompt 0 enters <strong>update mode</strong>: copies your latest compiled specs into a new version',
             'Walk through new/changed template fields — keep existing values or revise',
             'New version saved (e.g., v2) — previous version preserved'
-          ],cmd:'Follow docs/ai/prompts/prompt-0-spec-builder.md.\nRead docs/spec/compiled/manifest.json and all files in docs/spec/_templates/ before proceeding.',nxt:{href:'#template-sync',lbl:'See Template Sync details'}}},
+          ],cmd:'Follow docs/ai/prompts/prompt-0-spec-builder.md.',nxt:{href:'#template-sync',lbl:'See Template Sync details'}}},
         {ico:'&#10060;',lbl:'No, just governance files',dsc:'Agents, gates, workflow, prompts only',
           res:{act:'Nothing to do',title:'Already Up to Date',steps:[
             'Governance files (agents, gates, prompts) were updated automatically',
@@ -1022,7 +1055,7 @@ const DT = {
         'Run Prompt A to re-initialize',
         'Create a new decision record in docs/ai/decisions/ (next sequential number)',
         'Prompt A verifies consistency across all Repo OS files'
-      ],cmd:'Follow docs/ai/prompts/prompt-a-repo-os.md.\nRead AI.md, docs/ai/quality-gates.md, docs/ai/decisions/,\nand .claude/agents/ before proceeding.',nxt:{href:'#decisions',lbl:'See Decision Records'}}},
+      ],cmd:'Follow docs/ai/prompts/prompt-a-repo-os.md.',nxt:{href:'#decisions',lbl:'See Decision Records'}}},
     {ico:'&#9888;&#65039;',lbl:'Something is wrong',dsc:'Agent drift, bugs, gate issues, conflicts',
       next:{q:'What kind of problem?',opts:[
         {ico:'&#129302;',lbl:'Agent acting weird',dsc:'Skipping gates, making decisions it shouldn\'t',
@@ -1031,15 +1064,16 @@ const DT = {
             'Start new session with Prompt A',
             'Check agent definitions in .claude/agents/ for unexpected changes',
             'Verify decisions in docs/ai/decisions/'
-          ],cmd:'Follow docs/ai/prompts/prompt-a-repo-os.md.\nRead AI.md, docs/ai/quality-gates.md, docs/ai/decisions/,\nand .claude/agents/ before proceeding.',nxt:{href:'#agents',lbl:'Review Agent Roles'}}},
+          ],cmd:'Follow docs/ai/prompts/prompt-a-repo-os.md.',nxt:{href:'#agents',lbl:'Review Agent Roles'}}},
         {ico:'&#128027;',lbl:'Code bug / instability',dsc:'Tests failing, build broken',
           res:{act:'Prompt B (HVST activates)',title:'Use HVST Protocol',steps:[
             'Continue with Prompt B — HVST activates automatically',
             'Hypothesis: form testable theory about what\'s wrong',
             'Validate: run targeted tests/checks',
             'Solve: apply minimal targeted fix',
-            'Test: verify fix. Loop if needed.'
-          ],cmd:'Follow docs/ai/prompts/prompt-b-product-build.md.\nRead AI.md, docs/ai/quality-gates.md, docs/ai/decisions/,\nand .claude/agents/ before proceeding.',nxt:{href:'#workflow',lbl:'See the Daily Workflow'}}},
+            'Test: verify fix',
+            'Record: log findings in known-issues.md'
+          ],cmd:'Follow docs/ai/prompts/prompt-b-product-build.md.',nxt:{href:'#workflow',lbl:'See the Daily Workflow'}}},
         {ico:'&#128679;',lbl:'Gate failed, stuck',dsc:'Can\'t meet a requirement',
           res:{act:'Log it + Follow-up',title:'Document the Gap',steps:[
             'Document the unmet gate in session log',

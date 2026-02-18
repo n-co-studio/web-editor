@@ -25,6 +25,7 @@ Agent-allowed:
 - docs/ai/quality-gates.md
 - docs/ai/decisions/
 - docs/ai/logs/session-log.md
+- docs/ai/logs/session-archive.md
 - docs/ai/logs/known-issues.md
 - .claude/agents/orchestrator.md
 - .claude/agents/_agent-glossary.md

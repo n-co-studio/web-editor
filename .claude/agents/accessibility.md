@@ -24,6 +24,12 @@ Reviews UI changes for WCAG 2.1 AA baseline compliance. Advisory — not a commi
 
 ---
 
+## First Action
+
+Read `.claude/agents/_agent-glossary.md` and `.claude/agents/_agent-workflow.md` for shared definitions (scope thresholds, risk levels, enforcement terms) before beginning review.
+
+---
+
 ## Checks
 
 - **Perceivable**: Text alternatives, contrast ≥4.5:1 (≥3:1 large), color not sole indicator, resizable text

@@ -26,6 +26,12 @@ Security gate for high-risk changes. Checks for vulnerabilities, secrets, and pr
 
 ---
 
+## First Action
+
+Read `.claude/agents/_agent-glossary.md` and `.claude/agents/_agent-workflow.md` for shared definitions (scope thresholds, risk levels, enforcement terms) before beginning review.
+
+---
+
 ## Constraints
 
 - BLOCK: Secrets in code — zero tolerance, no exceptions

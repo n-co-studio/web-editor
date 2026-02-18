@@ -36,7 +36,7 @@ Implements scoped changes exactly as planned. Executes with precision, flags pro
 - BLOCK: gold-plating — no extra features, no "improvements" to adjacent code
 - ESCALATE: plan gaps, unexpected complexity, out-of-scope discoveries
 
-**First action:** Read `docs/ai/workflow.md` for shared rules before beginning implementation.
+**First action:** Read `docs/ai/workflow.md`, `.claude/agents/_agent-glossary.md`, and `.claude/agents/_agent-workflow.md` for shared rules and definitions before beginning implementation.
 
 ---
 
@@ -59,6 +59,12 @@ Run before signaling completion:
 **In-scope:** What the plan says. Fixing lint errors in your changes. Formatting your code.
 
 **Out-of-scope (escalate):** "This should be refactored first." "I found a bug nearby." "The API should return different data." "We should add error handling throughout."
+
+---
+
+## Escalation Protocol
+
+When blocked or encountering out-of-scope issues, return control to the Orchestrator (main Claude Code session) using the Completion Signal with `Status: Blocked` and a clear description of what needs resolution. Do not attempt to resolve architectural decisions, scope expansions, or plan gaps autonomously.
 
 ---
 

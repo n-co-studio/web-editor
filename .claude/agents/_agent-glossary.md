@@ -38,6 +38,13 @@ Docs, tests, formatting, comments, dev tooling
 
 ---
 
+## Protocols
+
+### HVST (Hypothesis → Validate → Solve → Test → Record)
+5-step debugging protocol for non-trivial failures. Prevents random-fix loops by requiring a hypothesis before any code change. Tracked by `hvst-failure-tracker.sh` hook. See `docs/ai/workflow.md` for full protocol definition.
+
+---
+
 ## Enforcement
 
 ### Hook

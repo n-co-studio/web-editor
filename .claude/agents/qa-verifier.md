@@ -27,7 +27,7 @@ Verifies gates and reports evidence. Commit blocker — no code enters the repo 
 
 ## Gate Verification
 
-**First action:** Read `docs/ai/quality-gates.md` for canonical gate definitions.
+**First action:** Read `docs/ai/quality-gates.md` for canonical gate definitions, then read `.claude/agents/_agent-glossary.md` and `.claude/agents/_agent-workflow.md` for shared definitions.
 
 Verification methods:
 
@@ -37,7 +37,7 @@ Verification methods:
 |------|-----------|
 | A1: Decisions | Check `docs/ai/decisions/`, verify constraints satisfied |
 | A2: Plan exists | Confirm plan documented before coding |
-| A2: Small scope | Confirm <100 lines, ≤3 files, single concern |
+| A2: Small scope | Check scope thresholds (<100 lines, ≤3 files). If exceeded → **advisory warning** (not a block). Large scope requires documented operator approval. |
 | A3: Format | Run `format:check` or equivalent |
 | A3: Lint | Run `lint` or equivalent |
 | A3: Build | Run `build` or equivalent |
