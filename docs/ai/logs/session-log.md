@@ -66,7 +66,7 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 **Status:** complete
 **Decisions applied:** 0002, 0004
-**Commits:** b520f7a
+**Commits:** b520f7a, 98ce603, 263f06c
 
 ### Goal
 - Audit all Repo OS rules for enforcement gaps (rules stated as blocking but with no mechanical enforcement)

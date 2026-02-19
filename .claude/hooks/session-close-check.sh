@@ -28,12 +28,17 @@ if [ ! -f "$SESSION_LOG" ]; then
   exit 0
 fi
 
-# Check if session log has uncommitted changes (modified or staged)
+# Check if session log was updated this session:
+# 1. Uncommitted changes (modified or staged)
+# 2. Committed within the last 4 hours (covers mid-session commits)
 SESSION_LOG_MODIFIED=false
 if git diff --name-only "$SESSION_LOG" 2>/dev/null | grep -q .; then
   SESSION_LOG_MODIFIED=true
 fi
 if git diff --cached --name-only "$SESSION_LOG" 2>/dev/null | grep -q .; then
+  SESSION_LOG_MODIFIED=true
+fi
+if git log --since="4 hours ago" --name-only --format="" -- "$SESSION_LOG" 2>/dev/null | grep -q .; then
   SESSION_LOG_MODIFIED=true
 fi
 
