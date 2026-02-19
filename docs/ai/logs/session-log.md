@@ -10,7 +10,7 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 **Status:** complete
 **Decisions applied:** 0001, 0002, 0003, 0004, 0005
-**Commits:** (pending)
+**Commits:** 04f7520
 
 ### Goal
 - Comprehensive audit of repo OS template for incohesion, disconnects, loose ends, and ambiguity
