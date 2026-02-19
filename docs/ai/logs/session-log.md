@@ -112,7 +112,7 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 **Status:** complete
 **Decisions applied:** 0007
-**Commits:** pending
+**Commits:** a2d3db0 — feat(repo-os): add Critic cross-reference synthesis to advisory board
 
 ### Goal
 - Ensure every Critic finding surfaces with a suggested fix, without making the Critic suggest solutions itself
