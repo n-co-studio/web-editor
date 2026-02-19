@@ -4,6 +4,12 @@ description: Gate verification agent. Use after implementation to verify all com
 tools: Read, Glob, Grep, Bash
 disallowedTools: Edit, Write, Task
 model: sonnet
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: ".claude/hooks/agent-git-guard.sh"
 ---
 
 # Agent: QA / Verifier
@@ -27,7 +33,7 @@ Verifies gates and reports evidence. Commit blocker — no code enters the repo 
 
 ## Gate Verification
 
-**First action:** Read `docs/ai/quality-gates.md` for canonical gate definitions.
+**First action:** Read `docs/ai/quality-gates.md` for canonical gate definitions, then read `.claude/agents/_agent-glossary.md` and `.claude/agents/_agent-workflow.md` for shared definitions.
 
 Verification methods:
 
@@ -37,12 +43,13 @@ Verification methods:
 |------|-----------|
 | A1: Decisions | Check `docs/ai/decisions/`, verify constraints satisfied |
 | A2: Plan exists | Confirm plan documented before coding |
-| A2: Small scope | Confirm <100 lines, ≤3 files, single concern |
+| A2: Small scope | Check scope thresholds (<100 lines, ≤3 files). If exceeded → **advisory warning** (not a block). Large scope requires documented operator approval. |
 | A3: Format | Run `format:check` or equivalent |
 | A3: Lint | Run `lint` or equivalent |
 | A3: Build | Run `build` or equivalent |
 | A4: Secrets | Scan diff for keys, tokens, credentials |
 | A4: PII | Review added content for sensitive data |
+| A5: Cohesion | Verify Critic (cohesion mode) was invoked, cohesion brief produced, critical findings resolved. If fixes were applied, verify Critic was re-run clean. |
 
 ### Push Gates (additional)
 
@@ -80,6 +87,7 @@ Verification methods:
 | A2 | plan + scope review | PASS/FAIL |
 | A3 | `npm run lint` | PASS/FAIL |
 | A4 | secret scan | PASS/FAIL |
+| A5 | cohesion brief review | PASS/FAIL |
 
 If blocked: [specific gate(s) that failed]
 ```

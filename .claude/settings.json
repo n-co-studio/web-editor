@@ -9,11 +9,38 @@
   "hooks": {
     "PreToolUse": [
       {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/branch-guard.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/branch-guard.sh"
+          }
+        ]
+      },
+      {
         "matcher": "Bash(git commit:*)",
         "hooks": [
           {
             "type": "command",
             "command": ".claude/hooks/pre-commit-gates.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(git push:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/pre-push-gates.sh"
           }
         ]
       }
