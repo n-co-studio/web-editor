@@ -1,0 +1,234 @@
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { z } from 'zod';
+import { Bridge } from './bridge.js';
+import {
+  discoverTokens,
+  watchTokenSources,
+  resolveToToken,
+  parseTokenSource,
+} from './tokens.js';
+
+/**
+ * Create and start the MCP server with WebSocket bridge.
+ */
+export async function createServer(): Promise<void> {
+  const cwd = process.cwd();
+  const bridge = new Bridge(cwd);
+
+  // 1. Start WebSocket server (port fallback 7890–7899)
+  const port = await bridge.start();
+
+  // 2. Discover and parse design tokens
+  const { tokens, sources, discovered } = await discoverTokens(cwd);
+  bridge.setTokenRegistry(tokens, sources);
+
+  // 3. Start file watchers for ALL discovered token sources
+  //    (including error-status sources, so a fix-and-save triggers re-parse)
+  const watcher = watchTokenSources(discovered, async (file, type) => {
+    const result = await parseTokenSource(file, type);
+    bridge.updateTokens(file, result.tokens, result.status);
+  });
+
+  // 4. Create MCP server
+  const server = new McpServer({
+    name: 'frontend-editor',
+    version: '0.1.0',
+  });
+
+  // 5. Register all tools
+  registerTools(server, bridge);
+
+  // 6. Connect stdio transport
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+
+  console.error(`[frontend-editor] MCP server running (WebSocket port: ${port})`);
+
+  // Graceful shutdown
+  const shutdown = async () => {
+    await watcher.close();
+    await bridge.stop();
+    process.exit(0);
+  };
+
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+}
+
+// ---------------------------------------------------------------------------
+// Tool registration
+// ---------------------------------------------------------------------------
+
+function registerTools(server: McpServer, bridge: Bridge): void {
+  // 1. get_pending_visual_changes
+  server.registerTool(
+    'get_pending_visual_changes',
+    {
+      title: 'Get Pending Visual Changes',
+      description:
+        'Returns all visual diffs queued by the Chrome extension. Optionally filter by tab session ID.',
+      inputSchema: z.object({
+        tabId: z
+          .string()
+          .optional()
+          .describe('Optional tab session ID to filter by'),
+      }),
+    },
+    async ({ tabId }) => {
+      const changes = bridge.getPendingChanges(tabId);
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({ changes }, null, 2) }],
+      };
+    },
+  );
+
+  // 2. acknowledge_visual_change
+  server.registerTool(
+    'acknowledge_visual_change',
+    {
+      title: 'Acknowledge Visual Change',
+      description:
+        'Marks a visual diff as applied and removes it from the pending queue.',
+      inputSchema: z.object({
+        diffId: z.string().describe('The unique ID of the diff to acknowledge'),
+      }),
+    },
+    async ({ diffId }) => {
+      const success = bridge.acknowledgeDiff(diffId);
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({ success }) }],
+      };
+    },
+  );
+
+  // 3. reject_visual_change
+  server.registerTool(
+    'reject_visual_change',
+    {
+      title: 'Reject Visual Change',
+      description:
+        'Marks a visual diff as rejected and removes it from the pending queue.',
+      inputSchema: z.object({
+        diffId: z.string().describe('The unique ID of the diff to reject'),
+        reason: z.string().describe('Reason for rejecting the change'),
+      }),
+    },
+    async ({ diffId, reason }) => {
+      const success = bridge.rejectDiff(diffId, reason);
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({ success }) }],
+      };
+    },
+  );
+
+  // 4. get_design_tokens
+  server.registerTool(
+    'get_design_tokens',
+    {
+      title: 'Get Design Tokens',
+      description:
+        "Returns the project's parsed design tokens. Optionally filter by category (spacing, typography, colors, radii, shadows, breakpoints).",
+      inputSchema: z.object({
+        category: z
+          .string()
+          .optional()
+          .describe('Token category to filter by'),
+      }),
+    },
+    async ({ category }) => {
+      const result = bridge.getTokens(category);
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+      };
+    },
+  );
+
+  // 5. resolve_to_token
+  server.registerTool(
+    'resolve_to_token',
+    {
+      title: 'Resolve to Token',
+      description:
+        'Maps a CSS value to the nearest design token for a given property.',
+      inputSchema: z.object({
+        property: z
+          .string()
+          .describe('CSS property name (e.g., "font-size", "color")'),
+        value: z
+          .string()
+          .describe('CSS value to resolve (e.g., "16px", "#3b82f6")'),
+      }),
+    },
+    async ({ property, value }) => {
+      const allTokens = bridge.getAllTokensFlat();
+      const result = resolveToToken(property, value, allTokens);
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+      };
+    },
+  );
+
+  // 6. get_token_drift_report
+  server.registerTool(
+    'get_token_drift_report',
+    {
+      title: 'Get Token Drift Report',
+      description:
+        'Returns a session-scoped report of custom value usage — values that did not match any design token.',
+      inputSchema: z.object({}),
+    },
+    async () => {
+      const report = bridge.getDriftReport();
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(report, null, 2) }],
+      };
+    },
+  );
+
+  // 7. export_session
+  server.registerTool(
+    'export_session',
+    {
+      title: 'Export Session',
+      description:
+        'Exports the pending queue to a JSON file for archival or handoff.',
+      inputSchema: z.object({
+        outputPath: z
+          .string()
+          .optional()
+          .describe(
+            'Output file path (defaults to .frontend-editor/session-export.json)',
+          ),
+      }),
+    },
+    async ({ outputPath }) => {
+      const result = await bridge.exportSession(outputPath);
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+      };
+    },
+  );
+
+  // 8. import_session
+  server.registerTool(
+    'import_session',
+    {
+      title: 'Import Session',
+      description:
+        'Loads a previously exported session file into the pending queue.',
+      inputSchema: z.object({
+        inputPath: z
+          .string()
+          .describe('Path to the session export JSON file'),
+      }),
+    },
+    async ({ inputPath }) => {
+      const result = await bridge.importSession(inputPath);
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+      };
+    },
+  );
+}
+
