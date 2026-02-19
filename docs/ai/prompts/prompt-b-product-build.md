@@ -20,5 +20,6 @@ If `manifest.json` has `"active": null`, specs have not been compiled yet. Instr
 Before planning new features or architectural work, check `docs/spec/prototypes/` for completed experiment briefs. Validated learnings from prototype sessions may inform architecture decisions, feature design, or spec updates.
 
 ## Operating Rules
+- After Builder signals done, Orchestrator runs a cohesion review (Critic in cohesion mode) before invoking QA. Critical cohesion findings must be resolved before commit. See `quality-gates.md` gate A5.
 - Use HVST (see `workflow.md`) when debugging or instability appears
 - All other rules (human-led architecture, gates, decisions, small scope, session log) are defined in AI.md and enforced by the Repo OS

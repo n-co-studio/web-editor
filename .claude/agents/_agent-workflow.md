@@ -49,8 +49,22 @@ See `.claude/agents/_advisory-board.md` for activation logic, brief format, and 
             implements → runs local checks → signals done
                             │
                             ▼
+               CRITIC (cohesion mode)
+            reviews diff for internal coherence
+                            │
+                  ┌─────────┴─────────┐
+               CLEAN              FINDINGS
+                  │                   │
+                  │          Orchestrator reviews
+                  │          clear fixes → Builder
+                  │          ambiguity → Operator
+                  │          re-run Critic if fixes
+                  │                   │
+                  └─────────┬─────────┘
+                            │
+                            ▼
                     QA / VERIFIER ⚠️ COMMIT BLOCKER
-               verifies all gates → BLOCK or APPROVE
+              verifies all gates (A1–A5) → BLOCK or APPROVE
                             │
                   ┌─────────┴─────────┐
                PASS                 FAIL → back to Builder
@@ -83,10 +97,14 @@ See `.claude/agents/_advisory-board.md` for activation logic, brief format, and 
 ### Build Phase
 1. **Operator → Orchestrator**: Task request
 2. **Orchestrator → Builder**: Approved plan, instructions, decisions, scope
-3. **Builder → QA**: Completion signal, changes made, local check results
-4. **QA → Reviewer** (when required): Code diff with risk assessment
-5. **QA → Security** (when required): Code diff with risk assessment
-6. **Orchestrator → Accessibility** (when applicable): UI code with context
+3. **Builder → Orchestrator**: Completion signal, changes made, local check results
+4. **Orchestrator → Critic (cohesion)**: Diff context, changed files, review request
+5. **Critic → Orchestrator**: Cohesion Brief with findings
+6. **Orchestrator → Builder** (if fixes needed): Specific fix instructions from cohesion findings
+7. **Orchestrator → QA**: Verification request (after cohesion review clean)
+8. **QA → Reviewer** (when required): Code diff with risk assessment
+9. **QA → Security** (when required): Code diff with risk assessment
+10. **Orchestrator → Accessibility** (when applicable): UI code with context
 
 ## Subagent Reference
 
@@ -96,7 +114,7 @@ See `.claude/agents/_advisory-board.md` for activation logic, brief format, and 
 |-------|------------|----------------|
 | **Researcher** | Always (spec review) | No (advisory) |
 | **Architect** | Always (spec review) | No (advisory) |
-| **Critic** | Always (spec review) | No (advisory) |
+| **Critic** (spec mode) | Always (spec review) | No (advisory) |
 | **Security Analyst** | Auth, PII, APIs, payments in spec | No (advisory) |
 | **UX Strategist** | UI, design-system, user-flows in spec | No (advisory) |
 | **Performance Engineer** | Real-time, large-data, media in spec | No (advisory) |
@@ -108,7 +126,8 @@ See `.claude/agents/_advisory-board.md` for activation logic, brief format, and 
 | Agent | Invoke When | Blocks Commit? |
 |-------|------------|----------------|
 | **Builder** | Plan approved, ready to implement | No |
-| **QA/Verifier** | Builder signals done, before any commit | **Yes** — always |
+| **Critic (cohesion)** | Builder signals done, before QA | No (Orchestrator resolves findings before QA) |
+| **QA/Verifier** | Cohesion review clean, before any commit | **Yes** — always |
 | **Reviewer** | Structural, high-risk, or cross-cutting changes | **Yes** — when required |
 | **Security** | Auth, PII, deps changed, crypto, external integrations | **Yes** — when required |
 | **Accessibility** | Public-facing UI modified, forms, interactive widgets | No (advisory) |
