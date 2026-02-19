@@ -10,17 +10,20 @@ Run after Prompt 0 completes (spec or feature brief is ready). Skip this phase i
 
 1. Read `docs/spec/compiled/manifest.json` to find the active version
 2. Read all compiled spec files in `docs/spec/compiled/{active}/`
-3. Read `.claude/agents/_advisory-board.md` for activation logic and report format
-4. Scan specs for activation signals:
-   - **Always activate:** Researcher, Architect, Critic, Innovator
-   - **Conditional — scan for trigger keywords:**
-     - Auth/sessions/OAuth/tokens/permissions → Security Analyst
-     - UI/design-system/user-flows/forms/components → UX Strategist
-     - Real-time/websockets/large-data/media/streaming → Performance Engineer
-     - Database/data-contracts/migrations/schema/GDPR → Data Strategist
-   - **Feature mode:** If a feature brief exists at `docs/spec/compiled/{active}/features/brief-*.md`, use its "What It Touches" checkboxes as activation signals
-5. Dispatch all activated specialists in parallel
-6. Collect specialist briefs
+3. Read `.claude/agents/_advisory-board.md` for tier definitions, activation logic, and report format
+4. **Select review tier** (operator can override):
+   - Feature brief → **Lite** (Architect + Critic)
+   - Full compiled spec → **Standard** (+ Researcher, Innovator)
+   - Operator requests full board or spec touches 3+ signal categories → **Full** (+ conditional specialists)
+   - Single-file fix or docs-only → **Skip**
+5. At Full tier, scan specs for conditional activation signals:
+   - Auth/sessions/OAuth/tokens/permissions → Security Analyst
+   - UI/design-system/user-flows/forms/components → UX Strategist
+   - Real-time/websockets/large-data/media/streaming → Performance Engineer
+   - Database/data-contracts/migrations/schema/GDPR → Data Strategist
+   - **Feature mode:** Use "What It Touches" checkboxes as activation signals
+6. Dispatch activated specialists in parallel
+7. Collect specialist briefs
 
 ## Phase 2 — Operator Review
 
