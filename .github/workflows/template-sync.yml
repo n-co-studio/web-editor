@@ -2,7 +2,7 @@ name: Template Sync
 
 on:
   schedule:
-    - cron: "0 4 * * 1" # Weekly on Monday at 04:00 UTC
+    - cron: "0 * * * *" # Hourly
   workflow_dispatch: # Manual trigger
 
 permissions:
@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: AndreasAugustin/actions-template-sync@v6
+      - uses: AndreasAugustin/actions-template-sync@v2
         with:
           source_repo_path: OWNER/repo-OS-template # Replace with your template repo
           upstream_branch: main
