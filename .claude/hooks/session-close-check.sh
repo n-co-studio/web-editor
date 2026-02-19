@@ -54,6 +54,30 @@ if [ "$SESSION_LOG_MODIFIED" = false ]; then
   exit 2
 fi
 
+# --- PR reminder (advisory) ---
+# Remind the agent to create a PR if on a mergeable branch with no open PR.
+# Non-blocking: prints a reminder, does not exit 2.
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+
+case "$CURRENT_BRANCH" in
+  feature/*|fix/*|hotfix/*|release/*)
+    PR_EXISTS=false
+    if command -v gh &>/dev/null; then
+      PR_COUNT=$(gh pr list --head "$CURRENT_BRANCH" --state open --json number --jq 'length' 2>/dev/null || echo "0")
+      if [ "$PR_COUNT" -gt 0 ]; then
+        PR_EXISTS=true
+      fi
+    fi
+
+    if [ "$PR_EXISTS" = false ]; then
+      echo ""
+      echo "Reminder: No open PR found for branch '$CURRENT_BRANCH'."
+      echo "  Ask the operator whether to create a PR to merge to main."
+      echo "  Do not skip or defer without explicit operator direction."
+    fi
+    ;;
+esac
+
 # --- HVST known-issues check (advisory) ---
 # If HVST failures occurred this session, check if known-issues.md was updated.
 COUNTER_FILE="$REPO_ROOT/.claude/.hvst-fail-count"

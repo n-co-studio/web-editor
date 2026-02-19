@@ -98,5 +98,5 @@ No build begins until the operator has reviewed all Critical findings.
 - No sub-subagents: `disallowedTools: Task` on all advisory agents
 - No code execution: Advisory agents cannot run Bash commands
 - Parallel execution: All activated specialists run simultaneously
-- Spec is the input: Agents review compiled specs and feature briefs, not source code (source code may not exist yet)
+- Spec is the input (spec mode): Advisory board agents review compiled specs and feature briefs, not source code (source code may not exist yet). The Critic also has a cohesion mode (see `critic.md`) where implementation code is the input — that mode runs during the build flow, not as part of advisory board review.
 - No `_agent-workflow.md` reading: Advisory agents read this file and `_agent-glossary.md` — not the build-phase workflow doc

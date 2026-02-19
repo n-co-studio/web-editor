@@ -4,7 +4,7 @@
 
 1. **Plan** — goal, scope, files, verification steps
 2. **Build** — small, reviewable increments
-3. **Verify** — run checks required by gates
+3. **Verify** — cohesion review (Critic checks diff for internal coherence), then gate checks (QA verifies A1–A5 + push gates)
 4. **Commit** — only after all gates pass
 
 ## Advisory Board Review
@@ -33,7 +33,7 @@ Work happens on categorized branches. Never commit directly to `main` — merge 
 
 ## Session Lifecycle
 
-At session close: verify all changes, commit, update session log (`docs/ai/logs/session-log.md`).
+At session close: verify all changes, commit, update session log (`docs/ai/logs/session-log.md`). Ask operator whether to create a PR to merge to `main` — do not skip or defer without explicit operator direction. Does not apply to `experiment/*` branches.
 
 ### Prototype Sessions
 

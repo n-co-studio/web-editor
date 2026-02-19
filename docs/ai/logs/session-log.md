@@ -6,110 +6,6 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 ---
 
-## Session 3 — 2026-02-18 — Mechanical enforcement audit and implementation
-
-**Status:** complete
-**Decisions applied:** 0002, 0004
-**Commits:** b520f7a, 98ce603, 263f06c
-
-### Goal
-- Audit all Repo OS rules for enforcement gaps (rules stated as blocking but with no mechanical enforcement)
-- Implement mechanical enforcement for the critical gaps identified
-
-### Plan Summary
-- Add branch protection to `pre-commit-gates.sh` (block commits on `main`)
-- Create `pre-push-gates.sh` with B1 naming convention check and B2/B3 stubs, wire in `settings.json`
-- Create `agent-git-guard.sh` and add frontmatter `PreToolUse` hooks to Builder, QA, Security (block `git commit`/`git push`)
-- Upgrade `session-close-check.sh` from advisory to blocking (`exit 2` with `stop_hook_active` guard)
-- Update Decision 0004, AI.md, HTML explainer to reflect new enforcement layer
-- Archive Session 1 per rotation policy
-
-### Changes Made
-- `.claude/hooks/pre-commit-gates.sh` — Added branch protection: blocks commits on `main` unless `REPO_OS_ALLOW_MAIN=1`
-- `.claude/hooks/pre-push-gates.sh` — New: B1 branch naming convention (advisory), stubs for B2/B3 project-specific checks
-- `.claude/hooks/agent-git-guard.sh` — New: blocks `git commit` and `git push` in subagents via `exit 2`
-- `.claude/hooks/session-close-check.sh` — Upgraded from advisory to blocking: reads stdin JSON for `stop_hook_active` guard, exits 2 if session log not modified, override via `SKIP_SESSION_LOG=1`
-- `.claude/settings.json` — Added `PreToolUse` matcher for `Bash(git push:*)`
-- `.claude/agents/builder.md` — Added frontmatter `hooks.PreToolUse` wiring `agent-git-guard.sh`
-- `.claude/agents/qa-verifier.md` — Added frontmatter `hooks.PreToolUse` wiring `agent-git-guard.sh`
-- `.claude/agents/security-privacy.md` — Added frontmatter `hooks.PreToolUse` wiring `agent-git-guard.sh`
-- `docs/ai/decisions/0004-mechanical-enforcement.md` — Expanded with all new enforcement mechanisms, override env vars, hook details
-- `AI.md` — Updated hooks description to reflect full enforcement scope
-- `repo-os-explainer.html` — Updated hooks table (6 rows), file tree (2 new files), customizing hooks paragraph
-- `docs/ai/logs/session-archive.md` — Archived Session 1
-- `docs/ai/logs/session-log.md` — Added Session 3, rotated Session 1 to archive
-
-### Verification (Gates Evidence)
-- Commit gates: A1 pass (decisions 0002/0004 followed), A2 pass (plan existed, scope documented), A3 n/a (no tooling), A4 pass (no secrets)
-- Push gates: B1 pass (meaningful message), B2 n/a (no tests/typecheck), B3 n/a (no deps changed)
-- Override: committed directly to main (operator explicit override — template repo, no PR workflow active yet)
-
-### Failed Attempts (Brief)
-- Investigated `disallowedTools` frontmatter for granular `Bash(git commit:*)` patterns — not supported, frontmatter only accepts full tool names. Used frontmatter `hooks` with `PreToolUse` matcher instead (documented pattern for this use case)
-
-### Known Issues Logged
-- None
-
-### Follow-ups
-- A1 (decision compliance) remains behavioral-only — shell scripts cannot meaningfully verify semantic decision compliance
-- A3 quality gate stubs remain operator-customizable by design
-- Orchestrator has no mechanical tool restrictions (by design per Decision 0004) — all constraints are behavioral
-
----
-
-## Session 4 — 2026-02-18 — Add prototyping tier system (Napkin / Spike / PoC)
-
-**Status:** complete
-**Decisions applied:** 0001, 0002, 0004, 0006
-**Commits:** aa09dba — feat(repo-os): add prototyping tiers and early branch protection
-
-### Goal
-- Add a tiered rapid prototyping system to repo-OS using existing `experiment/*` branch category
-- Three tiers (Napkin / Spike / PoC) as operator-selected documentation levels, not gates
-- Integrate into all source-of-truth files and the HTML explainer including decision navigator
-
-### Plan Summary
-- Create experiment brief template, Prompt 0.5 prototype prompt, Decision 0006
-- Update AI.md, quality-gates.md, workflow.md, prompt-b-product-build.md, .templatesyncignore
-- Add prototyping section to HTML explainer with operator language mapping, decision navigator path, glossary entries
-- Run cohesion review to verify cross-reference integrity
-- Move branch protection from commit-time to Edit/Write-time (branch-guard.sh)
-
-### Changes Made
-- `docs/spec/_templates/_experiment-brief.md` — New: experiment brief template (hypothesis, method, success criteria, time-box, learnings, disposition)
-- `docs/ai/prompts/prompt-0.5-prototype.md` — New: prototype prompt with tier system, operator language mapping, per-tier entry/during/exit flows
-- `docs/ai/decisions/0006-prototyping-tiers.md` — New: decision record for prototyping tiers
-- `docs/spec/prototypes/.gitkeep` — New: directory for experiment briefs (protected from template sync)
-- `AI.md` — Added prompt-0.5 to Prompts, `docs/spec/prototypes/` to Source of Truth
-- `docs/ai/quality-gates.md` — `experiment/*` row references Prompt 0.5 and tiers
-- `docs/ai/workflow.md` — Added Prototype Sessions subsection under Session Lifecycle
-- `docs/ai/prompts/prompt-b-product-build.md` — Added Prototype Learnings section
-- `.templatesyncignore` — Added `docs/spec/prototypes/`
-- `repo-os-explainer.html` — Sidebar link, triggers row, full Prototyping section with operator language table, updated branch table, file tree, 0006 decision card, navigator path (3 tier sub-options), glossary entries, template sync table, branch-guard in hooks table
-- `.claude/hooks/branch-guard.sh` — New: blocks Edit/Write on `main` before any work starts
-- `.claude/settings.json` — Added PreToolUse matchers for Edit and Write → branch-guard.sh
-- `.claude/hooks/pre-commit-gates.sh` — Removed branch protection (moved to branch-guard.sh)
-- `docs/ai/decisions/0004-mechanical-enforcement.md` — Updated to reflect branch-guard.sh
-
-### Verification (Gates Evidence)
-- Commit gates: A1 pass (decisions 0001/0002/0004/0006 followed), A2 pass (plan existed, operator approved), A3 n/a (no tooling), A4 pending (pre-commit hook will run)
-- Push gates: B1 pass (branch name `feature/prototyping-tiers`), B2 n/a, B3 n/a
-- Cohesion review: reviewer agent verified all cross-references, terminology, governance chain, template sync safety, HTML structure — all PASS
-
-### Failed Attempts (Brief)
-- Initial prototype prompt written without tier system — operator caught the omission, rewrote with full tier support
-- Started work on `main` instead of branching first — operator caught, moved to `feature/prototyping-tiers` (no commits were made on main)
-- Session log not updated proactively — operator caught the gap
-
-### Known Issues Logged
-- None
-
-### Follow-ups
-- Agent glossary could add "experiment brief" and "prototype tier" terms (optional)
-- Experiment branch merge prevention is convention-only, not mechanically enforced (intentional — documented in Decision 0006)
-
----
-
 ## Session 5 — 2026-02-18 — Add advisory board system with specialist agents
 
 **Status:** complete
@@ -168,3 +64,105 @@ Each session adds one entry. Keep entries high-signal and readable.
 - Merge `feature/advisory-board` to main via PR
 - Agent glossary could add advisory board agent entries (optional)
 - Advisory agent frontmatter hooks not yet added (no git access needed — they have disallowedTools: Edit, Write, Bash, Task)
+
+---
+
+## Session 6 — 2026-02-18 — Add A5 Cohesion gate and dual-mode Critic
+
+**Status:** complete
+**Decisions applied:** 0001, 0002, 0003, 0004, 0007, 0008
+**Commits:** d81a8a9 — feat(repo-os): add A5 Cohesion gate and dual-mode Critic
+
+### Goal
+- Add post-build cohesion review gate (A5) to catch internal codebase incoherence after Prompt B builds
+- Expand Critic agent to dual-mode: spec mode (unchanged, advisory board) + cohesion mode (new, post-build)
+- Integrate into all source-of-truth files and HTML explainer
+
+### Plan Summary
+- Create Decision 0008 establishing A5 Cohesion gate and dual-mode Critic
+- Add A5 row to quality-gates.md, update hotfix exclusion
+- Expand critic.md with cohesion mode: separate review scope, constraints, brief format
+- Add Cohesion Review Flow section to orchestrator.md with 6-step process and 2-round loop cap
+- Add A5 verification to qa-verifier.md
+- Update _agent-workflow.md build flow diagram, handoff chain (10 steps), build team table
+- Scope _advisory-board.md "spec is the input" to spec mode only
+- Add Cohesion Review term to _agent-glossary.md
+- Update workflow.md Verify step and prompt-b operating rules
+- Update HTML explainer: A5 gate card, Critic in build flow, Verify row, Orchestrator card, 0008 decision card, navigator path, hotfix row, B2 A1–A5 ref, glossary entry
+- Archive Sessions 2–3 per rotation policy
+
+### Changes Made
+- `docs/ai/decisions/0008-cohesion-review-gate.md` — New: decision record for A5 Cohesion gate
+- `docs/ai/quality-gates.md` — Added A5 row, hotfix excludes A5
+- `.claude/agents/critic.md` — Dual-mode: spec + cohesion, separate scopes/constraints/brief formats
+- `.claude/agents/orchestrator.md` — New constraint, checklist items, Cohesion Review Flow section, updated handoffs
+- `.claude/agents/qa-verifier.md` — A5 verification row + evidence format
+- `.claude/agents/_agent-workflow.md` — Critic in build flow diagram, 10-step handoff chain, build team table with Critic (cohesion)
+- `.claude/agents/_advisory-board.md` — "Spec is the input" scoped to spec mode
+- `.claude/agents/_agent-glossary.md` — Added Cohesion Review protocol definition
+- `docs/ai/workflow.md` — Verify step references cohesion review + A1–A5
+- `docs/ai/prompts/prompt-b-product-build.md` — Operating rule for cohesion review before QA
+- `repo-os-explainer.html` — A5 gate card, Critic in build flow, Verify row, Orchestrator card, 0008 decision card, navigator path, hotfix row, B2 A1–A5 ref, glossary entry
+- `docs/ai/logs/session-archive.md` — Archived Sessions 2–3
+- `docs/ai/logs/session-log.md` — Added Session 6, rotated Sessions 2–3 to archive
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass (decisions 0001/0002/0003/0004/0007/0008 followed), A2 pass (plan existed, operator approved), A3 n/a (no tooling), A4 pass (pre-commit hook will run)
+- Push gates: B1 pass (branch name `feature/advisory-board`), B2 n/a, B3 n/a
+- Cross-reference review: reviewer agent verified 10 consistency checks (gate IDs, Critic naming, flow ordering, handoff numbering, QA table, decision refs, branch categories, advisory board constraint, glossary, Prompt B) — all PASS. One alignment fix caught (HTML hotfix row matched to quality-gates.md).
+
+### Failed Attempts (Brief)
+- Edit on _agent-glossary.md failed with "file not read" error — resolved by reading first
+
+### Known Issues Logged
+- None
+
+### Follow-ups
+- A5 enforcement is behavioral (same as A1) — QA verifies the review happened, not its quality. This is intentional per Decision 0008.
+- Cohesion review does not apply to experiment/* or hotfix/* branches (by design)
+
+---
+
+## Session 7 — 2026-02-18 — Add PR merge step to session close
+
+**Status:** complete
+**Decisions applied:** 0001, 0004
+**Commits:** d4ae989 — feat(repo-os): add PR merge step to session close workflow
+
+### Goal
+- Add "create PR to merge branch to main" as an explicit session close step
+- Advisory hook reminder for mergeable branches (non-blocking)
+- Update all session close references across source-of-truth files and HTML explainer
+
+### Plan Summary
+- Expand session close definition in workflow.md to include PR step
+- Add PR checklist item to orchestrator.md verification checklist
+- Add advisory PR reminder to session-close-check.sh (same pattern as HVST advisory)
+- Update HTML explainer: Session Hygiene checklist (5th item), hooks table, wizard, glossary
+- Update AI.md non-negotiables and hooks summary
+- Update Decision 0004 Stop hook description
+- Fix existing bug: HTML Session Hygiene gate reference said A1–A4, corrected to A1–A5
+
+### Changes Made
+- `docs/ai/workflow.md` — Session close one-liner expanded with PR step and experiment/* exclusion
+- `.claude/agents/orchestrator.md` — Added PR checklist item after "No uncommitted changes"
+- `.claude/hooks/session-close-check.sh` — Advisory PR reminder: detects mergeable branches, checks for open PR via `gh`, non-blocking
+- `repo-os-explainer.html` — 5th Session Hygiene check item, "all five satisfied", A1–A5 fix, hooks table, wizard, glossary
+- `AI.md` — Non-negotiables + hooks summary updated
+- `docs/ai/decisions/0004-mechanical-enforcement.md` — Stop hook description updated
+- `docs/ai/logs/session-archive.md` — Archived Session 4
+- `docs/ai/logs/session-log.md` — Added Session 7, rotated Session 4 to archive
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass (decisions 0001/0004 followed), A2 pass (plan existed, operator approved), A3 n/a (no tooling), A4 pass (pre-commit hook will run)
+- Push gates: B1 pass (branch name `feature/advisory-board`), B2 n/a, B3 n/a
+- Cross-reference review: reviewer agent verified 8 consistency checks (PR wording, hook descriptions, checklist count, gate refs, ordering, canonical definition, glossary, wizard) — all PASS
+
+### Failed Attempts (Brief)
+- None
+
+### Known Issues Logged
+- None
+
+### Follow-ups
+- Merge `feature/advisory-board` to main via PR (PR #3 open, will include Sessions 5–7)

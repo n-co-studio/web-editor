@@ -14,5 +14,5 @@ Enforce Repo OS mechanically using Claude Code native features:
    - `PreToolUse` on `git commit` → `pre-commit-gates.sh`: A4 secret scanning (blocks), A2 scope check (advisory)
    - `PreToolUse` on `git push` → `pre-push-gates.sh`: B1 branch naming convention (advisory), stubs for B2/B3 project-specific checks. Projects add test/typecheck/audit checks
    - `PostToolUse`/`PostToolUseFailure` on Bash → `hvst-failure-tracker.sh`: HVST failure tracking
-   - `Stop` → `session-close-check.sh`: session log update check (blocks via exit 2, with `stop_hook_active` guard), HVST known-issues reminder (advisory). Override: `SKIP_SESSION_LOG=1`
+   - `Stop` → `session-close-check.sh`: session log update check (blocks via exit 2, with `stop_hook_active` guard), PR-to-main reminder for mergeable branches (advisory), HVST known-issues reminder (advisory). Override: `SKIP_SESSION_LOG=1`
 6. Extends Decision 0003 — frontmatter is required for invocable agents
