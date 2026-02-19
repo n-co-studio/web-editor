@@ -32,6 +32,7 @@ Agent-allowed:
 - .claude/agents/_agent-glossary.md
 - .claude/agents/_agent-workflow.md
 - .claude/agents/_advisory-board.md
+- .claude/agents/_cohesion-review.md
 
 Hooks (`.claude/hooks/`) enforce automatically: branch protection on Edit/Write (blocks file changes on `main`), A4 secret scanning on commit, B1 naming convention on push, session log check on stop, PR reminder on stop for mergeable branches (advisory). Subagent frontmatter hooks block Builder/QA/Security from running git commit/push. Settings (`.claude/settings.json`) are auto-loaded by Claude Code. Neither hooks nor settings need to be read into context.
 
