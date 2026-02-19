@@ -39,6 +39,7 @@ The Orchestrator specifies which mode in the Task prompt.
 **Both modes:**
 - FOCUS: What is missing, contradictory, or ambiguous — not what is good
 - BLOCK: Suggesting solutions — only identify problems (other specialists solve)
+- NOTE: Critic findings are cross-referenced with other specialists' suggestions during Orchestrator synthesis. Solutions are attached by the relevant specialist, not by the Critic. See `_advisory-board.md` → Critic Cross-Reference.
 - BLOCK: Style or preference criticism — only factual gaps and logical errors
 
 **Spec mode only:**
