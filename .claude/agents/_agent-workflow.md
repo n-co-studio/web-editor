@@ -2,7 +2,7 @@
 
 ## Advisory Flow (Spec Review)
 
-Runs after Prompt 0, before build begins. Orchestrated by Prompt A Phase 1.
+Runs after Prompt 0, before build begins. Orchestrated by Prompt A Phase 1. Tier selected before dispatch — see `_advisory-board.md` for tier definitions.
 
 ```
                         OPERATOR
@@ -10,18 +10,19 @@ Runs after Prompt 0, before build begins. Orchestrated by Prompt A Phase 1.
                             │
                             ▼
                       ORCHESTRATOR
-           scans spec → activates specialists → synthesizes
+              selects tier → activates agents → synthesizes
                             │
-                ┌───────────┼───────────┐
-                ▼           ▼           ▼
-          ALWAYS-ON    CONDITIONAL   ALWAYS-ON
-       ┌────────────┐  (if triggered)  │
-       │ Researcher  │  Security Analyst│
-       │ Architect   │  UX Strategist  Innovator
-       │ Critic      │  Perf Engineer  │
-       └────────────┘  Data Strategist │
-                │           │           │
-                └───────────┼───────────┘
+              ┌─────────────┼─────────────┐
+              ▼             ▼             ▼
+          CORE PAIR    EXTENDED      CONDITIONAL
+         (Lite+)     (Standard+)   (Full only)
+       ┌───────────┐ ┌───────────┐ ┌──────────────┐
+       │ Architect  │ │ Researcher│ │Security Analyst│
+       │ Critic     │ │ Innovator │ │UX Strategist  │
+       └───────────┘ └───────────┘ │Perf Engineer  │
+              │             │      │Data Strategist│
+              │             │      └──────────────┘
+              └─────────────┼─────────────┘
                             ▼
                    REFINEMENT REPORT
                             │
@@ -30,7 +31,7 @@ Runs after Prompt 0, before build begins. Orchestrated by Prompt A Phase 1.
               (accept / reject / defer per item)
 ```
 
-See `.claude/agents/_advisory-board.md` for activation logic, brief format, and report structure.
+See `.claude/agents/_advisory-board.md` for tier defaults, activation logic, and report structure.
 
 ---
 
@@ -110,16 +111,16 @@ See `.claude/agents/_advisory-board.md` for activation logic, brief format, and 
 
 ### Advisory Board (Spec Review Phase)
 
-| Agent | Invoke When | Blocks Commit? |
-|-------|------------|----------------|
-| **Researcher** | Always (spec review) | No (advisory) |
-| **Architect** | Always (spec review) | No (advisory) |
-| **Critic** (spec mode) | Always (spec review) | No (advisory) |
-| **Security Analyst** | Auth, PII, APIs, payments in spec | No (advisory) |
-| **UX Strategist** | UI, design-system, user-flows in spec | No (advisory) |
-| **Performance Engineer** | Real-time, large-data, media in spec | No (advisory) |
-| **Data Strategist** | Database, data-contracts, migrations in spec | No (advisory) |
-| **Innovator** | Always, lower priority (spec review) | No (advisory) |
+| Agent | Tier | Invoke When | Blocks Commit? |
+|-------|------|------------|----------------|
+| **Architect** | Lite+ | Core pair — always when board runs | No (advisory) |
+| **Critic** (spec mode) | Lite+ | Core pair — always when board runs | No (advisory) |
+| **Researcher** | Standard+ | Standard tier and above | No (advisory) |
+| **Innovator** | Standard+ | Standard tier and above | No (advisory) |
+| **Security Analyst** | Full | Signal-triggered at Full tier | No (advisory) |
+| **UX Strategist** | Full | Signal-triggered at Full tier | No (advisory) |
+| **Performance Engineer** | Full | Signal-triggered at Full tier | No (advisory) |
+| **Data Strategist** | Full | Signal-triggered at Full tier | No (advisory) |
 
 ### Build Team (Implementation Phase)
 
