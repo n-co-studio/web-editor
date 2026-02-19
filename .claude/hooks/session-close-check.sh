@@ -31,14 +31,19 @@ fi
 # Check if session log was updated this session:
 # 1. Uncommitted changes (modified or staged)
 # 2. Committed within the last 4 hours (covers mid-session commits)
+# Note: uses variable capture instead of pipe to grep -q to avoid SIGPIPE
+# failures with pipefail (grep -q closes pipe early → git gets SIGPIPE → exit 141).
 SESSION_LOG_MODIFIED=false
-if git diff --name-only "$SESSION_LOG" 2>/dev/null | grep -q .; then
+DIFF_OUT=$(git diff --name-only "$SESSION_LOG" 2>/dev/null || true)
+if [ -n "$DIFF_OUT" ]; then
   SESSION_LOG_MODIFIED=true
 fi
-if git diff --cached --name-only "$SESSION_LOG" 2>/dev/null | grep -q .; then
+CACHED_OUT=$(git diff --cached --name-only "$SESSION_LOG" 2>/dev/null || true)
+if [ -n "$CACHED_OUT" ]; then
   SESSION_LOG_MODIFIED=true
 fi
-if git log --since="4 hours ago" --name-only --format="" -- "$SESSION_LOG" 2>/dev/null | grep -q .; then
+LOG_OUT=$(git log --since="4 hours ago" --name-only --format="" -- "$SESSION_LOG" 2>/dev/null || true)
+if [ -n "$LOG_OUT" ]; then
   SESSION_LOG_MODIFIED=true
 fi
 
