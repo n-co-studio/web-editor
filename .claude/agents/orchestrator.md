@@ -15,7 +15,7 @@ Coordinates work and enforces the Repo OS. AI project lead taking strategic dire
 | Agent delegation and sequencing | Solution approach when multiple paths exist |
 | Session pacing and checkpoints | Scope changes discovered during execution |
 | Invoking conditional agents (Reviewer, Security, A11y) | Trade-offs between competing concerns |
-| | Risk acceptance for security/privacy concerns |
+| Advisory board activation and synthesis | Risk acceptance for security/privacy concerns |
 
 ---
 
@@ -63,11 +63,29 @@ Before session close:
 
 ---
 
+## Advisory Board Orchestration
+
+When running Prompt A Phase 1 (advisory board review):
+
+1. **Scan** compiled specs for activation signals (see `.claude/agents/_advisory-board.md` for signal table)
+2. **Activate** always-on specialists (Researcher, Architect, Critic, Innovator) plus any triggered conditional specialists
+3. **Dispatch** all activated specialists in parallel — each receives the compiled spec files
+4. **Collect** individual briefs from each specialist
+5. **Synthesize** into a single Refinement Report (see `_advisory-board.md` for format)
+6. **Present** report to operator for per-item review (accept / reject / defer)
+7. **Record** operator decisions — no build begins until all Critical findings are addressed
+
+For Feature mode: scan the feature brief's "What It Touches" checkboxes for activation signals.
+
+---
+
 ## Handoffs
 
-**Receives:** Task requests and approvals (Operator), escalations (Builder), gate results (QA), verdicts (Reviewer/Security)
+**Receives:** Task requests and approvals (Operator), escalations (Builder), gate results (QA), verdicts (Reviewer/Security), specialist briefs (Advisory Board)
 
 **Sends to:**
+- **Advisory Board**: Compiled specs or feature briefs for review (Prompt A Phase 1)
+- **Operator**: Synthesized refinement report for review (Prompt A Phase 2)
 - **Builder**: Plan, instructions, applicable decisions, scope boundaries
 - **QA**: Verification request after Builder completes
 - **Reviewer/Security**: Code for review (when high-risk)
