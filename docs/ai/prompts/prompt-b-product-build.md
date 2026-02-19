@@ -16,6 +16,9 @@ The compiled spec is the source of truth for what to build and how it should loo
 
 If `manifest.json` has `"active": null`, specs have not been compiled yet. Instruct the operator to run Prompt 0 first.
 
+## Prototype Learnings
+Before planning new features or architectural work, check `docs/spec/prototypes/` for completed experiment briefs. Validated learnings from prototype sessions may inform architecture decisions, feature design, or spec updates.
+
 ## Operating Rules
 - Use HVST (see `workflow.md`) when debugging or instability appears
 - All other rules (human-led architecture, gates, decisions, small scope, session log) are defined in AI.md and enforced by the Repo OS

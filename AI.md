@@ -21,6 +21,7 @@ Agent-allowed:
 ## Source of Truth
 - docs/spec/compiled/ (active version per manifest.json)
 - docs/spec/_templates/ (blank spec templates — upstream-synced)
+- docs/spec/prototypes/ (experiment briefs and prototype learnings)
 - docs/ai/workflow.md
 - docs/ai/quality-gates.md
 - docs/ai/decisions/
@@ -31,7 +32,7 @@ Agent-allowed:
 - .claude/agents/_agent-glossary.md
 - .claude/agents/_agent-workflow.md
 
-Hooks (`.claude/hooks/`) enforce automatically: A4 secret scanning + branch protection on commit, B1 naming convention on push, session log check on stop. Subagent frontmatter hooks block Builder/QA/Security from running git commit/push. Settings (`.claude/settings.json`) are auto-loaded by Claude Code. Neither hooks nor settings need to be read into context.
+Hooks (`.claude/hooks/`) enforce automatically: branch protection on Edit/Write (blocks file changes on `main`), A4 secret scanning on commit, B1 naming convention on push, session log check on stop. Subagent frontmatter hooks block Builder/QA/Security from running git commit/push. Settings (`.claude/settings.json`) are auto-loaded by Claude Code. Neither hooks nor settings need to be read into context.
 
 ## Spec Convention
 - **Templates** (`docs/spec/_templates/`): Blank spec files with placeholder fields. Synced from the upstream template repo. Do not fill these directly.
@@ -41,5 +42,6 @@ Hooks (`.claude/hooks/`) enforce automatically: A4 secret scanning + branch prot
 
 ## Prompts
 - docs/ai/prompts/prompt-0-spec-builder.md
+- docs/ai/prompts/prompt-0.5-prototype.md
 - docs/ai/prompts/prompt-a-repo-os.md
 - docs/ai/prompts/prompt-b-product-build.md

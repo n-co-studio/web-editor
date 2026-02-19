@@ -34,7 +34,7 @@ Branch type determines which gates apply and at what strictness.
 | `feature/*` | New functionality | Standard gates (A + B). Normal workflow. |
 | `fix/*` | Bug fixes | Standard gates (A + B). Normal workflow. |
 | `hotfix/*` | Urgent production fixes | Expedited: A2 scope limit relaxed (operator discretion). A1, A3, A4 still enforced. Push gates still apply. |
-| `experiment/*` | Spikes, prototypes, exploration | A4 (safety) only. No push to main without full gates. Must not be merged — rewrite into `feature/*` branch. |
+| `experiment/*` | Spikes, prototypes, exploration | A4 (safety) only. No push to main without full gates. Must not be merged — rewrite into `feature/*` branch. See Prompt 0.5 for prototyping tiers (Napkin / Spike / PoC). |
 
 **Naming convention:** `<category>/<short-description>` (e.g., `feature/user-auth`, `hotfix/stripe-webhook-fix`).
 

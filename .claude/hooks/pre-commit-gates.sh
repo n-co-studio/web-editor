@@ -37,17 +37,9 @@ if [ -n "$STAGED_FILES" ]; then
   done
 fi
 
-# --- Branch Protection — No Direct Commits to main ---
-# Block commits on main branch unless operator overrides.
-# Override: REPO_OS_ALLOW_MAIN=1 git commit ...
-
-CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
-if [ "$CURRENT_BRANCH" = "main" ] && [ "${REPO_OS_ALLOW_MAIN:-0}" != "1" ]; then
-  echo "BLOCKED: Direct commits to main are not allowed."
-  echo "  Create a branch: git checkout -b feature/<description>"
-  echo "  Operator override: REPO_OS_ALLOW_MAIN=1 git commit ..."
-  FAILED=1
-fi
+# --- Branch Protection ---
+# Moved to branch-guard.sh (PreToolUse on Edit/Write) so it fires
+# before any work is done, not at commit time.
 
 # --- A2: Process — Scope Check ---
 # Warn if staged changes exceed small scope threshold (100 lines).
