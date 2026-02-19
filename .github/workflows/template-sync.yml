@@ -17,7 +17,7 @@ jobs:
 
       - uses: AndreasAugustin/actions-template-sync@v6
         with:
-          source_repo_path: OWNER/repo-OS-template # Replace with your template repo
+          source_repo_path: markpreston2/repo-OS-template
           upstream_branch: main
           pr_title: "chore: sync with upstream template"
           pr_labels: template-sync

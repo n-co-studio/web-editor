@@ -4,6 +4,12 @@ description: Security assessment agent. Use for changes touching auth, PII, depe
 tools: Read, Glob, Grep, Bash
 disallowedTools: Edit, Write, Task
 model: sonnet
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: ".claude/hooks/agent-git-guard.sh"
 ---
 
 # Agent: Security / Privacy
@@ -23,6 +29,12 @@ Security gate for high-risk changes. Checks for vulnerabilities, secrets, and pr
 - Cryptography used or modified
 - External integrations added/changed
 - Untrusted input handling
+
+---
+
+## First Action
+
+Read `.claude/agents/_agent-glossary.md` and `.claude/agents/_agent-workflow.md` for shared definitions (scope thresholds, risk levels, enforcement terms) before beginning review.
 
 ---
 
