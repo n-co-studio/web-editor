@@ -127,7 +127,7 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 **Status:** complete
 **Decisions applied:** 0001, 0004
-**Commits:** pending
+**Commits:** d4ae989 — feat(repo-os): add PR merge step to session close workflow
 
 ### Goal
 - Add "create PR to merge branch to main" as an explicit session close step
