@@ -6,45 +6,6 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 ---
 
-## Session 1 — 2026-02-16 — Add branch categories and multi-agent team guidance
-
-**Status:** complete
-**Decisions applied:** 0001, 0002, 0004
-**Commits:** (pending)
-
-### Goal
-- Bring back branch categories with gate mapping from prior governance model
-- Add operator guidance for scaling to multi-agent teams per branch
-
-### Plan Summary
-- Add branch category table with gate profiles to quality-gates.md (agent-readable)
-- Add branch quick-reference to workflow.md (agent-readable)
-- Add Branch Categories section + Multi-Agent Teams section to explainer HTML (operator-facing, primary reference)
-- Add corresponding sections to operator-guide.md (brief, points to HTML for detail)
-
-### Changes Made
-- `docs/ai/quality-gates.md` — Added Branch Categories section: 6 branch types, gate mapping, naming convention, default behavior
-- `docs/ai/workflow.md` — Added Branch Categories section: quick-reference table, "never commit to main" rule
-- `repo-os-explainer.html` — Added Scaling sidebar group, Branch Categories section (table + examples), Multi-Agent Teams section (when/how, flow diagram, setup table, handles/doesn't handle, 6-step checklist)
-- `docs/operator-guide.md` — Added Section 8 (Branch Categories) and Section 9 (Scaling: Multi-Agent Teams), renumbered Rule Overrides to Section 10
-
-### Verification (Gates Evidence)
-- Commit gates: A1 pass (decisions 0001/0002/0004 followed), A2 pass (plan existed, 4 files, changes documented), A3 n/a (no tooling), A4 pass (no secrets)
-- Push gates: B1 pass (meaningful message), B2 n/a (no tests/typecheck), B3 n/a (no deps changed)
-- Override: committed directly to main (operator explicit override — template repo, no PR workflow active yet)
-
-### Failed Attempts (Brief)
-- None
-
-### Known Issues Logged
-- None
-
-### Follow-ups
-- Consider adding branch category awareness to pre-commit-gates.sh (validate branch name pattern)
-- Consider creating a decision record (0005) for branch categories if this becomes a firm standard
-
----
-
 ## Session 2 — 2026-02-18 — Spec Builder (Prompt 0) — v1
 
 **Status:** complete
@@ -137,6 +98,69 @@ Each session adds one entry. Keep entries high-signal and readable.
 ### Follow-ups
 - Proceed to Prompt B (Product Build)
 - Deferred items: R7 (non-JSX plugin guidance — future version), R17 (plugin registry — future version), I3 (undo/redo stack), I9 (batch diffing), I10 (visual test harness)
+
+---
+
+## Session 4 — 2026-02-19 — Product Build (Prompt B) — Increments 1–3
+
+**Status:** incomplete (increment 4 remaining)
+**Decisions applied:** 0001, 0002, 0005
+**Commits:** 6476406, 8d0725f (pending: increment 3)
+
+### Goal
+- Execute Prompt B (Product Build) — implement the Frontend Editor monorepo packages incrementally
+- Increment 1: monorepo scaffold + `@frontend-editor/shared` (types + protocol)
+- Increment 2: `@frontend-editor/dev-plugin` (build-time JSX source mapping)
+- Increment 3: `@frontend-editor/mcp-server` (WebSocket bridge + MCP tools + token discovery)
+
+### Plan Summary
+- Incremental build: each increment gets plan → build → cohesion review → fix → QA → commit
+- Types-first: shared package establishes the contract, then consumers build on top
+- Each package follows the established monorepo pattern (npm workspaces, TS project references, composite builds)
+
+### Changes Made
+
+**Increment 1** (commit `6476406`):
+- `.gitignore` — Added node_modules, dist, tsbuildinfo, .frontend-editor
+- `package.json` (root) — Monorepo workspace config
+- `tsconfig.json` (root) — Solution-style with project references
+- `packages/shared/` — Types package: VisualDiff, ElementInfo, PropertyChange, PageContext, DesignToken, WebSocket protocol types
+
+**Increment 2** (commit `8d0725f`):
+- `packages/dev-plugin/` — Vite plugin + Babel plugin for `data-source-file`/`data-source-line`/`data-source-index` injection
+- Core transform: `@babel/parser` + `@babel/traverse` + `magic-string`, ESM default-import trap handled
+
+**Increment 3** (pending commit):
+- `packages/mcp-server/package.json` — Manifest with bin field, deps (MCP SDK, ws, chokidar, zod)
+- `packages/mcp-server/tsconfig.json` — Extends root, references shared
+- `packages/mcp-server/src/types.ts` — Internal types (ConnectedClient, PersistedQueue, DriftEntry)
+- `packages/mcp-server/src/tokens.ts` — Token discovery (4 source types), parsing, resolution, chokidar file watching
+- `packages/mcp-server/src/bridge.ts` — WebSocket server (port 7890–7899 fallback), EXTENSION_HELLO/SERVER_HELLO reconciliation, pending queue persistence, tombstone set, drift tracking, path-confined session export/import
+- `packages/mcp-server/src/server.ts` — MCP server with 8 tools via `registerTool` + zod schemas
+- `packages/mcp-server/src/bin/cli.ts` — `#!/usr/bin/env node` entry point
+
+### Cohesion Fixes Applied
+- Inc 1: TokenUpdatePayload.sources made optional, esModuleInterop removed, TokenCategory union type added
+- Inc 2: @babel/core moved to optional peerDependency, dead fragment guard removed, exclude support added to Babel plugin
+- Inc 3: Tombstone set for reconnect reconciliation, path traversal confinement, isValidDiff validation, safePersistQueue error handling, handleMessage envelope validation, error-status token sources watched, Tailwind security comment
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass (0001/0002/0005 followed), A2 pass (plans exist per increment), A3 pass (`npm run build` clean), A4 pass (no secrets), A5 pass (cohesion reviews run per increment)
+- Push gates: pending
+
+### Failed Attempts (Brief)
+- Inc 2: `import('@frontend-editor/dev-plugin/transform')` failed — sub-path not in exports map, used direct dist path for testing
+- Inc 2: Heredoc commit syntax error — used double-quoted multiline string instead
+- Inc 3: `spacing` category regex — `"spacing"` does not contain `"space"` (s-p-a-c-i vs s-p-a-c-e), fixed with `/spac(?:e|ing)/`
+
+### Known Issues Logged
+- Spec says `DOMRect`, code uses `BoundingRect` (serializable alternative) — spec follow-up needed
+- No formatter/linter configured yet
+
+### Follow-ups
+- Commit increment 3
+- Increment 4: `chrome-extension` package
+- Update spec: `DOMRect` → `BoundingRect` in data-contracts.md
 
 ---
 

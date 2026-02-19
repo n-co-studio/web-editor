@@ -15,6 +15,7 @@
   "files": [],
   "references": [
     { "path": "packages/shared" },
-    { "path": "packages/dev-plugin" }
+    { "path": "packages/dev-plugin" },
+    { "path": "packages/mcp-server" }
   ]
 }
