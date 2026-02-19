@@ -124,7 +124,7 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 **Status:** complete
 **Decisions applied:** 0001, 0002, 0003, 0004, 0007, 0008
-**Commits:** pending
+**Commits:** d81a8a9 — feat(repo-os): add A5 Cohesion gate and dual-mode Critic
 
 ### Goal
 - Add post-build cohesion review gate (A5) to catch internal codebase incoherence after Prompt B builds
