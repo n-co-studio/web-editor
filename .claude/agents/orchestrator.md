@@ -75,7 +75,10 @@ When running Prompt A Phase 1 (advisory board review):
 2. **Activate** always-on specialists (Researcher, Architect, Critic, Innovator) plus any triggered conditional specialists
 3. **Dispatch** all activated specialists in parallel — each receives the compiled spec files
 4. **Collect** individual briefs from each specialist
-5. **Synthesize** into a single Refinement Report (see `_advisory-board.md` for format)
+5. **Synthesize** into a single Refinement Report (see `_advisory-board.md` for format):
+   a. Merge all non-Critic findings directly (they already include suggestions)
+   b. Cross-reference each Critic finding against other specialists' briefs — if a specialist addressed the same concern, attach their suggestion to the Critic finding
+   c. Any Critic finding with no matching specialist suggestion → list under "Unresolved Critic Findings" in the report (operator must provide direction)
 6. **Present** report to operator for per-item review (accept / reject / defer)
 7. **Record** operator decisions — no build begins until all Critical findings are addressed
 

@@ -77,7 +77,22 @@ The Orchestrator synthesizes all specialist briefs into a single report:
 
 ### Ideas (from Innovator + nice-to-haves from others)
 [Numbered list]
+
+### Unresolved Critic Findings (no specialist coverage)
+[Critic findings that no other specialist addressed — operator must provide direction or assign follow-up]
 ```
+
+---
+
+## Critic Cross-Reference
+
+During synthesis (step 5 of Advisory Board Orchestration), the Orchestrator pairs Critic findings with solutions from other specialists:
+
+1. For each Critic finding, scan other specialists' briefs for a finding that addresses the same concern
+2. If a match exists, attach the specialist's suggestion to the Critic finding in the Refinement Report (listed under Critical Findings or Recommendations as normal, with the paired suggestion noted)
+3. If no specialist addressed the Critic's concern, list it under **Unresolved Critic Findings** — the operator must provide direction or assign follow-up before build begins
+
+This preserves the Critic's adversarial focus (problems only) while ensuring every identified problem surfaces with a path forward.
 
 ---
 
@@ -100,3 +115,4 @@ No build begins until the operator has reviewed all Critical findings.
 - Parallel execution: All activated specialists run simultaneously
 - Spec is the input (spec mode): Advisory board agents review compiled specs and feature briefs, not source code (source code may not exist yet). The Critic also has a cohesion mode (see `critic.md`) where implementation code is the input — that mode runs during the build flow, not as part of advisory board review.
 - No `_agent-workflow.md` reading: Advisory agents read this file and `_agent-glossary.md` — not the build-phase workflow doc
+- Actionable suggestions: Every specialist (except Critic) MUST include a concrete, actionable suggestion with every finding. Never flag a concern without proposing a path forward
