@@ -37,6 +37,10 @@ if [ -n "$STAGED_FILES" ]; then
   done
 fi
 
+# --- Branch Protection ---
+# Moved to branch-guard.sh (PreToolUse on Edit/Write) so it fires
+# before any work is done, not at commit time.
+
 # --- A2: Process — Scope Check ---
 # Warn if staged changes exceed small scope threshold (100 lines).
 # This is advisory — does not block, but prints a warning.

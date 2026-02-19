@@ -1,5 +1,27 @@
 {
-  "active": null,
-  "versions": [],
+  "active": "v1",
+  "versions": [
+    {
+      "version": "v1",
+      "created": "2026-02-18T00:00:00Z",
+      "templateCommit": "0b6ced3",
+      "specFiles": [
+        "product.md",
+        "architecture.md",
+        "design-system.md",
+        "data-contracts.md",
+        "integrations.md",
+        "boundaries.md"
+      ],
+      "featureFiles": [
+        "features/feature-001-element-selection.md",
+        "features/feature-002-visual-property-editing.md",
+        "features/feature-003-design-token-snapping.md",
+        "features/feature-004-change-batching.md",
+        "features/feature-005-mcp-server-bridge.md",
+        "features/feature-006-dev-plugin.md"
+      ]
+    }
+  ],
   "note": "Populated by Prompt 0. Do not edit manually."
 }
