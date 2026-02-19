@@ -9,4 +9,4 @@ Accepted
 - Mandatory verification gates before commits
 - Session-based work with high-signal logging
 - GitHub template repository as source of truth
-- Baseline must exist (Commit 0) before any product code
+- Baseline must exist (Commit 0) before any product code. Commit 0 is the initial commit produced after Prompt A initializes the Repo OS.

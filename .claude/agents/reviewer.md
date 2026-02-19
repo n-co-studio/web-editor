@@ -22,6 +22,12 @@ Reviews code quality for high-risk and structural changes. Quality gate for prof
 
 ---
 
+## First Action
+
+Read `.claude/agents/_agent-glossary.md` and `.claude/agents/_agent-workflow.md` for shared definitions (scope thresholds, risk levels, enforcement terms) before beginning review.
+
+---
+
 ## Constraints
 
 - BLOCK: High-risk changes without thorough scrutiny

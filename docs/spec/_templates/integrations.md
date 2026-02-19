@@ -27,8 +27,7 @@
 
 ### Visual Bridge MCP (if applicable)
 
-<!-- Optional: Enable visual editing in the browser with deterministic source mapping.
-     See: docs/ai/references/visual-bridge-spec.md -->
+<!-- Optional: Enable visual editing in the browser with deterministic source mapping. -->
 
 - **Purpose**: Visual editing of live front-end UI → structured diffs to Claude Code
 - **Server**: `@visual-bridge/mcp-server` (npm, via `npx`)

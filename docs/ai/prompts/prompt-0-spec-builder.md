@@ -15,6 +15,7 @@ You must:
 2. Read all template files in `docs/spec/_templates/`
 3. Determine mode:
    - **If `manifest.json` has `"active": null`** → Fresh mode. Target: `docs/spec/compiled/v1/`
+   - **If versions exist AND operator says "add a feature"** → Feature mode. Target: `docs/spec/compiled/{active}/features/`
    - **If versions exist** → Update mode. Read the latest compiled version. Target: `docs/spec/compiled/v{n+1}/`
 4. Walk the operator through each spec file, one at a time, in this order:
    - `product.md` — What the product is and who it's for
@@ -68,6 +69,23 @@ You must:
 - The operator must confirm each section (a blanket "accept all" is fine)
 - Brand colors (primary, accent) have no defaults — the operator must define these
 
+### Feature Mode
+
+**Feature mode** (active version exists AND operator wants to add a feature):
+- Read the active compiled spec version for project context
+- Read `docs/spec/_templates/feature-brief.md` for the brief template
+- Interview the operator to fill out the feature brief — focused interview, not full 7-page spec
+- The "What It Touches" section is critical — it determines which advisory board specialists activate
+- If the feature was promoted from a PoC, ask the operator for the experiment brief path and link it in the "Prior Art" field
+- Write the completed brief to `docs/spec/compiled/{active}/features/brief-{name}.md`
+- Do NOT update `manifest.json` (this is a feature addition, not a version change)
+- When complete, confirm **"Feature brief complete"** and instruct the operator to proceed to the Advisory Board review (Prompt A Phase 1)
+
+Feature mode is lighter than a full spec update:
+- No re-interview of product, architecture, design system, or boundaries
+- Focus only on the new feature's requirements, constraints, and touchpoints
+- The existing compiled spec provides the context for what the feature integrates with
+
 ### Feature Specs
 
 - For each feature the operator describes, create a new file in the target version directory: `docs/spec/compiled/v{n}/features/feature-NNN-[name].md`
@@ -85,6 +103,7 @@ You must:
 - **If the operator is unsure**, present options and tradeoffs — but they decide.
 - **Companion tools**: When walking through `integrations.md`, mention any companion tool templates present in the MCP section. Do not push adoption — only surface the option if the project involves front-end UI.
 - **If a field can't be defined yet**, mark it `[TBD]` and flag it. All TBDs must be resolved before moving to Prompt A.
+- **Feature brief rule:** The "What It Touches" checkboxes must have at least one item checked. If the operator checks none, ask what the feature interacts with — every feature touches something.
 
 When complete, confirm **"Spec complete"** and instruct the operator to proceed to Prompt A.
 
@@ -95,3 +114,9 @@ When complete, confirm **"Spec complete"** and instruct the operator to proceed 
 - The operator has explicitly approved the full spec
 - `boundaries.md` → "Assumptions: NONE" section is empty
 - `manifest.json` has been updated with the new active version
+
+**Feature mode complete** means:
+- Feature brief filled out with no `[TBD]` fields
+- "What It Touches" has at least one checked item
+- Operator has explicitly approved the brief
+- Brief saved at `docs/spec/compiled/{active}/features/brief-{name}.md`
