@@ -9,15 +9,16 @@
 
 ## Advisory Board Review
 
-Runs after Prompt 0 completes, before Prompt B. Orchestrated by Prompt A Phase 1.
+Runs after Prompt 0 completes, before Prompt B. Orchestrated by Prompt A Phase 1. Uses tiered activation to match review depth to scope.
 
-1. **Activate** — Orchestrator scans compiled specs for trigger signals, activates specialists
-2. **Review** — Specialists analyze specs in parallel, produce focused briefs
-3. **Synthesize** — Orchestrator merges briefs into a Refinement Report
-4. **Decide** — Operator reviews each finding: accept / reject / defer
-5. **Proceed** — All critical findings addressed, move to Repo OS validation (Phase 3)
+1. **Select tier** — Orchestrator picks Lite / Standard / Full based on scope (operator can override or skip)
+2. **Activate** — Dispatch agents for the selected tier; scan for conditional signals at Full tier
+3. **Review** — Specialists analyze specs in parallel, produce focused briefs
+4. **Synthesize** — Orchestrator merges briefs into a Refinement Report
+5. **Decide** — Operator reviews each finding: accept / reject / defer
+6. **Proceed** — All critical findings addressed, move to Repo OS validation (Phase 3)
 
-See `.claude/agents/_advisory-board.md` for activation logic, brief format, and report structure.
+See `.claude/agents/_advisory-board.md` for tier definitions, activation logic, and report structure.
 
 ## HVST Protocol (debugging/instability)
 
