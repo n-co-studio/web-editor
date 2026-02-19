@@ -10,18 +10,38 @@ Review compiled specs or feature briefs before build begins. Identify gaps, risk
 
 ---
 
+## Review Tiers
+
+The Orchestrator selects a tier based on scope before dispatching any agents. The operator can override at any time ("run full board" or "skip review").
+
+| Tier | When | Agents | Est. Cost |
+|---|---|---|---|
+| **Skip** | Single-file fix, docs-only, typo | None | 0 |
+| **Lite** | Small feature, 1-3 files, bounded scope | Architect + Critic | Low |
+| **Standard** | Multi-file feature, new endpoints, moderate complexity | Architect + Critic + Researcher + Innovator | Medium |
+| **Full** | New subsystem, architectural change, full spec review | Standard + conditional specialists | High |
+
+**Defaults:**
+- Feature briefs → Lite (operator can escalate)
+- Full compiled specs → Standard
+- Operator requests "full board" or spec touches 3+ signal categories → Full
+
+---
+
 ## Activation Logic
 
 The Orchestrator scans compiled specs (or the feature brief's "What It Touches" checkboxes) for trigger signals:
 
-| Signal Keywords | Activates |
+| Signal Keywords | Activates (Full tier only) |
 |---|---|
 | auth, sessions, OAuth, tokens, permissions, login | Security Analyst |
 | UI, design-system, user-flows, forms, components, responsive | UX Strategist |
 | real-time, websockets, video, streaming, large-data, media, CDN | Performance Engineer |
 | database, data-contracts, migrations, schema, GDPR, data-lifecycle | Data Strategist |
 
-**Always active:** Researcher, Architect, Critic, Innovator (lower priority).
+**Core pair (Lite+):** Architect, Critic — always active when advisory board runs.
+**Extended (Standard+):** Researcher, Innovator — active at Standard tier and above.
+**Conditional (Full only):** Security Analyst, UX Strategist, Performance Engineer, Data Strategist — signal-triggered, Full tier only.
 
 ---
 
@@ -57,17 +77,19 @@ The Orchestrator synthesizes all specialist briefs into a single report:
 ```
 ## Advisory Board — Refinement Report
 
+### Review Tier: [Lite / Standard / Full] — [reason or operator override]
+
 ### Activation Summary
 | Specialist | Status | Trigger |
 |---|---|---|
-| Researcher | Ran | Always |
-| Architect | Ran | Always |
-| Critic | Ran | Always |
+| Architect | Ran | Core (Lite+) |
+| Critic | Ran | Core (Lite+) |
+| Researcher | Ran / Skipped | Standard+ |
+| Innovator | Ran / Skipped | Standard+ |
 | Security Analyst | Ran / Skipped | [trigger or "no signal"] |
 | UX Strategist | Ran / Skipped | [trigger or "no signal"] |
 | Performance Engineer | Ran / Skipped | [trigger or "no signal"] |
 | Data Strategist | Ran / Skipped | [trigger or "no signal"] |
-| Innovator | Ran | Always |
 
 ### Critical Findings (must address before build)
 [Numbered list from any specialist — severity CRITICAL]
@@ -86,7 +108,7 @@ The Orchestrator synthesizes all specialist briefs into a single report:
 
 ## Critic Cross-Reference
 
-During synthesis (step 5 of the Orchestration Procedure below), the Orchestrator pairs Critic findings with solutions from other specialists:
+During synthesis (step 6 of the Orchestration Procedure below), the Orchestrator pairs Critic findings with solutions from other specialists:
 
 1. For each Critic finding, scan other specialists' briefs for a finding that addresses the same concern
 2. If a match exists, attach the specialist's suggestion to the Critic finding in the Refinement Report (listed under Critical Findings or Recommendations as normal, with the paired suggestion noted)
@@ -123,15 +145,19 @@ No build begins until the operator has reviewed all Critical findings.
 
 When running Prompt A Phase 1 (advisory board review), the Orchestrator follows this sequence:
 
-1. **Scan** compiled specs for activation signals (see Activation Logic above)
-2. **Activate** always-on specialists (Researcher, Architect, Critic, Innovator) plus any triggered conditional specialists
-3. **Dispatch** all activated specialists in parallel — each receives the compiled spec files
-4. **Collect** individual briefs from each specialist
-5. **Synthesize** into a single Refinement Report (see Refinement Report above):
+1. **Select tier** — Apply defaults from Review Tiers table (feature brief → Lite, full spec → Standard). If the operator specified a tier, use that instead. If Skip, stop here
+2. **Scan** compiled specs for activation signals (see Activation Logic above) — only relevant at Full tier
+3. **Activate** agents for the selected tier:
+   - Lite: Architect + Critic
+   - Standard: Architect + Critic + Researcher + Innovator
+   - Full: Standard set + any signal-triggered conditional specialists
+4. **Dispatch** all activated specialists in parallel — each receives the compiled spec files
+5. **Collect** individual briefs from each specialist
+6. **Synthesize** into a single Refinement Report (see Refinement Report above):
    a. Merge all non-Critic findings directly (they already include suggestions)
    b. Cross-reference each Critic finding against other specialists' briefs — if a specialist addressed the same concern, attach their suggestion to the Critic finding
    c. Any Critic finding with no matching specialist suggestion → list under "Unresolved Critic Findings" in the report (operator must provide direction)
-6. **Present** report to operator for per-item review (accept / reject / defer)
-7. **Record** operator decisions — no build begins until all Critical findings are addressed
+7. **Present** report to operator for per-item review (accept / reject / defer)
+8. **Record** operator decisions — no build begins until all Critical findings are addressed
 
-For Feature mode: scan the feature brief's "What It Touches" checkboxes for activation signals.
+For Feature mode: scan the feature brief's "What It Touches" checkboxes for activation signals. Default tier is Lite.
