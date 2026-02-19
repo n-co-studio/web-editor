@@ -256,6 +256,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
     <div class="sb-group">How It Works</div>
     <a href="#workflow">Daily Workflow</a>
     <a href="#agents">Agents</a>
+    <a href="#advisory">Advisory Board</a>
     <a href="#gates">Quality Gates</a>
     <a href="#decisions">Decisions</a>
     <a href="#hooks">Hooks &amp; Files</a>
@@ -289,7 +290,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
   <table class="ref">
     <tr><td style="color:var(--cyn)">You (operator)</td><td>Own architecture, approve plans, accept risk, decide when done. These are non-delegable.</td></tr>
     <tr><td style="color:var(--grn)">Prompt 0</td><td>Before any code: guided interview builds your complete project spec (product, architecture, design system, data, features, integrations, boundaries). Baked-in design system defaults. Figma MCP integration.</td></tr>
-    <tr><td style="color:var(--acc2)">AI agents</td><td>Six roles: Orchestrator plans, Builder codes, QA blocks bad commits, Reviewer + Security sign off high-risk, Accessibility advises.</td></tr>
+    <tr><td style="color:var(--acc2)">AI agents</td><td>Two teams: <strong>Advisory Board</strong> (8 specialists review specs before build) and <strong>Build Team</strong> (Orchestrator plans, Builder codes, QA blocks bad commits, Reviewer + Security sign off high-risk, Accessibility advises).</td></tr>
     <tr><td style="color:var(--orn)">Repo OS</td><td>Enforces decisions (mandatory rules), gates (verification before commit/push), and roles (who can do what). Hooks run automatically.</td></tr>
   </table>
   <div class="callout">
@@ -328,7 +329,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
   <h3>Step 4 &mdash; Initialize Repo OS <span class="tag t-acc">prompt A</span></h3>
   <p>Paste:</p>
   <div class="cmd">Follow docs/ai/prompts/prompt-a-repo-os.md.</div>
-  <p>Prompt A reads every Repo OS file, summarizes the state, proposes changes, and waits for your approval. It will <strong>not</strong> write product code. When it says &ldquo;Repo OS ready&rdquo;, move to Step 5.</p>
+  <p>Prompt A now runs in three phases: <strong>Phase 1</strong> activates the Advisory Board to review your specs (specialists run in parallel). <strong>Phase 2</strong> presents a synthesized refinement report for your per-item review. <strong>Phase 3</strong> validates the Repo OS (agents, gates, decisions). When it says &ldquo;Repo OS ready&rdquo;, move to Step 5.</p>
 
   <h3>Step 5 &mdash; Start building <span class="tag t-cyn">prompt B</span></h3>
   <p>For every development session going forward, paste:</p>
@@ -351,7 +352,8 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
       <tr><td><span class="tag t-orn">Repo OS change</span></td><td>Prompt A + new decision</td><td>Re-initialize consistency, document the behavioral change</td></tr>
       <tr><td><span class="tag t-acc">Normal work</span></td><td>Prompt B</td><td>Standard dev: features, bug fixes, regular coding</td></tr>
       <tr><td><span class="tag t-red">Drift / confusion</span></td><td>STOP &rarr; re-run Prompt A</td><td>Reset agents, restore enforcement, correct behavior</td></tr>
-      <tr><td><span class="tag t-pnk">Spec changes</span></td><td>Re-run Prompt 0</td><td>Requirements changed, new features, design updates</td></tr>
+      <tr><td><span class="tag t-cyn">New feature</span></td><td>Prompt 0 (Feature mode), then Prompt A</td><td>Lightweight feature brief, then advisory board review before build</td></tr>
+      <tr><td><span class="tag t-pnk">Spec changes</span></td><td>Re-run Prompt 0, then Prompt A</td><td>Requirements changed, new features, design updates</td></tr>
       <tr><td><span class="tag t-cyn">Template sync</span></td><td>Automatic &mdash; Prompt 0 only if spec templates changed</td><td>Governance updates auto-merge weekly</td></tr>
       <tr><td><span class="tag t-pnk">Prototype / spike</span></td><td>Prompt 0.5</td><td>Quick test, architecture spike, or proof of concept on an experiment branch</td></tr>
     </tbody>
@@ -391,6 +393,22 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
   <div class="callout">
     <strong>Key rule:</strong> The AI never fills in a field itself. Every value comes from you (the operator). If something is unclear, the AI asks &mdash; it does not guess. The spec is your design, not the AI&rsquo;s.
   </div>
+
+  <h3>Feature briefs <span class="tag t-cyn">feature mode</span></h3>
+  <p>When your project already has a compiled spec and you want to add a single feature, Prompt 0 enters <strong>Feature mode</strong>. Instead of the full 7-page interview, you fill out a focused feature brief.</p>
+  <table class="ref">
+    <thead><tr><th>Section</th><th>What it captures</th></tr></thead>
+    <tbody>
+      <tr><td><code>What / Why</code></td><td>Feature purpose and motivation</td></tr>
+      <tr><td><code>Prior Art</code></td><td>Link to experiment brief if promoted from a PoC</td></tr>
+      <tr><td><code>What It Touches</code></td><td>Checklist of system areas affected &mdash; drives advisory board activation</td></tr>
+      <tr><td><code>Key Requirements</code></td><td>Non-negotiable requirements</td></tr>
+      <tr><td><code>Constraints</code></td><td>Limitations and boundaries</td></tr>
+      <tr><td><code>Open Questions</code></td><td>Unresolved items for advisory review</td></tr>
+      <tr><td><code>Acceptance Criteria</code></td><td>Definition of done</td></tr>
+    </tbody>
+  </table>
+  <p>Feature briefs are stored at <code>docs/spec/compiled/{active}/features/brief-{name}.md</code>. After completing the brief, proceed to Prompt A for advisory board review.</p>
 </section>
 
 <!-- ══════ WORKFLOW ══════ -->
@@ -553,6 +571,219 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
   </div>
 </section>
 
+<!-- ══════ ADVISORY BOARD ══════ -->
+<section id="advisory">
+  <div class="sec-num">Spec Review</div>
+  <h2>Advisory Board</h2>
+  <p>Before any code is written, 8 specialist agents review your compiled spec (or feature brief) for gaps, risks, and opportunities. They run in parallel during Prompt A Phase 1. All findings are advisory &mdash; you decide what to act on.</p>
+
+  <h3>How it works</h3>
+  <div class="flow">
+    <div class="flow-node fn-op">Spec Complete</div>
+    <span class="flow-arr">&rarr;</span>
+    <div class="flow-node fn-orch">Orchestrator<br><span style="font-size:.68rem;color:var(--t3)">scans &amp; activates</span></div>
+    <span class="flow-arr">&rarr;</span>
+    <div class="fn-branch" style="border-style:solid;border-color:var(--b2);">
+      <span style="font-size:.72rem;font-weight:600;color:var(--t2);">Parallel Specialists</span>
+      <div style="display:flex;gap:.25rem;margin-top:.2rem;flex-wrap:wrap;">
+        <div class="flow-node" style="font-size:.72rem;border-color:rgba(6,182,212,.3);color:var(--cyn)">Researcher</div>
+        <div class="flow-node" style="font-size:.72rem;border-color:rgba(99,102,241,.3);color:var(--acc2)">Architect</div>
+        <div class="flow-node" style="font-size:.72rem;border-color:rgba(245,158,11,.3);color:var(--orn)">Critic</div>
+        <div class="flow-node" style="font-size:.72rem;border-color:rgba(6,182,212,.3);color:var(--cyn)">Innovator</div>
+      </div>
+      <div style="display:flex;gap:.25rem;margin-top:.2rem;flex-wrap:wrap;">
+        <div class="flow-node" style="font-size:.72rem;border-color:rgba(239,68,68,.3);color:var(--red)">Security</div>
+        <div class="flow-node" style="font-size:.72rem;border-color:rgba(236,72,153,.3);color:var(--pnk)">UX</div>
+        <div class="flow-node" style="font-size:.72rem;border-color:rgba(245,158,11,.3);color:var(--orn)">Perf</div>
+        <div class="flow-node" style="font-size:.72rem;border-color:rgba(34,197,94,.3);color:var(--grn)">Data</div>
+      </div>
+    </div>
+    <span class="flow-arr">&rarr;</span>
+    <div class="flow-node fn-orch">Refinement<br>Report</div>
+    <span class="flow-arr">&rarr;</span>
+    <div class="flow-node fn-op">Operator<br>Review</div>
+    <span class="flow-arr">&rarr;</span>
+    <div class="flow-node fn-done">Build &#10003;</div>
+  </div>
+
+  <h3>Activation</h3>
+  <p>Four specialists always run. Four are conditional &mdash; activated when trigger keywords are found in the spec or in the feature brief&rsquo;s &ldquo;What It Touches&rdquo; checkboxes.</p>
+  <table class="ref">
+    <thead><tr><th>Specialist</th><th>Activation</th><th>Trigger</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Researcher</strong></td><td><span class="tag t-grn">always</span></td><td>&mdash;</td></tr>
+      <tr><td><strong>Architect</strong></td><td><span class="tag t-grn">always</span></td><td>&mdash;</td></tr>
+      <tr><td><strong>Critic</strong></td><td><span class="tag t-grn">always</span></td><td>&mdash;</td></tr>
+      <tr><td><strong>Innovator</strong></td><td><span class="tag t-grn">always</span></td><td>&mdash;</td></tr>
+      <tr><td><strong>Security Analyst</strong></td><td><span class="tag t-orn">conditional</span></td><td>Auth, sessions, OAuth, PII, payments, external APIs</td></tr>
+      <tr><td><strong>UX Strategist</strong></td><td><span class="tag t-orn">conditional</span></td><td>UI, design system, user flows, forms, responsive</td></tr>
+      <tr><td><strong>Performance Engineer</strong></td><td><span class="tag t-orn">conditional</span></td><td>Real-time, websockets, large data, media, CDN</td></tr>
+      <tr><td><strong>Data Strategist</strong></td><td><span class="tag t-orn">conditional</span></td><td>Database, data contracts, migrations, schema, GDPR</td></tr>
+    </tbody>
+  </table>
+
+  <h3>The specialists</h3>
+  <p>All advisory agents are read-only. They cannot modify files, run commands, or spawn sub-agents. Click to expand details.</p>
+
+  <!-- Researcher -->
+  <div class="card agent" onclick="toggleA(this)">
+    <div class="agent-row">
+      <div class="agent-ico" style="background:var(--cyn-d)">&#128218;</div>
+      <div class="agent-info"><h3>Researcher</h3><div class="role">Best practices, ecosystem landscape, prior art</div></div>
+      <span class="tag t-grn">always</span>
+      <span class="expand-ico">&#9660;</span>
+    </div>
+    <div class="agent-expand"><div class="agent-body">
+      <h4>What It Does</h4>
+      <p>Researches current best practices, ecosystem landscape, and prior art. Grounds recommendations in real-world evidence. Every claim must cite a source.</p>
+      <h4>Review Scope</h4>
+      <p>Tech stack currency, dependency risks, integration pattern best practices, architecture patterns against industry consensus.</p>
+      <h4>Tools</h4>
+      <div class="tools"><span class="tool ok">Read</span><span class="tool ok">Glob</span><span class="tool ok">Grep</span><span class="tool ok">WebSearch</span><span class="tool ok">WebFetch</span><span class="tool no">Edit</span><span class="tool no">Write</span><span class="tool no">Bash</span><span class="tool no">Task</span></div>
+    </div></div>
+  </div>
+
+  <!-- Architect -->
+  <div class="card agent" onclick="toggleA(this)">
+    <div class="agent-row">
+      <div class="agent-ico" style="background:var(--acc-g)">&#127959;</div>
+      <div class="agent-info"><h3>Architect</h3><div class="role">Structural integrity, scalability, patterns</div></div>
+      <span class="tag t-grn">always</span>
+      <span class="expand-ico">&#9660;</span>
+    </div>
+    <div class="agent-expand"><div class="agent-body">
+      <h4>What It Does</h4>
+      <p>Reviews spec for structural integrity, scalability, separation of concerns, and pattern consistency. Validates that the architecture supports all specified features.</p>
+      <h4>Review Scope</h4>
+      <p>Coupling and dependencies, boundary clarity, data model &harr; feature alignment, API contract consistency, scaling concerns.</p>
+      <h4>Tools</h4>
+      <div class="tools"><span class="tool ok">Read</span><span class="tool ok">Glob</span><span class="tool ok">Grep</span><span class="tool no">Edit</span><span class="tool no">Write</span><span class="tool no">Bash</span><span class="tool no">Task</span></div>
+    </div></div>
+  </div>
+
+  <!-- Critic -->
+  <div class="card agent" onclick="toggleA(this)">
+    <div class="agent-row">
+      <div class="agent-ico" style="background:var(--orn-d)">&#129504;</div>
+      <div class="agent-info"><h3>Critic</h3><div class="role">Gaps, contradictions, unstated assumptions</div></div>
+      <span class="tag t-grn">always</span>
+      <span class="expand-ico">&#9660;</span>
+    </div>
+    <div class="agent-expand"><div class="agent-body">
+      <h4>What It Does</h4>
+      <p>Adversarial review &mdash; specifically finds what is missing, contradictory, or ambiguous. Identifies problems only; does not propose solutions (other specialists solve).</p>
+      <h4>Review Scope</h4>
+      <p>Cross-reference failures, unstated assumptions, missing edge cases (empty/error states), contradictions between spec files, completeness gaps.</p>
+      <h4>Tools</h4>
+      <div class="tools"><span class="tool ok">Read</span><span class="tool ok">Glob</span><span class="tool ok">Grep</span><span class="tool no">Edit</span><span class="tool no">Write</span><span class="tool no">Bash</span><span class="tool no">Task</span></div>
+    </div></div>
+  </div>
+
+  <!-- Security Analyst -->
+  <div class="card agent" onclick="toggleA(this)">
+    <div class="agent-row">
+      <div class="agent-ico" style="background:var(--red-d)">&#128737;</div>
+      <div class="agent-info"><h3>Security Analyst</h3><div class="role">Threat surface, auth patterns, data protection</div></div>
+      <span class="tag t-orn">conditional</span>
+      <span class="expand-ico">&#9660;</span>
+    </div>
+    <div class="agent-expand"><div class="agent-body">
+      <h4>When Activated</h4>
+      <p>Auth, sessions, OAuth, PII, external APIs, payments, file uploads, multi-tenancy, role-based access.</p>
+      <h4>Review Scope</h4>
+      <p>Auth architecture, data classification, API security, third-party trust boundaries, compliance signals (GDPR, CCPA, PCI). References OWASP Top 10 and ASVS.</p>
+      <h4>Tools</h4>
+      <div class="tools"><span class="tool ok">Read</span><span class="tool ok">Glob</span><span class="tool ok">Grep</span><span class="tool ok">WebSearch</span><span class="tool no">Edit</span><span class="tool no">Write</span><span class="tool no">Bash</span><span class="tool no">Task</span></div>
+    </div></div>
+  </div>
+
+  <!-- UX Strategist -->
+  <div class="card agent" onclick="toggleA(this)">
+    <div class="agent-row">
+      <div class="agent-ico" style="background:var(--pnk-d)">&#127912;</div>
+      <div class="agent-info"><h3>UX Strategist</h3><div class="role">Interaction patterns, accessibility, responsive design</div></div>
+      <span class="tag t-orn">conditional</span>
+      <span class="expand-ico">&#9660;</span>
+    </div>
+    <div class="agent-expand"><div class="agent-body">
+      <h4>When Activated</h4>
+      <p>UI or design system specified, user flows with UI states, forms, interactive components, responsive strategy.</p>
+      <h4>Review Scope</h4>
+      <p>User flow completeness (loading/error/empty states), information architecture, accessibility foundations (contrast, keyboard, ARIA), responsive strategy, form UX, design system consistency. References WCAG 2.1 AA and Nielsen&rsquo;s Heuristics.</p>
+      <h4>Tools</h4>
+      <div class="tools"><span class="tool ok">Read</span><span class="tool ok">Glob</span><span class="tool ok">Grep</span><span class="tool ok">WebSearch</span><span class="tool no">Edit</span><span class="tool no">Write</span><span class="tool no">Bash</span><span class="tool no">Task</span></div>
+    </div></div>
+  </div>
+
+  <!-- Performance Engineer -->
+  <div class="card agent" onclick="toggleA(this)">
+    <div class="agent-row">
+      <div class="agent-ico" style="background:var(--orn-d)">&#9889;</div>
+      <div class="agent-info"><h3>Performance Engineer</h3><div class="role">Caching, bundle size, rendering, data fetching</div></div>
+      <span class="tag t-orn">conditional</span>
+      <span class="expand-ico">&#9660;</span>
+    </div>
+    <div class="agent-expand"><div class="agent-body">
+      <h4>When Activated</h4>
+      <p>Real-time features, large datasets, media processing, performance-critical flows, CDN, SSR/SSG/ISR decisions.</p>
+      <h4>Review Scope</h4>
+      <p>Data fetching patterns (N+1, unbounded queries, pagination), rendering strategy per route, caching and invalidation, bundle splitting, real-time connection management, media optimization.</p>
+      <h4>Tools</h4>
+      <div class="tools"><span class="tool ok">Read</span><span class="tool ok">Glob</span><span class="tool ok">Grep</span><span class="tool ok">WebSearch</span><span class="tool no">Edit</span><span class="tool no">Write</span><span class="tool no">Bash</span><span class="tool no">Task</span></div>
+    </div></div>
+  </div>
+
+  <!-- Data Strategist -->
+  <div class="card agent" onclick="toggleA(this)">
+    <div class="agent-row">
+      <div class="agent-ico" style="background:var(--grn-d)">&#128451;</div>
+      <div class="agent-info"><h3>Data Strategist</h3><div class="role">Schema design, migration safety, contract consistency</div></div>
+      <span class="tag t-orn">conditional</span>
+      <span class="expand-ico">&#9660;</span>
+    </div>
+    <div class="agent-expand"><div class="agent-body">
+      <h4>When Activated</h4>
+      <p>Database schema, data contracts, migration strategy, GDPR/retention requirements, multi-entity relationships.</p>
+      <h4>Review Scope</h4>
+      <p>Schema design and normalization, migration safety and rollback, data lifecycle (CRUD completeness), contract &harr; feature consistency, validation rules, compliance requirements.</p>
+      <h4>Tools</h4>
+      <div class="tools"><span class="tool ok">Read</span><span class="tool ok">Glob</span><span class="tool ok">Grep</span><span class="tool no">Edit</span><span class="tool no">Write</span><span class="tool no">Bash</span><span class="tool no">Task</span></div>
+    </div></div>
+  </div>
+
+  <!-- Innovator -->
+  <div class="card agent" onclick="toggleA(this)">
+    <div class="agent-row">
+      <div class="agent-ico" style="background:var(--cyn-d)">&#128161;</div>
+      <div class="agent-info"><h3>Innovator</h3><div class="role">Creative alternatives, unconventional approaches</div></div>
+      <span class="tag t-grn">always</span>
+      <span class="expand-ico">&#9660;</span>
+    </div>
+    <div class="agent-expand"><div class="agent-body">
+      <h4>What It Does</h4>
+      <p>Divergent thinker &mdash; surfaces what the team might not have considered. Proposes creative alternatives with explicit tradeoffs. Maximum 5 ideas per brief, quality over quantity.</p>
+      <h4>Review Scope</h4>
+      <p>Alternative architectures, emerging technologies, build-vs-buy opportunities, DX improvements, cross-feature synergies, UX innovations beyond stated requirements.</p>
+      <h4>Tools</h4>
+      <div class="tools"><span class="tool ok">Read</span><span class="tool ok">Glob</span><span class="tool ok">Grep</span><span class="tool ok">WebSearch</span><span class="tool ok">WebFetch</span><span class="tool no">Edit</span><span class="tool no">Write</span><span class="tool no">Bash</span><span class="tool no">Task</span></div>
+    </div></div>
+  </div>
+
+  <h3>Refinement report</h3>
+  <p>The Orchestrator synthesizes all specialist briefs into a single report, organized by severity:</p>
+  <ul class="tight">
+    <li><strong>Critical Findings</strong> &mdash; must address before build begins</li>
+    <li><strong>Recommendations</strong> &mdash; you decide, grouped by specialist</li>
+    <li><strong>Ideas</strong> &mdash; from Innovator + nice-to-haves from others</li>
+    <li><strong>Activation Summary</strong> &mdash; which specialists ran and why</li>
+  </ul>
+  <p>You review each item: <strong>Accept</strong> (integrate into spec), <strong>Reject</strong> (document reason), or <strong>Defer</strong> (revisit later). All Critical findings must be addressed before proceeding to build.</p>
+
+  <div class="callout">
+    <strong>Advisory, not mandatory:</strong> The advisory board produces recommendations. You are the final arbiter. Every accept/reject decision is yours. The system does not block commits based on advisory findings.
+  </div>
+</section>
+
 <!-- ══════ QUALITY GATES ══════ -->
 <section id="gates">
   <div class="sec-num">Verification</div>
@@ -598,6 +829,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
   <div class="card dec"><div class="dec-id">0004</div><h3>Mechanical Enforcement</h3><p>Automated enforcement via Claude Code features: executable subagents with tool boundaries, team-shared settings, verification hooks (secret scanning, session log reminders).</p></div>
   <div class="card dec"><div class="dec-id">0005</div><h3>Companion Tool Pattern</h3><p>Companion tools extend the dev workflow without modifying Repo OS core governance. They integrate via MCP servers in <code>.claude/settings.json</code>. The template ships clean &mdash; no companion tools pre-configured.</p></div>
   <div class="card dec"><div class="dec-id">0006</div><h3>Prototyping Tiers</h3><p>Three-tier prototyping system (Napkin / Spike / PoC) on <code>experiment/*</code> branches. Operator self-selects tier based on complexity. Prompt 0.5 facilitates. Only learnings are promoted &mdash; code is disposable. Experiment briefs stored in <code>docs/spec/prototypes/</code>.</p></div>
+  <div class="card dec"><div class="dec-id">0007</div><h3>Advisory Board</h3><p>8 read-only specialist agents review compiled specs before build. Mix of always-on (Researcher, Architect, Critic, Innovator) and conditional (Security Analyst, UX Strategist, Performance Engineer, Data Strategist). Prompt A orchestrates in 3 phases. Prompt 0 gains Feature mode for individual feature additions.</p></div>
 </section>
 
 <!-- ══════ HOOKS & FILES ══════ -->
@@ -648,7 +880,16 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
 <span class="p">│       ├── </span><span class="f">qa-verifier.md</span> <span class="n">&mdash; executable, commit blocker</span>
 <span class="p">│       ├── </span><span class="f">reviewer.md</span> <span class="n">&mdash; executable, read-only</span>
 <span class="p">│       ├── </span><span class="f">security-privacy.md</span> <span class="n">&mdash; executable</span>
-<span class="p">│       └── </span><span class="f">accessibility.md</span> <span class="n">&mdash; executable, advisory</span>
+<span class="p">│       ├── </span><span class="f">accessibility.md</span> <span class="n">&mdash; executable, advisory</span>
+<span class="p">│       ├── </span><span class="f">_advisory-board.md</span> <span class="n">&mdash; shared reference for advisory specialists</span>
+<span class="p">│       ├── </span><span class="f">researcher.md</span> <span class="n">&mdash; ecosystem research, always-on</span>
+<span class="p">│       ├── </span><span class="f">architect.md</span> <span class="n">&mdash; structural review, always-on</span>
+<span class="p">│       ├── </span><span class="f">critic.md</span> <span class="n">&mdash; gap analysis, always-on</span>
+<span class="p">│       ├── </span><span class="f">security-analyst.md</span> <span class="n">&mdash; threat review, conditional</span>
+<span class="p">│       ├── </span><span class="f">ux-strategist.md</span> <span class="n">&mdash; interaction review, conditional</span>
+<span class="p">│       ├── </span><span class="f">performance-engineer.md</span> <span class="n">&mdash; performance review, conditional</span>
+<span class="p">│       ├── </span><span class="f">data-strategist.md</span> <span class="n">&mdash; schema review, conditional</span>
+<span class="p">│       └── </span><span class="f">innovator.md</span> <span class="n">&mdash; creative alternatives, always-on</span>
 <span class="p">├── </span><span class="d">docs/</span>
 <span class="p">│   ├── </span><span class="d">spec/</span>
 <span class="p">│   │   ├── </span><span class="d">_templates/</span> <span class="n">&mdash; blank spec templates (synced from upstream)</span>
@@ -659,6 +900,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
 <span class="p">│   │   │   ├── </span><span class="d">features/</span>
 <span class="p">│   │   │   │   └── </span><span class="f">_feature-template.md</span> <span class="n">&mdash; copyable template</span>
 <span class="p">│   │   │   ├── </span><span class="f">_experiment-brief.md</span> <span class="n">&mdash; prototype brief template</span>
+<span class="p">│   │   │   ├── </span><span class="f">feature-brief.md</span> <span class="n">&mdash; lightweight feature addition template</span>
 <span class="p">│   │   │   ├── </span><span class="f">integrations.md</span> <span class="n">&mdash; services, MCP, env vars</span>
 <span class="p">│   │   │   └── </span><span class="f">boundaries.md</span> <span class="n">&mdash; exclusions, protected areas</span>
 <span class="p">│   │   ├── </span><span class="d">compiled/</span> <span class="n">&mdash; operator-filled specs, versioned (never synced)</span>
@@ -668,7 +910,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
 <span class="p">│   └── </span><span class="d">ai/</span>
 <span class="p">│       ├── </span><span class="f">workflow.md</span> <span class="n">&mdash; execution model, HVST protocol</span>
 <span class="p">│       ├── </span><span class="f">quality-gates.md</span> <span class="n">&mdash; gate definitions (A/B/C)</span>
-<span class="p">│       ├── </span><span class="d">decisions/</span> <span class="n">&mdash; 0001&ndash;0006 baseline decisions</span>
+<span class="p">│       ├── </span><span class="d">decisions/</span> <span class="n">&mdash; 0001&ndash;0007 baseline decisions</span>
 <span class="p">│       ├── </span><span class="d">logs/</span>
 <span class="p">│       │   ├── </span><span class="f">session-log.md</span> <span class="n">&mdash; session audit trail (last 3 sessions)</span>
 <span class="p">│       │   ├── </span><span class="f">session-archive.md</span> <span class="n">&mdash; older sessions (rotated from log)</span>
@@ -997,6 +1239,9 @@ experiment/new-caching-strategy</div>
     <dl class="gl"><dt>HVST</dt><dd>Hypothesis &rarr; Validate &rarr; Solve &rarr; Test &rarr; Record. 5-step debugging protocol. Prevents random-fix loops.</dd></dl>
     <dl class="gl"><dt>Experiment Brief</dt><dd>Lightweight document capturing hypothesis, method, success criteria, and learnings for a prototype session. Template at <code>docs/spec/_templates/_experiment-brief.md</code>.</dd></dl>
     <dl class="gl"><dt>Prototype Tier</dt><dd>Operator-selected documentation level for experiments: Napkin (no artifact), Spike (experiment brief), Proof of Concept (brief + mini-spec notes). See <a href="#prototyping">Prototyping</a>.</dd></dl>
+    <dl class="gl"><dt>Advisory Board</dt><dd>8 specialist agents that review compiled specs before build. Runs during Prompt A Phase 1. All findings are advisory &mdash; operator decides.</dd></dl>
+    <dl class="gl"><dt>Refinement Report</dt><dd>Synthesized output of advisory board review. Contains critical findings, recommendations, and ideas. Operator reviews per-item.</dd></dl>
+    <dl class="gl"><dt>Feature Brief</dt><dd>Lightweight spec template for individual feature additions. Created by Prompt 0 Feature mode. Drives advisory board activation via &ldquo;What It Touches&rdquo; field.</dd></dl>
   </div>
 </section>
 
@@ -1094,6 +1339,15 @@ const DT = {
             'Switch to Prompt B for development',
           ],cmd:'Follow docs/ai/prompts/prompt-a-repo-os.md.'}}
       ]}},
+    {ico:'&#128269;',lbl:'Add a feature to existing project',dsc:'New feature with advisory review',
+      res:{act:'Prompt 0 (Feature) → Prompt A',title:'Feature Brief + Advisory Review',steps:[
+        'Start Claude Code session and run Prompt 0',
+        'Tell the AI you want to add a feature',
+        'Fill out the focused feature brief',
+        'When AI confirms "Feature brief complete", switch to Prompt A',
+        'Advisory Board reviews the brief, you review findings',
+        'Proceed to Prompt B for implementation'
+      ],cmd:'Follow docs/ai/prompts/prompt-0-spec-builder.md.'}},
     {ico:'&#128161;',lbl:'Prototype / experiment',dsc:'Test an idea, spike architecture, explore a feature',
       next:{q:'How complex is the exploration?',opts:[
         {ico:'&#9889;',lbl:'Quick test',dsc:'Single question, under an hour',

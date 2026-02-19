@@ -7,6 +7,18 @@
 3. **Verify** — run checks required by gates
 4. **Commit** — only after all gates pass
 
+## Advisory Board Review
+
+Runs after Prompt 0 completes, before Prompt B. Orchestrated by Prompt A Phase 1.
+
+1. **Activate** — Orchestrator scans compiled specs for trigger signals, activates specialists
+2. **Review** — Specialists analyze specs in parallel, produce focused briefs
+3. **Synthesize** — Orchestrator merges briefs into a Refinement Report
+4. **Decide** — Operator reviews each finding: accept / reject / defer
+5. **Proceed** — All critical findings addressed, move to Repo OS validation (Phase 3)
+
+See `.claude/agents/_advisory-board.md` for activation logic, brief format, and report structure.
+
 ## HVST Protocol (debugging/instability)
 
 Use when: fixing bugs, failing tests, unstable behavior. Not required for simple feature work.
