@@ -117,7 +117,7 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 **Status:** complete
 **Decisions applied:** 0001, 0002, 0004, 0006
-**Commits:** (pending — staged for commit)
+**Commits:** aa09dba — feat(repo-os): add prototyping tiers and early branch protection
 
 ### Goal
 - Add a tiered rapid prototyping system to repo-OS using existing `experiment/*` branch category
