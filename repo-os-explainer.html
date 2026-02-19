@@ -1199,7 +1199,7 @@ experiment/new-caching-strategy</div>
     <div class="chk"><div class="chk-ico">&#10003;</div><div><div class="chk-txt">Gates satisfied</div><div class="chk-sub">A1&ndash;A5, B1&ndash;B3 passed with evidence</div></div></div>
     <div class="chk"><div class="chk-ico">&#10003;</div><div><div class="chk-txt">Session log updated</div><div class="chk-sub">Goal, changes, evidence, follow-ups</div></div></div>
     <div class="chk"><div class="chk-ico">&#10003;</div><div><div class="chk-txt">Next steps clear</div><div class="chk-sub">Follow-ups documented for next session</div></div></div>
-    <div class="chk"><div class="chk-ico">&#10003;</div><div><div class="chk-txt">PR created or deferred</div><div class="chk-sub">Branch work complete &rarr; PR to main. Multi-session &rarr; document in follow-ups. Not for experiment/* branches.</div></div></div>
+    <div class="chk"><div class="chk-ico">&#10003;</div><div><div class="chk-txt">PR to main &mdash; ask operator</div><div class="chk-sub">Always ask the operator whether to create a PR. Never skip or defer without explicit direction. Not for experiment/* branches.</div></div></div>
   </div>
 
   <h3>Session log format</h3>
@@ -1236,7 +1236,7 @@ experiment/new-caching-strategy</div>
     <dl class="gl"><dt>Evidence</dt><dd>Proof a gate was checked: command, output excerpt, pass/fail, timestamp.</dd></dl>
     <dl class="gl"><dt>High-Risk</dt><dd>Auth, payments, data persistence, security, PII, external integrations. Requires Reviewer + Security sign-off.</dd></dl>
     <dl class="gl"><dt>Plan</dt><dd>Pre-coding roadmap: goal, decisions, steps, files, verification, risks. Required before implementation.</dd></dl>
-    <dl class="gl"><dt>Session</dt><dd>Bounded work unit. Clear start/end, scope, verification evidence, clean commits at close. PR created or deferred at close for mergeable branches.</dd></dl>
+    <dl class="gl"><dt>Session</dt><dd>Bounded work unit. Clear start/end, scope, verification evidence, clean commits at close. Agent asks operator about PR to main for mergeable branches.</dd></dl>
     <dl class="gl"><dt>Escalation</dt><dd>Routing to higher authority. Triggered when agent lacks authority, requirements ambiguous, constraints conflict.</dd></dl>
     <dl class="gl"><dt>Hook</dt><dd>Automated script at lifecycle events (pre-commit, session stop). Runs regardless of agent behavior.</dd></dl>
     <dl class="gl"><dt>Handoff</dt><dd>Formal work transition between agents. Includes summary, status, verification items.</dd></dl>
@@ -1336,7 +1336,7 @@ const DT = {
             'Describe what to build or fix',
             'Orchestrator proposes plan, you approve',
             'Builder implements, Critic checks cohesion, QA verifies gates',
-            'Session ends: commits clean, gates pass, log updated, PR created or deferred'
+            'Session ends: commits clean, gates pass, log updated, ask operator about PR to main'
           ],cmd:'Follow docs/ai/prompts/prompt-b-product-build.md.',nxt:{href:'#workflow',lbl:'See the Daily Workflow'}}},
         {ico:'&#10060;',lbl:'No / Not sure',dsc:'',
           res:{act:'Prompt A first, then B',title:'Initialize Then Develop',steps:[

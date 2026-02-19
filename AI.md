@@ -6,7 +6,7 @@
 - Work happens in small, verifiable increments.
 - **Gates must pass before commits (and before any push).**
 - **Accepted decisions are mandatory. Decision violations block commits.**
-- Session log is updated at session close. PR created or deferred for mergeable branches.
+- Session log is updated at session close. Agent asks operator about PR to main for mergeable branches — never skip without operator direction.
 
 ## Authority
 Operator-only:

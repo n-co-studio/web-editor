@@ -72,8 +72,8 @@ case "$CURRENT_BRANCH" in
     if [ "$PR_EXISTS" = false ]; then
       echo ""
       echo "Reminder: No open PR found for branch '$CURRENT_BRANCH'."
-      echo "  If branch work is complete, create a PR to merge to main."
-      echo "  If work spans multiple sessions, document this in follow-ups."
+      echo "  Ask the operator whether to create a PR to merge to main."
+      echo "  Do not skip or defer without explicit operator direction."
     fi
     ;;
 esac

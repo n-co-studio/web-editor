@@ -33,7 +33,7 @@ Work happens on categorized branches. Never commit directly to `main` — merge 
 
 ## Session Lifecycle
 
-At session close: verify all changes, commit, update session log (`docs/ai/logs/session-log.md`). If branch work is complete, create a PR to merge to `main` (or document why deferred). Does not apply to `experiment/*` branches.
+At session close: verify all changes, commit, update session log (`docs/ai/logs/session-log.md`). Ask operator whether to create a PR to merge to `main` — do not skip or defer without explicit operator direction. Does not apply to `experiment/*` branches.
 
 ### Prototype Sessions
 
