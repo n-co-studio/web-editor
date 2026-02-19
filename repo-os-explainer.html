@@ -259,6 +259,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
     <a href="#gates">Quality Gates</a>
     <a href="#decisions">Decisions</a>
     <a href="#hooks">Hooks &amp; Files</a>
+    <a href="#prototyping">Prototyping</a>
     <div class="sb-group">Scaling</div>
     <a href="#branches">Branch Categories</a>
     <a href="#multi-team">Multi-Agent Teams</a>
@@ -352,6 +353,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
       <tr><td><span class="tag t-red">Drift / confusion</span></td><td>STOP &rarr; re-run Prompt A</td><td>Reset agents, restore enforcement, correct behavior</td></tr>
       <tr><td><span class="tag t-pnk">Spec changes</span></td><td>Re-run Prompt 0</td><td>Requirements changed, new features, design updates</td></tr>
       <tr><td><span class="tag t-cyn">Template sync</span></td><td>Automatic &mdash; Prompt 0 only if spec templates changed</td><td>Governance updates auto-merge weekly</td></tr>
+      <tr><td><span class="tag t-pnk">Prototype / spike</span></td><td>Prompt 0.5</td><td>Quick test, architecture spike, or proof of concept on an experiment branch</td></tr>
     </tbody>
   </table>
 </section>
@@ -595,6 +597,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
   <div class="card dec"><div class="dec-id">0003</div><h3>Agent Structure Standard</h3><p>Agent definitions use YAML frontmatter for tool boundaries. Shared files (<code>_agent-glossary.md</code>, <code>_agent-workflow.md</code>) are mandatory reading. Orchestrator is behavioral guidance only (no frontmatter, not invocable as subagent).</p></div>
   <div class="card dec"><div class="dec-id">0004</div><h3>Mechanical Enforcement</h3><p>Automated enforcement via Claude Code features: executable subagents with tool boundaries, team-shared settings, verification hooks (secret scanning, session log reminders).</p></div>
   <div class="card dec"><div class="dec-id">0005</div><h3>Companion Tool Pattern</h3><p>Companion tools extend the dev workflow without modifying Repo OS core governance. They integrate via MCP servers in <code>.claude/settings.json</code>. The template ships clean &mdash; no companion tools pre-configured.</p></div>
+  <div class="card dec"><div class="dec-id">0006</div><h3>Prototyping Tiers</h3><p>Three-tier prototyping system (Napkin / Spike / PoC) on <code>experiment/*</code> branches. Operator self-selects tier based on complexity. Prompt 0.5 facilitates. Only learnings are promoted &mdash; code is disposable. Experiment briefs stored in <code>docs/spec/prototypes/</code>.</p></div>
 </section>
 
 <!-- ══════ HOOKS & FILES ══════ -->
@@ -606,7 +609,8 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
   <table class="ref">
     <thead><tr><th>Hook</th><th>When</th><th>What it does</th><th>Blocks?</th></tr></thead>
     <tbody>
-      <tr><td><code>pre-commit-gates.sh</code></td><td>Before every <code>git commit</code></td><td>A4: Secret pattern scanning. Branch protection: blocks commits on <code>main</code> (override: <code>REPO_OS_ALLOW_MAIN=1</code>). A2: Advisory scope warning if &gt;100 lines.</td><td><span class="tag t-red">yes</span> (secrets + branch)</td></tr>
+      <tr><td><code>branch-guard.sh</code></td><td>Before every <code>Edit</code> or <code>Write</code></td><td>Blocks file modifications on <code>main</code>. Fires before any work is done, not at commit time. Override: <code>REPO_OS_ALLOW_MAIN=1</code>.</td><td><span class="tag t-red">yes</span> (exit 2)</td></tr>
+      <tr><td><code>pre-commit-gates.sh</code></td><td>Before every <code>git commit</code></td><td>A4: Secret pattern scanning. A2: Advisory scope warning if &gt;100 lines.</td><td><span class="tag t-red">yes</span> (secrets)</td></tr>
       <tr><td><code>pre-push-gates.sh</code></td><td>Before every <code>git push</code></td><td>B1: Branch naming convention check (advisory). Stubs for B2 tests/typecheck and B3 dependency audit &mdash; activate per project.</td><td><span class="tag t-grn">no</span> (template default)</td></tr>
       <tr><td><code>agent-git-guard.sh</code></td><td>Builder/QA/Security Bash calls</td><td>Blocks <code>git commit</code> and <code>git push</code> commands in subagents. Only the Orchestrator can commit/push.</td><td><span class="tag t-red">yes</span> (exit 2)</td></tr>
       <tr><td><code>hvst-failure-tracker.sh</code></td><td>After every Bash command</td><td>Tracks consecutive failures. After 2+ failures, reminds agent to check <code>known-issues.md</code> and follow HVST protocol.</td><td><span class="tag t-grn">no</span> (advisory)</td></tr>
@@ -630,7 +634,8 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
 <span class="p">│   ├── </span><span class="f">settings.json</span> <span class="n">&mdash; team hooks &amp; permissions (committed)</span>
 <span class="p">│   ├── </span><span class="f">settings.local.json</span> <span class="n">&mdash; personal overrides (gitignored)</span>
 <span class="p">│   ├── </span><span class="d">hooks/</span>
-<span class="p">│   │   ├── </span><span class="f">pre-commit-gates.sh</span> <span class="n">&mdash; secret scan + branch protection + scope check</span>
+<span class="p">│   │   ├── </span><span class="f">branch-guard.sh</span> <span class="n">&mdash; blocks file edits on main (fires before work starts)</span>
+<span class="p">│   │   ├── </span><span class="f">pre-commit-gates.sh</span> <span class="n">&mdash; secret scan + scope check</span>
 <span class="p">│   │   ├── </span><span class="f">pre-push-gates.sh</span> <span class="n">&mdash; branch naming + B-gate stubs</span>
 <span class="p">│   │   ├── </span><span class="f">agent-git-guard.sh</span> <span class="n">&mdash; blocks git commit/push in subagents</span>
 <span class="p">│   │   ├── </span><span class="f">hvst-failure-tracker.sh</span> <span class="n">&mdash; consecutive failure tracking</span>
@@ -653,24 +658,75 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
 <span class="p">│   │   │   ├── </span><span class="f">data-contracts.md</span> <span class="n">&mdash; entities, APIs, state</span>
 <span class="p">│   │   │   ├── </span><span class="d">features/</span>
 <span class="p">│   │   │   │   └── </span><span class="f">_feature-template.md</span> <span class="n">&mdash; copyable template</span>
+<span class="p">│   │   │   ├── </span><span class="f">_experiment-brief.md</span> <span class="n">&mdash; prototype brief template</span>
 <span class="p">│   │   │   ├── </span><span class="f">integrations.md</span> <span class="n">&mdash; services, MCP, env vars</span>
 <span class="p">│   │   │   └── </span><span class="f">boundaries.md</span> <span class="n">&mdash; exclusions, protected areas</span>
-<span class="p">│   │   └── </span><span class="d">compiled/</span> <span class="n">&mdash; operator-filled specs, versioned (never synced)</span>
-<span class="p">│   │       ├── </span><span class="f">manifest.json</span> <span class="n">&mdash; tracks active version</span>
-<span class="p">│   │       └── </span><span class="d">v1/</span> <span class="n">&mdash; first Prompt 0 run (v2, v3&hellip; after re-runs)</span>
+<span class="p">│   │   ├── </span><span class="d">compiled/</span> <span class="n">&mdash; operator-filled specs, versioned (never synced)</span>
+<span class="p">│   │   │   ├── </span><span class="f">manifest.json</span> <span class="n">&mdash; tracks active version</span>
+<span class="p">│   │   │   └── </span><span class="d">v1/</span> <span class="n">&mdash; first Prompt 0 run (v2, v3&hellip; after re-runs)</span>
+<span class="p">│   │   └── </span><span class="d">prototypes/</span> <span class="n">&mdash; experiment briefs and learnings (never synced)</span>
 <span class="p">│   └── </span><span class="d">ai/</span>
 <span class="p">│       ├── </span><span class="f">workflow.md</span> <span class="n">&mdash; execution model, HVST protocol</span>
 <span class="p">│       ├── </span><span class="f">quality-gates.md</span> <span class="n">&mdash; gate definitions (A/B/C)</span>
-<span class="p">│       ├── </span><span class="d">decisions/</span> <span class="n">&mdash; 0001&ndash;0005 baseline decisions</span>
+<span class="p">│       ├── </span><span class="d">decisions/</span> <span class="n">&mdash; 0001&ndash;0006 baseline decisions</span>
 <span class="p">│       ├── </span><span class="d">logs/</span>
 <span class="p">│       │   ├── </span><span class="f">session-log.md</span> <span class="n">&mdash; session audit trail (last 3 sessions)</span>
 <span class="p">│       │   ├── </span><span class="f">session-archive.md</span> <span class="n">&mdash; older sessions (rotated from log)</span>
 <span class="p">│       │   └── </span><span class="f">known-issues.md</span> <span class="n">&mdash; HVST failure log</span>
 <span class="p">│       └── </span><span class="d">prompts/</span>
 <span class="p">│           ├── </span><span class="f">prompt-0-spec-builder.md</span> <span class="n">&mdash; project spec interview</span>
+<span class="p">│           ├── </span><span class="f">prompt-0.5-prototype.md</span> <span class="n">&mdash; rapid prototype session</span>
 <span class="p">│           ├── </span><span class="f">prompt-a-repo-os.md</span> <span class="n">&mdash; initialization prompt</span>
 <span class="p">│           └── </span><span class="f">prompt-b-product-build.md</span> <span class="n">&mdash; development prompt</span>
 <span class="p">└── </span><span class="d">src/</span> <span class="n">&mdash; your product code</span></div>
+</section>
+
+<!-- ══════ PROTOTYPING ══════ -->
+<section id="prototyping">
+  <div class="sec-num">Rapid Exploration</div>
+  <h2>Prototyping</h2>
+  <p>Not everything needs a full spec. When you want to test an idea, validate architecture, or explore a feature before committing to it, use <strong>Prompt 0.5</strong> on an <code>experiment/*</code> branch. Only the A4 safety gate applies &mdash; no process gates, no review chain, no scope warnings.</p>
+
+  <h3>Prototyping tiers</h3>
+  <p>You choose the tier. The tiers are a menu, not a gate &mdash; they determine how much documentation overhead the session carries.</p>
+
+  <table class="ref">
+    <thead><tr><th>Tier</th><th>When to use</th><th>Artifact</th></tr></thead>
+    <tbody>
+      <tr><td><span class="tag t-grn">Napkin</span></td><td>Quick question, &lt; 1 hour. &ldquo;Does X even work?&rdquo;</td><td>None &mdash; verbal conclusion only</td></tr>
+      <tr><td><span class="tag t-acc">Spike</span></td><td>Focused hypothesis, single session. &ldquo;Can we build Y this way?&rdquo;</td><td>Experiment brief</td></tr>
+      <tr><td><span class="tag t-pnk">Proof of Concept</span></td><td>Multi-session exploration. &ldquo;Is this entire approach viable?&rdquo;</td><td>Experiment brief + mini-spec notes</td></tr>
+    </tbody>
+  </table>
+
+  <h3>What to say to the Orchestrator</h3>
+  <p>The system maps your natural language to tiers. You don&rsquo;t need to memorize tier names &mdash; just describe what you want to do.</p>
+
+  <table class="ref">
+    <thead><tr><th>You say&hellip;</th><th>Maps to</th></tr></thead>
+    <tbody>
+      <tr><td>&ldquo;Quick test&rdquo;, &ldquo;try this&rdquo;, &ldquo;does X work?&rdquo;, &ldquo;napkin test&rdquo;</td><td><span class="tag t-grn">Napkin</span></td></tr>
+      <tr><td>&ldquo;Spike on X&rdquo;, &ldquo;prototype this&rdquo;, &ldquo;test this architecture&rdquo;, &ldquo;validate this approach&rdquo;</td><td><span class="tag t-acc">Spike</span></td></tr>
+      <tr><td>&ldquo;Proof of concept&rdquo;, &ldquo;PoC&rdquo;, &ldquo;multi-day exploration&rdquo;, &ldquo;I need to explore this across sessions&rdquo;</td><td><span class="tag t-pnk">Proof of Concept</span></td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <strong>Scope escalation:</strong> If a napkin test turns into a half-day exploration, the system suggests upgrading: &ldquo;This is growing past napkin scope &mdash; want to create an experiment brief?&rdquo; You decide.
+  </div>
+
+  <h3>How to start</h3>
+  <div class="cmd">Follow docs/ai/prompts/prompt-0.5-prototype.md.</div>
+  <p>The system helps you create an <code>experiment/*</code> branch (if needed), fill out a brief (Spike/PoC), and start building immediately. No full spec interview. No plan-before-code requirement.</p>
+
+  <h3>What happens to the code?</h3>
+  <p>Experiment branches <strong>never merge to main</strong>. The code is disposable. When you&rsquo;re done:</p>
+  <ul class="tight">
+    <li><strong>Discard</strong> &mdash; question answered, delete the branch</li>
+    <li><strong>Promote</strong> &mdash; capture learnings, then rewrite the validated approach into a <code>feature/*</code> branch</li>
+    <li><strong>Pivot</strong> &mdash; start a new experiment with a different hypothesis</li>
+  </ul>
+  <p>Experiment briefs are stored in <code>docs/spec/prototypes/</code> and survive branch deletion. Prompt B checks this directory for validated learnings before planning new work.</p>
 </section>
 
 <!-- ══════ BRANCH CATEGORIES ══════ -->
@@ -687,7 +743,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
       <tr><td><code>feature/*</code></td><td>New functionality</td><td>Standard gates (A + B). Normal workflow.</td></tr>
       <tr><td><code>fix/*</code></td><td>Bug fixes</td><td>Standard gates (A + B). Normal workflow.</td></tr>
       <tr><td><code>hotfix/*</code></td><td>Urgent production fixes</td><td>Expedited: A2 scope limit relaxed (operator discretion). A1, A3, A4 still enforced.</td></tr>
-      <tr><td><code>experiment/*</code></td><td>Spikes &amp; prototypes</td><td>A4 (safety) only. <strong>Never merge to main</strong> &mdash; rewrite into <code>feature/*</code>.</td></tr>
+      <tr><td><code>experiment/*</code></td><td>Spikes &amp; prototypes</td><td>A4 (safety) only. <strong>Never merge to main</strong> &mdash; rewrite into <code>feature/*</code>. Use <a href="#prototyping">Prompt 0.5</a> with prototyping tiers.</td></tr>
     </tbody>
   </table>
 
@@ -816,8 +872,8 @@ experiment/new-caching-strategy</div>
       <tr><td><code>AI.md</code></td><td><code>docs/spec/compiled/</code></td></tr>
       <tr><td><code>docs/ai/prompts/</code></td><td><code>docs/ai/logs/</code></td></tr>
       <tr><td><code>docs/ai/workflow.md</code></td><td><code>docs/ai/decisions/</code></td></tr>
-      <tr><td><code>docs/ai/quality-gates.md</code></td><td><code>.claude/settings.local.json</code></td></tr>
-      <tr><td><code>.claude/agents/</code></td><td></td></tr>
+      <tr><td><code>docs/ai/quality-gates.md</code></td><td><code>docs/spec/prototypes/</code></td></tr>
+      <tr><td><code>.claude/agents/</code></td><td><code>.claude/settings.local.json</code></td></tr>
       <tr><td><code>.claude/hooks/</code></td><td></td></tr>
       <tr><td><code>docs/spec/_templates/</code></td><td></td></tr>
     </tbody>
@@ -939,6 +995,8 @@ experiment/new-caching-strategy</div>
     <dl class="gl"><dt>Handoff</dt><dd>Formal work transition between agents. Includes summary, status, verification items.</dd></dl>
     <dl class="gl"><dt>Structural Change</dt><dd>New modules, API contracts, schemas, build system changes. Requires Reviewer sign-off.</dd></dl>
     <dl class="gl"><dt>HVST</dt><dd>Hypothesis &rarr; Validate &rarr; Solve &rarr; Test &rarr; Record. 5-step debugging protocol. Prevents random-fix loops.</dd></dl>
+    <dl class="gl"><dt>Experiment Brief</dt><dd>Lightweight document capturing hypothesis, method, success criteria, and learnings for a prototype session. Template at <code>docs/spec/_templates/_experiment-brief.md</code>.</dd></dl>
+    <dl class="gl"><dt>Prototype Tier</dt><dd>Operator-selected documentation level for experiments: Napkin (no artifact), Spike (experiment brief), Proof of Concept (brief + mini-spec notes). See <a href="#prototyping">Prototyping</a>.</dd></dl>
   </div>
 </section>
 
@@ -1035,6 +1093,33 @@ const DT = {
             'Wait for "Repo OS ready"',
             'Switch to Prompt B for development',
           ],cmd:'Follow docs/ai/prompts/prompt-a-repo-os.md.'}}
+      ]}},
+    {ico:'&#128161;',lbl:'Prototype / experiment',dsc:'Test an idea, spike architecture, explore a feature',
+      next:{q:'How complex is the exploration?',opts:[
+        {ico:'&#9889;',lbl:'Quick test',dsc:'Single question, under an hour',
+          res:{act:'Run Prompt 0.5 (Napkin)',title:'Quick Napkin Test',steps:[
+            'Start Claude Code session on any branch (or create an experiment/* branch)',
+            'Paste Prompt 0.5 starter line',
+            'Describe what you want to test',
+            'Build and test immediately \u2014 no brief, no spec, no plan required',
+            'When done, state your conclusion verbally'
+          ],cmd:'Follow docs/ai/prompts/prompt-0.5-prototype.md.',nxt:{href:'#prototyping',lbl:'See Prototyping details'}}},
+        {ico:'&#128296;',lbl:'Focused spike',dsc:'Validate a specific hypothesis, single session',
+          res:{act:'Run Prompt 0.5 (Spike)',title:'Architecture or Feature Spike',steps:[
+            'Start Claude Code session',
+            'Paste Prompt 0.5 starter line',
+            'System creates an experiment/* branch and helps fill an experiment brief',
+            'Build directly \u2014 A4 safety gate only, no review chain',
+            'When done: capture learnings, choose disposition (discard / promote / pivot)'
+          ],cmd:'Follow docs/ai/prompts/prompt-0.5-prototype.md.',nxt:{href:'#prototyping',lbl:'See Prototyping details'}}},
+        {ico:'&#128218;',lbl:'Multi-session PoC',dsc:'Larger exploration across multiple sessions',
+          res:{act:'Run Prompt 0.5 (Proof of Concept)',title:'Proof of Concept Exploration',steps:[
+            'Start Claude Code session',
+            'Paste Prompt 0.5 starter line',
+            'System creates an experiment/* branch, brief, and mini-spec notes',
+            'Build across sessions \u2014 brief provides continuity',
+            'When done: capture learnings, recommend spec updates or decision records if validated'
+          ],cmd:'Follow docs/ai/prompts/prompt-0.5-prototype.md.',nxt:{href:'#prototyping',lbl:'See Prototyping details'}}}
       ]}},
     {ico:'&#128260;',lbl:'Template sync happened',dsc:'Governance auto-updated from template',
       next:{q:'Did the sync update spec templates (docs/spec/_templates/)?',opts:[
