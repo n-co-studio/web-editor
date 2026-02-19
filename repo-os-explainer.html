@@ -850,7 +850,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
       <tr><td><code>pre-push-gates.sh</code></td><td>Before every <code>git push</code></td><td>B1: Branch naming convention check (advisory). Stubs for B2 tests/typecheck and B3 dependency audit &mdash; activate per project.</td><td><span class="tag t-grn">no</span> (template default)</td></tr>
       <tr><td><code>agent-git-guard.sh</code></td><td>Builder/QA/Security Bash calls</td><td>Blocks <code>git commit</code> and <code>git push</code> commands in subagents. Only the Orchestrator can commit/push.</td><td><span class="tag t-red">yes</span> (exit 2)</td></tr>
       <tr><td><code>hvst-failure-tracker.sh</code></td><td>After every Bash command</td><td>Tracks consecutive failures. After 2+ failures, reminds agent to check <code>known-issues.md</code> and follow HVST protocol.</td><td><span class="tag t-grn">no</span> (advisory)</td></tr>
-      <tr><td><code>session-close-check.sh</code></td><td>When Claude stops responding</td><td>Blocks session close if session log not updated (override: <code>SKIP_SESSION_LOG=1</code>). Advisory HVST known-issues reminder.</td><td><span class="tag t-red">yes</span> (session log)</td></tr>
+      <tr><td><code>session-close-check.sh</code></td><td>When Claude stops responding</td><td>Blocks session close if session log not updated (override: <code>SKIP_SESSION_LOG=1</code>). Advisory PR-to-main reminder for mergeable branches. Advisory HVST known-issues reminder.</td><td><span class="tag t-red">yes</span> (session log)</td></tr>
       <tr><td>YAML frontmatter</td><td>Agent invocation</td><td>Restricts tools per agent (e.g., Builder can&rsquo;t use Task, QA can&rsquo;t use Edit/Write). Frontmatter hooks wire <code>agent-git-guard.sh</code>.</td><td><span class="tag t-red">yes</span> (runtime)</td></tr>
     </tbody>
   </table>
@@ -1192,13 +1192,14 @@ experiment/new-caching-strategy</div>
 <section id="session">
   <div class="sec-num">Closing a Session</div>
   <h2>Session Hygiene</h2>
-  <p>Every session must end with all four satisfied. If they&rsquo;re not, you&rsquo;re not done.</p>
+  <p>Every session must end with all five satisfied. If they&rsquo;re not, you&rsquo;re not done.</p>
 
   <div class="checks">
     <div class="chk"><div class="chk-ico">&#10003;</div><div><div class="chk-txt">Commits are clean</div><div class="chk-sub">No uncommitted work left behind</div></div></div>
-    <div class="chk"><div class="chk-ico">&#10003;</div><div><div class="chk-txt">Gates satisfied</div><div class="chk-sub">A1&ndash;A4, B1&ndash;B3 passed with evidence</div></div></div>
+    <div class="chk"><div class="chk-ico">&#10003;</div><div><div class="chk-txt">Gates satisfied</div><div class="chk-sub">A1&ndash;A5, B1&ndash;B3 passed with evidence</div></div></div>
     <div class="chk"><div class="chk-ico">&#10003;</div><div><div class="chk-txt">Session log updated</div><div class="chk-sub">Goal, changes, evidence, follow-ups</div></div></div>
     <div class="chk"><div class="chk-ico">&#10003;</div><div><div class="chk-txt">Next steps clear</div><div class="chk-sub">Follow-ups documented for next session</div></div></div>
+    <div class="chk"><div class="chk-ico">&#10003;</div><div><div class="chk-txt">PR created or deferred</div><div class="chk-sub">Branch work complete &rarr; PR to main. Multi-session &rarr; document in follow-ups. Not for experiment/* branches.</div></div></div>
   </div>
 
   <h3>Session log format</h3>
@@ -1235,7 +1236,7 @@ experiment/new-caching-strategy</div>
     <dl class="gl"><dt>Evidence</dt><dd>Proof a gate was checked: command, output excerpt, pass/fail, timestamp.</dd></dl>
     <dl class="gl"><dt>High-Risk</dt><dd>Auth, payments, data persistence, security, PII, external integrations. Requires Reviewer + Security sign-off.</dd></dl>
     <dl class="gl"><dt>Plan</dt><dd>Pre-coding roadmap: goal, decisions, steps, files, verification, risks. Required before implementation.</dd></dl>
-    <dl class="gl"><dt>Session</dt><dd>Bounded work unit. Clear start/end, scope, verification evidence, clean commits at close.</dd></dl>
+    <dl class="gl"><dt>Session</dt><dd>Bounded work unit. Clear start/end, scope, verification evidence, clean commits at close. PR created or deferred at close for mergeable branches.</dd></dl>
     <dl class="gl"><dt>Escalation</dt><dd>Routing to higher authority. Triggered when agent lacks authority, requirements ambiguous, constraints conflict.</dd></dl>
     <dl class="gl"><dt>Hook</dt><dd>Automated script at lifecycle events (pre-commit, session stop). Runs regardless of agent behavior.</dd></dl>
     <dl class="gl"><dt>Handoff</dt><dd>Formal work transition between agents. Includes summary, status, verification items.</dd></dl>
@@ -1335,7 +1336,7 @@ const DT = {
             'Describe what to build or fix',
             'Orchestrator proposes plan, you approve',
             'Builder implements, Critic checks cohesion, QA verifies gates',
-            'Session ends: commits clean, gates pass, log updated'
+            'Session ends: commits clean, gates pass, log updated, PR created or deferred'
           ],cmd:'Follow docs/ai/prompts/prompt-b-product-build.md.',nxt:{href:'#workflow',lbl:'See the Daily Workflow'}}},
         {ico:'&#10060;',lbl:'No / Not sure',dsc:'',
           res:{act:'Prompt A first, then B',title:'Initialize Then Develop',steps:[

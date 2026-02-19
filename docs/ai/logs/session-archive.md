@@ -152,6 +152,50 @@ This file is not read during normal sessions. Referenced for deep investigation 
 
 ---
 
+## Session 4 — 2026-02-18 — Add prototyping tier system (Napkin / Spike / PoC)
+
+**Status:** complete
+**Decisions applied:** 0001, 0002, 0004, 0006
+**Commits:** aa09dba — feat(repo-os): add prototyping tiers and early branch protection
+
+### Goal
+- Add a tiered rapid prototyping system to repo-OS using existing `experiment/*` branch category
+- Three tiers (Napkin / Spike / PoC) as operator-selected documentation levels, not gates
+- Integrate into all source-of-truth files and the HTML explainer including decision navigator
+
+### Plan Summary
+- Create experiment brief template, Prompt 0.5 prototype prompt, Decision 0006
+- Update AI.md, quality-gates.md, workflow.md, prompt-b-product-build.md, .templatesyncignore
+- Add prototyping section to HTML explainer with operator language mapping, decision navigator path, glossary entries
+- Run cohesion review to verify cross-reference integrity
+- Move branch protection from commit-time to Edit/Write-time (branch-guard.sh)
+
+### Changes Made
+- `docs/spec/_templates/_experiment-brief.md` — New: experiment brief template
+- `docs/ai/prompts/prompt-0.5-prototype.md` — New: prototype prompt with tier system
+- `docs/ai/decisions/0006-prototyping-tiers.md` — New: decision record for prototyping tiers
+- `docs/spec/prototypes/.gitkeep` — New: directory for experiment briefs
+- `AI.md`, `quality-gates.md`, `workflow.md`, `prompt-b-product-build.md`, `.templatesyncignore` — Updated
+- `repo-os-explainer.html` — Full prototyping section with operator language table, decision navigator, glossary
+- `.claude/hooks/branch-guard.sh` — New: blocks Edit/Write on `main`
+- `.claude/settings.json`, `pre-commit-gates.sh`, `0004-mechanical-enforcement.md` — Updated
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass, A2 pass, A3 n/a, A4 pending
+- Push gates: B1 pass (`feature/prototyping-tiers`), B2 n/a, B3 n/a
+
+### Failed Attempts (Brief)
+- Initial prototype prompt without tier system — operator caught, rewrote
+- Started on `main` — moved to feature branch
+
+### Known Issues Logged
+- None
+
+### Follow-ups
+- Experiment branch merge prevention is convention-only (intentional per Decision 0006)
+
+---
+
 ## Session 2 — 2026-02-18 — Cohesion audit and cross-reference fixes
 
 **Status:** complete

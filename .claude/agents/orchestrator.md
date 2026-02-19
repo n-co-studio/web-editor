@@ -51,6 +51,7 @@ Before session close:
 - [ ] QA verified all gates (including A5)
 - [ ] Session log updated
 - [ ] No uncommitted changes
+- [ ] PR created to merge branch to `main`, or merge explicitly deferred (skip for `experiment/*` branches)
 - [ ] Follow-ups documented
 
 ---

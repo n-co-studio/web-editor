@@ -6,59 +6,6 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 ---
 
-## Session 4 — 2026-02-18 — Add prototyping tier system (Napkin / Spike / PoC)
-
-**Status:** complete
-**Decisions applied:** 0001, 0002, 0004, 0006
-**Commits:** aa09dba — feat(repo-os): add prototyping tiers and early branch protection
-
-### Goal
-- Add a tiered rapid prototyping system to repo-OS using existing `experiment/*` branch category
-- Three tiers (Napkin / Spike / PoC) as operator-selected documentation levels, not gates
-- Integrate into all source-of-truth files and the HTML explainer including decision navigator
-
-### Plan Summary
-- Create experiment brief template, Prompt 0.5 prototype prompt, Decision 0006
-- Update AI.md, quality-gates.md, workflow.md, prompt-b-product-build.md, .templatesyncignore
-- Add prototyping section to HTML explainer with operator language mapping, decision navigator path, glossary entries
-- Run cohesion review to verify cross-reference integrity
-- Move branch protection from commit-time to Edit/Write-time (branch-guard.sh)
-
-### Changes Made
-- `docs/spec/_templates/_experiment-brief.md` — New: experiment brief template (hypothesis, method, success criteria, time-box, learnings, disposition)
-- `docs/ai/prompts/prompt-0.5-prototype.md` — New: prototype prompt with tier system, operator language mapping, per-tier entry/during/exit flows
-- `docs/ai/decisions/0006-prototyping-tiers.md` — New: decision record for prototyping tiers
-- `docs/spec/prototypes/.gitkeep` — New: directory for experiment briefs (protected from template sync)
-- `AI.md` — Added prompt-0.5 to Prompts, `docs/spec/prototypes/` to Source of Truth
-- `docs/ai/quality-gates.md` — `experiment/*` row references Prompt 0.5 and tiers
-- `docs/ai/workflow.md` — Added Prototype Sessions subsection under Session Lifecycle
-- `docs/ai/prompts/prompt-b-product-build.md` — Added Prototype Learnings section
-- `.templatesyncignore` — Added `docs/spec/prototypes/`
-- `repo-os-explainer.html` — Sidebar link, triggers row, full Prototyping section with operator language table, updated branch table, file tree, 0006 decision card, navigator path (3 tier sub-options), glossary entries, template sync table, branch-guard in hooks table
-- `.claude/hooks/branch-guard.sh` — New: blocks Edit/Write on `main` before any work starts
-- `.claude/settings.json` — Added PreToolUse matchers for Edit and Write → branch-guard.sh
-- `.claude/hooks/pre-commit-gates.sh` — Removed branch protection (moved to branch-guard.sh)
-- `docs/ai/decisions/0004-mechanical-enforcement.md` — Updated to reflect branch-guard.sh
-
-### Verification (Gates Evidence)
-- Commit gates: A1 pass (decisions 0001/0002/0004/0006 followed), A2 pass (plan existed, operator approved), A3 n/a (no tooling), A4 pending (pre-commit hook will run)
-- Push gates: B1 pass (branch name `feature/prototyping-tiers`), B2 n/a, B3 n/a
-- Cohesion review: reviewer agent verified all cross-references, terminology, governance chain, template sync safety, HTML structure — all PASS
-
-### Failed Attempts (Brief)
-- Initial prototype prompt written without tier system — operator caught the omission, rewrote with full tier support
-- Started work on `main` instead of branching first — operator caught, moved to `feature/prototyping-tiers` (no commits were made on main)
-- Session log not updated proactively — operator caught the gap
-
-### Known Issues Logged
-- None
-
-### Follow-ups
-- Agent glossary could add "experiment brief" and "prototype tier" terms (optional)
-- Experiment branch merge prevention is convention-only, not mechanically enforced (intentional — documented in Decision 0006)
-
----
-
 ## Session 5 — 2026-02-18 — Add advisory board system with specialist agents
 
 **Status:** complete
@@ -173,3 +120,49 @@ Each session adds one entry. Keep entries high-signal and readable.
 ### Follow-ups
 - A5 enforcement is behavioral (same as A1) — QA verifies the review happened, not its quality. This is intentional per Decision 0008.
 - Cohesion review does not apply to experiment/* or hotfix/* branches (by design)
+
+---
+
+## Session 7 — 2026-02-18 — Add PR merge step to session close
+
+**Status:** complete
+**Decisions applied:** 0001, 0004
+**Commits:** pending
+
+### Goal
+- Add "create PR to merge branch to main" as an explicit session close step
+- Advisory hook reminder for mergeable branches (non-blocking)
+- Update all session close references across source-of-truth files and HTML explainer
+
+### Plan Summary
+- Expand session close definition in workflow.md to include PR step
+- Add PR checklist item to orchestrator.md verification checklist
+- Add advisory PR reminder to session-close-check.sh (same pattern as HVST advisory)
+- Update HTML explainer: Session Hygiene checklist (5th item), hooks table, wizard, glossary
+- Update AI.md non-negotiables and hooks summary
+- Update Decision 0004 Stop hook description
+- Fix existing bug: HTML Session Hygiene gate reference said A1–A4, corrected to A1–A5
+
+### Changes Made
+- `docs/ai/workflow.md` — Session close one-liner expanded with PR step and experiment/* exclusion
+- `.claude/agents/orchestrator.md` — Added PR checklist item after "No uncommitted changes"
+- `.claude/hooks/session-close-check.sh` — Advisory PR reminder: detects mergeable branches, checks for open PR via `gh`, non-blocking
+- `repo-os-explainer.html` — 5th Session Hygiene check item, "all five satisfied", A1–A5 fix, hooks table, wizard, glossary
+- `AI.md` — Non-negotiables + hooks summary updated
+- `docs/ai/decisions/0004-mechanical-enforcement.md` — Stop hook description updated
+- `docs/ai/logs/session-archive.md` — Archived Session 4
+- `docs/ai/logs/session-log.md` — Added Session 7, rotated Session 4 to archive
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass (decisions 0001/0004 followed), A2 pass (plan existed, operator approved), A3 n/a (no tooling), A4 pass (pre-commit hook will run)
+- Push gates: B1 pass (branch name `feature/advisory-board`), B2 n/a, B3 n/a
+- Cross-reference review: reviewer agent verified 8 consistency checks (PR wording, hook descriptions, checklist count, gate refs, ordering, canonical definition, glossary, wizard) — all PASS
+
+### Failed Attempts (Brief)
+- None
+
+### Known Issues Logged
+- None
+
+### Follow-ups
+- Merge `feature/advisory-board` to main via PR (PR #3 open, will include Sessions 5–7)
