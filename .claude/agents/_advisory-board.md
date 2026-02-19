@@ -86,7 +86,7 @@ The Orchestrator synthesizes all specialist briefs into a single report:
 
 ## Critic Cross-Reference
 
-During synthesis (step 5 of Advisory Board Orchestration), the Orchestrator pairs Critic findings with solutions from other specialists:
+During synthesis (step 5 of the Orchestration Procedure below), the Orchestrator pairs Critic findings with solutions from other specialists:
 
 1. For each Critic finding, scan other specialists' briefs for a finding that addresses the same concern
 2. If a match exists, attach the specialist's suggestion to the Critic finding in the Refinement Report (listed under Critical Findings or Recommendations as normal, with the paired suggestion noted)
@@ -116,3 +116,22 @@ No build begins until the operator has reviewed all Critical findings.
 - Spec is the input (spec mode): Advisory board agents review compiled specs and feature briefs, not source code (source code may not exist yet). The Critic also has a cohesion mode (see `critic.md`) where implementation code is the input — that mode runs during the build flow, not as part of advisory board review.
 - No `_agent-workflow.md` reading: Advisory agents read this file and `_agent-glossary.md` — not the build-phase workflow doc
 - Actionable suggestions: Every specialist (except Critic) MUST include a concrete, actionable suggestion with every finding. Never flag a concern without proposing a path forward
+
+---
+
+## Orchestration Procedure
+
+When running Prompt A Phase 1 (advisory board review), the Orchestrator follows this sequence:
+
+1. **Scan** compiled specs for activation signals (see Activation Logic above)
+2. **Activate** always-on specialists (Researcher, Architect, Critic, Innovator) plus any triggered conditional specialists
+3. **Dispatch** all activated specialists in parallel — each receives the compiled spec files
+4. **Collect** individual briefs from each specialist
+5. **Synthesize** into a single Refinement Report (see Refinement Report above):
+   a. Merge all non-Critic findings directly (they already include suggestions)
+   b. Cross-reference each Critic finding against other specialists' briefs — if a specialist addressed the same concern, attach their suggestion to the Critic finding
+   c. Any Critic finding with no matching specialist suggestion → list under "Unresolved Critic Findings" in the report (operator must provide direction)
+6. **Present** report to operator for per-item review (accept / reject / defer)
+7. **Record** operator decisions — no build begins until all Critical findings are addressed
+
+For Feature mode: scan the feature brief's "What It Touches" checkboxes for activation signals.

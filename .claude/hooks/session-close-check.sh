@@ -24,26 +24,37 @@ fi
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo ".")"
 SESSION_LOG="$REPO_ROOT/docs/ai/logs/session-log.md"
 
+# --- Bootstrap ---
+# If session log is missing, recover from git (clean template) or skip.
 if [ ! -f "$SESSION_LOG" ]; then
-  exit 0
+  git show HEAD:"docs/ai/logs/session-log.md" > "$SESSION_LOG" 2>/dev/null || exit 0
 fi
 
-# Check if session log was updated this session:
-# 1. Uncommitted changes (modified or staged)
-# 2. Committed within the last 4 hours (covers mid-session commits)
-# Note: uses variable capture instead of pipe to grep -q to avoid SIGPIPE
-# failures with pipefail (grep -q closes pipe early → git gets SIGPIPE → exit 141).
+# --- Portable SHA-256 ---
+file_hash() {
+  if command -v shasum &>/dev/null; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  elif command -v sha256sum &>/dev/null; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    openssl sha256 "$1" | awk '{print $NF}'
+  fi
+}
+
+# --- Session log modification check (content hash) ---
+# Compares current file hash against baseline stored at last session close.
+# Works for both tracked and untracked (gitignored) files.
+HASH_FILE="$REPO_ROOT/.claude/.session-log-hash"
+CURRENT_HASH=$(file_hash "$SESSION_LOG")
+
 SESSION_LOG_MODIFIED=false
-DIFF_OUT=$(git diff --name-only "$SESSION_LOG" 2>/dev/null || true)
-if [ -n "$DIFF_OUT" ]; then
-  SESSION_LOG_MODIFIED=true
-fi
-CACHED_OUT=$(git diff --cached --name-only "$SESSION_LOG" 2>/dev/null || true)
-if [ -n "$CACHED_OUT" ]; then
-  SESSION_LOG_MODIFIED=true
-fi
-LOG_OUT=$(git log --since="4 hours ago" --name-only --format="" -- "$SESSION_LOG" 2>/dev/null || true)
-if [ -n "$LOG_OUT" ]; then
+if [ -f "$HASH_FILE" ]; then
+  STORED_HASH=$(cat "$HASH_FILE")
+  if [ "$CURRENT_HASH" != "$STORED_HASH" ]; then
+    SESSION_LOG_MODIFIED=true
+  fi
+else
+  # First session — no baseline exists. Lenient: allow close.
   SESSION_LOG_MODIFIED=true
 fi
 
@@ -103,3 +114,6 @@ if [ -f "$COUNTER_FILE" ]; then
   # Clean up counter file at session end
   rm -f "$COUNTER_FILE"
 fi
+
+# --- Update baseline hash for next session ---
+echo "$CURRENT_HASH" > "$HASH_FILE"
