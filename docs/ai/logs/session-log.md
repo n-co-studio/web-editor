@@ -113,6 +113,59 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 ---
 
+## Session 4 — 2026-02-18 — Add prototyping tier system (Napkin / Spike / PoC)
+
+**Status:** complete
+**Decisions applied:** 0001, 0002, 0004, 0006
+**Commits:** (pending — staged for commit)
+
+### Goal
+- Add a tiered rapid prototyping system to repo-OS using existing `experiment/*` branch category
+- Three tiers (Napkin / Spike / PoC) as operator-selected documentation levels, not gates
+- Integrate into all source-of-truth files and the HTML explainer including decision navigator
+
+### Plan Summary
+- Create experiment brief template, Prompt 0.5 prototype prompt, Decision 0006
+- Update AI.md, quality-gates.md, workflow.md, prompt-b-product-build.md, .templatesyncignore
+- Add prototyping section to HTML explainer with operator language mapping, decision navigator path, glossary entries
+- Run cohesion review to verify cross-reference integrity
+- Move branch protection from commit-time to Edit/Write-time (branch-guard.sh)
+
+### Changes Made
+- `docs/spec/_templates/_experiment-brief.md` — New: experiment brief template (hypothesis, method, success criteria, time-box, learnings, disposition)
+- `docs/ai/prompts/prompt-0.5-prototype.md` — New: prototype prompt with tier system, operator language mapping, per-tier entry/during/exit flows
+- `docs/ai/decisions/0006-prototyping-tiers.md` — New: decision record for prototyping tiers
+- `docs/spec/prototypes/.gitkeep` — New: directory for experiment briefs (protected from template sync)
+- `AI.md` — Added prompt-0.5 to Prompts, `docs/spec/prototypes/` to Source of Truth
+- `docs/ai/quality-gates.md` — `experiment/*` row references Prompt 0.5 and tiers
+- `docs/ai/workflow.md` — Added Prototype Sessions subsection under Session Lifecycle
+- `docs/ai/prompts/prompt-b-product-build.md` — Added Prototype Learnings section
+- `.templatesyncignore` — Added `docs/spec/prototypes/`
+- `repo-os-explainer.html` — Sidebar link, triggers row, full Prototyping section with operator language table, updated branch table, file tree, 0006 decision card, navigator path (3 tier sub-options), glossary entries, template sync table, branch-guard in hooks table
+- `.claude/hooks/branch-guard.sh` — New: blocks Edit/Write on `main` before any work starts
+- `.claude/settings.json` — Added PreToolUse matchers for Edit and Write → branch-guard.sh
+- `.claude/hooks/pre-commit-gates.sh` — Removed branch protection (moved to branch-guard.sh)
+- `docs/ai/decisions/0004-mechanical-enforcement.md` — Updated to reflect branch-guard.sh
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass (decisions 0001/0002/0004/0006 followed), A2 pass (plan existed, operator approved), A3 n/a (no tooling), A4 pending (pre-commit hook will run)
+- Push gates: B1 pass (branch name `feature/prototyping-tiers`), B2 n/a, B3 n/a
+- Cohesion review: reviewer agent verified all cross-references, terminology, governance chain, template sync safety, HTML structure — all PASS
+
+### Failed Attempts (Brief)
+- Initial prototype prompt written without tier system — operator caught the omission, rewrote with full tier support
+- Started work on `main` instead of branching first — operator caught, moved to `feature/prototyping-tiers` (no commits were made on main)
+- Session log not updated proactively — operator caught the gap
+
+### Known Issues Logged
+- None
+
+### Follow-ups
+- Agent glossary could add "experiment brief" and "prototype tier" terms (optional)
+- Experiment branch merge prevention is convention-only, not mechanically enforced (intentional — documented in Decision 0006)
+
+---
+
 ## Session <N> — <YYYY-MM-DD> — <Short Goal>
 
 **Status:** complete | incomplete
