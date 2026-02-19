@@ -49,6 +49,7 @@ Verification methods:
 | A3: Build | Run `build` or equivalent |
 | A4: Secrets | Scan diff for keys, tokens, credentials |
 | A4: PII | Review added content for sensitive data |
+| A5: Cohesion | Verify Critic (cohesion mode) was invoked, cohesion brief produced, critical findings resolved. If fixes were applied, verify Critic was re-run clean. |
 
 ### Push Gates (additional)
 
@@ -86,6 +87,7 @@ Verification methods:
 | A2 | plan + scope review | PASS/FAIL |
 | A3 | `npm run lint` | PASS/FAIL |
 | A4 | secret scan | PASS/FAIL |
+| A5 | cohesion brief review | PASS/FAIL |
 
 If blocked: [specific gate(s) that failed]
 ```

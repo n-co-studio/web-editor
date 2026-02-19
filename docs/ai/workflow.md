@@ -4,7 +4,7 @@
 
 1. **Plan** — goal, scope, files, verification steps
 2. **Build** — small, reviewable increments
-3. **Verify** — run checks required by gates
+3. **Verify** — cohesion review (Critic checks diff for internal coherence), then gate checks (QA verifies A1–A5 + push gates)
 4. **Commit** — only after all gates pass
 
 ## Advisory Board Review
