@@ -12,3 +12,6 @@ docs/spec/prototypes/
 
 # Local Claude settings
 .claude/settings.local.json
+
+# Workflow file (repo-specific source_repo_path; GITHUB_TOKEN cannot push workflow changes)
+.github/workflows/template-sync.yml
