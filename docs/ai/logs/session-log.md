@@ -38,7 +38,7 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 -->
 
-## Session 16 — 2026-02-20 — Fix template-sync auth and frequency
+## Session 16 — 2026-02-20 — Fix template-sync auth, permissions, and docs
 
 **Status:** complete
 **Decisions applied:** none
@@ -49,16 +49,38 @@ Each session adds one entry. Keep entries high-signal and readable.
 - Reduce sync frequency from hourly to daily to conserve GitHub Actions minutes
 - Document PAT setup requirement for operators
 
+### Plan Summary
+- Iteratively debugged 5 distinct failure modes across 6 workflow triggers
+- Fixed auth chain: classic PAT → persist-credentials: false → source_gh_token → target_gh_token → .templatesyncignore → repo settings
+- Updated template repo and pushed fixes to child repo (markpreston.co) via GitHub API
+- Verified end-to-end: sync PR #6 created and merged in markpreston.co
+
 ### Changes Made
-- `.github/workflows/template-sync.yml` — Changed cron to daily 06:00 UTC, added `source_gh_token: ${{ secrets.SOURCE_REPO_TOKEN }}` for private template access, added inline setup comments
-- `repo-os-explainer.html` — Expanded one-time setup with PAT creation steps, updated frequency references
+- `.github/workflows/template-sync.yml` — Daily cron, `persist-credentials: false`, `source_gh_token`, `target_gh_token`, updated inline PAT comments (classic PAT + repo + read:org)
+- `.templatesyncignore` — Added `.github/workflows/template-sync.yml` (GITHUB_TOKEN cannot push workflow changes; also prevents overwriting repo-specific config)
+- `repo-os-explainer.html` — Updated PAT instructions to classic PAT (not fine-grained), added repo settings step for "Allow GitHub Actions to create PRs"
+- `docs/ai/logs/known-issues.md` — Logged template-sync debugging chain (Session 16)
+- `docs/ai/logs/session-archive.md` — Archived Sessions 12 and 13
+- `docs/ai/logs/session-log.md` — Rotated Sessions 12/13, updated Session 16
 
 ### Verification (Gates Evidence)
 - Commit gates: A1 n/a, A2 pass, A3 n/a, A4 pass, A5 n/a (docs + workflow only)
 - Push gates: B1 pass, B2 n/a, B3 n/a
 
+### Failed Attempts (Brief)
+- Fine-grained PAT: incompatible with git clone in GitHub Actions
+- Missing `read:org` scope on classic PAT
+- `actions/checkout` extraheader overriding PAT (fixed with `persist-credentials: false`)
+- Push failed after removing credentials (fixed with `target_gh_token`)
+- `GITHUB_TOKEN` cannot push workflow files (fixed with `.templatesyncignore`)
+- Stale sync branch caused action to skip (deleted branch, re-triggered)
+- Repo settings blocked PR creation (enabled via API)
+
+### Known Issues Logged
+- Template sync debugging chain logged to known-issues.md (Session 16)
+
 ### Follow-ups
-- Operator must create PAT and add `SOURCE_REPO_TOKEN` secret to each child repo
+- None — template sync verified end-to-end
 
 ---
 
@@ -104,87 +126,3 @@ Each session adds one entry. Keep entries high-signal and readable.
 ### Follow-ups
 - Push and create PR to merge to main
 
----
-
-## Session 12 — 2026-02-19 — Context recovery and branch status check
-
-**Status:** complete
-**Decisions applied:** none
-**Commits:** none
-
-### Goal
-- Continue from compacted context; answer pending "are we on a branch?" question
-- Update session log to unblock stop hook
-
-### Plan Summary
-- Recovered context from previous conversation summary
-- Confirmed current branch is `feature/token-optimization` (5 commits ahead of main, PR #7 open)
-- Diagnosed stop hook block: SHA-256 hash matched stored baseline (no session log changes yet)
-- Archived Session 8 per rotation policy, added this entry
-
-### Changes Made
-- `docs/ai/logs/session-archive.md` — Archived Session 8
-- `docs/ai/logs/session-log.md` — Removed Session 8, added Session 12
-
-### Verification (Gates Evidence)
-- Commit gates: n/a (no commits this session)
-- Push gates: n/a (no pushes this session)
-
-### Failed Attempts (Brief)
-- `git branch --show-current` failed (exit 129) — used `git rev-parse --abbrev-ref HEAD` instead
-
-### Known Issues Logged
-- None
-
-### Follow-ups
-- Operator asked to "close this branch" — awaiting clarification: merge PR #7 or close without merging
-
----
-
-## Session 13 — 2026-02-19 — Token optimization audit
-
-**Status:** complete
-**Decisions applied:** 0007 (updated)
-**Commits:** 9c72a47 — feat(repo-os): optimize token usage across governance layer
-
-### Goal
-- Full performance audit of token usage across the Repo OS template
-- Identify optimizations that reduce per-session overhead without losing quality, clarity, or features
-
-### Plan Summary
-- Measured all 50+ repo files (~14,970 tokens governance overhead per session)
-- Identified optimization targets: session-archive (4,280t), spec templates (2,400t), advisory-board (1,440t), cohesion-review (280t)
-- Ran advisory board (Architect, Critic, Performance Engineer) — all validated core proposals
-- Synthesized refinement report with Phase 1 changes: remove 4 files from Source of Truth (already on-demand gated), slim advisory diagram, model selection for extended agents
-- Projected savings: ~14,970 → ~6,370 tokens (57% reduction)
-
-### Changes Made
-- `docs/ai/logs/session-archive.md` — Archived Sessions 9 and 10
-- `docs/ai/logs/session-log.md` — Removed Sessions 9/10, added Session 13
-- `AI.md` — Removed 4 items from Source of Truth, added On-demand section (O1, O2, O3, O5)
-- `.claude/agents/_agent-workflow.md` — Replaced advisory flow diagram with one-line reference (Slim), updated Exploration reference (R7f)
-- `.claude/agents/_advisory-board-lite.md` — NEW: compressed agent-facing shared context (R7a, R7c, R7d)
-- `.claude/agents/exploration.md` — NEW: merged Innovator + Researcher (R7f)
-- `.claude/agents/innovator.md` — DELETED (replaced by exploration.md)
-- `.claude/agents/researcher.md` — DELETED (replaced by exploration.md)
-- `.claude/agents/{architect,critic,security-analyst,ux-strategist,performance-engineer,data-strategist}.md` — Removed Brief Format sections, compressed authority tables, updated First Action to _advisory-board-lite.md (R7b)
-- `.claude/agents/_advisory-board.md` — Updated for Exploration agent, added complexity heuristic (R7e, R7f)
-- `docs/ai/prompts/prompt-a-repo-os.md` — Updated Exploration references (R7f)
-- `docs/ai/decisions/0007-advisory-board.md` — Updated agent count and roster (R7f)
-- `repo-os-explainer.html` — Updated all Researcher/Innovator references to Exploration (R7f cohesion fix)
-- `docs/ai/logs/known-issues.md` — Logged stop hook hash race condition
-
-### Verification (Gates Evidence)
-- Commit gates: A1 pass, A2 n/a, A3 n/a, A4 n/a, A5 pass (cohesion review clean)
-- Push gates: pending
-
-### Failed Attempts (Brief)
-- Dropped O4 (decisions index) — advisory board flagged maintenance risk
-- Dropped O6 (advisory split), O7 (session log trim), O8 (full workflow split) — low ROI or complexity risk
-
-### Known Issues Logged
-- Stop hook baseline hash race condition — logged to known-issues.md (Session 13)
-
-### Follow-ups
-- Push and merge PR when ready
-- Phase 2 audit opportunities: deeper agent-specific compression, hook optimization
