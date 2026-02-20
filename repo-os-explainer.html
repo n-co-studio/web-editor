@@ -846,7 +846,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
 <span class="p">├── </span><span class="f">.templatesyncignore</span> <span class="n">&mdash; protects compiled specs, logs, decisions from sync</span>
 <span class="p">├── </span><span class="d">.github/</span>
 <span class="p">│   └── </span><span class="d">workflows/</span>
-<span class="p">│       └── </span><span class="f">template-sync.yml</span> <span class="n">&mdash; weekly sync from upstream template</span>
+<span class="p">│       └── </span><span class="f">template-sync.yml</span> <span class="n">&mdash; daily sync from upstream template</span>
 <span class="p">├── </span><span class="d">.claude/</span>
 <span class="p">│   ├── </span><span class="f">settings.json</span> <span class="n">&mdash; team hooks &amp; permissions (committed)</span>
 <span class="p">│   ├── </span><span class="f">settings.local.json</span> <span class="n">&mdash; personal overrides (gitignored)</span>
@@ -1080,13 +1080,20 @@ experiment/new-caching-strategy</div>
     <div class="flow-node fn-done">Auto-merged &#10003;</div>
   </div>
 
-  <p>A GitHub Actions workflow (<code>.github/workflows/template-sync.yml</code>) runs weekly (Monday 04:00 UTC) and compares your repo against the template. When differences are found, it creates a PR and auto-merges it. Your compiled specs, logs, and decisions are never touched &mdash; protected by <code>.templatesyncignore</code>. Every sync is recorded as a merged PR for audit.</p>
+  <p>A GitHub Actions workflow (<code>.github/workflows/template-sync.yml</code>) runs daily (06:00 UTC) and compares your repo against the template. When differences are found, it creates a PR and auto-merges it. Your compiled specs, logs, and decisions are never touched &mdash; protected by <code>.templatesyncignore</code>. Every sync is recorded as a merged PR for audit.</p>
 
   <h3>One-time setup</h3>
   <ol class="tight">
     <li>Open <code>.github/workflows/template-sync.yml</code></li>
     <li>Replace <code>OWNER/repo-OS-template</code> with your actual template repo path</li>
-    <li>If the template is private: create a PAT with repo read access, add it as a secret named <code>TEMPLATE_SYNC_TOKEN</code>, replace <code>GITHUB_TOKEN</code> with it in the workflow</li>
+    <li><strong>If the template repo is private</strong> (required):
+      <ol style="margin-top:.25rem">
+        <li>Create a <strong>Fine-Grained PAT</strong> on GitHub: Settings &rarr; Developer settings &rarr; Personal access tokens &rarr; Fine-grained tokens</li>
+        <li>Scope it to <strong>read-only Contents</strong> on the template repo only</li>
+        <li>Add the PAT as a repository secret named <code>SOURCE_REPO_TOKEN</code> in each child repo (Settings &rarr; Secrets and variables &rarr; Actions)</li>
+      </ol>
+      <p style="font-size:.8rem;color:var(--t3);margin-top:.25rem">The workflow already references <code>SOURCE_REPO_TOKEN</code> via <code>source_gh_token</code>. If the template repo is public, you can remove that line &mdash; the default <code>GITHUB_TOKEN</code> works without extra setup.</p>
+    </li>
   </ol>
   <p style="font-size:.875rem;color:var(--t3)"><strong>Note:</strong> The template repo itself should not have this workflow. Only project repos created from the template need it.</p>
 
