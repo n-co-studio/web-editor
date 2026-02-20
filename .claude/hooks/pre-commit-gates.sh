@@ -5,36 +5,27 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/_analytics-helper.sh"
+START_MS=$(date +%s%3N 2>/dev/null || date +%s)
+
 FAILED=0
+A2_WARN=false
 
 # --- A4: Safety — Secret Scanning ---
-# Scan staged files for common secret patterns.
+# Scan staged files for common secret patterns (single-pass grep).
 # Patterns sourced from security-privacy agent definitions.
 
-SECRET_PATTERNS=(
-  'sk_live_'
-  'sk_test_'
-  'ghp_[A-Za-z0-9]'
-  'AKIA[A-Z0-9]'
-  'AIza[A-Za-z0-9]'
-  '-----BEGIN.*PRIVATE KEY-----'
-  'password\s*=\s*["\x27][^"\x27]'
-  'secret\s*=\s*["\x27][^"\x27]'
-  'token\s*=\s*["\x27][^"\x27]'
-)
+SECRET_PATTERN='sk_live_|sk_test_|ghp_[A-Za-z0-9]|AKIA[A-Z0-9]|AIza[A-Za-z0-9]|-----BEGIN.*PRIVATE KEY-----|password\s*=\s*["\x27][^"\x27]|secret\s*=\s*["\x27][^"\x27]|token\s*=\s*["\x27][^"\x27]'
 
 STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || true)
 
 if [ -n "$STAGED_FILES" ]; then
-  for pattern in "${SECRET_PATTERNS[@]}"; do
-    MATCHES=$(echo "$STAGED_FILES" | xargs grep -lE "$pattern" 2>/dev/null || true)
-    if [ -n "$MATCHES" ]; then
-      echo "GATE A4 FAILED: Possible secret detected (pattern: $pattern)"
-      echo "  Files: $MATCHES"
-      FAILED=1
-    fi
-  done
+  MATCHES=$(echo "$STAGED_FILES" | xargs grep -lE "$SECRET_PATTERN" 2>/dev/null || true)
+  if [ -n "$MATCHES" ]; then
+    echo "GATE A4 FAILED: Possible secret in: $MATCHES" >&2
+    FAILED=1
+  fi
 fi
 
 # --- Branch Protection ---
@@ -46,10 +37,10 @@ fi
 # This is advisory — does not block, but prints a warning.
 
 if [ -n "$STAGED_FILES" ]; then
-  LINES_CHANGED=$(git diff --cached --stat | tail -1 | grep -oE '[0-9]+ insertion|[0-9]+ deletion' | grep -oE '[0-9]+' | paste -sd+ - | bc 2>/dev/null || echo "0")
+  LINES_CHANGED=$(git diff --cached --numstat | awk '{s+=$1+$2} END {print s+0}')
   if [ "$LINES_CHANGED" -gt 100 ]; then
-    echo "GATE A2 WARNING: $LINES_CHANGED lines changed — exceeds small scope threshold (100)."
-    echo "  Ensure operator approved larger scope and rationale is documented."
+    A2_WARN=true
+    echo "GATE A2 WARNING: $LINES_CHANGED lines changed — exceeds 100-line threshold. Ensure operator approved." >&2
   fi
 fi
 
@@ -67,7 +58,11 @@ fi
 # fi
 
 if [ "$FAILED" -ne 0 ]; then
-  echo ""
-  echo "Commit blocked by pre-commit gate check."
+  log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A4_secret_detected"
+  echo "Commit blocked by pre-commit gate check." >&2
   exit 1
 fi
+
+REASON="pass"
+[ "$A2_WARN" = true ] && REASON="A2_scope_warning"
+log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "$REASON"

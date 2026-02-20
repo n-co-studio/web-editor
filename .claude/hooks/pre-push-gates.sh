@@ -5,8 +5,12 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/_analytics-helper.sh"
+START_MS=$(date +%s%3N 2>/dev/null || date +%s)
+
 FAILED=0
+B1_WARN=false
 
 # --- B1: Process — Branch Naming Convention ---
 # Warn if branch name doesn't match expected categories.
@@ -16,9 +20,9 @@ CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
 VALID_PATTERNS="^(main|feature/|fix/|hotfix/|release/|experiment/).+$"
 
 if [ -n "$CURRENT_BRANCH" ] && [ "$CURRENT_BRANCH" != "main" ]; then
-  if ! echo "$CURRENT_BRANCH" | grep -qE "$VALID_PATTERNS"; then
-    echo "GATE B1 WARNING: Branch '$CURRENT_BRANCH' does not match naming convention."
-    echo "  Expected: <category>/<short-description> (feature/, fix/, hotfix/, release/, experiment/)"
+  if [[ ! "$CURRENT_BRANCH" =~ $VALID_PATTERNS ]]; then
+    B1_WARN=true
+    echo "GATE B1 WARNING: Branch '$CURRENT_BRANCH' — expected: <category>/<description>" >&2
   fi
 fi
 
@@ -41,7 +45,11 @@ fi
 # fi
 
 if [ "$FAILED" -ne 0 ]; then
-  echo ""
-  echo "Push blocked by pre-push gate check."
+  log_hook_event "pre-push-gates" "PreToolUse" "Bash" "block" "$START_MS" "push_gate_failed"
+  echo "Push blocked by pre-push gate check." >&2
   exit 1
 fi
+
+REASON="pass"
+[ "$B1_WARN" = true ] && REASON="B1_naming_warning"
+log_hook_event "pre-push-gates" "PreToolUse" "Bash" "allow" "$START_MS" "$REASON"

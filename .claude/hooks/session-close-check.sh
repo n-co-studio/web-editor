@@ -7,10 +7,14 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/_analytics-helper.sh"
+START_MS=$(date +%s%3N 2>/dev/null || date +%s)
+
 INPUT=$(cat)
 
 # --- Paths and state files ---
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo ".")"
+REPO_ROOT="$(get_repo_root)"
 SESSION_LOG="$REPO_ROOT/docs/ai/logs/session-log.md"
 HASH_FILE="$REPO_ROOT/.claude/.session-log-hash"
 BASELINE_SHA_FILE="$REPO_ROOT/.claude/.session-baseline-sha"
@@ -38,9 +42,11 @@ update_baseline() {
   git rev-parse HEAD > "$BASELINE_SHA_FILE" 2>/dev/null || true
 }
 
-# --- HVST counter cleanup ---
-cleanup_hvst() {
+# --- Session cleanup (HVST counter + session ID + old analytics) ---
+cleanup_session() {
   rm -f "$COUNTER_FILE"
+  rm -f "$REPO_ROOT/.claude/.session-id"
+  cleanup_old_analytics "$REPO_ROOT"
 }
 
 # --- Infinite loop guard ---
@@ -49,14 +55,14 @@ cleanup_hvst() {
 STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
 if [ "$STOP_HOOK_ACTIVE" = "true" ]; then
   update_baseline
-  cleanup_hvst
+  cleanup_session
   exit 0
 fi
 
 # --- Operator override ---
 if [ "${SKIP_SESSION_LOG:-0}" = "1" ]; then
   update_baseline
-  cleanup_hvst
+  cleanup_session
   exit 0
 fi
 
@@ -110,7 +116,8 @@ if [ -z "$UNCOMMITTED" ] && [ -z "$STAGED" ] && [ -z "$RECENT_COMMITS" ]; then
   if [ "$SESSION_LOG_MODIFIED" = false ]; then
     echo "Advisory: No code changes detected (zero-change session). Session log not updated." >&2
   fi
-  cleanup_hvst
+  log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "zero_change"
+  cleanup_session
   update_baseline
   exit 0
 fi
@@ -119,9 +126,8 @@ fi
 # Session had real changes but session log was not updated.
 if [ "$SESSION_LOG_MODIFIED" = false ]; then
   # Do NOT update baseline when blocking — prevents stale hash on retry.
-  echo "BLOCKED: Session log (docs/ai/logs/session-log.md) has not been updated." >&2
-  echo "  Update the session log before closing the session." >&2
-  echo "  Operator override: SKIP_SESSION_LOG=1" >&2
+  log_hook_event "session-close-check" "Stop" "" "block" "$START_MS" "log_not_updated"
+  echo "BLOCKED: Session log not updated — update docs/ai/logs/session-log.md (override: SKIP_SESSION_LOG=1)" >&2
   exit 2
 fi
 
@@ -141,10 +147,7 @@ case "$CURRENT_BRANCH" in
     fi
 
     if [ "$PR_EXISTS" = false ]; then
-      echo ""
-      echo "Reminder: No open PR found for branch '$CURRENT_BRANCH'."
-      echo "  Ask the operator whether to create a PR to merge to main."
-      echo "  Do not skip or defer without explicit operator direction."
+      echo "Reminder: No open PR for '$CURRENT_BRANCH' — ask operator about creating PR to main." >&2
     fi
     ;;
 esac
@@ -165,13 +168,15 @@ if [ -f "$COUNTER_FILE" ]; then
     fi
 
     if [ "$KI_MODIFIED" = false ]; then
-      echo ""
-      echo "Reminder: $FAIL_COUNT HVST failures occurred but known-issues.md was not updated."
-      echo "Record resolved issues per HVST Record step (docs/ai/workflow.md)."
+      echo "Reminder: $FAIL_COUNT HVST failures but known-issues.md not updated — record per HVST Record step." >&2
     fi
   fi
-  cleanup_hvst
+  cleanup_session
 fi
+
+# --- Analytics: log successful close and register repo ---
+log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "session_complete"
+register_repo "$REPO_ROOT"
 
 # --- Update baseline for next session ---
 update_baseline
