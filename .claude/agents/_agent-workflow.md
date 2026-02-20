@@ -119,4 +119,12 @@ No file artifacts. No session log entry. No handoff to Build Flow — the operat
 | **Security** | Auth, PII, deps changed, crypto, external integrations | **Yes** — when required |
 | **Accessibility** | Public-facing UI modified, forms, interactive widgets | No (advisory) |
 
+### Operations (Operator-Invoked Tools)
+
+| Agent | Invoke When | Blocks Commit? |
+|-------|------------|----------------|
+| **Analytics** | Operator requests hook telemetry analysis or cross-repo reporting | No (standalone) |
+
+Operations agents are invoked directly by the operator, not as part of the plan→build→verify chain. They do not participate in handoffs.
+
 Subagents load their own definitions from `.claude/agents/`. Do not read subagent files into orchestrator context.
