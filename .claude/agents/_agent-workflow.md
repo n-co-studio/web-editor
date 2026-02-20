@@ -6,6 +6,22 @@ Runs after Prompt 0, before build begins. Orchestrated by Prompt A Phase 1. Tier
 
 ---
 
+## Task Definition Flow (Prompt T — Brief Mode)
+
+Lightweight spec-mode dispatch of Architect + Exploration + Critic for task scoping. No file output. See `docs/ai/prompts/prompt-t-task-definition.md`.
+
+### Handoff Chain
+1. **Operator → Orchestrator**: Task description (what/why/constraints)
+2. **Orchestrator → Architect + Exploration + Critic**: Parallel dispatch with task context + specs
+3. **Specialists → Orchestrator**: Lightweight briefs (same format as advisory board)
+4. **Orchestrator → Operator**: Synthesized draft task brief for review
+5. **Operator → Orchestrator**: Approve / revise / narrow / abandon
+6. **Orchestrator → Operator**: Final task brief displayed for copy-paste into Prompt B
+
+No file artifacts. No session log entry. No handoff to Build Flow — the operator manually carries the brief to a new Prompt B session.
+
+---
+
 ## Build Flow (Implementation)
 
 ```

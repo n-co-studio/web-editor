@@ -654,3 +654,58 @@ This file is not read during normal sessions. Referenced for deep investigation 
 
 ### Follow-ups
 - None — template sync verified across all child repos
+
+---
+
+## Session 17 — 2026-02-20 — Decision Navigator overhaul
+
+**Status:** in-progress
+**Decisions applied:** none (explainer-only change, no governance files modified)
+**Commits:** pending
+
+### Goal
+- Overhaul the Decision Navigator in repo-os-explainer.html based on advisory team review (UX strategist, architect, critic)
+- Follow-up: extract embedded commands to copy-paste blocks, add next-step chaining buttons between result pages
+
+### Plan Summary
+- Ran 3 advisory agents in parallel for comprehensive review
+- Synthesized findings into 10-item implementation plan, operator approved
+- Implemented all 10 items in single file (repo-os-explainer.html)
+- Operator feedback: embedded commands in steps should be dedicated copy-paste blocks; every result page needs "next step" buttons chaining to the logical next action
+- Refactored DT data from single `cmd` string to `cmds` array (`{label, value}`) and added `goTo` (`{lbl, path}`) for inter-result navigation
+- Updated `renderDT()` and added `dtGoto(path)` function
+
+### Changes Made
+- `repo-os-explainer.html` — Decision Navigator overhaul:
+  - Copy-to-clipboard buttons on all `.cmd` blocks (navigator + static)
+  - Breadcrumb trail showing navigation path with clickable segments
+  - Inline term tooltips for jargon (Prompt 0/A/B/0.5, HVST, Advisory Board, etc.)
+  - Richer result pages: why rationale, warnings, expected outcome
+  - 3 new scenario paths: returning after break, onboarding teammate, update specs mid-build
+  - Command gaps filled: gate failed gets template, decision conflict gets filename pattern
+  - Emoji icons replaced with Unicode symbols for cross-platform consistency
+  - Keyboard accessibility: tabindex, role=button, Enter/Space handlers, focus-visible
+  - Smooth 150ms fade transitions between states
+  - URL hash state (#nav=0.1.0) for bookmarking/sharing results
+  - ARIA attributes on navigator container (role, aria-label, aria-live)
+  - Multi-command blocks: `cmds` array with labeled copy-paste blocks per result
+  - Next-step chaining: `goTo` buttons on 12 result pages linking to logical next action (Initialize Repo OS or Start Development)
+  - `dtGoto(path)` function: navigates to any result by replaying option indices through tree
+  - Step text cleaned: instructions say "paste the starter below" instead of embedding commands inline
+  - Example references (`eg` field) on placeholder commands: git clone, session log override template
+  - `.dt-cmd-eg` CSS + render support for italic example hints below editable command blocks
+  - Static Getting Started clone block also gets example hint
+
+### Verification (Gates Evidence)
+- Commit gates: A1 n/a, A2 pass, A3 pass (JS syntax validated via node), A4 pass, A5 n/a (explainer only)
+- Push gates: B1 pending, B2 n/a, B3 n/a
+
+### Failed Attempts (Brief)
+- First edit attempt blocked by branch-guard hook (was on main). Switched to feature/navigator-overhaul branch.
+
+### Known Issues Logged
+- None
+
+### Follow-ups
+- Open in browser for visual verification
+- Commit and create PR to main
