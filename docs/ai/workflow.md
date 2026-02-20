@@ -9,7 +9,7 @@
 
 ## Advisory Board Review
 
-Runs after Prompt 0 completes, before Prompt B. Orchestrated by Prompt A Phase 1. Uses tiered activation to match review depth to scope.
+Runs after Prompt 0 completes, before Prompt B. Orchestrated by Prompt A Phase 1. Uses tiered activation to match review depth to scope. Re-initialization (after agent drift, decision conflicts, template sync, or mid-build spec changes) skips advisory review and goes directly to Phase 3 validation — operator selects the mode when Prompt A starts.
 
 1. **Select tier** — Orchestrator picks Lite / Standard / Full based on scope (operator can override or skip)
 2. **Activate** — Dispatch agents for the selected tier; scan for conditional signals at Full tier
@@ -44,3 +44,11 @@ Prototype sessions on `experiment/*` branches follow a lighter lifecycle. See `d
 - **Simplified session log** — one-line entry referencing the prototype brief
 - **Agent chain** — Orchestrator + Builder only (no QA/Reviewer/Security unless requested)
 - **At close** — update the Learnings and Disposition sections of the brief before deleting the branch
+
+### Task Definition Sessions
+
+Prompt T facilitates exploration and task planning without producing file artifacts. Two modes:
+- **Query**: Conversational Q&A grounded in specs and codebase. No agent dispatch.
+- **Brief**: 3-agent team (Architect, Exploration, Critic) produces a structured task brief for Prompt B.
+
+Task definition sessions are fully ephemeral — no files written, no session log entries, no gates apply. The output is a terminal-displayed task brief the operator copy-pastes into a new Prompt B session. See `docs/ai/prompts/prompt-t-task-definition.md` for full details.

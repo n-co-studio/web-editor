@@ -50,3 +50,4 @@ Hooks (`.claude/hooks/`) enforce automatically: branch protection on Edit/Write 
 - docs/ai/prompts/prompt-0.5-prototype.md
 - docs/ai/prompts/prompt-a-repo-os.md
 - docs/ai/prompts/prompt-b-product-build.md
+- docs/ai/prompts/prompt-t-task-definition.md

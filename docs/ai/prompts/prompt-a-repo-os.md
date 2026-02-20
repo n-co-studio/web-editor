@@ -4,9 +4,16 @@ Read and follow AI.md. Read all files referenced in AI.md's source-of-truth sect
 
 **Scope**: Initialize, validate, or update the Repo OS. Review specs via Advisory Board. No product code.
 
-## Phase 1 — Advisory Board Review
+## Mode Selection
 
-Run after Prompt 0 completes (spec or feature brief is ready). Skip this phase if `manifest.json` has `"active": null` (no spec yet).
+Ask the operator which mode applies:
+
+- **Initialize** — First run, or major spec rewrite. Runs full advisory review (Phases 1 → 2 → 3). Use after Prompt 0 completes for the first time or after a significant spec overhaul.
+- **Re-initialize** — Repeat run after build has started. Skips advisory review, goes straight to validation (Phase 3 only). Use after agent drift, decision conflicts, template sync updates, or mid-build spec changes where specs have already been reviewed.
+
+## Phase 1 — Advisory Board Review (Initialize mode only)
+
+Run after Prompt 0 completes (spec or feature brief is ready). Skip this phase if `manifest.json` has `"active": null` (no spec yet). Skip entirely in Re-initialize mode.
 
 1. Read `docs/spec/compiled/manifest.json` to find the active version
 2. Read all compiled spec files in `docs/spec/compiled/{active}/`
@@ -25,7 +32,9 @@ Run after Prompt 0 completes (spec or feature brief is ready). Skip this phase i
 6. Dispatch activated specialists in parallel
 7. Collect specialist briefs
 
-## Phase 2 — Operator Review
+## Phase 2 — Operator Review (Initialize mode only)
+
+Skip entirely in Re-initialize mode.
 
 1. Synthesize specialist briefs into a single Refinement Report (see `_advisory-board.md` format)
 2. Present to operator organized as:
@@ -37,7 +46,7 @@ Run after Prompt 0 completes (spec or feature brief is ready). Skip this phase i
 4. For accepted items: note what changes to make (spec updates, new constraints, follow-ups)
 5. All Critical findings must be addressed (accepted or explicitly rejected with reason) before proceeding
 
-## Phase 3 — Repo OS Validation
+## Phase 3 — Repo OS Validation (both modes)
 
 Define or confirm:
 - Agent roles and responsibilities

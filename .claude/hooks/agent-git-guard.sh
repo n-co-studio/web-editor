@@ -3,6 +3,10 @@
 # Used via frontmatter hooks in Builder, QA, and Security agents.
 # Exit 2 = block the tool call.
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/_analytics-helper.sh"
+START_MS=$(date +%s%3N 2>/dev/null || date +%s)
+
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
 
@@ -10,10 +14,11 @@ if [ -z "$COMMAND" ]; then
   exit 0
 fi
 
-if echo "$COMMAND" | grep -qE '^\s*git\s+(commit|push)\b'; then
-  echo "BLOCKED: This agent cannot run git commit or git push." >&2
-  echo "  Return control to the Orchestrator for commit/push operations." >&2
+if [[ "$COMMAND" =~ ^[[:space:]]*git[[:space:]]+(commit|push) ]]; then
+  log_hook_event "agent-git-guard" "PreToolUse" "Bash" "block" "$START_MS" "subagent_git_blocked"
+  echo "BLOCKED: This agent cannot git commit/push — return to Orchestrator." >&2
   exit 2
 fi
 
+log_hook_event "agent-git-guard" "PreToolUse" "Bash" "allow" "$START_MS" "not_git_commit_push"
 exit 0

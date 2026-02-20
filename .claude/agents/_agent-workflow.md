@@ -6,6 +6,22 @@ Runs after Prompt 0, before build begins. Orchestrated by Prompt A Phase 1. Tier
 
 ---
 
+## Task Definition Flow (Prompt T — Brief Mode)
+
+Lightweight spec-mode dispatch of Architect + Exploration + Critic for task scoping. No file output. See `docs/ai/prompts/prompt-t-task-definition.md`.
+
+### Handoff Chain
+1. **Operator → Orchestrator**: Task description (what/why/constraints)
+2. **Orchestrator → Architect + Exploration + Critic**: Parallel dispatch with task context + specs
+3. **Specialists → Orchestrator**: Lightweight briefs (same format as advisory board)
+4. **Orchestrator → Operator**: Synthesized draft task brief for review
+5. **Operator → Orchestrator**: Approve / revise / narrow / abandon
+6. **Orchestrator → Operator**: Final task brief displayed for copy-paste into Prompt B
+
+No file artifacts. No session log entry. No handoff to Build Flow — the operator manually carries the brief to a new Prompt B session.
+
+---
+
 ## Build Flow (Implementation)
 
 ```
@@ -102,5 +118,13 @@ Runs after Prompt 0, before build begins. Orchestrated by Prompt A Phase 1. Tier
 | **Reviewer** | Structural, high-risk, or cross-cutting changes | **Yes** — when required |
 | **Security** | Auth, PII, deps changed, crypto, external integrations | **Yes** — when required |
 | **Accessibility** | Public-facing UI modified, forms, interactive widgets | No (advisory) |
+
+### Operations (Operator-Invoked Tools)
+
+| Agent | Invoke When | Blocks Commit? |
+|-------|------------|----------------|
+| **Analytics** | Operator requests hook telemetry analysis or cross-repo reporting | No (standalone) |
+
+Operations agents are invoked directly by the operator, not as part of the plan→build→verify chain. They do not participate in handoffs.
 
 Subagents load their own definitions from `.claude/agents/`. Do not read subagent files into orchestrator context.
