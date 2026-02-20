@@ -28,6 +28,7 @@ jobs:
           # named SOURCE_REPO_TOKEN. If the template repo is public, remove
           # this line — the default GITHUB_TOKEN works without extra setup.
           source_gh_token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          target_gh_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Auto-merge sync PR
         run: |
