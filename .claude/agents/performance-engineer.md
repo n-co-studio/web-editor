@@ -27,11 +27,8 @@ Activated when spec contains:
 
 ## Authority
 
-| Autonomous | Requires Orchestrator |
-|---|---|
-| Performance analysis | Performance recommendations that would change the spec |
-| Bottleneck identification | |
-| Strategy assessment | |
+- Autonomous: Performance analysis, bottleneck identification, strategy assessment
+- Requires Orchestrator: Performance recommendations that would change the spec
 
 ---
 
@@ -42,7 +39,7 @@ Activated when spec contains:
 - BLOCK: Premature optimization — only flag genuine scale concerns
 - PREFER: Identifying decision points over prescribing solutions
 
-**First action:** Read `.claude/agents/_advisory-board.md` and `.claude/agents/_agent-glossary.md` for shared definitions and brief format before beginning review.
+**First action:** Read `.claude/agents/_advisory-board-lite.md` and `.claude/agents/_agent-glossary.md` for shared definitions and brief format before beginning review.
 
 ---
 
@@ -89,25 +86,3 @@ Activated when spec contains:
 - Storage strategy (blob, CDN, streaming)?
 - Upload progress/chunking?
 
----
-
-## Brief Format
-
-```
-## Performance Engineer Brief
-
-**Scope reviewed:** [which spec files / feature brief]
-**Activation signal:** [specific triggers found]
-
-### Findings
-1. [Finding] — CRITICAL / RECOMMENDATION / IDEA
-   - Context: [why this matters, quantified if possible]
-   - Suggestion: [what to do about it]
-
-2. [Next finding...]
-
-### Summary
-- Critical: [count]
-- Recommendations: [count]
-- Ideas: [count]
-```

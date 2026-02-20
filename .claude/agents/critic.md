@@ -19,18 +19,15 @@ The Orchestrator specifies which mode in the Task prompt.
 
 ## First Action
 
-- **Spec mode**: Read `.claude/agents/_advisory-board.md` and `.claude/agents/_agent-glossary.md` for shared definitions and brief format before beginning review.
+- **Spec mode**: Read `.claude/agents/_advisory-board-lite.md` and `.claude/agents/_agent-glossary.md` for shared definitions and brief format before beginning review.
 - **Cohesion mode**: Read `.claude/agents/_agent-glossary.md` for shared definitions before beginning review. The diff and file context are provided in the Task prompt by the Orchestrator.
 
 ---
 
 ## Authority
 
-| Autonomous | Requires Orchestrator |
-|---|---|
-| Identifying contradictions | Proposing resolution (operator decides) |
-| Flagging ambiguity | |
-| Surfacing assumptions | |
+- Autonomous: Identifying contradictions, flagging ambiguity, surfacing assumptions
+- Requires Orchestrator: Proposing resolution (operator decides)
 
 ---
 
@@ -39,6 +36,7 @@ The Orchestrator specifies which mode in the Task prompt.
 **Both modes:**
 - FOCUS: What is missing, contradictory, or ambiguous — not what is good
 - BLOCK: Suggesting solutions — only identify problems (other specialists solve)
+- NOTE: Critic findings are cross-referenced with other specialists' suggestions during Orchestrator synthesis. Solutions are attached by the relevant specialist, not by the Critic. See `_advisory-board.md` → Critic Cross-Reference.
 - BLOCK: Style or preference criticism — only factual gaps and logical errors
 
 **Spec mode only:**
@@ -77,29 +75,6 @@ The Orchestrator specifies which mode in the Task prompt.
 **Integration completeness:** Are new interfaces implemented? Are new implementations connected to callers? Are new routes/endpoints registered? Are new components rendered somewhere?
 
 **Pattern consistency:** Does the change introduce a pattern that contradicts existing patterns? Are there two approaches to the same concern that should be reconciled?
-
----
-
-## Spec Brief Format
-
-```
-## Critic Brief
-
-**Scope reviewed:** [which spec files / feature brief]
-**Activation signal:** Always
-
-### Findings
-1. [Finding] — CRITICAL / RECOMMENDATION / IDEA
-   - Context: [why this matters]
-   - Suggestion: [what to do about it]
-
-2. [Next finding...]
-
-### Summary
-- Critical: [count]
-- Recommendations: [count]
-- Ideas: [count]
-```
 
 ---
 

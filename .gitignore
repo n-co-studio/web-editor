@@ -11,12 +11,6 @@
 # HVST failure counter (session-scoped temp file)
 .claude/.hvst-fail-count
 
-# Node
-node_modules/
-
-# Build output
-dist/
-*.tsbuildinfo
-
-# Frontend Editor local state
-.frontend-editor/
+# Session-scoped state files (stop hook baselines)
+.claude/.session-log-hash
+.claude/.session-baseline-sha
