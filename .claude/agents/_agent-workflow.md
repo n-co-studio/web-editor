@@ -2,36 +2,7 @@
 
 ## Advisory Flow (Spec Review)
 
-Runs after Prompt 0, before build begins. Orchestrated by Prompt A Phase 1. Tier selected before dispatch — see `_advisory-board.md` for tier definitions.
-
-```
-                        OPERATOR
-              (completes spec via Prompt 0)
-                            │
-                            ▼
-                      ORCHESTRATOR
-              selects tier → activates agents → synthesizes
-                            │
-              ┌─────────────┼─────────────┐
-              ▼             ▼             ▼
-          CORE PAIR    EXTENDED      CONDITIONAL
-         (Lite+)     (Standard+)   (Full only)
-       ┌───────────┐ ┌───────────┐ ┌──────────────┐
-       │ Architect  │ │ Researcher│ │Security Analyst│
-       │ Critic     │ │ Innovator │ │UX Strategist  │
-       └───────────┘ └───────────┘ │Perf Engineer  │
-              │             │      │Data Strategist│
-              │             │      └──────────────┘
-              └─────────────┼─────────────┘
-                            ▼
-                   REFINEMENT REPORT
-                            │
-                            ▼
-                     OPERATOR REVIEW
-              (accept / reject / defer per item)
-```
-
-See `.claude/agents/_advisory-board.md` for tier defaults, activation logic, and report structure.
+Runs after Prompt 0, before build begins. Orchestrated by Prompt A Phase 1. Tier selected before dispatch. See `.claude/agents/_advisory-board.md` for tier definitions, activation logic, agent roster, and report structure.
 
 ---
 
@@ -115,8 +86,7 @@ See `.claude/agents/_advisory-board.md` for tier defaults, activation logic, and
 |-------|------|------------|----------------|
 | **Architect** | Lite+ | Core pair — always when board runs | No (advisory) |
 | **Critic** (spec mode) | Lite+ | Core pair — always when board runs | No (advisory) |
-| **Researcher** | Standard+ | Standard tier and above | No (advisory) |
-| **Innovator** | Standard+ | Standard tier and above | No (advisory) |
+| **Exploration** | Standard+ | Standard tier and above | No (advisory) |
 | **Security Analyst** | Full | Signal-triggered at Full tier | No (advisory) |
 | **UX Strategist** | Full | Signal-triggered at Full tier | No (advisory) |
 | **Performance Engineer** | Full | Signal-triggered at Full tier | No (advisory) |
