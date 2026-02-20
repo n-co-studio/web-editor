@@ -831,7 +831,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
       <tr><td><code>pre-push-gates.sh</code></td><td>Before every <code>git push</code></td><td>B1: Branch naming convention check (advisory). Stubs for B2 tests/typecheck and B3 dependency audit &mdash; activate per project.</td><td><span class="tag t-grn">no</span> (template default)</td></tr>
       <tr><td><code>agent-git-guard.sh</code></td><td>Builder/QA/Security Bash calls</td><td>Blocks <code>git commit</code> and <code>git push</code> commands in subagents. Only the Orchestrator can commit/push.</td><td><span class="tag t-red">yes</span> (exit 2)</td></tr>
       <tr><td><code>hvst-failure-tracker.sh</code></td><td>After every Bash command</td><td>Tracks consecutive failures. After 2+ failures, reminds agent to check <code>known-issues.md</code> and follow HVST protocol.</td><td><span class="tag t-grn">no</span> (advisory)</td></tr>
-      <tr><td><code>session-close-check.sh</code></td><td>When Claude stops responding</td><td>Blocks session close if session log not updated (override: <code>SKIP_SESSION_LOG=1</code>). Advisory PR-to-main reminder for mergeable branches. Advisory HVST known-issues reminder.</td><td><span class="tag t-red">yes</span> (session log)</td></tr>
+      <tr><td><code>session-close-check.sh</code></td><td>When Claude stops responding</td><td>Blocks session close if session log not updated; zero-change sessions (no commits, no working tree changes) downgrade to advisory (override: <code>SKIP_SESSION_LOG=1</code>). Advisory PR-to-main reminder for mergeable branches. Advisory HVST known-issues reminder.</td><td><span class="tag t-red">yes</span> (session log)</td></tr>
       <tr><td>YAML frontmatter</td><td>Agent invocation</td><td>Restricts tools per agent (e.g., Builder can&rsquo;t use Task, QA can&rsquo;t use Edit/Write). Frontmatter hooks wire <code>agent-git-guard.sh</code>.</td><td><span class="tag t-red">yes</span> (runtime)</td></tr>
     </tbody>
   </table>
@@ -856,7 +856,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
 <span class="p">│   │   ├── </span><span class="f">pre-push-gates.sh</span> <span class="n">&mdash; branch naming + B-gate stubs</span>
 <span class="p">│   │   ├── </span><span class="f">agent-git-guard.sh</span> <span class="n">&mdash; blocks git commit/push in subagents</span>
 <span class="p">│   │   ├── </span><span class="f">hvst-failure-tracker.sh</span> <span class="n">&mdash; consecutive failure tracking</span>
-<span class="p">│   │   └── </span><span class="f">session-close-check.sh</span> <span class="n">&mdash; session log enforcement (blocking)</span>
+<span class="p">│   │   └── </span><span class="f">session-close-check.sh</span> <span class="n">&mdash; session log enforcement (blocking; zero-change exempt)</span>
 <span class="p">│   └── </span><span class="d">agents/</span>
 <span class="p">│       ├── </span><span class="f">_agent-glossary.md</span> <span class="n">&mdash; shared terms (all agents read)</span>
 <span class="p">│       ├── </span><span class="f">_agent-workflow.md</span> <span class="n">&mdash; handoff flow (all agents read)</span>

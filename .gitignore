@@ -11,5 +11,6 @@
 # HVST failure counter (session-scoped temp file)
 .claude/.hvst-fail-count
 
-# Session log hash baseline (session-scoped temp file)
+# Session-scoped state files (stop hook baselines)
 .claude/.session-log-hash
+.claude/.session-baseline-sha

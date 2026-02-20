@@ -34,7 +34,7 @@ Work happens on categorized branches. Never commit directly to `main` — merge 
 
 ## Session Lifecycle
 
-At session close: verify all changes, commit, update session log (`docs/ai/logs/session-log.md`). Ask operator whether to create a PR to merge to `main` — do not skip or defer without explicit operator direction. Does not apply to `experiment/*` branches.
+At session close: verify all changes, commit, update session log (`docs/ai/logs/session-log.md`). Zero-change sessions (no commits, no working tree changes) are exempt from the session log requirement — the stop hook downgrades to advisory instead of blocking. Ask operator whether to create a PR to merge to `main` — do not skip or defer without explicit operator direction. Does not apply to `experiment/*` branches.
 
 ### Prototype Sessions
 
