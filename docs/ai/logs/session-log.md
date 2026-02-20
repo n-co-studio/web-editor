@@ -38,37 +38,47 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 -->
 
-## Session 11 — 2026-02-19 — Fix template-sync workflow
+## Session 15 — 2026-02-19 — Fix stop hook session weight and baseline hash bugs
 
 **Status:** complete
-**Decisions applied:** none
-**Commits:** 99b6a6a — fix(repo-os): correct template-sync action version and frequency
+**Decisions applied:** 0004
+**Commits:** pending
 
 ### Goal
-- Fix broken `actions-template-sync` version tag (v6 → v2)
-- Tighten sync frequency from weekly to hourly
+- Fix two unresolved known issues in `session-close-check.sh`:
+  - Session 13: Stop hook blocks again after first block (stale baseline hash)
+  - Session 14: Stop hook blocks on zero-change sessions (no session weight concept)
 
 ### Plan Summary
-- Corrected action version to `@v2`
-- Tightened cron schedule from weekly Monday to hourly
-- Kept `workflow_dispatch` for manual trigger
-- Initially tried `pull_request: closed` trigger but reverted — child repos can't listen for template repo PR events
+- Ran Lite advisory board (Architect + Critic) on proposed fix design
+- Architect: 3 critical (hash path safety, timing window, bootstrap dependency), 3 recommendations, 2 ideas
+- Critic: 4 critical (SKIP_SESSION_LOG stale hash, timing window, stash/reset false positive, race condition), 4 recommendations, 2 ideas
+- Synthesized refinement report; operator approved all items including governance doc updates
+- Cohesion review + QA caught missing `.gitignore` entry and terminology mismatch — fixed
 
 ### Changes Made
-- `.github/workflows/template-sync.yml` — Fixed version tag v6 → v2, changed cron from weekly to hourly
+- `.claude/hooks/session-close-check.sh` — Restructured: `update_baseline()` + `cleanup_hvst()` functions, session weight detection via baseline SHA, blocking exit never updates baseline
+- `AI.md` — Zero-change session exemption in non-negotiables
+- `docs/ai/workflow.md` — Zero-change session exemption in Session Lifecycle
+- `docs/ai/decisions/0004-mechanical-enforcement.md` — Updated Stop hook description
+- `docs/ai/logs/known-issues.md` — Marked Session 13 + 14 issues as fixed
+- `.gitignore` — Added `.session-baseline-sha`, updated comment
+- `repo-os-explainer.html` — Hook description in table + file tree
+- `docs/ai/logs/session-archive.md` — Archived Session 11
+- `docs/ai/logs/session-log.md` — Rotated Session 11, added Session 15
 
 ### Verification (Gates Evidence)
-- Commit gates: pending
-- Push gates: pending
+- Commit gates: A1 pass, A2 pass, A3 pass (bash -n), A4 pass, A5 pass (cohesion clean after fixes)
+- Push gates: B1 pass, B2 n/a, B3 n/a
 
 ### Failed Attempts (Brief)
-- Tried `pull_request: closed` trigger with merge guard — wrong approach since child repos can't detect template repo PR merges. Reverted to cron.
+- Initial proposal used `git log --since="4 hours ago"` — both advisory specialists flagged unreliable. Replaced with stored baseline commit SHA.
 
 ### Known Issues Logged
-- None
+- Session 13 + 14 entries updated with fix details
 
 ### Follow-ups
-- Commit and merge to main
+- Push and create PR to merge to main
 
 ---
 
