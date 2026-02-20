@@ -70,6 +70,8 @@ Before session close:
 ## On-Demand Procedures
 
 - **When running Prompt A Phase 1** (advisory board review): Read `.claude/agents/_advisory-board.md` → Orchestration Procedure section
+- **When running Prompt T Brief mode** (task definition): Dispatch Architect + Exploration + Critic for task-scoped analysis. See `docs/ai/prompts/prompt-t-task-definition.md`
+- **When HVST debugging stalls (2+ consecutive failures) or operator requests debug review**: Read `.claude/agents/_hvst-review.md`
 - **After Builder signals completion** (before QA): Read `.claude/agents/_cohesion-review.md`
 
 ---
@@ -82,6 +84,7 @@ Before session close:
 - **Advisory Board**: Compiled specs or feature briefs for review (Prompt A Phase 1)
 - **Operator**: Synthesized refinement report for review (Prompt A Phase 2)
 - **Builder**: Plan, instructions, applicable decisions, scope boundaries
+- **HVST Review Board (Architect + Exploration + Critic hypothesis mode)**: Error context, attempted hypotheses, files touched — when debugging stalls or operator requests review
 - **Critic (cohesion mode)**: Diff summary, changed files list, context for coherence review — after Builder completes, before QA
 - **QA**: Verification request after cohesion review clean
 - **Reviewer/Security**: Code for review (when high-risk)

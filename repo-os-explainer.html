@@ -232,7 +232,100 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
 @media(max-width:800px){
   .checks,.gloss{grid-template-columns:1fr;}
   .flow{flex-direction:column;align-items:flex-start;}
+  .dt-o{padding:.85rem 1rem;}
+  .dt-opts{gap:.6rem;}
 }
+
+/* ─── COPY BUTTON ─── */
+.cmd-wrap{position:relative;}
+.cmd-wrap .cmd{padding-right:3rem;margin:0;}
+.cmd-copy{
+  position:absolute;top:.45rem;right:.45rem;
+  background:var(--s3);border:1px solid var(--b1);border-radius:4px;
+  padding:.25rem .4rem;cursor:pointer;color:var(--t3);
+  font-size:.7rem;font-family:'Inter',sans-serif;font-weight:600;
+  transition:all .15s;line-height:1;display:flex;align-items:center;gap:.25rem;
+}
+.cmd-copy:hover{color:var(--t1);border-color:var(--b2);background:var(--s2);}
+.cmd-copy.copied{color:var(--grn);border-color:rgba(34,197,94,.3);}
+
+/* ─── BREADCRUMBS ─── */
+.dt-crumbs{display:flex;align-items:center;gap:.3rem;margin-bottom:.75rem;flex-wrap:wrap;font-size:.78rem;}
+.dt-crumb{background:none;border:none;color:var(--t3);font-family:'Inter',sans-serif;font-size:.78rem;cursor:pointer;padding:.15rem .3rem;border-radius:3px;transition:all .15s;}
+.dt-crumb:hover{color:var(--acc2);background:rgba(99,102,241,.06);}
+.dt-crumb-cur{color:var(--t1);font-weight:600;padding:.15rem .3rem;}
+.dt-crumb-sep{color:var(--b2);font-size:.65rem;}
+
+/* ─── TERM TOOLTIPS ─── */
+.dt-term{position:relative;border-bottom:1px dotted var(--t3);cursor:help;white-space:nowrap;}
+.dt-tip{
+  display:none;position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);
+  background:var(--s3);border:1px solid var(--b2);border-radius:6px;
+  padding:.45rem .65rem;font-size:.75rem;color:var(--t2);line-height:1.45;
+  white-space:normal;width:max-content;max-width:260px;z-index:20;
+  box-shadow:0 4px 12px rgba(0,0,0,.3);font-weight:400;font-style:normal;
+  pointer-events:none;
+}
+.dt-tip::after{
+  content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);
+  border:5px solid transparent;border-top-color:var(--b2);
+}
+.dt-term:hover .dt-tip,.dt-term:focus .dt-tip{display:block;}
+
+/* ─── RESULT ENHANCEMENTS ─── */
+.dt-why{font-size:.875rem;color:var(--t2);text-align:center;margin-bottom:.65rem;line-height:1.6;font-style:italic;}
+.dt-warn{
+  text-align:left;max-width:480px;margin:.5rem auto .65rem;
+  border-left:3px solid var(--orn);background:rgba(245,158,11,.04);
+  border-radius:0 6px 6px 0;padding:.5rem .85rem;
+  font-size:.8rem;color:var(--t2);line-height:1.55;
+}
+.dt-warn strong{color:var(--orn);}
+.dt-outcome{
+  text-align:left;max-width:480px;margin:.5rem auto 0;
+  background:var(--grn-d);border:1px solid rgba(34,197,94,.15);
+  border-radius:6px;padding:.5rem .85rem;
+  font-size:.8rem;color:var(--t2);line-height:1.55;
+}
+.dt-outcome strong{color:var(--grn);}
+
+/* ─── NEXT-STEP CHAINING ─── */
+.dt-goto{
+  display:inline-flex;align-items:center;gap:.3rem;padding:.5rem 1.1rem;
+  background:var(--acc);border:none;border-radius:6px;font-size:.85rem;font-weight:600;
+  color:#fff;cursor:pointer;font-family:'Inter',sans-serif;transition:background .15s;
+}
+.dt-goto:hover{background:var(--acc2);}
+
+/* ─── MULTI-COMMAND BLOCKS ─── */
+.dt-cmd-label{font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--t3);margin-top:.6rem;margin-bottom:.15rem;}
+.dt-cmd-eg{font-size:.78rem;color:var(--t3);margin:.2rem 0 .1rem .4rem;font-style:italic;}
+.dt-cmd-eg code{font-style:normal;background:var(--bg2);padding:.1em .35em;border-radius:3px;font-size:.85em;}
+.dt-cmds{margin-top:.65rem;}
+
+/* ─── KEYBOARD FOCUS ─── */
+.dt-o:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-color:var(--acc);background:rgba(99,102,241,.04);}
+.dt-back:focus-visible,.dt-next:focus-visible,.dt-crumb:focus-visible,.dt-goto:focus-visible{outline:2px solid var(--acc);outline-offset:2px;}
+
+/* ─── ALTERNATIVES TILE GRID ─── */
+.dt-alts-hdr{font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);margin-top:1.2rem;margin-bottom:.45rem;text-align:center;}
+.dt-alts{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.45rem;max-width:520px;margin:0 auto;}
+.dt-alt{
+  display:flex;align-items:center;gap:.5rem;
+  padding:.55rem .7rem;border-radius:7px;
+  background:var(--s2);border:1px solid var(--b1);
+  cursor:pointer;transition:all .15s;text-align:left;
+  font-family:inherit;color:inherit;
+}
+.dt-alt:hover{border-color:var(--acc);background:rgba(99,102,241,.04);transform:translateY(-1px);}
+.dt-alt:focus-visible{outline:2px solid var(--acc);outline-offset:2px;}
+.dt-alt .ico{font-size:.95rem;flex-shrink:0;}
+.dt-alt .lbl{font-size:.8rem;font-weight:600;color:var(--t1);}
+.dt-alt .dsc{font-size:.68rem;color:var(--t3);margin-top:.05rem;}
+
+/* ─── TRANSITIONS ─── */
+.dt-box{transition:opacity .15s ease;}
+.dt-box.fading{opacity:0;}
 </style>
 </head>
 <body>
@@ -248,8 +341,8 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
   </div>
   <nav class="sb-nav" id="sbnav">
     <div class="sb-group">Start Here</div>
-    <a href="#tldr">TL;DR</a>
     <a href="#navigator">Navigator</a>
+    <a href="#tldr">TL;DR</a>
     <a href="#setup">Setup</a>
     <a href="#spec">Spec Builder</a>
     <a href="#triggers">When to Run What</a>
@@ -280,6 +373,17 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
 <section id="top" style="padding-top:1.5rem;">
   <h1>Repo OS &mdash; Operator Guide</h1>
   <p>This is the reference for <strong>you, the human operator</strong>. It covers how to set up projects, run sessions, and work with AI agents safely. Agents do not read this file &mdash; it&rsquo;s for you.</p>
+  <div class="callout">
+    <strong>Short-conversation model.</strong> Repo OS is designed to keep token usage low. Structured prompts, spec-first planning, and mandatory gates mean agents do less guessing and more executing &mdash; keeping sessions short across creation, initialization, and build.
+  </div>
+</section>
+
+<!-- ══════ DECISION NAVIGATOR ══════ -->
+<section id="navigator">
+  <div class="sec-num">What Should I Do?</div>
+  <h2>Decision Navigator</h2>
+  <p>Not sure where to start? Answer a quick question to get the exact action, prompt, and next step.</p>
+  <div class="dt-box" id="dtBox" role="region" aria-label="Decision Navigator" aria-live="polite"></div>
 </section>
 
 <!-- ══════ TL;DR ══════ -->
@@ -298,14 +402,6 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
   </div>
 </section>
 
-<!-- ══════ DECISION NAVIGATOR ══════ -->
-<section id="navigator">
-  <div class="sec-num">What Should I Do?</div>
-  <h2>Decision Navigator</h2>
-  <p>Not sure where to start? Answer a quick question to get the exact action, prompt, and next step.</p>
-  <div class="dt-box" id="dtBox"></div>
-</section>
-
 <!-- ══════ SETUP ══════ -->
 <section id="setup">
   <div class="sec-num">Getting Started</div>
@@ -316,6 +412,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
 
   <h3>Step 2 &mdash; Clone</h3>
   <div class="cmd">git clone &lt;REPO_URL&gt; && cd &lt;REPO_NAME&gt;</div>
+  <div class="dt-cmd-eg">e.g. <code>git clone https://github.com/acme/my-app.git && cd my-app</code></div>
 
   <h3>Step 3 &mdash; Build your project spec <span class="tag t-grn">prompt 0</span></h3>
   <p>Start a Claude Code session and paste:</p>
@@ -356,6 +453,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
       <tr><td><span class="tag t-pnk">Spec changes</span></td><td>Re-run Prompt 0, then Prompt A</td><td>Requirements changed, new features, design updates</td></tr>
       <tr><td><span class="tag t-cyn">Template sync</span></td><td>Automatic &mdash; Prompt 0 only if spec templates changed</td><td>Governance updates auto-merge weekly</td></tr>
       <tr><td><span class="tag t-pnk">Prototype / spike</span></td><td>Prompt 0.5</td><td>Quick test, architecture spike, or proof of concept on an experiment branch</td></tr>
+      <tr><td><span class="tag t-cyn">Explore / investigate</span></td><td>Prompt T</td><td>Feasibility check, task planning, or quick Q&amp;A &mdash; produces a task brief for Prompt B</td></tr>
     </tbody>
   </table>
 </section>
@@ -807,7 +905,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
   <h2>Decisions</h2>
   <p>Version-controlled constraints in <code>docs/ai/decisions/</code>. They are <strong>laws, not notes</strong>. Violations block commits. If one no longer fits, create a new decision &mdash; never silently ignore the old one.</p>
 
-  <div class="card dec"><div class="dec-id">0001</div><h3>Repo OS Baseline</h3><p>Establishes authority model (operator vs agent), three-prompt system (Prompt 0 for spec, A for init, B for dev), mandatory gates, session-based work, GitHub template as source of truth. Baseline must exist (Commit 0) before any product code.</p></div>
+  <div class="card dec"><div class="dec-id">0001</div><h3>Repo OS Baseline</h3><p>Establishes authority model (operator vs agent), prompt system (Prompt 0 for spec, A for init, B for dev; extended by 0.5 and T), mandatory gates, session-based work, GitHub template as source of truth. Baseline must exist (Commit 0) before any product code.</p></div>
   <div class="card dec"><div class="dec-id">0002</div><h3>Decisions Are Mandatory</h3><p>Decisions are binding constraints. Applicable decisions must be identified and followed for every change. Conflicts require a new decision before proceeding. Violations block commits.</p></div>
   <div class="card dec"><div class="dec-id">0003</div><h3>Agent Structure Standard</h3><p>Agent definitions use YAML frontmatter for tool boundaries. Shared files (<code>_agent-glossary.md</code>, <code>_agent-workflow.md</code>) are mandatory reading. Orchestrator is behavioral guidance only (no frontmatter, not invocable as subagent).</p></div>
   <div class="card dec"><div class="dec-id">0004</div><h3>Mechanical Enforcement</h3><p>Automated enforcement via Claude Code features: executable subagents with tool boundaries, team-shared settings, verification hooks (secret scanning, session log reminders).</p></div>
@@ -815,6 +913,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
   <div class="card dec"><div class="dec-id">0006</div><h3>Prototyping Tiers</h3><p>Three-tier prototyping system (Napkin / Spike / PoC) on <code>experiment/*</code> branches. Operator self-selects tier based on complexity. Prompt 0.5 facilitates. Only learnings are promoted &mdash; code is disposable. Experiment briefs stored in <code>docs/spec/prototypes/</code>.</p></div>
   <div class="card dec"><div class="dec-id">0007</div><h3>Advisory Board</h3><p>7 read-only specialist agents review compiled specs before build. Mix of always-on (Architect, Critic, Exploration) and conditional (Security Analyst, UX Strategist, Performance Engineer, Data Strategist). Prompt A orchestrates in 3 phases. Prompt 0 gains Feature mode for individual feature additions.</p></div>
   <div class="card dec"><div class="dec-id">0008</div><h3>Cohesion Review Gate</h3><p>Post-build coherence review via Critic (cohesion mode). Checks diff + neighbors for broken references, dangling imports, naming inconsistencies, incomplete integrations. Gate A5 verified by QA. Applies to standard+ branches. Critic stays read-only &mdash; Orchestrator passes diff context.</p></div>
+  <div class="card dec"><div class="dec-id">0010</div><h3>Task Definition Prompt</h3><p>Prompt T for task exploration and planning. Two modes: Query (conversational Q&amp;A) and Brief (3-agent team produces structured task brief). Fully ephemeral &mdash; no files, no session log, no gates. Task brief is copy-pasted alongside Prompt B in a new session.</p></div>
 </section>
 
 <!-- ══════ HOOKS & FILES ══════ -->
@@ -905,7 +1004,8 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
 <span class="p">│           ├── </span><span class="f">prompt-0-spec-builder.md</span> <span class="n">&mdash; project spec interview</span>
 <span class="p">│           ├── </span><span class="f">prompt-0.5-prototype.md</span> <span class="n">&mdash; rapid prototype session</span>
 <span class="p">│           ├── </span><span class="f">prompt-a-repo-os.md</span> <span class="n">&mdash; initialization prompt</span>
-<span class="p">│           └── </span><span class="f">prompt-b-product-build.md</span> <span class="n">&mdash; development prompt</span>
+<span class="p">│           ├── </span><span class="f">prompt-b-product-build.md</span> <span class="n">&mdash; development prompt</span>
+<span class="p">│           └── </span><span class="f">prompt-t-task-definition.md</span> <span class="n">&mdash; task exploration &amp; planning</span>
 <span class="p">└── </span><span class="d">src/</span> <span class="n">&mdash; your product code</span></div>
 </section>
 
@@ -1282,193 +1382,498 @@ document.querySelectorAll('.g-tab').forEach(tab => {
   });
 });
 
+/* ── Copy to clipboard ── */
+function copyCmd(btn){
+  const code=btn.closest('.cmd-wrap').querySelector('.cmd').textContent;
+  navigator.clipboard.writeText(code).then(()=>{
+    btn.textContent='Copied!';
+    btn.classList.add('copied');
+    setTimeout(()=>{btn.textContent='Copy';btn.classList.remove('copied');},1500);
+  });
+}
+
+/* ── Wrap all static .cmd blocks with copy button ── */
+document.querySelectorAll('.cmd').forEach(cmd=>{
+  if(cmd.closest('.dt-box')||cmd.closest('.cmd-wrap')) return;
+  const wrap=document.createElement('div');
+  wrap.className='cmd-wrap';
+  cmd.parentNode.insertBefore(wrap,cmd);
+  wrap.appendChild(cmd);
+  const btn=document.createElement('button');
+  btn.className='cmd-copy';
+  btn.textContent='Copy';
+  btn.setAttribute('aria-label','Copy command');
+  btn.onclick=function(){copyCmd(this);};
+  wrap.appendChild(btn);
+});
+
+/* ── Glossary terms for inline tooltips ── */
+const TERMS={
+  'Prompt 0':'Guided interview that builds your complete project spec \u2014 product, architecture, design system, data, features, integrations, boundaries.',
+  'Prompt A':'Initializes Repo OS governance. Runs Advisory Board review, verifies agents, gates, and decisions are consistent.',
+  'Prompt B':'Standard development prompt. Enforces plan-before-code, quality gates, session logging, and the full agent workflow.',
+  'Prompt 0.5':'Rapid prototyping prompt for experiments. Lightweight \u2014 only the A4 safety gate applies.',
+  'Prompt T':'Task exploration and planning prompt. Query mode for Q\u0026A, Brief mode for structured task definitions that feed into Prompt B.',
+  'HVST':'Hypothesis \u2192 Validate \u2192 Solve \u2192 Test \u2192 Record. A 5-step debugging protocol that prevents random-fix loops.',
+  'Advisory Board':'7 specialist agents that review your compiled specs before any code is written. All findings are advisory \u2014 you decide what to act on.',
+  'Cohesion review':'Post-build review by the Critic checking your diff for broken references, dangling imports, and naming inconsistencies. Gate A5.',
+  'Quality gates':'Verification checkpoints that must pass before commits (A-gates) or pushes (B-gates). Failures block the action.',
+  'Decision record':'A version-controlled constraint in docs/ai/decisions/. Decisions are laws \u2014 violations block commits.',
+  'Feature brief':'Lightweight spec for individual feature additions, created by Prompt 0 Feature mode. Drives advisory board activation.'
+};
+
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+function term(name){
+  const tip=TERMS[name];
+  if(!tip) return name;
+  return '<span class="dt-term" tabindex="0">'+esc(name)+'<span class="dt-tip">'+esc(tip)+'</span></span>';
+}
+
 /* ── Decision Tree ── */
 const DT = {
   q:'What are you trying to do?',
   opts:[
-    {ico:'&#128640;',lbl:'Start a new project',dsc:'Fresh repo from template',
+    {ico:'\u2795',lbl:'Start a new project',dsc:'Fresh repo from template',
       next:{q:'Have you cloned the repo yet?',opts:[
-        {ico:'&#10060;',lbl:'Not yet',dsc:'Need to clone first',
-          res:{act:'git clone + Prompt 0',title:'Clone, then Build Spec',steps:[
-            'Clone: <code>git clone &lt;URL&gt; && cd &lt;REPO&gt;</code>',
-            'Start Claude Code session',
-            'Paste Prompt 0 starter line to build your project spec',
+        {ico:'\u2717',lbl:'Not yet',dsc:'Need to clone first',
+          res:{act:'git clone + Prompt 0',title:'Clone, then Build Spec',
+            why:'You need a local copy of the repo before anything else. '+term('Prompt 0')+' builds the spec that all agents depend on.',
+            warn:'Don\u2019t skip the spec interview. Every blank field becomes an assumption agents will guess at.',
+            outcome:term('Prompt 0')+' confirms \u201cSpec complete\u201d and files appear in docs/spec/compiled/v1/.',
+            steps:[
+            'Clone your repo using the command below',
+            'Start a Claude Code session in the repo directory',
+            'Paste the '+term('Prompt 0')+' starter to begin the spec interview',
             'Complete the guided interview (product, architecture, design system, data, features, integrations, boundaries)',
-            'When AI confirms "Spec complete", switch to Prompt A to initialize Repo OS',
-            'Then switch to Prompt B for development'
-          ],cmd:'Follow docs/ai/prompts/prompt-0-spec-builder.md.'}},
-        {ico:'&#9989;',lbl:'Yes, already cloned',dsc:'Ready to start',
+            'When AI confirms \u201cSpec complete\u201d, continue to '+term('Prompt A')
+          ],cmds:[
+            {label:'Clone',value:'git clone <URL> && cd <REPO>',eg:'git clone https://github.com/acme/my-app.git && cd my-app'},
+            {label:'Start the spec interview',value:'Follow docs/ai/prompts/prompt-0-spec-builder.md.'}
+          ],goTo:{lbl:'Next: Initialize Repo OS',path:[0,1,1]}}},
+        {ico:'\u2713',lbl:'Yes, already cloned',dsc:'Ready to start',
           next:{q:'Have you built your project spec yet?',opts:[
-            {ico:'&#10060;',lbl:'No',dsc:'Need to define the project first',
-              res:{act:'Run Prompt 0',title:'Build Your Project Spec',steps:[
-                'Start Claude Code session in repo directory',
-                'Paste Prompt 0 starter line',
+            {ico:'\u2717',lbl:'No',dsc:'Need to define the project first',
+              res:{act:'Run Prompt 0',title:'Build Your Project Spec',
+                why:'Agents need a complete spec before any code \u2014 without it, they\u2019ll guess.',
+                warn:'Don\u2019t skip sections. Every blank field becomes an assumption.',
+                outcome:'AI confirms \u201cSpec complete\u201d and files appear in docs/spec/compiled/v1/.',
+                steps:[
+                'Start Claude Code session in the repo directory',
+                'Paste the '+term('Prompt 0')+' starter below',
                 'AI interviews you to fill out every spec file',
-                'Design system defaults are baked in — accept, override, or replace via Figma',
-                'When AI confirms "Spec complete", switch to Prompt A'
-              ],cmd:'Follow docs/ai/prompts/prompt-0-spec-builder.md.'}},
-            {ico:'&#9989;',lbl:'Yes, spec is done',dsc:'Ready to initialize Repo OS',
-              res:{act:'Run Prompt A',title:'Initialize Repo OS',steps:[
-                'Start Claude Code session in repo directory',
-                'Paste Prompt A starter line',
-                'Prompt A reads all files, summarizes state, proposes changes',
-                'Approve when satisfied',
-                'Switch to Prompt B for development'
-              ],cmd:'Follow docs/ai/prompts/prompt-a-repo-os.md.'}}
+                'Design system defaults are baked in \u2014 accept, override, or replace via Figma',
+                'When AI confirms \u201cSpec complete\u201d, continue to '+term('Prompt A')
+              ],cmds:[{label:'Start the spec interview',value:'Follow docs/ai/prompts/prompt-0-spec-builder.md.'}],
+              goTo:{lbl:'Next: Initialize Repo OS',path:[0,1,1]}}},
+            {ico:'\u2713',lbl:'Yes, spec is done',dsc:'Ready to initialize Repo OS',
+              res:{act:'Run Prompt A',title:'Initialize Repo OS',
+                why:term('Prompt A')+' reads all governance files, runs the '+term('Advisory Board')+', and verifies everything is consistent before you start building.',
+                warn:'Don\u2019t skip this step. Without initialization, agents won\u2019t enforce gates or follow decisions.',
+                outcome:'AI confirms \u201cRepo OS ready\u201d. You can now start development with '+term('Prompt B')+'.',
+                steps:[
+                'Start Claude Code session in the repo directory',
+                'Paste the '+term('Prompt A')+' starter below',
+                term('Prompt A')+' reads all files, runs advisory review, summarizes state, proposes changes',
+                'Approve when satisfied'
+              ],cmds:[{label:'Initialize Repo OS',value:'Follow docs/ai/prompts/prompt-a-repo-os.md.'}],
+              goTo:{lbl:'Next: Start Development',path:[1,0]}}}
           ]}}
       ]}},
-    {ico:'&#128187;',lbl:'Normal dev work',dsc:'Features, fixes, daily coding',
-      next:{q:'Has Prompt A been run on this project?',opts:[
-        {ico:'&#9989;',lbl:'Yes',dsc:'Repo OS is initialized',
-          res:{act:'Run Prompt B',title:'Start Development Session',steps:[
+    {ico:'\u276F',lbl:'Normal dev work',dsc:'Features, fixes, daily coding',
+      next:{q:'Has '+term('Prompt A')+' been run on this project?',opts:[
+        {ico:'\u2713',lbl:'Yes',dsc:'Repo OS is initialized',
+          res:{act:'Run Prompt B',title:'Start Development Session',
+            why:term('Prompt B')+' activates the full agent workflow: plan \u2192 build \u2192 verify \u2192 commit. Every session follows this loop.',
+            outcome:'Session ends with clean commits, all gates passed, session log updated, and the system asks about a PR to main.',
+            steps:[
             'Start Claude Code session',
-            'Paste Prompt B starter line',
+            'Paste the '+term('Prompt B')+' starter below',
             'Describe what to build or fix',
             'Orchestrator proposes plan, you approve',
-            'Builder implements, Critic checks cohesion, QA verifies gates',
-            'Session ends: commits clean, gates pass, log updated, ask operator about PR to main'
-          ],cmd:'Follow docs/ai/prompts/prompt-b-product-build.md.',nxt:{href:'#workflow',lbl:'See the Daily Workflow'}}},
-        {ico:'&#10060;',lbl:'No / Not sure',dsc:'',
-          res:{act:'Prompt A first, then B',title:'Initialize Then Develop',steps:[
-            'Run Prompt A to initialize Repo OS (one time)',
-            'Wait for "Repo OS ready"',
-            'Switch to Prompt B for development',
-          ],cmd:'Follow docs/ai/prompts/prompt-a-repo-os.md.'}}
+            'Builder implements, Critic checks cohesion, QA verifies '+term('Quality gates'),
+            'Session ends: commits clean, gates pass, log updated, system asks about PR to main'
+          ],cmds:[{label:'Start development session',value:'Follow docs/ai/prompts/prompt-b-product-build.md.'}],
+          nxt:{href:'#workflow',lbl:'See the Daily Workflow'}}},
+        {ico:'\u2717',lbl:'No / Not sure',dsc:'Need to initialize first',
+          res:{act:'Prompt A first, then B',title:'Initialize Then Develop',
+            why:'Repo OS needs to be initialized once per project so agents know the governance rules.',
+            outcome:'After '+term('Prompt A')+' confirms \u201cRepo OS ready\u201d, switch to '+term('Prompt B')+' for development.',
+            steps:[
+            'Start Claude Code session in the repo directory',
+            'Paste the '+term('Prompt A')+' starter below to initialize',
+            'Wait for \u201cRepo OS ready\u201d confirmation'
+          ],cmds:[
+            {label:'Initialize Repo OS',value:'Follow docs/ai/prompts/prompt-a-repo-os.md.'},
+            {label:'Then start development',value:'Follow docs/ai/prompts/prompt-b-product-build.md.'}
+          ],goTo:{lbl:'Next: Start Development',path:[1,0]}}}
       ]}},
-    {ico:'&#128269;',lbl:'Add a feature to existing project',dsc:'New feature with advisory review',
-      res:{act:'Prompt 0 (Feature) → Prompt A',title:'Feature Brief + Advisory Review',steps:[
-        'Start Claude Code session and run Prompt 0',
-        'Tell the AI you want to add a feature',
-        'Fill out the focused feature brief',
-        'When AI confirms "Feature brief complete", switch to Prompt A',
-        'Advisory Board reviews the brief, you review findings',
-        'Proceed to Prompt B for implementation'
-      ],cmd:'Follow docs/ai/prompts/prompt-0-spec-builder.md.'}},
-    {ico:'&#128161;',lbl:'Prototype / experiment',dsc:'Test an idea, spike architecture, explore a feature',
+    {ico:'\u002B',lbl:'Add a feature to existing project',dsc:'New feature with advisory review',
+      res:{act:'Prompt 0 (Feature) \u2192 Prompt A',title:'Feature Brief + Advisory Review',
+        why:term('Prompt 0')+' Feature mode creates a lightweight '+term('Feature brief')+' instead of the full 7-page interview. The '+term('Advisory Board')+' then reviews it for gaps before you build.',
+        warn:'Don\u2019t skip the advisory review. Even small features can have architectural implications.',
+        outcome:term('Feature brief')+' saved to docs/spec/compiled/{active}/features/. Advisory review complete. Ready for '+term('Prompt B')+'.',
+        steps:[
+        'Start Claude Code session and paste the '+term('Prompt 0')+' starter below',
+        'Tell the AI you want to add a feature \u2014 it enters Feature mode automatically',
+        'Fill out the focused '+term('Feature brief'),
+        'When AI confirms \u201cFeature brief complete\u201d, paste the '+term('Prompt A')+' starter',
+        term('Advisory Board')+' reviews the brief, you review findings'
+      ],cmds:[
+        {label:'Create feature brief',value:'Follow docs/ai/prompts/prompt-0-spec-builder.md.'},
+        {label:'Then run advisory review',value:'Follow docs/ai/prompts/prompt-a-repo-os.md.'}
+      ],goTo:{lbl:'Next: Start Development',path:[1,0]},nxt:{href:'#spec',lbl:'See Feature Briefs'}}},
+    {ico:'\uD83D\uDD0D',lbl:'Explore / investigate',dsc:'Feasibility check, task planning, quick Q\u0026A',
+      next:{q:'Do you need a structured task brief for a build session?',opts:[
+        {ico:'\u2713',lbl:'Yes, define a task',dsc:'Produce a brief to paste into Prompt B',
+          res:{act:'Run Prompt T (Brief)',title:'Task Definition Session',
+            why:term('Prompt T')+' Brief mode dispatches Architect, Exploration, and Critic to produce a structured task brief you can copy-paste into a '+term('Prompt B')+' session.',
+            outcome:'Copy-pastable task brief displayed in terminal. Paste alongside '+term('Prompt B')+' to start building.',
+            steps:[
+            'Start Claude Code session',
+            'Paste the '+term('Prompt T')+' starter below',
+            'Describe what you want to build or change',
+            '3-agent team (Architect, Exploration, Critic) analyzes feasibility and approach',
+            'Review the draft brief \u2014 approve, revise, or narrow',
+            'Copy the final brief and paste it alongside '+term('Prompt B')+' in a new session'
+          ],cmds:[{label:'Start task definition',value:'Follow docs/ai/prompts/prompt-t-task-definition.md.'}],
+          goTo:{lbl:'Next: Start Development',path:[1,0]}}},
+        {ico:'\u2717',lbl:'No, just exploring',dsc:'Quick question or feasibility check',
+          res:{act:'Run Prompt T (Query)',title:'Quick Exploration Session',
+            why:term('Prompt T')+' Query mode is a lightweight conversation grounded in your specs and codebase. No agents dispatched, no artifacts produced.',
+            outcome:'Your question is answered. If it evolves into a task, the system offers to switch to Brief mode.',
+            steps:[
+            'Start Claude Code session',
+            'Paste the '+term('Prompt T')+' starter below',
+            'Ask your question \u2014 the system answers using specs and codebase context',
+            'If the conversation naturally evolves toward a task, switch to Brief mode when offered'
+          ],cmds:[{label:'Start exploration',value:'Follow docs/ai/prompts/prompt-t-task-definition.md.'}]}}
+      ]}},
+    {ico:'\u26A1',lbl:'Prototype / experiment',dsc:'Test an idea, spike architecture, explore a feature',
       next:{q:'How complex is the exploration?',opts:[
-        {ico:'&#9889;',lbl:'Quick test',dsc:'Single question, under an hour',
-          res:{act:'Run Prompt 0.5 (Napkin)',title:'Quick Napkin Test',steps:[
+        {ico:'\u2192',lbl:'Quick test',dsc:'Single question, under an hour',
+          res:{act:'Run Prompt 0.5 (Napkin)',title:'Quick Napkin Test',
+            why:'Napkin tests are the fastest path \u2014 no brief, no spec, no plan. Just test and conclude.',
+            outcome:'You state your conclusion verbally. No artifact required.',
+            steps:[
             'Start Claude Code session on any branch (or create an experiment/* branch)',
-            'Paste Prompt 0.5 starter line',
+            'Paste the '+term('Prompt 0.5')+' starter below',
             'Describe what you want to test',
             'Build and test immediately \u2014 no brief, no spec, no plan required',
             'When done, state your conclusion verbally'
-          ],cmd:'Follow docs/ai/prompts/prompt-0.5-prototype.md.',nxt:{href:'#prototyping',lbl:'See Prototyping details'}}},
-        {ico:'&#128296;',lbl:'Focused spike',dsc:'Validate a specific hypothesis, single session',
-          res:{act:'Run Prompt 0.5 (Spike)',title:'Architecture or Feature Spike',steps:[
+          ],cmds:[{label:'Start napkin test',value:'Follow docs/ai/prompts/prompt-0.5-prototype.md.'}],
+          nxt:{href:'#prototyping',lbl:'See Prototyping details'}}},
+        {ico:'\u2692',lbl:'Focused spike',dsc:'Validate a specific hypothesis, single session',
+          res:{act:'Run Prompt 0.5 (Spike)',title:'Architecture or Feature Spike',
+            why:'Spikes validate a specific hypothesis with minimal overhead. Only the A4 safety gate applies \u2014 no review chain.',
+            outcome:'Experiment brief captured. Choose disposition: discard, promote to feature/*, or pivot.',
+            steps:[
             'Start Claude Code session',
-            'Paste Prompt 0.5 starter line',
+            'Paste the '+term('Prompt 0.5')+' starter below',
             'System creates an experiment/* branch and helps fill an experiment brief',
             'Build directly \u2014 A4 safety gate only, no review chain',
             'When done: capture learnings, choose disposition (discard / promote / pivot)'
-          ],cmd:'Follow docs/ai/prompts/prompt-0.5-prototype.md.',nxt:{href:'#prototyping',lbl:'See Prototyping details'}}},
-        {ico:'&#128218;',lbl:'Multi-session PoC',dsc:'Larger exploration across multiple sessions',
-          res:{act:'Run Prompt 0.5 (Proof of Concept)',title:'Proof of Concept Exploration',steps:[
+          ],cmds:[{label:'Start spike',value:'Follow docs/ai/prompts/prompt-0.5-prototype.md.'}],
+          nxt:{href:'#prototyping',lbl:'See Prototyping details'}}},
+        {ico:'\u2630',lbl:'Multi-session PoC',dsc:'Larger exploration across multiple sessions',
+          res:{act:'Run Prompt 0.5 (Proof of Concept)',title:'Proof of Concept Exploration',
+            why:'PoCs span multiple sessions. The experiment brief provides continuity between sessions so you don\u2019t lose context.',
+            outcome:'Brief + mini-spec notes captured. Recommend spec updates or '+term('Decision record')+'s if validated.',
+            steps:[
             'Start Claude Code session',
-            'Paste Prompt 0.5 starter line',
+            'Paste the '+term('Prompt 0.5')+' starter below',
             'System creates an experiment/* branch, brief, and mini-spec notes',
             'Build across sessions \u2014 brief provides continuity',
-            'When done: capture learnings, recommend spec updates or decision records if validated'
-          ],cmd:'Follow docs/ai/prompts/prompt-0.5-prototype.md.',nxt:{href:'#prototyping',lbl:'See Prototyping details'}}}
+            'When done: capture learnings, recommend spec updates or '+term('Decision record')+'s if validated'
+          ],cmds:[{label:'Start proof of concept',value:'Follow docs/ai/prompts/prompt-0.5-prototype.md.'}],
+          nxt:{href:'#prototyping',lbl:'See Prototyping details'}}}
       ]}},
-    {ico:'&#128260;',lbl:'Template sync happened',dsc:'Governance auto-updated from template',
+    {ico:'\u21BB',lbl:'Template sync happened',dsc:'Governance auto-updated from template',
       next:{q:'Did the sync update spec templates (docs/spec/_templates/)?',opts:[
-        {ico:'&#9989;',lbl:'Yes, templates changed',dsc:'New fields or files in spec templates',
-          res:{act:'Re-run Prompt 0',title:'Update Your Specs',steps:[
-            'Check the merged sync PR to see what template fields changed',
-            'Start Claude Code session and run Prompt 0',
-            'Prompt 0 enters <strong>update mode</strong>: copies your latest compiled specs into a new version',
-            'Walk through new/changed template fields — keep existing values or revise',
-            'New version saved (e.g., v2) — previous version preserved'
-          ],cmd:'Follow docs/ai/prompts/prompt-0-spec-builder.md.',nxt:{href:'#template-sync',lbl:'See Template Sync details'}}},
-        {ico:'&#10060;',lbl:'No, just governance files',dsc:'Agents, gates, workflow, prompts only',
-          res:{act:'Nothing to do',title:'Already Up to Date',steps:[
+        {ico:'\u2713',lbl:'Yes, templates changed',dsc:'New fields or files in spec templates',
+          res:{act:'Re-run Prompt 0',title:'Update Your Specs',
+            why:'New template fields mean your compiled specs may be missing information that agents now expect.',
+            warn:'Don\u2019t ignore template changes. Missing fields create gaps in agent understanding.',
+            outcome:'New spec version saved (e.g., v2). Previous version preserved. manifest.json updated.',
+            steps:[
+            'Check the merged sync PR on GitHub to see what template fields changed',
+            'Start Claude Code session and paste the '+term('Prompt 0')+' starter below',
+            term('Prompt 0')+' enters <strong>update mode</strong>: copies your latest compiled specs into a new version',
+            'Walk through new/changed template fields \u2014 keep existing values or revise',
+            'New version saved (e.g., v2) \u2014 previous version preserved'
+          ],cmds:[{label:'Update specs',value:'Follow docs/ai/prompts/prompt-0-spec-builder.md.'}],
+          goTo:{lbl:'Next: Re-initialize Repo OS',path:[0,1,1]},nxt:{href:'#template-sync',lbl:'See Template Sync details'}}},
+        {ico:'\u2717',lbl:'No, just governance files',dsc:'Agents, gates, workflow, prompts only',
+          res:{act:'Nothing to do',title:'Already Up to Date',
+            why:'Governance files (agents, gates, prompts) are automatically updated by the sync. Your compiled specs are unchanged.',
+            outcome:'Continue development as normal. Agents will use the updated governance files automatically.',
+            steps:[
             'Governance files (agents, gates, prompts) were updated automatically',
             'Your compiled specs are unchanged',
-            'Continue development with Prompt B as normal'
-          ],cmd:null,nxt:{href:'#template-sync',lbl:'See Template Sync details'}}}
+            'Continue development as normal'
+          ],goTo:{lbl:'Next: Start Development',path:[1,0]},nxt:{href:'#template-sync',lbl:'See Template Sync details'}}}
       ]}},
-    {ico:'&#9881;&#65039;',lbl:'Change Repo OS config',dsc:'Modify agents, gates, decisions, hooks',
-      res:{act:'Prompt A + New Decision',title:'Re-initialize and Document',steps:[
+    {ico:'\u2699',lbl:'Change Repo OS config',dsc:'Modify agents, gates, decisions, hooks',
+      res:{act:'Prompt A + New Decision',title:'Re-initialize and Document',
+        why:'Any change to Repo OS governance must be documented as a '+term('Decision record')+' and re-initialized so agents pick up the changes.',
+        warn:'Don\u2019t skip the decision record. Undocumented changes cause silent drift.',
+        outcome:term('Prompt A')+' confirms consistency. New decision record is committed.',
+        steps:[
         'Make your changes to the relevant files',
-        'Run Prompt A to re-initialize',
-        'Create a new decision record in docs/ai/decisions/ (next sequential number)',
-        'Prompt A verifies consistency across all Repo OS files'
-      ],cmd:'Follow docs/ai/prompts/prompt-a-repo-os.md.',nxt:{href:'#decisions',lbl:'See Decision Records'}}},
-    {ico:'&#9888;&#65039;',lbl:'Something is wrong',dsc:'Agent drift, bugs, gate issues, conflicts',
+        'Create a new '+term('Decision record')+' in docs/ai/decisions/ (next sequential number)',
+        'Paste the '+term('Prompt A')+' starter below and choose <strong>Re-initialize</strong> mode (skips advisory review)'
+      ],cmds:[{label:'Re-initialize Repo OS',value:'Follow docs/ai/prompts/prompt-a-repo-os.md.'}],
+      goTo:{lbl:'Next: Start Development',path:[1,0]},nxt:{href:'#decisions',lbl:'See Decision Records'}}},
+    {ico:'\u21C4',lbl:'Returning after a break',dsc:'Haven\u2019t touched this in a while',
+      res:{act:'Re-orient, then Prompt B',title:'Get Back Up to Speed',
+        why:'After time away, you need to re-orient on where things left off. The session log and git status give you full context.',
+        outcome:'You\u2019re caught up on the state of the project and ready to resume work.',
+        steps:[
+        'Read the last session\u2019s follow-ups in the session log',
+        'Check for any open issues in the known-issues log',
+        'Run the git commands below to see recent changes',
+        'If the project spec or Repo OS config changed while you were away, run '+term('Prompt A')+' first',
+        'Otherwise, start a development session with '+term('Prompt B')
+      ],cmds:[
+        {label:'Check recent changes',value:'git status && git log --oneline -10'},
+        {label:'Start development session',value:'Follow docs/ai/prompts/prompt-b-product-build.md.'}
+      ],goTo:{lbl:'Next: Start Development',path:[1,0]},nxt:{href:'#session',lbl:'See Session Hygiene'}}},
+    {ico:'\u2B9E',lbl:'Onboarding a teammate',dsc:'Someone new joining the project',
+      res:{act:'Explainer + Prompt B',title:'Onboard a New Team Member',
+        why:'New team members need to understand the governance model before they start coding. This explainer is the reference.',
+        outcome:'Teammate understands the workflow and can start a development session independently.',
+        steps:[
+        'Have them read this explainer (repo-os-explainer.html) \u2014 especially TL;DR, Setup, and Daily Workflow',
+        'Walk through the compiled spec in docs/spec/compiled/ together',
+        'Review active decisions in docs/ai/decisions/',
+        'Have them paste the '+term('Prompt B')+' starter below in their own Claude Code session',
+        'For parallel work: each person uses a separate branch and session (see Multi-Agent Teams)'
+      ],cmds:[{label:'Their first development session',value:'Follow docs/ai/prompts/prompt-b-product-build.md.'}],
+      nxt:{href:'#multi-team',lbl:'See Multi-Agent Teams'}}},
+    {ico:'\u270E',lbl:'Update specs mid-build',dsc:'Requirements changed, need to revise specs',
+      res:{act:'Finish current task \u2192 Prompt 0 \u2192 Prompt A',title:'Revise Specs Safely',
+        why:'Changing specs mid-session creates inconsistency. Finish your current unit of work first, then update the spec and re-initialize.',
+        warn:'Don\u2019t edit compiled spec files directly. Always go through '+term('Prompt 0')+' to maintain versioning.',
+        outcome:'New spec version created. '+term('Prompt A')+' re-initialized. Ready to resume building.',
+        steps:[
+        'Finish and commit your current task (or stash changes)',
+        'End the current session cleanly',
+        'Start a new session and paste the '+term('Prompt 0')+' starter below to update the spec',
+        term('Prompt 0')+' enters update mode \u2014 revise the sections that changed',
+        'When done, paste the '+term('Prompt A')+' starter and choose <strong>Re-initialize</strong> mode (skips advisory review)'
+      ],cmds:[
+        {label:'Update the spec',value:'Follow docs/ai/prompts/prompt-0-spec-builder.md.'},
+        {label:'Then re-initialize',value:'Follow docs/ai/prompts/prompt-a-repo-os.md.'}
+      ],goTo:{lbl:'Next: Start Development',path:[1,0]},nxt:{href:'#spec',lbl:'See Spec Builder'}}},
+    {ico:'\u26A0',lbl:'Something is wrong',dsc:'Agent drift, bugs, gate issues, conflicts',
       next:{q:'What kind of problem?',opts:[
-        {ico:'&#129302;',lbl:'Agent acting weird',dsc:'Skipping gates, making decisions it shouldn\'t',
-          res:{act:'STOP → Re-run Prompt A',title:'Reset Agents',steps:[
-            'Stop the current session immediately',
-            'Start new session with Prompt A',
+        {ico:'\u2716',lbl:'Agent acting weird',dsc:'Skipping gates, making decisions it shouldn\u2019t',
+          res:{act:'STOP \u2192 Re-run Prompt A',title:'Reset Agents',
+            why:'Agent drift compounds. The longer you continue, the harder the reset. A fresh '+term('Prompt A')+' session restores correct behavior.',
+            warn:'Do NOT try to fix drift within the current session. Close it and start fresh.',
+            steps:[
+            'Close the current Claude Code session (type /exit or close the terminal)',
+            'Start a new session and paste the '+term('Prompt A')+' starter below \u2014 choose <strong>Re-initialize</strong> mode',
             'Check agent definitions in .claude/agents/ for unexpected changes',
             'Verify decisions in docs/ai/decisions/'
-          ],cmd:'Follow docs/ai/prompts/prompt-a-repo-os.md.',nxt:{href:'#agents',lbl:'Review Agent Roles'}}},
-        {ico:'&#128027;',lbl:'Code bug / instability',dsc:'Tests failing, build broken',
-          res:{act:'Prompt B (HVST activates)',title:'Use HVST Protocol',steps:[
-            'Continue with Prompt B — HVST activates automatically',
-            'Hypothesis: form testable theory about what\'s wrong',
-            'Validate: run targeted tests/checks',
-            'Solve: apply minimal targeted fix',
-            'Test: verify fix',
-            'Record: log findings in known-issues.md'
-          ],cmd:'Follow docs/ai/prompts/prompt-b-product-build.md.',nxt:{href:'#workflow',lbl:'See the Daily Workflow'}}},
-        {ico:'&#128679;',lbl:'Gate failed, stuck',dsc:'Can\'t meet a requirement',
-          res:{act:'Log it + Follow-up',title:'Document the Gap',steps:[
-            'Document the unmet gate in session log',
+          ],cmds:[{label:'Reset agents',value:'Follow docs/ai/prompts/prompt-a-repo-os.md.'}],
+          goTo:{lbl:'Next: Start Development',path:[1,0]},nxt:{href:'#agents',lbl:'Review Agent Roles'}}},
+        {ico:'\u2261',lbl:'Code bug / instability',dsc:'Tests failing, build broken',
+          res:{act:'Prompt B (HVST activates)',title:'Use HVST Protocol',
+            why:'The '+term('HVST')+' protocol prevents random-fix loops by enforcing a structured debugging approach: hypothesize, validate, solve, test, record.',
+            outcome:'Bug fixed and documented in docs/ai/logs/known-issues.md.',
+            steps:[
+            'Continue with '+term('Prompt B')+' \u2014 '+term('HVST')+' activates automatically when failures are detected',
+            'Hypothesis: form a testable theory about what\u2019s wrong',
+            'Validate: run targeted tests/checks to confirm or reject',
+            'Solve: apply a minimal, targeted fix',
+            'Test: verify the fix works',
+            'Record: log findings in docs/ai/logs/known-issues.md'
+          ],cmds:[{label:'Start debugging session',value:'Follow docs/ai/prompts/prompt-b-product-build.md.'}],
+          nxt:{href:'#workflow',lbl:'See the Daily Workflow'}}},
+        {ico:'\u25A1',lbl:'Gate failed, stuck',dsc:'Can\u2019t meet a requirement',
+          res:{act:'Log it + Follow-up',title:'Document the Gap',
+            why:'Silent skipping causes drift. Documenting the gap creates accountability and a path to resolution.',
+            warn:'Do NOT silently skip. If overriding, you must document why.',
+            outcome:'Gap is documented. Follow-up task exists for resolution.',
+            steps:[
+            'Document the unmet gate in the session log with the specific gate ID (e.g., A3, B2)',
+            'Note what was tried and why it failed',
             'Create a follow-up task for resolution',
-            'Do NOT silently skip — if overriding, document why',
-            'Conscious override beats silent drift'
-          ],cmd:null,nxt:{href:'#gates',lbl:'Review Quality Gates'}}},
-        {ico:'&#128196;',lbl:'Decision conflict',dsc:'Two decisions contradict',
-          res:{act:'New Decision Record',title:'Resolve the Conflict',steps:[
+            'If overriding: document the reason \u2014 conscious override beats silent drift'
+          ],cmds:[{label:'Session log override template',value:'# Add to session log under Verification:\n# A3 \u2717 \u2014 [reason] \u2014 Override: [justification]',eg:'A3 \u2717 \u2014 No tests exist yet \u2014 Override: greenfield project, tests deferred to Session 4'}],
+          nxt:{href:'#gates',lbl:'Review Quality Gates'}}},
+        {ico:'\u2194',lbl:'Decision conflict',dsc:'Two decisions contradict',
+          res:{act:'New Decision Record',title:'Resolve the Conflict',
+            why:'Conflicting decisions create ambiguity for agents. A new decision explicitly resolves the conflict and supersedes the old ones.',
+            warn:'Do NOT silently ignore either decision. Both remain active until a new one supersedes them.',
+            outcome:'New '+term('Decision record')+' committed. '+term('Prompt A')+' re-initialized with resolved conflict.',
+            steps:[
             'Do NOT silently ignore either decision',
-            'Create new decision in docs/ai/decisions/ (next number)',
-            'Reference which decisions it supersedes',
-            'Run Prompt A to re-initialize'
-          ],cmd:null,nxt:{href:'#decisions',lbl:'See Decision Records'}}}
+            'Create a new '+term('Decision record')+' at docs/ai/decisions/ (use the next sequential number, e.g., 0009-title.md)',
+            'Reference which decisions it supersedes (e.g., \u201cSupersedes 0003, 0005\u201d)',
+            'Paste the '+term('Prompt A')+' starter below and choose <strong>Re-initialize</strong> mode'
+          ],cmds:[{label:'Re-initialize after resolving conflict',value:'Follow docs/ai/prompts/prompt-a-repo-os.md.'}],
+          goTo:{lbl:'Next: Start Development',path:[1,0]},nxt:{href:'#decisions',lbl:'See Decision Records'}}}
       ]}}
   ]
 };
 
-let dtHist=[], dtCur=DT;
-const dtBox = document.getElementById('dtBox');
+/* ── Alternatives catalog ── */
+const DT_ALTS=[
+  {id:'spec', ico:'\uD83D\uDCCB',lbl:'Build Spec',   dsc:'Prompt 0 \u2014 guided spec interview',  path:[0,1,0]},
+  {id:'init', ico:'\u2699',       lbl:'Initialize',    dsc:'Prompt A \u2014 set up Repo OS',         path:[0,1,1]},
+  {id:'dev',  ico:'\u25B6',       lbl:'Dev Session',   dsc:'Prompt B \u2014 build, verify, commit',  path:[1,0]},
+  {id:'feat', ico:'\u002B',       lbl:'Add Feature',   dsc:'Feature brief + advisory review',        path:[2]},
+  {id:'task', ico:'\uD83D\uDD0D',lbl:'Task Brief',    dsc:'Prompt T \u2014 explore or define a task',path:[3]},
+  {id:'proto',ico:'\u26A1',       lbl:'Prototype',     dsc:'Prompt 0.5 \u2014 spike or experiment',  path:[4]}
+];
+function renderAlts(act){
+  const a=act.toLowerCase(),ex=[];
+  if(a.includes('prompt 0')&&!a.includes('0.5')) ex.push('spec');
+  if(a.includes('prompt a')) ex.push('init');
+  if(a.includes('prompt b')) ex.push('dev');
+  if(a.includes('prompt t')) ex.push('task');
+  if(a.includes('prompt 0.5')||a.includes('napkin')||a.includes('spike')||a.includes('proof of concept')) ex.push('proto');
+  if(a.includes('feature')) ex.push('feat');
+  const tiles=DT_ALTS.filter(t=>!ex.includes(t.id));
+  if(!tiles.length) return '';
+  return '<div class="dt-alts-hdr">Alternatives</div><div class="dt-alts">'+
+    tiles.map(t=>'<button class="dt-alt" onclick="dtGoto(['+t.path.join(',')+'])" aria-label="'+t.lbl+'">'+
+      '<span class="ico" aria-hidden="true">'+t.ico+'</span>'+
+      '<div><div class="lbl">'+t.lbl+'</div><div class="dsc">'+t.dsc+'</div></div></button>').join('')+
+    '</div>';
+}
 
-function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+/* ── State ── */
+let dtHist=[], dtCur=DT, dtPickedLabels=[];
+const dtBox=document.getElementById('dtBox');
 
+/* ── Breadcrumbs ── */
+function renderCrumbs(){
+  if(!dtPickedLabels.length) return '';
+  let html='<div class="dt-crumbs"><button class="dt-crumb" onclick="dtJump(0)">Start</button>';
+  dtPickedLabels.forEach((lbl,i)=>{
+    html+='<span class="dt-crumb-sep">\u203A</span>';
+    if(i<dtPickedLabels.length-1){
+      html+='<button class="dt-crumb" onclick="dtJump('+(i+1)+')">'+lbl+'</button>';
+    } else {
+      html+='<span class="dt-crumb-cur">'+lbl+'</span>';
+    }
+  });
+  html+='</div>';
+  return html;
+}
+
+/* ── Render ── */
 function renderDT(){
+  const crumbs=renderCrumbs();
   if(dtCur.res){
     const r=dtCur.res;
     const steps=r.steps.map(s=>'<li>'+s+'</li>').join('');
-    const cmd=r.cmd?'<div class="cmd" style="margin-top:.5rem">'+esc(r.cmd)+'</div>':'';
-    const nxt=r.nxt?`<a href="${r.nxt.href}" class="dt-next">${r.nxt.lbl} &#8594;</a>`:'';
-    dtBox.innerHTML=`<div class="dt-res">
-      <div class="act">${r.act}</div>
-      <h3>${r.title}</h3>
-      <ol>${steps}</ol>${cmd}
-      <div class="dt-actions">${nxt}<button class="dt-back" onclick="dtBack()">&#8592; Start over</button></div>
-    </div>`;
+    let cmdsHtml='';
+    if(r.cmds&&r.cmds.length){
+      cmdsHtml='<div class="dt-cmds">';
+      r.cmds.forEach(c=>{
+        cmdsHtml+=(c.label?'<div class="dt-cmd-label">'+c.label+'</div>':'')+'<div class="cmd-wrap"><div class="cmd">'+esc(c.value)+'</div><button class="cmd-copy" onclick="copyCmd(this)" aria-label="Copy command">Copy</button></div>'+(c.eg?'<div class="dt-cmd-eg">e.g. <code>'+esc(c.eg)+'</code></div>':'');
+      });
+      cmdsHtml+='</div>';
+    }
+    const why=r.why?'<div class="dt-why">'+r.why+'</div>':'';
+    const warn=r.warn?'<div class="dt-warn"><strong>Watch out:</strong> '+r.warn+'</div>':'';
+    const outcome=r.outcome?'<div class="dt-outcome"><strong>You\u2019ll know it worked when:</strong> '+r.outcome+'</div>':'';
+    const goTo=r.goTo?'<button class="dt-goto" onclick="dtGoto(['+r.goTo.path.join(',')+'])">'+r.goTo.lbl+' \u2192</button>':'';
+    const nxt=r.nxt?'<a href="'+r.nxt.href+'" class="dt-next">'+r.nxt.lbl+' \u2192</a>':'';
+    const alts=renderAlts(r.act);
+    dtBox.innerHTML=crumbs+'<div class="dt-res"><div class="act">'+r.act+'</div><h3>'+r.title+'</h3>'+why+'<ol>'+steps+'</ol>'+cmdsHtml+warn+outcome+'<div class="dt-actions">'+goTo+nxt+'<button class="dt-back" onclick="dtJump(0)">\u2190 Start over</button></div>'+alts+'</div>';
+    updateHash();
     return;
   }
-  const opts=dtCur.opts.map((o,i)=>`<div class="dt-o" onclick="dtPick(${i})">
-    <span class="ico">${o.ico}</span>
-    <div><div class="lbl">${o.lbl}</div>${o.dsc?'<div class="dsc">'+o.dsc+'</div>':''}</div>
-  </div>`).join('');
-  dtBox.innerHTML=`<div class="dt-q">${dtCur.q}</div><div class="dt-opts">${opts}</div>
-    ${dtHist.length?'<div style="text-align:center"><button class="dt-back" onclick="dtBack()">&#8592; Back</button></div>':''}`;
+  const opts=dtCur.opts.map((o,i)=>'<div class="dt-o" tabindex="0" role="button" onclick="dtPick('+i+')" onkeydown="dtKey(event,'+i+')"><span class="ico" aria-hidden="true">'+o.ico+'</span><div><div class="lbl">'+o.lbl+'</div>'+(o.dsc?'<div class="dsc">'+o.dsc+'</div>':'')+'</div></div>').join('');
+  dtBox.innerHTML=crumbs+'<div class="dt-q">'+dtCur.q+'</div><div class="dt-opts">'+opts+'</div>'+(dtHist.length?'<div style="text-align:center;margin-top:.6rem"><button class="dt-back" onclick="dtBack()">\u2190 Back</button></div>':'');
+  updateHash();
+}
+
+/* ── Navigation ── */
+function dtTransition(fn){
+  dtBox.classList.add('fading');
+  setTimeout(()=>{fn();renderDT();dtBox.classList.remove('fading');},150);
 }
 
 function dtPick(i){
-  const o=dtCur.opts[i];
-  dtHist.push(dtCur);
-  dtCur=o.res?{res:o.res}:o.next;
-  renderDT();
+  dtTransition(()=>{
+    const o=dtCur.opts[i];
+    dtHist.push(dtCur);
+    dtPickedLabels.push(o.lbl);
+    dtCur=o.res?{res:o.res}:o.next;
+  });
 }
+
 function dtBack(){
-  dtCur=dtHist.length?dtHist.pop():DT;
-  dtHist=dtHist.length?dtHist:[];
-  renderDT();
+  dtTransition(()=>{
+    dtCur=dtHist.length?dtHist.pop():DT;
+    dtPickedLabels.pop();
+  });
 }
+
+function dtJump(level){
+  dtTransition(()=>{
+    if(level===0){dtCur=DT;dtHist=[];dtPickedLabels=[];return;}
+    while(dtHist.length>level){dtHist.pop();dtPickedLabels.pop();}
+    dtCur=dtHist.pop();
+    dtPickedLabels.pop();
+  });
+}
+
+function dtGoto(path){
+  dtTransition(()=>{
+    dtHist=[];dtPickedLabels=[];dtCur=DT;
+    for(const idx of path){
+      if(!dtCur.opts||!dtCur.opts[idx]) return;
+      const o=dtCur.opts[idx];
+      dtHist.push(dtCur);
+      dtPickedLabels.push(o.lbl);
+      dtCur=o.res?{res:o.res}:o.next;
+      if(!dtCur) return;
+    }
+  });
+}
+
+/* ── Keyboard ── */
+function dtKey(e,i){if(e.key==='Enter'||e.key===' '){e.preventDefault();dtPick(i);}}
+
+/* ── URL hash state ── */
+function updateHash(){
+  if(!dtPickedLabels.length){if(location.hash.startsWith('#nav=')){history.replaceState(null,'','#navigator');}return;}
+  const indices=[];
+  for(let h=0;h<dtPickedLabels.length;h++){
+    const src=h===0?DT:dtHist[h];
+    if(src&&src.opts){
+      const idx=src.opts.findIndex(o=>o.lbl===dtPickedLabels[h]);
+      if(idx>=0) indices.push(idx);
+    }
+  }
+  if(indices.length) history.replaceState(null,'','#nav='+indices.join('.'));
+}
+
+function restoreFromHash(){
+  const h=location.hash;
+  if(!h.startsWith('#nav=')) return;
+  const parts=h.slice(5).split('.').map(Number);
+  if(parts.some(isNaN)) return;
+  let node=DT;
+  for(const idx of parts){
+    if(!node.opts||!node.opts[idx]) return;
+    const o=node.opts[idx];
+    dtHist.push(node);
+    dtPickedLabels.push(o.lbl);
+    node=o.res?{res:o.res}:o.next;
+    if(!node) return;
+  }
+  dtCur=node;
+}
+
+restoreFromHash();
 renderDT();
 </script>
 </body>
