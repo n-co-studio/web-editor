@@ -5,7 +5,7 @@ Accepted
 
 ## Decision
 - Explicit authority model: operator vs agent (see AI.md)
-- Prompt system: Prompt 0 (spec), Prompt A (Repo OS init), Prompt B (product build)
+- Prompt system: Prompt 0 (spec), Prompt A (Repo OS init), Prompt B (product build). Extended by Decision 0006 (Prompt 0.5 — prototyping) and Decision 0010 (Prompt T — task definition)
 - Mandatory verification gates before commits
 - Session-based work with high-signal logging
 - GitHub template repository as source of truth

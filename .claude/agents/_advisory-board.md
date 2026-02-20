@@ -8,6 +8,8 @@ Shared context for all advisory board specialists. Read this before producing yo
 
 Review compiled specs or feature briefs before build begins. Identify gaps, risks, contradictions, and opportunities. All findings are advisory — the operator decides what to act on.
 
+**Also used by Prompt T (Brief mode):** Architect, Exploration, and Critic are dispatched for task-scoped analysis (feasibility, alternatives, risks). Same agents and brief format, lighter scope — see `docs/ai/prompts/prompt-t-task-definition.md`.
+
 ---
 
 ## Review Tiers
