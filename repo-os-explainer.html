@@ -577,7 +577,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
 <section id="advisory">
   <div class="sec-num">Spec Review</div>
   <h2>Advisory Board</h2>
-  <p>Before any code is written, 8 specialist agents review your compiled spec (or feature brief) for gaps, risks, and opportunities. They run in parallel during Prompt A Phase 1. All findings are advisory &mdash; you decide what to act on.</p>
+  <p>Before any code is written, 7 specialist agents review your compiled spec (or feature brief) for gaps, risks, and opportunities. They run in parallel during Prompt A Phase 1. All findings are advisory &mdash; you decide what to act on.</p>
 
   <h3>How it works</h3>
   <div class="flow">
@@ -588,10 +588,9 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
     <div class="fn-branch" style="border-style:solid;border-color:var(--b2);">
       <span style="font-size:.72rem;font-weight:600;color:var(--t2);">Parallel Specialists</span>
       <div style="display:flex;gap:.25rem;margin-top:.2rem;flex-wrap:wrap;">
-        <div class="flow-node" style="font-size:.72rem;border-color:rgba(6,182,212,.3);color:var(--cyn)">Researcher</div>
         <div class="flow-node" style="font-size:.72rem;border-color:rgba(99,102,241,.3);color:var(--acc2)">Architect</div>
         <div class="flow-node" style="font-size:.72rem;border-color:rgba(245,158,11,.3);color:var(--orn)">Critic</div>
-        <div class="flow-node" style="font-size:.72rem;border-color:rgba(6,182,212,.3);color:var(--cyn)">Innovator</div>
+        <div class="flow-node" style="font-size:.72rem;border-color:rgba(6,182,212,.3);color:var(--cyn)">Exploration</div>
       </div>
       <div style="display:flex;gap:.25rem;margin-top:.2rem;flex-wrap:wrap;">
         <div class="flow-node" style="font-size:.72rem;border-color:rgba(239,68,68,.3);color:var(--red)">Security</div>
@@ -609,14 +608,13 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
   </div>
 
   <h3>Activation</h3>
-  <p>Four specialists always run. Four are conditional &mdash; activated when trigger keywords are found in the spec or in the feature brief&rsquo;s &ldquo;What It Touches&rdquo; checkboxes.</p>
+  <p>Three specialists always run (at Standard+ tier). Four are conditional &mdash; activated when trigger keywords are found in the spec or in the feature brief&rsquo;s &ldquo;What It Touches&rdquo; checkboxes.</p>
   <table class="ref">
     <thead><tr><th>Specialist</th><th>Activation</th><th>Trigger</th></tr></thead>
     <tbody>
-      <tr><td><strong>Researcher</strong></td><td><span class="tag t-grn">always</span></td><td>&mdash;</td></tr>
       <tr><td><strong>Architect</strong></td><td><span class="tag t-grn">always</span></td><td>&mdash;</td></tr>
       <tr><td><strong>Critic</strong></td><td><span class="tag t-grn">always</span></td><td>&mdash;</td></tr>
-      <tr><td><strong>Innovator</strong></td><td><span class="tag t-grn">always</span></td><td>&mdash;</td></tr>
+      <tr><td><strong>Exploration</strong></td><td><span class="tag t-grn">Standard+</span></td><td>&mdash;</td></tr>
       <tr><td><strong>Security Analyst</strong></td><td><span class="tag t-orn">conditional</span></td><td>Auth, sessions, OAuth, PII, payments, external APIs</td></tr>
       <tr><td><strong>UX Strategist</strong></td><td><span class="tag t-orn">conditional</span></td><td>UI, design system, user flows, forms, responsive</td></tr>
       <tr><td><strong>Performance Engineer</strong></td><td><span class="tag t-orn">conditional</span></td><td>Real-time, websockets, large data, media, CDN</td></tr>
@@ -627,19 +625,19 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
   <h3>The specialists</h3>
   <p>All advisory agents are read-only. They cannot modify files, run commands, or spawn sub-agents. Click to expand details.</p>
 
-  <!-- Researcher -->
+  <!-- Exploration -->
   <div class="card agent" onclick="toggleA(this)">
     <div class="agent-row">
       <div class="agent-ico" style="background:var(--cyn-d)">&#128218;</div>
-      <div class="agent-info"><h3>Researcher</h3><div class="role">Best practices, ecosystem landscape, prior art</div></div>
-      <span class="tag t-grn">always</span>
+      <div class="agent-info"><h3>Exploration</h3><div class="role">Research, best practices, creative alternatives</div></div>
+      <span class="tag t-grn">Standard+</span>
       <span class="expand-ico">&#9660;</span>
     </div>
     <div class="agent-expand"><div class="agent-body">
       <h4>What It Does</h4>
-      <p>Researches current best practices, ecosystem landscape, and prior art. Grounds recommendations in real-world evidence. Every claim must cite a source.</p>
+      <p>Combines research and creative exploration in a single pass. Grounds recommendations in real-world evidence while surfacing unconventional alternatives. Every research claim must cite a source. Every idea must include a tradeoff.</p>
       <h4>Review Scope</h4>
-      <p>Tech stack currency, dependency risks, integration pattern best practices, architecture patterns against industry consensus.</p>
+      <p>Tech stack currency, dependency risks, integration patterns, alternative architectures, emerging technologies, build-vs-buy, DX improvements, cross-feature synergies.</p>
       <h4>Tools</h4>
       <div class="tools"><span class="tool ok">Read</span><span class="tool ok">Glob</span><span class="tool ok">Grep</span><span class="tool ok">WebSearch</span><span class="tool ok">WebFetch</span><span class="tool no">Edit</span><span class="tool no">Write</span><span class="tool no">Bash</span><span class="tool no">Task</span></div>
     </div></div>
@@ -753,30 +751,13 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
     </div></div>
   </div>
 
-  <!-- Innovator -->
-  <div class="card agent" onclick="toggleA(this)">
-    <div class="agent-row">
-      <div class="agent-ico" style="background:var(--cyn-d)">&#128161;</div>
-      <div class="agent-info"><h3>Innovator</h3><div class="role">Creative alternatives, unconventional approaches</div></div>
-      <span class="tag t-grn">always</span>
-      <span class="expand-ico">&#9660;</span>
-    </div>
-    <div class="agent-expand"><div class="agent-body">
-      <h4>What It Does</h4>
-      <p>Divergent thinker &mdash; surfaces what the team might not have considered. Proposes creative alternatives with explicit tradeoffs. Maximum 5 ideas per brief, quality over quantity.</p>
-      <h4>Review Scope</h4>
-      <p>Alternative architectures, emerging technologies, build-vs-buy opportunities, DX improvements, cross-feature synergies, UX innovations beyond stated requirements.</p>
-      <h4>Tools</h4>
-      <div class="tools"><span class="tool ok">Read</span><span class="tool ok">Glob</span><span class="tool ok">Grep</span><span class="tool ok">WebSearch</span><span class="tool ok">WebFetch</span><span class="tool no">Edit</span><span class="tool no">Write</span><span class="tool no">Bash</span><span class="tool no">Task</span></div>
-    </div></div>
-  </div>
 
   <h3>Refinement report</h3>
   <p>The Orchestrator synthesizes all specialist briefs into a single report, organized by severity:</p>
   <ul class="tight">
     <li><strong>Critical Findings</strong> &mdash; must address before build begins</li>
     <li><strong>Recommendations</strong> &mdash; you decide, grouped by specialist</li>
-    <li><strong>Ideas</strong> &mdash; from Innovator + nice-to-haves from others</li>
+    <li><strong>Ideas</strong> &mdash; from Exploration + nice-to-haves from others</li>
     <li><strong>Activation Summary</strong> &mdash; which specialists ran and why</li>
   </ul>
   <p>You review each item: <strong>Accept</strong> (integrate into spec), <strong>Reject</strong> (document reason), or <strong>Defer</strong> (revisit later). All Critical findings must be addressed before proceeding to build.</p>
@@ -832,7 +813,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
   <div class="card dec"><div class="dec-id">0004</div><h3>Mechanical Enforcement</h3><p>Automated enforcement via Claude Code features: executable subagents with tool boundaries, team-shared settings, verification hooks (secret scanning, session log reminders).</p></div>
   <div class="card dec"><div class="dec-id">0005</div><h3>Companion Tool Pattern</h3><p>Companion tools extend the dev workflow without modifying Repo OS core governance. They integrate via MCP servers in <code>.claude/settings.json</code>. The template ships clean &mdash; no companion tools pre-configured.</p></div>
   <div class="card dec"><div class="dec-id">0006</div><h3>Prototyping Tiers</h3><p>Three-tier prototyping system (Napkin / Spike / PoC) on <code>experiment/*</code> branches. Operator self-selects tier based on complexity. Prompt 0.5 facilitates. Only learnings are promoted &mdash; code is disposable. Experiment briefs stored in <code>docs/spec/prototypes/</code>.</p></div>
-  <div class="card dec"><div class="dec-id">0007</div><h3>Advisory Board</h3><p>8 read-only specialist agents review compiled specs before build. Mix of always-on (Researcher, Architect, Critic, Innovator) and conditional (Security Analyst, UX Strategist, Performance Engineer, Data Strategist). Prompt A orchestrates in 3 phases. Prompt 0 gains Feature mode for individual feature additions.</p></div>
+  <div class="card dec"><div class="dec-id">0007</div><h3>Advisory Board</h3><p>7 read-only specialist agents review compiled specs before build. Mix of always-on (Architect, Critic, Exploration) and conditional (Security Analyst, UX Strategist, Performance Engineer, Data Strategist). Prompt A orchestrates in 3 phases. Prompt 0 gains Feature mode for individual feature additions.</p></div>
   <div class="card dec"><div class="dec-id">0008</div><h3>Cohesion Review Gate</h3><p>Post-build coherence review via Critic (cohesion mode). Checks diff + neighbors for broken references, dangling imports, naming inconsistencies, incomplete integrations. Gate A5 verified by QA. Applies to standard+ branches. Critic stays read-only &mdash; Orchestrator passes diff context.</p></div>
 </section>
 
@@ -885,16 +866,16 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
 <span class="p">│       ├── </span><span class="f">reviewer.md</span> <span class="n">&mdash; executable, read-only</span>
 <span class="p">│       ├── </span><span class="f">security-privacy.md</span> <span class="n">&mdash; executable</span>
 <span class="p">│       ├── </span><span class="f">accessibility.md</span> <span class="n">&mdash; executable, advisory</span>
-<span class="p">│       ├── </span><span class="f">_advisory-board.md</span> <span class="n">&mdash; shared reference for advisory specialists</span>
+<span class="p">│       ├── </span><span class="f">_advisory-board.md</span> <span class="n">&mdash; orchestrator reference for advisory review (on-demand)</span>
+<span class="p">│       ├── </span><span class="f">_advisory-board-lite.md</span> <span class="n">&mdash; compressed shared context for advisory agents</span>
 <span class="p">│       ├── </span><span class="f">_cohesion-review.md</span> <span class="n">&mdash; cohesion review procedure (on-demand)</span>
-<span class="p">│       ├── </span><span class="f">researcher.md</span> <span class="n">&mdash; ecosystem research, always-on</span>
 <span class="p">│       ├── </span><span class="f">architect.md</span> <span class="n">&mdash; structural review, always-on</span>
 <span class="p">│       ├── </span><span class="f">critic.md</span> <span class="n">&mdash; gap analysis, always-on</span>
+<span class="p">│       ├── </span><span class="f">exploration.md</span> <span class="n">&mdash; research + creative alternatives, Standard+</span>
 <span class="p">│       ├── </span><span class="f">security-analyst.md</span> <span class="n">&mdash; threat review, conditional</span>
 <span class="p">│       ├── </span><span class="f">ux-strategist.md</span> <span class="n">&mdash; interaction review, conditional</span>
 <span class="p">│       ├── </span><span class="f">performance-engineer.md</span> <span class="n">&mdash; performance review, conditional</span>
-<span class="p">│       ├── </span><span class="f">data-strategist.md</span> <span class="n">&mdash; schema review, conditional</span>
-<span class="p">│       └── </span><span class="f">innovator.md</span> <span class="n">&mdash; creative alternatives, always-on</span>
+<span class="p">│       └── </span><span class="f">data-strategist.md</span> <span class="n">&mdash; schema review, conditional</span>
 <span class="p">├── </span><span class="d">docs/</span>
 <span class="p">│   ├── </span><span class="d">spec/</span>
 <span class="p">│   │   ├── </span><span class="d">_templates/</span> <span class="n">&mdash; blank spec templates (synced from upstream)</span>
