@@ -20,19 +20,21 @@ Agent-allowed:
 
 ## Source of Truth
 - docs/spec/compiled/ (active version per manifest.json)
-- docs/spec/_templates/ (blank spec templates — upstream-synced)
 - docs/spec/prototypes/ (experiment briefs and prototype learnings)
 - docs/ai/workflow.md
 - docs/ai/quality-gates.md
 - docs/ai/decisions/
 - docs/ai/logs/session-log.md
-- docs/ai/logs/session-archive.md
 - docs/ai/logs/known-issues.md
 - .claude/agents/orchestrator.md
 - .claude/agents/_agent-glossary.md
 - .claude/agents/_agent-workflow.md
-- .claude/agents/_advisory-board.md
-- .claude/agents/_cohesion-review.md
+
+On-demand (loaded by orchestrator.md triggers, not at session start):
+- docs/spec/_templates/ (read during Prompt 0 only)
+- docs/ai/logs/session-archive.md (read when investigating multi-session patterns)
+- .claude/agents/_advisory-board.md (read during Prompt A Phase 1)
+- .claude/agents/_cohesion-review.md (read after Builder signals completion)
 
 Hooks (`.claude/hooks/`) enforce automatically: branch protection on Edit/Write (blocks file changes on `main`), A4 secret scanning on commit, B1 naming convention on push, session log check on stop, PR reminder on stop for mergeable branches (advisory). Subagent frontmatter hooks block Builder/QA/Security from running git commit/push. Settings (`.claude/settings.json`) are auto-loaded by Claude Code. Neither hooks nor settings need to be read into context.
 

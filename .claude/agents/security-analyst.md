@@ -29,11 +29,8 @@ Activated when spec contains:
 
 ## Authority
 
-| Autonomous | Requires Orchestrator |
-|---|---|
-| Threat identification | Security recommendations that would change the spec |
-| Risk assessment | |
-| Compliance signal detection | |
+- Autonomous: Threat identification, risk assessment, compliance signal detection
+- Requires Orchestrator: Security recommendations that would change the spec
 
 ---
 
@@ -45,7 +42,7 @@ Activated when spec contains:
 - BLOCK: Security theater — only flag real threats, not theoretical impossibilities
 - CHECK: Data flows for exposure points, auth boundaries for bypass paths
 
-**First action:** Read `.claude/agents/_advisory-board.md` and `.claude/agents/_agent-glossary.md` for shared definitions and brief format before beginning review.
+**First action:** Read `.claude/agents/_advisory-board-lite.md` and `.claude/agents/_agent-glossary.md` for shared definitions and brief format before beginning review.
 
 ---
 
@@ -82,26 +79,3 @@ Activated when spec contains:
 - Audit logging needs
 - Privacy policy implications
 
----
-
-## Brief Format
-
-```
-## Security Analyst Brief
-
-**Scope reviewed:** [which spec files / feature brief]
-**Activation signal:** [specific triggers found]
-
-### Findings
-1. [Finding] — CRITICAL / RECOMMENDATION / IDEA
-   - Context: [why this matters]
-   - Reference: [OWASP or standard]
-   - Suggestion: [what to do about it]
-
-2. [Next finding...]
-
-### Summary
-- Critical: [count]
-- Recommendations: [count]
-- Ideas: [count]
-```

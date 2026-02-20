@@ -13,7 +13,7 @@ Run after Prompt 0 completes (spec or feature brief is ready). Skip this phase i
 3. Read `.claude/agents/_advisory-board.md` for tier definitions, activation logic, and report format
 4. **Select review tier** (operator can override):
    - Feature brief → **Lite** (Architect + Critic)
-   - Full compiled spec → **Standard** (+ Researcher, Innovator)
+   - Full compiled spec → **Standard** (+ Exploration)
    - Operator requests full board or spec touches 3+ signal categories → **Full** (+ conditional specialists)
    - Single-file fix or docs-only → **Skip**
 5. At Full tier, scan specs for conditional activation signals:
@@ -31,7 +31,7 @@ Run after Prompt 0 completes (spec or feature brief is ready). Skip this phase i
 2. Present to operator organized as:
    - **Critical Findings** — must address before build
    - **Recommendations** — operator decides
-   - **Ideas** — from Innovator and nice-to-haves
+   - **Ideas** — from Exploration and nice-to-haves
    - **Activation Summary** — which specialists ran and why
 3. Operator reviews each item: Accept / Reject / Defer
 4. For accepted items: note what changes to make (spec updates, new constraints, follow-ups)
