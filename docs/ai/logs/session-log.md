@@ -38,6 +38,30 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 -->
 
+## Session 16 — 2026-02-20 — Fix template-sync auth and frequency
+
+**Status:** complete
+**Decisions applied:** none
+**Commits:** pending
+
+### Goal
+- Fix template-sync workflow failing in child repos (private template repo requires PAT)
+- Reduce sync frequency from hourly to daily to conserve GitHub Actions minutes
+- Document PAT setup requirement for operators
+
+### Changes Made
+- `.github/workflows/template-sync.yml` — Changed cron to daily 06:00 UTC, added `source_gh_token: ${{ secrets.SOURCE_REPO_TOKEN }}` for private template access, added inline setup comments
+- `repo-os-explainer.html` — Expanded one-time setup with PAT creation steps, updated frequency references
+
+### Verification (Gates Evidence)
+- Commit gates: A1 n/a, A2 pass, A3 n/a, A4 pass, A5 n/a (docs + workflow only)
+- Push gates: B1 pass, B2 n/a, B3 n/a
+
+### Follow-ups
+- Operator must create PAT and add `SOURCE_REPO_TOKEN` secret to each child repo
+
+---
+
 ## Session 15 — 2026-02-19 — Fix stop hook session weight and baseline hash bugs
 
 **Status:** complete
