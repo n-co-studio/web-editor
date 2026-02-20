@@ -442,3 +442,37 @@ This file is not read during normal sessions. Referenced for deep investigation 
 
 ### Follow-ups
 - Merge `feature/critic-cross-reference` to main via PR
+
+---
+
+## Session 11 — 2026-02-19 — Fix template-sync workflow
+
+**Status:** complete
+**Decisions applied:** none
+**Commits:** 99b6a6a — fix(repo-os): correct template-sync action version and frequency
+
+### Goal
+- Fix broken `actions-template-sync` version tag (v6 → v2)
+- Tighten sync frequency from weekly to hourly
+
+### Plan Summary
+- Corrected action version to `@v2`
+- Tightened cron schedule from weekly Monday to hourly
+- Kept `workflow_dispatch` for manual trigger
+- Initially tried `pull_request: closed` trigger but reverted — child repos can't listen for template repo PR events
+
+### Changes Made
+- `.github/workflows/template-sync.yml` — Fixed version tag v6 → v2, changed cron from weekly to hourly
+
+### Verification (Gates Evidence)
+- Commit gates: pending
+- Push gates: pending
+
+### Failed Attempts (Brief)
+- Tried `pull_request: closed` trigger with merge guard — wrong approach since child repos can't detect template repo PR merges. Reverted to cron.
+
+### Known Issues Logged
+- None
+
+### Follow-ups
+- Commit and merge to main
