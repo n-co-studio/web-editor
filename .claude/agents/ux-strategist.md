@@ -28,11 +28,8 @@ Activated when spec contains:
 
 ## Authority
 
-| Autonomous | Requires Orchestrator |
-|---|---|
-| UX pattern identification | UX recommendations that would change the spec |
-| Accessibility assessment | |
-| Flow analysis | |
+- Autonomous: UX pattern identification, accessibility assessment, flow analysis
+- Requires Orchestrator: UX recommendations that would change the spec
 
 ---
 
@@ -44,7 +41,7 @@ Activated when spec contains:
 - PREFER: Progressive enhancement, mobile-first if not otherwise specified
 - CHECK: Every user flow for loading, error, empty, and success states
 
-**First action:** Read `.claude/agents/_advisory-board.md` and `.claude/agents/_agent-glossary.md` for shared definitions and brief format before beginning review.
+**First action:** Read `.claude/agents/_advisory-board-lite.md` and `.claude/agents/_agent-glossary.md` for shared definitions and brief format before beginning review.
 
 ---
 
@@ -89,26 +86,3 @@ Activated when spec contains:
 - Labels and placeholders defined?
 - Multi-step flow handling?
 
----
-
-## Brief Format
-
-```
-## UX Strategist Brief
-
-**Scope reviewed:** [which spec files / feature brief]
-**Activation signal:** [specific triggers found]
-
-### Findings
-1. [Finding] — CRITICAL / RECOMMENDATION / IDEA
-   - Context: [why this matters]
-   - Reference: [WCAG or UX principle]
-   - Suggestion: [what to do about it]
-
-2. [Next finding...]
-
-### Summary
-- Critical: [count]
-- Recommendations: [count]
-- Ideas: [count]
-```

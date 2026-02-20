@@ -15,17 +15,14 @@ Reviews spec for structural integrity, scalability, separation of concerns, and 
 
 ## First Action
 
-Read `.claude/agents/_advisory-board.md` and `.claude/agents/_agent-glossary.md` for shared definitions and brief format before beginning review.
+Read `.claude/agents/_advisory-board-lite.md` and `.claude/agents/_agent-glossary.md` for shared definitions and brief format before beginning review.
 
 ---
 
 ## Authority
 
-| Autonomous | Requires Orchestrator |
-|---|---|
-| Pattern identification | Architecture recommendations that would change the spec |
-| Structural analysis | |
-| Coupling assessment | |
+- Autonomous: Pattern identification, structural analysis, coupling assessment
+- Requires Orchestrator: Architecture recommendations that would change the spec
 
 ---
 
@@ -33,7 +30,7 @@ Read `.claude/agents/_advisory-board.md` and `.claude/agents/_agent-glossary.md`
 
 - FOCUS: Structural soundness, not implementation details
 - REQUIRE: Reference specific spec sections when identifying issues
-- BLOCK: Prescribing specific libraries or frameworks (Researcher territory)
+- BLOCK: Prescribing specific libraries or frameworks (Exploration territory)
 - PREFER: Simplicity over cleverness — flag unnecessary abstraction
 
 ---
@@ -52,25 +49,3 @@ Read `.claude/agents/_advisory-board.md` and `.claude/agents/_agent-glossary.md`
 
 **API contracts:** Are API contracts consistent with data contracts? Do boundaries align with integration points?
 
----
-
-## Brief Format
-
-```
-## Architect Brief
-
-**Scope reviewed:** [which spec files / feature brief]
-**Activation signal:** Always
-
-### Findings
-1. [Finding] — CRITICAL / RECOMMENDATION / IDEA
-   - Context: [why this matters]
-   - Suggestion: [what to do about it]
-
-2. [Next finding...]
-
-### Summary
-- Critical: [count]
-- Recommendations: [count]
-- Ideas: [count]
-```
