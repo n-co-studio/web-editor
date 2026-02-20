@@ -23,8 +23,8 @@ jobs:
           upstream_branch: main
           pr_title: "chore: sync with upstream template"
           pr_labels: template-sync
-          # Required if the template repo is private. Create a PAT with read
-          # access to the template repo and add it as a repository secret
+          # Required if the template repo is private. Create a classic PAT
+          # with repo + read:org scopes and add it as a repository secret
           # named SOURCE_REPO_TOKEN. If the template repo is public, remove
           # this line — the default GITHUB_TOKEN works without extra setup.
           source_gh_token: ${{ secrets.SOURCE_REPO_TOKEN }}

@@ -1088,9 +1088,10 @@ experiment/new-caching-strategy</div>
     <li>Replace <code>OWNER/repo-OS-template</code> with your actual template repo path</li>
     <li><strong>If the template repo is private</strong> (required):
       <ol style="margin-top:.25rem">
-        <li>Create a <strong>Fine-Grained PAT</strong> on GitHub: Settings &rarr; Developer settings &rarr; Personal access tokens &rarr; Fine-grained tokens</li>
-        <li>Scope it to <strong>read-only Contents</strong> on the template repo only</li>
+        <li>Create a <strong>Classic PAT</strong> on GitHub: Settings &rarr; Developer settings &rarr; Personal access tokens &rarr; Tokens (classic)</li>
+        <li>Scopes required: <code>repo</code> and <code>read:org</code> (fine-grained PATs are not compatible with git clone in Actions)</li>
         <li>Add the PAT as a repository secret named <code>SOURCE_REPO_TOKEN</code> in each child repo (Settings &rarr; Secrets and variables &rarr; Actions)</li>
+        <li>In each child repo: Settings &rarr; Actions &rarr; General &rarr; Workflow permissions &rarr; enable <strong>"Allow GitHub Actions to create and approve pull requests"</strong></li>
       </ol>
       <p style="font-size:.8rem;color:var(--t3);margin-top:.25rem">The workflow already references <code>SOURCE_REPO_TOKEN</code> via <code>source_gh_token</code>. If the template repo is public, you can remove that line &mdash; the default <code>GITHUB_TOKEN</code> works without extra setup.</p>
     </li>
