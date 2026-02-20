@@ -38,91 +38,123 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 -->
 
-## Session 16 — 2026-02-20 — Fix template-sync auth, permissions, and docs
+## Session 19 — 2026-02-20 — Prompt A re-init mode selector
 
-**Status:** complete
+**Status:** in-progress
 **Decisions applied:** none
 **Commits:** pending
 
 ### Goal
-- Fix template-sync workflow failing in child repos (private template repo requires PAT)
-- Reduce sync frequency from hourly to daily to conserve GitHub Actions minutes
-- Document PAT setup requirement for operators
+- Add mode selector to Prompt A so re-initialization (after agent drift, conflicts, template sync) skips advisory review and goes straight to validation
 
 ### Plan Summary
-- Iteratively debugged 5 distinct failure modes across 6 workflow triggers
-- Fixed auth chain: classic PAT → persist-credentials: false → source_gh_token → target_gh_token → .templatesyncignore → repo settings
-- Updated template repo and pushed fixes to child repo (markpreston.co) via GitHub API
-- Verified end-to-end: sync PR #6 created and merged in markpreston.co
+- Explored Prompt A usage across codebase, identified 5 navigator results that chain to Prompt A as re-init vs 5 that are first-run
+- Added Initialize / Re-initialize mode selector to Prompt A
+- Updated workflow docs and navigator step text for re-init results
 
 ### Changes Made
-- `.github/workflows/template-sync.yml` — Daily cron, `persist-credentials: false`, `source_gh_token`, `target_gh_token`, updated inline PAT comments (classic PAT + repo + read:org)
-- `.templatesyncignore` — Added `.github/workflows/template-sync.yml` (GITHUB_TOKEN cannot push workflow changes; also prevents overwriting repo-specific config)
-- `repo-os-explainer.html` — Updated PAT instructions to classic PAT (not fine-grained), added repo settings step for "Allow GitHub Actions to create PRs"
-- `docs/ai/logs/known-issues.md` — Logged template-sync debugging chain (Session 16)
-- `docs/ai/logs/session-archive.md` — Archived Sessions 12 and 13
-- `docs/ai/logs/session-log.md` — Rotated Sessions 12/13, updated Session 16
+- `docs/ai/prompts/prompt-a-repo-os.md` — Added Mode Selection section: Initialize (full Phases 1→2→3) vs Re-initialize (Phase 3 only)
+- `docs/ai/workflow.md` — Added re-init skip note to Advisory Board Review section
+- `repo-os-explainer.html` — Updated 4 navigator re-init results to mention choosing "Re-initialize" mode
 
 ### Verification (Gates Evidence)
-- Commit gates: A1 n/a, A2 pass, A3 n/a, A4 pass, A5 n/a (docs + workflow only)
-- Push gates: B1 pass, B2 n/a, B3 n/a
+- Commit gates: A1 n/a, A2 pass, A3 pass (JS syntax validated), A4 pass, A5 n/a
+- Push gates: B1 pending, B2 n/a, B3 n/a
 
 ### Failed Attempts (Brief)
-- Fine-grained PAT: incompatible with git clone in GitHub Actions
-- Missing `read:org` scope on classic PAT
-- `actions/checkout` extraheader overriding PAT (fixed with `persist-credentials: false`)
-- Push failed after removing credentials (fixed with `target_gh_token`)
-- `GITHUB_TOKEN` cannot push workflow files (fixed with `.templatesyncignore`)
-- Stale sync branch caused action to skip (deleted branch, re-triggered)
-- Repo settings blocked PR creation (enabled via API)
+- None
 
 ### Known Issues Logged
-- Template sync debugging chain logged to known-issues.md (Session 16)
+- None
 
 ### Follow-ups
-- None — template sync verified end-to-end
+- Commit and create PR to main
 
 ---
 
-## Session 15 — 2026-02-19 — Fix stop hook session weight and baseline hash bugs
+## Session 18 — 2026-02-20 — Remove template-sync from source repo
 
 **Status:** complete
-**Decisions applied:** 0004
-**Commits:** pending
+**Decisions applied:** none
+**Commits:** f79b3a5 — fix: remove template-sync workflow from source template repo
 
 ### Goal
-- Fix two unresolved known issues in `session-close-check.sh`:
-  - Session 13: Stop hook blocks again after first block (stale baseline hash)
-  - Session 14: Stop hook blocks on zero-change sessions (no session weight concept)
+- Stop daily GitHub Actions failures on the template repo caused by template-sync running against itself
 
 ### Plan Summary
-- Ran Lite advisory board (Architect + Critic) on proposed fix design
-- Architect: 3 critical (hash path safety, timing window, bootstrap dependency), 3 recommendations, 2 ideas
-- Critic: 4 critical (SKIP_SESSION_LOG stale hash, timing window, stash/reset false positive, race condition), 4 recommendations, 2 ideas
-- Synthesized refinement report; operator approved all items including governance doc updates
-- Cohesion review + QA caught missing `.gitignore` entry and terminology mismatch — fixed
+- Identified that template-sync workflow on the source template repo was syncing against itself (placeholder `OWNER/repo-OS-template`)
+- Removed the workflow file; child repos retain their copies (protected by `.templatesyncignore`)
 
 ### Changes Made
-- `.claude/hooks/session-close-check.sh` — Restructured: `update_baseline()` + `cleanup_hvst()` functions, session weight detection via baseline SHA, blocking exit never updates baseline
-- `AI.md` — Zero-change session exemption in non-negotiables
-- `docs/ai/workflow.md` — Zero-change session exemption in Session Lifecycle
-- `docs/ai/decisions/0004-mechanical-enforcement.md` — Updated Stop hook description
-- `docs/ai/logs/known-issues.md` — Marked Session 13 + 14 issues as fixed
-- `.gitignore` — Added `.session-baseline-sha`, updated comment
-- `repo-os-explainer.html` — Hook description in table + file tree
-- `docs/ai/logs/session-archive.md` — Archived Session 11
-- `docs/ai/logs/session-log.md` — Rotated Session 11, added Session 15
+- `.github/workflows/template-sync.yml` — Deleted (source repo doesn't need to sync from itself)
 
 ### Verification (Gates Evidence)
-- Commit gates: A1 pass, A2 pass, A3 pass (bash -n), A4 pass, A5 pass (cohesion clean after fixes)
+- Commit gates: A1 n/a, A2 pass, A3 n/a, A4 pass, A5 n/a
 - Push gates: B1 pass, B2 n/a, B3 n/a
 
 ### Failed Attempts (Brief)
-- Initial proposal used `git log --since="4 hours ago"` — both advisory specialists flagged unreliable. Replaced with stored baseline commit SHA.
+- None
 
 ### Known Issues Logged
-- Session 13 + 14 entries updated with fix details
+- None
 
 ### Follow-ups
-- Push and create PR to merge to main
+- Merge PR #14
+
+---
+
+## Session 17 — 2026-02-20 — Decision Navigator overhaul
+
+**Status:** in-progress
+**Decisions applied:** none (explainer-only change, no governance files modified)
+**Commits:** pending
+
+### Goal
+- Overhaul the Decision Navigator in repo-os-explainer.html based on advisory team review (UX strategist, architect, critic)
+- Follow-up: extract embedded commands to copy-paste blocks, add next-step chaining buttons between result pages
+
+### Plan Summary
+- Ran 3 advisory agents in parallel for comprehensive review
+- Synthesized findings into 10-item implementation plan, operator approved
+- Implemented all 10 items in single file (repo-os-explainer.html)
+- Operator feedback: embedded commands in steps should be dedicated copy-paste blocks; every result page needs "next step" buttons chaining to the logical next action
+- Refactored DT data from single `cmd` string to `cmds` array (`{label, value}`) and added `goTo` (`{lbl, path}`) for inter-result navigation
+- Updated `renderDT()` and added `dtGoto(path)` function
+
+### Changes Made
+- `repo-os-explainer.html` — Decision Navigator overhaul:
+  - Copy-to-clipboard buttons on all `.cmd` blocks (navigator + static)
+  - Breadcrumb trail showing navigation path with clickable segments
+  - Inline term tooltips for jargon (Prompt 0/A/B/0.5, HVST, Advisory Board, etc.)
+  - Richer result pages: why rationale, warnings, expected outcome
+  - 3 new scenario paths: returning after break, onboarding teammate, update specs mid-build
+  - Command gaps filled: gate failed gets template, decision conflict gets filename pattern
+  - Emoji icons replaced with Unicode symbols for cross-platform consistency
+  - Keyboard accessibility: tabindex, role=button, Enter/Space handlers, focus-visible
+  - Smooth 150ms fade transitions between states
+  - URL hash state (#nav=0.1.0) for bookmarking/sharing results
+  - ARIA attributes on navigator container (role, aria-label, aria-live)
+  - Multi-command blocks: `cmds` array with labeled copy-paste blocks per result
+  - Next-step chaining: `goTo` buttons on 12 result pages linking to logical next action (Initialize Repo OS or Start Development)
+  - `dtGoto(path)` function: navigates to any result by replaying option indices through tree
+  - Step text cleaned: instructions say "paste the starter below" instead of embedding commands inline
+  - Example references (`eg` field) on placeholder commands: git clone, session log override template
+  - `.dt-cmd-eg` CSS + render support for italic example hints below editable command blocks
+  - Static Getting Started clone block also gets example hint
+
+### Verification (Gates Evidence)
+- Commit gates: A1 n/a, A2 pass, A3 pass (JS syntax validated via node), A4 pass, A5 n/a (explainer only)
+- Push gates: B1 pending, B2 n/a, B3 n/a
+
+### Failed Attempts (Brief)
+- First edit attempt blocked by branch-guard hook (was on main). Switched to feature/navigator-overhaul branch.
+
+### Known Issues Logged
+- None
+
+### Follow-ups
+- Open in browser for visual verification
+- Commit and create PR to main
+
+
 
