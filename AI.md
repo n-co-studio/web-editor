@@ -35,6 +35,7 @@ On-demand (loaded by orchestrator.md triggers, not at session start):
 - docs/ai/logs/session-archive.md (read when investigating multi-session patterns)
 - .claude/agents/_advisory-board.md (read during Prompt A Phase 1)
 - .claude/agents/_cohesion-review.md (read after Builder signals completion)
+- .claude/agents/_hvst-review.md (read when HVST debugging stalls or operator requests debug review)
 
 Hooks (`.claude/hooks/`) enforce automatically: branch protection on Edit/Write (blocks file changes on `main`), A4 secret scanning on commit, B1 naming convention on push, session log check on stop, PR reminder on stop for mergeable branches (advisory). Subagent frontmatter hooks block Builder/QA/Security from running git commit/push. Settings (`.claude/settings.json`) are auto-loaded by Claude Code. Neither hooks nor settings need to be read into context.
 
@@ -50,3 +51,4 @@ Hooks (`.claude/hooks/`) enforce automatically: branch protection on Edit/Write 
 - docs/ai/prompts/prompt-0.5-prototype.md
 - docs/ai/prompts/prompt-a-repo-os.md
 - docs/ai/prompts/prompt-b-product-build.md
+- docs/ai/prompts/prompt-t-task-definition.md

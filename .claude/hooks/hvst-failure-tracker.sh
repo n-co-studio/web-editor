@@ -9,7 +9,11 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo ".")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/_analytics-helper.sh"
+START_MS=$(date +%s%3N 2>/dev/null || date +%s)
+
+REPO_ROOT="$(get_repo_root)"
 COUNTER_FILE="$REPO_ROOT/.claude/.hvst-fail-count"
 
 # Read JSON payload from stdin
@@ -23,13 +27,22 @@ if [ "$EVENT" = "PostToolUseFailure" ]; then
   echo "$NEW_COUNT" > "$COUNTER_FILE"
 
   if [ "$NEW_COUNT" -ge 2 ]; then
-    echo ""
-    echo "HVST: $NEW_COUNT consecutive failures detected."
-    echo "Check docs/ai/logs/known-issues.md for matching symptoms before continuing."
+    log_hook_event "hvst-failure-tracker" "PostToolUseFailure" "Bash" "warn" "$START_MS" "failure_${NEW_COUNT}"
+    echo "HVST: $NEW_COUNT consecutive failures — check docs/ai/logs/known-issues.md" >&2
+  else
+    log_hook_event "hvst-failure-tracker" "PostToolUseFailure" "Bash" "allow" "$START_MS" "failure_${NEW_COUNT}"
   fi
 elif [ "$EVENT" = "PostToolUse" ]; then
-  # Bash command succeeded — reset counter
+  # Bash command succeeded — reset counter only if it was non-zero
   if [ -f "$COUNTER_FILE" ]; then
-    echo "0" > "$COUNTER_FILE"
+    CURRENT=$(cat "$COUNTER_FILE" 2>/dev/null || echo "0")
+    if [ "$CURRENT" != "0" ]; then
+      echo "0" > "$COUNTER_FILE"
+      log_hook_event "hvst-failure-tracker" "PostToolUse" "Bash" "allow" "$START_MS" "reset_from_${CURRENT}"
+    else
+      log_hook_event "hvst-failure-tracker" "PostToolUse" "Bash" "allow" "$START_MS" "already_zero"
+    fi
+  else
+    log_hook_event "hvst-failure-tracker" "PostToolUse" "Bash" "allow" "$START_MS" "no_counter"
   fi
 fi
