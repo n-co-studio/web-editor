@@ -1,0 +1,39 @@
+{
+  "name": "@frontend-editor/mcp-server",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "frontend-editor-mcp": "./dist/bin/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/server.d.ts",
+      "default": "./dist/server.js"
+    }
+  },
+  "main": "./dist/server.js",
+  "types": "./dist/server.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@frontend-editor/shared": "0.1.0",
+    "@modelcontextprotocol/sdk": "^1.25.0",
+    "chokidar": "^4.0.0",
+    "ws": "^8.18.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.0",
+    "typescript": "~5.7.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -10,3 +10,13 @@
 
 # HVST failure counter (session-scoped temp file)
 .claude/.hvst-fail-count
+
+# Node
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Frontend Editor local state
+.frontend-editor/

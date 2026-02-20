@@ -1,0 +1,61 @@
+import type { ElementInfo, VisualDiff } from '@frontend-editor/shared';
+
+// ---------------------------------------------------------------------------
+// Extension state
+// ---------------------------------------------------------------------------
+
+export type ExtensionMode = 'inactive' | 'selecting' | 'editing' | 'paused';
+
+export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+
+export type EditMode = 'spacing' | 'dimensions' | 'typography' | 'colors' | 'border-radius' | 'position' | 'move';
+
+// ---------------------------------------------------------------------------
+// Selection
+// ---------------------------------------------------------------------------
+
+export type SelectionState =
+  | { kind: 'none' }
+  | { kind: 'hovering'; element: Element; rect: DOMRect }
+  | { kind: 'selected'; element: Element; info: ElementInfo; rect: DOMRect }
+  | { kind: 'stale'; info: ElementInfo; lastRect: DOMRect };
+
+export interface PanelPosition {
+  readonly x: number;
+  readonly y: number;
+}
+
+// ---------------------------------------------------------------------------
+// Editor state (top-level)
+// ---------------------------------------------------------------------------
+
+export interface EditorState {
+  mode: ExtensionMode;
+  selection: SelectionState;
+  activeEditMode: EditMode | null;
+  connectionStatus: ConnectionStatus;
+  pendingCount: number;
+  tokensLoaded: boolean;
+  panelPosition: PanelPosition | null;
+}
+
+// ---------------------------------------------------------------------------
+// Batching
+// ---------------------------------------------------------------------------
+
+export interface PendingEdit {
+  readonly diffId: string;
+  readonly diff: VisualDiff;
+  removedAt?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Chrome messaging (content ↔ service-worker)
+// ---------------------------------------------------------------------------
+
+export type ChromeMessageType = 'TOGGLE_EXTENSION' | 'GET_STATE' | 'UPDATE_BADGE';
+
+export interface ChromeMessage {
+  readonly type: ChromeMessageType;
+  readonly payload?: unknown;
+}

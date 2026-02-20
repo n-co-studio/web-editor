@@ -101,6 +101,23 @@ This file is not read during normal sessions. Referenced for deep investigation 
 
 ---
 
+## Session 2 (spec) — 2026-02-18 — Spec Builder (Prompt 0) — v1
+
+**Status:** complete
+**Decisions applied:** None
+**Commits:** None (pending)
+
+### Goal
+- Run Prompt 0 (Spec Builder) in fresh mode to populate `docs/spec/compiled/v1/` from the reference document `frontend-editor-repo-os-spec.md`
+
+### Changes Made
+- 12 spec files + manifest.json created in `docs/spec/compiled/v1/`
+
+### Follow-ups
+- Proceed to Prompt A (Advisory Board review)
+
+---
+
 ## Session 3 — 2026-02-18 — Mechanical enforcement audit and implementation
 
 **Status:** complete
