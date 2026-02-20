@@ -28,6 +28,8 @@ export interface ServerHelloPayload {
 
 export interface VisualDiffBatchPayload {
   readonly diffs: readonly VisualDiff[];
+  /** Optional operator note describing intent for this batch. */
+  readonly batchNote?: string;
 }
 
 export interface DiffAckPayload {
