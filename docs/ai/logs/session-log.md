@@ -6,51 +6,6 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 ---
 
-## Session 2 — 2026-02-18 — Spec Builder (Prompt 0) — v1
-
-**Status:** complete
-**Decisions applied:** None
-**Commits:** None (pending)
-
-### Goal
-- Run Prompt 0 (Spec Builder) in fresh mode to populate `docs/spec/compiled/v1/` from the reference document `frontend-editor-repo-os-spec.md`
-
-### Plan Summary
-- Walk through all 7 spec files + features in template order
-- Use pre-researched answers from `frontend-editor-repo-os-spec.md`
-- Confirm each file with operator before writing
-- Update `manifest.json` when all files are complete
-
-### Changes Made
-- `docs/spec/compiled/v1/product.md` — New: product definition (removed "not a design tool" per operator)
-- `docs/spec/compiled/v1/architecture.md` — New: tech stack, monorepo structure, 4 packages (`@frontend-editor/*`)
-- `docs/spec/compiled/v1/design-system.md` — New: template defaults + overlay color tokens, brand colors as initial pass (UX strategist to revise)
-- `docs/spec/compiled/v1/data-contracts.md` — New: 5 entities, 4 MCP tool definitions, in-memory state
-- `docs/spec/compiled/v1/features/feature-001-element-selection.md` — New
-- `docs/spec/compiled/v1/features/feature-002-visual-property-editing.md` — New
-- `docs/spec/compiled/v1/features/feature-003-design-token-snapping.md` — New
-- `docs/spec/compiled/v1/features/feature-004-change-batching.md` — New
-- `docs/spec/compiled/v1/features/feature-005-mcp-server-bridge.md` — New
-- `docs/spec/compiled/v1/features/feature-006-dev-plugin.md` — New
-- `docs/spec/compiled/v1/integrations.md` — New: companion to repo-OS template
-- `docs/spec/compiled/v1/boundaries.md` — New: hard boundaries + future considerations (JS changes, other browsers, mobile app)
-- `docs/spec/compiled/manifest.json` — Updated: `active: "v1"`
-
-### Verification (Gates Evidence)
-- N/A — spec files only, no code changes
-
-### Failed Attempts (Brief)
-- None
-
-### Known Issues Logged
-- None
-
-### Follow-ups
-- Brand colors in design-system.md are initial pass — UX strategist to recommend alternatives during Prompt A
-- Proceed to Prompt A (Advisory Board review)
-
----
-
 ## Session 3 — 2026-02-18 — Advisory Board Review (Prompt A)
 
 **Status:** complete
@@ -161,6 +116,50 @@ Each session adds one entry. Keep entries high-signal and readable.
 - Commit increment 3
 - Increment 4: `chrome-extension` package
 - Update spec: `DOMRect` → `BoundingRect` in data-contracts.md
+
+---
+
+## Session 5 — 2026-02-19 — Chrome Extension: Undo/Redo/Reset + Bug Fixes
+
+**Status:** complete
+**Decisions applied:** None
+**Commits:** None (pending)
+
+### Goal
+- Add undo/redo/reset functionality to the floating toolbar
+- Fix extension not activating (runtime crash from `var history` global conflict)
+- Remove freeform text input from mini panels (token-only editing)
+
+### Plan Summary
+- Create `EditHistory` class with undo/redo stacks tracking inline style changes per element
+- Add undo (↶), redo (↷), reset (↻) SVG icon buttons to toolbar below tool icons
+- Add confirmation modal for destructive reset action
+- Wire all commit paths through unified `commitEdit()` helper
+- Add Ctrl+Z / Cmd+Z keyboard shortcuts
+- Fix `var history = null` global conflict by renaming to `editHistory`
+- Strip freeform inputs from typography and color editors
+
+### Changes Made
+- `packages/chrome-extension/src/content/history.ts` — New: `EditHistory` class with undo/redo stacks, `resetAll()`, inline style revert/re-apply
+- `packages/chrome-extension/src/content/toolbar.ts` — Added undo/redo/reset icons (inline SVG), buttons below tools with separator, `setUndoRedoState()` for dimming, `onUndo`/`onRedo`/`onReset` callbacks, reset confirmation modal (backdrop + alertdialog)
+- `packages/chrome-extension/src/content/index.ts` — Renamed `history` → `editHistory` (fixes `var history` overwriting `window.history`), added `commitEdit()` helper, wired all 4 commit paths (panel, typography, colors, handles) to push to both queue and history, added Ctrl+Z/Cmd+Z keyboard shortcuts, wired toolbar undo/redo/reset callbacks
+- `packages/chrome-extension/src/content/editing/typography.ts` — Token-only: font-size/font-family/color controls return `null` when no tokens (row hidden), removed `buildTextInput()` and `isValidColor()`
+- `packages/chrome-extension/src/content/editing/colors.ts` — Token-only: removed freeform hex input mode, removed mode toggle link, shows "No color tokens loaded" fallback, removed `rgbToHex()` helper
+
+### Verification (Gates Evidence)
+- `npx tsc --noEmit -p packages/chrome-extension` → 0 errors
+- `node packages/chrome-extension/esbuild.config.js` → content.js 125.5kb, service-worker.js 845b
+- Verified `var editHistory` in bundle (no `var history` conflict)
+
+### Failed Attempts (Brief)
+- `let history` in index.ts → esbuild converts module-level `let` to `var` in bundle → `var history = null` at top-level overwrites `window.history` (browser History API), crashing the content script silently. Fixed by renaming to `editHistory`.
+
+### Known Issues Logged
+- esbuild `format: 'esm'` converts module-level `let`/`const` to `var` which becomes global in content scripts — avoid naming variables after browser globals (`history`, `location`, `navigator`, `screen`, etc.)
+
+### Follow-ups
+- Test extension reload in Chrome after rebuild
+- Undo/redo queue sync is best-effort (collapsed diffs may not perfectly round-trip through undo)
 
 ---
 

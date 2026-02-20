@@ -30,6 +30,25 @@ export interface ElementInfo {
 }
 
 /**
+ * Lightweight element reference for notes — subset of ElementInfo
+ * without viewport-specific data (boundingRect, attributes).
+ */
+export interface NoteElementRef {
+  readonly selector: string;
+  readonly tagName: string;
+  readonly textContent?: string;
+  readonly sourceFile: string;
+  readonly sourceLine: number;
+  readonly instanceIndex?: number;
+}
+
+/** A note with optional element references. */
+export interface NoteEntry {
+  readonly text: string;
+  readonly elements: readonly NoteElementRef[];
+}
+
+/**
  * A single CSS property change.
  * Property is always a CSS longhand name — shorthand expansion
  * happens at the extension layer before diff creation.

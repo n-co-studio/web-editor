@@ -1,0 +1,503 @@
+import type { VisualDiff, NoteEntry } from '@frontend-editor/shared';
+import { createElement, createText, createButton } from '../../shared/ui-utils';
+import { OVERLAY, SELECTOR_TRUNCATE_LENGTH, BATCH_CONFIRM_THRESHOLD, TOOLBAR_WIDTH } from '../../shared/constants';
+import type { ConnectionStatus } from '../../shared/types';
+import type { PendingQueue } from './queue';
+import type { WebSocketClient } from '../websocket-client';
+import type { DiffBuilder } from './diff-builder';
+import type { NotesStore } from './notes-store';
+
+type VoidCallback = () => void;
+
+/**
+ * Review panel for pending changes. Renders inside the shadow DOM.
+ * Shows changes grouped by element, with individual removal/restore,
+ * "Apply Changes" button, and WebSocket status banners.
+ */
+export class ReviewPanel {
+  private container: HTMLDivElement | null = null;
+  private visible = false;
+  private connectionStatus: ConnectionStatus = 'disconnected';
+  private sending = false;
+  private closeCb: VoidCallback | null = null;
+
+  constructor(
+    private readonly shadow: ShadowRoot,
+    private readonly queue: PendingQueue,
+    private readonly wsClient: WebSocketClient,
+    private readonly diffBuilder: DiffBuilder,
+    private readonly notesStore: NotesStore,
+  ) {
+    // Auto-refresh when queue or notes change
+    queue.onChange(() => {
+      if (this.visible) this.refresh();
+    });
+    notesStore.onChange(() => {
+      if (this.visible) this.refresh();
+    });
+  }
+
+  show(): void {
+    this.visible = true;
+    this.render();
+  }
+
+  hide(): void {
+    this.container?.remove();
+    this.container = null;
+    this.visible = false;
+  }
+
+  refresh(): void {
+    if (!this.visible) return;
+    this.render();
+  }
+
+  updateConnectionStatus(status: ConnectionStatus): void {
+    this.connectionStatus = status;
+    if (this.visible) this.refresh();
+  }
+
+  /** Register callback for user-initiated close (× button). */
+  onClose(cb: VoidCallback): void {
+    this.closeCb = cb;
+  }
+
+  isOpen(): boolean {
+    return this.visible;
+  }
+
+  /** Get the current batch note from the notes store. */
+  getSessionNote(): string {
+    return this.notesStore.toBatchNote() ?? '';
+  }
+
+  // -----------------------------------------------------------------------
+  // Rendering
+  // -----------------------------------------------------------------------
+
+  private render(): void {
+    this.container?.remove();
+
+    const panel = createElement('div', { role: 'dialog', 'aria-label': 'Review changes' }, {
+      position: 'fixed',
+      bottom: '16px',
+      left: `${TOOLBAR_WIDTH + 24}px`,
+      width: '360px',
+      maxHeight: '50vh',
+      overflowY: 'auto',
+      background: OVERLAY.bg,
+      border: `1px solid ${OVERLAY.border}`,
+      borderRadius: OVERLAY.radiusMd,
+      boxShadow: OVERLAY.shadowLg,
+      pointerEvents: 'auto',
+      zIndex: '200',
+      fontFamily: OVERLAY.fontFamily,
+    });
+
+    // Header
+    const header = createElement('div', {}, {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: '8px 12px',
+      borderBottom: `1px solid ${OVERLAY.border}`,
+    });
+    const notes = this.notesStore.getAll();
+    const active = this.queue.getActive();
+    const totalCount = active.length + notes.length;
+
+    const title = createText('span', `Changes (${totalCount})`, 'heading');
+    header.appendChild(title);
+    const closeBtn = createButton('\u00d7', 'ghost', () => {
+      this.hide();
+      this.closeCb?.();
+    });
+    closeBtn.style.padding = '2px 6px';
+    closeBtn.style.fontSize = '16px';
+    header.appendChild(closeBtn);
+    panel.appendChild(header);
+
+    // Connection warning
+    if (this.connectionStatus !== 'connected') {
+      panel.appendChild(this.renderConnectionWarning());
+    }
+
+    // Source unverified warning (if any diffs lack sourceVerified)
+    const hasUnverified = active.some((d) => !d.sourceVerified);
+    if (hasUnverified) {
+      panel.appendChild(this.renderSourceWarning());
+    }
+
+    // Notes as change requests
+    for (let i = 0; i < notes.length; i++) {
+      panel.appendChild(this.renderNoteCard(notes[i], i));
+    }
+
+    // Grouped CSS changes
+    const groups = this.groupByElement(active);
+    for (const [selector, diffs] of groups) {
+      panel.appendChild(this.renderGroup(selector, diffs));
+    }
+
+    // Empty state
+    if (totalCount === 0) {
+      const empty = createText('div', 'No pending changes', 'body');
+      empty.style.padding = '16px 12px';
+      empty.style.color = OVERLAY.textMuted;
+      empty.style.textAlign = 'center';
+      panel.appendChild(empty);
+    }
+
+    // Removed section
+    const removed = this.queue.getRemoved();
+    if (removed.length > 0) {
+      panel.appendChild(this.renderRemovedSection(removed));
+    }
+
+    // Action bar
+    panel.appendChild(this.renderActionBar(active, notes.length));
+
+    this.container = panel;
+    this.shadow.appendChild(panel);
+  }
+
+  private renderConnectionWarning(): HTMLDivElement {
+    const banner = createElement('div', {}, {
+      background: 'rgba(245, 158, 11, 0.15)',
+      border: `1px solid ${OVERLAY.warning}`,
+      borderRadius: OVERLAY.radiusSm,
+      padding: '8px 12px',
+      margin: '8px',
+      fontSize: OVERLAY.bodySize,
+      color: OVERLAY.warning,
+      fontFamily: OVERLAY.fontFamily,
+    });
+
+    banner.textContent =
+      'Not connected to MCP server \u2014 check that Claude Code is running with the frontend-editor MCP configured (port 7890).';
+
+    const retryBtn = createButton('Retry', 'ghost', () => {
+      this.wsClient.retryNow();
+    });
+    retryBtn.style.marginTop = '6px';
+    retryBtn.style.fontSize = '11px';
+    retryBtn.style.color = OVERLAY.warning;
+    retryBtn.style.borderColor = OVERLAY.warning;
+    banner.appendChild(retryBtn);
+
+    return banner;
+  }
+
+  private renderNoteCard(note: NoteEntry, index: number): HTMLDivElement {
+    const card = createElement('div', {}, {
+      padding: '8px 12px',
+      borderBottom: `1px solid ${OVERLAY.border}`,
+      borderLeft: note.elements.length > 0 ? `2px solid rgba(6, 182, 212, 0.4)` : 'none',
+    });
+
+    // Note header row: icon + text + delete button
+    const row = createElement('div', {}, {
+      display: 'flex',
+      alignItems: 'flex-start',
+      gap: '6px',
+    });
+
+    const icon = createText('span', '\u270e', 'body');
+    icon.style.color = OVERLAY.primary;
+    icon.style.fontSize = '11px';
+    icon.style.flexShrink = '0';
+    icon.style.marginTop = '1px';
+    row.appendChild(icon);
+
+    const text = createText('span', note.text, 'body');
+    text.style.flex = '1';
+    text.style.fontSize = '11px';
+    text.style.color = OVERLAY.text;
+    text.style.wordBreak = 'break-word';
+    row.appendChild(text);
+
+    const delBtn = createElement('button', { title: 'Remove note' }, {
+      background: 'none',
+      border: 'none',
+      color: OVERLAY.textMuted,
+      cursor: 'pointer',
+      padding: '0 2px',
+      fontSize: '11px',
+      marginLeft: 'auto',
+      pointerEvents: 'auto',
+      flexShrink: '0',
+    }) as HTMLButtonElement;
+    delBtn.textContent = '\u00d7';
+    delBtn.addEventListener('click', () => {
+      this.notesStore.remove(index);
+    });
+    row.appendChild(delBtn);
+    card.appendChild(row);
+
+    // Element pills (read-only in review panel)
+    if (note.elements.length > 0) {
+      const pillRow = createElement('div', {}, {
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: '3px',
+        padding: '4px 0 0 17px',
+      });
+      for (const ref of note.elements) {
+        const label = ref.textContent?.slice(0, 12) || ref.selector.slice(0, 20);
+        const pill = createText('span', `<${ref.tagName}> ${label}`, 'mono');
+        pill.style.fontSize = '9px';
+        pill.style.padding = '1px 4px';
+        pill.style.background = 'rgba(6, 182, 212, 0.15)';
+        pill.style.border = `1px solid ${OVERLAY.primary}`;
+        pill.style.borderRadius = '3px';
+        pill.title = ref.selector;
+        pillRow.appendChild(pill);
+      }
+      card.appendChild(pillRow);
+    }
+
+    return card;
+  }
+
+  private renderSourceWarning(): HTMLDivElement {
+    const banner = createElement('div', {}, {
+      background: 'rgba(245, 158, 11, 0.08)',
+      padding: '6px 12px',
+      margin: '4px 8px',
+      fontSize: OVERLAY.bodySize,
+      color: OVERLAY.warning,
+      fontFamily: OVERLAY.fontFamily,
+      borderRadius: OVERLAY.radiusSm,
+    });
+    banner.textContent =
+      'Some changes have unverified source mapping \u2014 install the dev-plugin for precise file targeting. Changes will be sent with CSS selector only.';
+    return banner;
+  }
+
+  private renderGroup(
+    selector: string,
+    diffs: VisualDiff[],
+  ): HTMLDivElement {
+    const group = createElement('div', {}, {
+      padding: '8px 12px',
+      borderBottom: `1px solid ${OVERLAY.border}`,
+    });
+
+    // Group header
+    const headerText =
+      selector.length > SELECTOR_TRUNCATE_LENGTH
+        ? selector.slice(0, SELECTOR_TRUNCATE_LENGTH) + '\u2026'
+        : selector;
+    const header = createText('div', headerText, 'mono');
+    header.style.color = OVERLAY.primary;
+    header.style.marginBottom = '4px';
+    header.title = selector;
+    group.appendChild(header);
+
+    // Property changes
+    for (const diff of diffs) {
+      for (const change of diff.changes) {
+        const row = createElement('div', {}, {
+          display: 'flex',
+          alignItems: 'center',
+          gap: '4px',
+          padding: '2px 0',
+          fontFamily: OVERLAY.monoFamily,
+          fontSize: OVERLAY.monoSize,
+        });
+
+        // Property name
+        const propEl = createElement('span', {}, { color: OVERLAY.textMuted });
+        propEl.textContent = `${change.property}:`;
+        row.appendChild(propEl);
+
+        // Token badge (if toToken)
+        if (change.toToken) {
+          const badge = createElement('span', {}, {
+            background: 'rgba(6, 182, 212, 0.2)',
+            color: OVERLAY.primary,
+            padding: '1px 3px',
+            borderRadius: '2px',
+            fontSize: '9px',
+          });
+          badge.textContent = change.toToken;
+          row.appendChild(badge);
+        }
+
+        // before → after
+        const values = createElement('span', {}, { color: OVERLAY.text });
+        values.textContent = `${change.fromValue} \u2192 ${change.toValue}`;
+        row.appendChild(values);
+
+        // Remove button
+        const removeBtn = createElement('button', {}, {
+          background: 'none',
+          border: 'none',
+          color: OVERLAY.textMuted,
+          cursor: 'pointer',
+          padding: '0 2px',
+          fontSize: '11px',
+          marginLeft: 'auto',
+          pointerEvents: 'auto',
+        });
+        removeBtn.textContent = '\u00d7';
+        removeBtn.title = 'Remove this change';
+        removeBtn.addEventListener('click', () => {
+          this.queue.remove(diff.id);
+        });
+        row.appendChild(removeBtn);
+
+        group.appendChild(row);
+      }
+    }
+
+    return group;
+  }
+
+  private renderRemovedSection(
+    removed: Array<{ diffId: string; diff: VisualDiff }>,
+  ): HTMLDivElement {
+    const section = createElement('div', {}, {
+      padding: '4px 12px',
+      borderBottom: `1px solid ${OVERLAY.border}`,
+    });
+
+    // Collapsible header
+    const toggle = createElement('button', {}, {
+      background: 'none',
+      border: 'none',
+      color: OVERLAY.textMuted,
+      fontFamily: OVERLAY.fontFamily,
+      fontSize: OVERLAY.bodySize,
+      cursor: 'pointer',
+      padding: '4px 0',
+      pointerEvents: 'auto',
+    });
+    toggle.textContent = `\u25b6 Removed (${removed.length})`;
+
+    const content = createElement('div', {}, { display: 'none' });
+
+    toggle.addEventListener('click', () => {
+      const open = content.style.display !== 'none';
+      content.style.display = open ? 'none' : '';
+      toggle.textContent = `${open ? '\u25b6' : '\u25bc'} Removed (${removed.length})`;
+    });
+
+    for (const item of removed) {
+      const row = createElement('div', {}, {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '2px 0',
+        opacity: '0.5',
+        fontFamily: OVERLAY.monoFamily,
+        fontSize: OVERLAY.monoSize,
+        color: OVERLAY.textMuted,
+      });
+
+      const label = createElement('span');
+      label.textContent = `${item.diff.element.selector.slice(0, 30)} (${item.diff.changes.length} changes)`;
+      row.appendChild(label);
+
+      const restoreBtn = createButton('Restore', 'ghost', () => {
+        this.queue.restoreItem(item.diffId);
+      });
+      restoreBtn.style.fontSize = '10px';
+      restoreBtn.style.padding = '1px 4px';
+      row.appendChild(restoreBtn);
+
+      content.appendChild(row);
+    }
+
+    section.appendChild(toggle);
+    section.appendChild(content);
+    return section;
+  }
+
+  private renderActionBar(active: VisualDiff[], noteCount: number): HTMLDivElement {
+    const bar = createElement('div', {}, {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: '8px 12px',
+    });
+
+    const totalCount = active.length + noteCount;
+    const countText = createText(
+      'span',
+      `${totalCount} change${totalCount !== 1 ? 's' : ''}`,
+      'body',
+    );
+    countText.style.color = OVERLAY.textMuted;
+    bar.appendChild(countText);
+
+    const sendDisabled =
+      totalCount === 0 || this.connectionStatus !== 'connected' || this.sending;
+
+    const sendBtn = createButton('Apply Changes', 'primary', () => {
+      this.handleSend();
+    });
+    if (sendDisabled) {
+      sendBtn.style.opacity = '0.5';
+      sendBtn.style.pointerEvents = 'none';
+    }
+    bar.appendChild(sendBtn);
+
+    return bar;
+  }
+
+  // -----------------------------------------------------------------------
+  // Send logic
+  // -----------------------------------------------------------------------
+
+  private async handleSend(): Promise<void> {
+    if (this.sending) return;
+    const { diffs } = this.queue.getBatch();
+    const note = this.notesStore.toBatchNote();
+    if (diffs.length === 0 && !note) return;
+
+    // Confirm large batches
+    if (diffs.length >= BATCH_CONFIRM_THRESHOLD) {
+      console.log(
+        `[frontend-editor] Sending batch of ${diffs.length} changes`,
+      );
+    }
+
+    this.sending = true;
+    this.refresh();
+
+    const success = this.wsClient.sendDiffBatch(diffs, note);
+    if (!success) {
+      console.error('[frontend-editor] Failed to send batch — WebSocket not connected');
+      this.sending = false;
+      this.refresh();
+      return;
+    }
+
+    // Clear notes after successful send
+    this.notesStore.clear();
+
+    // The queue will be updated when DIFF_ACK arrives (via queue.acknowledge)
+    // Reset sending state after a reasonable timeout
+    setTimeout(() => {
+      this.sending = false;
+      this.refresh();
+    }, 5000);
+  }
+
+  // -----------------------------------------------------------------------
+  // Helpers
+  // -----------------------------------------------------------------------
+
+  private groupByElement(diffs: VisualDiff[]): Map<string, VisualDiff[]> {
+    const groups = new Map<string, VisualDiff[]>();
+    for (const diff of diffs) {
+      const key = diff.element.selector;
+      const existing = groups.get(key);
+      if (existing) existing.push(diff);
+      else groups.set(key, [diff]);
+    }
+    return groups;
+  }
+}

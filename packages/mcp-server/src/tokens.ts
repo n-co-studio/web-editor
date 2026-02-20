@@ -13,7 +13,7 @@ import type { TokenSourceType } from './types.js';
 // ---------------------------------------------------------------------------
 
 const CATEGORY_PATTERNS: ReadonlyArray<[RegExp, TokenCategory]> = [
-  [/color|bg-|text-(?!sm|base|lg|xl|2xl|3xl)|border-color|fill|stroke/, 'colors'],
+  [/color|bg-|text-(?!xs|sm|base|lg|xl|\d+xl)|border-color|fill|stroke/, 'colors'],
   [/spac(?:e|ing)|gap|padding|margin|inset/, 'spacing'],
   [/font|text|leading|tracking|line-height/, 'typography'],
   [/radius|rounded/, 'radii'],
@@ -21,7 +21,14 @@ const CATEGORY_PATTERNS: ReadonlyArray<[RegExp, TokenCategory]> = [
   [/screen|breakpoint/, 'breakpoints'],
 ];
 
-function inferCategory(name: string): TokenCategory {
+function inferCategory(name: string, value?: string): TokenCategory {
+  // Value-based disambiguation for ambiguous text-* token names:
+  // --text-hero: 3rem → typography (dimensional)
+  // --text-primary: #333 → colors (falls through to regex)
+  if (value && /^text-/.test(name) && /^[\d.]+\s*(px|r?em|%|pt|vw|vh|ch)$/i.test(value.trim())) {
+    return 'typography';
+  }
+
   for (const [pattern, category] of CATEGORY_PATTERNS) {
     if (pattern.test(name)) return category;
   }
@@ -55,6 +62,53 @@ const CATEGORY_CSS_PROPERTIES: Readonly<Record<TokenCategory, readonly string[]>
   ],
   shadows: ['box-shadow', 'text-shadow'],
   breakpoints: [],
+};
+
+// ---------------------------------------------------------------------------
+// Refined typography CSS property mapping by token name
+// ---------------------------------------------------------------------------
+
+const TYPOGRAPHY_PROPERTY_PATTERNS: ReadonlyArray<[RegExp, readonly string[]]> = [
+  [/font-?size|text-(?:xs|sm|base|lg|xl|\d+xl)/i, ['font-size']],
+  [/font-?weight|weight/i, ['font-weight']],
+  [/font-?family|font-(?:sans|serif|mono)/i, ['font-family']],
+  [/line-?height|leading/i, ['line-height']],
+  [/letter-?spacing|tracking/i, ['letter-spacing']],
+  [/word-?spacing/i, ['word-spacing']],
+  // Generic text-* tokens (e.g. text-hero, text-h1, text-body) → font-size
+  [/^text-/i, ['font-size']],
+];
+
+/**
+ * For typography tokens, infer specific CSS properties from the token name
+ * instead of mapping to all typography properties.
+ */
+function inferTypographyCssProperties(name: string): string[] {
+  for (const [pattern, properties] of TYPOGRAPHY_PROPERTY_PATTERNS) {
+    if (pattern.test(name)) return [...properties];
+  }
+  // Fallback: all typography properties
+  return [...CATEGORY_CSS_PROPERTIES.typography];
+}
+
+/**
+ * Get CSS properties for a token based on its category and name.
+ * Typography tokens get refined mapping; others use the category default.
+ */
+function getCssPropertiesForToken(name: string, category: TokenCategory): string[] {
+  if (category === 'typography') {
+    return inferTypographyCssProperties(name);
+  }
+  return [...CATEGORY_CSS_PROPERTIES[category]];
+}
+
+// Tailwind theme key → specific CSS properties
+const TAILWIND_KEY_CSS_PROPERTIES: Readonly<Record<string, readonly string[]>> = {
+  fontSize: ['font-size'],
+  fontWeight: ['font-weight'],
+  fontFamily: ['font-family'],
+  lineHeight: ['line-height'],
+  letterSpacing: ['letter-spacing'],
 };
 
 // ---------------------------------------------------------------------------
@@ -232,12 +286,12 @@ function flattenTokens(
     if ('value' in record && typeof record.value === 'string') {
       // Leaf token node
       const name = [...path, key].join('-');
-      const category = inferCategory(name);
+      const category = inferCategory(name, record.value);
       tokens.push({
         name,
         category,
         value: record.value,
-        cssProperties: [...CATEGORY_CSS_PROPERTIES[category]],
+        cssProperties: getCssPropertiesForToken(name, category),
         source,
       });
     } else {
@@ -259,12 +313,12 @@ async function parseCssFile(filePath: string): Promise<DesignToken[]> {
   while ((match = pattern.exec(raw)) !== null) {
     const name = match[1];
     const value = match[2].trim();
-    const category = inferCategory(name);
+    const category = inferCategory(name, value);
     tokens.push({
       name,
       category,
       value,
-      cssProperties: [...CATEGORY_CSS_PROPERTIES[category]],
+      cssProperties: getCssPropertiesForToken(name, category),
       source: filePath,
     });
   }
@@ -334,11 +388,11 @@ async function parseDesignSystemMd(filePath: string): Promise<DesignToken[]> {
     if (!name || !value) continue;
 
     const categoryStr = cols.category >= 0 ? cells[cols.category] : undefined;
-    const category = isTokenCategory(categoryStr) ? categoryStr : inferCategory(name);
+    const category = isTokenCategory(categoryStr) ? categoryStr : inferCategory(name, value);
     const cssStr = cols.cssProperties >= 0 ? cells[cols.cssProperties] : undefined;
     const cssProperties = cssStr
       ? cssStr.split(',').map((s) => s.trim()).filter(Boolean)
-      : [...CATEGORY_CSS_PROPERTIES[category]];
+      : getCssPropertiesForToken(name, category);
 
     tokens.push({ name, category, value, cssProperties, source: filePath });
   }
@@ -387,6 +441,8 @@ async function parseTailwindConfig(filePath: string): Promise<DesignToken[]> {
       ['fontSize', 'typography'],
       ['fontWeight', 'typography'],
       ['fontFamily', 'typography'],
+      ['lineHeight', 'typography'],
+      ['letterSpacing', 'typography'],
       ['borderRadius', 'radii'],
       ['boxShadow', 'shadows'],
       ['screens', 'breakpoints'],
@@ -396,13 +452,18 @@ async function parseTailwindConfig(filePath: string): Promise<DesignToken[]> {
       const section = theme[key];
       if (typeof section !== 'object' || section === null) continue;
 
+      // Use specific CSS properties for Tailwind keys when available
+      const cssProps = key in TAILWIND_KEY_CSS_PROPERTIES
+        ? [...TAILWIND_KEY_CSS_PROPERTIES[key]]
+        : getCssPropertiesForToken(key, category);
+
       for (const [name, value] of Object.entries(section as Record<string, unknown>)) {
         if (typeof value === 'string') {
           tokens.push({
             name: `${key}-${name}`,
             category,
             value,
-            cssProperties: [...CATEGORY_CSS_PROPERTIES[category]],
+            cssProperties: cssProps,
             source: filePath,
           });
         } else if (typeof value === 'object' && value !== null) {
@@ -413,7 +474,7 @@ async function parseTailwindConfig(filePath: string): Promise<DesignToken[]> {
                 name: `${key}-${name}-${subName}`,
                 category,
                 value: subValue,
-                cssProperties: [...CATEGORY_CSS_PROPERTIES[category]],
+                cssProperties: cssProps,
                 source: filePath,
               });
             }

@@ -1,6 +1,8 @@
 export type {
   BoundingRect,
   ElementInfo,
+  NoteElementRef,
+  NoteEntry,
   PropertyChange,
   PageContext,
   DiffStatus,
