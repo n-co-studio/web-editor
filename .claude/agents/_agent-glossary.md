@@ -48,6 +48,13 @@ Post-build review by the Critic agent (cohesion mode) checking the diff and surr
 
 ---
 
+## Reserved Directories
+
+### `.claude/analytics/`
+Reserved for the Analytics specialist agent. Contains hook telemetry data (NDJSON event files). All other agents MUST NOT read, Glob, or Grep this directory during normal operations. When using Grep or Glob with broad patterns, exclude analytics: `--glob '!.claude/analytics/**'`. The Analytics agent is invoked on-demand by the operator only.
+
+---
+
 ## Enforcement
 
 ### Hook
