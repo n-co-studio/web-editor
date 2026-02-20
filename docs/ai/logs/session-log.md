@@ -38,6 +38,49 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 -->
 
+## Session 20 — 2026-02-20 — Add Prompt T for task definition and exploration
+
+**Status:** complete
+**Decisions applied:** 0010
+**Commits:** 88df250 — feat(repo-os): add Prompt T for task definition and exploration
+
+### Goal
+- Add Prompt T — a lightweight exploration prompt for feasibility checks, quick Q&A, and task planning
+- Two modes: Query (conversational) and Brief (3-agent team produces structured task brief for Prompt B)
+- Fully ephemeral — no files written, no session logs, no gates
+
+### Plan Summary
+- Explored existing prompt system (0, 0.5, A, B) and identified the gap for pre-build exploration
+- Designed Prompt T with operator input on naming (T), output (terminal-only), and agent team (Architect + Exploration + Critic)
+- Created prompt file and Decision 0010, updated 5 integration points
+- Ran cohesion audit (Critic) — found 2 issues and 4 recommendations, fixed all
+
+### Changes Made
+- `docs/ai/prompts/prompt-t-task-definition.md` — New: prompt with Query/Brief modes, 5-step Brief flow, task brief output format
+- `docs/ai/decisions/0010-task-definition-prompt.md` — New: decision record
+- `AI.md` — Added Prompt T to Prompts list
+- `docs/ai/workflow.md` — Added Task Definition Sessions subsection
+- `.claude/agents/_agent-workflow.md` — Added Task Definition Flow with 6-step handoff chain
+- `.claude/agents/orchestrator.md` — Added Prompt T to On-Demand Procedures
+- `.claude/agents/_advisory-board.md` — Added note about Prompt T agent reuse
+- `docs/ai/decisions/0001-repo-os-baseline.md` — Updated stale "three-prompt" reference
+- `repo-os-explainer.html` — File tree, glossary, trigger table, Decision 0010 card, decision navigator (Explore/Investigate path)
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass (Decision 0010 followed), A2 pass, A3 n/a, A4 pass, A5 pass (cohesion audit run)
+- Push gates: B1 pass (`feature/prompt-t-task-definition`), B2 n/a, B3 n/a
+
+### Failed Attempts (Brief)
+- None
+
+### Known Issues Logged
+- None
+
+### Follow-ups
+- Merge PR #16 to main
+
+---
+
 ## Session 19 — 2026-02-20 — Prompt A re-init mode selector
 
 **Status:** in-progress
@@ -100,61 +143,5 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 ### Follow-ups
 - Merge PR #14
-
----
-
-## Session 17 — 2026-02-20 — Decision Navigator overhaul
-
-**Status:** in-progress
-**Decisions applied:** none (explainer-only change, no governance files modified)
-**Commits:** pending
-
-### Goal
-- Overhaul the Decision Navigator in repo-os-explainer.html based on advisory team review (UX strategist, architect, critic)
-- Follow-up: extract embedded commands to copy-paste blocks, add next-step chaining buttons between result pages
-
-### Plan Summary
-- Ran 3 advisory agents in parallel for comprehensive review
-- Synthesized findings into 10-item implementation plan, operator approved
-- Implemented all 10 items in single file (repo-os-explainer.html)
-- Operator feedback: embedded commands in steps should be dedicated copy-paste blocks; every result page needs "next step" buttons chaining to the logical next action
-- Refactored DT data from single `cmd` string to `cmds` array (`{label, value}`) and added `goTo` (`{lbl, path}`) for inter-result navigation
-- Updated `renderDT()` and added `dtGoto(path)` function
-
-### Changes Made
-- `repo-os-explainer.html` — Decision Navigator overhaul:
-  - Copy-to-clipboard buttons on all `.cmd` blocks (navigator + static)
-  - Breadcrumb trail showing navigation path with clickable segments
-  - Inline term tooltips for jargon (Prompt 0/A/B/0.5, HVST, Advisory Board, etc.)
-  - Richer result pages: why rationale, warnings, expected outcome
-  - 3 new scenario paths: returning after break, onboarding teammate, update specs mid-build
-  - Command gaps filled: gate failed gets template, decision conflict gets filename pattern
-  - Emoji icons replaced with Unicode symbols for cross-platform consistency
-  - Keyboard accessibility: tabindex, role=button, Enter/Space handlers, focus-visible
-  - Smooth 150ms fade transitions between states
-  - URL hash state (#nav=0.1.0) for bookmarking/sharing results
-  - ARIA attributes on navigator container (role, aria-label, aria-live)
-  - Multi-command blocks: `cmds` array with labeled copy-paste blocks per result
-  - Next-step chaining: `goTo` buttons on 12 result pages linking to logical next action (Initialize Repo OS or Start Development)
-  - `dtGoto(path)` function: navigates to any result by replaying option indices through tree
-  - Step text cleaned: instructions say "paste the starter below" instead of embedding commands inline
-  - Example references (`eg` field) on placeholder commands: git clone, session log override template
-  - `.dt-cmd-eg` CSS + render support for italic example hints below editable command blocks
-  - Static Getting Started clone block also gets example hint
-
-### Verification (Gates Evidence)
-- Commit gates: A1 n/a, A2 pass, A3 pass (JS syntax validated via node), A4 pass, A5 n/a (explainer only)
-- Push gates: B1 pending, B2 n/a, B3 n/a
-
-### Failed Attempts (Brief)
-- First edit attempt blocked by branch-guard hook (was on main). Switched to feature/navigator-overhaul branch.
-
-### Known Issues Logged
-- None
-
-### Follow-ups
-- Open in browser for visual verification
-- Commit and create PR to main
-
 
 
