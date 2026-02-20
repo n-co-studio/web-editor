@@ -2,35 +2,7 @@
 
 ## Advisory Flow (Spec Review)
 
-Runs after Prompt 0, before build begins. Orchestrated by Prompt A Phase 1.
-
-```
-                        OPERATOR
-              (completes spec via Prompt 0)
-                            │
-                            ▼
-                      ORCHESTRATOR
-           scans spec → activates specialists → synthesizes
-                            │
-                ┌───────────┼───────────┐
-                ▼           ▼           ▼
-          ALWAYS-ON    CONDITIONAL   ALWAYS-ON
-       ┌────────────┐  (if triggered)  │
-       │ Researcher  │  Security Analyst│
-       │ Architect   │  UX Strategist  Innovator
-       │ Critic      │  Perf Engineer  │
-       └────────────┘  Data Strategist │
-                │           │           │
-                └───────────┼───────────┘
-                            ▼
-                   REFINEMENT REPORT
-                            │
-                            ▼
-                     OPERATOR REVIEW
-              (accept / reject / defer per item)
-```
-
-See `.claude/agents/_advisory-board.md` for activation logic, brief format, and report structure.
+Runs after Prompt 0, before build begins. Orchestrated by Prompt A Phase 1. Tier selected before dispatch. See `.claude/agents/_advisory-board.md` for tier definitions, activation logic, agent roster, and report structure.
 
 ---
 
@@ -110,16 +82,15 @@ See `.claude/agents/_advisory-board.md` for activation logic, brief format, and 
 
 ### Advisory Board (Spec Review Phase)
 
-| Agent | Invoke When | Blocks Commit? |
-|-------|------------|----------------|
-| **Researcher** | Always (spec review) | No (advisory) |
-| **Architect** | Always (spec review) | No (advisory) |
-| **Critic** (spec mode) | Always (spec review) | No (advisory) |
-| **Security Analyst** | Auth, PII, APIs, payments in spec | No (advisory) |
-| **UX Strategist** | UI, design-system, user-flows in spec | No (advisory) |
-| **Performance Engineer** | Real-time, large-data, media in spec | No (advisory) |
-| **Data Strategist** | Database, data-contracts, migrations in spec | No (advisory) |
-| **Innovator** | Always, lower priority (spec review) | No (advisory) |
+| Agent | Tier | Invoke When | Blocks Commit? |
+|-------|------|------------|----------------|
+| **Architect** | Lite+ | Core pair — always when board runs | No (advisory) |
+| **Critic** (spec mode) | Lite+ | Core pair — always when board runs | No (advisory) |
+| **Exploration** | Standard+ | Standard tier and above | No (advisory) |
+| **Security Analyst** | Full | Signal-triggered at Full tier | No (advisory) |
+| **UX Strategist** | Full | Signal-triggered at Full tier | No (advisory) |
+| **Performance Engineer** | Full | Signal-triggered at Full tier | No (advisory) |
+| **Data Strategist** | Full | Signal-triggered at Full tier | No (advisory) |
 
 ### Build Team (Implementation Phase)
 

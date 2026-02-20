@@ -27,11 +27,8 @@ Activated when spec contains:
 
 ## Authority
 
-| Autonomous | Requires Orchestrator |
-|---|---|
-| Schema analysis | Data recommendations that would change the spec |
-| Contract validation | |
-| Lifecycle assessment | |
+- Autonomous: Schema analysis, contract validation, lifecycle assessment
+- Requires Orchestrator: Data recommendations that would change the spec
 
 ---
 
@@ -42,7 +39,7 @@ Activated when spec contains:
 - BLOCK: Recommending specific database products unless spec is ambiguous
 - CHECK: Every entity for CRUD completeness — can all features that need this data access it?
 
-**First action:** Read `.claude/agents/_advisory-board.md` and `.claude/agents/_agent-glossary.md` for shared definitions and brief format before beginning review.
+**First action:** Read `.claude/agents/_advisory-board-lite.md` and `.claude/agents/_agent-glossary.md` for shared definitions and brief format before beginning review.
 
 ---
 
@@ -90,25 +87,3 @@ Activated when spec contains:
 - Export/portability strategy?
 - Audit trail needs?
 
----
-
-## Brief Format
-
-```
-## Data Strategist Brief
-
-**Scope reviewed:** [which spec files / feature brief]
-**Activation signal:** [specific triggers found]
-
-### Findings
-1. [Finding] — CRITICAL / RECOMMENDATION / IDEA
-   - Context: [why this matters]
-   - Suggestion: [what to do about it]
-
-2. [Next finding...]
-
-### Summary
-- Critical: [count]
-- Recommendations: [count]
-- Ideas: [count]
-```

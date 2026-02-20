@@ -67,34 +67,10 @@ Before session close:
 
 ---
 
-## Advisory Board Orchestration
+## On-Demand Procedures
 
-When running Prompt A Phase 1 (advisory board review):
-
-1. **Scan** compiled specs for activation signals (see `.claude/agents/_advisory-board.md` for signal table)
-2. **Activate** always-on specialists (Researcher, Architect, Critic, Innovator) plus any triggered conditional specialists
-3. **Dispatch** all activated specialists in parallel — each receives the compiled spec files
-4. **Collect** individual briefs from each specialist
-5. **Synthesize** into a single Refinement Report (see `_advisory-board.md` for format)
-6. **Present** report to operator for per-item review (accept / reject / defer)
-7. **Record** operator decisions — no build begins until all Critical findings are addressed
-
-For Feature mode: scan the feature brief's "What It Touches" checkboxes for activation signals.
-
----
-
-## Cohesion Review Flow
-
-After Builder signals completion, before invoking QA:
-
-1. **Gather context** — Run `git diff` to capture the changes. Identify files touched and their immediate neighbors (files that import from or are imported by the changed files).
-2. **Invoke Critic** — Dispatch Critic as subagent via Task with mode=cohesion. Pass the diff output and list of files to review in the Task prompt.
-3. **Review findings** — Read the Cohesion Brief. Categorize each finding:
-   - **Clear fix**: Unambiguous broken reference or inconsistency → delegate to Builder
-   - **Ambiguous**: Could be intentional or could be a problem → surface to operator for decision
-4. **Resolve** — If clear fixes exist, delegate to Builder with specific instructions. If ambiguous findings exist, pause and present to operator.
-5. **Re-run** — If Builder made fixes, invoke Critic (cohesion mode) again to verify resolution. Cap at 2 rounds — after that, escalate remaining findings to operator for accept/defer.
-6. **Proceed** — When Cohesion Brief shows clean (zero critical findings, or all findings operator-accepted) → invoke QA for gate verification.
+- **When running Prompt A Phase 1** (advisory board review): Read `.claude/agents/_advisory-board.md` → Orchestration Procedure section
+- **After Builder signals completion** (before QA): Read `.claude/agents/_cohesion-review.md`
 
 ---
 
