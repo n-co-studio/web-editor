@@ -6,7 +6,7 @@ import type { VisualDiff } from '@frontend-editor/shared';
  * Discriminated union on `type`:
  *  - 'css'     — inline style changes (spacing, dimensions, typography, etc.)
  *  - 'removal' — element deleted from DOM
- *  - 'reorder' — element moved within its parent container (stub: Phase 2 adds drag, Phase 3 adds undo/redo)
+ *  - 'reorder' — element moved within its parent container
  */
 
 interface CssHistoryEntry {
@@ -69,10 +69,17 @@ export class EditHistory {
       case 'removal':
         entry.parent.insertBefore(entry.element, entry.nextSibling);
         break;
-      case 'reorder':
-        // Stub — Phase 3 implements reorder undo logic
-        console.warn('[frontend-editor] Reorder undo not yet implemented');
+      case 'reorder': {
+        const container = entry.container;
+        for (const child of entry.originalChildOrder) {
+          if ('moveBefore' in container && typeof (container as any).moveBefore === 'function') {
+            (container as any).moveBefore(child, null);
+          } else {
+            container.insertBefore(child, null);
+          }
+        }
         break;
+      }
     }
 
     this.redoStack.push(entry);
@@ -94,10 +101,19 @@ export class EditHistory {
       case 'removal':
         entry.element.remove();
         break;
-      case 'reorder':
-        // Stub — Phase 3 implements reorder redo logic
-        console.warn('[frontend-editor] Reorder redo not yet implemented');
+      case 'reorder': {
+        const container = entry.container;
+        const el = entry.element;
+        const remaining = entry.originalChildOrder.filter((_, i) => i !== entry.fromIndex);
+        const effectiveIdx = entry.toIndex > entry.fromIndex ? entry.toIndex - 1 : entry.toIndex;
+        const refNode = effectiveIdx < remaining.length ? remaining[effectiveIdx] : null;
+        if ('moveBefore' in container && typeof (container as any).moveBefore === 'function') {
+          (container as any).moveBefore(el, refNode);
+        } else {
+          container.insertBefore(el, refNode);
+        }
         break;
+      }
     }
 
     this.undoStack.push(entry);
@@ -128,10 +144,17 @@ export class EditHistory {
         case 'removal':
           entry.parent.insertBefore(entry.element, entry.nextSibling);
           break;
-        case 'reorder':
-          // Stub — Phase 3 implements reorder reset logic
-          console.warn('[frontend-editor] Reorder reset not yet implemented');
+        case 'reorder': {
+          const container = entry.container;
+          for (const child of entry.originalChildOrder) {
+            if ('moveBefore' in container && typeof (container as any).moveBefore === 'function') {
+              (container as any).moveBefore(child, null);
+            } else {
+              container.insertBefore(child, null);
+            }
+          }
           break;
+        }
       }
       diffIds.push(entry.diff.id);
     }
