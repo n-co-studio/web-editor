@@ -1,18 +1,41 @@
 import type { VisualDiff } from '@frontend-editor/shared';
 
 /**
- * Tracks committed CSS edits for undo/redo/reset.
+ * Tracks committed edits for undo/redo/reset.
  *
- * Each entry stores the target element and the CSS property changes
- * (fromValue/toValue) so we can revert or re-apply inline styles.
- * The VisualDiff is retained so callers can sync with the PendingQueue.
+ * Discriminated union on `type`:
+ *  - 'css'     — inline style changes (spacing, dimensions, typography, etc.)
+ *  - 'removal' — element deleted from DOM
+ *  - 'reorder' — element moved within its parent container
  */
 
-export interface HistoryEntry {
+interface CssHistoryEntry {
+  readonly type: 'css';
   readonly element: HTMLElement;
   readonly changes: ReadonlyArray<{ property: string; fromValue: string; toValue: string }>;
   readonly diff: VisualDiff;
 }
+
+interface RemovalHistoryEntry {
+  readonly type: 'removal';
+  readonly element: HTMLElement;
+  readonly changes: ReadonlyArray<{ property: string; fromValue: string; toValue: string }>;
+  readonly diff: VisualDiff;
+  readonly parent: Node;
+  readonly nextSibling: Node | null;
+}
+
+interface ReorderHistoryEntry {
+  readonly type: 'reorder';
+  readonly element: HTMLElement;
+  readonly container: HTMLElement;
+  readonly fromIndex: number;
+  readonly toIndex: number;
+  readonly originalChildOrder: HTMLElement[];
+  readonly diff: VisualDiff;
+}
+
+export type HistoryEntry = CssHistoryEntry | RemovalHistoryEntry | ReorderHistoryEntry;
 
 type HistoryCallback = () => void;
 
@@ -33,12 +56,29 @@ export class EditHistory {
     const entry = this.undoStack.pop();
     if (!entry) return null;
 
-    // Revert inline styles
-    for (const c of entry.changes) {
-      if (c.fromValue) {
-        entry.element.style.setProperty(c.property, c.fromValue);
-      } else {
-        entry.element.style.removeProperty(c.property);
+    switch (entry.type) {
+      case 'css':
+        for (const c of entry.changes) {
+          if (c.fromValue) {
+            entry.element.style.setProperty(c.property, c.fromValue);
+          } else {
+            entry.element.style.removeProperty(c.property);
+          }
+        }
+        break;
+      case 'removal':
+        entry.parent.insertBefore(entry.element, entry.nextSibling);
+        break;
+      case 'reorder': {
+        const container = entry.container;
+        for (const child of entry.originalChildOrder) {
+          if ('moveBefore' in container && typeof (container as any).moveBefore === 'function') {
+            (container as any).moveBefore(child, null);
+          } else {
+            container.insertBefore(child, null);
+          }
+        }
+        break;
       }
     }
 
@@ -52,9 +92,28 @@ export class EditHistory {
     const entry = this.redoStack.pop();
     if (!entry) return null;
 
-    // Re-apply inline styles
-    for (const c of entry.changes) {
-      entry.element.style.setProperty(c.property, c.toValue);
+    switch (entry.type) {
+      case 'css':
+        for (const c of entry.changes) {
+          entry.element.style.setProperty(c.property, c.toValue);
+        }
+        break;
+      case 'removal':
+        entry.element.remove();
+        break;
+      case 'reorder': {
+        const container = entry.container;
+        const el = entry.element;
+        const remaining = entry.originalChildOrder.filter((_, i) => i !== entry.fromIndex);
+        const effectiveIdx = entry.toIndex > entry.fromIndex ? entry.toIndex - 1 : entry.toIndex;
+        const refNode = effectiveIdx < remaining.length ? remaining[effectiveIdx] : null;
+        if ('moveBefore' in container && typeof (container as any).moveBefore === 'function') {
+          (container as any).moveBefore(el, refNode);
+        } else {
+          container.insertBefore(el, refNode);
+        }
+        break;
+      }
     }
 
     this.undoStack.push(entry);
@@ -63,7 +122,7 @@ export class EditHistory {
   }
 
   /**
-   * Reset all edits — reverts every inline style change in reverse order.
+   * Reset all edits — reverts every change in reverse order.
    * Returns the list of diff IDs that were undone.
    */
   resetAll(): string[] {
@@ -72,11 +131,29 @@ export class EditHistory {
     // Revert undo stack in reverse (most recent first)
     for (let i = this.undoStack.length - 1; i >= 0; i--) {
       const entry = this.undoStack[i];
-      for (const c of entry.changes) {
-        if (c.fromValue) {
-          entry.element.style.setProperty(c.property, c.fromValue);
-        } else {
-          entry.element.style.removeProperty(c.property);
+      switch (entry.type) {
+        case 'css':
+          for (const c of entry.changes) {
+            if (c.fromValue) {
+              entry.element.style.setProperty(c.property, c.fromValue);
+            } else {
+              entry.element.style.removeProperty(c.property);
+            }
+          }
+          break;
+        case 'removal':
+          entry.parent.insertBefore(entry.element, entry.nextSibling);
+          break;
+        case 'reorder': {
+          const container = entry.container;
+          for (const child of entry.originalChildOrder) {
+            if ('moveBefore' in container && typeof (container as any).moveBefore === 'function') {
+              (container as any).moveBefore(child, null);
+            } else {
+              container.insertBefore(child, null);
+            }
+          }
+          break;
         }
       }
       diffIds.push(entry.diff.id);

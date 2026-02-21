@@ -38,138 +38,136 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 -->
 
-## Session 5 — 2026-02-19 — Chrome Extension: Undo/Redo/Reset + Bug Fixes
+## Session 10 — 2026-02-21 — Drag-to-Reorder Phase 3: Undo/Redo, Diff Pipeline & MCP
 
 **Status:** complete
-**Decisions applied:** None
-**Commits:** None (pending)
+**Decisions applied:** 0001, 0002, 0008
+**Commits:** pending
 
 ### Goal
-- Add undo/redo/reset functionality to the floating toolbar
-- Fix extension not activating (runtime crash from `var history` global conflict)
-- Remove freeform text input from mini panels (token-only editing)
+- Implement reorder undo/redo/reset (replace console.warn stubs in history.ts)
+- Add reorder change rendering to review panel
+- Bump protocol version to 0.2.0
+- Update MCP tool description to document reorderChanges
+- Complete end-to-end reorder flow from drag to Claude Code
 
 ### Plan Summary
-- Create `EditHistory` class with undo/redo stacks tracking inline style changes per element
-- Add undo (↶), redo (↷), reset (↻) SVG icon buttons to toolbar below tool icons
-- Add confirmation modal for destructive reset action
-- Wire all commit paths through unified `commitEdit()` helper
-- Add Ctrl+Z / Cmd+Z keyboard shortcuts
-- Fix `var history = null` global conflict by renaming to `editHistory`
-- Strip freeform inputs from typography and color editors
+- Replace 3 reorder stubs in `EditHistory` with `moveBefore`/`insertBefore` guard pattern: undo restores full `originalChildOrder`, redo re-applies single move, reset restores order
+- Add reorder rows in `ReviewPanel.renderGroup()` with position description and direction badge
+- Fix removed section label to count both CSS and reorder changes
+- Bump `PROTOCOL_VERSION` from `'0.1.0'` to `'0.2.0'`
+- Update `get_pending_visual_changes` tool description for Claude Code consumption
+- Add `refreshReorderAfterHistoryChange()` helper (from cohesion review) to keep reorder editor in sync after undo/redo
 
 ### Changes Made
-- `packages/chrome-extension/src/content/history.ts` — New: `EditHistory` class with undo/redo stacks, `resetAll()`, inline style revert/re-apply
-- `packages/chrome-extension/src/content/toolbar.ts` — Added undo/redo/reset icons (inline SVG), buttons below tools with separator, `setUndoRedoState()` for dimming, `onUndo`/`onRedo`/`onReset` callbacks, reset confirmation modal (backdrop + alertdialog)
-- `packages/chrome-extension/src/content/index.ts` — Renamed `history` → `editHistory` (fixes `var history` overwriting `window.history`), added `commitEdit()` helper, wired all 4 commit paths (panel, typography, colors, handles) to push to both queue and history, added Ctrl+Z/Cmd+Z keyboard shortcuts, wired toolbar undo/redo/reset callbacks
-- `packages/chrome-extension/src/content/editing/typography.ts` — Token-only: font-size/font-family/color controls return `null` when no tokens (row hidden), removed `buildTextInput()` and `isValidColor()`
-- `packages/chrome-extension/src/content/editing/colors.ts` — Token-only: removed freeform hex input mode, removed mode toggle link, shows "No color tokens loaded" fallback, removed `rgbToHex()` helper
+- `packages/shared/src/protocol.ts` — Bumped `PROTOCOL_VERSION` from `'0.1.0'` to `'0.2.0'`
+- `packages/chrome-extension/src/content/history.ts` — Implemented 3 reorder cases: undo (restore `originalChildOrder` via append loop), redo (re-apply move mirroring `commitReorder()`), reset (same as undo). Removed stale Phase 2/3 stub comment from doc block.
+- `packages/chrome-extension/src/content/batching/review-panel.ts` — Added reorder change rendering in `renderGroup()` (position description, indigo direction badge, remove button). Fixed `renderRemovedSection` label to count `reorderChanges`.
+- `packages/mcp-server/src/server.ts` — Updated `get_pending_visual_changes` description: documents `reorderChanges` field, explains intent is source child reorder not CSS `order`, lists available fields.
+- `packages/chrome-extension/src/content/index.ts` — Added `refreshReorderAfterHistoryChange()` helper (re-renders reorder editor after undo/redo of reorder entry to keep drop zones in sync with DOM). Wired into all 4 undo/redo paths (toolbar onUndo, toolbar onRedo, keyboard Cmd+Z, keyboard Cmd+Shift+Z). Added `HistoryEntry` type import.
 
 ### Verification (Gates Evidence)
-- `npx tsc --noEmit -p packages/chrome-extension` → 0 errors
-- `node packages/chrome-extension/esbuild.config.js` → content.js 125.5kb, service-worker.js 845b
-- Verified `var editHistory` in bundle (no `var history` conflict)
+- Commit gates: A1 pass (0001/0002/0008 followed), A2 pass (plan documented, 5 files), A3 pass (`npm run build` → 0 errors), A4 pass (no secrets), A5 pass (Critic cohesion: full 3-phase review — 0 critical, 3 warnings; fixed warning #2 (stale reorder editor after undo/redo); re-run clean — 0 critical, 0 warning)
+- Push gates: B1 pending, B2 pending, B3 pending
 
 ### Failed Attempts (Brief)
-- `let history` in index.ts → esbuild converts module-level `let` to `var` in bundle → `var history = null` at top-level overwrites `window.history` (browser History API), crashing the content script silently. Fixed by renaming to `editHistory`.
+- Cohesion review (full 3-phase) found that undo/redo while reorder editor is active leaves stale drop zones/indices — the DOM reverts but the editor's internal geometry is not refreshed. Fixed by adding `refreshReorderAfterHistoryChange()` helper that re-renders the editor when a reorder entry is undone/redone.
 
 ### Known Issues Logged
-- esbuild `format: 'esm'` converts module-level `let`/`const` to `var` which becomes global in content scripts — avoid naming variables after browser globals (`history`, `location`, `navigator`, `screen`, etc.)
+- None
 
 ### Follow-ups
-- Test extension reload in Chrome after rebuild
-- Undo/redo queue sync is best-effort (collapsed diffs may not perfectly round-trip through undo)
+- None — drag-to-reorder feature complete (Phases 1-3)
 
 ---
 
-## Session 6 — 2026-02-20 — Inspector Panels + Review Panel Highlights + Button-Relative Positioning
+## Session 9 — 2026-02-21 — Drag-to-Reorder Phase 2: Core Drag Interaction
 
 **Status:** complete
-**Decisions applied:** None
-**Commits:** None (pending)
+**Decisions applied:** 0001, 0002, 0008
+**Commits:** pending (included in Phase 3 commit)
 
 ### Goal
-- Split monolithic PropertyPanel into 2 focused panels: Properties (floating) + DevTools (bottom)
-- Add click-to-highlight from review panel to page elements
-- Add Classes & ID section to properties panel
-- Position all mini-panels relative to their respective toolbar buttons (not always at top)
-- Make review panel sticky to toolbar like other mini-panels
+- Build `ReorderEditor` and `OrderPreview` classes with Figma-style drag-to-reorder
+- Bounding-rect ghost, gap-center drop-zone indicators, FLIP-animated sibling displacement
+- DOM `insertBefore`/`moveBefore` on commit, history entry for undo stack
 
 ### Plan Summary
-- Create `PropertiesPanel` — floating mini-panel with CSS properties + Classes & ID section (extracted from panel.ts)
-- Create `DevToolsPanel` — Chrome DevTools-style bottom panel with split DOM Inspector (left) + Console (right), adjustable split divider and resizable height
-- Replace toolbar's single panel button with 2 inspector buttons (Properties + DevTools)
-- Add programmatic highlight overlay (rose dashed border) to HoverHighlight for review panel click-to-highlight
-- Wire review panel change groups and note pills to trigger element highlight
-- Rewire index.ts to use new panels, update escape ladder, cursor mode, multi-select
-- Delete old panel.ts
-- Update all mini-panel positioning to use `toolbar.getButtonPosition(mode)` instead of `toolbar.getPosition()`
+- Create `OrderPreview` class — standalone multi-element inline style tracker for CSS `order`, `transform`, `transition`
+- Build `ReorderEditor` class with gap-center drop-zone algorithm, pointer-capture drag, FLIP animation (throttled to midpoint crossings), guarded `moveBefore`/`insertBefore` commit
+- Add `buildReorder()` method to `DiffBuilder` for producing `VisualDiff` with `reorderChanges`
+- Wire into `index.ts` — toolbar tool selection, 7 cleanup chains, scroll refresh, Escape ladder, commit callback helper
 
 ### Changes Made
-- `packages/chrome-extension/src/shared/types.ts` — Added `InspectorMode` type (`'properties' | 'devtools'`)
-- `packages/chrome-extension/src/shared/constants.ts` — Added `DEVTOOLS_DEFAULT_HEIGHT`, `DEVTOOLS_MIN_HEIGHT`, `DEVTOOLS_MAX_HEIGHT_RATIO`
-- `packages/chrome-extension/src/content/selection/hover.ts` — Added programmatic highlight overlay (rose dashed `#fb7185` border), `showProgrammaticHighlight(el)`, `clearProgrammaticHighlight()`
-- `packages/chrome-extension/src/content/selection/properties-panel.ts` — **New** (~885 lines): floating mini-panel extracted from panel.ts, new Classes & ID section (amber ID pills, neutral class pills), 6 property groups with inline editing + token integration, draggable header
-- `packages/chrome-extension/src/content/selection/devtools-panel.ts` — **New**: bottom panel with horizontal split DOM Inspector + Console, draggable vertical divider (min 200px per side), draggable top edge for height resize, height/split persisted in `chrome.storage.session`
-- `packages/chrome-extension/src/content/toolbar.ts` — Replaced `panel` icon with `properties` + `devtools` SVG icons, replaced `panelToggleCb`/`panelBtn` with `inspectorToggleCbs`/`inspectorButtons`/`activeInspectors`, added `onInspectorToggle()`/`setInspectorOpen()`, added `getButtonPosition()` with support for EditMode, InspectorMode, 'review', 'notes', 'grid'
-- `packages/chrome-extension/src/content/batching/review-panel.ts` — Added `onHighlightElement` callback, clickable selector headers + element pills, anchor-based positioning with `reposition()` method (replaced hard-coded `bottom: 16px`)
-- `packages/chrome-extension/src/content/index.ts` — Full rewire: replaced `PropertyPanel` with `PropertiesPanel` + `DevToolsPanel`, all `panel?.log()` → `devtoolsPanel?.log()`, all panel render calls use `toolbar.getButtonPosition(mode)`, `onMove` handler passes button-specific positions, review panel highlight callback, updated escape ladder + cursor mode + multi-select
-- `packages/chrome-extension/src/content/editing/keyboard.ts` — Removed `PropertyPanel` dependency, changed panel parameter to `_panel: unknown`
-- `packages/chrome-extension/src/content/selection/panel.ts` — **Deleted** (replaced by properties-panel.ts + devtools-panel.ts)
+- `packages/chrome-extension/src/content/editing/order-preview.ts` — **New** (~60 lines): standalone multi-element inline style tracker with `begin()`/`apply()`/`revertAll()`
+- `packages/chrome-extension/src/content/editing/reorder.ts` — Added `ReorderEditor` class (~380 lines) + `ReorderCommitCallback` type: gap-center drop zones (N+1 for N children), bounding-rect ghost (indigo, not cloneNode), FLIP animation via `OrderPreview`, public `cancelDrag()` with rAF cancellation + pointer release, `moveBefore`/`insertBefore` guarded commit, row/column/reverse support
+- `packages/chrome-extension/src/content/batching/diff-builder.ts` — Added `buildReorder(elementInfo, reorderChange)` method producing `VisualDiff` with `reorderChanges` field, imported `ReorderChange` type
+- `packages/chrome-extension/src/content/index.ts` — Wired `ReorderEditor`: `makeReorderCommit()` helper (builds diff + history entry + re-renders), toolbar tool select, 7 cleanup chains (onSelect, onDeselect, onToolSelect, onToggle, onCursorModeChange, enterMultiSelectMode, deactivate), scroll rAF refresh, Escape ladder cancel, toolbar move reposition, onClose callback, grid-aware `containerDirection`
 
 ### Verification (Gates Evidence)
-- `npx tsc --noEmit -p packages/chrome-extension` → 0 errors
-- `node packages/chrome-extension/esbuild.config.js` → content.js 300.3kb, service-worker.js 845b
+- Commit gates: A1 pass (0001/0002/0008 followed), A2 pass (plan documented, 4 files), A3 pass (`npm run build` → content.js 322.5kb), A4 pass (no secrets), A5 pass (Critic cohesion: 3 criticals + 2 warnings found and fixed, re-run clean — 0 critical, 0 warning)
+- Push gates: B1 pending, B2 pending, B3 pending
 
 ### Failed Attempts (Brief)
-- keyboard.ts still imported deleted PropertyPanel after panel.ts removal — fixed by updating import to `_panel: unknown`
+- Cohesion review found FLIP `rAF` race: direct `child.style` writes bypassed `OrderPreview`, leaving stale transforms if Escape fired mid-animation. Fixed by routing all writes through `orderPreview.apply()` and tracking rAF IDs.
+- Cohesion review found `enterMultiSelectMode` missing `reorderEditor?.cleanup()`. Fixed.
+- Cohesion review found `cancelDrag` was private but needed by Escape handler; also missing pointer capture release and cursor reset. Fixed by making public and adding release logic.
+- Cohesion review found `containerDirection` used `flexDirection` for grid containers (returns empty string). Fixed with `display.includes('grid')` branch reading `gridAutoFlow`.
 
 ### Known Issues Logged
 - None
 
 ### Follow-ups
-- Test full extension reload in Chrome to verify new panel layout
-- Consider persisting properties panel open/closed preference in chrome.storage.session
+- Phase 3: implement reorder undo/redo/reset (replace console.warn stubs in history.ts)
+- Phase 3: wire diff builder + queue for proper reorder diff pipeline
 
 ---
 
-## Session 7 — 2026-02-20 — Move Properties Panel into Bottom DevTools Panel
+## Session 8 — 2026-02-21 — Drag-to-Reorder Phase 1: Data Contract, Guards & Toolbar
 
 **Status:** complete
-**Decisions applied:** None
-**Commits:** None (pending)
+**Decisions applied:** 0001, 0002, 0004
+**Commits:** 63c9fca — feat: add drag-to-reorder Phase 1 — data contract, guards & toolbar
 
 ### Goal
-- Merge floating PropertiesPanel into the bottom DevToolsPanel as a middle pane
-- Three-column Chrome DevTools-like layout: Elements | Properties | Console
+- Establish type-level foundation for drag-to-reorder feature (no drag logic)
+- Add `ReorderChange` to shared data contract
+- Refactor `HistoryEntry` to discriminated union
+- Add block-reason guard, toolbar button, and boundary expansion documentation
 
 ### Plan Summary
-- Rewrite `DevToolsPanel` with three-column layout and two draggable vertical dividers
-- Port all property rendering logic (inline editors, token resolution, multi-select) from PropertiesPanel into DevToolsPanel
-- Delete `properties-panel.ts` entirely
-- Remove "properties" toolbar button (DevTools button opens the unified panel)
-- Auto-open DevTools when selecting an element (replaces old properties auto-open)
-- Track `devtoolsUserClosed` flag (replaces `propertiesUserClosed`)
+- Add `ReorderChange` interface + `reorderChanges` field to `VisualDiff` in shared package
+- Add `'reorder'` to `EditMode` union type
+- Add reorder color (indigo) to `HANDLE_COLORS` + `DROP_INDICATOR` design tokens
+- Create `getReorderBlockReason()` guard (checks flex/grid parent, wrap, sibling count)
+- Add 6-dot grip icon + label + tool order entry to toolbar
+- Wire block-reason into disabled tools map + stub mode branch in index.ts
+- Refactor `HistoryEntry` from optional-field pattern to discriminated union (`css | removal | reorder`)
+- Document boundary expansion for DOM node relocation in `boundaries.md`
 
 ### Changes Made
-- `packages/chrome-extension/src/shared/constants.ts` — Added `DEVTOOLS_DEFAULT_LEFT_RATIO` (0.30) and `DEVTOOLS_DEFAULT_MIDDLE_RATIO` (0.40)
-- `packages/chrome-extension/src/shared/types.ts` — Simplified `InspectorMode` to `'devtools'` only (removed `'properties'`)
-- `packages/chrome-extension/src/content/selection/devtools-panel.ts` — Full rewrite (~1500 lines): three-column layout, `tokenStore` constructor parameter, ported all 14 property rendering methods (buildClassesSection, buildCssPropertiesSection, buildPropertyRow, openInlineEditor, closeInlineEditor, applyPropertyChange, buildMultiCssPropertiesSection, buildMultiPropertyRow, openMultiInlineEditor, closeMultiInlineEditor, applyMultiPropertyChange, resolveToken, renderPropertiesContent, renderMultiPropertiesContent), new public API (onPropertyChange, onMultiPropertyChange, updateProperties, updateMultiProperties, clearProperties, refreshProperties), two split drag handlers, backwards-compatible persistence format
-- `packages/chrome-extension/src/content/selection/properties-panel.ts` — **Deleted** (all logic absorbed into DevToolsPanel)
-- `packages/chrome-extension/src/content/toolbar.ts` — Removed "properties" button from inspector row, removed properties SVG icon, cleaned up getButtonPosition
-- `packages/chrome-extension/src/content/index.ts` — Removed PropertiesPanel import/variable, replaced `propertiesUserClosed` with `devtoolsUserClosed`, auto-open DevTools on element select, rewired all property change callbacks through DevToolsPanel, updated escape ladder (removed properties level), removed properties reposition/cleanup, updated multi-select flow
+- `packages/shared/src/diff.ts` — Added `ReorderChange` interface (type, fromIndex, toIndex, siblingSelectors, containerSelector, containerDirection) + `reorderChanges?: readonly ReorderChange[]` on `VisualDiff`
+- `packages/shared/src/index.ts` — Exported `ReorderChange` from barrel
+- `packages/chrome-extension/src/shared/types.ts` — Added `'reorder'` to `EditMode` union
+- `packages/chrome-extension/src/shared/constants.ts` — Added `reorder: '#6366f1'` to `HANDLE_COLORS`, added `DROP_INDICATOR` constant (color, activeColor, thickness, activeThickness)
+- `packages/chrome-extension/src/content/editing/reorder.ts` — **New**: `getReorderBlockReason(element)` — returns block reason string or null (checks parent exists, parent is flex/grid, flex-wrap is nowrap, >1 sibling)
+- `packages/chrome-extension/src/content/toolbar.ts` — Added 6-dot grip SVG icon, `reorder: 'Reorder'` label, `'reorder'` in `TOOL_ORDER` after `'move'`
+- `packages/chrome-extension/src/content/index.ts` — Imported `getReorderBlockReason`, wired into disabled tools in `onSelect`, added stub `else if (selectedMode === 'reorder')` branch, refactored `commitEdit` to construct typed `CssHistoryEntry` or `RemovalHistoryEntry`
+- `packages/chrome-extension/src/content/history.ts` — Full refactor: discriminated union (`CssHistoryEntry | RemovalHistoryEntry | ReorderHistoryEntry`), `switch (entry.type)` dispatch in `undo()`/`redo()`/`resetAll()`, `console.warn` stubs for reorder cases
+- `docs/spec/compiled/v1/boundaries.md` — Added "Boundary Expansions" section documenting `insertBefore`/`moveBefore` permission for same-parent reorder
 
 ### Verification (Gates Evidence)
-- `npx tsc --noEmit` → 0 errors
-- `npm run build` → content.js 296.5kb, service-worker.js 819b
+- Commit gates: A1 pass (decisions 0001/0002/0004 followed), A2 pass (plan existed, 9 files), A3 pass (`npx tsc --noEmit` → 0 errors), A4 pass (no secrets, feature branch), A5 pass (Critic cohesion review: 2 warnings found and fixed, re-verified clean)
+- Push gates: B1 pending, B2 pending, B3 pending
 
 ### Failed Attempts (Brief)
-- None
+- TypeScript error after adding `'reorder'` to `EditMode` — `TOOL_LABELS` (Record<EditMode, string>) missing new key. Fixed by adding label + tool order entry.
+- Cohesion review found `throw new Error(...)` in reorder undo/redo/reset stubs would leave extension unrecoverable (callers have no try/catch). Fixed by replacing with `console.warn` + `break`.
+- Cohesion review found phase label mismatch ("Phase 3" in history.ts vs "Phase 2" in reorder.ts). Fixed by aligning to consistent "Phase 1/2/3" references.
 
 ### Known Issues Logged
 - None
 
 ### Follow-ups
-- Test full extension reload in Chrome to verify three-column layout
-- Verify inline property editing works within the embedded pane
-- Verify divider drag + split ratio persistence
+- Phase 2: implement drag interaction logic in reorder.ts
+- Phase 3: implement reorder undo/redo/reset (replace console.warn stubs in history.ts)

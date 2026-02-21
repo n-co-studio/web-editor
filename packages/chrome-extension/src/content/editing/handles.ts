@@ -7,8 +7,8 @@ import {
   HANDLE_HIT_AREA,
   SNAP_EASE_MS,
   HANDLE_COLORS,
-  ZONE_OVERLAY,
 } from '../../shared/constants';
+import { createZoneOverlays } from './zone-overlays';
 import type { EditMode } from '../../shared/types';
 import type { SnappingEngine } from '../tokens/snapping';
 import type { PreviewManager } from './preview';
@@ -118,10 +118,8 @@ export class DragHandleManager {
     const rect = element.getBoundingClientRect();
     const configs = getHandleConfigs(mode, rect);
 
-    // Spacing mode: render zone overlays first (behind handles)
-    if (mode === 'spacing') {
-      this.renderSpacingZones(element, rect);
-    }
+    // Always render zone overlays (behind handles)
+    this.renderSpacingZones(element, rect);
 
     // Mode badge above element
     this.renderModeBadge(mode, rect);
@@ -150,7 +148,7 @@ export class DragHandleManager {
 
   /** Reposition all handles, zones, and badge to match the element's current bounding rect. */
   refreshHandles(): void {
-    if (!this.currentElement || this.handleEntries.length === 0) return;
+    if (!this.currentElement || (this.handleEntries.length === 0 && this.zoneOverlays.length === 0)) return;
     const rect = this.currentElement.getBoundingClientRect();
     for (const { el, config } of this.handleEntries) {
       const offset = config.dynamicOffset
@@ -162,7 +160,7 @@ export class DragHandleManager {
       el.style.top = `${y - HANDLE_HIT_AREA / 2}px`;
     }
     // Reposition zone overlays
-    if (this.currentMode === 'spacing' && this.zoneOverlays.length > 0) {
+    if (this.zoneOverlays.length > 0) {
       this.repositionSpacingZones(this.currentElement, rect);
     }
     // Reposition badge
@@ -465,87 +463,14 @@ export class DragHandleManager {
   // Spacing zone overlays (R1)
   // -----------------------------------------------------------------------
 
-  private renderSpacingZones(element: Element, rect: DOMRect, animate = true): void {
-    const cs = getComputedStyle(element);
-    const pt = parseFloat(cs.paddingTop) || 0;
-    const pr = parseFloat(cs.paddingRight) || 0;
-    const pb = parseFloat(cs.paddingBottom) || 0;
-    const pl = parseFloat(cs.paddingLeft) || 0;
-    const mt = parseFloat(cs.marginTop) || 0;
-    const mr = parseFloat(cs.marginRight) || 0;
-    const mb = parseFloat(cs.marginBottom) || 0;
-    const ml = parseFloat(cs.marginLeft) || 0;
-
-    // Padding zones — inside the border box
-    if (pt > 0) this.addZone(rect.left, rect.top, rect.width, pt, 'padding', pt, animate);
-    if (pr > 0) this.addZone(rect.right - pr, rect.top, pr, rect.height, 'padding', pr, animate);
-    if (pb > 0) this.addZone(rect.left, rect.bottom - pb, rect.width, pb, 'padding', pb, animate);
-    if (pl > 0) this.addZone(rect.left, rect.top, pl, rect.height, 'padding', pl, animate);
-
-    // Margin zones — outside the border box
-    if (mt > 0) this.addZone(rect.left - ml, rect.top - mt, rect.width + ml + mr, mt, 'margin', mt, animate);
-    if (mr > 0) this.addZone(rect.right, rect.top - mt, mr, rect.height + mt + mb, 'margin', mr, animate);
-    if (mb > 0) this.addZone(rect.left - ml, rect.bottom, rect.width + ml + mr, mb, 'margin', mb, animate);
-    if (ml > 0) this.addZone(rect.left - ml, rect.top - mt, ml, rect.height + mt + mb, 'margin', ml, animate);
+  private renderSpacingZones(element: Element, _rect: DOMRect, animate = true): void {
+    this.zoneOverlays = createZoneOverlays(element, this.shadow, { animate });
   }
 
-  private addZone(
-    x: number, y: number, w: number, h: number,
-    type: 'padding' | 'margin',
-    value: number,
-    animate = true,
-  ): void {
-    const isPadding = type === 'padding';
-    const zone = createElement('div', {}, {
-      position: 'fixed',
-      left: `${x}px`,
-      top: `${y}px`,
-      width: `${w}px`,
-      height: `${h}px`,
-      background: isPadding ? ZONE_OVERLAY.paddingFill : ZONE_OVERLAY.marginFill,
-      outline: `1px dashed ${isPadding ? ZONE_OVERLAY.paddingOutline : ZONE_OVERLAY.marginOutline}`,
-      outlineOffset: '-1px',
-      pointerEvents: 'none',
-      zIndex: '55',
-      opacity: animate ? '0' : '1',
-      transition: animate ? 'opacity 100ms ease-out' : 'none',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      overflow: 'hidden',
-    });
-
-    // Value label — only show if zone is large enough to fit it
-    const minDim = Math.min(w, h);
-    if (minDim >= 14) {
-      const label = createElement('span', {}, {
-        color: isPadding ? ZONE_OVERLAY.paddingOutline : ZONE_OVERLAY.marginOutline,
-        fontSize: '9px',
-        fontWeight: '600',
-        fontFamily: OVERLAY.monoFamily,
-        lineHeight: '1',
-        whiteSpace: 'nowrap',
-        pointerEvents: 'none',
-        userSelect: 'none',
-      });
-      label.textContent = `${Math.round(value)}`;
-      zone.appendChild(label);
-    }
-
-    this.shadow.appendChild(zone);
-    this.zoneOverlays.push(zone);
-
-    // Fade in (only on initial render, not during drag/scroll refresh)
-    if (animate) {
-      requestAnimationFrame(() => { zone.style.opacity = '1'; });
-    }
-  }
-
-  private repositionSpacingZones(element: Element, rect: DOMRect): void {
-    // Remove old zones and re-render (simplest approach for scroll/resize)
+  private repositionSpacingZones(element: Element, _rect: DOMRect): void {
     for (const z of this.zoneOverlays) z.remove();
     this.zoneOverlays = [];
-    this.renderSpacingZones(element, rect, false); // skip fade on refresh
+    this.renderSpacingZones(element, _rect, false);
   }
 
   // -----------------------------------------------------------------------

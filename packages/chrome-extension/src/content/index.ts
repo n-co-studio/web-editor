@@ -20,16 +20,19 @@ import { TypographyEditor } from './editing/typography';
 import { ColorEditor } from './editing/colors';
 import { FloatingToolbar } from './toolbar';
 import { EditHistory } from './history';
+import type { HistoryEntry } from './history';
 import { NotesStore } from './batching/notes-store';
 import { NotesEditor } from './editing/notes';
 import { GridOverlay } from './grid-overlay';
 import { MoveEditor, getMoveBlockReason } from './editing/move';
+import { ReorderEditor, getReorderBlockReason } from './editing/reorder';
+import type { ReorderCommitCallback } from './editing/reorder';
 import { GridSettingsPanel } from './grid-settings';
 import { MeasureOverlay } from './selection/measure-overlay';
 import { MultiSelectManager } from './selection/multi-select';
 import { MultiSelectToolbar } from './editing/multi-select-toolbar';
-import { buildElementInfo, getTopElementAt } from '../shared/dom-utils';
-import type { VisualDiff, PropertyChange } from '@frontend-editor/shared';
+import { buildElementInfo, getTopElementAt, generateSelector } from '../shared/dom-utils';
+import type { VisualDiff, PropertyChange, ReorderChange } from '@frontend-editor/shared';
 import type { ExtensionMode, ConnectionStatus, EditMode } from '../shared/types';
 
 // ---------------------------------------------------------------------------
@@ -66,10 +69,12 @@ let notesStore: NotesStore | null = null;
 let notesEditor: NotesEditor | null = null;
 let gridOverlay: GridOverlay | null = null;
 let moveEditor: MoveEditor | null = null;
+let reorderEditor: ReorderEditor | null = null;
 let gridSettingsPanel: GridSettingsPanel | null = null;
 let measureOverlay: MeasureOverlay | null = null;
 let measureRafId: number | null = null;
 let devtoolsUserClosed = false;
+let devtoolsOpenBeforeCollapse = false;
 let multiSelect: MultiSelectManager | null = null;
 let multiSelectToolbar: MultiSelectToolbar | null = null;
 let multiSelectClickHandler: ((e: MouseEvent) => void) | null = null;
@@ -162,6 +167,7 @@ async function activate(): Promise<void> {
   notesEditor = new NotesEditor(notesStore, shadow);
   gridOverlay = new GridOverlay(shadow, tokenStore);
   moveEditor = new MoveEditor(shadow, preview);
+  reorderEditor = new ReorderEditor(shadow);
   gridSettingsPanel = new GridSettingsPanel(gridOverlay.getEffectiveSettings());
   measureOverlay = new MeasureOverlay(shadow, host);
   multiSelect = new MultiSelectManager(shadow, host);
@@ -172,6 +178,15 @@ async function activate(): Promise<void> {
 
   // Wire DevTools DOM tree clicks → re-select different element
   devtoolsPanel.onElementSelect((el) => selection!.select(el));
+
+  // Wire DevTools DOM tree hover → highlight element on page
+  devtoolsPanel.onElementHover((el) => {
+    if (el) {
+      hover!.highlightElement(el);
+    } else {
+      hover!.unhighlightElement();
+    }
+  });
 
   // Wire DevTools property edits → diff creation → queue + history
   devtoolsPanel.onPropertyChange((property, fromValue, toValue, tokenName) => {
@@ -252,6 +267,7 @@ async function activate(): Promise<void> {
     spacingEditor!.cleanup();
     positionEditor!.cleanup();
     moveEditor!.cleanup();
+    reorderEditor!.cleanup();
     staleDetector!.watch(element, () => {
       selection!.markStale();
       handles!.hideHandles();
@@ -260,9 +276,11 @@ async function activate(): Promise<void> {
     // Determine disabled tools
     const dimBlock = getDimensionBlockReason(element);
     const moveBlock = getMoveBlockReason(element);
+    const reorderBlock = getReorderBlockReason(element);
     const disabled: Partial<Record<EditMode, string>> = {};
     if (dimBlock) disabled['dimensions'] = dimBlock;
     if (moveBlock) disabled['move'] = moveBlock;
+    if (reorderBlock) disabled['reorder'] = reorderBlock;
     toolbar!.setDisabledTools(disabled);
 
     // Auto-activate dimensions if not blocked
@@ -296,6 +314,7 @@ async function activate(): Promise<void> {
     spacingEditor!.cleanup();
     positionEditor!.cleanup();
     moveEditor!.cleanup();
+    reorderEditor!.cleanup();
     measureOverlay!.disable();
     measureOverlay!.clear();
     staleDetector!.cleanup();
@@ -318,6 +337,7 @@ async function activate(): Promise<void> {
     spacingEditor!.cleanup();
     positionEditor!.cleanup();
     moveEditor!.cleanup();
+    reorderEditor!.cleanup();
 
     // Toggle off if clicking the active tool
     if (selectedMode === toolbar!.getActiveMode()) {
@@ -388,6 +408,9 @@ async function activate(): Promise<void> {
         moveEditor!.refreshOverlay();
       });
       toolbar!.setActiveMode('move');
+    } else if (selectedMode === 'reorder') {
+      reorderEditor!.render(el, makeReorderCommit(el));
+      toolbar!.setActiveMode('reorder');
     } else {
       handles!.showHandles(el, selectedMode);
       toolbar!.setActiveMode(selectedMode);
@@ -415,20 +438,35 @@ async function activate(): Promise<void> {
     devtoolsUserClosed = true;
   });
 
-  // Wire toolbar toggle → hide/show panel + tool mini-panels (overlay stays visible)
+  // Wire toolbar toggle → hide/show tool mini-panels + bottom DevTools panel
   toolbar.onToggle((expanded) => {
     if (!expanded) {
+      // Save DevTools state before collapsing
+      devtoolsOpenBeforeCollapse = devtoolsPanel!.isOpen();
+      if (devtoolsOpenBeforeCollapse) {
+        devtoolsPanel!.hide();
+        toolbar!.setInspectorOpen('devtools', false);
+      }
       typographyEditor!.cleanup();
       colorEditor!.cleanup();
       dimensionsEditor!.cleanup();
       spacingEditor!.cleanup();
       positionEditor!.cleanup();
       moveEditor!.cleanup();
+      reorderEditor!.cleanup();
       notesEditor!.cleanup();
       gridSettingsPanel!.cleanup();
       multiSelectToolbar!.cleanup();
       toolbar!.setNotesOpen(false);
       // Keep handles and overlay visible — only UI chrome hides
+    } else {
+      // Restore DevTools if it was open before collapse and user hasn't manually closed it
+      if (devtoolsOpenBeforeCollapse && !devtoolsUserClosed) {
+        const el = selection?.getSelectedElement() ?? undefined;
+        const info = el ? buildElementInfo(el) : undefined;
+        devtoolsPanel!.show(el, info);
+        toolbar!.setInspectorOpen('devtools', true);
+      }
     }
   });
 
@@ -445,6 +483,7 @@ async function activate(): Promise<void> {
       spacingEditor!.cleanup();
       positionEditor!.cleanup();
       moveEditor!.cleanup();
+      reorderEditor!.cleanup();
       notesEditor!.cleanup();
       gridSettingsPanel!.cleanup();
       toolbar!.setNotesOpen(false);
@@ -475,6 +514,7 @@ async function activate(): Promise<void> {
     positionEditor!.reposition(toolbar!.getButtonPosition('position'));
     notesEditor!.reposition(toolbar!.getButtonPosition('notes'));
     moveEditor!.reposition(toolbar!.getButtonPosition('move'));
+    reorderEditor!.reposition(toolbar!.getButtonPosition('reorder'));
     gridSettingsPanel!.reposition(toolbar!.getButtonPosition('grid'));
     multiSelectToolbar!.reposition(toolbar!.getPosition());
     reviewPanel!.reposition(toolbar!.getButtonPosition('review'));
@@ -551,6 +591,16 @@ async function activate(): Promise<void> {
     if (notePanel) notePanel.style.pointerEvents = 'auto';
 
     const pickHandler = (e: MouseEvent) => {
+      // Let clicks within the notes panel through so buttons remain interactive
+      const noteEl = notesEditor!.getContainerElement();
+      if (noteEl) {
+        const r = noteEl.getBoundingClientRect();
+        if (e.clientX >= r.left && e.clientX <= r.right &&
+            e.clientY >= r.top && e.clientY <= r.bottom) {
+          return;
+        }
+      }
+
       e.preventDefault();
       e.stopPropagation();
 
@@ -647,6 +697,11 @@ async function activate(): Promise<void> {
     toolbar!.setActiveMode(null);
   });
 
+  // Wire reorder editor close → deactivate tool
+  reorderEditor.onClose(() => {
+    toolbar!.setActiveMode(null);
+  });
+
   // Wire delete element
   toolbar.onDelete(() => {
     deleteSelectedElement();
@@ -667,6 +722,7 @@ async function activate(): Promise<void> {
       badge!.update();
       reviewPanel!.refresh();
       selection?.refreshHighlight();
+      refreshReorderAfterHistoryChange(entry);
       devtoolsPanel?.log('Undo');
     }
   });
@@ -678,6 +734,7 @@ async function activate(): Promise<void> {
       badge!.update();
       reviewPanel!.refresh();
       selection?.refreshHighlight();
+      refreshReorderAfterHistoryChange(entry);
       devtoolsPanel?.log('Redo');
     }
   });
@@ -753,6 +810,7 @@ function deactivate(): void {
   spacingEditor?.cleanup();
   positionEditor?.cleanup();
   moveEditor?.cleanup();
+  reorderEditor?.cleanup();
   notesEditor?.cleanup();
   gridOverlay?.hide();
   gridSettingsPanel?.cleanup();
@@ -778,6 +836,7 @@ function deactivate(): void {
 
   // Reset state
   devtoolsUserClosed = false;
+  devtoolsOpenBeforeCollapse = false;
   mode = 'inactive';
   wsClient = null;
   hover = null;
@@ -804,6 +863,7 @@ function deactivate(): void {
   notesEditor = null;
   gridOverlay = null;
   moveEditor = null;
+  reorderEditor = null;
   gridSettingsPanel = null;
   measureOverlay = null;
   measureRafId = null;
@@ -832,18 +892,32 @@ function commitEdit(
   element: Element | null,
   changes: readonly PropertyChange[],
   diff: VisualDiff,
+  removal?: { parent: Node; nextSibling: Node | null },
 ): void {
   queue!.add(diff);
   if (element) {
-    editHistory!.push({
-      element: element as HTMLElement,
-      changes: changes.map((c) => ({
-        property: c.property,
-        fromValue: c.fromValue,
-        toValue: c.toValue,
-      })),
-      diff,
-    });
+    const changeList = changes.map((c) => ({
+      property: c.property,
+      fromValue: c.fromValue,
+      toValue: c.toValue,
+    }));
+    if (removal) {
+      editHistory!.push({
+        type: 'removal',
+        element: element as HTMLElement,
+        changes: changeList,
+        diff,
+        parent: removal.parent,
+        nextSibling: removal.nextSibling,
+      });
+    } else {
+      editHistory!.push({
+        type: 'css',
+        element: element as HTMLElement,
+        changes: changeList,
+        diff,
+      });
+    }
   }
   badge!.update();
   reviewPanel!.refresh();
@@ -851,7 +925,61 @@ function commitEdit(
 }
 
 // ---------------------------------------------------------------------------
-// Delete element helper — hides via display:none, tracked as a diff
+// Reorder commit helper — builds diff + history entry, re-renders reorder mode
+// ---------------------------------------------------------------------------
+
+function makeReorderCommit(el: Element): ReorderCommitCallback {
+  return (element, container, fromIndex, toIndex, originalChildOrder) => {
+    const info = buildElementInfo(element);
+
+    const reorderChange: ReorderChange = {
+      type: 'reorder',
+      fromIndex,
+      toIndex,
+      siblingSelectors: originalChildOrder.map((c) => generateSelector(c)),
+      containerSelector: generateSelector(container),
+      containerDirection: getComputedStyle(container).display.includes('grid')
+        ? (getComputedStyle(container).gridAutoFlow?.includes('column') ? 'column' : 'row')
+        : (getComputedStyle(container).flexDirection || 'row'),
+    };
+
+    const diff = diffBuilder!.buildReorder(info, reorderChange);
+
+    queue!.add(diff);
+    editHistory!.push({
+      type: 'reorder',
+      element,
+      container,
+      fromIndex,
+      toIndex,
+      originalChildOrder,
+      diff,
+    });
+    badge!.update();
+    reviewPanel!.refresh();
+    devtoolsPanel?.refreshProperties();
+    selection?.refreshHighlight();
+
+    // Re-render reorder mode on the element at its new position
+    reorderEditor!.render(el, makeReorderCommit(el));
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Reorder editor refresh after undo/redo — keeps drop zones in sync with DOM
+// ---------------------------------------------------------------------------
+
+function refreshReorderAfterHistoryChange(entry: HistoryEntry): void {
+  if (entry.type !== 'reorder') return;
+  if (!reorderEditor?.isActive()) return;
+  const el = selection?.getSelectedElement();
+  if (el) {
+    reorderEditor.render(el, makeReorderCommit(el));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Delete element helper — removes from DOM, tracked as a diff
 // ---------------------------------------------------------------------------
 
 function deleteSelectedElement(): void {
@@ -861,6 +989,11 @@ function deleteSelectedElement(): void {
   const fromValue = getComputedStyle(el).display;
   if (fromValue === 'none') return; // already hidden
 
+  // Capture insertion context before removal
+  const parent = el.parentNode;
+  const nextSibling = el.nextSibling;
+  if (!parent) return;
+
   const info = buildElementInfo(el);
   const changes: PropertyChange[] = [{
     property: 'display',
@@ -869,10 +1002,10 @@ function deleteSelectedElement(): void {
   }];
   const diff = diffBuilder!.build(info, changes);
 
-  // Apply the style change
-  (el as HTMLElement).style.display = 'none';
+  // Remove element from DOM
+  el.remove();
 
-  commitEdit(el, changes, diff);
+  commitEdit(el, changes, diff, { parent, nextSibling });
   selection?.deselect();
 }
 
@@ -907,6 +1040,7 @@ function handleScroll(): void {
     hover?.refreshHighlight();
     handles?.refreshHandles();
     moveEditor?.refreshOverlay();
+    reorderEditor?.refreshOverlay();
     if (measureOverlay?.isActive()) measureOverlay.clear();
     if (notesEditor?.isOpen()) {
       notesEditor.refreshHighlights();
@@ -1017,6 +1151,7 @@ function enterMultiSelectMode(): void {
   spacingEditor?.cleanup();
   positionEditor?.cleanup();
   moveEditor?.cleanup();
+  reorderEditor?.cleanup();
   toolbar?.setActiveMode(null);
 
   // Show multi-select toolbar (or update it)
@@ -1083,6 +1218,7 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
         badge?.update();
         reviewPanel?.refresh();
         selection?.refreshHighlight();
+        refreshReorderAfterHistoryChange(entry);
         devtoolsPanel?.log('Redo');
       }
     } else {
@@ -1092,21 +1228,11 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
         badge?.update();
         reviewPanel?.refresh();
         selection?.refreshHighlight();
+        refreshReorderAfterHistoryChange(entry);
         devtoolsPanel?.log('Undo');
       }
     }
     return;
-  }
-
-  // Delete / Backspace — delete selected element
-  if ((e.key === 'Delete' || e.key === 'Backspace') && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
-    const selectedEl = selection?.getSelectedElement();
-    if (selectedEl) {
-      e.preventDefault();
-      e.stopPropagation();
-      deleteSelectedElement();
-      return;
-    }
   }
 
   // Escape ladder: cancel edit → close review → dismiss panel → deactivate
@@ -1152,8 +1278,11 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
     } else if (gridSettingsPanel?.isOpen()) {
       // Level 0b: close grid settings panel
       gridSettingsPanel.cleanup();
+    } else if (reorderEditor?.isDragging()) {
+      // Level 1a: cancel reorder drag — revert preview, stay in reorder mode
+      reorderEditor.cancelDrag();
     } else if (moveEditor?.isDragging()) {
-      // Level 1a: cancel move drag — revert and stay in move mode
+      // Level 1b: cancel move drag — revert and stay in move mode
       moveEditor.cleanup();
       const el = selection?.getSelectedElement();
       if (el) {

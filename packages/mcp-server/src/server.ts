@@ -67,7 +67,13 @@ function registerTools(server: McpServer, bridge: Bridge): void {
     {
       title: 'Get Pending Visual Changes',
       description:
-        'Returns all visual diffs queued by the Chrome extension. Optionally filter by tab session ID.',
+        'Returns all visual diffs and operator notes queued by the Chrome extension. ' +
+        'Diffs may include CSS property changes (in `changes`) and/or element reorder operations ' +
+        '(in `reorderChanges`). When `reorderChanges` is present with empty `changes`, the intent is ' +
+        'to physically reorder children in the source file at `element.sourceFile:element.sourceLine`, ' +
+        'not to add a CSS `order` property. Each reorder change includes fromIndex, toIndex, ' +
+        'siblingSelectors (original child order), containerSelector, and containerDirection. ' +
+        'Optionally filter by tab session ID.',
       inputSchema: z.object({
         tabId: z
           .string()
@@ -76,9 +82,9 @@ function registerTools(server: McpServer, bridge: Bridge): void {
       }),
     },
     async ({ tabId }) => {
-      const changes = bridge.getPendingChanges(tabId);
+      const { diffs, notes } = bridge.getPendingChanges(tabId);
       return {
-        content: [{ type: 'text' as const, text: JSON.stringify({ changes }, null, 2) }],
+        content: [{ type: 'text' as const, text: JSON.stringify({ changes: diffs, notes }, null, 2) }],
       };
     },
   );
@@ -122,7 +128,24 @@ function registerTools(server: McpServer, bridge: Bridge): void {
     },
   );
 
-  // 4. get_design_tokens
+  // 4. clear_notes
+  server.registerTool(
+    'clear_notes',
+    {
+      title: 'Clear Operator Notes',
+      description:
+        'Clears all pending operator notes after they have been read and processed.',
+      inputSchema: z.object({}),
+    },
+    async () => {
+      const cleared = bridge.clearNotes();
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({ cleared }) }],
+      };
+    },
+  );
+
+  // 5. get_design_tokens
   server.registerTool(
     'get_design_tokens',
     {

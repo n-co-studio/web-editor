@@ -8,7 +8,7 @@ export type ExtensionMode = 'inactive' | 'selecting' | 'editing' | 'paused';
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
-export type EditMode = 'spacing' | 'dimensions' | 'typography' | 'colors' | 'border-radius' | 'position' | 'move';
+export type EditMode = 'spacing' | 'dimensions' | 'typography' | 'colors' | 'border-radius' | 'position' | 'move' | 'reorder';
 
 export type InspectorMode = 'devtools';
 

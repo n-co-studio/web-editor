@@ -7,13 +7,14 @@ import {
 } from '@frontend-editor/shared';
 import type {
   VisualDiff,
+  VisualDiffBatchPayload,
   DesignToken,
   TokenSourceStatus,
   ExtensionToServerMessage,
   ServerToExtensionMessage,
 } from '@frontend-editor/shared';
 import { resolveToToken } from './tokens.js';
-import type { ConnectedClient, PersistedQueue, SessionExport, DriftEntry } from './types.js';
+import type { ConnectedClient, PendingNote, PersistedQueue, SessionExport, DriftEntry } from './types.js';
 
 const PERSIST_DIR = '.frontend-editor';
 const PERSIST_FILE = 'pending-queue.json';
@@ -22,6 +23,7 @@ export class Bridge {
   private wss: WebSocketServer | null = null;
   private readonly clients = new Map<string, ConnectedClient>();
   private pendingQueue: VisualDiff[] = [];
+  private pendingNotes: PendingNote[] = [];
   /** Tombstone set — IDs of diffs that were acknowledged or rejected.
    *  Prevents re-ingestion after extension reconnect. Session-scoped. */
   private readonly processedIds = new Set<string>();
@@ -76,12 +78,12 @@ export class Bridge {
   // Pending queue operations (called by MCP tools)
   // -----------------------------------------------------------------------
 
-  /** Get all pending diffs, optionally filtered by tabId. */
-  getPendingChanges(tabId?: string): VisualDiff[] {
-    if (tabId) {
-      return this.pendingQueue.filter((d) => d.context.tabId === tabId);
-    }
-    return [...this.pendingQueue];
+  /** Get all pending diffs and notes, optionally filtered by tabId. */
+  getPendingChanges(tabId?: string): { diffs: VisualDiff[]; notes: PendingNote[] } {
+    const diffs = tabId
+      ? this.pendingQueue.filter((d) => d.context.tabId === tabId)
+      : [...this.pendingQueue];
+    return { diffs, notes: [...this.pendingNotes] };
   }
 
   /** Acknowledge a diff — remove from queue, add to tombstone, persist. */
@@ -93,6 +95,14 @@ export class Bridge {
     this.processedIds.add(diffId);
     this.safePersistQueue();
     return true;
+  }
+
+  /** Clear all pending notes. Called after Claude Code has read them. */
+  clearNotes(): number {
+    const count = this.pendingNotes.length;
+    this.pendingNotes = [];
+    this.safePersistQueue();
+    return count;
   }
 
   /** Reject a diff — remove from queue, add to tombstone, log reason, persist. */
@@ -377,9 +387,9 @@ export class Bridge {
 
   private handleDiffBatch(
     ws: WebSocket,
-    payload: { diffs: readonly VisualDiff[] },
+    payload: VisualDiffBatchPayload,
   ): void {
-    const { diffs } = payload;
+    const { diffs, batchNote } = payload;
     const existingIds = new Set(this.pendingQueue.map((d) => d.id));
     const newDiffs: VisualDiff[] = [];
 
@@ -392,7 +402,13 @@ export class Bridge {
       newDiffs.push(diff);
     }
 
-    if (newDiffs.length > 0) {
+    // Store batch note if provided
+    if (batchNote) {
+      this.pendingNotes.push({ text: batchNote, receivedAt: new Date().toISOString() });
+      console.error(`[frontend-editor] Received batch note (${batchNote.length} chars)`);
+    }
+
+    if (newDiffs.length > 0 || batchNote) {
       this.trackDrift(newDiffs);
       this.safePersistQueue();
     }
@@ -466,7 +482,7 @@ export class Bridge {
   }
 
   private async persistQueue(): Promise<void> {
-    if (this.pendingQueue.length === 0) {
+    if (this.pendingQueue.length === 0 && this.pendingNotes.length === 0) {
       try {
         await unlink(this.persistPath);
       } catch {
@@ -478,6 +494,7 @@ export class Bridge {
     const data: PersistedQueue = {
       version: PROTOCOL_VERSION,
       diffs: this.pendingQueue,
+      notes: this.pendingNotes.length > 0 ? this.pendingNotes : undefined,
       savedAt: new Date().toISOString(),
     };
 
@@ -501,6 +518,17 @@ export class Bridge {
         if (valid.length > 0) {
           console.error(
             `[frontend-editor] Restored ${valid.length} pending diffs from disk`,
+          );
+        }
+      }
+
+      if (Array.isArray(data.notes) && data.notes.length > 0) {
+        this.pendingNotes = data.notes.filter(
+          (n): n is PendingNote => typeof n === 'object' && n !== null && typeof n.text === 'string',
+        );
+        if (this.pendingNotes.length > 0) {
+          console.error(
+            `[frontend-editor] Restored ${this.pendingNotes.length} pending notes from disk`,
           );
         }
       }

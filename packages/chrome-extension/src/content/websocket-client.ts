@@ -224,7 +224,8 @@ export class WebSocketClient {
     if (this.destroyed) return;
 
     this.retryCount++;
-    if (this.retryCount > WS_MAX_RETRIES) {
+    // WS_MAX_RETRIES === 0 means unlimited retries
+    if (WS_MAX_RETRIES > 0 && this.retryCount > WS_MAX_RETRIES) {
       console.error(
         `[frontend-editor] Failed to connect after ${WS_MAX_RETRIES} attempts`,
       );
@@ -237,7 +238,7 @@ export class WebSocketClient {
       WS_BACKOFF_MAX_MS,
     );
     console.log(
-      `[frontend-editor] Reconnecting in ${delay}ms (attempt ${this.retryCount}/${WS_MAX_RETRIES})`,
+      `[frontend-editor] Reconnecting in ${delay}ms (attempt ${this.retryCount})`,
     );
 
     this.retryTimer = setTimeout(() => {

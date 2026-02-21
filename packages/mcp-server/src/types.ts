@@ -7,10 +7,17 @@ export interface ConnectedClient {
   readonly tabId: string;
 }
 
+/** A batch note stored alongside pending diffs. */
+export interface PendingNote {
+  readonly text: string;
+  readonly receivedAt: string;
+}
+
 /** Serializable shape for .frontend-editor/pending-queue.json. */
 export interface PersistedQueue {
   readonly version: string;
   readonly diffs: readonly VisualDiff[];
+  readonly notes?: readonly PendingNote[];
   readonly savedAt: string;
 }
 
