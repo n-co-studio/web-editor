@@ -1,6 +1,6 @@
 import { createElement, createButton, makeDraggable } from '../shared/ui-utils';
 import { OVERLAY, TOOLBAR_WIDTH } from '../shared/constants';
-import type { EditMode, PanelPosition } from '../shared/types';
+import type { EditMode, InspectorMode, PanelPosition } from '../shared/types';
 
 type ToolSelectCallback = (mode: EditMode) => void;
 type ToggleCallback = (expanded: boolean) => void;
@@ -77,11 +77,11 @@ const ICONS: Record<string, string> = {
     <line x1="6" y1="10.5" x2="9" y2="10.5"/>
   </svg>`,
 
-  panel: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-    <rect x="2" y="2" width="12" height="12" rx="1.5"/>
-    <line x1="9" y1="2" x2="9" y2="14"/>
-    <line x1="11" y1="5.5" x2="12.5" y2="5.5"/>
-    <line x1="11" y1="8" x2="12.5" y2="8"/>
+  devtools: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="1.5" y="2" width="13" height="12" rx="1.5"/>
+    <line x1="1.5" y1="8" x2="14.5" y2="8"/>
+    <polyline points="4,10 5.5,11.5 4,13"/>
+    <line x1="7" y1="13" x2="10" y2="13"/>
   </svg>`,
 
   grid: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round">
@@ -158,7 +158,7 @@ export class FloatingToolbar {
   private resetCb: VoidCallback | null = null;
   private cursorModeCb: CursorModeCallback | null = null;
   private reviewToggleCb: VoidCallback | null = null;
-  private panelToggleCb: VoidCallback | null = null;
+  private inspectorToggleCbs = new Map<InspectorMode, VoidCallback>();
   private notesToggleCb: VoidCallback | null = null;
   private gridToggleCb: ((enabled: boolean) => void) | null = null;
   private gridSettingsToggleCb: VoidCallback | null = null;
@@ -174,7 +174,8 @@ export class FloatingToolbar {
   private redoBtn: HTMLButtonElement | null = null;
   private resetBtn: HTMLButtonElement | null = null;
   private reviewBtn: HTMLButtonElement | null = null;
-  private panelBtn: HTMLButtonElement | null = null;
+  private inspectorButtons = new Map<InspectorMode, HTMLButtonElement>();
+  private activeInspectors = new Set<InspectorMode>();
   private notesBtn: HTMLButtonElement | null = null;
   private notesBadge: HTMLSpanElement | null = null;
   private gridBtn: HTMLButtonElement | null = null;
@@ -218,8 +219,8 @@ export class FloatingToolbar {
     this.reviewToggleCb = cb;
   }
 
-  onPanelToggle(cb: VoidCallback): void {
-    this.panelToggleCb = cb;
+  onInspectorToggle(mode: InspectorMode, cb: VoidCallback): void {
+    this.inspectorToggleCbs.set(mode, cb);
   }
 
   onNotesToggle(cb: VoidCallback): void {
@@ -296,15 +297,18 @@ export class FloatingToolbar {
     }
   }
 
-  /** Sync panel button active state with panel open/closed. */
-  setPanelOpen(open: boolean): void {
-    if (!this.panelBtn) return;
+  /** Sync inspector button active state with panel open/closed. */
+  setInspectorOpen(mode: InspectorMode, open: boolean): void {
+    if (open) this.activeInspectors.add(mode);
+    else this.activeInspectors.delete(mode);
+    const btn = this.inspectorButtons.get(mode);
+    if (!btn) return;
     if (open) {
-      this.panelBtn.style.background = 'rgba(6, 182, 212, 0.12)';
-      this.panelBtn.style.color = OVERLAY.primary;
+      btn.style.background = 'rgba(6, 182, 212, 0.12)';
+      btn.style.color = OVERLAY.primary;
     } else {
-      this.panelBtn.style.background = 'transparent';
-      this.panelBtn.style.color = OVERLAY.textMuted;
+      btn.style.background = 'transparent';
+      btn.style.color = OVERLAY.textMuted;
     }
   }
 
@@ -375,6 +379,20 @@ export class FloatingToolbar {
     return { x: rect.left, y: rect.top };
   }
 
+  /** Get the position of a specific toolbar button (for anchoring mini-panels next to it). */
+  getButtonPosition(key: EditMode | InspectorMode | 'review' | 'notes' | 'grid'): { x: number; y: number } {
+    let btn: HTMLButtonElement | null | undefined = null;
+    if (key === 'review') btn = this.reviewBtn;
+    else if (key === 'notes') btn = this.notesBtn;
+    else if (key === 'grid') btn = this.gridBtn;
+    else if (key === 'devtools') btn = this.inspectorButtons.get(key);
+    else btn = this.toolButtons.get(key);
+    if (!btn || !this.container) return this.getPosition();
+    const containerRect = this.container.getBoundingClientRect();
+    const btnRect = btn.getBoundingClientRect();
+    return { x: containerRect.left, y: btnRect.top };
+  }
+
   async show(): Promise<void> {
     if (this.visible && this.container) return;
 
@@ -406,7 +424,8 @@ export class FloatingToolbar {
     this.resetBtn = null;
     this.reviewBtn = null;
     this.reviewBadge = null;
-    this.panelBtn = null;
+    this.inspectorButtons.clear();
+    this.activeInspectors.clear();
     this.notesBtn = null;
     this.notesBadge = null;
     this.gridBtn = null;
@@ -428,7 +447,7 @@ export class FloatingToolbar {
     this.resetCb = null;
     this.cursorModeCb = null;
     this.reviewToggleCb = null;
-    this.panelToggleCb = null;
+    this.inspectorToggleCbs.clear();
     this.notesToggleCb = null;
     this.gridToggleCb = null;
     this.gridSettingsToggleCb = null;
@@ -543,11 +562,12 @@ export class FloatingToolbar {
     }
     container.appendChild(this.gridBtn);
 
-    // Panel toggle button — show/hide property panel
-    this.panelBtn = this.buildIconButton('panel', 'Toggle property panel', () => {
-      this.panelToggleCb?.();
+    // DevTools panel button (DOM inspector + properties + console)
+    const devtoolsBtn = this.buildIconButton('devtools', 'DevTools panel', () => {
+      this.inspectorToggleCbs.get('devtools')?.();
     });
-    container.appendChild(this.panelBtn);
+    this.inspectorButtons.set('devtools', devtoolsBtn);
+    container.appendChild(devtoolsBtn);
 
     // Separator
     const sep = createElement('div', {}, {

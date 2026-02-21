@@ -33,6 +33,13 @@ export const TEXT_CONTENT_TRUNCATE_LENGTH = 80;
 export const SNAP_EASE_MS = 125;
 export const TOOLBAR_WIDTH = 40;
 
+// DevTools bottom panel
+export const DEVTOOLS_DEFAULT_HEIGHT = 250;
+export const DEVTOOLS_MIN_HEIGHT = 120;
+export const DEVTOOLS_MAX_HEIGHT_RATIO = 0.6;
+export const DEVTOOLS_DEFAULT_LEFT_RATIO = 0.30;
+export const DEVTOOLS_DEFAULT_MIDDLE_RATIO = 0.40;
+
 // ---------------------------------------------------------------------------
 // Overlay design tokens (px, not rem — isolated in Shadow DOM)
 // ---------------------------------------------------------------------------

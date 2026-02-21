@@ -213,56 +213,38 @@ This file is not read during normal sessions. Referenced for deep investigation 
 
 ---
 
-## Session 2 — 2026-02-18 — Cohesion audit and cross-reference fixes
+## Session 3 (spec-v1) — 2026-02-18 — Advisory Board Review (Prompt A)
 
 **Status:** complete
-**Decisions applied:** 0001, 0002, 0003, 0004, 0005
-**Commits:** 04f7520
+**Decisions applied:** 0007
+**Commits:** None (pending)
 
 ### Goal
-- Comprehensive audit of repo OS template for incohesion, disconnects, loose ends, and ambiguity
-- Fix all 25 issues identified across 5 categories (broken references, terminology, workflow disconnects, loose ends, ambiguity)
-
-### Plan Summary
-- Remove stale references to deleted `docs/ai/references/` directory and `visual-bridge-spec.md`
-- Align high-risk triggers across quality-gates.md, _agent-glossary.md, reviewer.md, and HTML explainer
-- Make A2 scope check explicitly advisory (not blocking), matching enforcement audit findings
-- Merge C/D gate tiers into single "C — Conditional + Release" with C1-C3 release gates
-- Add HVST Record step consistently across all references
-- Add shared file reading (First Action) to all executable agents per Decision 0003
-- Add Builder escalation protocol, Decision 0005 card, Orchestrator identity note
-- Move Companion Tools content from operator-guide.md to HTML explainer, then delete operator-guide.md
-- Update file tree, prompt starters, and all cross-references in HTML explainer
+- Run Prompt A (Advisory Board review) on v1 compiled specs
+- Apply accepted findings to spec files
 
 ### Changes Made
-- `AI.md` — Added `session-archive.md` to source of truth index
-- `docs/ai/decisions/0001-repo-os-baseline.md` — Added Commit 0 definition
-- `docs/ai/decisions/0005-companion-tool-pattern.md` — Removed stale `docs/ai/references/` line, updated to HTML explainer reference
-- `docs/ai/quality-gates.md` — A2 scope advisory, B1 high-risk aligned with glossary, C section expanded with C1-C3 release gates
-- `.claude/agents/qa-verifier.md` — Added shared file reading, A2 scope advisory warning
-- `.claude/agents/builder.md` — Added shared file reading, escalation protocol section
-- `.claude/agents/reviewer.md` — Added First Action with shared file reading
-- `.claude/agents/security-privacy.md` — Added First Action with shared file reading
-- `.claude/agents/accessibility.md` — Added First Action with shared file reading
-- `.claude/agents/_agent-glossary.md` — Added HVST definition in new Protocols section
-- `docs/spec/_templates/integrations.md` — Removed stale `visual-bridge-spec.md` reference
-- `docs/README.md` — Added HTML explainer mention
-- `repo-os-explainer.html` — 20+ edits: fixed Decision 0001/0003 cards, added 0005 card, Orchestrator identity, HVST Record step, merged C/D gates, A2 advisory, hvst-failure-tracker.sh in hooks table, updated file tree, simplified prompt starters, added Companion Tools section
-- `docs/operator-guide.md` — Deleted (all content now in HTML explainer)
-
-### Verification (Gates Evidence)
-- Commit gates: A1 pass (all 5 decisions followed), A2 pass (plan existed, scope advisory — 15 files, operator-approved audit), A3 n/a (no tooling), A4 pass (no secrets)
-- Push gates: B1 pass (meaningful message), B2 n/a (no tests/typecheck), B3 n/a (no deps changed)
-- Cross-reference review: automated reviewer agent verified 8 consistency checks — all PASS
-- Override: committed directly to main (operator explicit override — template repo, no PR workflow active yet)
-
-### Failed Attempts (Brief)
-- Parallel Edit calls failed with "File has not been read yet" error despite prior reads — switched to sequential edits
-- Background builder agents failed due to Edit permission denial in background mode — completed all edits in main session
-
-### Known Issues Logged
-- None
+- 12 spec files updated in `docs/spec/compiled/v1/` with advisory board refinements
 
 ### Follow-ups
-- Consider adding branch category awareness to pre-commit-gates.sh (carried from Session 1) → resolved in Session 3
-- Builder commit/push enforcement is behavioral-only (no hook) → resolved in Session 3
+- Proceed to Prompt B (Product Build)
+
+---
+
+## Session 4 — 2026-02-19 — Product Build (Prompt B) — Increments 1–3
+
+**Status:** incomplete (increment 4 remaining)
+**Decisions applied:** 0001, 0002, 0005
+**Commits:** 6476406, 8d0725f (pending: increment 3)
+
+### Goal
+- Execute Prompt B (Product Build) — implement the Frontend Editor monorepo packages incrementally
+
+### Changes Made
+- Increment 1 (commit `6476406`): monorepo scaffold + `@frontend-editor/shared`
+- Increment 2 (commit `8d0725f`): `@frontend-editor/dev-plugin` (build-time JSX source mapping)
+- Increment 3 (pending): `@frontend-editor/mcp-server` (WebSocket bridge + MCP tools + token discovery)
+
+### Follow-ups
+- Commit increment 3
+- Increment 4: `chrome-extension` package

@@ -6,119 +6,6 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 ---
 
-## Session 3 — 2026-02-18 — Advisory Board Review (Prompt A)
-
-**Status:** complete
-**Decisions applied:** 0007
-**Commits:** None (pending)
-
-### Goal
-- Run Prompt A (Advisory Board review) on v1 compiled specs
-- Apply accepted findings to spec files
-- Validate Repo OS readiness for build phase
-
-### Plan Summary
-- Phase 1: Dispatch 7 advisory board specialists (all except Security Analyst — no auth signals)
-- Phase 2: Synthesize findings into refinement report, get operator per-item decisions
-- Apply accepted changes to all 12 spec files via parallel builder agents
-
-### Changes Made
-- `docs/spec/compiled/v1/data-contracts.md` — Rewritten: added sourceVerified, instanceIndex, reject_visual_change, WebSocket protocol section, TokenSourceStatus, get_token_drift_report/export_session/import_session tools, persistence model
-- `docs/spec/compiled/v1/product.md` — Updated: "Apply Changes" label, scoped deterministic claim, JSX/TSX project scope
-- `docs/spec/compiled/v1/architecture.md` — Updated: content script WebSocket ownership, error isolation, protocol versioning, shared package scope, Shadow DOM constraints, Vite compatibility section, port discovery 7890-7899
-- `docs/spec/compiled/v1/design-system.md` — Updated: Cyan/Rose brand palette (I5), overlay type scale (I7), simplified breakpoints to compact/standard (I8)
-- `docs/spec/compiled/v1/features/feature-001-element-selection.md` — Rewritten: toolbar dropdown, Alt-pause, movable floating panel, stale selection, focus management, rAF gating
-- `docs/spec/compiled/v1/features/feature-002-visual-property-editing.md` — Updated: color picker modes, keyboard editing, drag handle spec, live preview mechanism
-- `docs/spec/compiled/v1/features/feature-003-design-token-snapping.md` — Updated: file watcher with chokidar, token ruler visual spec, CSS scan scope, ease transition
-- `docs/spec/compiled/v1/features/feature-004-change-batching.md` — Rewritten: single-send clarification, review panel layout, error messages, page reload persistence
-- `docs/spec/compiled/v1/features/feature-005-mcp-server-bridge.md` — Rewritten: content script WebSocket, error isolation, EXTENSION_HELLO reconciliation, persistence, port discovery, export/import session
-- `docs/spec/compiled/v1/features/feature-006-dev-plugin.md` — Updated: standalone primitive framing, Vite compatibility note, instanceIndex, scoped 1% overhead AC
-- `docs/spec/compiled/v1/boundaries.md` — Updated: accepted limitations section, multi-editor future consideration, non-JSX/TSX scope limitation
-- `docs/spec/compiled/v1/integrations.md` — Updated: npx --yes flag, expanded MCP tool list
-
-### Advisory Board Summary
-- **Specialists activated:** Researcher, Architect, Critic, Innovator, UX Strategist, Performance Engineer, Data Strategist (7/8 — Security Analyst skipped, no auth signals)
-- **Findings:** 18 critical, 24 recommendations, 10 ideas → 52 total deduplicated
-- **Operator decisions:** All 18 critical accepted, 22/24 recommendations accepted (R7, R17 deferred), 7/10 ideas accepted (I3, I9, I10 deferred)
-
-### Verification (Gates Evidence)
-- N/A — spec files only, no code changes
-
-### Failed Attempts (Brief)
-- None
-
-### Known Issues Logged
-- None
-
-### Follow-ups
-- Proceed to Prompt B (Product Build)
-- Deferred items: R7 (non-JSX plugin guidance — future version), R17 (plugin registry — future version), I3 (undo/redo stack), I9 (batch diffing), I10 (visual test harness)
-
----
-
-## Session 4 — 2026-02-19 — Product Build (Prompt B) — Increments 1–3
-
-**Status:** incomplete (increment 4 remaining)
-**Decisions applied:** 0001, 0002, 0005
-**Commits:** 6476406, 8d0725f (pending: increment 3)
-
-### Goal
-- Execute Prompt B (Product Build) — implement the Frontend Editor monorepo packages incrementally
-- Increment 1: monorepo scaffold + `@frontend-editor/shared` (types + protocol)
-- Increment 2: `@frontend-editor/dev-plugin` (build-time JSX source mapping)
-- Increment 3: `@frontend-editor/mcp-server` (WebSocket bridge + MCP tools + token discovery)
-
-### Plan Summary
-- Incremental build: each increment gets plan → build → cohesion review → fix → QA → commit
-- Types-first: shared package establishes the contract, then consumers build on top
-- Each package follows the established monorepo pattern (npm workspaces, TS project references, composite builds)
-
-### Changes Made
-
-**Increment 1** (commit `6476406`):
-- `.gitignore` — Added node_modules, dist, tsbuildinfo, .frontend-editor
-- `package.json` (root) — Monorepo workspace config
-- `tsconfig.json` (root) — Solution-style with project references
-- `packages/shared/` — Types package: VisualDiff, ElementInfo, PropertyChange, PageContext, DesignToken, WebSocket protocol types
-
-**Increment 2** (commit `8d0725f`):
-- `packages/dev-plugin/` — Vite plugin + Babel plugin for `data-source-file`/`data-source-line`/`data-source-index` injection
-- Core transform: `@babel/parser` + `@babel/traverse` + `magic-string`, ESM default-import trap handled
-
-**Increment 3** (pending commit):
-- `packages/mcp-server/package.json` — Manifest with bin field, deps (MCP SDK, ws, chokidar, zod)
-- `packages/mcp-server/tsconfig.json` — Extends root, references shared
-- `packages/mcp-server/src/types.ts` — Internal types (ConnectedClient, PersistedQueue, DriftEntry)
-- `packages/mcp-server/src/tokens.ts` — Token discovery (4 source types), parsing, resolution, chokidar file watching
-- `packages/mcp-server/src/bridge.ts` — WebSocket server (port 7890–7899 fallback), EXTENSION_HELLO/SERVER_HELLO reconciliation, pending queue persistence, tombstone set, drift tracking, path-confined session export/import
-- `packages/mcp-server/src/server.ts` — MCP server with 8 tools via `registerTool` + zod schemas
-- `packages/mcp-server/src/bin/cli.ts` — `#!/usr/bin/env node` entry point
-
-### Cohesion Fixes Applied
-- Inc 1: TokenUpdatePayload.sources made optional, esModuleInterop removed, TokenCategory union type added
-- Inc 2: @babel/core moved to optional peerDependency, dead fragment guard removed, exclude support added to Babel plugin
-- Inc 3: Tombstone set for reconnect reconciliation, path traversal confinement, isValidDiff validation, safePersistQueue error handling, handleMessage envelope validation, error-status token sources watched, Tailwind security comment
-
-### Verification (Gates Evidence)
-- Commit gates: A1 pass (0001/0002/0005 followed), A2 pass (plans exist per increment), A3 pass (`npm run build` clean), A4 pass (no secrets), A5 pass (cohesion reviews run per increment)
-- Push gates: pending
-
-### Failed Attempts (Brief)
-- Inc 2: `import('@frontend-editor/dev-plugin/transform')` failed — sub-path not in exports map, used direct dist path for testing
-- Inc 2: Heredoc commit syntax error — used double-quoted multiline string instead
-- Inc 3: `spacing` category regex — `"spacing"` does not contain `"space"` (s-p-a-c-i vs s-p-a-c-e), fixed with `/spac(?:e|ing)/`
-
-### Known Issues Logged
-- Spec says `DOMRect`, code uses `BoundingRect` (serializable alternative) — spec follow-up needed
-- No formatter/linter configured yet
-
-### Follow-ups
-- Commit increment 3
-- Increment 4: `chrome-extension` package
-- Update spec: `DOMRect` → `BoundingRect` in data-contracts.md
-
----
-
 ## Session 5 — 2026-02-19 — Chrome Extension: Undo/Redo/Reset + Bug Fixes
 
 **Status:** complete
@@ -160,6 +47,100 @@ Each session adds one entry. Keep entries high-signal and readable.
 ### Follow-ups
 - Test extension reload in Chrome after rebuild
 - Undo/redo queue sync is best-effort (collapsed diffs may not perfectly round-trip through undo)
+
+---
+
+## Session 6 — 2026-02-20 — Inspector Panels + Review Panel Highlights + Button-Relative Positioning
+
+**Status:** complete
+**Decisions applied:** None
+**Commits:** None (pending)
+
+### Goal
+- Split monolithic PropertyPanel into 2 focused panels: Properties (floating) + DevTools (bottom)
+- Add click-to-highlight from review panel to page elements
+- Add Classes & ID section to properties panel
+- Position all mini-panels relative to their respective toolbar buttons (not always at top)
+- Make review panel sticky to toolbar like other mini-panels
+
+### Plan Summary
+- Create `PropertiesPanel` — floating mini-panel with CSS properties + Classes & ID section (extracted from panel.ts)
+- Create `DevToolsPanel` — Chrome DevTools-style bottom panel with split DOM Inspector (left) + Console (right), adjustable split divider and resizable height
+- Replace toolbar's single panel button with 2 inspector buttons (Properties + DevTools)
+- Add programmatic highlight overlay (rose dashed border) to HoverHighlight for review panel click-to-highlight
+- Wire review panel change groups and note pills to trigger element highlight
+- Rewire index.ts to use new panels, update escape ladder, cursor mode, multi-select
+- Delete old panel.ts
+- Update all mini-panel positioning to use `toolbar.getButtonPosition(mode)` instead of `toolbar.getPosition()`
+
+### Changes Made
+- `packages/chrome-extension/src/shared/types.ts` — Added `InspectorMode` type (`'properties' | 'devtools'`)
+- `packages/chrome-extension/src/shared/constants.ts` — Added `DEVTOOLS_DEFAULT_HEIGHT`, `DEVTOOLS_MIN_HEIGHT`, `DEVTOOLS_MAX_HEIGHT_RATIO`
+- `packages/chrome-extension/src/content/selection/hover.ts` — Added programmatic highlight overlay (rose dashed `#fb7185` border), `showProgrammaticHighlight(el)`, `clearProgrammaticHighlight()`
+- `packages/chrome-extension/src/content/selection/properties-panel.ts` — **New** (~885 lines): floating mini-panel extracted from panel.ts, new Classes & ID section (amber ID pills, neutral class pills), 6 property groups with inline editing + token integration, draggable header
+- `packages/chrome-extension/src/content/selection/devtools-panel.ts` — **New**: bottom panel with horizontal split DOM Inspector + Console, draggable vertical divider (min 200px per side), draggable top edge for height resize, height/split persisted in `chrome.storage.session`
+- `packages/chrome-extension/src/content/toolbar.ts` — Replaced `panel` icon with `properties` + `devtools` SVG icons, replaced `panelToggleCb`/`panelBtn` with `inspectorToggleCbs`/`inspectorButtons`/`activeInspectors`, added `onInspectorToggle()`/`setInspectorOpen()`, added `getButtonPosition()` with support for EditMode, InspectorMode, 'review', 'notes', 'grid'
+- `packages/chrome-extension/src/content/batching/review-panel.ts` — Added `onHighlightElement` callback, clickable selector headers + element pills, anchor-based positioning with `reposition()` method (replaced hard-coded `bottom: 16px`)
+- `packages/chrome-extension/src/content/index.ts` — Full rewire: replaced `PropertyPanel` with `PropertiesPanel` + `DevToolsPanel`, all `panel?.log()` → `devtoolsPanel?.log()`, all panel render calls use `toolbar.getButtonPosition(mode)`, `onMove` handler passes button-specific positions, review panel highlight callback, updated escape ladder + cursor mode + multi-select
+- `packages/chrome-extension/src/content/editing/keyboard.ts` — Removed `PropertyPanel` dependency, changed panel parameter to `_panel: unknown`
+- `packages/chrome-extension/src/content/selection/panel.ts` — **Deleted** (replaced by properties-panel.ts + devtools-panel.ts)
+
+### Verification (Gates Evidence)
+- `npx tsc --noEmit -p packages/chrome-extension` → 0 errors
+- `node packages/chrome-extension/esbuild.config.js` → content.js 300.3kb, service-worker.js 845b
+
+### Failed Attempts (Brief)
+- keyboard.ts still imported deleted PropertyPanel after panel.ts removal — fixed by updating import to `_panel: unknown`
+
+### Known Issues Logged
+- None
+
+### Follow-ups
+- Test full extension reload in Chrome to verify new panel layout
+- Consider persisting properties panel open/closed preference in chrome.storage.session
+
+---
+
+## Session 7 — 2026-02-20 — Move Properties Panel into Bottom DevTools Panel
+
+**Status:** complete
+**Decisions applied:** None
+**Commits:** None (pending)
+
+### Goal
+- Merge floating PropertiesPanel into the bottom DevToolsPanel as a middle pane
+- Three-column Chrome DevTools-like layout: Elements | Properties | Console
+
+### Plan Summary
+- Rewrite `DevToolsPanel` with three-column layout and two draggable vertical dividers
+- Port all property rendering logic (inline editors, token resolution, multi-select) from PropertiesPanel into DevToolsPanel
+- Delete `properties-panel.ts` entirely
+- Remove "properties" toolbar button (DevTools button opens the unified panel)
+- Auto-open DevTools when selecting an element (replaces old properties auto-open)
+- Track `devtoolsUserClosed` flag (replaces `propertiesUserClosed`)
+
+### Changes Made
+- `packages/chrome-extension/src/shared/constants.ts` — Added `DEVTOOLS_DEFAULT_LEFT_RATIO` (0.30) and `DEVTOOLS_DEFAULT_MIDDLE_RATIO` (0.40)
+- `packages/chrome-extension/src/shared/types.ts` — Simplified `InspectorMode` to `'devtools'` only (removed `'properties'`)
+- `packages/chrome-extension/src/content/selection/devtools-panel.ts` — Full rewrite (~1500 lines): three-column layout, `tokenStore` constructor parameter, ported all 14 property rendering methods (buildClassesSection, buildCssPropertiesSection, buildPropertyRow, openInlineEditor, closeInlineEditor, applyPropertyChange, buildMultiCssPropertiesSection, buildMultiPropertyRow, openMultiInlineEditor, closeMultiInlineEditor, applyMultiPropertyChange, resolveToken, renderPropertiesContent, renderMultiPropertiesContent), new public API (onPropertyChange, onMultiPropertyChange, updateProperties, updateMultiProperties, clearProperties, refreshProperties), two split drag handlers, backwards-compatible persistence format
+- `packages/chrome-extension/src/content/selection/properties-panel.ts` — **Deleted** (all logic absorbed into DevToolsPanel)
+- `packages/chrome-extension/src/content/toolbar.ts` — Removed "properties" button from inspector row, removed properties SVG icon, cleaned up getButtonPosition
+- `packages/chrome-extension/src/content/index.ts` — Removed PropertiesPanel import/variable, replaced `propertiesUserClosed` with `devtoolsUserClosed`, auto-open DevTools on element select, rewired all property change callbacks through DevToolsPanel, updated escape ladder (removed properties level), removed properties reposition/cleanup, updated multi-select flow
+
+### Verification (Gates Evidence)
+- `npx tsc --noEmit` → 0 errors
+- `npm run build` → content.js 296.5kb, service-worker.js 819b
+
+### Failed Attempts (Brief)
+- None
+
+### Known Issues Logged
+- None
+
+### Follow-ups
+- Test full extension reload in Chrome to verify three-column layout
+- Verify inline property editing works within the embedded pane
+- Verify divider drag + split ratio persistence
 
 ---
 

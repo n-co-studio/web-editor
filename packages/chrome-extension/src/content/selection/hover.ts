@@ -9,6 +9,8 @@ import { OVERLAY } from '../../shared/constants';
 export class HoverHighlight {
   private overlay: HTMLDivElement;
   private tooltip: HTMLDivElement;
+  private programmaticOverlay: HTMLDivElement;
+  private programmaticTooltip: HTMLDivElement;
   private rafId: number | null = null;
   private active = false;
   private currentElement: Element | null = null;
@@ -47,8 +49,36 @@ export class HoverHighlight {
       zIndex: '2',
     });
 
+    // Programmatic highlight (review panel click-to-highlight)
+    this.programmaticOverlay = createElement('div', {}, {
+      position: 'fixed',
+      pointerEvents: 'none',
+      border: `2px dashed ${OVERLAY.accent}`,
+      background: 'rgba(251, 113, 133, 0.08)',
+      borderRadius: OVERLAY.radiusSm,
+      transition: 'all 0.15s ease',
+      display: 'none',
+      zIndex: '3',
+    });
+
+    this.programmaticTooltip = createElement('div', {}, {
+      position: 'fixed',
+      pointerEvents: 'none',
+      background: 'rgba(251, 113, 133, 0.65)',
+      color: '#fff',
+      fontFamily: OVERLAY.monoFamily,
+      fontSize: OVERLAY.monoSize,
+      padding: '2px 6px',
+      borderRadius: OVERLAY.radiusSm,
+      whiteSpace: 'nowrap',
+      display: 'none',
+      zIndex: '4',
+    });
+
     shadow.appendChild(this.overlay);
     shadow.appendChild(this.tooltip);
+    shadow.appendChild(this.programmaticOverlay);
+    shadow.appendChild(this.programmaticTooltip);
   }
 
   enable(): void {
@@ -123,6 +153,35 @@ export class HoverHighlight {
     e.stopPropagation();
     this.clickHandler?.(target);
   };
+
+  // -----------------------------------------------------------------------
+  // Programmatic highlight (for review panel click-to-highlight)
+  // -----------------------------------------------------------------------
+
+  /** Highlight an element programmatically (e.g. from review panel click). */
+  showProgrammaticHighlight(el: Element): void {
+    const rect = el.getBoundingClientRect();
+
+    this.programmaticOverlay.style.left = `${rect.left}px`;
+    this.programmaticOverlay.style.top = `${rect.top}px`;
+    this.programmaticOverlay.style.width = `${rect.width}px`;
+    this.programmaticOverlay.style.height = `${rect.height}px`;
+    this.programmaticOverlay.style.display = 'block';
+
+    const tag = `<${el.tagName.toLowerCase()}>`;
+    this.programmaticTooltip.textContent = tag;
+    this.programmaticTooltip.style.left = `${rect.left}px`;
+    this.programmaticTooltip.style.top = `${Math.max(0, rect.top - 22)}px`;
+    this.programmaticTooltip.style.display = 'block';
+
+    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  /** Clear programmatic highlight. */
+  clearProgrammaticHighlight(): void {
+    this.programmaticOverlay.style.display = 'none';
+    this.programmaticTooltip.style.display = 'none';
+  }
 
   // -----------------------------------------------------------------------
   // Rendering
