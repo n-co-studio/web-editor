@@ -2,7 +2,7 @@ import { mountShadowHost, unmountShadowHost } from './shadow-host';
 import { WebSocketClient } from './websocket-client';
 import { HoverHighlight } from './selection/hover';
 import { SelectionManager } from './selection/select';
-import { PropertyPanel } from './selection/panel';
+import { DevToolsPanel } from './selection/devtools-panel';
 import { StaleDetector } from './selection/stale';
 import { TokenStore } from './tokens/store';
 import { SnappingEngine } from './tokens/snapping';
@@ -44,7 +44,7 @@ let shadow: ShadowRoot | null = null;
 let wsClient: WebSocketClient | null = null;
 let hover: HoverHighlight | null = null;
 let selection: SelectionManager | null = null;
-let panel: PropertyPanel | null = null;
+let devtoolsPanel: DevToolsPanel | null = null;
 let toolbar: FloatingToolbar | null = null;
 let staleDetector: StaleDetector | null = null;
 let tokenStore: TokenStore | null = null;
@@ -69,7 +69,7 @@ let moveEditor: MoveEditor | null = null;
 let gridSettingsPanel: GridSettingsPanel | null = null;
 let measureOverlay: MeasureOverlay | null = null;
 let measureRafId: number | null = null;
-let panelUserClosed = false;
+let devtoolsUserClosed = false;
 let multiSelect: MultiSelectManager | null = null;
 let multiSelectToolbar: MultiSelectToolbar | null = null;
 let multiSelectClickHandler: ((e: MouseEvent) => void) | null = null;
@@ -117,18 +117,18 @@ async function activate(): Promise<void> {
       queue!.acknowledge(payload.diffIds);
       badge!.update();
       reviewPanel?.refresh();
-      panel?.log(`${payload.diffIds.length} diff(s) acknowledged`);
+      devtoolsPanel?.log(`${payload.diffIds.length} diff(s) acknowledged`);
     },
     onTokenData: (payload) => {
       tokenStore!.setAll(payload.tokens, payload.sources);
-      panel?.log(`Received ${payload.tokens.length} design tokens`);
+      devtoolsPanel?.log(`Received ${payload.tokens.length} design tokens`);
     },
     onTokenUpdate: (payload) => {
       tokenStore!.update(payload.tokens, payload.sources);
-      panel?.log(`Token update: ${payload.tokens.length} tokens`);
+      devtoolsPanel?.log(`Token update: ${payload.tokens.length} tokens`);
     },
     onError: (payload) => {
-      panel?.log(`Server error: ${payload.code} — ${payload.message}`, 'error');
+      devtoolsPanel?.log(`Server error: ${payload.code} — ${payload.message}`, 'error');
     },
   });
   wsClient.connect();
@@ -143,11 +143,17 @@ async function activate(): Promise<void> {
   // UI components
   hover = new HoverHighlight(shadow, host);
   selection = new SelectionManager(shadow, host, tokenStore);
-  panel = new PropertyPanel(shadow, tokenStore);
+  devtoolsPanel = new DevToolsPanel(shadow!, tokenStore!);
   toolbar = new FloatingToolbar(shadow);
   handles = new DragHandleManager(shadow, snapping, preview);
-  keyboard = new KeyboardHandler(shadow, handles, panel, selection);
-  reviewPanel = new ReviewPanel(shadow, queue, wsClient, diffBuilder, notesStore);
+  keyboard = new KeyboardHandler(shadow, handles, null as any, selection);
+  reviewPanel = new ReviewPanel(shadow!, queue!, wsClient!, diffBuilder!, notesStore!, (selector) => {
+    const el = document.querySelector(selector);
+    if (el) {
+      hover?.showProgrammaticHighlight(el);
+      setTimeout(() => hover?.clearProgrammaticHighlight(), 3000);
+    }
+  });
   typographyEditor = new TypographyEditor(tokenStore, preview);
   colorEditor = new ColorEditor(tokenStore, snapping, preview);
   dimensionsEditor = new DimensionsEditor(preview);
@@ -164,18 +170,11 @@ async function activate(): Promise<void> {
   // Wire hover click → selection
   hover.onClick((el) => selection!.select(el));
 
-  // Wire panel close → hide panel (keep element selected), remember user closed it
-  panel.onClose(() => {
-    panel!.hide();
-    toolbar!.setPanelOpen(false);
-    panelUserClosed = true;
-  });
+  // Wire DevTools DOM tree clicks → re-select different element
+  devtoolsPanel.onElementSelect((el) => selection!.select(el));
 
-  // Wire panel DOM tree layer clicks → re-select different element
-  panel.onElementSelect((el) => selection!.select(el));
-
-  // Wire panel inline property edits → diff creation → queue + history
-  panel.onPropertyChange((property, fromValue, toValue, tokenName) => {
+  // Wire DevTools property edits → diff creation → queue + history
+  devtoolsPanel.onPropertyChange((property, fromValue, toValue, tokenName) => {
     const el = selection!.getSelectedElement();
     if (!el) return;
     const info = buildElementInfo(el);
@@ -190,8 +189,8 @@ async function activate(): Promise<void> {
     selection!.refreshHighlight();
   });
 
-  // Wire multi-select shared property edits → diff per element
-  panel.onMultiPropertyChange((changes) => {
+  // Wire DevTools multi-select shared property edits → diff per element
+  devtoolsPanel.onMultiPropertyChange((changes) => {
     for (const c of changes) {
       const info = buildElementInfo(c.element);
       const propChanges: PropertyChange[] = [{
@@ -222,9 +221,9 @@ async function activate(): Promise<void> {
       multiSelectToolbar.updateElements(allElements);
     }
 
-    // Update panel
-    if (!panelUserClosed) {
-      panel?.showMultiSelect(allElements);
+    // Update properties in DevTools panel
+    if (devtoolsPanel?.isOpen()) {
+      devtoolsPanel.updateMultiProperties(allElements);
     }
   });
 
@@ -238,9 +237,12 @@ async function activate(): Promise<void> {
       exitMultiSelectMode();
     }
 
-    if (!panelUserClosed) {
-      panel!.show(info, element);
-      toolbar!.setPanelOpen(true);
+    // Auto-open DevTools on element select (replaces old floating properties auto-open)
+    if (!devtoolsUserClosed && !devtoolsPanel!.isOpen()) {
+      devtoolsPanel!.show(element, info);
+      toolbar!.setInspectorOpen('devtools', true);
+    } else if (devtoolsPanel!.isOpen()) {
+      devtoolsPanel!.updateElement(element, info);
     }
     toolbar!.setDeleteEnabled(true);
     handles!.hideHandles();
@@ -252,7 +254,6 @@ async function activate(): Promise<void> {
     moveEditor!.cleanup();
     staleDetector!.watch(element, () => {
       selection!.markStale();
-      panel!.showStaleWarning();
       handles!.hideHandles();
     });
 
@@ -267,7 +268,7 @@ async function activate(): Promise<void> {
     // Auto-activate dimensions if not blocked
     if (!dimBlock) {
       handles!.showHandles(element, 'dimensions');
-      const pos = toolbar!.getPosition();
+      const pos = toolbar!.getButtonPosition('dimensions');
       const dimControls = dimensionsEditor!.render(element, pos, (changes) => {
         const info = buildElementInfo(element);
         const diff = diffBuilder!.build(info, changes);
@@ -286,8 +287,7 @@ async function activate(): Promise<void> {
     if (multiSelect?.isActive()) {
       exitMultiSelectMode();
     }
-    panel!.hide();
-    toolbar!.setPanelOpen(false);
+    devtoolsPanel?.clearElement();
     toolbar!.setDeleteEnabled(false);
     handles!.hideHandles();
     typographyEditor!.cleanup();
@@ -326,7 +326,7 @@ async function activate(): Promise<void> {
     }
 
     if (selectedMode === 'typography') {
-      const pos = toolbar!.getPosition();
+      const pos = toolbar!.getButtonPosition('typography');
       const controls = typographyEditor!.render(el, pos, (changes) => {
         const info = buildElementInfo(el);
         const diff = diffBuilder!.build(info, changes);
@@ -335,7 +335,7 @@ async function activate(): Promise<void> {
       shadow!.appendChild(controls);
       toolbar!.setActiveMode('typography');
     } else if (selectedMode === 'colors') {
-      const pos = toolbar!.getPosition();
+      const pos = toolbar!.getButtonPosition('colors');
       const controls = colorEditor!.render(el, 'color', pos, (changes) => {
         const info = buildElementInfo(el);
         const diff = diffBuilder!.build(info, changes);
@@ -346,7 +346,7 @@ async function activate(): Promise<void> {
     } else if (selectedMode === 'dimensions') {
       // Dimensions: handles for drag + mini panel for presets
       handles!.showHandles(el, selectedMode);
-      const pos = toolbar!.getPosition();
+      const pos = toolbar!.getButtonPosition('dimensions');
       const controls = dimensionsEditor!.render(el, pos, (changes) => {
         const info = buildElementInfo(el);
         const diff = diffBuilder!.build(info, changes);
@@ -359,7 +359,7 @@ async function activate(): Promise<void> {
     } else if (selectedMode === 'spacing') {
       // Spacing: handles for drag + mini panel for token-based value selection
       handles!.showHandles(el, selectedMode);
-      const pos = toolbar!.getPosition();
+      const pos = toolbar!.getButtonPosition('spacing');
       const controls = spacingEditor!.render(el, pos, (changes) => {
         const info = buildElementInfo(el);
         const diff = diffBuilder!.build(info, changes);
@@ -370,7 +370,7 @@ async function activate(): Promise<void> {
       shadow!.appendChild(controls);
       toolbar!.setActiveMode('spacing');
     } else if (selectedMode === 'position') {
-      const pos = toolbar!.getPosition();
+      const pos = toolbar!.getButtonPosition('position');
       const controls = positionEditor!.render(el, pos, (changes) => {
         const info = buildElementInfo(el);
         const diff = diffBuilder!.build(info, changes);
@@ -394,26 +394,29 @@ async function activate(): Promise<void> {
     }
   });
 
-  // Wire panel toggle button → show/hide property panel independently
-  toolbar.onPanelToggle(() => {
-    if (panel!.isVisible()) {
-      panel!.hide();
-      toolbar!.setPanelOpen(false);
-      panelUserClosed = true;
+  // Wire DevTools toggle button
+  toolbar.onInspectorToggle('devtools', () => {
+    if (devtoolsPanel!.isOpen()) {
+      devtoolsPanel!.hide();
+      toolbar!.setInspectorOpen('devtools', false);
+      devtoolsUserClosed = true;
     } else {
-      const el = selection!.getSelectedElement();
-      if (el) {
-        const info = buildElementInfo(el);
-        panel!.show(info, el);
-        toolbar!.setPanelOpen(true);
-        panelUserClosed = false;
-      }
+      const el = selection?.getSelectedElement() ?? undefined;
+      const info = el ? buildElementInfo(el) : undefined;
+      devtoolsPanel!.show(el, info);
+      toolbar!.setInspectorOpen('devtools', true);
+      devtoolsUserClosed = false;
     }
+  });
+
+  // Wire devtools panel close (via × button)
+  devtoolsPanel.onClose(() => {
+    toolbar!.setInspectorOpen('devtools', false);
+    devtoolsUserClosed = true;
   });
 
   // Wire toolbar toggle → hide/show panel + tool mini-panels (overlay stays visible)
   toolbar.onToggle((expanded) => {
-    panel!.setVisible(expanded);
     if (!expanded) {
       typographyEditor!.cleanup();
       colorEditor!.cleanup();
@@ -436,7 +439,6 @@ async function activate(): Promise<void> {
       hover!.disable();
       selection!.hideHighlight();
       handles!.hideHandles();
-      panel!.setVisible(false);
       typographyEditor!.cleanup();
       colorEditor!.cleanup();
       dimensionsEditor!.cleanup();
@@ -461,24 +463,21 @@ async function activate(): Promise<void> {
       document.body.style.cursor = 'crosshair';
       hover!.enable();
       selection!.restoreHighlight();
-      // Restore panel if toolbar is expanded
-      if (toolbar!.getActiveMode() !== null || selection!.getSelectedElement()) {
-        panel!.setVisible(true);
-      }
     }
   });
 
-  // Wire toolbar drag → reposition open mini panels
-  toolbar.onMove((pos) => {
-    typographyEditor!.reposition(pos);
-    colorEditor!.reposition(pos);
-    dimensionsEditor!.reposition(pos);
-    spacingEditor!.reposition(pos);
-    positionEditor!.reposition(pos);
-    notesEditor!.reposition(pos);
-    moveEditor!.reposition(pos);
-    gridSettingsPanel!.reposition(pos);
-    multiSelectToolbar!.reposition(pos);
+  // Wire toolbar drag → reposition open mini panels next to their buttons
+  toolbar.onMove(() => {
+    typographyEditor!.reposition(toolbar!.getButtonPosition('typography'));
+    colorEditor!.reposition(toolbar!.getButtonPosition('colors'));
+    dimensionsEditor!.reposition(toolbar!.getButtonPosition('dimensions'));
+    spacingEditor!.reposition(toolbar!.getButtonPosition('spacing'));
+    positionEditor!.reposition(toolbar!.getButtonPosition('position'));
+    notesEditor!.reposition(toolbar!.getButtonPosition('notes'));
+    moveEditor!.reposition(toolbar!.getButtonPosition('move'));
+    gridSettingsPanel!.reposition(toolbar!.getButtonPosition('grid'));
+    multiSelectToolbar!.reposition(toolbar!.getPosition());
+    reviewPanel!.reposition(toolbar!.getButtonPosition('review'));
   });
 
   // Wire editor close buttons → deactivate tool
@@ -506,7 +505,7 @@ async function activate(): Promise<void> {
       reviewPanel!.hide();
       toolbar!.setReviewPanelOpen(false);
     } else {
-      reviewPanel!.show();
+      reviewPanel!.show(toolbar!.getButtonPosition('review'));
       toolbar!.setReviewPanelOpen(true);
     }
   });
@@ -522,7 +521,7 @@ async function activate(): Promise<void> {
       notesEditor!.cleanup();
       toolbar!.setNotesOpen(false);
     } else {
-      const pos = toolbar!.getPosition();
+      const pos = toolbar!.getButtonPosition('notes');
       const notePanel = notesEditor!.render(pos);
       shadow!.appendChild(notePanel);
       toolbar!.setNotesOpen(true);
@@ -619,7 +618,7 @@ async function activate(): Promise<void> {
     if (gridSettingsPanel!.isOpen()) {
       gridSettingsPanel!.cleanup();
     } else {
-      const pos = toolbar!.getPosition();
+      const pos = toolbar!.getButtonPosition('grid');
       const settingsEl = gridSettingsPanel!.render(pos);
       shadow!.appendChild(settingsEl);
     }
@@ -668,7 +667,7 @@ async function activate(): Promise<void> {
       badge!.update();
       reviewPanel!.refresh();
       selection?.refreshHighlight();
-      panel?.log('Undo');
+      devtoolsPanel?.log('Undo');
     }
   });
 
@@ -679,7 +678,7 @@ async function activate(): Promise<void> {
       badge!.update();
       reviewPanel!.refresh();
       selection?.refreshHighlight();
-      panel?.log('Redo');
+      devtoolsPanel?.log('Redo');
     }
   });
 
@@ -689,7 +688,7 @@ async function activate(): Promise<void> {
     badge!.update();
     reviewPanel!.refresh();
     selection?.deselect();
-    panel?.log('All changes reset');
+    devtoolsPanel?.log('All changes reset');
   });
 
   // Update toolbar undo/redo button states when history changes
@@ -705,7 +704,7 @@ async function activate(): Promise<void> {
 
   // Wire disabled mode feedback (e.g. dimension resize blocked by layout)
   handles.onDisabled((reason) => {
-    panel!.log(`Edit mode blocked: ${reason}`, 'warn');
+    devtoolsPanel?.log(`Edit mode blocked: ${reason}`, 'warn');
     toolbar!.setActiveMode(null);
   });
 
@@ -729,8 +728,8 @@ async function activate(): Promise<void> {
   document.addEventListener('scroll', handleScroll, true);
 
   badge.update();
-  panel.log('Extension activated');
-  panel.log(`WebSocket connecting to localhost…`);
+  devtoolsPanel.log('Extension activated');
+  devtoolsPanel.log(`WebSocket connecting to localhost…`);
 }
 
 function deactivate(): void {
@@ -745,7 +744,7 @@ function deactivate(): void {
   exitNotePickMode();
   hover?.disable();
   selection?.deactivate();
-  panel?.hide();
+  devtoolsPanel?.hide();
   toolbar?.destroy();
   handles?.hideHandles();
   typographyEditor?.cleanup();
@@ -778,12 +777,12 @@ function deactivate(): void {
   savedFocus = null;
 
   // Reset state
-  panelUserClosed = false;
+  devtoolsUserClosed = false;
   mode = 'inactive';
   wsClient = null;
   hover = null;
   selection = null;
-  panel = null;
+  devtoolsPanel = null;
   toolbar = null;
   staleDetector = null;
   tokenStore = null;
@@ -848,7 +847,7 @@ function commitEdit(
   }
   badge!.update();
   reviewPanel!.refresh();
-  panel?.refreshProperties();
+  devtoolsPanel?.refreshProperties();
 }
 
 // ---------------------------------------------------------------------------
@@ -886,11 +885,11 @@ let savedFocus: HTMLElement | null = null;
 function handleStatusChange(status: ConnectionStatus): void {
   reviewPanel?.updateConnectionStatus(status);
   if (status === 'connected') {
-    panel?.log('WebSocket connected');
+    devtoolsPanel?.log('WebSocket connected');
   } else if (status === 'disconnected') {
-    panel?.log('WebSocket disconnected', 'warn');
+    devtoolsPanel?.log('WebSocket disconnected', 'warn');
   } else if (status === 'connecting') {
-    panel?.log('WebSocket reconnecting…');
+    devtoolsPanel?.log('WebSocket reconnecting…');
   }
 }
 
@@ -1038,10 +1037,9 @@ function enterMultiSelectMode(): void {
     shadow!.appendChild(msToolbar);
   }
 
-  // Switch panel to multi-select mode
-  if (!panelUserClosed) {
-    panel?.showMultiSelect(allElements);
-    toolbar?.setPanelOpen(true);
+  // Switch DevTools properties to multi-select mode
+  if (devtoolsPanel?.isOpen()) {
+    devtoolsPanel.updateMultiProperties(allElements);
   }
 }
 
@@ -1085,7 +1083,7 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
         badge?.update();
         reviewPanel?.refresh();
         selection?.refreshHighlight();
-        panel?.log('Redo');
+        devtoolsPanel?.log('Redo');
       }
     } else {
       const entry = editHistory?.undo();
@@ -1094,7 +1092,7 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
         badge?.update();
         reviewPanel?.refresh();
         selection?.refreshHighlight();
-        panel?.log('Undo');
+        devtoolsPanel?.log('Undo');
       }
     }
     return;
@@ -1121,15 +1119,14 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
       exitMultiSelectMode();
       const primary = selection?.getSelectedElement();
       if (primary) {
-        const info = buildElementInfo(primary);
-        if (!panelUserClosed) {
-          panel?.show(info, primary);
-          toolbar?.setPanelOpen(true);
+        // Restore single-element properties in DevTools
+        if (devtoolsPanel?.isOpen()) {
+          devtoolsPanel.updateProperties(primary);
         }
         const dimBlock = getDimensionBlockReason(primary);
         if (!dimBlock) {
           handles?.showHandles(primary, 'dimensions');
-          const pos = toolbar!.getPosition();
+          const pos = toolbar!.getButtonPosition('dimensions');
           const dimControls = dimensionsEditor!.render(primary, pos, (changes) => {
             const dimInfo = buildElementInfo(primary);
             const diff = diffBuilder!.build(dimInfo, changes);
@@ -1180,9 +1177,11 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
       // Level 2b: close review panel
       reviewPanel.hide();
       toolbar?.setReviewPanelOpen(false);
-    } else if (panel?.isVisible()) {
-      // Level 3: dismiss property panel
-      selection?.deselect();
+    } else if (devtoolsPanel?.isOpen()) {
+      // Level 3: dismiss DevTools panel
+      devtoolsPanel.hide();
+      toolbar?.setInspectorOpen('devtools', false);
+      devtoolsUserClosed = true;
     } else {
       // Level 4: deactivate extension
       deactivate();

@@ -1,5 +1,4 @@
 import type { DragHandleManager } from './handles';
-import type { PropertyPanel } from '../selection/panel';
 import type { SelectionManager } from '../selection/select';
 
 /**
@@ -19,7 +18,7 @@ export class KeyboardHandler {
   constructor(
     private readonly shadow: ShadowRoot,
     private readonly handles: DragHandleManager,
-    private readonly panel: PropertyPanel,
+    private readonly _panel: unknown,
     private readonly selection: SelectionManager,
   ) {
     // ShadowRoot's typed addEventListener only supports 'slotchange'.

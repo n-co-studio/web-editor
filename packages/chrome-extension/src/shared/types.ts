@@ -10,6 +10,8 @@ export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'er
 
 export type EditMode = 'spacing' | 'dimensions' | 'typography' | 'colors' | 'border-radius' | 'position' | 'move';
 
+export type InspectorMode = 'devtools';
+
 // ---------------------------------------------------------------------------
 // Selection
 // ---------------------------------------------------------------------------
