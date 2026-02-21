@@ -7,11 +7,16 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/_analytics-helper.sh"
+START_MS=$(date +%s%3N 2>/dev/null || date +%s)
+
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
 
 if [ "$CURRENT_BRANCH" = "main" ] && [ "${REPO_OS_ALLOW_MAIN:-0}" != "1" ]; then
-  echo "BLOCKED: You are on main. Create a branch before making changes."
-  echo "  git checkout -b feature/<description>"
-  echo "  Override: REPO_OS_ALLOW_MAIN=1"
+  log_hook_event "branch-guard" "PreToolUse" "" "block" "$START_MS" "main_branch"
+  echo "BLOCKED: On main — run: git checkout -b feature/<description> (override: REPO_OS_ALLOW_MAIN=1)" >&2
   exit 2
 fi
+
+log_hook_event "branch-guard" "PreToolUse" "" "allow" "$START_MS" "not_main"

@@ -2,55 +2,132 @@
 # Session close check (blocking)
 # Runs via Stop hook in .claude/settings.json.
 # Blocks session close (exit 2) if session log was not updated.
+# Zero-change sessions (no commits, no working tree changes) downgrade to advisory.
 # Override: SKIP_SESSION_LOG=1
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/_analytics-helper.sh"
+START_MS=$(date +%s%3N 2>/dev/null || date +%s)
+
 INPUT=$(cat)
+
+# --- Paths and state files ---
+REPO_ROOT="$(get_repo_root)"
+SESSION_LOG="$REPO_ROOT/docs/ai/logs/session-log.md"
+HASH_FILE="$REPO_ROOT/.claude/.session-log-hash"
+BASELINE_SHA_FILE="$REPO_ROOT/.claude/.session-baseline-sha"
+COUNTER_FILE="$REPO_ROOT/.claude/.hvst-fail-count"
+
+# --- Portable SHA-256 ---
+file_hash() {
+  [ -f "$1" ] || return 1
+  if command -v shasum &>/dev/null; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  elif command -v sha256sum &>/dev/null; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    openssl sha256 "$1" | awk '{print $NF}'
+  fi
+}
+
+# --- Update baseline for next session ---
+# Re-computes hash fresh (never uses cached value). Stores commit SHA for
+# session-scoped change detection. Handles missing session log gracefully.
+update_baseline() {
+  if [ -f "$SESSION_LOG" ]; then
+    file_hash "$SESSION_LOG" > "$HASH_FILE" 2>/dev/null || true
+  fi
+  git rev-parse HEAD > "$BASELINE_SHA_FILE" 2>/dev/null || true
+}
+
+# --- Session cleanup (HVST counter + session ID + old analytics) ---
+cleanup_session() {
+  rm -f "$COUNTER_FILE"
+  rm -f "$REPO_ROOT/.claude/.session-id"
+  cleanup_old_analytics "$REPO_ROOT"
+}
 
 # --- Infinite loop guard ---
 # When a Stop hook blocks (exit 2), Claude continues working.
 # On the next stop attempt, stop_hook_active=true. Allow it to prevent loops.
 STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
 if [ "$STOP_HOOK_ACTIVE" = "true" ]; then
+  update_baseline
+  cleanup_session
   exit 0
 fi
 
 # --- Operator override ---
 if [ "${SKIP_SESSION_LOG:-0}" = "1" ]; then
+  update_baseline
+  cleanup_session
   exit 0
 fi
 
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo ".")"
-SESSION_LOG="$REPO_ROOT/docs/ai/logs/session-log.md"
-
+# --- Bootstrap ---
+# If session log is missing, recover from git (clean template) or skip.
 if [ ! -f "$SESSION_LOG" ]; then
+  git show HEAD:"docs/ai/logs/session-log.md" > "$SESSION_LOG" 2>/dev/null || exit 0
+fi
+
+# --- Session log modification check (content hash) ---
+# Compares current file hash against baseline stored at last session close.
+CURRENT_HASH=$(file_hash "$SESSION_LOG")
+
+SESSION_LOG_MODIFIED=false
+if [ -f "$HASH_FILE" ]; then
+  STORED_HASH=$(cat "$HASH_FILE")
+  if [ "$CURRENT_HASH" != "$STORED_HASH" ]; then
+    SESSION_LOG_MODIFIED=true
+  fi
+else
+  # First session — no baseline exists. Lenient: allow close.
+  SESSION_LOG_MODIFIED=true
+fi
+
+# --- Session weight check ---
+# If no actual changes were made (no commits since baseline, no working tree
+# changes), this is a zero-change session. Downgrade to advisory instead of
+# blocking. Uses stored baseline commit SHA for reliable session-scoped
+# detection (no hardcoded time window).
+UNCOMMITTED=$(git diff --name-only 2>/dev/null || echo "")
+STAGED=$(git diff --cached --name-only 2>/dev/null || echo "")
+
+RECENT_COMMITS=""
+if [ -f "$BASELINE_SHA_FILE" ]; then
+  BASELINE_SHA=$(cat "$BASELINE_SHA_FILE")
+  # Verify the baseline SHA still exists in the repo (handles force-push/reset)
+  if git cat-file -e "$BASELINE_SHA" 2>/dev/null; then
+    RECENT_COMMITS=$(git log --oneline "$BASELINE_SHA..HEAD" 2>/dev/null || echo "")
+  else
+    # Baseline SHA gone (rebased/reset) — treat as non-zero session
+    RECENT_COMMITS="baseline-missing"
+  fi
+else
+  # No baseline file — first session or file was cleaned up. Fall back to
+  # time-based detection as a one-time bridge (next close will write the file).
+  RECENT_COMMITS=$(git log --oneline --since="4 hours ago" 2>/dev/null || echo "")
+fi
+
+if [ -z "$UNCOMMITTED" ] && [ -z "$STAGED" ] && [ -z "$RECENT_COMMITS" ]; then
+  # Zero-change session — no blocking
+  if [ "$SESSION_LOG_MODIFIED" = false ]; then
+    echo "Advisory: No code changes detected (zero-change session). Session log not updated." >&2
+  fi
+  log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "zero_change"
+  cleanup_session
+  update_baseline
   exit 0
 fi
 
-# Check if session log was updated this session:
-# 1. Uncommitted changes (modified or staged)
-# 2. Committed within the last 4 hours (covers mid-session commits)
-# Note: uses variable capture instead of pipe to grep -q to avoid SIGPIPE
-# failures with pipefail (grep -q closes pipe early → git gets SIGPIPE → exit 141).
-SESSION_LOG_MODIFIED=false
-DIFF_OUT=$(git diff --name-only "$SESSION_LOG" 2>/dev/null || true)
-if [ -n "$DIFF_OUT" ]; then
-  SESSION_LOG_MODIFIED=true
-fi
-CACHED_OUT=$(git diff --cached --name-only "$SESSION_LOG" 2>/dev/null || true)
-if [ -n "$CACHED_OUT" ]; then
-  SESSION_LOG_MODIFIED=true
-fi
-LOG_OUT=$(git log --since="4 hours ago" --name-only --format="" -- "$SESSION_LOG" 2>/dev/null || true)
-if [ -n "$LOG_OUT" ]; then
-  SESSION_LOG_MODIFIED=true
-fi
-
+# --- Blocking check ---
+# Session had real changes but session log was not updated.
 if [ "$SESSION_LOG_MODIFIED" = false ]; then
-  echo "BLOCKED: Session log (docs/ai/logs/session-log.md) has not been updated." >&2
-  echo "  Update the session log before closing the session." >&2
-  echo "  Operator override: SKIP_SESSION_LOG=1" >&2
+  # Do NOT update baseline when blocking — prevents stale hash on retry.
+  log_hook_event "session-close-check" "Stop" "" "block" "$START_MS" "log_not_updated"
+  echo "BLOCKED: Session log not updated — update docs/ai/logs/session-log.md (override: SKIP_SESSION_LOG=1)" >&2
   exit 2
 fi
 
@@ -70,17 +147,13 @@ case "$CURRENT_BRANCH" in
     fi
 
     if [ "$PR_EXISTS" = false ]; then
-      echo ""
-      echo "Reminder: No open PR found for branch '$CURRENT_BRANCH'."
-      echo "  Ask the operator whether to create a PR to merge to main."
-      echo "  Do not skip or defer without explicit operator direction."
+      echo "Reminder: No open PR for '$CURRENT_BRANCH' — ask operator about creating PR to main." >&2
     fi
     ;;
 esac
 
 # --- HVST known-issues check (advisory) ---
 # If HVST failures occurred this session, check if known-issues.md was updated.
-COUNTER_FILE="$REPO_ROOT/.claude/.hvst-fail-count"
 KNOWN_ISSUES="$REPO_ROOT/docs/ai/logs/known-issues.md"
 
 if [ -f "$COUNTER_FILE" ]; then
@@ -95,11 +168,15 @@ if [ -f "$COUNTER_FILE" ]; then
     fi
 
     if [ "$KI_MODIFIED" = false ]; then
-      echo ""
-      echo "Reminder: $FAIL_COUNT HVST failures occurred but known-issues.md was not updated."
-      echo "Record resolved issues per HVST Record step (docs/ai/workflow.md)."
+      echo "Reminder: $FAIL_COUNT HVST failures but known-issues.md not updated — record per HVST Record step." >&2
     fi
   fi
-  # Clean up counter file at session end
-  rm -f "$COUNTER_FILE"
+  cleanup_session
 fi
+
+# --- Analytics: log successful close and register repo ---
+log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "session_complete"
+register_repo "$REPO_ROOT"
+
+# --- Update baseline for next session ---
+update_baseline

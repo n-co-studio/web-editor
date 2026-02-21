@@ -6,7 +6,7 @@
 - Work happens in small, verifiable increments.
 - **Gates must pass before commits (and before any push).**
 - **Accepted decisions are mandatory. Decision violations block commits.**
-- Session log is updated at session close. Agent asks operator about PR to main for mergeable branches — never skip without operator direction.
+- Session log is updated at session close. Zero-change sessions (no commits, no working tree changes) are exempt — the hook downgrades to advisory. Agent asks operator about PR to main for mergeable branches — never skip without operator direction.
 
 ## Authority
 Operator-only:
@@ -20,18 +20,22 @@ Agent-allowed:
 
 ## Source of Truth
 - docs/spec/compiled/ (active version per manifest.json)
-- docs/spec/_templates/ (blank spec templates — upstream-synced)
 - docs/spec/prototypes/ (experiment briefs and prototype learnings)
 - docs/ai/workflow.md
 - docs/ai/quality-gates.md
 - docs/ai/decisions/
 - docs/ai/logs/session-log.md
-- docs/ai/logs/session-archive.md
 - docs/ai/logs/known-issues.md
 - .claude/agents/orchestrator.md
 - .claude/agents/_agent-glossary.md
 - .claude/agents/_agent-workflow.md
-- .claude/agents/_advisory-board.md
+
+On-demand (loaded by orchestrator.md triggers, not at session start):
+- docs/spec/_templates/ (read during Prompt 0 only)
+- docs/ai/logs/session-archive.md (read when investigating multi-session patterns)
+- .claude/agents/_advisory-board.md (read during Prompt A Phase 1)
+- .claude/agents/_cohesion-review.md (read after Builder signals completion)
+- .claude/agents/_hvst-review.md (read when HVST debugging stalls or operator requests debug review)
 
 Hooks (`.claude/hooks/`) enforce automatically: branch protection on Edit/Write (blocks file changes on `main`), A4 secret scanning on commit, B1 naming convention on push, session log check on stop, PR reminder on stop for mergeable branches (advisory). Subagent frontmatter hooks block Builder/QA/Security from running git commit/push. Settings (`.claude/settings.json`) are auto-loaded by Claude Code. Neither hooks nor settings need to be read into context.
 
@@ -47,3 +51,4 @@ Hooks (`.claude/hooks/`) enforce automatically: branch protection on Edit/Write 
 - docs/ai/prompts/prompt-0.5-prototype.md
 - docs/ai/prompts/prompt-a-repo-os.md
 - docs/ai/prompts/prompt-b-product-build.md
+- docs/ai/prompts/prompt-t-task-definition.md
