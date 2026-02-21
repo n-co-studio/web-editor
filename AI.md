@@ -52,3 +52,6 @@ Hooks (`.claude/hooks/`) enforce automatically: branch protection on Edit/Write 
 - docs/ai/prompts/prompt-a-repo-os.md
 - docs/ai/prompts/prompt-b-product-build.md
 - docs/ai/prompts/prompt-t-task-definition.md
+
+## Versioning
+Template versions use CalVer git tags (e.g., `v2026.02.1`). See GitHub Releases for changelog.
