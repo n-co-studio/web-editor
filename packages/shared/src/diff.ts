@@ -62,6 +62,19 @@ export interface PropertyChange {
   readonly unit?: string;
 }
 
+/**
+ * A reorder operation — moves a child element within the same parent container.
+ * Stored as a parallel array on VisualDiff (separate from PropertyChange[]).
+ */
+export interface ReorderChange {
+  readonly type: 'reorder';
+  readonly fromIndex: number;
+  readonly toIndex: number;
+  readonly siblingSelectors: string[];
+  readonly containerSelector: string;
+  readonly containerDirection: string;
+}
+
 /** Page state at the time of edit. */
 export interface PageContext {
   readonly url: string;
@@ -82,6 +95,7 @@ export interface VisualDiff {
   readonly timestamp: string;
   readonly element: ElementInfo;
   readonly changes: readonly PropertyChange[];
+  readonly reorderChanges?: readonly ReorderChange[];
   readonly context: PageContext;
   readonly status: DiffStatus;
   readonly sourceVerified: boolean;

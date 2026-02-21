@@ -11,6 +11,12 @@
 - Does not communicate with any remote server — all traffic is localhost
 - Does not support non-JSX/TSX projects for deterministic source mapping in v1 (Vue SFCs, Svelte, plain HTML fall back to 'source unverified' mode)
 
+## Boundary Expansions
+
+These expand specific boundary restrictions for well-scoped operations:
+
+- **DOM node relocation for reorder**: `insertBefore`/`moveBefore` is permitted for reorder operations within the same parent container. This relocates an existing element without creating or deleting nodes.
+
 ## Future Considerations
 
 These are out of scope for v1 but may be revisited in later versions:

@@ -1,6 +1,7 @@
 import { createElement } from '../../shared/ui-utils';
 import { getTopElementAt, isElementVisible } from '../../shared/dom-utils';
 import { OVERLAY } from '../../shared/constants';
+import { createZoneOverlays } from '../editing/zone-overlays';
 
 /**
  * Renders a highlight overlay on elements as the cursor moves.
@@ -11,6 +12,7 @@ export class HoverHighlight {
   private tooltip: HTMLDivElement;
   private programmaticOverlay: HTMLDivElement;
   private programmaticTooltip: HTMLDivElement;
+  private zoneOverlays: HTMLDivElement[] = [];
   private rafId: number | null = null;
   private active = false;
   private currentElement: Element | null = null;
@@ -108,6 +110,16 @@ export class HoverHighlight {
     return this.currentElement;
   }
 
+  /** Show hover highlight on an element programmatically (e.g. from DOM inspector). */
+  highlightElement(el: Element): void {
+    this.showHighlight(el);
+  }
+
+  /** Clear a programmatic hover highlight. */
+  unhighlightElement(): void {
+    this.hideHighlight();
+  }
+
   /** Refresh the hover highlight to match the current element's position. */
   refreshHighlight(): void {
     if (!this.currentElement || !this.active) return;
@@ -203,10 +215,20 @@ export class HoverHighlight {
     this.tooltip.style.left = `${rect.left}px`;
     this.tooltip.style.top = `${Math.max(0, rect.top - 22)}px`;
     this.tooltip.style.display = 'block';
+
+    // Zone overlays — destroy previous, create new
+    for (const z of this.zoneOverlays) z.remove();
+    this.zoneOverlays = createZoneOverlays(el, this.shadow, {
+      animate: false,
+      zIndex: '50',
+      showLabels: false,
+    });
   }
 
   private hideHighlight(): void {
     this.overlay.style.display = 'none';
     this.tooltip.style.display = 'none';
+    for (const z of this.zoneOverlays) z.remove();
+    this.zoneOverlays = [];
   }
 }

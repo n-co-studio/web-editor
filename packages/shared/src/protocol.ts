@@ -1,7 +1,7 @@
 import type { VisualDiff, DesignToken } from './diff.js';
 
 /** Current protocol version. */
-export const PROTOCOL_VERSION = '0.1.0' as const;
+export const PROTOCOL_VERSION = '0.2.0' as const;
 
 export const MessageType = {
   EXTENSION_HELLO: 'EXTENSION_HELLO',

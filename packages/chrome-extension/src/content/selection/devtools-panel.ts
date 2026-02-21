@@ -45,6 +45,7 @@ export class DevToolsPanel {
   private logEntries: Array<{ level: 'info' | 'warn' | 'error'; text: string; time: number }> = [];
   private closeCb: (() => void) | null = null;
   private elementSelectCb: ElementSelectCallback | null = null;
+  private elementHoverCb: ((element: Element | null) => void) | null = null;
   private propChangeCb: PropertyChangeCallback | null = null;
   private multiPropChangeCb: MultiPropertyChangeCallback | null = null;
   private leftRatio = DEVTOOLS_DEFAULT_LEFT_RATIO;
@@ -66,6 +67,10 @@ export class DevToolsPanel {
 
   onElementSelect(cb: ElementSelectCallback): void {
     this.elementSelectCb = cb;
+  }
+
+  onElementHover(cb: (element: Element | null) => void): void {
+    this.elementHoverCb = cb;
   }
 
   onPropertyChange(cb: PropertyChangeCallback): void {
@@ -554,9 +559,17 @@ export class DevToolsPanel {
       labelArea.appendChild(descEl);
     }
 
+    // Hover highlight on page for all rows (selected or not)
+    labelArea.addEventListener('mouseenter', () => {
+      if (!isSelected) row.style.background = 'rgba(255, 255, 255, 0.06)';
+      this.elementHoverCb?.(element);
+    });
+    labelArea.addEventListener('mouseleave', () => {
+      if (!isSelected) row.style.background = 'transparent';
+      this.elementHoverCb?.(null);
+    });
+
     if (!isSelected) {
-      labelArea.addEventListener('mouseenter', () => { row.style.background = 'rgba(255, 255, 255, 0.06)'; });
-      labelArea.addEventListener('mouseleave', () => { row.style.background = 'transparent'; });
       labelArea.addEventListener('click', (e) => {
         e.stopPropagation();
         this.elementSelectCb?.(element);
@@ -1006,9 +1019,15 @@ export class DevToolsPanel {
       groupLabel.style.letterSpacing = '0.5px';
       section.appendChild(groupLabel);
 
+      const propsGrid = createElement('div', {}, {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+        gap: '0 16px',
+      });
       for (const prop of group.props) {
-        section.appendChild(this.buildPropertyRow(prop.name, prop.value));
+        propsGrid.appendChild(this.buildPropertyRow(prop.name, prop.value));
       }
+      section.appendChild(propsGrid);
     }
 
     return section;
@@ -1251,13 +1270,19 @@ export class DevToolsPanel {
       groupLabel.style.letterSpacing = '0.5px';
       section.appendChild(groupLabel);
 
+      const propsGrid = createElement('div', {}, {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+        gap: '0 16px',
+      });
       for (const prop of group.props) {
         const values = elements.map((el) => getComputedProperty(el, prop));
         const allSame = values.every((v) => v === values[0]);
         const displayValue = allSame ? (values[0] ?? '') : 'Mixed';
 
-        section.appendChild(this.buildMultiPropertyRow(prop, displayValue, !allSame, elements));
+        propsGrid.appendChild(this.buildMultiPropertyRow(prop, displayValue, !allSame, elements));
       }
+      section.appendChild(propsGrid);
     }
 
     return section;

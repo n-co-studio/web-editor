@@ -13,10 +13,15 @@ type VoidCallback = () => void;
 // ---------------------------------------------------------------------------
 
 const ICONS: Record<string, string> = {
-  toggle: `<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-    <rect x="3" y="3" width="10" height="1.5" rx="0.75"/>
-    <rect x="3" y="7.25" width="10" height="1.5" rx="0.75"/>
-    <rect x="3" y="11.5" width="10" height="1.5" rx="0.75"/>
+  eye: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8s-2.5 4.5-6.5 4.5S1.5 8 1.5 8z"/>
+    <circle cx="8" cy="8" r="2"/>
+  </svg>`,
+
+  'eye-off': `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M6.5 3.8A6.4 6.4 0 0 1 8 3.5c4 0 6.5 4.5 6.5 4.5a11 11 0 0 1-1.7 2.2M10.4 10.4A2 2 0 0 1 5.6 5.6"/>
+    <path d="M1.5 8s1.2-2.2 3.1-3.4M8.8 10.5a6.5 6.5 0 0 1-.8 0C4 10.5 1.5 8 1.5 8"/>
+    <line x1="2" y1="2" x2="14" y2="14"/>
   </svg>`,
 
   spacing: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
@@ -107,6 +112,12 @@ const ICONS: Record<string, string> = {
     <polyline points="12,5 14,8 12,11"/>
   </svg>`,
 
+  reorder: `<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+    <circle cx="6" cy="4" r="1.25"/><circle cx="10" cy="4" r="1.25"/>
+    <circle cx="6" cy="8" r="1.25"/><circle cx="10" cy="8" r="1.25"/>
+    <circle cx="6" cy="12" r="1.25"/><circle cx="10" cy="12" r="1.25"/>
+  </svg>`,
+
   delete: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
     <path d="M3 4.5h10"/>
     <path d="M6.5 2.5h3"/>
@@ -124,6 +135,7 @@ const TOOL_LABELS: Record<EditMode, string> = {
   'border-radius': 'Radius',
   position: 'Position',
   move: 'Move',
+  reorder: 'Reorder',
 };
 
 const TOOLBAR_STORAGE_KEY = 'frontend-editor-toolbar-position';
@@ -136,6 +148,7 @@ const TOOL_ORDER: EditMode[] = [
   'border-radius',
   'position',
   'move',
+  'reorder',
 ];
 
 // ---------------------------------------------------------------------------
@@ -502,16 +515,18 @@ export class FloatingToolbar {
       (pos) => this.moveCb?.(pos),
     );
 
-    // Toggle button
-    this.toggleBtn = this.buildIconButton('toggle', 'Toggle tools', () => {
+    // Toggle button (eye = visible, eye-off = hidden)
+    this.toggleBtn = this.buildIconButton('eye', 'Hide UI', () => {
       if (this.cursorMode === 'page') return; // Disabled during page mode
       this.expanded = !this.expanded;
       if (this.toolsWrapper) {
         this.toolsWrapper.style.display = this.expanded ? 'flex' : 'none';
       }
+      // Swap icon between eye and eye-off
       if (this.toggleArrow) {
-        this.toggleArrow.style.transform = this.expanded ? '' : 'rotate(-90deg)';
+        this.toggleArrow.innerHTML = ICONS[this.expanded ? 'eye' : 'eye-off'] ?? '';
       }
+      this.toggleBtn!.title = this.expanded ? 'Hide UI' : 'Show UI';
       this.toggleCb?.(this.expanded);
     });
     this.toggleArrow = this.toggleBtn.querySelector('span');
@@ -818,13 +833,14 @@ export class FloatingToolbar {
         this.toolsWrapper.style.display = 'none';
       }
       if (this.toggleArrow) {
-        this.toggleArrow.style.transform = 'rotate(-90deg)';
+        this.toggleArrow.innerHTML = ICONS['eye-off'] ?? '';
       }
 
       // Dim toggle button (disabled during page mode)
       if (this.toggleBtn) {
         this.toggleBtn.style.opacity = '0.3';
         this.toggleBtn.style.cursor = 'not-allowed';
+        this.toggleBtn.title = 'Show UI';
       }
 
       // Highlight cursor button
@@ -849,7 +865,10 @@ export class FloatingToolbar {
         this.toolsWrapper.style.display = this.expanded ? 'flex' : 'none';
       }
       if (this.toggleArrow) {
-        this.toggleArrow.style.transform = this.expanded ? '' : 'rotate(-90deg)';
+        this.toggleArrow.innerHTML = ICONS[this.expanded ? 'eye' : 'eye-off'] ?? '';
+      }
+      if (this.toggleBtn) {
+        this.toggleBtn.title = this.expanded ? 'Hide UI' : 'Show UI';
       }
 
       // Un-highlight cursor button
