@@ -38,6 +38,55 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 -->
 
+## Session 11 — 2026-02-21 — Properties Panel Decomposition & Foundation
+
+**Status:** complete
+**Decisions applied:** 0001, 0002, 0008
+**Commits:** pending
+
+### Goal
+- Decompose monolithic ~1530-line `DevToolsPanel` into composable pane modules with typed contracts
+- Introduce `ComputedStyleSnapshot` for batched style reads (single `getComputedStyle` call per update)
+- Design enriched property row structure with indicator/badge/annotation slots for future briefs
+- Add tab bar with disabled "Rules" placeholder
+- Pure refactor — zero user-visible changes except greyed-out Rules tab
+
+### Plan Summary
+- Add `ComputedStyleSnapshot` interface + `createStyleSnapshot()` + `snapshotGet()` to dom-utils.ts
+- Extract 6 pane modules: ConsolePane, SourcePane, DomTreePane, InlineEditor, CssGroupsSection, PropertiesPane
+- Rewrite DevToolsPanel shell as thin coordinator (~513 lines, down from 1530)
+- Update product.md and boundaries.md specs
+- Verify public API compatibility (index.ts unchanged, all 45 call sites intact)
+
+### Changes Made
+- `packages/chrome-extension/src/shared/dom-utils.ts` — Added `ComputedStyleSnapshot` (39 properties), `createStyleSnapshot()`, `snapshotGet()` helper
+- `packages/chrome-extension/src/content/selection/panes/console-pane.ts` — **New** (~94 lines): log entries, clear button, browser console mirror
+- `packages/chrome-extension/src/content/selection/panes/source-pane.ts` — **New** (~60 lines): source file:line + CSS selector display
+- `packages/chrome-extension/src/content/selection/panes/dom-tree-pane.ts` — **New** (~230 lines): collapsible tree, expand/collapse, select/hover callbacks
+- `packages/chrome-extension/src/content/selection/panes/inline-editor.ts` — **New** (~316 lines): token dropdown + freeform input, single/multi select
+- `packages/chrome-extension/src/content/selection/panes/css-groups-section.ts` — **New** (~444 lines): 6 property groups, enriched row structure, token badges
+- `packages/chrome-extension/src/content/selection/panes/properties-pane.ts` — **New** (~208 lines): tab bar (Edit/Rules), scroll persistence, delegates to CssGroupsSection
+- `packages/chrome-extension/src/content/selection/devtools-panel.ts` — **Rewritten** (1530→513 lines): thin shell, delegates to 4 panes
+- `docs/spec/compiled/v1/product.md` — Updated DevTools panel description
+- `docs/spec/compiled/v1/boundaries.md` — Removed CSS rule location limitation
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass (0001/0002/0008 followed), A2 pass (plan documented, 10 files), A3 pass (`npx tsc --noEmit` → 0 errors, no lint/format tooling configured), A4 pass (no secrets), A5 pass (Critic cohesion: 1 critical (DomTreePane dispose/callback lifecycle) + 7 recommendations; fixed critical by documenting lifecycle contract; re-verified clean)
+- Push gates: B1 pending, B2 pending, B3 pending
+
+### Failed Attempts (Brief)
+- Cohesion review found DomTreePane callbacks survive `dispose()` as an invisible contract — if dispose ever nulls callbacks, second show cycle breaks silently. Fixed by documenting the lifecycle contract (pane instances are long-lived, dispose is DOM cleanup only).
+
+### Known Issues Logged
+- None
+
+### Follow-ups
+- Brief 1B: Enrichment — populate indicator/annotation slots with rule source data
+- Brief 2: Rules tab content implementation
+- Brief 3: Additional property badges
+
+---
+
 ## Session 10 — 2026-02-21 — Drag-to-Reorder Phase 3: Undo/Redo, Diff Pipeline & MCP
 
 **Status:** complete
@@ -120,54 +169,3 @@ Each session adds one entry. Keep entries high-signal and readable.
 ### Follow-ups
 - Phase 3: implement reorder undo/redo/reset (replace console.warn stubs in history.ts)
 - Phase 3: wire diff builder + queue for proper reorder diff pipeline
-
----
-
-## Session 8 — 2026-02-21 — Drag-to-Reorder Phase 1: Data Contract, Guards & Toolbar
-
-**Status:** complete
-**Decisions applied:** 0001, 0002, 0004
-**Commits:** 63c9fca — feat: add drag-to-reorder Phase 1 — data contract, guards & toolbar
-
-### Goal
-- Establish type-level foundation for drag-to-reorder feature (no drag logic)
-- Add `ReorderChange` to shared data contract
-- Refactor `HistoryEntry` to discriminated union
-- Add block-reason guard, toolbar button, and boundary expansion documentation
-
-### Plan Summary
-- Add `ReorderChange` interface + `reorderChanges` field to `VisualDiff` in shared package
-- Add `'reorder'` to `EditMode` union type
-- Add reorder color (indigo) to `HANDLE_COLORS` + `DROP_INDICATOR` design tokens
-- Create `getReorderBlockReason()` guard (checks flex/grid parent, wrap, sibling count)
-- Add 6-dot grip icon + label + tool order entry to toolbar
-- Wire block-reason into disabled tools map + stub mode branch in index.ts
-- Refactor `HistoryEntry` from optional-field pattern to discriminated union (`css | removal | reorder`)
-- Document boundary expansion for DOM node relocation in `boundaries.md`
-
-### Changes Made
-- `packages/shared/src/diff.ts` — Added `ReorderChange` interface (type, fromIndex, toIndex, siblingSelectors, containerSelector, containerDirection) + `reorderChanges?: readonly ReorderChange[]` on `VisualDiff`
-- `packages/shared/src/index.ts` — Exported `ReorderChange` from barrel
-- `packages/chrome-extension/src/shared/types.ts` — Added `'reorder'` to `EditMode` union
-- `packages/chrome-extension/src/shared/constants.ts` — Added `reorder: '#6366f1'` to `HANDLE_COLORS`, added `DROP_INDICATOR` constant (color, activeColor, thickness, activeThickness)
-- `packages/chrome-extension/src/content/editing/reorder.ts` — **New**: `getReorderBlockReason(element)` — returns block reason string or null (checks parent exists, parent is flex/grid, flex-wrap is nowrap, >1 sibling)
-- `packages/chrome-extension/src/content/toolbar.ts` — Added 6-dot grip SVG icon, `reorder: 'Reorder'` label, `'reorder'` in `TOOL_ORDER` after `'move'`
-- `packages/chrome-extension/src/content/index.ts` — Imported `getReorderBlockReason`, wired into disabled tools in `onSelect`, added stub `else if (selectedMode === 'reorder')` branch, refactored `commitEdit` to construct typed `CssHistoryEntry` or `RemovalHistoryEntry`
-- `packages/chrome-extension/src/content/history.ts` — Full refactor: discriminated union (`CssHistoryEntry | RemovalHistoryEntry | ReorderHistoryEntry`), `switch (entry.type)` dispatch in `undo()`/`redo()`/`resetAll()`, `console.warn` stubs for reorder cases
-- `docs/spec/compiled/v1/boundaries.md` — Added "Boundary Expansions" section documenting `insertBefore`/`moveBefore` permission for same-parent reorder
-
-### Verification (Gates Evidence)
-- Commit gates: A1 pass (decisions 0001/0002/0004 followed), A2 pass (plan existed, 9 files), A3 pass (`npx tsc --noEmit` → 0 errors), A4 pass (no secrets, feature branch), A5 pass (Critic cohesion review: 2 warnings found and fixed, re-verified clean)
-- Push gates: B1 pending, B2 pending, B3 pending
-
-### Failed Attempts (Brief)
-- TypeScript error after adding `'reorder'` to `EditMode` — `TOOL_LABELS` (Record<EditMode, string>) missing new key. Fixed by adding label + tool order entry.
-- Cohesion review found `throw new Error(...)` in reorder undo/redo/reset stubs would leave extension unrecoverable (callers have no try/catch). Fixed by replacing with `console.warn` + `break`.
-- Cohesion review found phase label mismatch ("Phase 3" in history.ts vs "Phase 2" in reorder.ts). Fixed by aligning to consistent "Phase 1/2/3" references.
-
-### Known Issues Logged
-- None
-
-### Follow-ups
-- Phase 2: implement drag interaction logic in reorder.ts
-- Phase 3: implement reorder undo/redo/reset (replace console.warn stubs in history.ts)

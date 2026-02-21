@@ -1,0 +1,316 @@
+import type { DesignToken } from '@frontend-editor/shared';
+import { createElement } from '../../../shared/ui-utils';
+import { OVERLAY } from '../../../shared/constants';
+import { getComputedProperty } from '../../../shared/dom-utils';
+import type { TokenStore } from '../../tokens/store';
+
+type SingleCommitCb = (property: string, fromValue: string, toValue: string, tokenName?: string) => void;
+type MultiCommitCb = (property: string, toValue: string, elements: Element[], tokenName?: string) => void;
+
+/**
+ * Inline editor — replaces a value display with a token dropdown + freeform input.
+ * Used by CssGroupsSection for both single-select and multi-select property editing.
+ */
+export class InlineEditor {
+  constructor(private readonly tokenStore: TokenStore) {}
+
+  // ---------------------------------------------------------------------------
+  // Single-select editor
+  // ---------------------------------------------------------------------------
+
+  openSingle(
+    row: HTMLDivElement,
+    valueContainer: HTMLDivElement,
+    property: string,
+    currentValue: string,
+    onCommit: SingleCommitCb,
+    currentElement: Element | null,
+  ): void {
+    const editor = createElement('div', {}, {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '4px',
+      flex: '1',
+      pointerEvents: 'auto',
+    });
+
+    const tokens = this.tokenStore.getForProperty(property);
+
+    if (tokens.length > 0) {
+      const select = createElement('select', {}, {
+        background: 'rgba(255, 255, 255, 0.1)',
+        color: OVERLAY.text,
+        border: `1px solid ${OVERLAY.primary}`,
+        borderRadius: OVERLAY.radiusSm,
+        padding: '2px 4px',
+        fontSize: OVERLAY.monoSize,
+        fontFamily: OVERLAY.monoFamily,
+        pointerEvents: 'auto',
+        cursor: 'pointer',
+        width: '100%',
+      }) as HTMLSelectElement;
+
+      const customOpt = document.createElement('option');
+      customOpt.value = '__custom__';
+      customOpt.textContent = 'Custom value...';
+      select.appendChild(customOpt);
+
+      let hasMatch = false;
+      for (const t of tokens) {
+        const opt = document.createElement('option');
+        opt.value = t.value;
+        opt.textContent = `${t.name} (${t.value})`;
+        if (t.value === currentValue) {
+          opt.selected = true;
+          hasMatch = true;
+        }
+        select.appendChild(opt);
+      }
+
+      if (!hasMatch) {
+        const currentOpt = document.createElement('option');
+        currentOpt.value = currentValue;
+        currentOpt.textContent = `${currentValue} (current)`;
+        currentOpt.selected = true;
+        select.insertBefore(currentOpt, customOpt.nextSibling);
+      }
+
+      select.addEventListener('change', () => {
+        if (select.value === '__custom__') {
+          select.style.display = 'none';
+          freeform.style.display = '';
+          freeform.focus();
+          return;
+        }
+        const newValue = select.value;
+        const selectedToken = tokens.find((t) => t.value === newValue);
+        if (currentElement) {
+          (currentElement as HTMLElement).style.setProperty(property, newValue);
+        }
+        onCommit(property, currentValue, newValue, selectedToken?.name);
+        this.closeSingle(row, valueContainer, editor, property, currentElement);
+      });
+
+      editor.appendChild(select);
+    }
+
+    const freeform = createElement('input', {
+      type: 'text',
+      value: currentValue,
+    }, {
+      background: 'rgba(255, 255, 255, 0.1)',
+      color: OVERLAY.text,
+      border: `1px solid ${OVERLAY.primary}`,
+      borderRadius: OVERLAY.radiusSm,
+      padding: '2px 4px',
+      fontSize: OVERLAY.monoSize,
+      fontFamily: OVERLAY.monoFamily,
+      width: '100%',
+      pointerEvents: 'auto',
+      display: tokens.length > 0 ? 'none' : '',
+    }) as HTMLInputElement;
+
+    freeform.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const newValue = freeform.value.trim();
+        if (newValue && newValue !== currentValue) {
+          if (currentElement) {
+            (currentElement as HTMLElement).style.setProperty(property, newValue);
+          }
+          onCommit(property, currentValue, newValue);
+        }
+        this.closeSingle(row, valueContainer, editor, property, currentElement);
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        this.closeSingle(row, valueContainer, editor, property, currentElement);
+      }
+    });
+
+    editor.appendChild(freeform);
+
+    valueContainer.style.display = 'none';
+    row.appendChild(editor);
+
+    if (tokens.length > 0) {
+      (editor.querySelector('select') as HTMLSelectElement)?.focus();
+    } else {
+      freeform.focus();
+      freeform.select();
+    }
+  }
+
+  closeSingle(
+    row: HTMLDivElement,
+    valueContainer: HTMLDivElement,
+    editor: HTMLDivElement,
+    property: string,
+    currentElement: Element | null,
+  ): void {
+    editor.remove();
+    valueContainer.style.display = '';
+
+    if (currentElement) {
+      const newValue = getComputedProperty(currentElement, property);
+      const valueEl = valueContainer.querySelector('span');
+      if (valueEl) valueEl.textContent = newValue;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Multi-select editor
+  // ---------------------------------------------------------------------------
+
+  openMulti(
+    row: HTMLDivElement,
+    valueContainer: HTMLDivElement,
+    property: string,
+    currentValue: string,
+    elements: Element[],
+    onCommit: MultiCommitCb,
+  ): void {
+    const editor = createElement('div', {}, {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '4px',
+      flex: '1',
+      pointerEvents: 'auto',
+    });
+
+    const tokens = this.tokenStore.getForProperty(property);
+
+    if (tokens.length > 0) {
+      const select = createElement('select', {}, {
+        background: 'rgba(255, 255, 255, 0.1)',
+        color: OVERLAY.text,
+        border: `1px solid ${OVERLAY.primary}`,
+        borderRadius: OVERLAY.radiusSm,
+        padding: '2px 4px',
+        fontSize: OVERLAY.monoSize,
+        fontFamily: OVERLAY.monoFamily,
+        pointerEvents: 'auto',
+        cursor: 'pointer',
+        width: '100%',
+      }) as HTMLSelectElement;
+
+      const customOpt = document.createElement('option');
+      customOpt.value = '__custom__';
+      customOpt.textContent = 'Custom value...';
+      select.appendChild(customOpt);
+
+      let hasMatch = false;
+      for (const t of tokens) {
+        const opt = document.createElement('option');
+        opt.value = t.value;
+        opt.textContent = `${t.name} (${t.value})`;
+        if (t.value === currentValue) {
+          opt.selected = true;
+          hasMatch = true;
+        }
+        select.appendChild(opt);
+      }
+
+      if (!hasMatch && currentValue !== 'Mixed') {
+        const currentOpt = document.createElement('option');
+        currentOpt.value = currentValue;
+        currentOpt.textContent = `${currentValue} (current)`;
+        currentOpt.selected = true;
+        select.insertBefore(currentOpt, customOpt.nextSibling);
+      }
+
+      select.addEventListener('change', () => {
+        if (select.value === '__custom__') {
+          select.style.display = 'none';
+          freeform.style.display = '';
+          freeform.focus();
+          return;
+        }
+        const newValue = select.value;
+        const selectedToken = tokens.find((t) => t.value === newValue);
+        onCommit(property, newValue, elements, selectedToken?.name);
+        this.closeMulti(row, valueContainer, editor, property, elements);
+      });
+
+      editor.appendChild(select);
+    }
+
+    const freeform = createElement('input', {
+      type: 'text',
+      value: currentValue === 'Mixed' ? '' : currentValue,
+      placeholder: currentValue === 'Mixed' ? 'Set value for all\u2026' : '',
+    }, {
+      background: 'rgba(255, 255, 255, 0.1)',
+      color: OVERLAY.text,
+      border: `1px solid ${OVERLAY.primary}`,
+      borderRadius: OVERLAY.radiusSm,
+      padding: '2px 4px',
+      fontSize: OVERLAY.monoSize,
+      fontFamily: OVERLAY.monoFamily,
+      width: '100%',
+      pointerEvents: 'auto',
+      display: tokens.length > 0 ? 'none' : '',
+    }) as HTMLInputElement;
+
+    freeform.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const newValue = freeform.value.trim();
+        if (newValue) {
+          onCommit(property, newValue, elements);
+        }
+        this.closeMulti(row, valueContainer, editor, property, elements);
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        this.closeMulti(row, valueContainer, editor, property, elements);
+      }
+    });
+
+    editor.appendChild(freeform);
+
+    valueContainer.style.display = 'none';
+    row.appendChild(editor);
+
+    if (tokens.length > 0) {
+      (editor.querySelector('select') as HTMLSelectElement)?.focus();
+    } else {
+      freeform.focus();
+      freeform.select();
+    }
+  }
+
+  closeMulti(
+    row: HTMLDivElement,
+    valueContainer: HTMLDivElement,
+    editor: HTMLDivElement,
+    property: string,
+    elements: Element[],
+  ): void {
+    editor.remove();
+    valueContainer.style.display = '';
+
+    const values = elements.map((el) => getComputedProperty(el, property));
+    const allSame = values.every((v) => v === values[0]);
+    const valueEl = valueContainer.querySelector('span');
+    if (valueEl) {
+      valueEl.textContent = allSame ? (values[0] ?? '') : 'Mixed';
+      valueEl.style.fontStyle = allSame ? '' : 'italic';
+      valueEl.style.color = allSame ? '' : OVERLAY.textMuted;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Token resolution
+  // ---------------------------------------------------------------------------
+
+  resolveToken(property: string, value: string): DesignToken | null {
+    if (!this.tokenStore.loaded) return null;
+    const result = this.tokenStore.resolveValue(property, value);
+    if (result.token) {
+      const tokens = this.tokenStore.getAll();
+      return tokens.find((t) => t.name === result.token) ?? null;
+    }
+    return null;
+  }
+}
