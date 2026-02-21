@@ -1,18 +1,41 @@
 import type { VisualDiff } from '@frontend-editor/shared';
 
 /**
- * Tracks committed CSS edits for undo/redo/reset.
+ * Tracks committed edits for undo/redo/reset.
  *
- * Each entry stores the target element and the CSS property changes
- * (fromValue/toValue) so we can revert or re-apply inline styles.
- * The VisualDiff is retained so callers can sync with the PendingQueue.
+ * Discriminated union on `type`:
+ *  - 'css'     — inline style changes (spacing, dimensions, typography, etc.)
+ *  - 'removal' — element deleted from DOM
+ *  - 'reorder' — element moved within its parent container (stub: Phase 2 adds drag, Phase 3 adds undo/redo)
  */
 
-export interface HistoryEntry {
+interface CssHistoryEntry {
+  readonly type: 'css';
   readonly element: HTMLElement;
   readonly changes: ReadonlyArray<{ property: string; fromValue: string; toValue: string }>;
   readonly diff: VisualDiff;
 }
+
+interface RemovalHistoryEntry {
+  readonly type: 'removal';
+  readonly element: HTMLElement;
+  readonly changes: ReadonlyArray<{ property: string; fromValue: string; toValue: string }>;
+  readonly diff: VisualDiff;
+  readonly parent: Node;
+  readonly nextSibling: Node | null;
+}
+
+interface ReorderHistoryEntry {
+  readonly type: 'reorder';
+  readonly element: HTMLElement;
+  readonly container: HTMLElement;
+  readonly fromIndex: number;
+  readonly toIndex: number;
+  readonly originalChildOrder: HTMLElement[];
+  readonly diff: VisualDiff;
+}
+
+export type HistoryEntry = CssHistoryEntry | RemovalHistoryEntry | ReorderHistoryEntry;
 
 type HistoryCallback = () => void;
 
@@ -33,13 +56,23 @@ export class EditHistory {
     const entry = this.undoStack.pop();
     if (!entry) return null;
 
-    // Revert inline styles
-    for (const c of entry.changes) {
-      if (c.fromValue) {
-        entry.element.style.setProperty(c.property, c.fromValue);
-      } else {
-        entry.element.style.removeProperty(c.property);
-      }
+    switch (entry.type) {
+      case 'css':
+        for (const c of entry.changes) {
+          if (c.fromValue) {
+            entry.element.style.setProperty(c.property, c.fromValue);
+          } else {
+            entry.element.style.removeProperty(c.property);
+          }
+        }
+        break;
+      case 'removal':
+        entry.parent.insertBefore(entry.element, entry.nextSibling);
+        break;
+      case 'reorder':
+        // Stub — Phase 3 implements reorder undo logic
+        console.warn('[frontend-editor] Reorder undo not yet implemented');
+        break;
     }
 
     this.redoStack.push(entry);
@@ -52,9 +85,19 @@ export class EditHistory {
     const entry = this.redoStack.pop();
     if (!entry) return null;
 
-    // Re-apply inline styles
-    for (const c of entry.changes) {
-      entry.element.style.setProperty(c.property, c.toValue);
+    switch (entry.type) {
+      case 'css':
+        for (const c of entry.changes) {
+          entry.element.style.setProperty(c.property, c.toValue);
+        }
+        break;
+      case 'removal':
+        entry.element.remove();
+        break;
+      case 'reorder':
+        // Stub — Phase 3 implements reorder redo logic
+        console.warn('[frontend-editor] Reorder redo not yet implemented');
+        break;
     }
 
     this.undoStack.push(entry);
@@ -63,7 +106,7 @@ export class EditHistory {
   }
 
   /**
-   * Reset all edits — reverts every inline style change in reverse order.
+   * Reset all edits — reverts every change in reverse order.
    * Returns the list of diff IDs that were undone.
    */
   resetAll(): string[] {
@@ -72,12 +115,23 @@ export class EditHistory {
     // Revert undo stack in reverse (most recent first)
     for (let i = this.undoStack.length - 1; i >= 0; i--) {
       const entry = this.undoStack[i];
-      for (const c of entry.changes) {
-        if (c.fromValue) {
-          entry.element.style.setProperty(c.property, c.fromValue);
-        } else {
-          entry.element.style.removeProperty(c.property);
-        }
+      switch (entry.type) {
+        case 'css':
+          for (const c of entry.changes) {
+            if (c.fromValue) {
+              entry.element.style.setProperty(c.property, c.fromValue);
+            } else {
+              entry.element.style.removeProperty(c.property);
+            }
+          }
+          break;
+        case 'removal':
+          entry.parent.insertBefore(entry.element, entry.nextSibling);
+          break;
+        case 'reorder':
+          // Stub — Phase 3 implements reorder reset logic
+          console.warn('[frontend-editor] Reorder reset not yet implemented');
+          break;
       }
       diffIds.push(entry.diff.id);
     }

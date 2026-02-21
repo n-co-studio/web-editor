@@ -5,8 +5,8 @@
 export const WS_PORT_BASE = 7890;
 export const WS_PORT_RANGE = 10;
 export const WS_BACKOFF_BASE_MS = 1_000;
-export const WS_BACKOFF_MAX_MS = 16_000;
-export const WS_MAX_RETRIES = 5;
+export const WS_BACKOFF_MAX_MS = 30_000;
+export const WS_MAX_RETRIES = 0; // 0 = unlimited — keep retrying indefinitely
 export const WS_KEEPALIVE_INTERVAL_MS = 20_000;
 
 // ---------------------------------------------------------------------------
@@ -102,6 +102,7 @@ export const HANDLE_COLORS = {
   dimensions: '#06b6d4',    // cyan (element intrinsic)
   borderRadius: '#22c55e',  // green (corner)
   snapped: '#22c55e',       // green (token snap feedback)
+  reorder: '#6366f1',       // indigo (drag reorder)
 } as const;
 
 // Spacing zone overlay fills + outlines
@@ -110,4 +111,12 @@ export const ZONE_OVERLAY = {
   paddingOutline: 'rgba(245, 158, 11, 0.60)',
   marginFill: 'rgba(251, 113, 133, 0.15)',
   marginOutline: 'rgba(251, 113, 133, 0.50)',
+} as const;
+
+// Drop indicator for reorder drag operations
+export const DROP_INDICATOR = {
+  color: '#3b82f6',
+  activeColor: '#60a5fa',
+  thickness: 2,
+  activeThickness: 3,
 } as const;

@@ -4,6 +4,7 @@ export type {
   NoteElementRef,
   NoteEntry,
   PropertyChange,
+  ReorderChange,
   PageContext,
   DiffStatus,
   VisualDiff,
