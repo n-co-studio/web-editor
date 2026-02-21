@@ -24,6 +24,7 @@ import { NotesStore } from './batching/notes-store';
 import { NotesEditor } from './editing/notes';
 import { GridOverlay } from './grid-overlay';
 import { MoveEditor, getMoveBlockReason } from './editing/move';
+import { getReorderBlockReason } from './editing/reorder';
 import { GridSettingsPanel } from './grid-settings';
 import { MeasureOverlay } from './selection/measure-overlay';
 import { MultiSelectManager } from './selection/multi-select';
@@ -70,6 +71,7 @@ let gridSettingsPanel: GridSettingsPanel | null = null;
 let measureOverlay: MeasureOverlay | null = null;
 let measureRafId: number | null = null;
 let devtoolsUserClosed = false;
+let devtoolsOpenBeforeCollapse = false;
 let multiSelect: MultiSelectManager | null = null;
 let multiSelectToolbar: MultiSelectToolbar | null = null;
 let multiSelectClickHandler: ((e: MouseEvent) => void) | null = null;
@@ -173,6 +175,15 @@ async function activate(): Promise<void> {
   // Wire DevTools DOM tree clicks → re-select different element
   devtoolsPanel.onElementSelect((el) => selection!.select(el));
 
+  // Wire DevTools DOM tree hover → highlight element on page
+  devtoolsPanel.onElementHover((el) => {
+    if (el) {
+      hover!.highlightElement(el);
+    } else {
+      hover!.unhighlightElement();
+    }
+  });
+
   // Wire DevTools property edits → diff creation → queue + history
   devtoolsPanel.onPropertyChange((property, fromValue, toValue, tokenName) => {
     const el = selection!.getSelectedElement();
@@ -260,9 +271,11 @@ async function activate(): Promise<void> {
     // Determine disabled tools
     const dimBlock = getDimensionBlockReason(element);
     const moveBlock = getMoveBlockReason(element);
+    const reorderBlock = getReorderBlockReason(element);
     const disabled: Partial<Record<EditMode, string>> = {};
     if (dimBlock) disabled['dimensions'] = dimBlock;
     if (moveBlock) disabled['move'] = moveBlock;
+    if (reorderBlock) disabled['reorder'] = reorderBlock;
     toolbar!.setDisabledTools(disabled);
 
     // Auto-activate dimensions if not blocked
@@ -388,6 +401,9 @@ async function activate(): Promise<void> {
         moveEditor!.refreshOverlay();
       });
       toolbar!.setActiveMode('move');
+    } else if (selectedMode === 'reorder') {
+      // Phase 2 will implement drag logic
+      toolbar!.setActiveMode('reorder');
     } else {
       handles!.showHandles(el, selectedMode);
       toolbar!.setActiveMode(selectedMode);
@@ -415,9 +431,15 @@ async function activate(): Promise<void> {
     devtoolsUserClosed = true;
   });
 
-  // Wire toolbar toggle → hide/show panel + tool mini-panels (overlay stays visible)
+  // Wire toolbar toggle → hide/show tool mini-panels + bottom DevTools panel
   toolbar.onToggle((expanded) => {
     if (!expanded) {
+      // Save DevTools state before collapsing
+      devtoolsOpenBeforeCollapse = devtoolsPanel!.isOpen();
+      if (devtoolsOpenBeforeCollapse) {
+        devtoolsPanel!.hide();
+        toolbar!.setInspectorOpen('devtools', false);
+      }
       typographyEditor!.cleanup();
       colorEditor!.cleanup();
       dimensionsEditor!.cleanup();
@@ -429,6 +451,14 @@ async function activate(): Promise<void> {
       multiSelectToolbar!.cleanup();
       toolbar!.setNotesOpen(false);
       // Keep handles and overlay visible — only UI chrome hides
+    } else {
+      // Restore DevTools if it was open before collapse and user hasn't manually closed it
+      if (devtoolsOpenBeforeCollapse && !devtoolsUserClosed) {
+        const el = selection?.getSelectedElement() ?? undefined;
+        const info = el ? buildElementInfo(el) : undefined;
+        devtoolsPanel!.show(el, info);
+        toolbar!.setInspectorOpen('devtools', true);
+      }
     }
   });
 
@@ -551,6 +581,16 @@ async function activate(): Promise<void> {
     if (notePanel) notePanel.style.pointerEvents = 'auto';
 
     const pickHandler = (e: MouseEvent) => {
+      // Let clicks within the notes panel through so buttons remain interactive
+      const noteEl = notesEditor!.getContainerElement();
+      if (noteEl) {
+        const r = noteEl.getBoundingClientRect();
+        if (e.clientX >= r.left && e.clientX <= r.right &&
+            e.clientY >= r.top && e.clientY <= r.bottom) {
+          return;
+        }
+      }
+
       e.preventDefault();
       e.stopPropagation();
 
@@ -778,6 +818,7 @@ function deactivate(): void {
 
   // Reset state
   devtoolsUserClosed = false;
+  devtoolsOpenBeforeCollapse = false;
   mode = 'inactive';
   wsClient = null;
   hover = null;
@@ -832,18 +873,32 @@ function commitEdit(
   element: Element | null,
   changes: readonly PropertyChange[],
   diff: VisualDiff,
+  removal?: { parent: Node; nextSibling: Node | null },
 ): void {
   queue!.add(diff);
   if (element) {
-    editHistory!.push({
-      element: element as HTMLElement,
-      changes: changes.map((c) => ({
-        property: c.property,
-        fromValue: c.fromValue,
-        toValue: c.toValue,
-      })),
-      diff,
-    });
+    const changeList = changes.map((c) => ({
+      property: c.property,
+      fromValue: c.fromValue,
+      toValue: c.toValue,
+    }));
+    if (removal) {
+      editHistory!.push({
+        type: 'removal',
+        element: element as HTMLElement,
+        changes: changeList,
+        diff,
+        parent: removal.parent,
+        nextSibling: removal.nextSibling,
+      });
+    } else {
+      editHistory!.push({
+        type: 'css',
+        element: element as HTMLElement,
+        changes: changeList,
+        diff,
+      });
+    }
   }
   badge!.update();
   reviewPanel!.refresh();
@@ -851,7 +906,7 @@ function commitEdit(
 }
 
 // ---------------------------------------------------------------------------
-// Delete element helper — hides via display:none, tracked as a diff
+// Delete element helper — removes from DOM, tracked as a diff
 // ---------------------------------------------------------------------------
 
 function deleteSelectedElement(): void {
@@ -861,6 +916,11 @@ function deleteSelectedElement(): void {
   const fromValue = getComputedStyle(el).display;
   if (fromValue === 'none') return; // already hidden
 
+  // Capture insertion context before removal
+  const parent = el.parentNode;
+  const nextSibling = el.nextSibling;
+  if (!parent) return;
+
   const info = buildElementInfo(el);
   const changes: PropertyChange[] = [{
     property: 'display',
@@ -869,10 +929,10 @@ function deleteSelectedElement(): void {
   }];
   const diff = diffBuilder!.build(info, changes);
 
-  // Apply the style change
-  (el as HTMLElement).style.display = 'none';
+  // Remove element from DOM
+  el.remove();
 
-  commitEdit(el, changes, diff);
+  commitEdit(el, changes, diff, { parent, nextSibling });
   selection?.deselect();
 }
 
@@ -1096,17 +1156,6 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
       }
     }
     return;
-  }
-
-  // Delete / Backspace — delete selected element
-  if ((e.key === 'Delete' || e.key === 'Backspace') && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
-    const selectedEl = selection?.getSelectedElement();
-    if (selectedEl) {
-      e.preventDefault();
-      e.stopPropagation();
-      deleteSelectedElement();
-      return;
-    }
   }
 
   // Escape ladder: cancel edit → close review → dismiss panel → deactivate
