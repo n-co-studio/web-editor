@@ -20,6 +20,7 @@ export class ReviewPanel {
   private connectionStatus: ConnectionStatus = 'disconnected';
   private sending = false;
   private closeCb: VoidCallback | null = null;
+  private anchorPos: { x: number; y: number } = { x: 16, y: 16 };
 
   constructor(
     private readonly shadow: ShadowRoot,
@@ -27,6 +28,7 @@ export class ReviewPanel {
     private readonly wsClient: WebSocketClient,
     private readonly diffBuilder: DiffBuilder,
     private readonly notesStore: NotesStore,
+    private readonly onHighlightElement?: (selector: string) => void,
   ) {
     // Auto-refresh when queue or notes change
     queue.onChange(() => {
@@ -37,7 +39,8 @@ export class ReviewPanel {
     });
   }
 
-  show(): void {
+  show(anchorPos?: { x: number; y: number }): void {
+    if (anchorPos) this.anchorPos = anchorPos;
     this.visible = true;
     this.render();
   }
@@ -67,6 +70,19 @@ export class ReviewPanel {
     return this.visible;
   }
 
+  /** Reposition the panel relative to a new toolbar anchor. */
+  reposition(anchorPos: { x: number; y: number }): void {
+    this.anchorPos = anchorPos;
+    if (!this.container) return;
+    const panelLeft = Math.min(
+      anchorPos.x + TOOLBAR_WIDTH + 8,
+      window.innerWidth - 368,
+    );
+    const panelTop = Math.max(8, anchorPos.y);
+    this.container.style.left = `${panelLeft}px`;
+    this.container.style.top = `${panelTop}px`;
+  }
+
   /** Get the current batch note from the notes store. */
   getSessionNote(): string {
     return this.notesStore.toBatchNote() ?? '';
@@ -79,10 +95,16 @@ export class ReviewPanel {
   private render(): void {
     this.container?.remove();
 
+    const panelLeft = Math.min(
+      this.anchorPos.x + TOOLBAR_WIDTH + 8,
+      window.innerWidth - 368,
+    );
+    const panelTop = Math.max(8, this.anchorPos.y);
+
     const panel = createElement('div', { role: 'dialog', 'aria-label': 'Review changes' }, {
       position: 'fixed',
-      bottom: '16px',
-      left: `${TOOLBAR_WIDTH + 24}px`,
+      left: `${panelLeft}px`,
+      top: `${panelTop}px`,
       width: '360px',
       maxHeight: '50vh',
       overflowY: 'auto',
@@ -251,7 +273,11 @@ export class ReviewPanel {
         pill.style.background = 'rgba(6, 182, 212, 0.15)';
         pill.style.border = `1px solid ${OVERLAY.primary}`;
         pill.style.borderRadius = '3px';
+        pill.style.cursor = 'pointer';
         pill.title = ref.selector;
+        pill.addEventListener('click', () => {
+          this.onHighlightElement?.(ref.selector);
+        });
         pillRow.appendChild(pill);
       }
       card.appendChild(pillRow);
@@ -292,7 +318,13 @@ export class ReviewPanel {
     const header = createText('div', headerText, 'mono');
     header.style.color = OVERLAY.primary;
     header.style.marginBottom = '4px';
+    header.style.cursor = 'pointer';
     header.title = selector;
+    header.addEventListener('click', () => {
+      this.onHighlightElement?.(selector);
+    });
+    header.addEventListener('mouseenter', () => { header.style.textDecoration = 'underline'; });
+    header.addEventListener('mouseleave', () => { header.style.textDecoration = 'none'; });
     group.appendChild(header);
 
     // Property changes
