@@ -4,12 +4,18 @@ Read and follow AI.md. Read all files referenced in AI.md's source-of-truth sect
 
 **Scope**: Initialize, validate, or update the Repo OS. Review specs via Advisory Board. No product code.
 
-## Mode Selection
+## Mode Selection (mandatory — do not proceed without operator choice)
 
-Ask the operator which mode applies:
+Present the two modes and wait for the operator to choose one. Do not begin any phase until a mode is explicitly selected.
 
 - **Initialize** — First run, or major spec rewrite. Runs full advisory review (Phases 1 → 2 → 3). Use after Prompt 0 completes for the first time or after a significant spec overhaul.
 - **Re-initialize** — Repeat run after build has started. Skips advisory review, goes straight to validation (Phase 3 only). Use after agent drift, decision conflicts, template sync updates, or mid-build spec changes where specs have already been reviewed.
+
+BLOCK: proceeding to any phase before the operator selects a mode.
+
+After mode selection, build your task list to match the selected mode:
+- **Initialize**: Phase 1 (advisory review) → Phase 2 (operator review) → Phase 3 (validation)
+- **Re-initialize**: Phase 3 (validation) only
 
 ## Phase 1 — Advisory Board Review (Initialize mode only)
 
@@ -48,12 +54,12 @@ Skip entirely in Re-initialize mode.
 
 ## Phase 3 — Repo OS Validation (both modes)
 
-Define or confirm:
-- Agent roles and responsibilities
-- Workflow rules and sequencing
-- Gate enforcement behavior
-- Project-specific conditional gates (if needed)
+Silently validate:
+- Agent roles and responsibilities are defined
+- Workflow rules and sequencing are consistent
+- Gate enforcement behavior is configured
+- Project-specific conditional gates (if any) are coherent
 
-Before changes: summarize current state → propose changes → wait for operator approval.
+If all checks pass: confirm "Repo OS ready" and instruct operator to proceed to Prompt B.
 
-Confirm "Repo OS ready" when complete, then instruct operator to proceed to Prompt B.
+If issues found: list only the problems, propose fixes, and wait for operator approval before confirming readiness.

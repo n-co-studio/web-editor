@@ -41,7 +41,7 @@ Docs, tests, formatting, comments, dev tooling
 ## Protocols
 
 ### HVST (Hypothesis → Validate → Solve → Test → Record)
-5-step debugging protocol for non-trivial failures. Prevents random-fix loops by requiring a hypothesis before any code change. Tracked by `hvst-failure-tracker.sh` hook. See `docs/ai/workflow.md` for full protocol definition.
+5-step debugging protocol for non-trivial failures. Prevents random-fix loops by requiring a hypothesis before any code change. Tracked by `hvst-failure-tracker.sh` hook. At 2+ consecutive failures or on operator request, Orchestrator may dispatch HVST Review Board (Architect + Exploration + Critic (hypothesis mode)) for multi-agent hypothesis review. See `.claude/agents/_hvst-review.md` for review board procedure and `docs/ai/workflow.md` for full protocol definition.
 
 ### Cohesion Review
 Post-build review by the Critic agent (cohesion mode) checking the diff and surrounding code for internal codebase coherence: broken cross-references, dangling imports, inconsistent naming, half-finished integrations, and contradictory patterns. Verified by QA as gate A5. Not the same as spec review (advisory board) — cohesion operates on code, not specs.

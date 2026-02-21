@@ -307,6 +307,22 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
 .dt-o:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-color:var(--acc);background:rgba(99,102,241,.04);}
 .dt-back:focus-visible,.dt-next:focus-visible,.dt-crumb:focus-visible,.dt-goto:focus-visible{outline:2px solid var(--acc);outline-offset:2px;}
 
+/* ─── ALTERNATIVES TILE GRID ─── */
+.dt-alts-hdr{font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);margin-top:1.2rem;margin-bottom:.45rem;text-align:center;}
+.dt-alts{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.45rem;max-width:520px;margin:0 auto;}
+.dt-alt{
+  display:flex;align-items:center;gap:.5rem;
+  padding:.55rem .7rem;border-radius:7px;
+  background:var(--s2);border:1px solid var(--b1);
+  cursor:pointer;transition:all .15s;text-align:left;
+  font-family:inherit;color:inherit;
+}
+.dt-alt:hover{border-color:var(--acc);background:rgba(99,102,241,.04);transform:translateY(-1px);}
+.dt-alt:focus-visible{outline:2px solid var(--acc);outline-offset:2px;}
+.dt-alt .ico{font-size:.95rem;flex-shrink:0;}
+.dt-alt .lbl{font-size:.8rem;font-weight:600;color:var(--t1);}
+.dt-alt .dsc{font-size:.68rem;color:var(--t3);margin-top:.05rem;}
+
 /* ─── TRANSITIONS ─── */
 .dt-box{transition:opacity .15s ease;}
 .dt-box.fading{opacity:0;}
@@ -325,8 +341,8 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
   </div>
   <nav class="sb-nav" id="sbnav">
     <div class="sb-group">Start Here</div>
-    <a href="#tldr">TL;DR</a>
     <a href="#navigator">Navigator</a>
+    <a href="#tldr">TL;DR</a>
     <a href="#setup">Setup</a>
     <a href="#spec">Spec Builder</a>
     <a href="#triggers">When to Run What</a>
@@ -357,6 +373,17 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
 <section id="top" style="padding-top:1.5rem;">
   <h1>Repo OS &mdash; Operator Guide</h1>
   <p>This is the reference for <strong>you, the human operator</strong>. It covers how to set up projects, run sessions, and work with AI agents safely. Agents do not read this file &mdash; it&rsquo;s for you.</p>
+  <div class="callout">
+    <strong>Short-conversation model.</strong> Repo OS is designed to keep token usage low. Structured prompts, spec-first planning, and mandatory gates mean agents do less guessing and more executing &mdash; keeping sessions short across creation, initialization, and build.
+  </div>
+</section>
+
+<!-- ══════ DECISION NAVIGATOR ══════ -->
+<section id="navigator">
+  <div class="sec-num">What Should I Do?</div>
+  <h2>Decision Navigator</h2>
+  <p>Not sure where to start? Answer a quick question to get the exact action, prompt, and next step.</p>
+  <div class="dt-box" id="dtBox" role="region" aria-label="Decision Navigator" aria-live="polite"></div>
 </section>
 
 <!-- ══════ TL;DR ══════ -->
@@ -373,14 +400,6 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
   <div class="callout">
     <strong>Core principle:</strong> You own intent. Agents execute within constraints. If something feels unclear or risky, stop and clarify before proceeding.
   </div>
-</section>
-
-<!-- ══════ DECISION NAVIGATOR ══════ -->
-<section id="navigator">
-  <div class="sec-num">What Should I Do?</div>
-  <h2>Decision Navigator</h2>
-  <p>Not sure where to start? Answer a quick question to get the exact action, prompt, and next step.</p>
-  <div class="dt-box" id="dtBox" role="region" aria-label="Decision Navigator" aria-live="polite"></div>
 </section>
 
 <!-- ══════ SETUP ══════ -->
@@ -1700,6 +1719,32 @@ const DT = {
   ]
 };
 
+/* ── Alternatives catalog ── */
+const DT_ALTS=[
+  {id:'spec', ico:'\uD83D\uDCCB',lbl:'Build Spec',   dsc:'Prompt 0 \u2014 guided spec interview',  path:[0,1,0]},
+  {id:'init', ico:'\u2699',       lbl:'Initialize',    dsc:'Prompt A \u2014 set up Repo OS',         path:[0,1,1]},
+  {id:'dev',  ico:'\u25B6',       lbl:'Dev Session',   dsc:'Prompt B \u2014 build, verify, commit',  path:[1,0]},
+  {id:'feat', ico:'\u002B',       lbl:'Add Feature',   dsc:'Feature brief + advisory review',        path:[2]},
+  {id:'task', ico:'\uD83D\uDD0D',lbl:'Task Brief',    dsc:'Prompt T \u2014 explore or define a task',path:[3]},
+  {id:'proto',ico:'\u26A1',       lbl:'Prototype',     dsc:'Prompt 0.5 \u2014 spike or experiment',  path:[4]}
+];
+function renderAlts(act){
+  const a=act.toLowerCase(),ex=[];
+  if(a.includes('prompt 0')&&!a.includes('0.5')) ex.push('spec');
+  if(a.includes('prompt a')) ex.push('init');
+  if(a.includes('prompt b')) ex.push('dev');
+  if(a.includes('prompt t')) ex.push('task');
+  if(a.includes('prompt 0.5')||a.includes('napkin')||a.includes('spike')||a.includes('proof of concept')) ex.push('proto');
+  if(a.includes('feature')) ex.push('feat');
+  const tiles=DT_ALTS.filter(t=>!ex.includes(t.id));
+  if(!tiles.length) return '';
+  return '<div class="dt-alts-hdr">Alternatives</div><div class="dt-alts">'+
+    tiles.map(t=>'<button class="dt-alt" onclick="dtGoto(['+t.path.join(',')+'])" aria-label="'+t.lbl+'">'+
+      '<span class="ico" aria-hidden="true">'+t.ico+'</span>'+
+      '<div><div class="lbl">'+t.lbl+'</div><div class="dsc">'+t.dsc+'</div></div></button>').join('')+
+    '</div>';
+}
+
 /* ── State ── */
 let dtHist=[], dtCur=DT, dtPickedLabels=[];
 const dtBox=document.getElementById('dtBox');
@@ -1739,7 +1784,8 @@ function renderDT(){
     const outcome=r.outcome?'<div class="dt-outcome"><strong>You\u2019ll know it worked when:</strong> '+r.outcome+'</div>':'';
     const goTo=r.goTo?'<button class="dt-goto" onclick="dtGoto(['+r.goTo.path.join(',')+'])">'+r.goTo.lbl+' \u2192</button>':'';
     const nxt=r.nxt?'<a href="'+r.nxt.href+'" class="dt-next">'+r.nxt.lbl+' \u2192</a>':'';
-    dtBox.innerHTML=crumbs+'<div class="dt-res"><div class="act">'+r.act+'</div><h3>'+r.title+'</h3>'+why+'<ol>'+steps+'</ol>'+cmdsHtml+warn+outcome+'<div class="dt-actions">'+goTo+nxt+'<button class="dt-back" onclick="dtJump(0)">\u2190 Start over</button></div></div>';
+    const alts=renderAlts(r.act);
+    dtBox.innerHTML=crumbs+'<div class="dt-res"><div class="act">'+r.act+'</div><h3>'+r.title+'</h3>'+why+'<ol>'+steps+'</ol>'+cmdsHtml+warn+outcome+'<div class="dt-actions">'+goTo+nxt+'<button class="dt-back" onclick="dtJump(0)">\u2190 Start over</button></div>'+alts+'</div>';
     updateHash();
     return;
   }
