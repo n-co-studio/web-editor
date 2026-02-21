@@ -2,6 +2,7 @@ import type {
   VisualDiff,
   ElementInfo,
   PropertyChange,
+  ReorderChange,
   PageContext,
 } from '@frontend-editor/shared';
 import type { TokenStore } from '../tokens/store';
@@ -24,6 +25,20 @@ export class DiffBuilder {
       timestamp: new Date().toISOString(),
       element: elementInfo,
       changes: changes.map((c) => this.resolveTokens(c)),
+      context: this.buildPageContext(),
+      status: 'pending',
+      sourceVerified: Boolean(elementInfo.sourceFile),
+    };
+  }
+
+  /** Build a VisualDiff for a reorder operation (no CSS property changes). */
+  buildReorder(elementInfo: ElementInfo, reorderChange: ReorderChange): VisualDiff {
+    return {
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      element: elementInfo,
+      changes: [],
+      reorderChanges: [reorderChange],
       context: this.buildPageContext(),
       status: 'pending',
       sourceVerified: Boolean(elementInfo.sourceFile),
