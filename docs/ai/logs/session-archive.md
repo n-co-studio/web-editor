@@ -386,3 +386,54 @@ This file is not read during normal sessions. Referenced for deep investigation 
 - Test full extension reload in Chrome to verify three-column layout
 - Verify inline property editing works within the embedded pane
 - Verify divider drag + split ratio persistence
+
+---
+
+## Session 8 — 2026-02-21 — Drag-to-Reorder Phase 1: Data Contract, Guards & Toolbar
+
+**Status:** complete
+**Decisions applied:** 0001, 0002, 0004
+**Commits:** 63c9fca — feat: add drag-to-reorder Phase 1 — data contract, guards & toolbar
+
+### Goal
+- Establish type-level foundation for drag-to-reorder feature (no drag logic)
+- Add `ReorderChange` to shared data contract
+- Refactor `HistoryEntry` to discriminated union
+- Add block-reason guard, toolbar button, and boundary expansion documentation
+
+### Plan Summary
+- Add `ReorderChange` interface + `reorderChanges` field to `VisualDiff` in shared package
+- Add `'reorder'` to `EditMode` union type
+- Add reorder color (indigo) to `HANDLE_COLORS` + `DROP_INDICATOR` design tokens
+- Create `getReorderBlockReason()` guard (checks flex/grid parent, wrap, sibling count)
+- Add 6-dot grip icon + label + tool order entry to toolbar
+- Wire block-reason into disabled tools map + stub mode branch in index.ts
+- Refactor `HistoryEntry` from optional-field pattern to discriminated union (`css | removal | reorder`)
+- Document boundary expansion for DOM node relocation in `boundaries.md`
+
+### Changes Made
+- `packages/shared/src/diff.ts` — Added `ReorderChange` interface (type, fromIndex, toIndex, siblingSelectors, containerSelector, containerDirection) + `reorderChanges?: readonly ReorderChange[]` on `VisualDiff`
+- `packages/shared/src/index.ts` — Exported `ReorderChange` from barrel
+- `packages/chrome-extension/src/shared/types.ts` — Added `'reorder'` to `EditMode` union
+- `packages/chrome-extension/src/shared/constants.ts` — Added `reorder: '#6366f1'` to `HANDLE_COLORS`, added `DROP_INDICATOR` constant (color, activeColor, thickness, activeThickness)
+- `packages/chrome-extension/src/content/editing/reorder.ts` — **New**: `getReorderBlockReason(element)` — returns block reason string or null (checks parent exists, parent is flex/grid, flex-wrap is nowrap, >1 sibling)
+- `packages/chrome-extension/src/content/toolbar.ts` — Added 6-dot grip SVG icon, `reorder: 'Reorder'` label, `'reorder'` in `TOOL_ORDER` after `'move'`
+- `packages/chrome-extension/src/content/index.ts` — Imported `getReorderBlockReason`, wired into disabled tools in `onSelect`, added stub `else if (selectedMode === 'reorder')` branch, refactored `commitEdit` to construct typed `CssHistoryEntry` or `RemovalHistoryEntry`
+- `packages/chrome-extension/src/content/history.ts` — Full refactor: discriminated union (`CssHistoryEntry | RemovalHistoryEntry | ReorderHistoryEntry`), `switch (entry.type)` dispatch in `undo()`/`redo()`/`resetAll()`, `console.warn` stubs for reorder cases
+- `docs/spec/compiled/v1/boundaries.md` — Added "Boundary Expansions" section documenting `insertBefore`/`moveBefore` permission for same-parent reorder
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass (decisions 0001/0002/0004 followed), A2 pass (plan existed, 9 files), A3 pass (`npx tsc --noEmit` → 0 errors), A4 pass (no secrets, feature branch), A5 pass (Critic cohesion review: 2 warnings found and fixed, re-verified clean)
+- Push gates: B1 pending, B2 pending, B3 pending
+
+### Failed Attempts (Brief)
+- TypeScript error after adding `'reorder'` to `EditMode` — `TOOL_LABELS` (Record<EditMode, string>) missing new key. Fixed by adding label + tool order entry.
+- Cohesion review found `throw new Error(...)` in reorder undo/redo/reset stubs would leave extension unrecoverable (callers have no try/catch). Fixed by replacing with `console.warn` + `break`.
+- Cohesion review found phase label mismatch ("Phase 3" in history.ts vs "Phase 2" in reorder.ts). Fixed by aligning to consistent "Phase 1/2/3" references.
+
+### Known Issues Logged
+- None
+
+### Follow-ups
+- Phase 2: implement drag interaction logic in reorder.ts
+- Phase 3: implement reorder undo/redo/reset (replace console.warn stubs in history.ts)
