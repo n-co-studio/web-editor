@@ -22,6 +22,22 @@ No file artifacts. No session log entry. No handoff to Build Flow — the operat
 
 ---
 
+## HVST Review Flow (Debug Stall)
+
+Runs when HVST debugging stalls (2+ consecutive failures) or when the operator proactively requests a debug review. See `.claude/agents/_hvst-review.md` for the full procedure.
+
+### Handoff Chain
+1. **Builder stalls** — 2+ consecutive HVST failures, or operator observes unproductive debugging
+2. **Orchestrator detects / operator requests** — Orchestrator reads `_hvst-review.md` procedure
+3. **Orchestrator → Architect + Exploration + Critic (hypothesis mode)** — Parallel dispatch with error context, attempted hypotheses, files touched
+4. **Specialists → Orchestrator** — Debug Briefs with findings
+5. **Orchestrator synthesizes** — Ranked hypotheses (not consensus) ordered by evidence strength, falsifiability, implementation risk
+6. **Operator / Builder picks hypothesis** — Selects which to validate first
+7. **Builder validates** — Resumes HVST loop with chosen hypothesis
+8. **If still stuck** — Escalate to operator (cap: 1 review board round)
+
+---
+
 ## Build Flow (Implementation)
 
 ```
@@ -118,6 +134,14 @@ No file artifacts. No session log entry. No handoff to Build Flow — the operat
 | **Reviewer** | Structural, high-risk, or cross-cutting changes | **Yes** — when required |
 | **Security** | Auth, PII, deps changed, crypto, external integrations | **Yes** — when required |
 | **Accessibility** | Public-facing UI modified, forms, interactive widgets | No (advisory) |
+
+### HVST Review Board (Debug Stall)
+
+| Agent | Invoke When | Blocks Commit? |
+|-------|------------|----------------|
+| **Architect** | HVST stall (2+ failures) or operator requests debug review | No (advisory) |
+| **Exploration** | HVST stall (2+ failures) or operator requests debug review | No (advisory) |
+| **Critic** (hypothesis mode) | HVST stall (2+ failures) or operator requests debug review | No (advisory) |
 
 ### Operations (Operator-Invoked Tools)
 
