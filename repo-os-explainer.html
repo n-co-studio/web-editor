@@ -1244,6 +1244,10 @@ experiment/new-caching-strategy</div>
   <div class="callout">
     <strong>Spec versioning:</strong> Compiled specs live in <code>docs/spec/compiled/v1/</code>, <code>v2/</code>, etc. A <code>manifest.json</code> tracks the active version. Prompt B always reads from the active version. Previous versions are kept for reference and rollback.
   </div>
+
+  <h3>Template version tags</h3>
+  <p>The template repo uses <strong>CalVer git tags</strong> (format: <code>v2026.02.1</code> &mdash; YYYY.0M.MICRO) to mark meaningful milestones. Tags are applied on <code>main</code> after changes to decisions, agents, hooks, or prompts. Not every commit is tagged. Each tag has a corresponding <strong>GitHub Release</strong> with a summary of what changed.</p>
+  <p>To check which template version your child repo synced from, look at the sync PR &mdash; <code>git log --oneline</code> in the PR diff shows the tagged commit. You can also compare against the template repo's <a href="#">Releases</a> page to see what's included.</p>
 </section>
 
 <!-- ══════ COMPANION TOOLS ══════ -->
