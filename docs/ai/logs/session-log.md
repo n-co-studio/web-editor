@@ -38,6 +38,59 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 -->
 
+## Session 12 — 2026-02-21 — CSS Rules Display & Property Toggle
+
+**Status:** complete
+**Decisions applied:** 0001, 0002, 0008
+**Commits:** pending
+
+### Goal
+- Build CSS rule matching engine with cache and graceful cross-origin degradation
+- Activate Rules tab with specificity-ordered authored declarations
+- Add property toggle checkboxes for cascade exploration
+- Cross-reference authored values back into Edit tab annotations
+- Implement ToggleManager for temporary CSS overrides via Constructable StyleSheet
+
+### Plan Summary
+- Phase 1: Create foundation types (`css-types.ts`) and specificity calculator (`specificity.ts`)
+- Phase 2: Create rule matching engine (`css-rules.ts`) and WeakMap cache with MutationObserver invalidation (`matched-rules-cache.ts`)
+- Phase 3: Create toggle manager (`toggle-manager.ts`) using Constructable StyleSheet API
+- Phase 4: Create rules section renderer (`rules-section.ts`), activate Rules tab in `properties-pane.ts`
+- Phase 5: Add Edit tab annotations and InlineEditor toggle coordination
+- Phase 6: Verification — tsc, cohesion review (Critic), fix criticals, re-verify
+
+### Changes Made
+- `packages/chrome-extension/src/shared/css-types.ts` — **New** (~25 lines): `MatchedRule`, `AccessLevel`, `MatchResult` interfaces
+- `packages/chrome-extension/src/content/inspection/specificity.ts` — **New** (~160 lines): CSS specificity calculator with `:where`, `:is`, `:not`, `:has`, pseudo-element support
+- `packages/chrome-extension/src/content/inspection/css-rules.ts` — **New** (~350 lines): rule matching engine — iterates `document.styleSheets` + `adoptedStyleSheets`, handles cross-origin SecurityError, recurses into `@media`/`@supports`/`@layer`, 5000-rule ceiling, async chunked variant
+- `packages/chrome-extension/src/content/inspection/matched-rules-cache.ts` — **New** (~190 lines): WeakMap + LRU(50) cache with document-level + element-level MutationObservers, exclusion-aware cache validation
+- `packages/chrome-extension/src/content/inspection/toggle-manager.ts` — **New** (~155 lines): Constructable StyleSheet toggle with element-scoped `unset !important` rules, key-based index tracking (no browser selectorText readback)
+- `packages/chrome-extension/src/content/selection/panes/rules-section.ts` — **New** (~520 lines): Rules tab renderer — specificity ordering, overridden detection, toggle checkboxes, pagination(50), filter, access banner
+- `packages/chrome-extension/src/content/selection/devtools-panel.ts` — Passes `shadow.host` to PropertiesPane constructor
+- `packages/chrome-extension/src/content/selection/panes/properties-pane.ts` — Lazy Rules tab activation (ToggleManager, MatchedRulesCache, RulesSection), tab switching with scroll preservation, eager idle indexing, toggle change callback, full dispose cleanup
+- `packages/chrome-extension/src/content/selection/panes/css-groups-section.ts` — `setInspectionDeps()` for toggle/cache injection, `populateAnnotation()` with winning rule source + authored value display, excludeSheets-aware cache access
+- `packages/chrome-extension/src/content/selection/panes/inline-editor.ts` — `setToggleManager()`, clears toggle when editing starts on toggled property
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass (0001/0002/0008 followed), A2 pass (plan documented, 10 files), A3 pass (`npx tsc --noEmit` → 0 errors, no lint/format tooling), A4 pass (no secrets), A5 pass (Critic cohesion: initial review found 4 criticals + 6 recs; all 4 criticals fixed; re-review found 0 criticals, 4 recs (pre-existing design limitations))
+- Push gates: B1 pending, B2 pending, B3 pending
+
+### Failed Attempts (Brief)
+- Cohesion review found `rebuildIndexMap()` in ToggleManager read back browser-normalized `selectorText` which could differ from `generateSelector()` keys — fixed by sorting existing map entries and reassigning indices.
+- Cohesion review found `onToggleChange` callback never registered — fixed by wiring in `ensureRulesInitialized()`.
+- Cohesion review found cache served stale results when queried with different exclusion params — fixed by storing `excludeSheetsCount`/`hasExcludeHost` in cache entries and validating on hit.
+- Cohesion review found `populateAnnotation` called cache without excludeSheets, leaking toggle sheet into annotations — fixed by building and passing excludeSheets from toggleManager.
+
+### Known Issues Logged
+- None
+
+### Follow-ups
+- Toggle → annotation refresh chain is incomplete (annotations re-render on tab switch, not live during Rules tab toggle) — acceptable as progressive enhancement
+- `getMatchedRulesAsync` is exported but has no callers — available for future use on large pages
+- Annotations only appear after Rules tab is opened (lazy init) — acceptable as progressive enhancement
+
+---
+
 ## Session 11 — 2026-02-21 — Properties Panel Decomposition & Foundation
 
 **Status:** complete
@@ -128,44 +181,3 @@ Each session adds one entry. Keep entries high-signal and readable.
 ### Follow-ups
 - None — drag-to-reorder feature complete (Phases 1-3)
 
----
-
-## Session 9 — 2026-02-21 — Drag-to-Reorder Phase 2: Core Drag Interaction
-
-**Status:** complete
-**Decisions applied:** 0001, 0002, 0008
-**Commits:** pending (included in Phase 3 commit)
-
-### Goal
-- Build `ReorderEditor` and `OrderPreview` classes with Figma-style drag-to-reorder
-- Bounding-rect ghost, gap-center drop-zone indicators, FLIP-animated sibling displacement
-- DOM `insertBefore`/`moveBefore` on commit, history entry for undo stack
-
-### Plan Summary
-- Create `OrderPreview` class — standalone multi-element inline style tracker for CSS `order`, `transform`, `transition`
-- Build `ReorderEditor` class with gap-center drop-zone algorithm, pointer-capture drag, FLIP animation (throttled to midpoint crossings), guarded `moveBefore`/`insertBefore` commit
-- Add `buildReorder()` method to `DiffBuilder` for producing `VisualDiff` with `reorderChanges`
-- Wire into `index.ts` — toolbar tool selection, 7 cleanup chains, scroll refresh, Escape ladder, commit callback helper
-
-### Changes Made
-- `packages/chrome-extension/src/content/editing/order-preview.ts` — **New** (~60 lines): standalone multi-element inline style tracker with `begin()`/`apply()`/`revertAll()`
-- `packages/chrome-extension/src/content/editing/reorder.ts` — Added `ReorderEditor` class (~380 lines) + `ReorderCommitCallback` type: gap-center drop zones (N+1 for N children), bounding-rect ghost (indigo, not cloneNode), FLIP animation via `OrderPreview`, public `cancelDrag()` with rAF cancellation + pointer release, `moveBefore`/`insertBefore` guarded commit, row/column/reverse support
-- `packages/chrome-extension/src/content/batching/diff-builder.ts` — Added `buildReorder(elementInfo, reorderChange)` method producing `VisualDiff` with `reorderChanges` field, imported `ReorderChange` type
-- `packages/chrome-extension/src/content/index.ts` — Wired `ReorderEditor`: `makeReorderCommit()` helper (builds diff + history entry + re-renders), toolbar tool select, 7 cleanup chains (onSelect, onDeselect, onToolSelect, onToggle, onCursorModeChange, enterMultiSelectMode, deactivate), scroll rAF refresh, Escape ladder cancel, toolbar move reposition, onClose callback, grid-aware `containerDirection`
-
-### Verification (Gates Evidence)
-- Commit gates: A1 pass (0001/0002/0008 followed), A2 pass (plan documented, 4 files), A3 pass (`npm run build` → content.js 322.5kb), A4 pass (no secrets), A5 pass (Critic cohesion: 3 criticals + 2 warnings found and fixed, re-run clean — 0 critical, 0 warning)
-- Push gates: B1 pending, B2 pending, B3 pending
-
-### Failed Attempts (Brief)
-- Cohesion review found FLIP `rAF` race: direct `child.style` writes bypassed `OrderPreview`, leaving stale transforms if Escape fired mid-animation. Fixed by routing all writes through `orderPreview.apply()` and tracking rAF IDs.
-- Cohesion review found `enterMultiSelectMode` missing `reorderEditor?.cleanup()`. Fixed.
-- Cohesion review found `cancelDrag` was private but needed by Escape handler; also missing pointer capture release and cursor reset. Fixed by making public and adding release logic.
-- Cohesion review found `containerDirection` used `flexDirection` for grid containers (returns empty string). Fixed with `display.includes('grid')` branch reading `gridAutoFlow`.
-
-### Known Issues Logged
-- None
-
-### Follow-ups
-- Phase 3: implement reorder undo/redo/reset (replace console.warn stubs in history.ts)
-- Phase 3: wire diff builder + queue for proper reorder diff pipeline

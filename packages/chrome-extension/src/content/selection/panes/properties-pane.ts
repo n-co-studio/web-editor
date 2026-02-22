@@ -5,9 +5,12 @@ import { createStyleSnapshot } from '../../../shared/dom-utils';
 import type { ComputedStyleSnapshot } from '../../../shared/dom-utils';
 import type { TokenStore } from '../../tokens/store';
 import type { PendingQueue } from '../../batching/queue';
+import { MatchedRulesCache } from '../../inspection/matched-rules-cache';
+import { ToggleManager } from '../../inspection/toggle-manager';
 import { CssGroupsSection } from './css-groups-section';
 import { BoxModelSection } from './box-model-section';
 import { LayoutSection } from './layout-section';
+import { RulesSection } from './rules-section';
 
 const STORAGE_KEY_TAB = 'frontend-editor-devtools-tab';
 
@@ -16,16 +19,20 @@ type MultiPropertyChangeCb = (changes: Array<{ element: Element; property: strin
 
 /**
  * Properties pane — middle column orchestrator.
- * Contains tab bar (Edit active, Rules disabled placeholder), filter input,
- * and delegates to BoxModelSection, LayoutSection, and CssGroupsSection for Edit tab content.
+ * Contains tab bar (Edit / Rules), filter input,
+ * and delegates to sub-sections for tab content.
+ * Owns ToggleManager and MatchedRulesCache (lazily initialized on first Rules tab activation).
  */
 export class PropertiesPane {
   private container: HTMLDivElement | null = null;
   private tabBar: HTMLDivElement | null = null;
+  private editTabEl: HTMLElement | null = null;
+  private rulesTabEl: HTMLElement | null = null;
   private filterInput: HTMLInputElement | null = null;
   private contentArea: HTMLDivElement | null = null;
   private activeTab: 'edit' | 'rules' = 'edit';
   private editScrollTop = 0;
+  private rulesScrollTop = 0;
   private tier: PanelSizeTier = 'full';
   private cssGroups: CssGroupsSection;
   private boxModelSection: BoxModelSection;
@@ -33,9 +40,16 @@ export class PropertiesPane {
   private currentElement: Element | null = null;
   private currentElements: Element[] | null = null;
 
+  // Lazy-initialized on first Rules tab activation
+  private toggleManager: ToggleManager | null = null;
+  private rulesCache: MatchedRulesCache | null = null;
+  private rulesSection: RulesSection | null = null;
+  private rulesInitialized = false;
+
   constructor(
     private readonly tokenStore: TokenStore,
     private readonly pendingQueue: PendingQueue,
+    private readonly shadowHost: Element | null = null,
   ) {
     this.cssGroups = new CssGroupsSection(tokenStore, pendingQueue);
     this.boxModelSection = new BoxModelSection();
@@ -66,11 +80,24 @@ export class PropertiesPane {
   }
 
   dispose(): void {
-    if (this.activeTab === 'edit' && this.contentArea) {
-      this.editScrollTop = this.contentArea.scrollTop;
+    if (this.contentArea) {
+      if (this.activeTab === 'edit') {
+        this.editScrollTop = this.contentArea.scrollTop;
+      } else {
+        this.rulesScrollTop = this.contentArea.scrollTop;
+      }
     }
+    this.rulesSection?.dispose();
+    this.toggleManager?.dispose();
+    this.rulesCache?.dispose();
+    this.rulesSection = null;
+    this.toggleManager = null;
+    this.rulesCache = null;
+    this.rulesInitialized = false;
     this.container = null;
     this.tabBar = null;
+    this.editTabEl = null;
+    this.rulesTabEl = null;
     this.filterInput = null;
     this.contentArea = null;
   }
@@ -87,8 +114,21 @@ export class PropertiesPane {
     // Clear filter on element change
     if (this.filterInput) this.filterInput.value = '';
 
+    // Update cache element watcher if initialized
+    this.rulesCache?.startWatching(el);
+
     if (this.activeTab === 'edit' && this.contentArea) {
       this.renderEditContent(el, snapshot);
+      // Eager idle indexing: pre-compute matched rules for Edit tab annotations
+      if (this.rulesCache) {
+        const cache = this.rulesCache;
+        const excludeSheets = this.getExcludeSheets();
+        requestIdleCallback(() => {
+          cache.get(el, excludeSheets, this.shadowHost ?? undefined);
+        });
+      }
+    } else if (this.activeTab === 'rules') {
+      this.rulesSection?.updateElement(el);
     }
   }
 
@@ -97,6 +137,11 @@ export class PropertiesPane {
     this.currentElement = elements[0] ?? null;
 
     if (this.filterInput) this.filterInput.value = '';
+
+    // Multi-select always shows Edit tab (Rules tab is single-element only)
+    if (this.activeTab === 'rules') {
+      this.switchTab('edit');
+    }
 
     if (this.activeTab === 'edit' && this.contentArea) {
       this.contentArea.innerHTML = '';
@@ -108,6 +153,9 @@ export class PropertiesPane {
     this.currentElement = null;
     this.currentElements = null;
     if (this.filterInput) this.filterInput.value = '';
+    this.toggleManager?.clearAll();
+    this.rulesCache?.stopWatching();
+    this.rulesSection?.clear();
     if (this.contentArea) {
       this.contentArea.innerHTML = '';
       const empty = createText('div', 'No element selected', 'mono');
@@ -119,6 +167,12 @@ export class PropertiesPane {
 
   refreshProperties(): void {
     if (!this.contentArea) return;
+    if (this.activeTab === 'rules') {
+      if (this.currentElement) {
+        this.rulesSection?.updateElement(this.currentElement);
+      }
+      return;
+    }
     if (this.currentElements && this.currentElements.length > 1) {
       this.contentArea.innerHTML = '';
       this.contentArea.appendChild(this.cssGroups.buildMulti(this.currentElements));
@@ -188,7 +242,13 @@ export class PropertiesPane {
       pointerEvents: 'auto',
     }) as HTMLInputElement;
 
-    input.addEventListener('input', () => this.applyFilter(input.value));
+    input.addEventListener('input', () => {
+      if (this.activeTab === 'rules') {
+        this.rulesSection?.setFilter(input.value);
+      } else {
+        this.applyFilter(input.value);
+      }
+    });
     return input;
   }
 
@@ -272,6 +332,7 @@ export class PropertiesPane {
     });
     editTab.textContent = 'Edit';
     editTab.addEventListener('click', () => this.switchTab('edit'));
+    this.editTabEl = editTab;
     bar.appendChild(editTab);
 
     const rulesTab = createElement('button', {}, {
@@ -283,11 +344,12 @@ export class PropertiesPane {
       fontSize: '11px',
       fontFamily: OVERLAY.fontFamily,
       color: OVERLAY.textMuted,
-      cursor: 'not-allowed',
-      opacity: '0.5',
+      cursor: 'pointer',
       fontWeight: '400',
     });
     rulesTab.textContent = 'Rules';
+    rulesTab.addEventListener('click', () => this.switchTab('rules'));
+    this.rulesTabEl = rulesTab;
     bar.appendChild(rulesTab);
 
     return bar;
@@ -295,31 +357,122 @@ export class PropertiesPane {
 
   private switchTab(tab: 'edit' | 'rules'): void {
     if (tab === this.activeTab) return;
-    if (tab === 'rules') return;
 
-    if (this.activeTab === 'edit' && this.contentArea) {
-      this.editScrollTop = this.contentArea.scrollTop;
+    // Save current scroll position
+    if (this.contentArea) {
+      if (this.activeTab === 'edit') {
+        this.editScrollTop = this.contentArea.scrollTop;
+      } else {
+        this.rulesScrollTop = this.contentArea.scrollTop;
+      }
     }
 
     this.activeTab = tab;
     this.saveTab(tab);
+    this.updateTabStyles();
+
+    if (this.filterInput) this.filterInput.value = '';
 
     if (tab === 'edit') {
-      if (this.filterInput) this.filterInput.value = '';
       this.refreshProperties();
       if (this.contentArea) {
         this.contentArea.scrollTop = this.editScrollTop;
       }
+    } else {
+      this.ensureRulesInitialized();
+      this.renderRulesContent();
+      if (this.contentArea) {
+        this.contentArea.scrollTop = this.rulesScrollTop;
+      }
     }
   }
+
+  private updateTabStyles(): void {
+    if (this.editTabEl) {
+      this.editTabEl.style.borderBottom = this.activeTab === 'edit'
+        ? `2px solid ${OVERLAY.primary}` : '2px solid transparent';
+      this.editTabEl.style.color = this.activeTab === 'edit'
+        ? OVERLAY.text : OVERLAY.textMuted;
+      this.editTabEl.style.fontWeight = this.activeTab === 'edit' ? '500' : '400';
+    }
+    if (this.rulesTabEl) {
+      this.rulesTabEl.style.borderBottom = this.activeTab === 'rules'
+        ? `2px solid ${OVERLAY.primary}` : '2px solid transparent';
+      this.rulesTabEl.style.color = this.activeTab === 'rules'
+        ? OVERLAY.text : OVERLAY.textMuted;
+      this.rulesTabEl.style.fontWeight = this.activeTab === 'rules' ? '500' : '400';
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Rules tab infrastructure (lazy initialization)
+  // ---------------------------------------------------------------------------
+
+  private ensureRulesInitialized(): void {
+    if (this.rulesInitialized) return;
+    this.rulesInitialized = true;
+
+    this.toggleManager = new ToggleManager();
+    this.toggleManager.init();
+
+    this.rulesCache = new MatchedRulesCache();
+    this.rulesSection = new RulesSection(this.rulesCache, this.toggleManager);
+    this.rulesSection.configure(
+      this.getExcludeSheets(),
+      this.shadowHost ?? undefined,
+    );
+
+    // Pass toggle manager and cache to CssGroupsSection for annotation coordination
+    this.cssGroups.setInspectionDeps(this.toggleManager, this.rulesCache);
+
+    // Invalidate cache when toggles change so Edit tab annotations stay accurate
+    this.rulesSection.onToggleChange((el) => {
+      this.rulesCache?.invalidate(el);
+    });
+  }
+
+  private getExcludeSheets(): Set<CSSStyleSheet> {
+    const sheets = new Set<CSSStyleSheet>();
+    const toggleSheet = this.toggleManager?.getSheet();
+    if (toggleSheet) sheets.add(toggleSheet);
+    return sheets;
+  }
+
+  /** Expose cache for external eager indexing. */
+  getMatchedRulesCache(): MatchedRulesCache | null {
+    return this.rulesCache;
+  }
+
+  private renderRulesContent(): void {
+    if (!this.contentArea) return;
+    this.contentArea.innerHTML = '';
+
+    if (!this.rulesSection) return;
+
+    // Mount rules section into content area
+    this.rulesSection.mount(this.contentArea);
+
+    if (this.currentElement) {
+      this.rulesSection.updateElement(this.currentElement);
+    } else {
+      this.rulesSection.clear();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Persistence
+  // ---------------------------------------------------------------------------
 
   private async restoreTab(): Promise<void> {
     try {
       const result = await chrome.storage.session.get(STORAGE_KEY_TAB);
       const saved = result[STORAGE_KEY_TAB] as string | undefined;
       if (saved === 'edit' || saved === 'rules') {
-        if (saved === 'edit') {
-          this.activeTab = saved;
+        this.activeTab = saved;
+        this.updateTabStyles();
+        if (saved === 'rules') {
+          this.ensureRulesInitialized();
+          this.renderRulesContent();
         }
       }
     } catch {

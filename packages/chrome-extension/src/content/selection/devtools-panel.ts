@@ -63,7 +63,7 @@ export class DevToolsPanel {
   ) {
     this.domTreePane = new DomTreePane();
     this.sourcePane = new SourcePane();
-    this.propertiesPane = new PropertiesPane(tokenStore, pendingQueue);
+    this.propertiesPane = new PropertiesPane(tokenStore, pendingQueue, shadow.host);
     this.consolePane = new ConsolePane();
   }
 

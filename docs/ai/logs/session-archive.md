@@ -437,3 +437,38 @@ This file is not read during normal sessions. Referenced for deep investigation 
 ### Follow-ups
 - Phase 2: implement drag interaction logic in reorder.ts
 - Phase 3: implement reorder undo/redo/reset (replace console.warn stubs in history.ts)
+
+---
+
+## Session 9 — 2026-02-21 — Drag-to-Reorder Phase 2: Core Drag Interaction
+
+**Status:** complete
+**Decisions applied:** 0001, 0002, 0008
+**Commits:** pending (included in Phase 3 commit)
+
+### Goal
+- Build `ReorderEditor` and `OrderPreview` classes with Figma-style drag-to-reorder
+- Bounding-rect ghost, gap-center drop-zone indicators, FLIP-animated sibling displacement
+- DOM `insertBefore`/`moveBefore` on commit, history entry for undo stack
+
+### Plan Summary
+- Create `OrderPreview` class — standalone multi-element inline style tracker for CSS `order`, `transform`, `transition`
+- Build `ReorderEditor` class with gap-center drop-zone algorithm, pointer-capture drag, FLIP animation (throttled to midpoint crossings), guarded `moveBefore`/`insertBefore` commit
+- Add `buildReorder()` method to `DiffBuilder` for producing `VisualDiff` with `reorderChanges`
+- Wire into `index.ts` — toolbar tool selection, 7 cleanup chains, scroll refresh, Escape ladder, commit callback helper
+
+### Changes Made
+- `packages/chrome-extension/src/content/editing/order-preview.ts` — **New** (~60 lines): standalone multi-element inline style tracker with `begin()`/`apply()`/`revertAll()`
+- `packages/chrome-extension/src/content/editing/reorder.ts` — Added `ReorderEditor` class (~380 lines) + `ReorderCommitCallback` type: gap-center drop zones (N+1 for N children), bounding-rect ghost (indigo, not cloneNode), FLIP animation via `OrderPreview`, public `cancelDrag()` with rAF cancellation + pointer release, `moveBefore`/`insertBefore` guarded commit, row/column/reverse support
+- `packages/chrome-extension/src/content/batching/diff-builder.ts` — Added `buildReorder(elementInfo, reorderChange)` method producing `VisualDiff` with `reorderChanges` field, imported `ReorderChange` type
+- `packages/chrome-extension/src/content/index.ts` — Wired `ReorderEditor`: `makeReorderCommit()` helper (builds diff + history entry + re-renders), toolbar tool select, 7 cleanup chains (onSelect, onDeselect, onToolSelect, onToggle, onCursorModeChange, enterMultiSelectMode, deactivate), scroll rAF refresh, Escape ladder cancel, toolbar move reposition, onClose callback, grid-aware `containerDirection`
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass (0001/0002/0008 followed), A2 pass (plan documented, 4 files), A3 pass (`npm run build` → content.js 322.5kb), A4 pass (no secrets), A5 pass (Critic cohesion: 3 criticals + 2 warnings found and fixed, re-run clean — 0 critical, 0 warning)
+- Push gates: B1 pending, B2 pending, B3 pending
+
+### Failed Attempts (Brief)
+- Cohesion review found FLIP `rAF` race: direct `child.style` writes bypassed `OrderPreview`, leaving stale transforms if Escape fired mid-animation. Fixed by routing all writes through `orderPreview.apply()` and tracking rAF IDs.
+- Cohesion review found `enterMultiSelectMode` missing `reorderEditor?.cleanup()`. Fixed.
+- Cohesion review found `cancelDrag` was private but needed by Escape handler; also missing pointer capture release and cursor reset. Fixed by making public and adding release logic.
+- Cohesion review found `containerDirection` used `flexDirection` for grid containers (returns empty string). Fixed with `display.includes('grid')` branch reading `gridAutoFlow`.
