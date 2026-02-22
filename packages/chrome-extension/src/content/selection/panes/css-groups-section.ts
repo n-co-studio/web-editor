@@ -5,6 +5,8 @@ import { getComputedProperty, generateSelector, createStyleSnapshot, snapshotGet
 import type { ComputedStyleSnapshot } from '../../../shared/dom-utils';
 import type { TokenStore } from '../../tokens/store';
 import type { PendingQueue } from '../../batching/queue';
+import type { ToggleManager } from '../../inspection/toggle-manager';
+import type { MatchedRulesCache } from '../../inspection/matched-rules-cache';
 import { InlineEditor } from './inline-editor';
 import { createColorSwatch } from './enrichments/color-swatch';
 import { checkInactive, applyInactiveStyles } from './enrichments/inactive-css';
@@ -34,12 +36,21 @@ export class CssGroupsSection {
   private multiPropChangeCb: MultiPropertyChangeCb | null = null;
   private currentElement: Element | null = null;
   private inlineEditor: InlineEditor;
+  private toggleManager: ToggleManager | null = null;
+  private rulesCache: MatchedRulesCache | null = null;
 
   constructor(
     private readonly tokenStore: TokenStore,
     private readonly pendingQueue: PendingQueue,
   ) {
     this.inlineEditor = new InlineEditor(tokenStore);
+  }
+
+  /** Set inspection dependencies (lazily provided by PropertiesPane on first Rules tab activation). */
+  setInspectionDeps(toggleManager: ToggleManager, cache: MatchedRulesCache): void {
+    this.toggleManager = toggleManager;
+    this.rulesCache = cache;
+    this.inlineEditor.setToggleManager(toggleManager);
   }
 
   onPropertyChange(cb: PropertyChangeCb): void {
@@ -376,7 +387,7 @@ export class CssGroupsSection {
     mainLine.appendChild(valueContainer);
     row.appendChild(mainLine);
 
-    // Annotation slot (hidden — future: rule source annotation)
+    // Annotation slot — rule source annotation (progressive enhancement: only when cache populated)
     const annotationSlot = createElement('div', {}, {
       display: 'none',
       paddingLeft: '12px',
@@ -384,9 +395,94 @@ export class CssGroupsSection {
       color: OVERLAY.textMuted,
       fontFamily: OVERLAY.monoFamily,
     });
+    this.populateAnnotation(annotationSlot, name, value, element);
     row.appendChild(annotationSlot);
 
     return row;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Annotation slot — rule source cross-reference
+  // ---------------------------------------------------------------------------
+
+  private populateAnnotation(
+    slot: HTMLDivElement,
+    property: string,
+    computedValue: string,
+    element: Element,
+  ): void {
+    if (!this.rulesCache || !this.rulesCache.has(element)) return;
+
+    // Pass excludeSheets to avoid toggle override sheet leaking into annotations
+    const excludeSheets = new Set<CSSStyleSheet>();
+    const toggleSheet = this.toggleManager?.getSheet();
+    if (toggleSheet) excludeSheets.add(toggleSheet);
+
+    const result = this.rulesCache.get(element, excludeSheets);
+    if (!result || result.rules.length === 0) return;
+
+    // Find the winning rule for this property (first non-overridden declaration in specificity order)
+    let winningRule: { selectorText: string; sourceHref: string | null; authoredValue: string } | null = null;
+    const seenProps = new Set<string>();
+
+    // Sort by specificity descending, inline first
+    const sorted = [...result.rules].sort((a, b) => {
+      if (a.isInline && !b.isInline) return -1;
+      if (!a.isInline && b.isInline) return 1;
+      const s0 = b.specificity[0] - a.specificity[0];
+      if (s0 !== 0) return s0;
+      const s1 = b.specificity[1] - a.specificity[1];
+      if (s1 !== 0) return s1;
+      const s2 = b.specificity[2] - a.specificity[2];
+      if (s2 !== 0) return s2;
+      return b.sourceIndex - a.sourceIndex;
+    });
+
+    for (const rule of sorted) {
+      if (rule.declarations.has(property)) {
+        const val = rule.declarations.get(property)!;
+        const isImportant = val.endsWith('!important');
+        if (!seenProps.has(property) || isImportant) {
+          winningRule = {
+            selectorText: rule.selectorText,
+            sourceHref: rule.sourceHref,
+            authoredValue: val.replace(/\s*!important$/, ''),
+          };
+          if (!isImportant) seenProps.add(property);
+          else break; // !important always wins
+        }
+        seenProps.add(property);
+      }
+    }
+
+    if (!winningRule || winningRule.selectorText === 'element.style') return;
+
+    // Build annotation content
+    const source = winningRule.sourceHref
+      ? winningRule.sourceHref.split('/').pop() ?? winningRule.sourceHref
+      : 'inline';
+
+    let annotationText = `from ${winningRule.selectorText} in ${source}`;
+
+    // Show authored value if it differs from computed
+    const authored = winningRule.authoredValue.trim();
+    const computed = computedValue.trim();
+    if (authored !== computed && authored) {
+      // Check for var() references
+      if (authored.includes('var(')) {
+        annotationText += ` \u00b7 ${authored}`;
+      } else {
+        annotationText += ` \u00b7 authored: ${authored}`;
+      }
+    }
+
+    const textEl = createText('span', `\u25b8 ${annotationText}`, 'mono');
+    textEl.style.fontSize = '10px';
+    textEl.style.color = OVERLAY.textMuted;
+    textEl.style.cursor = 'default';
+    slot.appendChild(textEl);
+    slot.style.display = 'block';
+    slot.style.padding = '1px 0 1px 12px';
   }
 
   // ---------------------------------------------------------------------------

@@ -3,6 +3,7 @@ import { createElement } from '../../../shared/ui-utils';
 import { OVERLAY } from '../../../shared/constants';
 import { getComputedProperty } from '../../../shared/dom-utils';
 import type { TokenStore } from '../../tokens/store';
+import type { ToggleManager } from '../../inspection/toggle-manager';
 import { stepCssValue, getStepDelta } from './css-value-stepping';
 
 type SingleCommitCb = (property: string, fromValue: string, toValue: string, tokenName?: string) => void;
@@ -12,9 +13,17 @@ type MultiCommitCb = (property: string, toValue: string, elements: Element[], to
  * Inline editor — replaces a value display with a token dropdown + freeform input.
  * Used by CssGroupsSection for both single-select and multi-select property editing.
  * Supports keyboard value stepping: Arrow Up/Down ±1, Shift ±10, Alt ±0.1, Cmd/Ctrl ±100.
+ * Coordinates with ToggleManager: clears toggle when editing starts on a toggled property.
  */
 export class InlineEditor {
+  private toggleManager: ToggleManager | null = null;
+
   constructor(private readonly tokenStore: TokenStore) {}
+
+  /** Set the toggle manager for coordination (lazily provided). */
+  setToggleManager(tm: ToggleManager): void {
+    this.toggleManager = tm;
+  }
 
   // ---------------------------------------------------------------------------
   // Single-select editor
@@ -28,6 +37,11 @@ export class InlineEditor {
     onCommit: SingleCommitCb,
     currentElement: Element | null,
   ): void {
+    // Clear toggle if property is toggled off — prevents conflict with element.style.setProperty
+    if (currentElement && this.toggleManager?.isToggledOff(currentElement, property)) {
+      this.toggleManager.clearPropertyToggle(currentElement, property);
+    }
+
     const editor = createElement('div', {}, {
       display: 'flex',
       flexDirection: 'column',
