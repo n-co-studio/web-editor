@@ -2,6 +2,7 @@ import type { ElementInfo } from '@frontend-editor/shared';
 import { createElement, createText } from '../../../shared/ui-utils';
 import { OVERLAY } from '../../../shared/constants';
 import { createStyleSnapshot } from '../../../shared/dom-utils';
+import type { StateSimulator } from '../../inspection/state-simulator';
 
 type ElementSelectCallback = (element: Element) => void;
 type ElementHoverCallback = (element: Element | null) => void;
@@ -23,6 +24,8 @@ export class DomTreePane {
   private elementSelectCb: ElementSelectCallback | null = null;
   private elementHoverCb: ElementHoverCallback | null = null;
   private layoutBadgeClickCb: LayoutBadgeClickCallback | null = null;
+  private stateSimulator: StateSimulator | null = null;
+  private attributeDetailExpanded = true;
 
   mount(container: HTMLDivElement): void {
     this.container = container;
@@ -37,6 +40,7 @@ export class DomTreePane {
 
   updateElement(el: Element, _info: ElementInfo): void {
     this.currentElement = el;
+    this.attributeDetailExpanded = true;
     this.expandedNodes.clear();
     this.autoExpandAncestors(el);
     if (this.container) this.renderTree(this.container, el);
@@ -64,6 +68,11 @@ export class DomTreePane {
 
   onLayoutBadgeClick(cb: LayoutBadgeClickCallback): void {
     this.layoutBadgeClickCb = cb;
+  }
+
+  setStateSimulator(sim: StateSimulator): void {
+    this.stateSimulator = sim;
+    sim.onChange(() => this.refreshTree());
   }
 
   // ---------------------------------------------------------------------------
@@ -104,6 +113,13 @@ export class DomTreePane {
     const isExpanded = this.expandedNodes.has(element);
     const row = this.buildTreeRow(element, depth, isSelected, hasChildren, isExpanded);
     container.appendChild(row);
+
+    // Collapsible attribute detail below selected row
+    if (isSelected) {
+      const attrDetail = this.buildAttributeDetail(element, depth);
+      if (attrDetail) container.appendChild(attrDetail);
+    }
+
     if (hasChildren && isExpanded) {
       const children = Array.from(element.children);
       const maxChildren = 20;
@@ -206,9 +222,30 @@ export class DomTreePane {
       labelArea.appendChild(descEl);
     }
 
-    // Layout badge (flex/grid)
+    // Status cluster (layout badge + state indicator, right-aligned)
+    const statusCluster = createElement('div', {}, {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '4px',
+      marginLeft: 'auto',
+      flexShrink: '0',
+    });
     const layoutBadge = this.buildLayoutBadge(element);
-    if (layoutBadge) labelArea.appendChild(layoutBadge);
+    if (layoutBadge) statusCluster.appendChild(layoutBadge);
+    if (this.stateSimulator?.hasActiveStates(element)) {
+      const dot = createElement('span', { title: 'Pseudo-state active' }, {
+        width: '6px',
+        height: '6px',
+        borderRadius: '50%',
+        background: OVERLAY.warning,
+        flexShrink: '0',
+        display: 'inline-block',
+      });
+      statusCluster.appendChild(dot);
+    }
+    if (statusCluster.childElementCount > 0) {
+      labelArea.appendChild(statusCluster);
+    }
 
     labelArea.addEventListener('mouseenter', () => {
       if (!isSelected) row.style.background = 'rgba(255, 255, 255, 0.06)';
@@ -266,5 +303,174 @@ export class DomTreePane {
       this.layoutBadgeClickCb?.(element, label!);
     });
     return badge;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Collapsible attribute detail (below selected row)
+  // ---------------------------------------------------------------------------
+
+  private buildAttributeDetail(element: Element, depth: number): HTMLDivElement | null {
+    const attrs = this.gatherDisplayAttributes(element);
+    if (attrs.length === 0) return null;
+
+    const wrapper = createElement('div', {}, {
+      paddingLeft: `${depth * 16 + 14}px`,
+      borderBottom: `1px solid ${OVERLAY.border}`,
+      marginBottom: '2px',
+    });
+
+    // Toggle header
+    const header = createElement('div', {}, {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '4px',
+      padding: '2px 4px',
+      cursor: 'pointer',
+      pointerEvents: 'auto',
+    });
+
+    const chevron = createText('span', '\u25B6', 'mono');
+    chevron.style.fontSize = '7px';
+    chevron.style.display = 'inline-block';
+    chevron.style.transition = 'transform 0.12s ease';
+    chevron.style.color = OVERLAY.textMuted;
+    if (this.attributeDetailExpanded) chevron.style.transform = 'rotate(90deg)';
+    header.appendChild(chevron);
+
+    const label = createText('span', 'ATTRIBUTES', 'mono');
+    label.style.fontSize = '10px';
+    label.style.color = OVERLAY.textMuted;
+    label.style.letterSpacing = '0.5px';
+    header.appendChild(label);
+
+    const countBadge = createText('span', `${attrs.length}`, 'mono');
+    countBadge.style.fontSize = '9px';
+    countBadge.style.color = OVERLAY.textMuted;
+    countBadge.style.background = 'rgba(255, 255, 255, 0.06)';
+    countBadge.style.borderRadius = '3px';
+    countBadge.style.padding = '0 3px';
+    header.appendChild(countBadge);
+
+    wrapper.appendChild(header);
+
+    // Content area
+    const content = createElement('div', {}, {
+      display: this.attributeDetailExpanded ? 'block' : 'none',
+      padding: '0 4px 4px',
+    });
+
+    for (const [key, value] of attrs) {
+      content.appendChild(this.buildAttrRow(key, value));
+    }
+
+    wrapper.appendChild(content);
+
+    header.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.attributeDetailExpanded = !this.attributeDetailExpanded;
+      chevron.style.transform = this.attributeDetailExpanded ? 'rotate(90deg)' : '';
+      content.style.display = this.attributeDetailExpanded ? 'block' : 'none';
+    });
+
+    return wrapper;
+  }
+
+  private gatherDisplayAttributes(element: Element): Array<[string, string]> {
+    const priorityKeys = ['id', 'class', 'role', 'src', 'href', 'alt', 'type', 'name', 'placeholder'];
+    const result: Array<[string, string]> = [];
+    const seen = new Set<string>();
+
+    // Priority attributes first
+    for (const key of priorityKeys) {
+      if (element.hasAttribute(key)) {
+        const val = element.getAttribute(key) ?? '';
+        if (key === 'style') continue;
+        result.push([key, val]);
+        seen.add(key);
+      }
+    }
+
+    // data-* and aria-* (excluding internal data-source-*)
+    for (const attr of element.attributes) {
+      if (seen.has(attr.name)) continue;
+      if (attr.name === 'style') continue;
+      if (attr.name.startsWith('data-source-')) continue;
+      if (attr.name.startsWith('data-') || attr.name.startsWith('aria-')) {
+        result.push([attr.name, attr.value]);
+        seen.add(attr.name);
+      }
+    }
+
+    // Remaining attributes
+    for (const attr of element.attributes) {
+      if (seen.has(attr.name)) continue;
+      if (attr.name === 'style') continue;
+      result.push([attr.name, attr.value]);
+      seen.add(attr.name);
+    }
+
+    return result;
+  }
+
+  private buildAttrRow(key: string, value: string): HTMLDivElement {
+    const MAX_LEN = 60;
+    const truncated = value.length > MAX_LEN;
+    const displayValue = truncated ? value.slice(0, MAX_LEN) + '\u2026' : value;
+
+    const row = createElement('div', {
+      ...(truncated ? { title: `${key}="${value}"` } : {}),
+    }, {
+      display: 'flex',
+      alignItems: 'baseline',
+      gap: '2px',
+      padding: '1px 0',
+      fontSize: '10px',
+      fontFamily: OVERLAY.monoFamily,
+      cursor: 'pointer',
+      pointerEvents: 'auto',
+      borderRadius: '2px',
+    });
+
+    const keyEl = createText('span', key, 'mono');
+    keyEl.style.color = OVERLAY.primary;
+    keyEl.style.fontSize = '10px';
+    keyEl.style.flexShrink = '0';
+    row.appendChild(keyEl);
+
+    const eq = createText('span', '=', 'mono');
+    eq.style.color = OVERLAY.textMuted;
+    eq.style.fontSize = '10px';
+    row.appendChild(eq);
+
+    const valEl = createText('span', `"${displayValue}"`, 'mono');
+    valEl.style.color = OVERLAY.text;
+    valEl.style.fontSize = '10px';
+    valEl.style.overflow = 'hidden';
+    valEl.style.textOverflow = 'ellipsis';
+    valEl.style.whiteSpace = 'nowrap';
+    row.appendChild(valEl);
+
+    // Hover effect
+    row.addEventListener('mouseenter', () => {
+      row.style.background = 'rgba(255, 255, 255, 0.06)';
+    });
+    row.addEventListener('mouseleave', () => {
+      row.style.background = 'transparent';
+    });
+
+    // Click-to-copy
+    row.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const copyText = `${key}="${value}"`;
+      navigator.clipboard.writeText(copyText).then(() => {
+        // Green flash confirmation
+        row.style.background = 'rgba(34, 197, 94, 0.15)';
+        setTimeout(() => { row.style.background = 'transparent'; }, 300);
+      }).catch(() => {
+        // Silent fail
+      });
+    });
+
+    return row;
   }
 }

@@ -7,14 +7,19 @@ import type { TokenStore } from '../../tokens/store';
 import type { PendingQueue } from '../../batching/queue';
 import type { ToggleManager } from '../../inspection/toggle-manager';
 import type { MatchedRulesCache } from '../../inspection/matched-rules-cache';
+import type { StateSimulator, PseudoState } from '../../inspection/state-simulator';
+import { PSEUDO_STATES } from '../../inspection/state-simulator';
 import { InlineEditor } from './inline-editor';
 import { createColorSwatch } from './enrichments/color-swatch';
 import { checkInactive, applyInactiveStyles } from './enrichments/inactive-css';
 import { findPendingChange, applyPendingDot } from './enrichments/pending-indicator';
 import { computeContrast, createContrastBadge } from './enrichments/contrast-badge';
+import { createVarBadge, createVarTooltip, cleanupVarTooltip } from './enrichments/var-badge';
+import type { VariableResolver } from '../../inspection/variable-resolver';
 
 type PropertyChangeCb = (property: string, fromValue: string, toValue: string, token?: string) => void;
 type MultiPropertyChangeCb = (changes: Array<{ element: Element; property: string; fromValue: string; toValue: string; token?: string }>) => void;
+type ScrollToRuleCb = (selectorText: string) => void;
 
 const PROPERTY_GROUPS: Array<{ label: string; props: string[] }> = [
   { label: 'Dimensions', props: ['width', 'height'] },
@@ -38,6 +43,13 @@ export class CssGroupsSection {
   private inlineEditor: InlineEditor;
   private toggleManager: ToggleManager | null = null;
   private rulesCache: MatchedRulesCache | null = null;
+  private stateSimulator: StateSimulator | null = null;
+  private hovToggleOpen = false;
+  private stateRefreshCb: (() => void) | null = null;
+  private variableResolver: VariableResolver | null = null;
+  private activeVarTooltip: HTMLDivElement | null = null;
+  private scrollToRuleCb: ScrollToRuleCb | null = null;
+  private dismissRoot: EventTarget | null = null;
 
   constructor(
     private readonly tokenStore: TokenStore,
@@ -51,6 +63,31 @@ export class CssGroupsSection {
     this.toggleManager = toggleManager;
     this.rulesCache = cache;
     this.inlineEditor.setToggleManager(toggleManager);
+  }
+
+  /** Set the state simulator for :hov toggles (eagerly provided by PropertiesPane). */
+  setStateSimulator(sim: StateSimulator): void {
+    this.stateSimulator = sim;
+  }
+
+  /** Register callback to refresh the Edit tab when state toggles change. */
+  onStateToggleRefresh(cb: () => void): void {
+    this.stateRefreshCb = cb;
+  }
+
+  /** Set the variable resolver (lazily provided on first Rules tab activation). Null clears it. */
+  setVariableResolver(resolver: VariableResolver | null): void {
+    this.variableResolver = resolver;
+  }
+
+  /** Register callback to scroll to a rule in the Rules tab. */
+  onScrollToRule(cb: ScrollToRuleCb): void {
+    this.scrollToRuleCb = cb;
+  }
+
+  /** Set the event target root for click-outside dismiss (shadow root). */
+  setDismissRoot(root: EventTarget): void {
+    this.dismissRoot = root;
   }
 
   onPropertyChange(cb: PropertyChangeCb): void {
@@ -170,7 +207,88 @@ export class CssGroupsSection {
       section.appendChild(pill);
     }
 
+    // :hov toggle button
+    if (this.stateSimulator) {
+      const hasActive = this.stateSimulator.hasActiveStates(element);
+      const hovBtn = createElement('button', {
+        title: 'Simulates CSS pseudo-class styles. Some effects may not be captured.',
+      }, {
+        background: hasActive ? 'rgba(6, 182, 212, 0.12)' : 'rgba(255, 255, 255, 0.08)',
+        border: `1px solid ${hasActive ? 'rgba(6, 182, 212, 0.4)' : OVERLAY.border}`,
+        borderRadius: '3px',
+        padding: '1px 5px',
+        fontSize: '10px',
+        fontFamily: OVERLAY.monoFamily,
+        color: hasActive ? OVERLAY.primary : OVERLAY.textMuted,
+        lineHeight: '1.4',
+        whiteSpace: 'nowrap',
+        cursor: 'pointer',
+        pointerEvents: 'auto',
+        marginLeft: 'auto',
+        flexShrink: '0',
+      });
+      hovBtn.textContent = ':hov';
+      hovBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.hovToggleOpen = !this.hovToggleOpen;
+        this.renderToggleStrip(section, element);
+      });
+      section.appendChild(hovBtn);
+
+      if (this.hovToggleOpen) {
+        this.renderToggleStrip(section, element);
+      }
+    }
+
     return section;
+  }
+
+  // ---------------------------------------------------------------------------
+  // State toggle strip
+  // ---------------------------------------------------------------------------
+
+  private renderToggleStrip(parent: HTMLDivElement, element: Element): void {
+    const existing = parent.querySelector('[data-state-toggles]');
+    existing?.remove();
+
+    if (!this.hovToggleOpen || !this.stateSimulator) return;
+
+    const strip = createElement('div', {}, {
+      display: 'flex',
+      gap: '4px',
+      flexBasis: '100%',
+      padding: '4px 0 0 0',
+    });
+    strip.setAttribute('data-state-toggles', '');
+
+    for (const state of PSEUDO_STATES) {
+      const isActive = this.stateSimulator.isActive(element, state);
+      const chip = createElement('button', {}, {
+        background: isActive ? 'rgba(6, 182, 212, 0.12)' : 'transparent',
+        border: `1px solid ${isActive ? 'rgba(6, 182, 212, 0.4)' : OVERLAY.border}`,
+        borderRadius: '3px',
+        padding: '1px 6px',
+        fontSize: '10px',
+        fontFamily: OVERLAY.monoFamily,
+        color: isActive ? OVERLAY.primary : OVERLAY.textMuted,
+        cursor: 'pointer',
+        pointerEvents: 'auto',
+        transition: 'background 0.1s, border-color 0.1s',
+      });
+      chip.textContent = state;
+      chip.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (this.stateSimulator!.isActive(element, state)) {
+          this.stateSimulator!.deactivate(element, state);
+        } else {
+          this.stateSimulator!.activate(element, state);
+        }
+        this.stateRefreshCb?.();
+      });
+      strip.appendChild(chip);
+    }
+
+    parent.appendChild(strip);
   }
 
   // ---------------------------------------------------------------------------
@@ -374,6 +492,19 @@ export class CssGroupsSection {
       valueContainer.appendChild(badgeEl);
     }
 
+    // Enrichment: var badge (badge-slot, when authored value contains var())
+    if (this.variableResolver) {
+      const winningRule = this.findWinningRule(name, element);
+      if (winningRule && winningRule.authoredValue.includes('var(')) {
+        const varBadge = createVarBadge(winningRule.authoredValue, () => {
+          this.showVarTooltip(varBadge!, winningRule!.authoredValue, element);
+        });
+        if (varBadge) {
+          valueContainer.appendChild(varBadge);
+        }
+      }
+    }
+
     valueContainer.addEventListener('click', openEditor);
 
     valueContainer.addEventListener('mouseenter', () => {
@@ -402,30 +533,25 @@ export class CssGroupsSection {
   }
 
   // ---------------------------------------------------------------------------
-  // Annotation slot — rule source cross-reference
+  // Winning rule lookup (shared by annotation and var badge)
   // ---------------------------------------------------------------------------
 
-  private populateAnnotation(
-    slot: HTMLDivElement,
+  private findWinningRule(
     property: string,
-    computedValue: string,
     element: Element,
-  ): void {
-    if (!this.rulesCache || !this.rulesCache.has(element)) return;
+  ): { selectorText: string; sourceHref: string | null; authoredValue: string } | null {
+    if (!this.rulesCache || !this.rulesCache.has(element)) return null;
 
-    // Pass excludeSheets to avoid toggle override sheet leaking into annotations
     const excludeSheets = new Set<CSSStyleSheet>();
     const toggleSheet = this.toggleManager?.getSheet();
     if (toggleSheet) excludeSheets.add(toggleSheet);
 
     const result = this.rulesCache.get(element, excludeSheets);
-    if (!result || result.rules.length === 0) return;
+    if (!result || result.rules.length === 0) return null;
 
-    // Find the winning rule for this property (first non-overridden declaration in specificity order)
-    let winningRule: { selectorText: string; sourceHref: string | null; authoredValue: string } | null = null;
     const seenProps = new Set<string>();
+    let winner: { selectorText: string; sourceHref: string | null; authoredValue: string } | null = null;
 
-    // Sort by specificity descending, inline first
     const sorted = [...result.rules].sort((a, b) => {
       if (a.isInline && !b.isInline) return -1;
       if (!a.isInline && b.isInline) return 1;
@@ -443,32 +569,43 @@ export class CssGroupsSection {
         const val = rule.declarations.get(property)!;
         const isImportant = val.endsWith('!important');
         if (!seenProps.has(property) || isImportant) {
-          winningRule = {
+          winner = {
             selectorText: rule.selectorText,
             sourceHref: rule.sourceHref,
             authoredValue: val.replace(/\s*!important$/, ''),
           };
           if (!isImportant) seenProps.add(property);
-          else break; // !important always wins
+          else break;
         }
         seenProps.add(property);
       }
     }
 
+    return winner;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Annotation slot — rule source cross-reference
+  // ---------------------------------------------------------------------------
+
+  private populateAnnotation(
+    slot: HTMLDivElement,
+    property: string,
+    computedValue: string,
+    element: Element,
+  ): void {
+    const winningRule = this.findWinningRule(property, element);
     if (!winningRule || winningRule.selectorText === 'element.style') return;
 
-    // Build annotation content
     const source = winningRule.sourceHref
       ? winningRule.sourceHref.split('/').pop() ?? winningRule.sourceHref
       : 'inline';
 
     let annotationText = `from ${winningRule.selectorText} in ${source}`;
 
-    // Show authored value if it differs from computed
     const authored = winningRule.authoredValue.trim();
     const computed = computedValue.trim();
     if (authored !== computed && authored) {
-      // Check for var() references
       if (authored.includes('var(')) {
         annotationText += ` \u00b7 ${authored}`;
       } else {
@@ -483,6 +620,47 @@ export class CssGroupsSection {
     slot.appendChild(textEl);
     slot.style.display = 'block';
     slot.style.padding = '1px 0 1px 12px';
+  }
+
+  // ---------------------------------------------------------------------------
+  // Variable resolution tooltip
+  // ---------------------------------------------------------------------------
+
+  private showVarTooltip(badge: HTMLSpanElement, authoredValue: string, element: Element): void {
+    this.dismissVarTooltip();
+    if (!this.variableResolver) return;
+
+    // Extract the variable name from the authored value
+    const varMatch = authoredValue.match(/var\(\s*(--[a-zA-Z0-9_-]+)/);
+    if (!varMatch) return;
+
+    const result = this.variableResolver.resolve(element, varMatch[1]);
+
+    const tooltip = createVarTooltip(
+      result,
+      (selectorText) => {
+        this.dismissVarTooltip();
+        this.scrollToRuleCb?.(selectorText);
+      },
+      () => this.dismissVarTooltip(),
+      this.dismissRoot ?? undefined,
+    );
+
+    // Position below the badge
+    badge.style.position = 'relative';
+    tooltip.style.top = '100%';
+    tooltip.style.left = '0';
+    tooltip.style.marginTop = '4px';
+    badge.appendChild(tooltip);
+    this.activeVarTooltip = tooltip;
+  }
+
+  private dismissVarTooltip(): void {
+    if (this.activeVarTooltip) {
+      cleanupVarTooltip(this.activeVarTooltip);
+      this.activeVarTooltip.remove();
+    }
+    this.activeVarTooltip = null;
   }
 
   // ---------------------------------------------------------------------------
