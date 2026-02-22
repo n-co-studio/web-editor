@@ -117,6 +117,16 @@ const ICONS: Record<string, string> = {
     <line x1="6.5" y1="7" x2="6.5" y2="11.5"/>
     <line x1="9.5" y1="7" x2="9.5" y2="11.5"/>
   </svg>`,
+
+  ruler: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round">
+    <rect x="1" y="1" width="14" height="5" rx="1"/>
+    <line x1="4" y1="1" x2="4" y2="4"/>
+    <line x1="7" y1="1" x2="7" y2="3"/>
+    <line x1="10" y1="1" x2="10" y2="4"/>
+    <line x1="13" y1="1" x2="13" y2="3"/>
+    <line x1="3" y1="9" x2="13" y2="9" stroke-dasharray="1.5 2"/>
+    <line x1="3" y1="13" x2="13" y2="13" stroke-dasharray="1.5 2"/>
+  </svg>`,
 };
 
 const TOOL_LABELS: Record<EditMode, string> = {
@@ -184,6 +194,9 @@ export class FloatingToolbar {
   private gridBtn: HTMLButtonElement | null = null;
   private gridEnabled = false;
   private gridBlockReason: string | null = null;
+  private rulersToggleCb: ((enabled: boolean) => void) | null = null;
+  private rulersBtn: HTMLButtonElement | null = null;
+  private rulersEnabled = false;
   private reviewBadge: HTMLSpanElement | null = null;
   private confirmOverlay: HTMLDivElement | null = null;
 
@@ -232,6 +245,23 @@ export class FloatingToolbar {
 
   onGridSettingsToggle(cb: VoidCallback): void {
     this.gridSettingsToggleCb = cb;
+  }
+
+  onRulersToggle(cb: (enabled: boolean) => void): void {
+    this.rulersToggleCb = cb;
+  }
+
+  /** Sync rulers button active state. */
+  setRulersEnabled(enabled: boolean): void {
+    this.rulersEnabled = enabled;
+    if (!this.rulersBtn) return;
+    if (enabled) {
+      this.rulersBtn.style.background = 'rgba(6, 182, 212, 0.12)';
+      this.rulersBtn.style.color = OVERLAY.primary;
+    } else {
+      this.rulersBtn.style.background = 'transparent';
+      this.rulersBtn.style.color = OVERLAY.textMuted;
+    }
   }
 
   onDelete(cb: VoidCallback): void {
@@ -376,11 +406,12 @@ export class FloatingToolbar {
   }
 
   /** Get the position of a specific toolbar button (for anchoring mini-panels next to it). */
-  getButtonPosition(key: EditMode | InspectorMode | 'review' | 'notes' | 'grid'): { x: number; y: number } {
+  getButtonPosition(key: EditMode | InspectorMode | 'review' | 'notes' | 'grid' | 'rulers'): { x: number; y: number } {
     let btn: HTMLButtonElement | null | undefined = null;
     if (key === 'review') btn = this.reviewBtn;
     else if (key === 'notes') btn = this.notesBtn;
     else if (key === 'grid') btn = this.gridBtn;
+    else if (key === 'rulers') btn = this.rulersBtn;
     else if (key === 'devtools') btn = this.inspectorButtons.get(key);
     else btn = this.toolButtons.get(key);
     if (!btn || !this.container) return this.getPosition();
@@ -427,6 +458,8 @@ export class FloatingToolbar {
     this.notesBadge = null;
     this.gridBtn = null;
     this.gridEnabled = false;
+    this.rulersBtn = null;
+    this.rulersEnabled = false;
     this.deleteBtn = null;
     this.visible = false;
     this.activeMode = null;
@@ -447,6 +480,7 @@ export class FloatingToolbar {
     this.notesToggleCb = null;
     this.gridToggleCb = null;
     this.gridSettingsToggleCb = null;
+    this.rulersToggleCb = null;
     this.deleteCb = null;
   }
 
@@ -561,6 +595,14 @@ export class FloatingToolbar {
     this.toolsSection = toolsSection;
 
     toolsSection.appendChild(this.gridBtn);
+
+    // Rulers toggle button
+    this.rulersBtn = this.buildIconButton('ruler', 'Toggle rulers & guides', () => {
+      this.rulersEnabled = !this.rulersEnabled;
+      this.setRulersEnabled(this.rulersEnabled);
+      this.rulersToggleCb?.(this.rulersEnabled);
+    });
+    toolsSection.appendChild(this.rulersBtn);
 
     // DevTools panel button (DOM inspector + properties + console)
     const devtoolsBtn = this.buildIconButton('devtools', 'DevTools panel', () => {
