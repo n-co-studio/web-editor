@@ -104,6 +104,10 @@ const ICONS: Record<string, string> = {
     <polyline points="12,5 14,8 12,11"/>
   </svg>`,
 
+  cursor: `<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" stroke="none">
+    <path d="M3.5 1.5l0 11.5 3.2-3.2 2.8 5.2 1.8-1-2.8-5.2h4.5z"/>
+  </svg>`,
+
   reorder: `<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
     <circle cx="6" cy="4" r="1.25"/><circle cx="10" cy="4" r="1.25"/>
     <circle cx="6" cy="8" r="1.25"/><circle cx="10" cy="8" r="1.25"/>
@@ -130,6 +134,7 @@ const ICONS: Record<string, string> = {
 };
 
 const TOOL_LABELS: Record<EditMode, string> = {
+  cursor: 'Select',
   spacing: 'Spacing',
   dimensions: 'Size',
   typography: 'Type',
@@ -143,6 +148,7 @@ const TOOL_LABELS: Record<EditMode, string> = {
 const TOOLBAR_STORAGE_KEY = 'frontend-editor-toolbar-position';
 
 const TOOL_ORDER: EditMode[] = [
+  'cursor',
   'spacing',
   'dimensions',
   'typography',
@@ -632,9 +638,12 @@ export class FloatingToolbar {
       const btn = this.buildIconButton(mode, TOOL_LABELS[mode], () => {
         if (this.disabledTools.has(mode)) return;
 
+        // Cursor is the default — can't toggle off, only switch to
+        if (mode === 'cursor' && this.activeMode === 'cursor') return;
+
         if (this.activeMode === mode) {
-          // Toggle off
-          this.toolCb?.(mode); // Let index.ts handle deactivation
+          // Toggle off → fall back to cursor
+          this.toolCb?.('cursor');
         } else {
           this.toolCb?.(mode);
         }

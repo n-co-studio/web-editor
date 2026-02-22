@@ -264,12 +264,11 @@ export class DevToolsPanel {
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
-      minHeight: '0',
       borderRight: `1px solid ${OVERLAY.border}`,
     });
     this.leftPaneEl = leftPane;
 
-    // Tree box (scrollable) — mount DomTreePane
+    // Tree box (scrollable, flex fill)
     const treeBox = createElement('div', {}, {
       flex: '1',
       minHeight: '0',
@@ -278,6 +277,7 @@ export class DevToolsPanel {
       padding: '4px',
       fontFamily: OVERLAY.monoFamily,
       fontSize: '11px',
+      pointerEvents: 'auto',
     });
     this.domTreePane.mount(treeBox);
 
@@ -520,16 +520,16 @@ export class DevToolsPanel {
     const hideColumns = tier === 'compact';
 
     if (this.leftPaneEl) {
-      this.leftPaneEl.style.display = hideColumns ? 'none' : '';
+      this.leftPaneEl.style.display = hideColumns ? 'none' : 'flex';
     }
     if (this.divider1El) {
-      this.divider1El.style.display = hideColumns ? 'none' : '';
+      this.divider1El.style.display = hideColumns ? 'none' : 'block';
     }
     if (this.rightPaneEl) {
-      this.rightPaneEl.style.display = hideColumns ? 'none' : '';
+      this.rightPaneEl.style.display = hideColumns ? 'none' : 'flex';
     }
     if (this.divider2El) {
-      this.divider2El.style.display = hideColumns ? 'none' : '';
+      this.divider2El.style.display = hideColumns ? 'none' : 'block';
     }
 
     // In compact mode, middle pane takes full width

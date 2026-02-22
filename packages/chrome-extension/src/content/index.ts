@@ -84,6 +84,10 @@ let multiSelectToolbar: MultiSelectToolbar | null = null;
 let multiSelectClickHandler: ((e: MouseEvent) => void) | null = null;
 let notePickMode: { noteIndex: number; handler: (e: MouseEvent) => void } | null = null;
 
+// Preserved tool mode across deselect→reselect cycle (selection.select() calls
+// deselect() before onSelect fires, so onDeselect would reset the toolbar mode).
+let preservedToolMode: EditMode | null = null;
+
 // Tab session ID — stable for the tab's lifetime
 let tabId: string | null = null;
 
@@ -299,25 +303,20 @@ async function activate(): Promise<void> {
     if (reorderBlock) disabled['reorder'] = reorderBlock;
     toolbar!.setDisabledTools(disabled);
 
-    // Auto-activate dimensions if not blocked
-    if (!dimBlock) {
-      handles!.showHandles(element, 'dimensions');
-      const pos = toolbar!.getButtonPosition('dimensions');
-      const dimControls = dimensionsEditor!.render(element, pos, (changes) => {
-        const info = buildElementInfo(element);
-        const diff = diffBuilder!.build(info, changes);
-        commitEdit(element, changes, diff);
-        selection!.refreshHighlight();
-        handles!.refreshHandles();
-      });
-      shadow!.appendChild(dimControls);
-      toolbar!.setActiveMode('dimensions');
-    } else {
-      toolbar!.setActiveMode(null);
-    }
+    // Re-apply the previous active tool for the new element (preserve tool state).
+    // onDeselect fires before onSelect during re-selection and resets toolbar to cursor,
+    // so we read from the preserved mode that onDeselect captured before resetting.
+    const previousMode = preservedToolMode ?? toolbar!.getActiveMode();
+    preservedToolMode = null;
+    const modeToApply = (previousMode && !disabled[previousMode]) ? previousMode : 'cursor';
+    activateToolForElement(element, modeToApply);
   });
 
   selection.onDeselect(() => {
+    // Preserve active tool mode so onSelect can restore it (select() calls
+    // deselect() before onSelect fires, which would otherwise lose the mode).
+    preservedToolMode = toolbar!.getActiveMode();
+
     if (multiSelect?.isActive()) {
       exitMultiSelectMode();
     }
@@ -335,7 +334,7 @@ async function activate(): Promise<void> {
     measureOverlay!.clear();
     staleDetector!.cleanup();
     preview!.revert();
-    toolbar!.setActiveMode(null);
+    toolbar!.setActiveMode('cursor');
     toolbar!.setDisabledTools({});
     // Transition notes panel from element → toolbar mode
     if (notesEditor?.isOpen() && notesEditor.getPositionMode() === 'element') {
@@ -349,93 +348,7 @@ async function activate(): Promise<void> {
     if (multiSelect?.isActive()) return; // ignore tool changes during multi-select
     const el = selection!.getSelectedElement();
     if (!el) return;
-
-    // Clean up previous edit mode
-    handles!.hideHandles();
-    typographyEditor!.cleanup();
-    colorEditor!.cleanup();
-    dimensionsEditor!.cleanup();
-    spacingEditor!.cleanup();
-    positionEditor!.cleanup();
-    moveEditor!.cleanup();
-    reorderEditor!.cleanup();
-
-    // Toggle off if clicking the active tool
-    if (selectedMode === toolbar!.getActiveMode()) {
-      toolbar!.setActiveMode(null);
-      return;
-    }
-
-    if (selectedMode === 'typography') {
-      const pos = toolbar!.getButtonPosition('typography');
-      const controls = typographyEditor!.render(el, pos, (changes) => {
-        const info = buildElementInfo(el);
-        const diff = diffBuilder!.build(info, changes);
-        commitEdit(el, changes, diff);
-      });
-      shadow!.appendChild(controls);
-      toolbar!.setActiveMode('typography');
-    } else if (selectedMode === 'colors') {
-      const pos = toolbar!.getButtonPosition('colors');
-      const controls = colorEditor!.render(el, 'color', pos, (changes) => {
-        const info = buildElementInfo(el);
-        const diff = diffBuilder!.build(info, changes);
-        commitEdit(el, changes, diff);
-      });
-      shadow!.appendChild(controls);
-      toolbar!.setActiveMode('colors');
-    } else if (selectedMode === 'dimensions') {
-      // Dimensions: handles for drag + mini panel for presets
-      handles!.showHandles(el, selectedMode);
-      const pos = toolbar!.getButtonPosition('dimensions');
-      const controls = dimensionsEditor!.render(el, pos, (changes) => {
-        const info = buildElementInfo(el);
-        const diff = diffBuilder!.build(info, changes);
-        commitEdit(el, changes, diff);
-        selection!.refreshHighlight();
-        handles!.refreshHandles();
-      });
-      shadow!.appendChild(controls);
-      toolbar!.setActiveMode('dimensions');
-    } else if (selectedMode === 'spacing') {
-      // Spacing: handles for drag + mini panel for token-based value selection
-      handles!.showHandles(el, selectedMode);
-      const pos = toolbar!.getButtonPosition('spacing');
-      const controls = spacingEditor!.render(el, pos, (changes) => {
-        const info = buildElementInfo(el);
-        const diff = diffBuilder!.build(info, changes);
-        commitEdit(el, changes, diff);
-        selection!.refreshHighlight();
-        handles!.refreshHandles();
-      });
-      shadow!.appendChild(controls);
-      toolbar!.setActiveMode('spacing');
-    } else if (selectedMode === 'position') {
-      const pos = toolbar!.getButtonPosition('position');
-      const controls = positionEditor!.render(el, pos, (changes) => {
-        const info = buildElementInfo(el);
-        const diff = diffBuilder!.build(info, changes);
-        commitEdit(el, changes, diff);
-        selection!.refreshHighlight();
-      });
-      shadow!.appendChild(controls);
-      toolbar!.setActiveMode('position');
-    } else if (selectedMode === 'move') {
-      moveEditor!.render(el, (changes) => {
-        const info = buildElementInfo(el);
-        const diff = diffBuilder!.build(info, changes);
-        commitEdit(el, changes, diff);
-        selection!.refreshHighlight();
-        moveEditor!.refreshOverlay();
-      });
-      toolbar!.setActiveMode('move');
-    } else if (selectedMode === 'reorder') {
-      reorderEditor!.render(el, makeReorderCommit(el));
-      toolbar!.setActiveMode('reorder');
-    } else {
-      handles!.showHandles(el, selectedMode);
-      toolbar!.setActiveMode(selectedMode);
-    }
+    activateToolForElement(el, selectedMode);
   });
 
   // Wire DevTools toggle button
@@ -551,23 +464,33 @@ async function activate(): Promise<void> {
     reviewPanel!.reposition(toolbar!.getButtonPosition('review'));
   });
 
-  // Wire editor close buttons → deactivate tool
+  // Wire editor close buttons → fall back to cursor tool
   typographyEditor.onClose(() => {
-    toolbar!.setActiveMode(null);
+    const el = selection?.getSelectedElement();
+    if (el) { activateToolForElement(el, 'cursor'); }
+    else { toolbar!.setActiveMode('cursor'); }
   });
   colorEditor.onClose(() => {
-    toolbar!.setActiveMode(null);
+    const el = selection?.getSelectedElement();
+    if (el) { activateToolForElement(el, 'cursor'); }
+    else { toolbar!.setActiveMode('cursor'); }
   });
   dimensionsEditor.onClose(() => {
     handles!.hideHandles();
-    toolbar!.setActiveMode(null);
+    const el = selection?.getSelectedElement();
+    if (el) { activateToolForElement(el, 'cursor'); }
+    else { toolbar!.setActiveMode('cursor'); }
   });
   spacingEditor.onClose(() => {
     handles!.hideHandles();
-    toolbar!.setActiveMode(null);
+    const el = selection?.getSelectedElement();
+    if (el) { activateToolForElement(el, 'cursor'); }
+    else { toolbar!.setActiveMode('cursor'); }
   });
   positionEditor.onClose(() => {
-    toolbar!.setActiveMode(null);
+    const el = selection?.getSelectedElement();
+    if (el) { activateToolForElement(el, 'cursor'); }
+    else { toolbar!.setActiveMode('cursor'); }
   });
 
   // Wire review panel toggle
@@ -750,14 +673,18 @@ async function activate(): Promise<void> {
     gridSettingsPanel?.updateDefaults(effective.baseSpacing, effective.majorSpacing);
   });
 
-  // Wire move editor close → deactivate tool
+  // Wire move editor close → fall back to cursor tool
   moveEditor.onClose(() => {
-    toolbar!.setActiveMode(null);
+    const el = selection?.getSelectedElement();
+    if (el) { activateToolForElement(el, 'cursor'); }
+    else { toolbar!.setActiveMode('cursor'); }
   });
 
-  // Wire reorder editor close → deactivate tool
+  // Wire reorder editor close → fall back to cursor tool
   reorderEditor.onClose(() => {
-    toolbar!.setActiveMode(null);
+    const el = selection?.getSelectedElement();
+    if (el) { activateToolForElement(el, 'cursor'); }
+    else { toolbar!.setActiveMode('cursor'); }
   });
 
   // Wire delete element
@@ -820,7 +747,7 @@ async function activate(): Promise<void> {
   // Wire disabled mode feedback (e.g. dimension resize blocked by layout)
   handles.onDisabled((reason) => {
     devtoolsPanel?.log(`Edit mode blocked: ${reason}`, 'warn');
-    toolbar!.setActiveMode(null);
+    toolbar!.setActiveMode('cursor');
   });
 
   // Wire editing → diff creation → queue + history
@@ -943,6 +870,98 @@ function toggleActive(): void {
     activate();
   } else {
     deactivate();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Activate tool for element — shared by onSelect and onToolSelect
+// ---------------------------------------------------------------------------
+
+function activateToolForElement(el: Element, mode: EditMode): void {
+  // Clean up previous edit mode
+  handles!.hideHandles();
+  typographyEditor!.cleanup();
+  colorEditor!.cleanup();
+  dimensionsEditor!.cleanup();
+  spacingEditor!.cleanup();
+  positionEditor!.cleanup();
+  moveEditor!.cleanup();
+  reorderEditor!.cleanup();
+
+  if (mode === 'cursor') {
+    // Cursor/select mode: show dimension handles only (no mini panel)
+    const dimBlock = getDimensionBlockReason(el);
+    if (!dimBlock) {
+      handles!.showHandles(el, 'dimensions');
+    }
+    toolbar!.setActiveMode('cursor');
+  } else if (mode === 'typography') {
+    const pos = toolbar!.getButtonPosition('typography');
+    const controls = typographyEditor!.render(el, pos, (changes) => {
+      const info = buildElementInfo(el);
+      const diff = diffBuilder!.build(info, changes);
+      commitEdit(el, changes, diff);
+    });
+    shadow!.appendChild(controls);
+    toolbar!.setActiveMode('typography');
+  } else if (mode === 'colors') {
+    const pos = toolbar!.getButtonPosition('colors');
+    const controls = colorEditor!.render(el, 'color', pos, (changes) => {
+      const info = buildElementInfo(el);
+      const diff = diffBuilder!.build(info, changes);
+      commitEdit(el, changes, diff);
+    });
+    shadow!.appendChild(controls);
+    toolbar!.setActiveMode('colors');
+  } else if (mode === 'dimensions') {
+    handles!.showHandles(el, mode);
+    const pos = toolbar!.getButtonPosition('dimensions');
+    const controls = dimensionsEditor!.render(el, pos, (changes) => {
+      const info = buildElementInfo(el);
+      const diff = diffBuilder!.build(info, changes);
+      commitEdit(el, changes, diff);
+      selection!.refreshHighlight();
+      handles!.refreshHandles();
+    });
+    shadow!.appendChild(controls);
+    toolbar!.setActiveMode('dimensions');
+  } else if (mode === 'spacing') {
+    handles!.showHandles(el, mode);
+    const pos = toolbar!.getButtonPosition('spacing');
+    const controls = spacingEditor!.render(el, pos, (changes) => {
+      const info = buildElementInfo(el);
+      const diff = diffBuilder!.build(info, changes);
+      commitEdit(el, changes, diff);
+      selection!.refreshHighlight();
+      handles!.refreshHandles();
+    });
+    shadow!.appendChild(controls);
+    toolbar!.setActiveMode('spacing');
+  } else if (mode === 'position') {
+    const pos = toolbar!.getButtonPosition('position');
+    const controls = positionEditor!.render(el, pos, (changes) => {
+      const info = buildElementInfo(el);
+      const diff = diffBuilder!.build(info, changes);
+      commitEdit(el, changes, diff);
+      selection!.refreshHighlight();
+    });
+    shadow!.appendChild(controls);
+    toolbar!.setActiveMode('position');
+  } else if (mode === 'move') {
+    moveEditor!.render(el, (changes) => {
+      const info = buildElementInfo(el);
+      const diff = diffBuilder!.build(info, changes);
+      commitEdit(el, changes, diff);
+      selection!.refreshHighlight();
+      moveEditor!.refreshOverlay();
+    });
+    toolbar!.setActiveMode('move');
+  } else if (mode === 'reorder') {
+    reorderEditor!.render(el, makeReorderCommit(el));
+    toolbar!.setActiveMode('reorder');
+  } else {
+    handles!.showHandles(el, mode);
+    toolbar!.setActiveMode(mode);
   }
 }
 
@@ -1219,7 +1238,7 @@ function enterMultiSelectMode(): void {
   positionEditor?.cleanup();
   moveEditor?.cleanup();
   reorderEditor?.cleanup();
-  toolbar?.setActiveMode(null);
+  toolbar?.setActiveMode('cursor');
 
   // Show multi-select toolbar (or update it)
   if (multiSelectToolbar?.isOpen()) {
@@ -1316,22 +1335,7 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
         if (devtoolsPanel?.isOpen()) {
           devtoolsPanel.updateProperties(primary);
         }
-        const dimBlock = getDimensionBlockReason(primary);
-        if (!dimBlock) {
-          handles?.showHandles(primary, 'dimensions');
-          const pos = toolbar!.getButtonPosition('dimensions');
-          const dimControls = dimensionsEditor!.render(primary, pos, (changes) => {
-            const dimInfo = buildElementInfo(primary);
-            const diff = diffBuilder!.build(dimInfo, changes);
-            commitEdit(primary, changes, diff);
-            selection!.refreshHighlight();
-            handles!.refreshHandles();
-          });
-          shadow!.appendChild(dimControls);
-          toolbar?.setActiveMode('dimensions');
-        } else {
-          toolbar?.setActiveMode(null);
-        }
+        activateToolForElement(primary, 'cursor');
       }
     } else if (notePickMode) {
       // Level 0a: exit note pick mode (notes panel stays open)
