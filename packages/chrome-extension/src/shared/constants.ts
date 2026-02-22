@@ -147,5 +147,5 @@ export const PANEL_TIER_STANDARD_MAX = 300;
 
 export const GUIDE_LINE_Z = '52';
 export const RULER_BAR_Z = '53';
-export const GUIDE_SNAP_THRESHOLD = 3;
+export const GUIDE_SNAP_THRESHOLD = 8;
 export const MAX_GUIDES_PER_PAGE = 50;

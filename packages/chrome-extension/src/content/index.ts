@@ -170,7 +170,7 @@ async function activate(): Promise<void> {
   positionEditor = new PositionEditor(preview);
   notesEditor = new NotesEditor(notesStore, shadow);
   gridOverlay = new GridOverlay(shadow, tokenStore);
-  rulerOverlay = new RulerOverlay(shadow, () => gridOverlay!.getEffectiveSettings());
+  rulerOverlay = new RulerOverlay(shadow, () => gridOverlay!.getEffectiveSettings(), () => gridOverlay?.isVisible() ?? false);
   moveEditor = new MoveEditor(shadow, preview);
   reorderEditor = new ReorderEditor(shadow);
   gridSettingsPanel = new GridSettingsPanel(gridOverlay.getEffectiveSettings());
@@ -1073,6 +1073,7 @@ function handleScroll(): void {
     handles?.refreshHandles();
     moveEditor?.refreshOverlay();
     reorderEditor?.refreshOverlay();
+    gridOverlay?.refreshScroll();
     rulerOverlay?.refreshGuides();
     if (measureOverlay?.isActive()) measureOverlay.clear();
     if (notesEditor?.isOpen()) {
