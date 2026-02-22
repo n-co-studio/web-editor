@@ -54,7 +54,7 @@ Operators working on projects inspect the front end and identify visual adjustme
 
 ## What This Product Is NOT
 
-- Not a browser DevTools replacement
+- An opinionated, editing-focused element inspection UI — not a full browser DevTools replacement, but the operator's primary interface for element inspection and visual manipulation during editing sessions
 - Not a CSS editor — generates structured change requests, not raw stylesheets
 - Not a component library or design system manager
 - Not a hosted service — everything runs locally

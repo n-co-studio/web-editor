@@ -136,6 +136,142 @@ export function getComputedProperty(el: Element, prop: string): string {
   return getComputedStyle(el).getPropertyValue(prop).trim();
 }
 
+// ---------------------------------------------------------------------------
+// Batched computed style snapshot
+// ---------------------------------------------------------------------------
+
+/**
+ * A snapshot of all computed CSS properties needed by DevTools panes.
+ * Created once per updateElement() call to eliminate redundant getComputedStyle invocations.
+ */
+export interface ComputedStyleSnapshot {
+  // Dimensions
+  width: string;
+  height: string;
+  // Spacing
+  paddingTop: string;
+  paddingRight: string;
+  paddingBottom: string;
+  paddingLeft: string;
+  marginTop: string;
+  marginRight: string;
+  marginBottom: string;
+  marginLeft: string;
+  // Typography
+  fontFamily: string;
+  fontSize: string;
+  fontWeight: string;
+  lineHeight: string;
+  color: string;
+  letterSpacing: string;
+  textAlign: string;
+  textDecoration: string;
+  textTransform: string;
+  // Background
+  backgroundColor: string;
+  backgroundImage: string;
+  // Position
+  position: string;
+  top: string;
+  right: string;
+  bottom: string;
+  left: string;
+  zIndex: string;
+  // Border
+  borderRadius: string;
+  borderColor: string;
+  borderWidth: string;
+  borderStyle: string;
+  // Layout — container
+  display: string;
+  flexDirection: string;
+  justifyContent: string;
+  alignItems: string;
+  flexWrap: string;
+  gap: string;
+  gridTemplateColumns: string;
+  gridTemplateRows: string;
+  gridAutoFlow: string;
+  // Layout — child
+  alignSelf: string;
+  flexGrow: string;
+  flexShrink: string;
+  flexBasis: string;
+  order: string;
+  gridColumn: string;
+  gridRow: string;
+  // Visibility
+  opacity: string;
+  overflow: string;
+  visibility: string;
+  // Box model
+  boxSizing: string;
+}
+
+/** Read all panel-relevant CSS properties in a single getComputedStyle call. */
+export function createStyleSnapshot(el: Element): ComputedStyleSnapshot {
+  const cs = getComputedStyle(el);
+  return {
+    width: cs.getPropertyValue('width').trim(),
+    height: cs.getPropertyValue('height').trim(),
+    paddingTop: cs.getPropertyValue('padding-top').trim(),
+    paddingRight: cs.getPropertyValue('padding-right').trim(),
+    paddingBottom: cs.getPropertyValue('padding-bottom').trim(),
+    paddingLeft: cs.getPropertyValue('padding-left').trim(),
+    marginTop: cs.getPropertyValue('margin-top').trim(),
+    marginRight: cs.getPropertyValue('margin-right').trim(),
+    marginBottom: cs.getPropertyValue('margin-bottom').trim(),
+    marginLeft: cs.getPropertyValue('margin-left').trim(),
+    fontFamily: cs.getPropertyValue('font-family').trim(),
+    fontSize: cs.getPropertyValue('font-size').trim(),
+    fontWeight: cs.getPropertyValue('font-weight').trim(),
+    lineHeight: cs.getPropertyValue('line-height').trim(),
+    color: cs.getPropertyValue('color').trim(),
+    letterSpacing: cs.getPropertyValue('letter-spacing').trim(),
+    textAlign: cs.getPropertyValue('text-align').trim(),
+    textDecoration: cs.getPropertyValue('text-decoration').trim(),
+    textTransform: cs.getPropertyValue('text-transform').trim(),
+    backgroundColor: cs.getPropertyValue('background-color').trim(),
+    backgroundImage: cs.getPropertyValue('background-image').trim(),
+    position: cs.getPropertyValue('position').trim(),
+    top: cs.getPropertyValue('top').trim(),
+    right: cs.getPropertyValue('right').trim(),
+    bottom: cs.getPropertyValue('bottom').trim(),
+    left: cs.getPropertyValue('left').trim(),
+    zIndex: cs.getPropertyValue('z-index').trim(),
+    borderRadius: cs.getPropertyValue('border-radius').trim(),
+    borderColor: cs.getPropertyValue('border-color').trim(),
+    borderWidth: cs.getPropertyValue('border-width').trim(),
+    borderStyle: cs.getPropertyValue('border-style').trim(),
+    display: cs.getPropertyValue('display').trim(),
+    flexDirection: cs.getPropertyValue('flex-direction').trim(),
+    justifyContent: cs.getPropertyValue('justify-content').trim(),
+    alignItems: cs.getPropertyValue('align-items').trim(),
+    flexWrap: cs.getPropertyValue('flex-wrap').trim(),
+    gap: cs.getPropertyValue('gap').trim(),
+    gridTemplateColumns: cs.getPropertyValue('grid-template-columns').trim(),
+    gridTemplateRows: cs.getPropertyValue('grid-template-rows').trim(),
+    gridAutoFlow: cs.getPropertyValue('grid-auto-flow').trim(),
+    alignSelf: cs.getPropertyValue('align-self').trim(),
+    flexGrow: cs.getPropertyValue('flex-grow').trim(),
+    flexShrink: cs.getPropertyValue('flex-shrink').trim(),
+    flexBasis: cs.getPropertyValue('flex-basis').trim(),
+    order: cs.getPropertyValue('order').trim(),
+    gridColumn: cs.getPropertyValue('grid-column').trim(),
+    gridRow: cs.getPropertyValue('grid-row').trim(),
+    opacity: cs.getPropertyValue('opacity').trim(),
+    overflow: cs.getPropertyValue('overflow').trim(),
+    visibility: cs.getPropertyValue('visibility').trim(),
+    boxSizing: cs.getPropertyValue('box-sizing').trim(),
+  };
+}
+
+/** Look up a CSS property from a snapshot by its CSS property name (kebab-case). */
+export function snapshotGet(snapshot: ComputedStyleSnapshot, property: string): string {
+  const key = property.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase()) as keyof ComputedStyleSnapshot;
+  return snapshot[key] ?? '';
+}
+
 /** Check if an element is visible (non-zero size, not hidden). */
 export function isElementVisible(el: Element): boolean {
   const style = getComputedStyle(el);

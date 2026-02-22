@@ -38,6 +38,175 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 -->
 
+## Session 13 — 2026-02-21 — State Toggles, CSS Variables, Attributes & Accessibility
+
+**Status:** complete
+**Decisions applied:** 0001, 0002, 0008
+**Commits:** pending
+
+### Goal
+- Implement Brief 3: element state simulation (:hover/:focus/:active/:visited), CSS variable resolution tooltips, read-only attribute display in DOM tree, and accessibility insights section.
+
+### Plan Summary
+1. Create `StateSimulator` engine (scans stylesheets, strips pseudo selectors, applies via `StatePreviewManager`)
+2. Add `:hov` button + toggle strip to `CssGroupsSection`
+3. Wire `StateSimulator` eagerly in `PropertiesPane`
+4. Add status cluster (layout badge + orange dot) and collapsible attribute display to `DomTreePane`
+5. Wire state simulator from `PropertiesPane` to `DomTreePane` via `DevToolsPanel`
+6. Create `VariableResolver` (walks matched rules + ancestors, resolves var() chains)
+7. Create `var-badge.ts` enrichment (purple badge + click-activated tooltip)
+8. Wire `VariableResolver` lazily in `PropertiesPane.ensureRulesInitialized()`
+9. Create `AccessibilitySection` (4 checks: ARIA role, accessible name, missing ARIA, contrast reference)
+10. Mount accessibility section at bottom of Edit tab
+
+### Changes Made
+- `packages/chrome-extension/src/content/inspection/state-simulator.ts` — **New** (~456 lines): `StatePreviewManager` (standalone inline style tracker), `StateSimulator` (pseudo selector stripping, ancestor hover chains up to 5 levels, specificity-sorted declaration collection)
+- `packages/chrome-extension/src/content/inspection/variable-resolver.ts` — **New** (~171 lines): walks matched rules + ancestors (20 levels), recursion depth 10, circular detection, `getComputedStyle` fallback, token cross-reference
+- `packages/chrome-extension/src/content/selection/panes/enrichments/var-badge.ts` — **New** (~235 lines): purple `var` badge, click-activated tooltip with resolution chain, source links, AbortController-based cleanup
+- `packages/chrome-extension/src/content/selection/panes/accessibility-section.ts` — **New** (~451 lines): collapsible (collapsed by default), computed ARIA role (implicit/explicit), accessible name, missing ARIA warnings, contrast reference with scroll-to-property
+- `packages/chrome-extension/src/content/selection/panes/css-groups-section.ts` — `:hov` button + toggle strip, `findWinningRule()` shared helper, var badge integration with tooltip, `setVariableResolver(null)` disposal, `dismissRoot` for shadow DOM
+- `packages/chrome-extension/src/content/selection/panes/dom-tree-pane.ts` — Status cluster consolidation (layout badge + orange state dot), collapsible attribute detail section (priority-ordered, click-to-copy with green flash)
+- `packages/chrome-extension/src/content/selection/panes/properties-pane.ts` — Eager `StateSimulator`, lazy `VariableResolver` (stored + disposed), `AccessibilitySection`, shadow root dismiss wiring, scroll-to-rule callback
+- `packages/chrome-extension/src/content/selection/devtools-panel.ts` — Wires state simulator from properties pane to DOM tree pane
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass (0001/0002/0008 followed), A2 pass (plan documented, 8 files ~1780 lines — scope advisory noted), A3 pass (`tsc --build` + `tsc --noEmit` → 0 errors), A4 pass (no secrets), A5 pass (Critic cohesion: initial review found 3 criticals + 6 advisories; fixed 3 criticals + 2 advisories; re-run found 1 new critical (tooltip listener leak) + 2 advisories; fixed critical; build verified clean)
+- Push gates: B1 pending, B2 pending, B3 pending
+
+### Cohesion Findings & Resolutions
+**Initial review (3 criticals):**
+1. `onToggleChange` callback arity mismatch (pre-existing) — fixed: `(el)` → `(el, _property, _toggled)`
+2. `VariableResolver` not stored/disposed — fixed: added field, stored in `ensureRulesInitialized()`, cleared in `dispose()`
+3. `document.addEventListener` for tooltip dismiss incompatible with shadow DOM — fixed: added `dismissRoot` parameter, wires `shadowHost.shadowRoot`
+
+**Re-run (1 critical):**
+4. Tooltip click handler leaks on programmatic dismiss — fixed: AbortController pattern, `cleanupVarTooltip()` exported and called in `dismissVarTooltip()`
+
+**Also fixed (advisories):**
+5. Dead variables in `splitByCombinators` — removed
+6. Accessibility double-fire warnings for form inputs — reordered checks with `isFormInput` guard
+
+**Remaining advisories (non-blocking):**
+- Redundant null-check on varBadge (harmless defensive code)
+- DomTreePane stale simulator reference between dispose/remount (replaced synchronously before use)
+- AccessibilitySection.scrollTarget not cleared (same contentArea element, safe)
+- Multi-var authored values only partially resolved in tooltip (spec gap, not error)
+
+### Failed Attempts (Brief)
+- None (all issues found via cohesion review, fixed before commit)
+
+### Known Issues Logged
+- None
+
+### Follow-ups
+- `findWinningRule()` omits `excludeHost` parameter (advisory — shadow-host CSS leakage risk is low)
+- Multi-var tooltip resolution covers only first var() in compound values
+- CDP upgrade path deferred per brief recommendation
+
+---
+
+## Session 12 — 2026-02-21 — CSS Rules Display & Property Toggle
+
+**Status:** complete
+**Decisions applied:** 0001, 0002, 0008
+**Commits:** pending
+
+### Goal
+- Build CSS rule matching engine with cache and graceful cross-origin degradation
+- Activate Rules tab with specificity-ordered authored declarations
+- Add property toggle checkboxes for cascade exploration
+- Cross-reference authored values back into Edit tab annotations
+- Implement ToggleManager for temporary CSS overrides via Constructable StyleSheet
+
+### Plan Summary
+- Phase 1: Create foundation types (`css-types.ts`) and specificity calculator (`specificity.ts`)
+- Phase 2: Create rule matching engine (`css-rules.ts`) and WeakMap cache with MutationObserver invalidation (`matched-rules-cache.ts`)
+- Phase 3: Create toggle manager (`toggle-manager.ts`) using Constructable StyleSheet API
+- Phase 4: Create rules section renderer (`rules-section.ts`), activate Rules tab in `properties-pane.ts`
+- Phase 5: Add Edit tab annotations and InlineEditor toggle coordination
+- Phase 6: Verification — tsc, cohesion review (Critic), fix criticals, re-verify
+
+### Changes Made
+- `packages/chrome-extension/src/shared/css-types.ts` — **New** (~25 lines): `MatchedRule`, `AccessLevel`, `MatchResult` interfaces
+- `packages/chrome-extension/src/content/inspection/specificity.ts` — **New** (~160 lines): CSS specificity calculator with `:where`, `:is`, `:not`, `:has`, pseudo-element support
+- `packages/chrome-extension/src/content/inspection/css-rules.ts` — **New** (~350 lines): rule matching engine — iterates `document.styleSheets` + `adoptedStyleSheets`, handles cross-origin SecurityError, recurses into `@media`/`@supports`/`@layer`, 5000-rule ceiling, async chunked variant
+- `packages/chrome-extension/src/content/inspection/matched-rules-cache.ts` — **New** (~190 lines): WeakMap + LRU(50) cache with document-level + element-level MutationObservers, exclusion-aware cache validation
+- `packages/chrome-extension/src/content/inspection/toggle-manager.ts` — **New** (~155 lines): Constructable StyleSheet toggle with element-scoped `unset !important` rules, key-based index tracking (no browser selectorText readback)
+- `packages/chrome-extension/src/content/selection/panes/rules-section.ts` — **New** (~520 lines): Rules tab renderer — specificity ordering, overridden detection, toggle checkboxes, pagination(50), filter, access banner
+- `packages/chrome-extension/src/content/selection/devtools-panel.ts` — Passes `shadow.host` to PropertiesPane constructor
+- `packages/chrome-extension/src/content/selection/panes/properties-pane.ts` — Lazy Rules tab activation (ToggleManager, MatchedRulesCache, RulesSection), tab switching with scroll preservation, eager idle indexing, toggle change callback, full dispose cleanup
+- `packages/chrome-extension/src/content/selection/panes/css-groups-section.ts` — `setInspectionDeps()` for toggle/cache injection, `populateAnnotation()` with winning rule source + authored value display, excludeSheets-aware cache access
+- `packages/chrome-extension/src/content/selection/panes/inline-editor.ts` — `setToggleManager()`, clears toggle when editing starts on toggled property
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass (0001/0002/0008 followed), A2 pass (plan documented, 10 files), A3 pass (`npx tsc --noEmit` → 0 errors, no lint/format tooling), A4 pass (no secrets), A5 pass (Critic cohesion: initial review found 4 criticals + 6 recs; all 4 criticals fixed; re-review found 0 criticals, 4 recs (pre-existing design limitations))
+- Push gates: B1 pending, B2 pending, B3 pending
+
+### Failed Attempts (Brief)
+- Cohesion review found `rebuildIndexMap()` in ToggleManager read back browser-normalized `selectorText` which could differ from `generateSelector()` keys — fixed by sorting existing map entries and reassigning indices.
+- Cohesion review found `onToggleChange` callback never registered — fixed by wiring in `ensureRulesInitialized()`.
+- Cohesion review found cache served stale results when queried with different exclusion params — fixed by storing `excludeSheetsCount`/`hasExcludeHost` in cache entries and validating on hit.
+- Cohesion review found `populateAnnotation` called cache without excludeSheets, leaking toggle sheet into annotations — fixed by building and passing excludeSheets from toggleManager.
+
+### Known Issues Logged
+- None
+
+### Follow-ups
+- Toggle → annotation refresh chain is incomplete (annotations re-render on tab switch, not live during Rules tab toggle) — acceptable as progressive enhancement
+- `getMatchedRulesAsync` is exported but has no callers — available for future use on large pages
+- Annotations only appear after Rules tab is opened (lazy init) — acceptable as progressive enhancement
+
+---
+
+## Session 11 — 2026-02-21 — Properties Panel Decomposition & Foundation
+
+**Status:** complete
+**Decisions applied:** 0001, 0002, 0008
+**Commits:** pending
+
+### Goal
+- Decompose monolithic ~1530-line `DevToolsPanel` into composable pane modules with typed contracts
+- Introduce `ComputedStyleSnapshot` for batched style reads (single `getComputedStyle` call per update)
+- Design enriched property row structure with indicator/badge/annotation slots for future briefs
+- Add tab bar with disabled "Rules" placeholder
+- Pure refactor — zero user-visible changes except greyed-out Rules tab
+
+### Plan Summary
+- Add `ComputedStyleSnapshot` interface + `createStyleSnapshot()` + `snapshotGet()` to dom-utils.ts
+- Extract 6 pane modules: ConsolePane, SourcePane, DomTreePane, InlineEditor, CssGroupsSection, PropertiesPane
+- Rewrite DevToolsPanel shell as thin coordinator (~513 lines, down from 1530)
+- Update product.md and boundaries.md specs
+- Verify public API compatibility (index.ts unchanged, all 45 call sites intact)
+
+### Changes Made
+- `packages/chrome-extension/src/shared/dom-utils.ts` — Added `ComputedStyleSnapshot` (39 properties), `createStyleSnapshot()`, `snapshotGet()` helper
+- `packages/chrome-extension/src/content/selection/panes/console-pane.ts` — **New** (~94 lines): log entries, clear button, browser console mirror
+- `packages/chrome-extension/src/content/selection/panes/source-pane.ts` — **New** (~60 lines): source file:line + CSS selector display
+- `packages/chrome-extension/src/content/selection/panes/dom-tree-pane.ts` — **New** (~230 lines): collapsible tree, expand/collapse, select/hover callbacks
+- `packages/chrome-extension/src/content/selection/panes/inline-editor.ts` — **New** (~316 lines): token dropdown + freeform input, single/multi select
+- `packages/chrome-extension/src/content/selection/panes/css-groups-section.ts` — **New** (~444 lines): 6 property groups, enriched row structure, token badges
+- `packages/chrome-extension/src/content/selection/panes/properties-pane.ts` — **New** (~208 lines): tab bar (Edit/Rules), scroll persistence, delegates to CssGroupsSection
+- `packages/chrome-extension/src/content/selection/devtools-panel.ts` — **Rewritten** (1530→513 lines): thin shell, delegates to 4 panes
+- `docs/spec/compiled/v1/product.md` — Updated DevTools panel description
+- `docs/spec/compiled/v1/boundaries.md` — Removed CSS rule location limitation
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass (0001/0002/0008 followed), A2 pass (plan documented, 10 files), A3 pass (`npx tsc --noEmit` → 0 errors, no lint/format tooling configured), A4 pass (no secrets), A5 pass (Critic cohesion: 1 critical (DomTreePane dispose/callback lifecycle) + 7 recommendations; fixed critical by documenting lifecycle contract; re-verified clean)
+- Push gates: B1 pending, B2 pending, B3 pending
+
+### Failed Attempts (Brief)
+- Cohesion review found DomTreePane callbacks survive `dispose()` as an invisible contract — if dispose ever nulls callbacks, second show cycle breaks silently. Fixed by documenting the lifecycle contract (pane instances are long-lived, dispose is DOM cleanup only).
+
+### Known Issues Logged
+- None
+
+### Follow-ups
+- Brief 1B: Enrichment — populate indicator/annotation slots with rule source data
+- Brief 2: Rules tab content implementation
+- Brief 3: Additional property badges
+
+---
+
 ## Session 10 — 2026-02-21 — Drag-to-Reorder Phase 3: Undo/Redo, Diff Pipeline & MCP
 
 **Status:** complete
@@ -79,95 +248,3 @@ Each session adds one entry. Keep entries high-signal and readable.
 ### Follow-ups
 - None — drag-to-reorder feature complete (Phases 1-3)
 
----
-
-## Session 9 — 2026-02-21 — Drag-to-Reorder Phase 2: Core Drag Interaction
-
-**Status:** complete
-**Decisions applied:** 0001, 0002, 0008
-**Commits:** pending (included in Phase 3 commit)
-
-### Goal
-- Build `ReorderEditor` and `OrderPreview` classes with Figma-style drag-to-reorder
-- Bounding-rect ghost, gap-center drop-zone indicators, FLIP-animated sibling displacement
-- DOM `insertBefore`/`moveBefore` on commit, history entry for undo stack
-
-### Plan Summary
-- Create `OrderPreview` class — standalone multi-element inline style tracker for CSS `order`, `transform`, `transition`
-- Build `ReorderEditor` class with gap-center drop-zone algorithm, pointer-capture drag, FLIP animation (throttled to midpoint crossings), guarded `moveBefore`/`insertBefore` commit
-- Add `buildReorder()` method to `DiffBuilder` for producing `VisualDiff` with `reorderChanges`
-- Wire into `index.ts` — toolbar tool selection, 7 cleanup chains, scroll refresh, Escape ladder, commit callback helper
-
-### Changes Made
-- `packages/chrome-extension/src/content/editing/order-preview.ts` — **New** (~60 lines): standalone multi-element inline style tracker with `begin()`/`apply()`/`revertAll()`
-- `packages/chrome-extension/src/content/editing/reorder.ts` — Added `ReorderEditor` class (~380 lines) + `ReorderCommitCallback` type: gap-center drop zones (N+1 for N children), bounding-rect ghost (indigo, not cloneNode), FLIP animation via `OrderPreview`, public `cancelDrag()` with rAF cancellation + pointer release, `moveBefore`/`insertBefore` guarded commit, row/column/reverse support
-- `packages/chrome-extension/src/content/batching/diff-builder.ts` — Added `buildReorder(elementInfo, reorderChange)` method producing `VisualDiff` with `reorderChanges` field, imported `ReorderChange` type
-- `packages/chrome-extension/src/content/index.ts` — Wired `ReorderEditor`: `makeReorderCommit()` helper (builds diff + history entry + re-renders), toolbar tool select, 7 cleanup chains (onSelect, onDeselect, onToolSelect, onToggle, onCursorModeChange, enterMultiSelectMode, deactivate), scroll rAF refresh, Escape ladder cancel, toolbar move reposition, onClose callback, grid-aware `containerDirection`
-
-### Verification (Gates Evidence)
-- Commit gates: A1 pass (0001/0002/0008 followed), A2 pass (plan documented, 4 files), A3 pass (`npm run build` → content.js 322.5kb), A4 pass (no secrets), A5 pass (Critic cohesion: 3 criticals + 2 warnings found and fixed, re-run clean — 0 critical, 0 warning)
-- Push gates: B1 pending, B2 pending, B3 pending
-
-### Failed Attempts (Brief)
-- Cohesion review found FLIP `rAF` race: direct `child.style` writes bypassed `OrderPreview`, leaving stale transforms if Escape fired mid-animation. Fixed by routing all writes through `orderPreview.apply()` and tracking rAF IDs.
-- Cohesion review found `enterMultiSelectMode` missing `reorderEditor?.cleanup()`. Fixed.
-- Cohesion review found `cancelDrag` was private but needed by Escape handler; also missing pointer capture release and cursor reset. Fixed by making public and adding release logic.
-- Cohesion review found `containerDirection` used `flexDirection` for grid containers (returns empty string). Fixed with `display.includes('grid')` branch reading `gridAutoFlow`.
-
-### Known Issues Logged
-- None
-
-### Follow-ups
-- Phase 3: implement reorder undo/redo/reset (replace console.warn stubs in history.ts)
-- Phase 3: wire diff builder + queue for proper reorder diff pipeline
-
----
-
-## Session 8 — 2026-02-21 — Drag-to-Reorder Phase 1: Data Contract, Guards & Toolbar
-
-**Status:** complete
-**Decisions applied:** 0001, 0002, 0004
-**Commits:** 63c9fca — feat: add drag-to-reorder Phase 1 — data contract, guards & toolbar
-
-### Goal
-- Establish type-level foundation for drag-to-reorder feature (no drag logic)
-- Add `ReorderChange` to shared data contract
-- Refactor `HistoryEntry` to discriminated union
-- Add block-reason guard, toolbar button, and boundary expansion documentation
-
-### Plan Summary
-- Add `ReorderChange` interface + `reorderChanges` field to `VisualDiff` in shared package
-- Add `'reorder'` to `EditMode` union type
-- Add reorder color (indigo) to `HANDLE_COLORS` + `DROP_INDICATOR` design tokens
-- Create `getReorderBlockReason()` guard (checks flex/grid parent, wrap, sibling count)
-- Add 6-dot grip icon + label + tool order entry to toolbar
-- Wire block-reason into disabled tools map + stub mode branch in index.ts
-- Refactor `HistoryEntry` from optional-field pattern to discriminated union (`css | removal | reorder`)
-- Document boundary expansion for DOM node relocation in `boundaries.md`
-
-### Changes Made
-- `packages/shared/src/diff.ts` — Added `ReorderChange` interface (type, fromIndex, toIndex, siblingSelectors, containerSelector, containerDirection) + `reorderChanges?: readonly ReorderChange[]` on `VisualDiff`
-- `packages/shared/src/index.ts` — Exported `ReorderChange` from barrel
-- `packages/chrome-extension/src/shared/types.ts` — Added `'reorder'` to `EditMode` union
-- `packages/chrome-extension/src/shared/constants.ts` — Added `reorder: '#6366f1'` to `HANDLE_COLORS`, added `DROP_INDICATOR` constant (color, activeColor, thickness, activeThickness)
-- `packages/chrome-extension/src/content/editing/reorder.ts` — **New**: `getReorderBlockReason(element)` — returns block reason string or null (checks parent exists, parent is flex/grid, flex-wrap is nowrap, >1 sibling)
-- `packages/chrome-extension/src/content/toolbar.ts` — Added 6-dot grip SVG icon, `reorder: 'Reorder'` label, `'reorder'` in `TOOL_ORDER` after `'move'`
-- `packages/chrome-extension/src/content/index.ts` — Imported `getReorderBlockReason`, wired into disabled tools in `onSelect`, added stub `else if (selectedMode === 'reorder')` branch, refactored `commitEdit` to construct typed `CssHistoryEntry` or `RemovalHistoryEntry`
-- `packages/chrome-extension/src/content/history.ts` — Full refactor: discriminated union (`CssHistoryEntry | RemovalHistoryEntry | ReorderHistoryEntry`), `switch (entry.type)` dispatch in `undo()`/`redo()`/`resetAll()`, `console.warn` stubs for reorder cases
-- `docs/spec/compiled/v1/boundaries.md` — Added "Boundary Expansions" section documenting `insertBefore`/`moveBefore` permission for same-parent reorder
-
-### Verification (Gates Evidence)
-- Commit gates: A1 pass (decisions 0001/0002/0004 followed), A2 pass (plan existed, 9 files), A3 pass (`npx tsc --noEmit` → 0 errors), A4 pass (no secrets, feature branch), A5 pass (Critic cohesion review: 2 warnings found and fixed, re-verified clean)
-- Push gates: B1 pending, B2 pending, B3 pending
-
-### Failed Attempts (Brief)
-- TypeScript error after adding `'reorder'` to `EditMode` — `TOOL_LABELS` (Record<EditMode, string>) missing new key. Fixed by adding label + tool order entry.
-- Cohesion review found `throw new Error(...)` in reorder undo/redo/reset stubs would leave extension unrecoverable (callers have no try/catch). Fixed by replacing with `console.warn` + `break`.
-- Cohesion review found phase label mismatch ("Phase 3" in history.ts vs "Phase 2" in reorder.ts). Fixed by aligning to consistent "Phase 1/2/3" references.
-
-### Known Issues Logged
-- None
-
-### Follow-ups
-- Phase 2: implement drag interaction logic in reorder.ts
-- Phase 3: implement reorder undo/redo/reset (replace console.warn stubs in history.ts)
