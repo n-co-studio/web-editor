@@ -75,6 +75,7 @@ let measureOverlay: MeasureOverlay | null = null;
 let measureRafId: number | null = null;
 let devtoolsUserClosed = false;
 let devtoolsOpenBeforeCollapse = false;
+let gridVisibleBeforeCollapse = false;
 let multiSelect: MultiSelectManager | null = null;
 let multiSelectToolbar: MultiSelectToolbar | null = null;
 let multiSelectClickHandler: ((e: MouseEvent) => void) | null = null;
@@ -438,41 +439,22 @@ async function activate(): Promise<void> {
     devtoolsUserClosed = true;
   });
 
-  // Wire toolbar toggle → hide/show tool mini-panels + bottom DevTools panel
-  toolbar.onToggle((expanded) => {
-    if (!expanded) {
-      // Save DevTools state before collapsing
+  // Wire collapse → hide/restore all overlay UI when toolbar is collapsed/expanded.
+  toolbar.onCollapse((collapsed) => {
+    if (collapsed) {
+      // Save DevTools state before hiding
       devtoolsOpenBeforeCollapse = devtoolsPanel!.isOpen();
       if (devtoolsOpenBeforeCollapse) {
         devtoolsPanel!.hide();
         toolbar!.setInspectorOpen('devtools', false);
       }
-      typographyEditor!.cleanup();
-      colorEditor!.cleanup();
-      dimensionsEditor!.cleanup();
-      spacingEditor!.cleanup();
-      positionEditor!.cleanup();
-      moveEditor!.cleanup();
-      reorderEditor!.cleanup();
-      notesEditor!.cleanup();
-      gridSettingsPanel!.cleanup();
-      multiSelectToolbar!.cleanup();
-      toolbar!.setNotesOpen(false);
-      // Keep handles and overlay visible — only UI chrome hides
-    } else {
-      // Restore DevTools if it was open before collapse and user hasn't manually closed it
-      if (devtoolsOpenBeforeCollapse && !devtoolsUserClosed) {
-        const el = selection?.getSelectedElement() ?? undefined;
-        const info = el ? buildElementInfo(el) : undefined;
-        devtoolsPanel!.show(el, info);
-        toolbar!.setInspectorOpen('devtools', true);
-      }
-    }
-  });
 
-  // Wire cursor mode → switch between DOM inspection and page browsing
-  toolbar.onCursorModeChange((cursorMode) => {
-    if (cursorMode === 'page') {
+      // Save grid overlay state
+      gridVisibleBeforeCollapse = gridOverlay!.isVisible();
+      if (gridVisibleBeforeCollapse) {
+        gridOverlay!.hide();
+      }
+
       // Pause inspection — let user interact with the page normally
       hover!.disable();
       selection!.hideHighlight();
@@ -486,6 +468,7 @@ async function activate(): Promise<void> {
       reorderEditor!.cleanup();
       notesEditor!.cleanup();
       gridSettingsPanel!.cleanup();
+      multiSelectToolbar!.cleanup();
       toolbar!.setNotesOpen(false);
       if (reviewPanel!.isOpen()) {
         reviewPanel!.hide();
@@ -502,6 +485,20 @@ async function activate(): Promise<void> {
       document.body.style.cursor = 'crosshair';
       hover!.enable();
       selection!.restoreHighlight();
+
+      // Restore DevTools if it was open before page mode
+      if (devtoolsOpenBeforeCollapse && !devtoolsUserClosed) {
+        const el = selection?.getSelectedElement() ?? undefined;
+        const info = el ? buildElementInfo(el) : undefined;
+        devtoolsPanel!.show(el, info);
+        toolbar!.setInspectorOpen('devtools', true);
+      }
+
+      // Restore grid overlay if it was visible
+      if (gridVisibleBeforeCollapse) {
+        gridOverlay!.show();
+        toolbar!.setGridEnabled(true);
+      }
     }
   });
 
@@ -837,6 +834,7 @@ function deactivate(): void {
   // Reset state
   devtoolsUserClosed = false;
   devtoolsOpenBeforeCollapse = false;
+  gridVisibleBeforeCollapse = false;
   mode = 'inactive';
   wsClient = null;
   hover = null;
