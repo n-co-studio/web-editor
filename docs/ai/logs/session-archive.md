@@ -6,6 +6,43 @@ This file is not read during normal sessions. Referenced for deep investigation 
 
 ---
 
+## Session 12 — 2026-02-21 — CSS Rules Display & Property Toggle
+
+**Status:** complete
+**Decisions applied:** 0001, 0002, 0008
+**Commits:** pending
+
+### Goal
+- Build CSS rule matching engine with cache and graceful cross-origin degradation
+- Activate Rules tab with specificity-ordered authored declarations
+- Add property toggle checkboxes for cascade exploration
+
+### Changes Made
+- 10 files: css-types.ts, specificity.ts, css-rules.ts, matched-rules-cache.ts, toggle-manager.ts, rules-section.ts, devtools-panel.ts, properties-pane.ts, css-groups-section.ts, inline-editor.ts
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass, A2 pass, A3 pass, A4 pass, A5 pass
+
+---
+
+## Session 11 — 2026-02-21 — Properties Panel Decomposition & Foundation
+
+**Status:** complete
+**Decisions applied:** 0001, 0002, 0008
+**Commits:** pending
+
+### Goal
+- Decompose monolithic ~1530-line `DevToolsPanel` into composable pane modules
+- Introduce `ComputedStyleSnapshot` for batched style reads
+
+### Changes Made
+- 10 files: dom-utils.ts, 6 new pane modules, devtools-panel.ts rewrite, product.md, boundaries.md
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass, A2 pass, A3 pass, A4 pass, A5 pass
+
+---
+
 ## Session 10 — 2026-02-21 — Drag-to-Reorder Phase 3: Undo/Redo, Diff Pipeline & MCP
 
 **Status:** complete
