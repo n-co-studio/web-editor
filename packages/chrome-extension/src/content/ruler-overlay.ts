@@ -15,6 +15,7 @@ import type { GridSettings } from './grid-settings';
 interface GuideData {
   readonly id: string;
   readonly axis: 'x' | 'y';
+  /** For axis='x': viewport X coordinate. For axis='y': page Y coordinate. */
   position: number;
 }
 
@@ -22,6 +23,12 @@ interface GuideDOM {
   line: HTMLDivElement;
   hitStrip: HTMLDivElement;
   label: HTMLDivElement;
+}
+
+interface EdgeEntry {
+  position: number;
+  rect: DOMRect;
+  side: 'top' | 'bottom' | 'left' | 'right';
 }
 
 // ---------------------------------------------------------------------------
@@ -32,6 +39,10 @@ const RULER_THICKNESS = 16;
 const GUIDE_HIT_WIDTH = 6;
 const STORAGE_PREFIX = 'fe-guides-';
 const TICK_FALLBACK_SPACING = 8;
+
+const TICK_COLOR = 'rgba(255, 255, 255, 0.35)';
+const LABEL_COLOR = 'rgba(255, 255, 255, 0.6)';
+const LABEL_FONT = '8px ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace';
 
 // ---------------------------------------------------------------------------
 // RulerOverlay
@@ -44,8 +55,12 @@ export class RulerOverlay {
   // DOM
   private topRuler: HTMLDivElement | null = null;
   private leftRuler: HTMLDivElement | null = null;
+  private topCanvas: HTMLCanvasElement | null = null;
+  private leftCanvas: HTMLCanvasElement | null = null;
   private cursorLabel: HTMLDivElement | null = null;
   private inProgressLine: HTMLDivElement | null = null;
+  private edgeHighlight: HTMLDivElement | null = null;
+  private resizeObserver: ResizeObserver | null = null;
 
   // Guides
   private guides: GuideData[] = [];
@@ -57,7 +72,7 @@ export class RulerOverlay {
   private dragAxis: 'x' | 'y' | null = null;
   private isNewGuideDrag = false;
   private dragRafId: number | null = null;
-  private edgeCache: number[] = [];
+  private edgeCache: EdgeEntry[] = [];
   private edgeCacheAxis: 'x' | 'y' | null = null;
 
   // Callbacks
@@ -70,6 +85,7 @@ export class RulerOverlay {
   constructor(
     private readonly shadow: ShadowRoot,
     private readonly getGridSettings: () => GridSettings,
+    private readonly isGridVisible: () => boolean,
   ) {}
 
   // -----------------------------------------------------------------------
@@ -83,6 +99,13 @@ export class RulerOverlay {
     this.renderRulers();
     this.renderAllGuides();
     this.attachKeyboard();
+
+    this.resizeObserver = new ResizeObserver(() => {
+      this.drawTopRuler();
+      this.drawLeftRuler();
+    });
+    if (this.topRuler) this.resizeObserver.observe(this.topRuler);
+    if (this.leftRuler) this.resizeObserver.observe(this.leftRuler);
   }
 
   hide(): void {
@@ -92,6 +115,8 @@ export class RulerOverlay {
     this.removeRulers();
     this.removeAllGuideElements();
     this.detachKeyboard();
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
   }
 
   isVisible(): boolean {
@@ -118,16 +143,20 @@ export class RulerOverlay {
     const y: number[] = [];
     for (const g of this.guides) {
       if (g.axis === 'x') x.push(g.position);
-      else y.push(g.position);
+      else y.push(g.position - window.scrollY); // page → viewport
     }
     return { x, y };
   }
 
   refreshGuides(): void {
     if (!this.visible) return;
-    // Guide lines are position: fixed — no repositioning needed on scroll.
-    // But ruler tick marks may need to update if grid settings changed.
-    this.updateRulerTicks();
+    // Redraw ruler canvases (left ruler tracks scroll)
+    this.drawTopRuler();
+    this.drawLeftRuler();
+    // Reposition horizontal guides (they track page scroll)
+    for (const guide of this.guides) {
+      if (guide.axis === 'y') this.updateGuideElement(guide);
+    }
   }
 
   setHoverSuppressor(suppress: () => void, restore: () => void): void {
@@ -136,12 +165,19 @@ export class RulerOverlay {
   }
 
   // -----------------------------------------------------------------------
-  // Ruler bars
+  // Coordinate helpers
+  // -----------------------------------------------------------------------
+
+  /** Convert guide position to viewport coordinate for CSS rendering. */
+  private viewportPos(guide: GuideData): number {
+    return guide.axis === 'y' ? guide.position - window.scrollY : guide.position;
+  }
+
+  // -----------------------------------------------------------------------
+  // Ruler bars (canvas-based)
   // -----------------------------------------------------------------------
 
   private renderRulers(): void {
-    const tickSpacing = this.getTickSpacing();
-
     // Top ruler (horizontal)
     this.topRuler = createElement('div', { 'aria-hidden': 'true' }, {
       position: 'fixed',
@@ -153,11 +189,15 @@ export class RulerOverlay {
       borderBottom: `1px solid ${OVERLAY.border}`,
       zIndex: RULER_BAR_Z,
       pointerEvents: 'auto',
-      cursor: 'col-resize',
+      cursor: 'row-resize',
       overflow: 'hidden',
-      backgroundImage: this.buildTickGradient('vertical', tickSpacing),
-      backgroundSize: `${tickSpacing}px 100%`,
     });
+    this.topCanvas = document.createElement('canvas');
+    Object.assign(this.topCanvas.style, {
+      position: 'absolute', top: '0', left: '0',
+      width: '100%', height: '100%', pointerEvents: 'none',
+    });
+    this.topRuler.appendChild(this.topCanvas);
     this.shadow.appendChild(this.topRuler);
 
     // Left ruler (vertical)
@@ -171,11 +211,15 @@ export class RulerOverlay {
       borderRight: `1px solid ${OVERLAY.border}`,
       zIndex: RULER_BAR_Z,
       pointerEvents: 'auto',
-      cursor: 'row-resize',
+      cursor: 'col-resize',
       overflow: 'hidden',
-      backgroundImage: this.buildTickGradient('horizontal', tickSpacing),
-      backgroundSize: `100% ${tickSpacing}px`,
     });
+    this.leftCanvas = document.createElement('canvas');
+    Object.assign(this.leftCanvas.style, {
+      position: 'absolute', top: '0', left: '0',
+      width: '100%', height: '100%', pointerEvents: 'none',
+    });
+    this.leftRuler.appendChild(this.leftCanvas);
     this.shadow.appendChild(this.leftRuler);
 
     // Corner block (dead zone)
@@ -192,7 +236,6 @@ export class RulerOverlay {
       pointerEvents: 'auto',
     });
     this.shadow.appendChild(corner);
-    // Store corner on topRuler for cleanup
     (this.topRuler as any).__corner = corner;
 
     // Cursor coordinate label (follows mouse on ruler bars)
@@ -213,9 +256,13 @@ export class RulerOverlay {
     });
     this.shadow.appendChild(this.cursorLabel);
 
+    // Draw initial tick marks
+    this.drawTopRuler();
+    this.drawLeftRuler();
+
     // Attach ruler interactions
-    this.attachRulerEvents(this.topRuler, 'x');
-    this.attachRulerEvents(this.leftRuler, 'y');
+    this.attachRulerEvents(this.topRuler, 'y');
+    this.attachRulerEvents(this.leftRuler, 'x');
   }
 
   private removeRulers(): void {
@@ -225,21 +272,145 @@ export class RulerOverlay {
     this.leftRuler?.remove();
     this.cursorLabel?.remove();
     this.inProgressLine?.remove();
+    this.edgeHighlight?.remove();
     this.topRuler = null;
     this.leftRuler = null;
+    this.topCanvas = null;
+    this.leftCanvas = null;
     this.cursorLabel = null;
     this.inProgressLine = null;
+    this.edgeHighlight = null;
   }
 
-  private updateRulerTicks(): void {
-    const tickSpacing = this.getTickSpacing();
-    if (this.topRuler) {
-      this.topRuler.style.backgroundImage = this.buildTickGradient('vertical', tickSpacing);
-      this.topRuler.style.backgroundSize = `${tickSpacing}px 100%`;
+  // -----------------------------------------------------------------------
+  // Canvas ruler drawing
+  // -----------------------------------------------------------------------
+
+  private drawTopRuler(): void {
+    if (!this.topCanvas || !this.topRuler) return;
+    const dpr = window.devicePixelRatio || 1;
+    const cssWidth = this.topRuler.clientWidth;
+    const cssHeight = RULER_THICKNESS;
+
+    this.topCanvas.width = Math.round(cssWidth * dpr);
+    this.topCanvas.height = Math.round(cssHeight * dpr);
+
+    const ctx = this.topCanvas.getContext('2d');
+    if (!ctx) return;
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+    // Viewport X range: startX..endX
+    const startX = RULER_THICKNESS;
+    const endX = startX + cssWidth;
+
+    // 1px base ticks — thin line along bottom
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.fillRect(0, cssHeight - 1, cssWidth, 1);
+
+    ctx.fillStyle = TICK_COLOR;
+
+    // 5px ticks (3px tall)
+    const first5 = Math.ceil(startX / 5) * 5;
+    for (let vx = first5; vx <= endX; vx += 5) {
+      if (vx % 10 === 0) continue; // drawn by 10px pass
+      ctx.fillRect(vx - startX, cssHeight - 3, 1, 3);
     }
-    if (this.leftRuler) {
-      this.leftRuler.style.backgroundImage = this.buildTickGradient('horizontal', tickSpacing);
-      this.leftRuler.style.backgroundSize = `100% ${tickSpacing}px`;
+
+    // 10px ticks (5px tall)
+    const first10 = Math.ceil(startX / 10) * 10;
+    for (let vx = first10; vx <= endX; vx += 10) {
+      if (vx % 50 === 0) continue;
+      ctx.fillRect(vx - startX, cssHeight - 5, 1, 5);
+    }
+
+    // 50px ticks (8px tall)
+    const first50 = Math.ceil(startX / 50) * 50;
+    for (let vx = first50; vx <= endX; vx += 50) {
+      if (vx % 100 === 0) continue;
+      ctx.fillRect(vx - startX, cssHeight - 8, 1, 8);
+    }
+
+    // 100px ticks (full height) + labels
+    const first100 = Math.ceil(startX / 100) * 100;
+    for (let vx = first100; vx <= endX; vx += 100) {
+      const cx = vx - startX;
+      ctx.fillRect(cx, 0, 1, cssHeight);
+      if (vx > 0) {
+        ctx.fillStyle = LABEL_COLOR;
+        ctx.font = LABEL_FONT;
+        ctx.textAlign = 'left';
+        ctx.fillText(`${vx}`, cx + 2, 9);
+        ctx.fillStyle = TICK_COLOR;
+      }
+    }
+  }
+
+  private drawLeftRuler(): void {
+    if (!this.leftCanvas || !this.leftRuler) return;
+    const dpr = window.devicePixelRatio || 1;
+    const cssWidth = RULER_THICKNESS;
+    const cssHeight = this.leftRuler.clientHeight;
+
+    this.leftCanvas.width = Math.round(cssWidth * dpr);
+    this.leftCanvas.height = Math.round(cssHeight * dpr);
+
+    const ctx = this.leftCanvas.getContext('2d');
+    if (!ctx) return;
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+    // Page Y range visible in the ruler
+    const scrollY = window.scrollY;
+    const startPageY = RULER_THICKNESS + scrollY;
+    const endPageY = startPageY + cssHeight;
+
+    // 1px base ticks — thin line along right edge
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.fillRect(cssWidth - 1, 0, 1, cssHeight);
+
+    ctx.fillStyle = TICK_COLOR;
+
+    // 5px ticks (3px wide)
+    const first5 = Math.ceil(startPageY / 5) * 5;
+    for (let py = first5; py <= endPageY; py += 5) {
+      if (py % 10 === 0) continue;
+      const cy = py - startPageY;
+      ctx.fillRect(cssWidth - 3, cy, 3, 1);
+    }
+
+    // 10px ticks (5px wide)
+    const first10 = Math.ceil(startPageY / 10) * 10;
+    for (let py = first10; py <= endPageY; py += 10) {
+      if (py % 50 === 0) continue;
+      const cy = py - startPageY;
+      ctx.fillRect(cssWidth - 5, cy, 5, 1);
+    }
+
+    // 50px ticks (8px wide)
+    const first50 = Math.ceil(startPageY / 50) * 50;
+    for (let py = first50; py <= endPageY; py += 50) {
+      if (py % 100 === 0) continue;
+      const cy = py - startPageY;
+      ctx.fillRect(cssWidth - 8, cy, 8, 1);
+    }
+
+    // 100px ticks (full width) + labels
+    const first100 = Math.ceil(startPageY / 100) * 100;
+    for (let py = first100; py <= endPageY; py += 100) {
+      const cy = py - startPageY;
+      ctx.fillRect(0, cy, cssWidth, 1);
+      if (py > 0) {
+        ctx.save();
+        ctx.fillStyle = LABEL_COLOR;
+        ctx.font = LABEL_FONT;
+        ctx.translate(9, cy + 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.textAlign = 'right';
+        ctx.fillText(`${py}`, 0, 0);
+        ctx.restore();
+        ctx.fillStyle = TICK_COLOR;
+      }
     }
   }
 
@@ -250,12 +421,6 @@ export class RulerOverlay {
     } catch {
       return TICK_FALLBACK_SPACING;
     }
-  }
-
-  private buildTickGradient(direction: 'horizontal' | 'vertical', spacing: number): string {
-    const dir = direction === 'horizontal' ? 'to bottom' : 'to right';
-    const color = `rgba(255, 255, 255, 0.2)`;
-    return `repeating-linear-gradient(${dir}, ${color} 0px, ${color} 1px, transparent 1px, transparent ${spacing}px)`;
   }
 
   // -----------------------------------------------------------------------
@@ -293,8 +458,8 @@ export class RulerOverlay {
       // Re-enable pointer events on the ruler itself
       ruler.style.pointerEvents = 'auto';
 
-      // Create a new guide at the current position
-      const pos = axis === 'x' ? e.clientX : e.clientY;
+      // Create a new guide at the current position (page coords for Y)
+      const pos = axis === 'x' ? e.clientX : e.clientY + window.scrollY;
       const guide = this.addGuide(axis, pos);
       this.activeGuideId = guide.id;
 
@@ -307,7 +472,7 @@ export class RulerOverlay {
     const onPointerMove = (e: PointerEvent) => {
       if (!ruler.hasPointerCapture(e.pointerId)) return;
 
-      const pos = axis === 'x' ? e.clientX : e.clientY;
+      const pos = axis === 'x' ? e.clientX : e.clientY + window.scrollY;
       const snappedPos = this.snapPosition(axis, pos);
 
       // Update guide position
@@ -322,7 +487,7 @@ export class RulerOverlay {
       if (!ruler.hasPointerCapture(e.pointerId)) return;
       ruler.releasePointerCapture(e.pointerId);
 
-      const pos = axis === 'x' ? e.clientX : e.clientY;
+      const pos = axis === 'x' ? e.clientX : e.clientY + window.scrollY;
 
       // If released back inside ruler bar area, discard the guide
       const insideRuler = this.isInsideRuler(axis, e.clientX, e.clientY);
@@ -365,13 +530,14 @@ export class RulerOverlay {
     this.removeGuideElement(guide.id);
 
     const isHorizontal = guide.axis === 'y';
+    const vp = this.viewportPos(guide);
 
     // Guide line (visual, 1px)
     const line = createElement('div', { 'data-guide-id': guide.id }, {
       position: 'fixed',
       ...(isHorizontal
-        ? { top: `${guide.position}px`, left: '0', width: '100vw', height: '1px' }
-        : { top: '0', left: `${guide.position}px`, width: '1px', height: '100vh' }),
+        ? { top: `${vp}px`, left: '0', width: '100vw', height: '1px' }
+        : { top: '0', left: `${vp}px`, width: '1px', height: '100vh' }),
       background: OVERLAY.guide,
       zIndex: GUIDE_LINE_Z,
       pointerEvents: 'none',
@@ -382,7 +548,7 @@ export class RulerOverlay {
       position: 'fixed',
       ...(isHorizontal
         ? {
-            top: `${guide.position - GUIDE_HIT_WIDTH / 2}px`,
+            top: `${vp - GUIDE_HIT_WIDTH / 2}px`,
             left: '0',
             width: '100vw',
             height: `${GUIDE_HIT_WIDTH}px`,
@@ -390,7 +556,7 @@ export class RulerOverlay {
           }
         : {
             top: '0',
-            left: `${guide.position - GUIDE_HIT_WIDTH / 2}px`,
+            left: `${vp - GUIDE_HIT_WIDTH / 2}px`,
             width: `${GUIDE_HIT_WIDTH}px`,
             height: '100vh',
             cursor: 'col-resize',
@@ -404,8 +570,8 @@ export class RulerOverlay {
     const label = createElement('div', {}, {
       position: 'fixed',
       ...(isHorizontal
-        ? { top: `${guide.position - 7}px`, left: '1px' }
-        : { top: '1px', left: `${guide.position + 3}px` }),
+        ? { top: `${vp - 7}px`, left: '1px' }
+        : { top: '1px', left: `${vp + 3}px` }),
       background: OVERLAY.guide,
       color: '#fff',
       fontFamily: OVERLAY.monoFamily,
@@ -435,18 +601,18 @@ export class RulerOverlay {
     if (!dom) return;
 
     const isHorizontal = guide.axis === 'y';
-    const pos = guide.position;
+    const vp = this.viewportPos(guide);
 
     if (isHorizontal) {
-      dom.line.style.top = `${pos}px`;
-      dom.hitStrip.style.top = `${pos - GUIDE_HIT_WIDTH / 2}px`;
-      dom.label.style.top = `${pos - 7}px`;
+      dom.line.style.top = `${vp}px`;
+      dom.hitStrip.style.top = `${vp - GUIDE_HIT_WIDTH / 2}px`;
+      dom.label.style.top = `${vp - 7}px`;
     } else {
-      dom.line.style.left = `${pos}px`;
-      dom.hitStrip.style.left = `${pos - GUIDE_HIT_WIDTH / 2}px`;
-      dom.label.style.left = `${pos + 3}px`;
+      dom.line.style.left = `${vp}px`;
+      dom.hitStrip.style.left = `${vp - GUIDE_HIT_WIDTH / 2}px`;
+      dom.label.style.left = `${vp + 3}px`;
     }
-    dom.label.textContent = `${Math.round(pos)}`;
+    dom.label.textContent = `${Math.round(guide.position)}`;
   }
 
   private removeGuideElement(id: string): void {
@@ -490,7 +656,7 @@ export class RulerOverlay {
     const onPointerMove = (e: PointerEvent) => {
       if (!hitStrip.hasPointerCapture(e.pointerId)) return;
 
-      const pos = guide.axis === 'x' ? e.clientX : e.clientY;
+      const pos = guide.axis === 'x' ? e.clientX : e.clientY + window.scrollY;
       const snappedPos = this.snapPosition(guide.axis, pos);
       guide.position = snappedPos;
       this.updateGuideElement(guide);
@@ -505,7 +671,7 @@ export class RulerOverlay {
       if (insideRuler) {
         this.removeGuide(guide.id);
       } else {
-        const pos = guide.axis === 'x' ? e.clientX : e.clientY;
+        const pos = guide.axis === 'x' ? e.clientX : e.clientY + window.scrollY;
         guide.position = this.snapPosition(guide.axis, pos);
         this.updateGuideElement(guide);
       }
@@ -561,30 +727,40 @@ export class RulerOverlay {
   }
 
   // -----------------------------------------------------------------------
-  // Snap logic
+  // Snap logic — mutually exclusive: grid OR edge
   // -----------------------------------------------------------------------
 
   private snapPosition(axis: 'x' | 'y', rawPos: number): number {
     let best = rawPos;
     let bestDist = Infinity;
 
-    // Snap to grid lines
-    const gridSpacing = this.getTickSpacing();
-    if (gridSpacing > 0) {
-      const nearest = Math.round(rawPos / gridSpacing) * gridSpacing;
-      const dist = Math.abs(rawPos - nearest);
-      if (dist <= GUIDE_SNAP_THRESHOLD && dist < bestDist) {
-        best = nearest;
-        bestDist = dist;
+    if (this.isGridVisible()) {
+      // Grid mode: snap to grid lines ONLY
+      if (gridSpacing >= 4) {
+        const nearest = Math.round(rawPos / gridSpacing) * gridSpacing;
+        const dist = Math.abs(rawPos - nearest);
+        if (dist <= GUIDE_SNAP_THRESHOLD) {
+          best = nearest;
+          bestDist = dist;
+        }
       }
-    }
+      this.clearEdgeHighlight();
+    } else {
+      // Edge mode: snap to DOM element edges ONLY + highlight
+      let snappedEntry: EdgeEntry | null = null;
+      for (const entry of this.edgeCache) {
+        const dist = Math.abs(rawPos - entry.position);
+        if (dist <= GUIDE_SNAP_THRESHOLD && dist < bestDist) {
+          best = entry.position;
+          bestDist = dist;
+          snappedEntry = entry;
+        }
+      }
 
-    // Snap to DOM element edges (pre-collected)
-    for (const edge of this.edgeCache) {
-      const dist = Math.abs(rawPos - edge);
-      if (dist <= GUIDE_SNAP_THRESHOLD && dist < bestDist) {
-        best = edge;
-        bestDist = dist;
+      if (snappedEntry) {
+        this.showEdgeHighlight(snappedEntry);
+      } else {
+        this.clearEdgeHighlight();
       }
     }
 
@@ -595,8 +771,10 @@ export class RulerOverlay {
     if (this.edgeCacheAxis === axis && this.edgeCache.length > 0) return;
 
     this.edgeCacheAxis = axis;
-    const edges = new Set<number>();
+    const entries: EdgeEntry[] = [];
+    const seen = new Set<string>();
     const shadowHost = this.shadow.host;
+    const scrollY = window.scrollY;
 
     const walker = document.createTreeWalker(
       document.body,
@@ -628,15 +806,64 @@ export class RulerOverlay {
       const el = walker.currentNode as Element;
       const rect = el.getBoundingClientRect();
       if (axis === 'x') {
-        edges.add(Math.round(rect.left));
-        edges.add(Math.round(rect.right));
+        const left = Math.round(rect.left);
+        const right = Math.round(rect.right);
+        const kl = `${left}-left`;
+        const kr = `${right}-right`;
+        if (!seen.has(kl)) { seen.add(kl); entries.push({ position: left, rect, side: 'left' }); }
+        if (!seen.has(kr)) { seen.add(kr); entries.push({ position: right, rect, side: 'right' }); }
       } else {
-        edges.add(Math.round(rect.top));
-        edges.add(Math.round(rect.bottom));
+        // Y-axis: store page coordinates
+        const top = Math.round(rect.top + scrollY);
+        const bottom = Math.round(rect.bottom + scrollY);
+        const kt = `${top}-top`;
+        const kb = `${bottom}-bottom`;
+        if (!seen.has(kt)) { seen.add(kt); entries.push({ position: top, rect, side: 'top' }); }
+        if (!seen.has(kb)) { seen.add(kb); entries.push({ position: bottom, rect, side: 'bottom' }); }
       }
     }
 
-    this.edgeCache = Array.from(edges);
+    this.edgeCache = entries;
+  }
+
+  // -----------------------------------------------------------------------
+  // Edge highlight
+  // -----------------------------------------------------------------------
+
+  private showEdgeHighlight(entry: EdgeEntry): void {
+    if (!this.edgeHighlight) {
+      this.edgeHighlight = createElement('div', { 'aria-hidden': 'true' }, {
+        position: 'fixed',
+        pointerEvents: 'none',
+        zIndex: GUIDE_LINE_Z,
+        background: OVERLAY.guide,
+        opacity: '0.5',
+      });
+      this.shadow.appendChild(this.edgeHighlight);
+    }
+
+    const rect = entry.rect;
+    if (entry.side === 'top' || entry.side === 'bottom') {
+      const y = entry.side === 'top' ? rect.top - 1 : rect.bottom - 1;
+      Object.assign(this.edgeHighlight.style, {
+        top: `${y}px`, left: `${rect.left}px`,
+        width: `${rect.width}px`, height: '3px',
+        display: 'block',
+      });
+    } else {
+      const x = entry.side === 'left' ? rect.left - 1 : rect.right - 1;
+      Object.assign(this.edgeHighlight.style, {
+        top: `${rect.top}px`, left: `${x}px`,
+        width: '3px', height: `${rect.height}px`,
+        display: 'block',
+      });
+    }
+  }
+
+  private clearEdgeHighlight(): void {
+    if (this.edgeHighlight) {
+      this.edgeHighlight.style.display = 'none';
+    }
   }
 
   // -----------------------------------------------------------------------
@@ -645,11 +872,11 @@ export class RulerOverlay {
 
   private isInsideRuler(axis: 'x' | 'y', clientX: number, clientY: number): boolean {
     if (axis === 'x') {
-      // Vertical guide — check if inside top ruler
-      return clientY <= RULER_THICKNESS;
-    } else {
-      // Horizontal guide — check if inside left ruler
+      // Vertical guide — created from left ruler, discard if back in left ruler
       return clientX <= RULER_THICKNESS;
+    } else {
+      // Horizontal guide — created from top ruler, discard if back in top ruler
+      return clientY <= RULER_THICKNESS;
     }
   }
 
@@ -669,6 +896,7 @@ export class RulerOverlay {
     this.inProgressLine?.remove();
     this.inProgressLine = null;
 
+    this.clearEdgeHighlight();
     this.restoreHover?.();
   }
 
@@ -681,15 +909,16 @@ export class RulerOverlay {
     this.cursorLabel.style.display = 'block';
 
     if (axis === 'x') {
+      // Left ruler — show page Y coordinate
+      const pageY = Math.round(e.clientY + window.scrollY);
+      this.cursorLabel.textContent = `${pageY}`;
+      this.cursorLabel.style.left = `${RULER_THICKNESS + 2}px`;
+      this.cursorLabel.style.top = `${e.clientY - 6}px`;
+    } else {
       // Top ruler — show X coordinate
       this.cursorLabel.textContent = `${Math.round(e.clientX)}`;
       this.cursorLabel.style.left = `${e.clientX + 4}px`;
       this.cursorLabel.style.top = `${RULER_THICKNESS + 2}px`;
-    } else {
-      // Left ruler — show Y coordinate
-      this.cursorLabel.textContent = `${Math.round(e.clientY)}`;
-      this.cursorLabel.style.left = `${RULER_THICKNESS + 2}px`;
-      this.cursorLabel.style.top = `${e.clientY - 6}px`;
     }
   }
 

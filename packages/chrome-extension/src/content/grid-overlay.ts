@@ -60,6 +60,12 @@ export class GridOverlay {
     return this.visible;
   }
 
+  /** Update background-position to track vertical scroll. */
+  refreshScroll(): void {
+    if (!this.visible || !this.container) return;
+    this.container.style.backgroundPositionY = `${-window.scrollY}px`;
+  }
+
   toggle(): boolean {
     if (this.visible) {
       this.hide();
@@ -166,6 +172,7 @@ export class GridOverlay {
 
     container.style.backgroundImage = gradients.join(', ');
     container.style.backgroundSize = sizes.join(', ');
+    container.style.backgroundPositionY = `${-window.scrollY}px`;
 
     // Label showing the grid spacing
     const label = createElement('div', {}, {
