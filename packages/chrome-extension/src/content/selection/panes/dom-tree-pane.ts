@@ -1,9 +1,11 @@
 import type { ElementInfo } from '@frontend-editor/shared';
 import { createElement, createText } from '../../../shared/ui-utils';
 import { OVERLAY } from '../../../shared/constants';
+import { createStyleSnapshot } from '../../../shared/dom-utils';
 
 type ElementSelectCallback = (element: Element) => void;
 type ElementHoverCallback = (element: Element | null) => void;
+type LayoutBadgeClickCallback = (element: Element, layout: string) => void;
 
 /**
  * DOM tree pane — top of the left column.
@@ -20,6 +22,7 @@ export class DomTreePane {
   private currentElement: Element | null = null;
   private elementSelectCb: ElementSelectCallback | null = null;
   private elementHoverCb: ElementHoverCallback | null = null;
+  private layoutBadgeClickCb: LayoutBadgeClickCallback | null = null;
 
   mount(container: HTMLDivElement): void {
     this.container = container;
@@ -57,6 +60,10 @@ export class DomTreePane {
 
   onElementHover(cb: ElementHoverCallback): void {
     this.elementHoverCb = cb;
+  }
+
+  onLayoutBadgeClick(cb: LayoutBadgeClickCallback): void {
+    this.layoutBadgeClickCb = cb;
   }
 
   // ---------------------------------------------------------------------------
@@ -199,6 +206,10 @@ export class DomTreePane {
       labelArea.appendChild(descEl);
     }
 
+    // Layout badge (flex/grid)
+    const layoutBadge = this.buildLayoutBadge(element);
+    if (layoutBadge) labelArea.appendChild(layoutBadge);
+
     labelArea.addEventListener('mouseenter', () => {
       if (!isSelected) row.style.background = 'rgba(255, 255, 255, 0.06)';
       this.elementHoverCb?.(element);
@@ -227,5 +238,33 @@ export class DomTreePane {
       if (cls.length <= 30) parts.push(`.${cls}`);
     }
     return parts.join('');
+  }
+
+  private buildLayoutBadge(element: Element): HTMLSpanElement | null {
+    const snapshot = createStyleSnapshot(element);
+    const display = snapshot.display;
+    let label: string | null = null;
+    if (display === 'flex' || display === 'inline-flex') label = 'flex';
+    else if (display === 'grid' || display === 'inline-grid') label = 'grid';
+    if (!label) return null;
+
+    const badge = createElement('span', {}, {
+      fontSize: '10px',
+      fontFamily: OVERLAY.monoFamily,
+      color: OVERLAY.textMuted,
+      background: 'rgba(255, 255, 255, 0.08)',
+      borderRadius: '3px',
+      padding: '0 4px',
+      lineHeight: '14px',
+      flexShrink: '0',
+      cursor: 'pointer',
+      pointerEvents: 'auto',
+    }) as HTMLSpanElement;
+    badge.textContent = label;
+    badge.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.layoutBadgeClickCb?.(element, label!);
+    });
+    return badge;
   }
 }

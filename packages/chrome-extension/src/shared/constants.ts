@@ -120,3 +120,20 @@ export const DROP_INDICATOR = {
   thickness: 2,
   activeThickness: 3,
 } as const;
+
+// Box model diagram colors (reuses zone overlay palette)
+export const BOX_MODEL = {
+  marginFill: 'rgba(251, 113, 133, 0.20)',
+  borderFill: 'rgba(255, 255, 255, 0.12)',
+  paddingFill: 'rgba(245, 158, 11, 0.20)',
+  contentFill: 'rgba(6, 182, 212, 0.20)',
+  marginText: '#fb7185',
+  borderText: '#a1a1aa',
+  paddingText: '#f59e0b',
+  contentText: '#06b6d4',
+} as const;
+
+// Panel height tier thresholds
+export type PanelSizeTier = 'compact' | 'standard' | 'full';
+export const PANEL_TIER_COMPACT_MAX = 180;
+export const PANEL_TIER_STANDARD_MAX = 300;

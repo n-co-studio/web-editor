@@ -3,6 +3,7 @@ import { createElement } from '../../../shared/ui-utils';
 import { OVERLAY } from '../../../shared/constants';
 import { getComputedProperty } from '../../../shared/dom-utils';
 import type { TokenStore } from '../../tokens/store';
+import { stepCssValue, getStepDelta } from './css-value-stepping';
 
 type SingleCommitCb = (property: string, fromValue: string, toValue: string, tokenName?: string) => void;
 type MultiCommitCb = (property: string, toValue: string, elements: Element[], tokenName?: string) => void;
@@ -10,6 +11,7 @@ type MultiCommitCb = (property: string, toValue: string, elements: Element[], to
 /**
  * Inline editor — replaces a value display with a token dropdown + freeform input.
  * Used by CssGroupsSection for both single-select and multi-select property editing.
+ * Supports keyboard value stepping: Arrow Up/Down ±1, Shift ±10, Alt ±0.1, Cmd/Ctrl ±100.
  */
 export class InlineEditor {
   constructor(private readonly tokenStore: TokenStore) {}
@@ -111,6 +113,23 @@ export class InlineEditor {
     }) as HTMLInputElement;
 
     freeform.addEventListener('keydown', (e) => {
+      // Keyboard value stepping (Arrow Up/Down with modifiers)
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        const delta = getStepDelta(e);
+        if (delta !== 0) {
+          const newValue = stepCssValue(freeform.value, delta);
+          if (newValue !== freeform.value) {
+            e.preventDefault();
+            e.stopPropagation();
+            freeform.value = newValue;
+            if (currentElement) {
+              (currentElement as HTMLElement).style.setProperty(property, newValue);
+            }
+          }
+        }
+        return;
+      }
+
       if (e.key === 'Enter') {
         e.preventDefault();
         const newValue = freeform.value.trim();
@@ -124,6 +143,10 @@ export class InlineEditor {
       }
       if (e.key === 'Escape') {
         e.preventDefault();
+        // Revert any stepped (live preview) changes
+        if (currentElement) {
+          (currentElement as HTMLElement).style.setProperty(property, currentValue);
+        }
         this.closeSingle(row, valueContainer, editor, property, currentElement);
       }
     });
@@ -177,6 +200,12 @@ export class InlineEditor {
       flex: '1',
       pointerEvents: 'auto',
     });
+
+    // Capture per-element original values for Escape revert
+    const originalValues = new Map<Element, string>();
+    for (const el of elements) {
+      originalValues.set(el, getComputedProperty(el, property));
+    }
 
     const tokens = this.tokenStore.getForProperty(property);
 
@@ -253,6 +282,23 @@ export class InlineEditor {
     }) as HTMLInputElement;
 
     freeform.addEventListener('keydown', (e) => {
+      // Keyboard value stepping (Arrow Up/Down with modifiers)
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        const delta = getStepDelta(e);
+        if (delta !== 0) {
+          const newValue = stepCssValue(freeform.value, delta);
+          if (newValue !== freeform.value) {
+            e.preventDefault();
+            e.stopPropagation();
+            freeform.value = newValue;
+            for (const el of elements) {
+              (el as HTMLElement).style.setProperty(property, newValue);
+            }
+          }
+        }
+        return;
+      }
+
       if (e.key === 'Enter') {
         e.preventDefault();
         const newValue = freeform.value.trim();
@@ -263,6 +309,10 @@ export class InlineEditor {
       }
       if (e.key === 'Escape') {
         e.preventDefault();
+        // Revert any stepped changes for all elements
+        for (const [el, origVal] of originalValues) {
+          (el as HTMLElement).style.setProperty(property, origVal);
+        }
         this.closeMulti(row, valueContainer, editor, property, elements);
       }
     });

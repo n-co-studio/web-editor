@@ -182,12 +182,24 @@ export interface ComputedStyleSnapshot {
   borderColor: string;
   borderWidth: string;
   borderStyle: string;
-  // Layout
+  // Layout — container
   display: string;
   flexDirection: string;
   justifyContent: string;
   alignItems: string;
+  flexWrap: string;
   gap: string;
+  gridTemplateColumns: string;
+  gridTemplateRows: string;
+  gridAutoFlow: string;
+  // Layout — child
+  alignSelf: string;
+  flexGrow: string;
+  flexShrink: string;
+  flexBasis: string;
+  order: string;
+  gridColumn: string;
+  gridRow: string;
   // Visibility
   opacity: string;
   overflow: string;
@@ -235,7 +247,18 @@ export function createStyleSnapshot(el: Element): ComputedStyleSnapshot {
     flexDirection: cs.getPropertyValue('flex-direction').trim(),
     justifyContent: cs.getPropertyValue('justify-content').trim(),
     alignItems: cs.getPropertyValue('align-items').trim(),
+    flexWrap: cs.getPropertyValue('flex-wrap').trim(),
     gap: cs.getPropertyValue('gap').trim(),
+    gridTemplateColumns: cs.getPropertyValue('grid-template-columns').trim(),
+    gridTemplateRows: cs.getPropertyValue('grid-template-rows').trim(),
+    gridAutoFlow: cs.getPropertyValue('grid-auto-flow').trim(),
+    alignSelf: cs.getPropertyValue('align-self').trim(),
+    flexGrow: cs.getPropertyValue('flex-grow').trim(),
+    flexShrink: cs.getPropertyValue('flex-shrink').trim(),
+    flexBasis: cs.getPropertyValue('flex-basis').trim(),
+    order: cs.getPropertyValue('order').trim(),
+    gridColumn: cs.getPropertyValue('grid-column').trim(),
+    gridRow: cs.getPropertyValue('grid-row').trim(),
     opacity: cs.getPropertyValue('opacity').trim(),
     overflow: cs.getPropertyValue('overflow').trim(),
     visibility: cs.getPropertyValue('visibility').trim(),
