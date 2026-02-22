@@ -736,6 +736,7 @@ export class RulerOverlay {
 
     if (this.isGridVisible()) {
       // Grid mode: snap to grid lines ONLY
+      const gridSpacing = this.getGridSettings().baseSpacing;
       if (gridSpacing >= 4) {
         const nearest = Math.round(rawPos / gridSpacing) * gridSpacing;
         const dist = Math.abs(rawPos - nearest);

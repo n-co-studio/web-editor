@@ -264,6 +264,7 @@ export class DevToolsPanel {
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
+      minHeight: '0',
       borderRight: `1px solid ${OVERLAY.border}`,
     });
     this.leftPaneEl = leftPane;
@@ -271,7 +272,9 @@ export class DevToolsPanel {
     // Tree box (scrollable) — mount DomTreePane
     const treeBox = createElement('div', {}, {
       flex: '1',
+      minHeight: '0',
       overflowY: 'auto',
+      overflowX: 'hidden',
       padding: '4px',
       fontFamily: OVERLAY.monoFamily,
       fontSize: '11px',
