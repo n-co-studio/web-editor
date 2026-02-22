@@ -207,44 +207,56 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 ---
 
-## Session 10 — 2026-02-21 — Drag-to-Reorder Phase 3: Undo/Redo, Diff Pipeline & MCP
+## Session 14 — 2026-02-21 — Design Guide System + Ruler/Grid Enhancements
 
 **Status:** complete
 **Decisions applied:** 0001, 0002, 0008
-**Commits:** pending
+**Commits:** ce77439 — feat: add Design Guide System, 5fd44c9 — fix: ruler overlay enhancements
 
 ### Goal
-- Implement reorder undo/redo/reset (replace console.warn stubs in history.ts)
-- Add reorder change rendering to review panel
-- Bump protocol version to 0.2.0
-- Update MCP tool description to document reorderChanges
-- Complete end-to-end reorder flow from drag to Claude Code
+- Build Design Guide System: ruler bars with draggable guide lines for arbitrary alignment references
+- Fix guide snap (HVST: sub-pixel grid spacing dominating edge snap)
+- Add canvas-based pixel ruler bars, scroll-aware grid/guides, snap exclusivity, edge highlighting
 
 ### Plan Summary
-- Replace 3 reorder stubs in `EditHistory` with `moveBefore`/`insertBefore` guard pattern: undo restores full `originalChildOrder`, redo re-applies single move, reset restores order
-- Add reorder rows in `ReviewPanel.renderGroup()` with position description and direction badge
-- Fix removed section label to count both CSS and reorder changes
-- Bump `PROTOCOL_VERSION` from `'0.1.0'` to `'0.2.0'`
-- Update `get_pending_visual_changes` tool description for Claude Code consumption
-- Add `refreshReorderAfterHistoryChange()` helper (from cohesion review) to keep reorder editor in sync after undo/redo
+1. Add guide color + z-index constants to constants.ts
+2. Create `guide-snap.ts` pure snap function
+3. Create `RulerOverlay` class (ruler bars, guide CRUD, snap, persistence)
+4. Integrate guide snap into `DragHandleManager` (handles.ts)
+5. Add toolbar ruler toggle button
+6. Wire lifecycle in index.ts (toolbar, collapse, escape, scroll)
+7. HVST: validate snap failure (gridSpacing 0.2px), fix with minimum threshold
+8. Fix axis swap (top ruler → horizontal guides, left ruler → vertical guides)
+9. Canvas-based rulers with pixel tick marks (1/5/10/50/100px intervals + labels)
+10. Horizontal guides scroll with page (page coords), grid vertical scroll
+11. Snap exclusivity: grid on → grid snap only; grid off → edge snap + 3px highlight
 
 ### Changes Made
-- `packages/shared/src/protocol.ts` — Bumped `PROTOCOL_VERSION` from `'0.1.0'` to `'0.2.0'`
-- `packages/chrome-extension/src/content/history.ts` — Implemented 3 reorder cases: undo (restore `originalChildOrder` via append loop), redo (re-apply move mirroring `commitReorder()`), reset (same as undo). Removed stale Phase 2/3 stub comment from doc block.
-- `packages/chrome-extension/src/content/batching/review-panel.ts` — Added reorder change rendering in `renderGroup()` (position description, indigo direction badge, remove button). Fixed `renderRemovedSection` label to count `reorderChanges`.
-- `packages/mcp-server/src/server.ts` — Updated `get_pending_visual_changes` description: documents `reorderChanges` field, explains intent is source child reorder not CSS `order`, lists available fields.
-- `packages/chrome-extension/src/content/index.ts` — Added `refreshReorderAfterHistoryChange()` helper (re-renders reorder editor after undo/redo of reorder entry to keep drop zones in sync with DOM). Wired into all 4 undo/redo paths (toolbar onUndo, toolbar onRedo, keyboard Cmd+Z, keyboard Cmd+Shift+Z). Added `HistoryEntry` type import.
+- `packages/chrome-extension/src/shared/constants.ts` — Added `guide: '#8b5cf6'` to OVERLAY, `GUIDE_LINE_Z`, `RULER_BAR_Z`, `GUIDE_SNAP_THRESHOLD = 8`, `MAX_GUIDES_PER_PAGE`
+- `packages/chrome-extension/src/content/editing/guide-snap.ts` — **New** (~22 lines): pure `snapToGuides()` function
+- `packages/chrome-extension/src/content/ruler-overlay.ts` — **New then rewritten** (~870 lines): canvas rulers (DPR-aware), page-coord horizontal guides, EdgeEntry-based snap with highlight, grid/edge exclusivity, `chrome.storage.session` persistence
+- `packages/chrome-extension/src/content/editing/handles.ts` — Added `guideGetter` param, viewport-to-CSS coordinate conversion for guide snap, `getEdgePosition()` helper
+- `packages/chrome-extension/src/content/toolbar.ts` — Ruler toggle button + callbacks (same pattern as grid)
+- `packages/chrome-extension/src/content/index.ts` — Full lifecycle wiring: RulerOverlay instantiation with `isGridVisible` callback, hover suppressor, collapse save/restore, escape ladder, scroll handler
+- `packages/chrome-extension/src/content/grid-overlay.ts` — Added `refreshScroll()` method + initial `backgroundPositionY` in render
 
 ### Verification (Gates Evidence)
-- Commit gates: A1 pass (0001/0002/0008 followed), A2 pass (plan documented, 5 files), A3 pass (`npm run build` → 0 errors), A4 pass (no secrets), A5 pass (Critic cohesion: full 3-phase review — 0 critical, 3 warnings; fixed warning #2 (stale reorder editor after undo/redo); re-run clean — 0 critical, 0 warning)
+- Commit gates: A1 pass (0001/0002/0008 followed), A2 pass (plan documented), A3 pass (`tsc --noEmit` clean, build clean), A4 pass (no secrets), A5 pass (cohesion review on commit 1: 3 criticals found and fixed — null-deref in guideGetter, keyboard on shadow instead of document, coordinate space mismatch)
 - Push gates: B1 pending, B2 pending, B3 pending
 
+### HVST Cycles
+1. **Snap not working (axis swap)**: H: axes swapped. V: user confirmed top ruler creates vertical lines. S: swap axis args + cursors. T: visual confirmation.
+2. **Snap invisible (sub-pixel spacing)**: H: grid snap dominating with 0.2px spacing. V: debug log confirmed gridSpacing=0.2, bestDist=0.02. S: add `gridSpacing >= 4` guard. T: edge snap now triggers.
+3. **Grid exclusivity not verified**: H: `isGridVisible()` may return wrong value. V: debug log added (pending operator validation). S: TBD based on validation.
+
 ### Failed Attempts (Brief)
-- Cohesion review (full 3-phase) found that undo/redo while reorder editor is active leaves stale drop zones/indices — the DOM reverts but the editor's internal geometry is not refreshed. Fixed by adding `refreshReorderAfterHistoryChange()` helper that re-renders the editor when a reorder entry is undone/redone.
+- Initial snap threshold of 3px too tight — increased to 8px
+- `isInsideRuler` checked wrong ruler bar for each axis — fixed in rewrite
 
 ### Known Issues Logged
-- None
+- Grid snap exclusivity not fully validated (operator reported issue, debug log added but session closing)
 
 ### Follow-ups
-- None — drag-to-reorder feature complete (Phases 1-3)
+- Validate grid snap exclusivity with debug log output (HVST cycle 3)
+- Grid snap with tiny baseSpacing (0.2px) produces no visible snap even when grid is shown — may need to use majorSpacing or external settings
 

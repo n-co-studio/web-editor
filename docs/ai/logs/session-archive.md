@@ -515,3 +515,46 @@ This file is not read during normal sessions. Referenced for deep investigation 
 - Cohesion review found `enterMultiSelectMode` missing `reorderEditor?.cleanup()`. Fixed.
 - Cohesion review found `cancelDrag` was private but needed by Escape handler; also missing pointer capture release and cursor reset. Fixed by making public and adding release logic.
 - Cohesion review found `containerDirection` used `flexDirection` for grid containers (returns empty string). Fixed with `display.includes('grid')` branch reading `gridAutoFlow`.
+
+---
+
+## Session 10 — 2026-02-21 — Drag-to-Reorder Phase 3: Undo/Redo, Diff Pipeline & MCP
+
+**Status:** complete
+**Decisions applied:** 0001, 0002, 0008
+**Commits:** pending
+
+### Goal
+- Implement reorder undo/redo/reset (replace console.warn stubs in history.ts)
+- Add reorder change rendering to review panel
+- Bump protocol version to 0.2.0
+- Update MCP tool description to document reorderChanges
+- Complete end-to-end reorder flow from drag to Claude Code
+
+### Plan Summary
+- Replace 3 reorder stubs in `EditHistory` with `moveBefore`/`insertBefore` guard pattern: undo restores full `originalChildOrder`, redo re-applies single move, reset restores order
+- Add reorder rows in `ReviewPanel.renderGroup()` with position description and direction badge
+- Fix removed section label to count both CSS and reorder changes
+- Bump `PROTOCOL_VERSION` from `'0.1.0'` to `'0.2.0'`
+- Update `get_pending_visual_changes` tool description for Claude Code consumption
+- Add `refreshReorderAfterHistoryChange()` helper (from cohesion review) to keep reorder editor in sync after undo/redo
+
+### Changes Made
+- `packages/shared/src/protocol.ts` — Bumped `PROTOCOL_VERSION` from `'0.1.0'` to `'0.2.0'`
+- `packages/chrome-extension/src/content/history.ts` — Implemented 3 reorder cases: undo (restore `originalChildOrder` via append loop), redo (re-apply move mirroring `commitReorder()`), reset (same as undo). Removed stale Phase 2/3 stub comment from doc block.
+- `packages/chrome-extension/src/content/batching/review-panel.ts` — Added reorder change rendering in `renderGroup()` (position description, indigo direction badge, remove button). Fixed `renderRemovedSection` label to count `reorderChanges`.
+- `packages/mcp-server/src/server.ts` — Updated `get_pending_visual_changes` description: documents `reorderChanges` field, explains intent is source child reorder not CSS `order`, lists available fields.
+- `packages/chrome-extension/src/content/index.ts` — Added `refreshReorderAfterHistoryChange()` helper (re-renders reorder editor after undo/redo of reorder entry to keep drop zones in sync with DOM). Wired into all 4 undo/redo paths (toolbar onUndo, toolbar onRedo, keyboard Cmd+Z, keyboard Cmd+Shift+Z). Added `HistoryEntry` type import.
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass, A2 pass, A3 pass, A4 pass, A5 pass
+- Push gates: B1 pending, B2 pending, B3 pending
+
+### Failed Attempts (Brief)
+- Cohesion review found stale reorder editor after undo/redo — fixed by adding `refreshReorderAfterHistoryChange()`.
+
+### Known Issues Logged
+- None
+
+### Follow-ups
+- None — drag-to-reorder feature complete (Phases 1-3)
