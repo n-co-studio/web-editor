@@ -148,7 +148,7 @@ async function activate(): Promise<void> {
   // UI components
   hover = new HoverHighlight(shadow, host);
   selection = new SelectionManager(shadow, host, tokenStore);
-  devtoolsPanel = new DevToolsPanel(shadow!, tokenStore!);
+  devtoolsPanel = new DevToolsPanel(shadow!, tokenStore!, queue!);
   toolbar = new FloatingToolbar(shadow);
   handles = new DragHandleManager(shadow, snapping, preview);
   keyboard = new KeyboardHandler(shadow, handles, null as any, selection);
