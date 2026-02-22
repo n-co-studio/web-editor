@@ -3,9 +3,6 @@ import { OVERLAY, TOOLBAR_WIDTH } from '../shared/constants';
 import type { EditMode, InspectorMode, PanelPosition } from '../shared/types';
 
 type ToolSelectCallback = (mode: EditMode) => void;
-type ToggleCallback = (expanded: boolean) => void;
-type CursorMode = 'dom' | 'page';
-type CursorModeCallback = (mode: CursorMode) => void;
 type VoidCallback = () => void;
 
 // ---------------------------------------------------------------------------
@@ -13,15 +10,14 @@ type VoidCallback = () => void;
 // ---------------------------------------------------------------------------
 
 const ICONS: Record<string, string> = {
-  eye: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8s-2.5 4.5-6.5 4.5S1.5 8 1.5 8z"/>
-    <circle cx="8" cy="8" r="2"/>
+  collapse: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="4,4 8,8 12,4"/>
+    <polyline points="4,8 8,12 12,8"/>
   </svg>`,
 
-  'eye-off': `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M6.5 3.8A6.4 6.4 0 0 1 8 3.5c4 0 6.5 4.5 6.5 4.5a11 11 0 0 1-1.7 2.2M10.4 10.4A2 2 0 0 1 5.6 5.6"/>
-    <path d="M1.5 8s1.2-2.2 3.1-3.4M8.8 10.5a6.5 6.5 0 0 1-.8 0C4 10.5 1.5 8 1.5 8"/>
-    <line x1="2" y1="2" x2="14" y2="14"/>
+  expand: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="4,12 8,8 12,12"/>
+    <polyline points="4,8 8,4 12,8"/>
   </svg>`,
 
   spacing: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
@@ -70,10 +66,6 @@ const ICONS: Record<string, string> = {
     <path d="M3.5 6a5.5 5.5 0 1 1 .87 3"/>
   </svg>`,
 
-  cursor: `<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-    <path d="M3.5 1l0 11.5 3-3.5 4 .5-7-8.5z"/>
-    <path d="M7 10l2.5 4.5 1.2-.7L8.2 9.5z"/>
-  </svg>`,
 
   review: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
     <rect x="3" y="2" width="10" height="12" rx="1.5"/>
@@ -157,19 +149,17 @@ const TOOL_ORDER: EditMode[] = [
 
 export class FloatingToolbar {
   private container: HTMLDivElement | null = null;
-  private toolsWrapper: HTMLDivElement | null = null;
   private toolButtons = new Map<EditMode, HTMLButtonElement>();
   private disabledTools = new Map<EditMode, string>();
   private activeMode: EditMode | null = null;
-  private expanded = true;
+  private collapsed = false;
   private visible = false;
   private toolCb: ToolSelectCallback | null = null;
-  private toggleCb: ToggleCallback | null = null;
   private moveCb: ((pos: { x: number; y: number }) => void) | null = null;
   private undoCb: VoidCallback | null = null;
   private redoCb: VoidCallback | null = null;
   private resetCb: VoidCallback | null = null;
-  private cursorModeCb: CursorModeCallback | null = null;
+  private collapseCb: ((collapsed: boolean) => void) | null = null;
   private reviewToggleCb: VoidCallback | null = null;
   private inspectorToggleCbs = new Map<InspectorMode, VoidCallback>();
   private notesToggleCb: VoidCallback | null = null;
@@ -177,12 +167,12 @@ export class FloatingToolbar {
   private gridSettingsToggleCb: VoidCallback | null = null;
   private deleteCb: VoidCallback | null = null;
   private deleteBtn: HTMLButtonElement | null = null;
-  private cursorMode: CursorMode = 'dom';
-  private expandedBeforePageMode = true;
+
   private reviewOpen = false;
+  private contentWrapper: HTMLDivElement | null = null;
+  private toolsSection: HTMLDivElement | null = null;
   private toggleArrow: HTMLElement | null = null;
   private toggleBtn: HTMLButtonElement | null = null;
-  private cursorBtn: HTMLButtonElement | null = null;
   private undoBtn: HTMLButtonElement | null = null;
   private redoBtn: HTMLButtonElement | null = null;
   private resetBtn: HTMLButtonElement | null = null;
@@ -203,10 +193,6 @@ export class FloatingToolbar {
     this.toolCb = cb;
   }
 
-  onToggle(cb: ToggleCallback): void {
-    this.toggleCb = cb;
-  }
-
   /** Called continuously while toolbar is being dragged. */
   onMove(cb: (pos: { x: number; y: number }) => void): void {
     this.moveCb = cb;
@@ -224,8 +210,8 @@ export class FloatingToolbar {
     this.resetCb = cb;
   }
 
-  onCursorModeChange(cb: CursorModeCallback): void {
-    this.cursorModeCb = cb;
+  onCollapse(cb: (collapsed: boolean) => void): void {
+    this.collapseCb = cb;
   }
 
   onReviewToggle(cb: VoidCallback): void {
@@ -325,9 +311,6 @@ export class FloatingToolbar {
     }
   }
 
-  getCursorMode(): CursorMode {
-    return this.cursorMode;
-  }
 
   /** Update the pending count badge on the review button. */
   setPendingCount(count: number): void {
@@ -427,11 +410,12 @@ export class FloatingToolbar {
     this.confirmOverlay = null;
     this.container?.remove();
     this.container = null;
-    this.toolsWrapper = null;
+    this.contentWrapper = null;
+    this.toolsSection = null;
     this.toolButtons.clear();
     this.toggleArrow = null;
     this.toggleBtn = null;
-    this.cursorBtn = null;
+
     this.undoBtn = null;
     this.redoBtn = null;
     this.resetBtn = null;
@@ -446,19 +430,18 @@ export class FloatingToolbar {
     this.deleteBtn = null;
     this.visible = false;
     this.activeMode = null;
-    this.cursorMode = 'dom';
+    this.collapsed = false;
     this.reviewOpen = false;
   }
 
   destroy(): void {
     this.hide();
     this.toolCb = null;
-    this.toggleCb = null;
     this.moveCb = null;
     this.undoCb = null;
     this.redoCb = null;
     this.resetCb = null;
-    this.cursorModeCb = null;
+    this.collapseCb = null;
     this.reviewToggleCb = null;
     this.inspectorToggleCbs.clear();
     this.notesToggleCb = null;
@@ -515,28 +498,21 @@ export class FloatingToolbar {
       (pos) => this.moveCb?.(pos),
     );
 
-    // Toggle button (eye = visible, eye-off = hidden)
-    this.toggleBtn = this.buildIconButton('eye', 'Hide UI', () => {
-      if (this.cursorMode === 'page') return; // Disabled during page mode
-      this.expanded = !this.expanded;
-      if (this.toolsWrapper) {
-        this.toolsWrapper.style.display = this.expanded ? 'flex' : 'none';
-      }
-      // Swap icon between eye and eye-off
-      if (this.toggleArrow) {
-        this.toggleArrow.innerHTML = ICONS[this.expanded ? 'eye' : 'eye-off'] ?? '';
-      }
-      this.toggleBtn!.title = this.expanded ? 'Hide UI' : 'Show UI';
-      this.toggleCb?.(this.expanded);
+    // Collapse button — minimizes entire toolbar to just this button
+    this.toggleBtn = this.buildIconButton('collapse', 'Collapse toolbar', () => {
+      this.toggleCollapse();
     });
     this.toggleArrow = this.toggleBtn.querySelector('span');
     container.appendChild(this.toggleBtn);
 
-    // Cursor mode button — switches between DOM inspection and page browsing
-    this.cursorBtn = this.buildIconButton('cursor', 'Switch to page interaction', () => {
-      this.toggleCursorMode();
+    // Content wrapper — everything below collapse button, hidden when collapsed
+    const contentWrapper = createElement('div', {}, {
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: '2px',
     });
-    container.appendChild(this.cursorBtn);
+    this.contentWrapper = contentWrapper;
 
     // Grid toggle button — click to toggle, long-press (500ms) for settings
     this.gridBtn = this.buildIconButton('grid', 'Toggle grid (hold for settings)', () => {
@@ -575,14 +551,23 @@ export class FloatingToolbar {
         }
       });
     }
-    container.appendChild(this.gridBtn);
+    // Tools section — grid, devtools, editing tools + separators, hidden during page mode
+    const toolsSection = createElement('div', {}, {
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: '2px',
+    });
+    this.toolsSection = toolsSection;
+
+    toolsSection.appendChild(this.gridBtn);
 
     // DevTools panel button (DOM inspector + properties + console)
     const devtoolsBtn = this.buildIconButton('devtools', 'DevTools panel', () => {
       this.inspectorToggleCbs.get('devtools')?.();
     });
     this.inspectorButtons.set('devtools', devtoolsBtn);
-    container.appendChild(devtoolsBtn);
+    toolsSection.appendChild(devtoolsBtn);
 
     // Separator
     const sep = createElement('div', {}, {
@@ -591,16 +576,15 @@ export class FloatingToolbar {
       background: OVERLAY.border,
       margin: '2px 0',
     });
-    container.appendChild(sep);
+    toolsSection.appendChild(sep);
 
-    // Tools wrapper (collapsible)
+    // Tools wrapper
     const wrapper = createElement('div', {}, {
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
       gap: '2px',
     });
-    this.toolsWrapper = wrapper;
 
     for (const mode of TOOL_ORDER) {
       const btn = this.buildIconButton(mode, TOOL_LABELS[mode], () => {
@@ -617,16 +601,18 @@ export class FloatingToolbar {
       wrapper.appendChild(btn);
     }
 
-    container.appendChild(wrapper);
+    toolsSection.appendChild(wrapper);
 
-    // Separator before undo/redo/reset
+    // Separator after tools
     const sep2 = createElement('div', {}, {
       width: '24px',
       height: '1px',
       background: OVERLAY.border,
       margin: '2px 0',
     });
-    container.appendChild(sep2);
+    toolsSection.appendChild(sep2);
+
+    contentWrapper.appendChild(toolsSection);
 
     // Notes button (with count badge)
     this.notesBtn = this.buildIconButton('notes', 'Session notes', () => {
@@ -654,7 +640,7 @@ export class FloatingToolbar {
       pointerEvents: 'none',
     }) as HTMLSpanElement;
     this.notesBtn.appendChild(this.notesBadge);
-    container.appendChild(this.notesBtn);
+    contentWrapper.appendChild(this.notesBtn);
 
     // Review changes button (always visible, with count badge)
     this.reviewBtn = this.buildIconButton('review', 'Review changes', () => {
@@ -683,7 +669,7 @@ export class FloatingToolbar {
       pointerEvents: 'none',
     }) as HTMLSpanElement;
     this.reviewBtn.appendChild(this.reviewBadge);
-    container.appendChild(this.reviewBtn);
+    contentWrapper.appendChild(this.reviewBtn);
 
     // Undo/Redo row
     const undoRedoRow = createElement('div', {}, {
@@ -706,21 +692,23 @@ export class FloatingToolbar {
     this.redoBtn.style.height = '28px';
     undoRedoRow.appendChild(this.redoBtn);
 
-    container.appendChild(undoRedoRow);
+    toolsSection.appendChild(undoRedoRow);
 
     // Reset button
     this.resetBtn = this.buildIconButton('reset', 'Reset all changes', () => {
       this.showResetConfirmation();
     });
-    container.appendChild(this.resetBtn);
+    toolsSection.appendChild(this.resetBtn);
 
     // Delete element button
     this.deleteBtn = this.buildIconButton('delete', 'Delete element (Del)', () => {
       if (this.deleteBtn?.style.opacity !== '0.3') this.deleteCb?.();
     });
     this.deleteBtn.style.color = OVERLAY.textMuted;
-    container.appendChild(this.deleteBtn);
+    toolsSection.appendChild(this.deleteBtn);
     this.setDeleteEnabled(false);
+
+    container.appendChild(contentWrapper);
 
     this.refreshButtonStates();
     // Initialize undo/redo as disabled
@@ -818,68 +806,43 @@ export class FloatingToolbar {
   }
 
   // -----------------------------------------------------------------------
-  // Cursor mode toggle
+  // Collapse / expand toolbar
   // -----------------------------------------------------------------------
 
-  private toggleCursorMode(): void {
-    if (this.cursorMode === 'dom') {
-      // Switch to page mode
-      this.cursorMode = 'page';
-      this.expandedBeforePageMode = this.expanded;
+  private toggleCollapse(): void {
+    if (!this.collapsed) {
+      // Collapsing — minimize toolbar to just grip + collapse button
+      this.collapsed = true;
 
-      // Collapse toolbar
-      this.expanded = false;
-      if (this.toolsWrapper) {
-        this.toolsWrapper.style.display = 'none';
+      if (this.contentWrapper) {
+        this.contentWrapper.style.display = 'none';
       }
+
       if (this.toggleArrow) {
-        this.toggleArrow.innerHTML = ICONS['eye-off'] ?? '';
+        this.toggleArrow.innerHTML = ICONS['expand'] ?? '';
       }
-
-      // Dim toggle button (disabled during page mode)
       if (this.toggleBtn) {
-        this.toggleBtn.style.opacity = '0.3';
-        this.toggleBtn.style.cursor = 'not-allowed';
-        this.toggleBtn.title = 'Show UI';
+        this.toggleBtn.title = 'Expand toolbar';
       }
 
-      // Highlight cursor button
-      if (this.cursorBtn) {
-        this.cursorBtn.style.background = 'rgba(6, 182, 212, 0.12)';
-        this.cursorBtn.style.color = OVERLAY.primary;
-        this.cursorBtn.title = 'Switch to DOM inspection';
-      }
+      this.collapseCb?.(true);
     } else {
-      // Switch to DOM mode
-      this.cursorMode = 'dom';
+      // Expanding — restore full toolbar
+      this.collapsed = false;
 
-      // Restore toggle button
-      if (this.toggleBtn) {
-        this.toggleBtn.style.opacity = '1';
-        this.toggleBtn.style.cursor = 'pointer';
+      if (this.contentWrapper) {
+        this.contentWrapper.style.display = 'flex';
       }
 
-      // Restore expanded state
-      this.expanded = this.expandedBeforePageMode;
-      if (this.toolsWrapper) {
-        this.toolsWrapper.style.display = this.expanded ? 'flex' : 'none';
-      }
       if (this.toggleArrow) {
-        this.toggleArrow.innerHTML = ICONS[this.expanded ? 'eye' : 'eye-off'] ?? '';
+        this.toggleArrow.innerHTML = ICONS['collapse'] ?? '';
       }
       if (this.toggleBtn) {
-        this.toggleBtn.title = this.expanded ? 'Hide UI' : 'Show UI';
+        this.toggleBtn.title = 'Collapse toolbar';
       }
 
-      // Un-highlight cursor button
-      if (this.cursorBtn) {
-        this.cursorBtn.style.background = 'transparent';
-        this.cursorBtn.style.color = OVERLAY.textMuted;
-        this.cursorBtn.title = 'Switch to page interaction';
-      }
+      this.collapseCb?.(false);
     }
-
-    this.cursorModeCb?.(this.cursorMode);
   }
 
   // -----------------------------------------------------------------------
