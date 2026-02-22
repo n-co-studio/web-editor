@@ -8,8 +8,12 @@ import {
   DEVTOOLS_MAX_HEIGHT_RATIO,
   DEVTOOLS_DEFAULT_LEFT_RATIO,
   DEVTOOLS_DEFAULT_MIDDLE_RATIO,
+  PANEL_TIER_COMPACT_MAX,
+  PANEL_TIER_STANDARD_MAX,
 } from '../../shared/constants';
+import type { PanelSizeTier } from '../../shared/constants';
 import type { TokenStore } from '../tokens/store';
+import type { PendingQueue } from '../batching/queue';
 import { DomTreePane } from './panes/dom-tree-pane';
 import { SourcePane } from './panes/source-pane';
 import { PropertiesPane } from './panes/properties-pane';
@@ -35,12 +39,16 @@ export class DevToolsPanel {
   private leftPaneEl: HTMLDivElement | null = null;
   private middlePaneEl: HTMLDivElement | null = null;
   private rightPaneEl: HTMLDivElement | null = null;
+  private divider1El: HTMLDivElement | null = null;
+  private divider2El: HTMLDivElement | null = null;
   private currentElement: Element | null = null;
   private currentInfo: ElementInfo | null = null;
   private closeCb: (() => void) | null = null;
   private leftRatio = DEVTOOLS_DEFAULT_LEFT_RATIO;
   private middleRatio = DEVTOOLS_DEFAULT_MIDDLE_RATIO;
   private panelHeight = DEVTOOLS_DEFAULT_HEIGHT;
+  private currentTier: PanelSizeTier = 'full';
+  private resizeObserver: ResizeObserver | null = null;
 
   // Pane instances
   private domTreePane: DomTreePane;
@@ -51,10 +59,11 @@ export class DevToolsPanel {
   constructor(
     private readonly shadow: ShadowRoot,
     tokenStore: TokenStore,
+    pendingQueue: PendingQueue,
   ) {
     this.domTreePane = new DomTreePane();
     this.sourcePane = new SourcePane();
-    this.propertiesPane = new PropertiesPane(tokenStore);
+    this.propertiesPane = new PropertiesPane(tokenStore, pendingQueue);
     this.consolePane = new ConsolePane();
   }
 
@@ -133,11 +142,15 @@ export class DevToolsPanel {
   }
 
   hide(): void {
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
     this.container?.remove();
     this.container = null;
     this.leftPaneEl = null;
     this.middlePaneEl = null;
     this.rightPaneEl = null;
+    this.divider1El = null;
+    this.divider2El = null;
     this.domTreePane.dispose();
     this.sourcePane.dispose();
     this.propertiesPane.dispose();
@@ -296,6 +309,7 @@ export class DevToolsPanel {
     divider1.addEventListener('mouseenter', () => { divider1.style.background = OVERLAY.border; });
     divider1.addEventListener('mouseleave', () => { divider1.style.background = 'transparent'; });
     this.initLeftSplitDrag(divider1, leftPane, splitContainer);
+    this.divider1El = divider1;
     splitContainer.appendChild(divider1);
 
     // Middle pane (Properties) — mount PropertiesPane
@@ -328,6 +342,7 @@ export class DevToolsPanel {
     divider2.addEventListener('mouseenter', () => { divider2.style.background = OVERLAY.border; });
     divider2.addEventListener('mouseleave', () => { divider2.style.background = 'transparent'; });
     this.initMiddleSplitDrag(divider2, middlePane, splitContainer);
+    this.divider2El = divider2;
     splitContainer.appendChild(divider2);
 
     // Right pane (console) — mount ConsolePane
@@ -344,6 +359,24 @@ export class DevToolsPanel {
     panel.appendChild(splitContainer);
     this.container = panel;
     this.shadow.appendChild(panel);
+
+    // Set up ResizeObserver for tier-based graceful degradation
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const height = entry.contentRect.height;
+        const tier = this.computeTier(height);
+        if (tier !== this.currentTier) {
+          this.currentTier = tier;
+          this.applyTier(tier);
+        }
+      }
+    });
+    this.resizeObserver.observe(panel);
+
+    // Apply initial tier
+    this.currentTier = this.computeTier(this.panelHeight);
+    this.applyTier(this.currentTier);
   }
 
   // ---------------------------------------------------------------------------
@@ -465,6 +498,46 @@ export class DevToolsPanel {
     divider.addEventListener('pointerdown', onPointerDown);
     divider.addEventListener('pointermove', onPointerMove);
     divider.addEventListener('pointerup', onPointerUp);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Tier-based graceful degradation
+  // ---------------------------------------------------------------------------
+
+  private computeTier(height: number): PanelSizeTier {
+    if (height <= PANEL_TIER_COMPACT_MAX) return 'compact';
+    if (height <= PANEL_TIER_STANDARD_MAX) return 'standard';
+    return 'full';
+  }
+
+  private applyTier(tier: PanelSizeTier): void {
+    const hideColumns = tier === 'compact';
+
+    if (this.leftPaneEl) {
+      this.leftPaneEl.style.display = hideColumns ? 'none' : '';
+    }
+    if (this.divider1El) {
+      this.divider1El.style.display = hideColumns ? 'none' : '';
+    }
+    if (this.rightPaneEl) {
+      this.rightPaneEl.style.display = hideColumns ? 'none' : '';
+    }
+    if (this.divider2El) {
+      this.divider2El.style.display = hideColumns ? 'none' : '';
+    }
+
+    // In compact mode, middle pane takes full width
+    if (this.middlePaneEl) {
+      if (hideColumns) {
+        this.middlePaneEl.style.flex = '1';
+        this.middlePaneEl.style.borderRight = 'none';
+      } else {
+        this.middlePaneEl.style.flex = `0 0 ${this.middleRatio * 100}%`;
+        this.middlePaneEl.style.borderRight = `1px solid ${OVERLAY.border}`;
+      }
+    }
+
+    this.propertiesPane.setTier(tier);
   }
 
   // ---------------------------------------------------------------------------
