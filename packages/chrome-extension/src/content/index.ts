@@ -282,6 +282,11 @@ async function activate(): Promise<void> {
     staleDetector!.watch(element, () => {
       selection!.markStale();
       handles!.hideHandles();
+      // Transition notes panel from element → toolbar mode
+      if (notesEditor?.isOpen() && notesEditor.getPositionMode() === 'element') {
+        notesEditor.clearAnchoredElement();
+        notesEditor.reposition(toolbar!.getButtonPosition('notes'));
+      }
     });
 
     // Determine disabled tools
@@ -332,6 +337,11 @@ async function activate(): Promise<void> {
     preview!.revert();
     toolbar!.setActiveMode(null);
     toolbar!.setDisabledTools({});
+    // Transition notes panel from element → toolbar mode
+    if (notesEditor?.isOpen() && notesEditor.getPositionMode() === 'element') {
+      notesEditor.clearAnchoredElement();
+      notesEditor.reposition(toolbar!.getButtonPosition('notes'));
+    }
   });
 
   // Wire toolbar tool selection → handles or floating editors
@@ -531,7 +541,9 @@ async function activate(): Promise<void> {
     dimensionsEditor!.reposition(toolbar!.getButtonPosition('dimensions'));
     spacingEditor!.reposition(toolbar!.getButtonPosition('spacing'));
     positionEditor!.reposition(toolbar!.getButtonPosition('position'));
-    notesEditor!.reposition(toolbar!.getButtonPosition('notes'));
+    if (notesEditor!.getPositionMode() === 'toolbar') {
+      notesEditor!.reposition(toolbar!.getButtonPosition('notes'));
+    }
     moveEditor!.reposition(toolbar!.getButtonPosition('move'));
     reorderEditor!.reposition(toolbar!.getButtonPosition('reorder'));
     gridSettingsPanel!.reposition(toolbar!.getButtonPosition('grid'));
@@ -580,6 +592,24 @@ async function activate(): Promise<void> {
       notesEditor!.cleanup();
       toolbar!.setNotesOpen(false);
     } else {
+      const selectedEl = selection?.getSelectedElement();
+      const isMulti = multiSelect?.isActive();
+
+      // Element mode only for single selection (no multi-select)
+      if (selectedEl && !isMulti) {
+        const info = buildElementInfo(selectedEl);
+        notesEditor!.setAnchoredElement(selectedEl, {
+          selector: info.selector,
+          tagName: info.tagName,
+          textContent: info.textContent,
+          sourceFile: info.sourceFile,
+          sourceLine: info.sourceLine,
+          instanceIndex: info.instanceIndex,
+        });
+      } else {
+        notesEditor!.clearAnchoredElement();
+      }
+
       const pos = toolbar!.getButtonPosition('notes');
       const notePanel = notesEditor!.render(pos);
       shadow!.appendChild(notePanel);
@@ -1078,6 +1108,9 @@ function handleScroll(): void {
     if (measureOverlay?.isActive()) measureOverlay.clear();
     if (notesEditor?.isOpen()) {
       notesEditor.refreshHighlights();
+      if (notesEditor.getPositionMode() === 'element') {
+        notesEditor.repositionToElement();
+      }
     }
     if (multiSelect?.isActive()) {
       multiSelect.refreshHighlights();

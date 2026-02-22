@@ -32,6 +32,8 @@ export const TEXT_CONTENT_TRUNCATE_LENGTH = 80;
 
 export const SNAP_EASE_MS = 125;
 export const TOOLBAR_WIDTH = 40;
+export const NOTES_PANEL_MAX_HEIGHT = 320;
+export const NOTES_PANEL_WIDTH = 260;
 
 // DevTools bottom panel
 export const DEVTOOLS_DEFAULT_HEIGHT = 250;
