@@ -7,10 +7,13 @@ import type { TokenStore } from '../../tokens/store';
 import type { PendingQueue } from '../../batching/queue';
 import { MatchedRulesCache } from '../../inspection/matched-rules-cache';
 import { ToggleManager } from '../../inspection/toggle-manager';
+import { StateSimulator } from '../../inspection/state-simulator';
+import { VariableResolver } from '../../inspection/variable-resolver';
 import { CssGroupsSection } from './css-groups-section';
 import { BoxModelSection } from './box-model-section';
 import { LayoutSection } from './layout-section';
 import { RulesSection } from './rules-section';
+import { AccessibilitySection } from './accessibility-section';
 
 const STORAGE_KEY_TAB = 'frontend-editor-devtools-tab';
 
@@ -37,12 +40,17 @@ export class PropertiesPane {
   private cssGroups: CssGroupsSection;
   private boxModelSection: BoxModelSection;
   private layoutSection: LayoutSection;
+  private accessibilitySection: AccessibilitySection;
   private currentElement: Element | null = null;
   private currentElements: Element[] | null = null;
+
+  // Eager: state simulator for :hov toggles (available on Edit tab)
+  private stateSimulator: StateSimulator;
 
   // Lazy-initialized on first Rules tab activation
   private toggleManager: ToggleManager | null = null;
   private rulesCache: MatchedRulesCache | null = null;
+  private variableResolver: VariableResolver | null = null;
   private rulesSection: RulesSection | null = null;
   private rulesInitialized = false;
 
@@ -54,6 +62,19 @@ export class PropertiesPane {
     this.cssGroups = new CssGroupsSection(tokenStore, pendingQueue);
     this.boxModelSection = new BoxModelSection();
     this.layoutSection = new LayoutSection(tokenStore);
+    this.accessibilitySection = new AccessibilitySection();
+
+    // Shadow root for click-outside dismiss in tooltips
+    const shadowRoot = this.shadowHost?.shadowRoot;
+    if (shadowRoot) this.cssGroups.setDismissRoot(shadowRoot);
+
+    // StateSimulator is eager (no heavy setup until first activation)
+    this.stateSimulator = new StateSimulator(
+      () => this.getExcludeSheets(),
+      this.shadowHost ?? undefined,
+    );
+    this.cssGroups.setStateSimulator(this.stateSimulator);
+    this.cssGroups.onStateToggleRefresh(() => this.refreshProperties());
   }
 
   mount(container: HTMLDivElement): void {
@@ -87,12 +108,15 @@ export class PropertiesPane {
         this.rulesScrollTop = this.contentArea.scrollTop;
       }
     }
+    this.stateSimulator.dispose();
     this.rulesSection?.dispose();
     this.toggleManager?.dispose();
     this.rulesCache?.dispose();
     this.rulesSection = null;
     this.toggleManager = null;
     this.rulesCache = null;
+    this.variableResolver = null;
+    this.cssGroups.setVariableResolver(null);
     this.rulesInitialized = false;
     this.container = null;
     this.tabBar = null;
@@ -153,6 +177,7 @@ export class PropertiesPane {
     this.currentElement = null;
     this.currentElements = null;
     if (this.filterInput) this.filterInput.value = '';
+    this.stateSimulator.deactivateAll();
     this.toggleManager?.clearAll();
     this.rulesCache?.stopWatching();
     this.rulesSection?.clear();
@@ -216,6 +241,13 @@ export class PropertiesPane {
 
     // 3. CSS property groups (with Dimensions/Spacing excluded when box model visible)
     this.contentArea.appendChild(this.cssGroups.buildSingle(el, snapshot, excludeGroups));
+
+    // 4. Accessibility insights (collapsible, at bottom)
+    this.accessibilitySection.setScrollTarget(this.contentArea);
+    const a11yEl = this.accessibilitySection.build(el, snapshot);
+    if (a11yEl) {
+      this.contentArea.appendChild(a11yEl);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -425,8 +457,32 @@ export class PropertiesPane {
     // Pass toggle manager and cache to CssGroupsSection for annotation coordination
     this.cssGroups.setInspectionDeps(this.toggleManager, this.rulesCache);
 
+    // Variable resolver for var() badge tooltips
+    this.variableResolver = new VariableResolver(
+      this.rulesCache,
+      this.tokenStore,
+      () => this.getExcludeSheets(),
+      this.shadowHost ?? undefined,
+    );
+    this.cssGroups.setVariableResolver(this.variableResolver);
+
+    // Scroll-to-rule: switch to Rules tab and highlight the matching rule
+    this.cssGroups.onScrollToRule((selectorText) => {
+      this.switchTab('rules');
+      // Defer to allow Rules tab to render
+      requestAnimationFrame(() => {
+        if (!this.contentArea) return;
+        const ruleEl = this.contentArea.querySelector(`[data-rule-selector="${CSS.escape(selectorText)}"]`) as HTMLElement | null;
+        if (ruleEl) {
+          ruleEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          ruleEl.style.background = 'rgba(6, 182, 212, 0.15)';
+          setTimeout(() => { ruleEl.style.background = ''; }, 1200);
+        }
+      });
+    });
+
     // Invalidate cache when toggles change so Edit tab annotations stay accurate
-    this.rulesSection.onToggleChange((el) => {
+    this.rulesSection.onToggleChange((el, _property, _toggled) => {
       this.rulesCache?.invalidate(el);
     });
   }
@@ -441,6 +497,11 @@ export class PropertiesPane {
   /** Expose cache for external eager indexing. */
   getMatchedRulesCache(): MatchedRulesCache | null {
     return this.rulesCache;
+  }
+
+  /** Expose state simulator for DomTreePane orange dot indicator. */
+  getStateSimulator(): StateSimulator {
+    return this.stateSimulator;
   }
 
   private renderRulesContent(): void {

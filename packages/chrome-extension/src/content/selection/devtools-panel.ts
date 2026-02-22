@@ -323,6 +323,9 @@ export class DevToolsPanel {
     this.middlePaneEl = middlePane;
     this.propertiesPane.mount(middlePane);
 
+    // Wire state simulator to DOM tree for orange dot indicator
+    this.domTreePane.setStateSimulator(this.propertiesPane.getStateSimulator());
+
     // Populate initial properties content
     if (this.currentElement) {
       const snapshot = createStyleSnapshot(this.currentElement);

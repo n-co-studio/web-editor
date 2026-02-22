@@ -38,6 +38,73 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 -->
 
+## Session 13 — 2026-02-21 — State Toggles, CSS Variables, Attributes & Accessibility
+
+**Status:** complete
+**Decisions applied:** 0001, 0002, 0008
+**Commits:** pending
+
+### Goal
+- Implement Brief 3: element state simulation (:hover/:focus/:active/:visited), CSS variable resolution tooltips, read-only attribute display in DOM tree, and accessibility insights section.
+
+### Plan Summary
+1. Create `StateSimulator` engine (scans stylesheets, strips pseudo selectors, applies via `StatePreviewManager`)
+2. Add `:hov` button + toggle strip to `CssGroupsSection`
+3. Wire `StateSimulator` eagerly in `PropertiesPane`
+4. Add status cluster (layout badge + orange dot) and collapsible attribute display to `DomTreePane`
+5. Wire state simulator from `PropertiesPane` to `DomTreePane` via `DevToolsPanel`
+6. Create `VariableResolver` (walks matched rules + ancestors, resolves var() chains)
+7. Create `var-badge.ts` enrichment (purple badge + click-activated tooltip)
+8. Wire `VariableResolver` lazily in `PropertiesPane.ensureRulesInitialized()`
+9. Create `AccessibilitySection` (4 checks: ARIA role, accessible name, missing ARIA, contrast reference)
+10. Mount accessibility section at bottom of Edit tab
+
+### Changes Made
+- `packages/chrome-extension/src/content/inspection/state-simulator.ts` — **New** (~456 lines): `StatePreviewManager` (standalone inline style tracker), `StateSimulator` (pseudo selector stripping, ancestor hover chains up to 5 levels, specificity-sorted declaration collection)
+- `packages/chrome-extension/src/content/inspection/variable-resolver.ts` — **New** (~171 lines): walks matched rules + ancestors (20 levels), recursion depth 10, circular detection, `getComputedStyle` fallback, token cross-reference
+- `packages/chrome-extension/src/content/selection/panes/enrichments/var-badge.ts` — **New** (~235 lines): purple `var` badge, click-activated tooltip with resolution chain, source links, AbortController-based cleanup
+- `packages/chrome-extension/src/content/selection/panes/accessibility-section.ts` — **New** (~451 lines): collapsible (collapsed by default), computed ARIA role (implicit/explicit), accessible name, missing ARIA warnings, contrast reference with scroll-to-property
+- `packages/chrome-extension/src/content/selection/panes/css-groups-section.ts` — `:hov` button + toggle strip, `findWinningRule()` shared helper, var badge integration with tooltip, `setVariableResolver(null)` disposal, `dismissRoot` for shadow DOM
+- `packages/chrome-extension/src/content/selection/panes/dom-tree-pane.ts` — Status cluster consolidation (layout badge + orange state dot), collapsible attribute detail section (priority-ordered, click-to-copy with green flash)
+- `packages/chrome-extension/src/content/selection/panes/properties-pane.ts` — Eager `StateSimulator`, lazy `VariableResolver` (stored + disposed), `AccessibilitySection`, shadow root dismiss wiring, scroll-to-rule callback
+- `packages/chrome-extension/src/content/selection/devtools-panel.ts` — Wires state simulator from properties pane to DOM tree pane
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass (0001/0002/0008 followed), A2 pass (plan documented, 8 files ~1780 lines — scope advisory noted), A3 pass (`tsc --build` + `tsc --noEmit` → 0 errors), A4 pass (no secrets), A5 pass (Critic cohesion: initial review found 3 criticals + 6 advisories; fixed 3 criticals + 2 advisories; re-run found 1 new critical (tooltip listener leak) + 2 advisories; fixed critical; build verified clean)
+- Push gates: B1 pending, B2 pending, B3 pending
+
+### Cohesion Findings & Resolutions
+**Initial review (3 criticals):**
+1. `onToggleChange` callback arity mismatch (pre-existing) — fixed: `(el)` → `(el, _property, _toggled)`
+2. `VariableResolver` not stored/disposed — fixed: added field, stored in `ensureRulesInitialized()`, cleared in `dispose()`
+3. `document.addEventListener` for tooltip dismiss incompatible with shadow DOM — fixed: added `dismissRoot` parameter, wires `shadowHost.shadowRoot`
+
+**Re-run (1 critical):**
+4. Tooltip click handler leaks on programmatic dismiss — fixed: AbortController pattern, `cleanupVarTooltip()` exported and called in `dismissVarTooltip()`
+
+**Also fixed (advisories):**
+5. Dead variables in `splitByCombinators` — removed
+6. Accessibility double-fire warnings for form inputs — reordered checks with `isFormInput` guard
+
+**Remaining advisories (non-blocking):**
+- Redundant null-check on varBadge (harmless defensive code)
+- DomTreePane stale simulator reference between dispose/remount (replaced synchronously before use)
+- AccessibilitySection.scrollTarget not cleared (same contentArea element, safe)
+- Multi-var authored values only partially resolved in tooltip (spec gap, not error)
+
+### Failed Attempts (Brief)
+- None (all issues found via cohesion review, fixed before commit)
+
+### Known Issues Logged
+- None
+
+### Follow-ups
+- `findWinningRule()` omits `excludeHost` parameter (advisory — shadow-host CSS leakage risk is low)
+- Multi-var tooltip resolution covers only first var() in compound values
+- CDP upgrade path deferred per brief recommendation
+
+---
+
 ## Session 12 — 2026-02-21 — CSS Rules Display & Property Toggle
 
 **Status:** complete
