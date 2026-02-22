@@ -24,6 +24,7 @@ import type { HistoryEntry } from './history';
 import { NotesStore } from './batching/notes-store';
 import { NotesEditor } from './editing/notes';
 import { GridOverlay } from './grid-overlay';
+import { RulerOverlay } from './ruler-overlay';
 import { MoveEditor, getMoveBlockReason } from './editing/move';
 import { ReorderEditor, getReorderBlockReason } from './editing/reorder';
 import type { ReorderCommitCallback } from './editing/reorder';
@@ -76,6 +77,8 @@ let measureRafId: number | null = null;
 let devtoolsUserClosed = false;
 let devtoolsOpenBeforeCollapse = false;
 let gridVisibleBeforeCollapse = false;
+let rulerOverlay: RulerOverlay | null = null;
+let rulersVisibleBeforeCollapse = false;
 let multiSelect: MultiSelectManager | null = null;
 let multiSelectToolbar: MultiSelectToolbar | null = null;
 let multiSelectClickHandler: ((e: MouseEvent) => void) | null = null;
@@ -151,7 +154,7 @@ async function activate(): Promise<void> {
   selection = new SelectionManager(shadow, host, tokenStore);
   devtoolsPanel = new DevToolsPanel(shadow!, tokenStore!, queue!);
   toolbar = new FloatingToolbar(shadow);
-  handles = new DragHandleManager(shadow, snapping, preview);
+  handles = new DragHandleManager(shadow, snapping, preview, () => rulerOverlay?.getGuidePositions() ?? { x: [], y: [] });
   keyboard = new KeyboardHandler(shadow, handles, null as any, selection);
   reviewPanel = new ReviewPanel(shadow!, queue!, wsClient!, diffBuilder!, notesStore!, (selector) => {
     const el = document.querySelector(selector);
@@ -167,6 +170,7 @@ async function activate(): Promise<void> {
   positionEditor = new PositionEditor(preview);
   notesEditor = new NotesEditor(notesStore, shadow);
   gridOverlay = new GridOverlay(shadow, tokenStore);
+  rulerOverlay = new RulerOverlay(shadow, () => gridOverlay!.getEffectiveSettings());
   moveEditor = new MoveEditor(shadow, preview);
   reorderEditor = new ReorderEditor(shadow);
   gridSettingsPanel = new GridSettingsPanel(gridOverlay.getEffectiveSettings());
@@ -245,6 +249,12 @@ async function activate(): Promise<void> {
 
   // Show toolbar immediately (stays visible for entire active session)
   toolbar.show();
+
+  // Wire ruler overlay hover suppression
+  rulerOverlay!.setHoverSuppressor(
+    () => { hover!.disable(); if (host) host.style.pointerEvents = 'none'; },
+    () => { hover!.enable(); if (host) host.style.pointerEvents = ''; },
+  );
 
   // Wire selection → panel, toolbar, handles, stale detection
   selection.onSelect((info, element, _rect) => {
@@ -455,6 +465,12 @@ async function activate(): Promise<void> {
         gridOverlay!.hide();
       }
 
+      // Save rulers overlay state
+      rulersVisibleBeforeCollapse = rulerOverlay!.isVisible();
+      if (rulersVisibleBeforeCollapse) {
+        rulerOverlay!.hide();
+      }
+
       // Pause inspection — let user interact with the page normally
       hover!.disable();
       selection!.hideHighlight();
@@ -498,6 +514,12 @@ async function activate(): Promise<void> {
       if (gridVisibleBeforeCollapse) {
         gridOverlay!.show();
         toolbar!.setGridEnabled(true);
+      }
+
+      // Restore rulers overlay if it was visible
+      if (rulersVisibleBeforeCollapse) {
+        rulerOverlay!.show();
+        toolbar!.setRulersEnabled(true);
       }
     }
   });
@@ -660,6 +682,15 @@ async function activate(): Promise<void> {
   });
   toolbar.setGridBlockReason(gridOverlay.getBlockReason());
 
+  // Wire rulers toggle
+  toolbar.onRulersToggle((enabled) => {
+    if (enabled) {
+      rulerOverlay!.show();
+    } else {
+      rulerOverlay!.hide();
+    }
+  });
+
   // Wire grid settings panel (long-press on grid button)
   toolbar.onGridSettingsToggle(() => {
     if (gridSettingsPanel!.isOpen()) {
@@ -810,6 +841,7 @@ function deactivate(): void {
   reorderEditor?.cleanup();
   notesEditor?.cleanup();
   gridOverlay?.hide();
+  rulerOverlay?.hide();
   gridSettingsPanel?.cleanup();
   multiSelect?.clear();
   multiSelectToolbar?.cleanup();
@@ -835,6 +867,7 @@ function deactivate(): void {
   devtoolsUserClosed = false;
   devtoolsOpenBeforeCollapse = false;
   gridVisibleBeforeCollapse = false;
+  rulersVisibleBeforeCollapse = false;
   mode = 'inactive';
   wsClient = null;
   hover = null;
@@ -860,6 +893,7 @@ function deactivate(): void {
   notesStore = null;
   notesEditor = null;
   gridOverlay = null;
+  rulerOverlay = null;
   moveEditor = null;
   reorderEditor = null;
   gridSettingsPanel = null;
@@ -1039,6 +1073,7 @@ function handleScroll(): void {
     handles?.refreshHandles();
     moveEditor?.refreshOverlay();
     reorderEditor?.refreshOverlay();
+    rulerOverlay?.refreshGuides();
     if (measureOverlay?.isActive()) measureOverlay.clear();
     if (notesEditor?.isOpen()) {
       notesEditor.refreshHighlights();
@@ -1276,6 +1311,9 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
     } else if (gridSettingsPanel?.isOpen()) {
       // Level 0b: close grid settings panel
       gridSettingsPanel.cleanup();
+    } else if (rulerOverlay?.isDragging()) {
+      // Level 1a: cancel guide drag
+      rulerOverlay.cancelDrag();
     } else if (reorderEditor?.isDragging()) {
       // Level 1a: cancel reorder drag — revert preview, stay in reorder mode
       reorderEditor.cancelDrag();

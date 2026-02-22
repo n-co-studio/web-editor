@@ -75,6 +75,9 @@ export const OVERLAY = {
   warning: '#f59e0b',
   info: '#3b82f6',
 
+  // Guide overlay
+  guide: '#8b5cf6',
+
   // Spacing base unit
   spaceUnit: 4,
 
@@ -137,3 +140,12 @@ export const BOX_MODEL = {
 export type PanelSizeTier = 'compact' | 'standard' | 'full';
 export const PANEL_TIER_COMPACT_MAX = 180;
 export const PANEL_TIER_STANDARD_MAX = 300;
+
+// ---------------------------------------------------------------------------
+// Guide overlay
+// ---------------------------------------------------------------------------
+
+export const GUIDE_LINE_Z = '52';
+export const RULER_BAR_Z = '53';
+export const GUIDE_SNAP_THRESHOLD = 3;
+export const MAX_GUIDES_PER_PAGE = 50;

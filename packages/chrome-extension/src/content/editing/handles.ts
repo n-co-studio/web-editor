@@ -7,7 +7,9 @@ import {
   HANDLE_HIT_AREA,
   SNAP_EASE_MS,
   HANDLE_COLORS,
+  GUIDE_SNAP_THRESHOLD,
 } from '../../shared/constants';
+import { snapToGuides } from './guide-snap';
 import { createZoneOverlays } from './zone-overlays';
 import type { EditMode } from '../../shared/types';
 import type { SnappingEngine } from '../tokens/snapping';
@@ -82,6 +84,7 @@ export class DragHandleManager {
     private readonly shadow: ShadowRoot,
     private readonly snapping: SnappingEngine,
     private readonly preview: PreviewManager,
+    private readonly guideGetter?: () => { x: number[]; y: number[] },
   ) {}
 
   onEditCommit(cb: EditCommitCallback): void {
@@ -406,11 +409,43 @@ export class DragHandleManager {
 
       let finalValue = rawValue;
       if (!isNaN(numVal)) {
-        const snap = this.snapping.snap(config.property, numVal);
-        finalValue = `${snap.snappedValue}${unit}`;
+        // Check guide snap first — guides take priority over token snap.
+        // Guide positions are in viewport coordinates, so we convert the
+        // element's relevant edge position to viewport coords, snap that,
+        // then derive the CSS value that places the edge at the guide.
+        const guideAxis = config.axis === 'xy' ? 'x' : config.axis;
+        const guidePositions = this.guideGetter?.();
+        const axisGuides = guideAxis === 'x' ? guidePositions?.x : guidePositions?.y;
+
+        let guideSnappedValue: number | null = null;
+        if (axisGuides?.length) {
+          const rect = element.getBoundingClientRect();
+          const edgePos = getEdgePosition(config.position, rect, guideAxis);
+          if (edgePos !== null) {
+            const guideSnap = snapToGuides(edgePos, axisGuides, GUIDE_SNAP_THRESHOLD);
+            if (guideSnap) {
+              // Convert viewport guide position back to CSS value
+              const delta = guideSnap.snapped - edgePos;
+              guideSnappedValue = numVal + delta;
+            }
+          }
+        }
+
+        let snappedValue: number;
+        let hasToken = false;
+
+        if (guideSnappedValue !== null) {
+          snappedValue = guideSnappedValue;
+        } else {
+          const snap = this.snapping.snap(config.property, numVal);
+          snappedValue = snap.snappedValue;
+          hasToken = !!snap.token;
+        }
+
+        finalValue = `${snappedValue}${unit}`;
 
         // Animate snap if value changed
-        if (snap.snappedValue !== numVal) {
+        if (snappedValue !== numVal) {
           const el = element as HTMLElement;
           el.style.transition = `${config.property} ${SNAP_EASE_MS}ms ease`;
           el.style.setProperty(config.property, finalValue);
@@ -422,7 +457,7 @@ export class DragHandleManager {
         }
 
         // Update handle color for snap feedback
-        pill.style.background = snap.token ? HANDLE_COLORS.snapped : config.color;
+        pill.style.background = (hasToken || guideSnappedValue !== null) ? HANDLE_COLORS.snapped : config.color;
       }
 
       // Commit
@@ -779,4 +814,24 @@ export function getDimensionBlockReason(element: Element): string | null {
 function extractUnit(value: string): string {
   const match = value.match(/[\d.]+(.*)$/);
   return match?.[1] || 'px';
+}
+
+/**
+ * Get the viewport coordinate of the element's edge for the given handle position.
+ * Returns null for corner handles (xy axis) where guide snap doesn't apply.
+ */
+function getEdgePosition(
+  position: HandleConfig['position'],
+  rect: DOMRect,
+  axis: 'x' | 'y',
+): number | null {
+  if (axis === 'x') {
+    if (position === 'right') return rect.right;
+    if (position === 'left') return rect.left;
+  }
+  if (axis === 'y') {
+    if (position === 'bottom') return rect.bottom;
+    if (position === 'top') return rect.top;
+  }
+  return null;
 }
