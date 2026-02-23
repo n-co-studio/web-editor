@@ -38,6 +38,50 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 -->
 
+## Session 16 — 2026-02-22 — Merge Move Tool into Position Panel
+
+**Status:** complete
+**Decisions applied:** 0001, 0002, 0008
+**Commits:** 04bd412 — feat: merge Move tool into Position panel as toggle button
+
+### Goal
+- Eliminate standalone Move toolbar tool by embedding drag-to-reposition as a Move toggle inside the Position mini panel
+- Reduce toolbar clutter (9 → 8 buttons), restore "every tool opens a panel" consistency
+- Create smoother workflow: change position type → drag, without switching tools
+
+### Plan Summary
+1. Remove `'move'` from `EditMode` union — use TypeScript as checklist for downstream references
+2. Clean up toolbar: remove move from TOOL_ORDER, TOOL_LABELS, ICONS
+3. Expand PositionEditor: accept `shadow`, compose MoveEditor internally (composition, not absorption)
+4. Add Move toggle row between position selector and inset section
+5. Expose delegation methods: `isMoveActive()`, `isMoveDragging()`, `cancelMoveDrag()`, `deactivateMove()`, `refreshMoveOverlay()`
+6. Wire 3-level Escape ladder: cancel drag → deactivate toggle → close panel
+7. Remove all `moveEditor` references from index.ts
+8. Clean up dead `onClose`/`closeCb` and `reposition` stub from MoveEditor (cohesion finding)
+
+### Changes Made
+- `packages/chrome-extension/src/shared/types.ts` — Removed `'move'` from `EditMode` union
+- `packages/chrome-extension/src/content/toolbar.ts` — Removed `'move'` from `TOOL_ORDER` (9→8), `TOOL_LABELS`, `ICONS`
+- `packages/chrome-extension/src/content/editing/position.ts` — Added `shadow` constructor param, composed `MoveEditor`, added Move toggle button with icon/disabled state/tooltip, 5 new public delegation methods, `cleanup()` calls `moveEditor.cleanup()`, position-type change refreshes toggle enabled state
+- `packages/chrome-extension/src/content/editing/move.ts` — Removed dead `onClose`/`closeCb` and no-op `reposition` stub (cohesion cleanup)
+- `packages/chrome-extension/src/content/index.ts` — Removed import, module var, instantiation, nulling for `moveEditor`; removed `getMoveBlockReason` from disabled tools; replaced scroll handler with `positionEditor.refreshMoveOverlay()`; replaced Escape ladder `moveEditor.isDragging()` block with 3-level hierarchy via `positionEditor`
+- `docs/ai/logs/session-log.md` — Added Session 16 entry, rotated Session 13 to archive
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass (0001/0002/0008), A2 pass (plan documented, scope advisory: 5 files ~168 net lines), A3 pass (`tsc --noEmit` clean, `npm run build` clean), A4 pass (no secrets), A5 pass (cohesion: 0 critical, 3 warnings — W1 dead API fixed, W2 pre-existing, W3 safe via external guard)
+
+### Failed Attempts (Brief)
+- None
+
+### Known Issues Logged
+- None
+
+### Follow-ups
+- Pre-existing `iconKey as EditMode` cast in toolbar.ts `buildIconButton` mouseleave handler (cohesion W2) — applies to all non-tool buttons, not introduced by this change
+- Move overlay does not reposition during toolbar drag (cohesion I1) — acceptable since overlay is element-anchored
+
+---
+
 ## Session 15 — 2026-02-21 — Contextual Note Panel Positioning
 
 **Status:** complete
@@ -112,31 +156,3 @@ Each session adds one entry. Keep entries high-signal and readable.
 - Validate grid snap exclusivity with debug log output
 - Grid snap with tiny baseSpacing (0.2px) may need majorSpacing fallback
 
----
-
-## Session 13 — 2026-02-21 — State Toggles, CSS Variables, Attributes & Accessibility
-
-**Status:** complete
-**Decisions applied:** 0001, 0002, 0008
-**Commits:** pending
-
-### Goal
-- Implement Brief 3: element state simulation (:hover/:focus/:active/:visited), CSS variable resolution tooltips, read-only attribute display in DOM tree, and accessibility insights section.
-
-### Changes Made
-- `packages/chrome-extension/src/content/inspection/state-simulator.ts` — **New** (~456 lines): `StatePreviewManager`, `StateSimulator`
-- `packages/chrome-extension/src/content/inspection/variable-resolver.ts` — **New** (~171 lines): var() chain resolution
-- `packages/chrome-extension/src/content/selection/panes/enrichments/var-badge.ts` — **New** (~235 lines): purple badge + tooltip
-- `packages/chrome-extension/src/content/selection/panes/accessibility-section.ts` — **New** (~451 lines): ARIA role, name, warnings, contrast
-- `packages/chrome-extension/src/content/selection/panes/css-groups-section.ts` — `:hov` button, var badge integration
-- `packages/chrome-extension/src/content/selection/panes/dom-tree-pane.ts` — Status cluster, attribute display
-- `packages/chrome-extension/src/content/selection/panes/properties-pane.ts` — StateSimulator, VariableResolver, AccessibilitySection
-- `packages/chrome-extension/src/content/selection/devtools-panel.ts` — State simulator wiring
-
-### Verification (Gates Evidence)
-- Commit gates: A1 pass, A2 pass, A3 pass, A4 pass, A5 pass (4 criticals found+fixed across 2 review rounds)
-
-### Follow-ups
-- `findWinningRule()` omits `excludeHost` parameter
-- Multi-var tooltip resolution covers only first var() in compound values
-- CDP upgrade path deferred per brief recommendation
