@@ -4,7 +4,7 @@
   "description": "Visual editing overlay for live web pages — feeds structured diffs to Claude Code",
   "version": "0.1.0",
   "minimum_chrome_version": "116",
-  "permissions": ["activeTab", "storage"],
+  "permissions": ["activeTab", "storage", "scripting"],
   "action": {
     "default_icon": {
       "16": "icons/icon-16.png",

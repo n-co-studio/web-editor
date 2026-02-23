@@ -1,7 +1,7 @@
 import type { VisualDiff, NoteEntry } from '@frontend-editor/shared';
 import { createElement, createText, createButton } from '../../shared/ui-utils';
 import { OVERLAY, SELECTOR_TRUNCATE_LENGTH, BATCH_CONFIRM_THRESHOLD, TOOLBAR_WIDTH } from '../../shared/constants';
-import type { ConnectionStatus } from '../../shared/types';
+import type { ConnectionStatus, DiffLifecycle } from '../../shared/types';
 import type { PendingQueue } from './queue';
 import type { WebSocketClient } from '../websocket-client';
 import type { DiffBuilder } from './diff-builder';
@@ -128,13 +128,26 @@ export class ReviewPanel {
     });
     const notes = this.notesStore.getAll();
     const active = this.queue.getActive();
-    const totalCount = active.length + notes.length;
+    const sent = this.queue.getSent();
+    const applied = this.queue.getApplied();
+    const pendingCount = active.length + notes.length;
+    const totalCount = pendingCount + sent.length + applied.length;
 
     const titleColumn = createElement('div', {}, {
       display: 'flex',
       flexDirection: 'column',
     });
-    const title = createText('span', `Changes (${totalCount})`, 'heading');
+
+    // Title with breakdown
+    let titleText = `Changes (${totalCount})`;
+    if (sent.length > 0 || applied.length > 0) {
+      const parts: string[] = [];
+      if (pendingCount > 0) parts.push(`${pendingCount} pending`);
+      if (sent.length > 0) parts.push(`${sent.length} sent`);
+      if (applied.length > 0) parts.push(`${applied.length} applied`);
+      titleText = `Changes (${parts.join(', ')})`;
+    }
+    const title = createText('span', titleText, 'heading');
     titleColumn.appendChild(title);
 
     // Elapsed time since oldest pending change
@@ -175,10 +188,51 @@ export class ReviewPanel {
       panel.appendChild(this.renderNoteCard(notes[i], i));
     }
 
-    // Grouped CSS changes
+    // Grouped CSS changes (pending)
     const groups = this.groupByElement(active);
     for (const [selector, diffs] of groups) {
       panel.appendChild(this.renderGroup(selector, diffs));
+    }
+
+    // Sent changes section
+    if (sent.length > 0) {
+      panel.appendChild(this.renderSectionHeader('Sent to Server', sent.length, OVERLAY.warning));
+      const sentDiffs = sent.map((s) => s.diff);
+      const sentGroups = this.groupByElement(sentDiffs);
+      for (const [selector, diffs] of sentGroups) {
+        panel.appendChild(this.renderGroup(selector, diffs, 'sent'));
+      }
+      // Stale indicator
+      const staleCount = sent.filter(
+        (s) => s.sentAt && Date.now() - s.sentAt > 24 * 60 * 60 * 1000,
+      ).length;
+      if (staleCount > 0) {
+        panel.appendChild(this.renderStaleNotice(staleCount));
+      }
+    }
+
+    // Applied changes section
+    if (applied.length > 0) {
+      panel.appendChild(this.renderSectionHeader('Applied', applied.length, '#10b981'));
+      const appliedDiffs = applied.map((a) => a.diff);
+      const appliedGroups = this.groupByElement(appliedDiffs);
+      for (const [selector, diffs] of appliedGroups) {
+        panel.appendChild(this.renderGroup(selector, diffs, 'applied'));
+      }
+      // Clear applied link
+      const clearLink = createElement('button', {}, {
+        background: 'none',
+        border: 'none',
+        color: OVERLAY.textMuted,
+        fontSize: '10px',
+        cursor: 'pointer',
+        padding: '2px 12px 6px',
+        pointerEvents: 'auto',
+        fontFamily: OVERLAY.fontFamily,
+      });
+      clearLink.textContent = `Clear ${applied.length} applied`;
+      clearLink.addEventListener('click', () => this.queue.clearApplied());
+      panel.appendChild(clearLink);
     }
 
     // Empty state
@@ -197,7 +251,7 @@ export class ReviewPanel {
     }
 
     // Action bar
-    panel.appendChild(this.renderActionBar(active, notes.length));
+    panel.appendChild(this.renderActionBar(active, notes.length, sent.length));
 
     this.container = panel;
     this.shadow.appendChild(panel);
@@ -323,20 +377,28 @@ export class ReviewPanel {
   private renderGroup(
     selector: string,
     diffs: VisualDiff[],
+    lifecycle?: DiffLifecycle,
   ): HTMLDivElement {
+    const isReadOnly = lifecycle === 'sent' || lifecycle === 'applied';
     const group = createElement('div', {}, {
       padding: '8px 12px',
       borderBottom: `1px solid ${OVERLAY.border}`,
+      opacity: isReadOnly ? '0.65' : '1',
     });
 
     // Group header
+    const headerRow = createElement('div', {}, {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '6px',
+      marginBottom: '4px',
+    });
     const headerText =
       selector.length > SELECTOR_TRUNCATE_LENGTH
         ? selector.slice(0, SELECTOR_TRUNCATE_LENGTH) + '\u2026'
         : selector;
-    const header = createText('div', headerText, 'mono');
+    const header = createText('span', headerText, 'mono');
     header.style.color = OVERLAY.primary;
-    header.style.marginBottom = '4px';
     header.style.cursor = 'pointer';
     header.title = selector;
     header.addEventListener('click', () => {
@@ -344,7 +406,17 @@ export class ReviewPanel {
     });
     header.addEventListener('mouseenter', () => { header.style.textDecoration = 'underline'; });
     header.addEventListener('mouseleave', () => { header.style.textDecoration = 'none'; });
-    group.appendChild(header);
+    headerRow.appendChild(header);
+
+    // Lifecycle badge
+    if (lifecycle === 'sent') {
+      headerRow.appendChild(this.renderLifecycleBadge('Sent', OVERLAY.warning));
+    } else if (lifecycle === 'applied') {
+      headerRow.appendChild(this.renderLifecycleBadge('\u2713 Applied', '#10b981'));
+    } else if (!lifecycle && diffs.some((d) => this.queue.isCopied(d.id))) {
+      headerRow.appendChild(this.renderLifecycleBadge('Copied', OVERLAY.textMuted));
+    }
+    group.appendChild(headerRow);
 
     // Property changes
     for (const diff of diffs) {
@@ -381,23 +453,25 @@ export class ReviewPanel {
         values.textContent = `${change.fromValue} \u2192 ${change.toValue}`;
         row.appendChild(values);
 
-        // Remove button
-        const removeBtn = createElement('button', {}, {
-          background: 'none',
-          border: 'none',
-          color: OVERLAY.textMuted,
-          cursor: 'pointer',
-          padding: '0 2px',
-          fontSize: '11px',
-          marginLeft: 'auto',
-          pointerEvents: 'auto',
-        });
-        removeBtn.textContent = '\u00d7';
-        removeBtn.title = 'Remove this change';
-        removeBtn.addEventListener('click', () => {
-          this.queue.remove(diff.id);
-        });
-        row.appendChild(removeBtn);
+        // Remove button (hidden for sent/applied)
+        if (!isReadOnly) {
+          const removeBtn = createElement('button', {}, {
+            background: 'none',
+            border: 'none',
+            color: OVERLAY.textMuted,
+            cursor: 'pointer',
+            padding: '0 2px',
+            fontSize: '11px',
+            marginLeft: 'auto',
+            pointerEvents: 'auto',
+          });
+          removeBtn.textContent = '\u00d7';
+          removeBtn.title = 'Remove this change';
+          removeBtn.addEventListener('click', () => {
+            this.queue.remove(diff.id);
+          });
+          row.appendChild(removeBtn);
+        }
 
         group.appendChild(row);
       }
@@ -428,22 +502,24 @@ export class ReviewPanel {
           dirBadge.textContent = rc.containerDirection;
           row.appendChild(dirBadge);
 
-          const removeBtn = createElement('button', {}, {
-            background: 'none',
-            border: 'none',
-            color: OVERLAY.textMuted,
-            cursor: 'pointer',
-            padding: '0 2px',
-            fontSize: '11px',
-            marginLeft: 'auto',
-            pointerEvents: 'auto',
-          });
-          removeBtn.textContent = '\u00d7';
-          removeBtn.title = 'Remove this change';
-          removeBtn.addEventListener('click', () => {
-            this.queue.remove(diff.id);
-          });
-          row.appendChild(removeBtn);
+          if (!isReadOnly) {
+            const removeBtn = createElement('button', {}, {
+              background: 'none',
+              border: 'none',
+              color: OVERLAY.textMuted,
+              cursor: 'pointer',
+              padding: '0 2px',
+              fontSize: '11px',
+              marginLeft: 'auto',
+              pointerEvents: 'auto',
+            });
+            removeBtn.textContent = '\u00d7';
+            removeBtn.title = 'Remove this change';
+            removeBtn.addEventListener('click', () => {
+              this.queue.remove(diff.id);
+            });
+            row.appendChild(removeBtn);
+          }
 
           group.appendChild(row);
         }
@@ -475,22 +551,73 @@ export class ReviewPanel {
           badge.textContent = 'new';
           row.appendChild(badge);
 
-          const removeBtn = createElement('button', {}, {
-            background: 'none',
-            border: 'none',
-            color: OVERLAY.textMuted,
-            cursor: 'pointer',
-            padding: '0 2px',
-            fontSize: '11px',
-            marginLeft: 'auto',
-            pointerEvents: 'auto',
+          if (!isReadOnly) {
+            const removeBtn = createElement('button', {}, {
+              background: 'none',
+              border: 'none',
+              color: OVERLAY.textMuted,
+              cursor: 'pointer',
+              padding: '0 2px',
+              fontSize: '11px',
+              marginLeft: 'auto',
+              pointerEvents: 'auto',
+            });
+            removeBtn.textContent = '\u00d7';
+            removeBtn.title = 'Remove this change';
+            removeBtn.addEventListener('click', () => {
+              this.queue.remove(diff.id);
+            });
+            row.appendChild(removeBtn);
+          }
+
+          group.appendChild(row);
+        }
+      }
+
+      // Group changes
+      if (diff.groupChanges) {
+        for (const gc of diff.groupChanges) {
+          const row = createElement('div', {}, {
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            padding: '2px 0',
+            fontFamily: OVERLAY.monoFamily,
+            fontSize: OVERLAY.monoSize,
           });
-          removeBtn.textContent = '\u00d7';
-          removeBtn.title = 'Remove this change';
-          removeBtn.addEventListener('click', () => {
-            this.queue.remove(diff.id);
+
+          const desc = createElement('span', {}, { color: OVERLAY.text });
+          desc.textContent = `group: ${gc.wrappedSelectors.length} elements into flex container`;
+          row.appendChild(desc);
+
+          const badge = createElement('span', {}, {
+            background: 'rgba(168, 85, 247, 0.2)',
+            color: '#a855f7',
+            padding: '1px 3px',
+            borderRadius: '2px',
+            fontSize: '9px',
           });
-          row.appendChild(removeBtn);
+          badge.textContent = 'wrap';
+          row.appendChild(badge);
+
+          if (!isReadOnly) {
+            const removeBtn = createElement('button', {}, {
+              background: 'none',
+              border: 'none',
+              color: OVERLAY.textMuted,
+              cursor: 'pointer',
+              padding: '0 2px',
+              fontSize: '11px',
+              marginLeft: 'auto',
+              pointerEvents: 'auto',
+            });
+            removeBtn.textContent = '\u00d7';
+            removeBtn.title = 'Remove this change';
+            removeBtn.addEventListener('click', () => {
+              this.queue.remove(diff.id);
+            });
+            row.appendChild(removeBtn);
+          }
 
           group.appendChild(row);
         }
@@ -542,7 +669,7 @@ export class ReviewPanel {
       });
 
       const label = createElement('span');
-      const changeCount = item.diff.changes.length + (item.diff.reorderChanges?.length ?? 0) + (item.diff.insertChanges?.length ?? 0);
+      const changeCount = item.diff.changes.length + (item.diff.reorderChanges?.length ?? 0) + (item.diff.insertChanges?.length ?? 0) + (item.diff.groupChanges?.length ?? 0);
       label.textContent = `${item.diff.element.selector.slice(0, 30)} (${changeCount} change${changeCount !== 1 ? 's' : ''})`;
       row.appendChild(label);
 
@@ -561,7 +688,7 @@ export class ReviewPanel {
     return section;
   }
 
-  private renderActionBar(active: VisualDiff[], noteCount: number): HTMLDivElement {
+  private renderActionBar(active: VisualDiff[], noteCount: number, sentCount: number): HTMLDivElement {
     const bar = createElement('div', {}, {
       display: 'flex',
       justifyContent: 'space-between',
@@ -569,28 +696,30 @@ export class ReviewPanel {
       padding: '8px 12px',
     });
 
-    const totalCount = active.length + noteCount;
+    const pendingTotal = active.length + noteCount;
     const countText = createText(
       'span',
-      `${totalCount} change${totalCount !== 1 ? 's' : ''}`,
+      `${pendingTotal} pending`,
       'body',
     );
     countText.style.color = OVERLAY.textMuted;
     bar.appendChild(countText);
 
-    // Button group (copy + apply)
+    // Button group (copy + check status + apply)
     const btnGroup = createElement('div', {}, {
       display: 'flex',
       gap: '6px',
       alignItems: 'center',
     });
 
-    // "Copy as Prompt" — works regardless of connection status
-    const copyDisabled = totalCount === 0;
+    // "Copy as Prompt" — works regardless of connection status (copies pending only)
+    const copyDisabled = pendingTotal === 0;
     const copyBtn = createButton('Copy as Prompt', 'ghost', () => {
       const notes = this.notesStore.getAll();
       const prompt = serializeToPrompt(active, notes.length > 0 ? notes : undefined);
       navigator.clipboard.writeText(prompt).then(() => {
+        // Mark diffs as copied for clipboard reconciliation
+        this.queue.markCopied(active.map((d) => d.id));
         // Green flash confirmation
         copyBtn.style.background = 'rgba(34, 197, 94, 0.15)';
         setTimeout(() => { copyBtn.style.background = 'transparent'; }, 300);
@@ -605,9 +734,23 @@ export class ReviewPanel {
     }
     btnGroup.appendChild(copyBtn);
 
-    // "Apply Changes" — requires connection
+    // "Check Status" — only shown when there are sent items
+    if (sentCount > 0) {
+      const checkDisabled = this.connectionStatus !== 'connected';
+      const checkBtn = createButton('Check Status', 'ghost', () => {
+        this.wsClient.sendStatusRequest();
+      });
+      checkBtn.style.fontSize = '11px';
+      if (checkDisabled) {
+        checkBtn.style.opacity = '0.5';
+        checkBtn.style.pointerEvents = 'none';
+      }
+      btnGroup.appendChild(checkBtn);
+    }
+
+    // "Apply Changes" — requires connection, only counts pending items
     const sendDisabled =
-      totalCount === 0 || this.connectionStatus !== 'connected' || this.sending;
+      pendingTotal === 0 || this.connectionStatus !== 'connected' || this.sending;
 
     const sendBtn = createButton('Apply Changes', 'primary', () => {
       this.handleSend();
@@ -665,6 +808,66 @@ export class ReviewPanel {
   // -----------------------------------------------------------------------
   // Helpers
   // -----------------------------------------------------------------------
+
+  private renderLifecycleBadge(label: string, color: string): HTMLSpanElement {
+    const badge = createElement('span', {}, {
+      background: `${color}22`,
+      color,
+      padding: '1px 4px',
+      borderRadius: '3px',
+      fontSize: '9px',
+      fontFamily: OVERLAY.fontFamily,
+      flexShrink: '0',
+    }) as HTMLSpanElement;
+    badge.textContent = label;
+    return badge;
+  }
+
+  private renderSectionHeader(label: string, count: number, color: string): HTMLDivElement {
+    const header = createElement('div', {}, {
+      padding: '6px 12px 2px',
+      fontSize: '10px',
+      fontFamily: OVERLAY.fontFamily,
+      color,
+      textTransform: 'uppercase',
+      letterSpacing: '0.5px',
+      borderTop: `1px solid ${OVERLAY.border}`,
+    });
+    header.textContent = `${label} (${count})`;
+    return header;
+  }
+
+  private renderStaleNotice(staleCount: number): HTMLDivElement {
+    const notice = createElement('div', {}, {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: '4px 12px 6px',
+      fontSize: '10px',
+      fontFamily: OVERLAY.fontFamily,
+      color: OVERLAY.warning,
+    });
+    const text = createElement('span');
+    text.textContent = `${staleCount} change${staleCount !== 1 ? 's' : ''} sent >24h ago`;
+    notice.appendChild(text);
+
+    const clearBtn = createElement('button', {}, {
+      background: 'none',
+      border: 'none',
+      color: OVERLAY.warning,
+      fontSize: '10px',
+      cursor: 'pointer',
+      padding: '0 2px',
+      pointerEvents: 'auto',
+      fontFamily: OVERLAY.fontFamily,
+      textDecoration: 'underline',
+    });
+    clearBtn.textContent = 'Clear stale';
+    clearBtn.addEventListener('click', () => this.queue.clearStale());
+    notice.appendChild(clearBtn);
+
+    return notice;
+  }
 
   private groupByElement(diffs: VisualDiff[]): Map<string, VisualDiff[]> {
     const groups = new Map<string, VisualDiff[]>();

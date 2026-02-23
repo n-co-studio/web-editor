@@ -383,16 +383,14 @@ export class Bridge {
     this.clients.set(tabId, { ws, tabId });
     console.error(`[frontend-editor] Extension hello from tab: ${tabId}`);
 
-    // Respond with SERVER_HELLO — include both pending and processed IDs
-    // so the extension knows which diffs the server has already seen
-    const knownDiffIds = [
-      ...this.pendingQueue.map((d) => d.id),
-      ...this.processedIds,
-    ];
+    // Respond with SERVER_HELLO — split pending and applied IDs
+    // so the extension can distinguish server queue state from completed diffs
+    const pendingDiffIds = this.pendingQueue.map((d) => d.id);
+    const appliedDiffIds = [...this.processedIds];
     this.send(ws, {
       type: MessageType.SERVER_HELLO,
       version: PROTOCOL_VERSION,
-      payload: { knownDiffIds, protocolVersion: PROTOCOL_VERSION },
+      payload: { pendingDiffIds, appliedDiffIds, protocolVersion: PROTOCOL_VERSION },
     });
 
     // Send full token data

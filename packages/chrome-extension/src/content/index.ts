@@ -30,12 +30,13 @@ import type { ReorderCommitCallback } from './editing/reorder';
 import { InsertEditor, getInsertBlockReason } from './editing/insert';
 import type { InsertCommitCallback } from './editing/insert';
 import { buildInsertChange } from './editing/insert-source';
+import { groupElements, getGroupBlockReason } from './editing/group';
 import { GridSettingsPanel } from './grid-settings';
 import { MeasureOverlay } from './selection/measure-overlay';
 import { MultiSelectManager } from './selection/multi-select';
 import { MultiSelectToolbar } from './editing/multi-select-toolbar';
 import { buildElementInfo, getTopElementAt, generateSelector } from '../shared/dom-utils';
-import type { VisualDiff, PropertyChange, ReorderChange } from '@frontend-editor/shared';
+import type { VisualDiff, PropertyChange, ReorderChange, GroupChange } from '@frontend-editor/shared';
 import type { ExtensionMode, ConnectionStatus, EditMode } from '../shared/types';
 
 // ---------------------------------------------------------------------------
@@ -125,8 +126,9 @@ async function activate(): Promise<void> {
     getPendingDiffIds: () => queue!.getDiffIds(),
     onStatusChange: handleStatusChange,
     onServerHello: (payload) => {
-      queue!.reconcile(payload.knownDiffIds);
+      queue!.reconcile(payload.pendingDiffIds, payload.appliedDiffIds);
       badge!.update();
+      reviewPanel?.refresh();
     },
     onDiffAck: (payload) => {
       queue!.acknowledge(payload.diffIds);
@@ -135,7 +137,9 @@ async function activate(): Promise<void> {
       devtoolsPanel?.log(`${payload.diffIds.length} diff(s) acknowledged`);
     },
     onDiffApplied: (payload) => {
-      // Phase 3 will transition diffs to 'applied' lifecycle status
+      queue!.markApplied(payload.diffIds);
+      badge!.update();
+      reviewPanel?.refresh();
       devtoolsPanel?.log(`${payload.diffIds.length} diff(s) applied`);
     },
     onTokenData: (payload) => {
@@ -147,7 +151,9 @@ async function activate(): Promise<void> {
       devtoolsPanel?.log(`Token update: ${payload.tokens.length} tokens`);
     },
     onStatusResponse: (payload) => {
-      // Phase 3 will update per-diff lifecycle status in the review panel
+      queue!.updateFromServerStatus(payload.perDiff);
+      badge!.update();
+      reviewPanel?.refresh();
       devtoolsPanel?.log(`Status: ${payload.pendingCount} pending, last activity: ${payload.lastToolCallAt ?? 'none'}`);
     },
     onError: (payload) => {
@@ -190,7 +196,8 @@ async function activate(): Promise<void> {
   gridSettingsPanel = new GridSettingsPanel(gridOverlay.getEffectiveSettings());
   measureOverlay = new MeasureOverlay(shadow, host);
   multiSelect = new MultiSelectManager(shadow, host);
-  multiSelectToolbar = new MultiSelectToolbar(tokenStore, preview);
+  multiSelectToolbar = new MultiSelectToolbar(shadow, tokenStore, preview);
+  multiSelectToolbar.onGroup((elements) => makeGroupCommit(elements));
 
   // Wire hover click → selection
   hover.onClick((el) => selection!.select(el));
@@ -701,25 +708,15 @@ async function activate(): Promise<void> {
     deleteSelectedElement();
   });
 
-  // Push pending count to toolbar badge
+  // Push pending count to toolbar badge (only unsent items)
   queue.onChange(() => {
-    toolbar?.setPendingCount(queue!.count);
+    toolbar?.setPendingCount(queue!.pendingCount);
   });
   // Initialize count from any restored queue items
-  toolbar.setPendingCount(queue.count);
+  toolbar.setPendingCount(queue.pendingCount);
 
   // Wire undo/redo/reset
-  toolbar.onUndo(() => {
-    const entry = editHistory!.undo();
-    if (entry) {
-      queue!.remove(entry.diff.id);
-      badge!.update();
-      reviewPanel!.refresh();
-      selection?.refreshHighlight();
-      refreshReorderAfterHistoryChange(entry);
-      devtoolsPanel?.log('Undo');
-    }
-  });
+  toolbar.onUndo(() => tryUndo());
 
   toolbar.onRedo(() => {
     const entry = editHistory!.redo();
@@ -735,11 +732,11 @@ async function activate(): Promise<void> {
 
   toolbar.onReset(() => {
     editHistory!.resetAll();
-    queue!.clear();
+    queue!.clearPending();
     badge!.update();
     reviewPanel!.refresh();
     selection?.deselect();
-    devtoolsPanel?.log('All changes reset');
+    devtoolsPanel?.log('Pending changes reset');
   });
 
   // Update toolbar undo/redo button states when history changes
@@ -1089,6 +1086,83 @@ function makeInsertCommit(_containerEl: Element): InsertCommitCallback {
 }
 
 // ---------------------------------------------------------------------------
+// Group commit helper — wraps selected elements in a flex container
+// ---------------------------------------------------------------------------
+
+function makeGroupCommit(elements: Element[]): void {
+  const htmlElements = elements as HTMLElement[];
+
+  // Capture all element data BEFORE DOM mutation
+  const parent = htmlElements[0].parentElement!;
+  const containerSelector = generateSelector(parent);
+
+  // Sort by DOM order to determine insert index
+  const childList = Array.from(parent.children);
+  const sorted = [...htmlElements].sort(
+    (a, b) => childList.indexOf(a) - childList.indexOf(b),
+  );
+  const insertIndex = childList.indexOf(sorted[0]);
+
+  // Capture sibling anchors (prev/next around the group range)
+  const firstIdx = childList.indexOf(sorted[0]);
+  const lastIdx = childList.indexOf(sorted[sorted.length - 1]);
+  const prevEl = firstIdx > 0 ? childList[firstIdx - 1] : null;
+  const nextEl = lastIdx < childList.length - 1 ? childList[lastIdx + 1] : null;
+
+  const buildAnchor = (el: Element | null) => {
+    if (!el) return null;
+    const info = buildElementInfo(el);
+    return {
+      selector: info.selector,
+      sourceFile: info.sourceFile,
+      sourceLine: info.sourceLine,
+      instanceIndex: info.instanceIndex,
+    };
+  };
+
+  const wrappedSelectors = sorted.map((el) => generateSelector(el));
+
+  // Perform DOM mutation
+  const result = groupElements(htmlElements, shadow!);
+
+  // Build diff using the wrapper as the element
+  const wrapperInfo = buildElementInfo(result.wrapper);
+
+  const groupChange: GroupChange = {
+    type: 'group',
+    wrapperTagName: 'div',
+    wrapperInitialStyles: [
+      { property: 'display', fromValue: '', toValue: 'flex' },
+      { property: 'flex-direction', fromValue: '', toValue: result.wrapper.style.flexDirection },
+      { property: 'gap', fromValue: '', toValue: '0px' },
+    ],
+    containerSelector,
+    insertIndex,
+    wrappedSelectors,
+    prevSibling: buildAnchor(prevEl),
+    nextSibling: buildAnchor(nextEl),
+  };
+
+  const diff = diffBuilder!.buildGroup(wrapperInfo, groupChange);
+
+  queue!.add(diff);
+  editHistory!.push({
+    type: 'group',
+    wrapper: result.wrapper,
+    originalParent: parent as HTMLElement,
+    originalPositions: result.originalPositions,
+    diff,
+  });
+  badge!.update();
+  reviewPanel!.refresh();
+  devtoolsPanel?.refreshProperties();
+
+  // Exit multi-select before selecting wrapper to avoid deselect→reselect cycle
+  exitMultiSelectMode();
+  selection!.select(result.wrapper);
+}
+
+// ---------------------------------------------------------------------------
 // Reorder editor refresh after undo/redo — keeps drop zones in sync with DOM
 // ---------------------------------------------------------------------------
 
@@ -1098,6 +1172,30 @@ function refreshReorderAfterHistoryChange(entry: HistoryEntry): void {
   const el = selection?.getSelectedElement();
   if (el) {
     reorderEditor.render(el, makeReorderCommit(el));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Undo helper — blocks undo for diffs already sent to the server
+// ---------------------------------------------------------------------------
+
+function tryUndo(): void {
+  const top = editHistory?.peekUndo();
+  if (top && queue) {
+    const status = queue.getLifecycleStatus(top.diff.id);
+    if (status !== 'pending') {
+      devtoolsPanel?.log('Cannot undo — change already sent to server', 'warn');
+      return;
+    }
+  }
+  const entry = editHistory?.undo();
+  if (entry) {
+    queue?.remove(entry.diff.id);
+    badge?.update();
+    reviewPanel?.refresh();
+    selection?.refreshHighlight();
+    refreshReorderAfterHistoryChange(entry);
+    devtoolsPanel?.log('Undo');
   }
 }
 
@@ -1350,14 +1448,22 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
         devtoolsPanel?.log('Redo');
       }
     } else {
-      const entry = editHistory?.undo();
-      if (entry) {
-        queue?.remove(entry.diff.id);
-        badge?.update();
-        reviewPanel?.refresh();
-        selection?.refreshHighlight();
-        refreshReorderAfterHistoryChange(entry);
-        devtoolsPanel?.log('Undo');
+      tryUndo();
+    }
+    return;
+  }
+
+  // Cmd+G / Ctrl+G — group selected elements (multi-select only)
+  if (e.key === 'g' && (e.metaKey || e.ctrlKey)) {
+    if (multiSelect?.isActive()) {
+      e.preventDefault();
+      e.stopPropagation();
+      const primary = selection?.getSelectedElement();
+      if (primary) {
+        const allElements = multiSelect.getAllElements(primary);
+        if (!getGroupBlockReason(allElements)) {
+          makeGroupCommit(allElements);
+        }
       }
     }
     return;
