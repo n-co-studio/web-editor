@@ -1,0 +1,50 @@
+# Task Group Contract Template
+# Copy this file to {group-name}.yaml when creating a new task group.
+# First Prompt B session in the group creates the contract from brief metadata.
+
+identity:
+  group_name: ""          # kebab-case identifier (matches filename)
+  created_by_session: 0   # session number that created this contract
+  created_date: ""        # YYYY-MM-DD
+
+# Brief roster — ordered list of briefs in execution sequence.
+# First session populates all briefs from Prompt T output.
+# Each session updates its own entry at close.
+briefs:
+  - title: ""             # brief title from ### Task Group section
+    sequence: 1           # 1-indexed position in the group
+    session: null         # session number (set when session starts)
+    branch: ""            # branch name (set when session starts)
+    status: pending       # pending | in_progress | complete
+    next_brief: ""        # title of the next brief (empty for last)
+
+# Shared conventions — REQUIRE-level constraints for all sessions.
+# Established by the first session, read by all subsequent sessions.
+conventions:
+  naming:                 # variable/function/file naming patterns
+    - pattern: ""
+      scope: ""           # where this pattern applies
+  patterns:               # architectural patterns to follow
+    - pattern: ""
+      rationale: ""
+  decisions:              # decision record IDs that apply across the group
+    - ""
+  boundaries:             # module boundaries — what each brief owns
+    - module: ""
+      owner_brief: ""     # which brief owns this module
+
+# Integration points — cross-brief touchpoints.
+# Producer creates; consumer reads. Prevents broken handoffs.
+integration_points:
+  - name: ""              # descriptive name for the integration
+    producer: ""          # brief title that creates this
+    consumer: ""          # brief title that reads/uses this
+    artifact: ""          # file path or API surface being shared
+
+# Session decisions — append-only log.
+# Each session appends decisions made during execution.
+# Subsequent sessions read this to stay aligned.
+session_decisions:
+  - session: 0
+    decision: ""
+    rationale: ""
