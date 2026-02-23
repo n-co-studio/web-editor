@@ -126,6 +126,34 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 ---
 
+## Session 18 — 2026-02-22 — Housekeeping: Template Sync + Uncommitted Triage
+
+**Status:** complete
+**Decisions applied:** none
+**Commits:** 73a14e5 — chore: sync Repo OS template updates, e017490 — chore: update manifest and service worker
+
+### Goal
+- Triage 25 uncommitted changes across the working tree
+- Commit Repo OS template sync and product changes separately
+
+### Changes Made
+- `.claude/agents/`, `.claude/hooks/`, `AI.md`, `docs/ai/` — Repo OS template sync (23 files: updated agents, hooks, prompts, workflow, gates; new decision 0011, auditor agent, prompt-c, contract template; removed session-archive.md)
+- `packages/chrome-extension/manifest.json`, `src/service-worker/index.ts` — Manifest + service worker updates
+
+### Verification (Gates Evidence)
+- Commit gates: A1 n/a (no decisions), A2 n/a (housekeeping), A3 n/a (no product logic), A4 pass (no secrets), A5 n/a
+
+### Failed Attempts (Brief)
+- None
+
+### Known Issues Logged
+- 7 uncommitted product files remain (queue.ts, review-panel.ts, history.ts, index.ts, types.ts, bridge.ts, protocol.ts) — likely in-progress work from operator
+
+### Follow-ups
+- None
+
+---
+
 ## Session 17 — 2026-02-22 — Insert Element Feature (Phases 0–2) + Cohesion Fixes
 
 **Status:** complete
