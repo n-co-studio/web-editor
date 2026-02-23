@@ -42,7 +42,7 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 **Status:** complete
 **Decisions applied:** 0001, 0002, 0008
-**Commits:** b1b8142 — feat: group elements phase 2 — UI, shortcut, wiring, server, boundary
+**Commits:** 9bc0b1b — feat: group elements phase 2 — UI, shortcut, wiring, server, boundary, cd7186d — merge: resolve conflict in prompt-t-task-definition.md
 
 ### Goal
 - Wire Group operation into user-facing UI: Group button in MultiSelectToolbar, Cmd+G keyboard shortcut, makeGroupCommit() orchestrator helper, MCP server description, review panel rendering, boundary expansion
@@ -77,6 +77,9 @@ Each session adds one entry. Keep entries high-signal and readable.
 ### Follow-ups
 - Cohesion R2: `refreshGroupAfterHistoryChange` not needed today (no active group overlay)
 - Cohesion R3: bridge drift tracking skips structural change styles (consistent with reorder/insert)
+
+### Post-commit
+- Created PR #11, resolved merge conflict in `docs/ai/prompts/prompt-t-task-definition.md` (kept phased-brief instructions from feature branch), merged to main
 
 ---
 
