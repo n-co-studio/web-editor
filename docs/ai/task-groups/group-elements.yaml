@@ -8,7 +8,7 @@ briefs:
     sequence: 1
     session: 20
     branch: "feature/reorder-phase-1"
-    status: in_progress
+    status: complete
     next_brief: "Group Elements — Phase 2 (UI Wiring)"
   - title: "Group Elements — Phase 2 (UI Wiring)"
     sequence: 2
