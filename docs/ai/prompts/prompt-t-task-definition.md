@@ -72,17 +72,21 @@ The Orchestrator synthesizes specialist findings into a draft task brief:
 Present the draft task brief to the operator. The operator reviews and may:
 - **Approve** — Brief is final. Displayed in copy-paste format.
 - **Revise** — Operator requests changes. Update and re-present.
-- **Narrow** — Operator says "too big." Split into multiple smaller briefs.
+- **Narrow** — Operator says "too big." Split into multiple smaller briefs. Each sub-brief gets a `### Task Group` section with a shared group name, sequence number (N of M), and integration notes (produces/consumes). The first brief in the group creates the task group contract during its Prompt B session; subsequent briefs read and update it. See `docs/ai/task-groups/_contract-template.yaml` for the contract structure.
 - **Abandon** — Operator decides not to proceed. No output.
 
 Do not finalize without explicit operator approval.
 
 #### Step 5 — Output
 
-Display the finalized task brief in a fenced code block so the operator can copy it:
+Display the finalized task brief in a self-contained fenced code block. Follow the Session Handoff Convention (see `workflow.md`): first line is a plain-text short title that becomes the VS Code tab label.
 
 ~~~
-## Task Brief: [Title]
+[Short Title] — Task Brief
+
+Follow docs/ai/prompts/prompt-b-product-build.md.
+
+## Task Brief: [Full Title]
 
 ### Goal
 [1-2 sentences: what this task accomplishes and why]
@@ -118,12 +122,19 @@ Display the finalized task brief in a fenced code block so the operator can copy
 ### Dependencies
 [Other tasks that must complete first, or that this task unblocks. "None" if standalone.]
 
+### Task Group
+[Only present when this brief is part of a multi-brief group (Narrow path). Omit entirely for standalone briefs.]
+- **Group:** [kebab-case group name]
+- **Brief:** [N of M] — [this brief's title]
+- **Produces:** [files/APIs this brief creates that later briefs consume. "None" if last.]
+- **Consumes:** [files/APIs from earlier briefs this brief depends on. "None" if first.]
+
 ### Spec References
 [Which compiled spec files are relevant. The Prompt B session should read these.]
 - `docs/spec/compiled/{active}/[file]` — [why relevant]
 ~~~
 
-After displaying the brief, instruct: "Copy this brief and paste it alongside Prompt B in a new session to begin implementation."
+After displaying the brief, instruct: "Copy the block above and paste it into a new session to begin implementation."
 
 ## Rules
 

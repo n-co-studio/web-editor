@@ -79,7 +79,13 @@ You must:
 - If the feature was promoted from a PoC, ask the operator for the experiment brief path and link it in the "Prior Art" field
 - Write the completed brief to `docs/spec/compiled/{active}/features/brief-{name}.md`
 - Do NOT update `manifest.json` (this is a feature addition, not a version change)
-- When complete, confirm **"Feature brief complete"** and instruct the operator to proceed to the Advisory Board review (Prompt A Phase 1)
+- When complete, confirm **"Feature brief complete"** and output a handoff block (see Session Handoff Convention in `workflow.md`):
+
+~~~
+[Feature Name] Review — Prompt A
+
+Follow docs/ai/prompts/prompt-a-repo-os.md. Initialize mode.
+~~~
 
 Feature mode is lighter than a full spec update:
 - No re-interview of product, architecture, design system, or boundaries
@@ -105,7 +111,13 @@ Feature mode is lighter than a full spec update:
 - **If a field can't be defined yet**, mark it `[TBD]` and flag it. All TBDs must be resolved before moving to Prompt A.
 - **Feature brief rule:** The "What It Touches" checkboxes must have at least one item checked. If the operator checks none, ask what the feature interacts with — every feature touches something.
 
-When complete, confirm **"Spec complete"** and instruct the operator to proceed to Prompt A.
+When complete, confirm **"Spec complete"** and output a handoff block (see Session Handoff Convention in `workflow.md`):
+
+~~~
+Spec Review — Prompt A
+
+Follow docs/ai/prompts/prompt-a-repo-os.md. Initialize mode.
+~~~
 
 ### What "complete" means
 
