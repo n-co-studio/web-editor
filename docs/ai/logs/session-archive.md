@@ -6,6 +6,35 @@ This file is not read during normal sessions. Referenced for deep investigation 
 
 ---
 
+## Session 13 — 2026-02-21 — State Toggles, CSS Variables, Attributes & Accessibility
+
+**Status:** complete
+**Decisions applied:** 0001, 0002, 0008
+**Commits:** pending
+
+### Goal
+- Implement Brief 3: element state simulation (:hover/:focus/:active/:visited), CSS variable resolution tooltips, read-only attribute display in DOM tree, and accessibility insights section.
+
+### Changes Made
+- `packages/chrome-extension/src/content/inspection/state-simulator.ts` — **New** (~456 lines): `StatePreviewManager`, `StateSimulator`
+- `packages/chrome-extension/src/content/inspection/variable-resolver.ts` — **New** (~171 lines): var() chain resolution
+- `packages/chrome-extension/src/content/selection/panes/enrichments/var-badge.ts` — **New** (~235 lines): purple badge + tooltip
+- `packages/chrome-extension/src/content/selection/panes/accessibility-section.ts` — **New** (~451 lines): ARIA role, name, warnings, contrast
+- `packages/chrome-extension/src/content/selection/panes/css-groups-section.ts` — `:hov` button, var badge integration
+- `packages/chrome-extension/src/content/selection/panes/dom-tree-pane.ts` — Status cluster, attribute display
+- `packages/chrome-extension/src/content/selection/panes/properties-pane.ts` — StateSimulator, VariableResolver, AccessibilitySection
+- `packages/chrome-extension/src/content/selection/devtools-panel.ts` — State simulator wiring
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass, A2 pass, A3 pass, A4 pass, A5 pass (4 criticals found+fixed across 2 review rounds)
+
+### Follow-ups
+- `findWinningRule()` omits `excludeHost` parameter
+- Multi-var tooltip resolution covers only first var() in compound values
+- CDP upgrade path deferred per brief recommendation
+
+---
+
 ## Session 12 — 2026-02-21 — CSS Rules Display & Property Toggle
 
 **Status:** complete

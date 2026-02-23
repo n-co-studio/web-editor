@@ -25,7 +25,6 @@ import { NotesStore } from './batching/notes-store';
 import { NotesEditor } from './editing/notes';
 import { GridOverlay } from './grid-overlay';
 import { RulerOverlay } from './ruler-overlay';
-import { MoveEditor, getMoveBlockReason } from './editing/move';
 import { ReorderEditor, getReorderBlockReason } from './editing/reorder';
 import type { ReorderCommitCallback } from './editing/reorder';
 import { GridSettingsPanel } from './grid-settings';
@@ -69,7 +68,6 @@ let editHistory: EditHistory | null = null;
 let notesStore: NotesStore | null = null;
 let notesEditor: NotesEditor | null = null;
 let gridOverlay: GridOverlay | null = null;
-let moveEditor: MoveEditor | null = null;
 let reorderEditor: ReorderEditor | null = null;
 let gridSettingsPanel: GridSettingsPanel | null = null;
 let measureOverlay: MeasureOverlay | null = null;
@@ -171,11 +169,10 @@ async function activate(): Promise<void> {
   colorEditor = new ColorEditor(tokenStore, snapping, preview);
   dimensionsEditor = new DimensionsEditor(preview);
   spacingEditor = new SpacingEditor(tokenStore, preview);
-  positionEditor = new PositionEditor(preview);
+  positionEditor = new PositionEditor(shadow, preview);
   notesEditor = new NotesEditor(notesStore, shadow);
   gridOverlay = new GridOverlay(shadow, tokenStore);
   rulerOverlay = new RulerOverlay(shadow, () => gridOverlay!.getEffectiveSettings(), () => gridOverlay?.isVisible() ?? false);
-  moveEditor = new MoveEditor(shadow, preview);
   reorderEditor = new ReorderEditor(shadow);
   gridSettingsPanel = new GridSettingsPanel(gridOverlay.getEffectiveSettings());
   measureOverlay = new MeasureOverlay(shadow, host);
@@ -281,7 +278,6 @@ async function activate(): Promise<void> {
     dimensionsEditor!.cleanup();
     spacingEditor!.cleanup();
     positionEditor!.cleanup();
-    moveEditor!.cleanup();
     reorderEditor!.cleanup();
     staleDetector!.watch(element, () => {
       selection!.markStale();
@@ -295,11 +291,9 @@ async function activate(): Promise<void> {
 
     // Determine disabled tools
     const dimBlock = getDimensionBlockReason(element);
-    const moveBlock = getMoveBlockReason(element);
     const reorderBlock = getReorderBlockReason(element);
     const disabled: Partial<Record<EditMode, string>> = {};
     if (dimBlock) disabled['dimensions'] = dimBlock;
-    if (moveBlock) disabled['move'] = moveBlock;
     if (reorderBlock) disabled['reorder'] = reorderBlock;
     toolbar!.setDisabledTools(disabled);
 
@@ -328,7 +322,6 @@ async function activate(): Promise<void> {
     dimensionsEditor!.cleanup();
     spacingEditor!.cleanup();
     positionEditor!.cleanup();
-    moveEditor!.cleanup();
     reorderEditor!.cleanup();
     measureOverlay!.disable();
     measureOverlay!.clear();
@@ -403,7 +396,6 @@ async function activate(): Promise<void> {
       dimensionsEditor!.cleanup();
       spacingEditor!.cleanup();
       positionEditor!.cleanup();
-      moveEditor!.cleanup();
       reorderEditor!.cleanup();
       notesEditor!.cleanup();
       gridSettingsPanel!.cleanup();
@@ -457,7 +449,6 @@ async function activate(): Promise<void> {
     if (notesEditor!.getPositionMode() === 'toolbar') {
       notesEditor!.reposition(toolbar!.getButtonPosition('notes'));
     }
-    moveEditor!.reposition(toolbar!.getButtonPosition('move'));
     reorderEditor!.reposition(toolbar!.getButtonPosition('reorder'));
     gridSettingsPanel!.reposition(toolbar!.getButtonPosition('grid'));
     multiSelectToolbar!.reposition(toolbar!.getPosition());
@@ -673,13 +664,6 @@ async function activate(): Promise<void> {
     gridSettingsPanel?.updateDefaults(effective.baseSpacing, effective.majorSpacing);
   });
 
-  // Wire move editor close → fall back to cursor tool
-  moveEditor.onClose(() => {
-    const el = selection?.getSelectedElement();
-    if (el) { activateToolForElement(el, 'cursor'); }
-    else { toolbar!.setActiveMode('cursor'); }
-  });
-
   // Wire reorder editor close → fall back to cursor tool
   reorderEditor.onClose(() => {
     const el = selection?.getSelectedElement();
@@ -794,7 +778,6 @@ function deactivate(): void {
   dimensionsEditor?.cleanup();
   spacingEditor?.cleanup();
   positionEditor?.cleanup();
-  moveEditor?.cleanup();
   reorderEditor?.cleanup();
   notesEditor?.cleanup();
   gridOverlay?.hide();
@@ -851,7 +834,6 @@ function deactivate(): void {
   notesEditor = null;
   gridOverlay = null;
   rulerOverlay = null;
-  moveEditor = null;
   reorderEditor = null;
   gridSettingsPanel = null;
   measureOverlay = null;
@@ -885,7 +867,6 @@ function activateToolForElement(el: Element, mode: EditMode): void {
   dimensionsEditor!.cleanup();
   spacingEditor!.cleanup();
   positionEditor!.cleanup();
-  moveEditor!.cleanup();
   reorderEditor!.cleanup();
 
   if (mode === 'cursor') {
@@ -947,15 +928,6 @@ function activateToolForElement(el: Element, mode: EditMode): void {
     });
     shadow!.appendChild(controls);
     toolbar!.setActiveMode('position');
-  } else if (mode === 'move') {
-    moveEditor!.render(el, (changes) => {
-      const info = buildElementInfo(el);
-      const diff = diffBuilder!.build(info, changes);
-      commitEdit(el, changes, diff);
-      selection!.refreshHighlight();
-      moveEditor!.refreshOverlay();
-    });
-    toolbar!.setActiveMode('move');
   } else if (mode === 'reorder') {
     reorderEditor!.render(el, makeReorderCommit(el));
     toolbar!.setActiveMode('reorder');
@@ -1120,7 +1092,7 @@ function handleScroll(): void {
     selection?.refreshHighlight();
     hover?.refreshHighlight();
     handles?.refreshHandles();
-    moveEditor?.refreshOverlay();
+    positionEditor?.refreshMoveOverlay();
     reorderEditor?.refreshOverlay();
     gridOverlay?.refreshScroll();
     rulerOverlay?.refreshGuides();
@@ -1236,7 +1208,6 @@ function enterMultiSelectMode(): void {
   dimensionsEditor?.cleanup();
   spacingEditor?.cleanup();
   positionEditor?.cleanup();
-  moveEditor?.cleanup();
   reorderEditor?.cleanup();
   toolbar?.setActiveMode('cursor');
 
@@ -1355,19 +1326,12 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
     } else if (reorderEditor?.isDragging()) {
       // Level 1a: cancel reorder drag — revert preview, stay in reorder mode
       reorderEditor.cancelDrag();
-    } else if (moveEditor?.isDragging()) {
-      // Level 1b: cancel move drag — revert and stay in move mode
-      moveEditor.cleanup();
-      const el = selection?.getSelectedElement();
-      if (el) {
-        moveEditor.render(el, (changes) => {
-          const info = buildElementInfo(el);
-          const diff = diffBuilder!.build(info, changes);
-          commitEdit(el, changes, diff);
-          selection!.refreshHighlight();
-          moveEditor!.refreshOverlay();
-        });
-      }
+    } else if (positionEditor?.isMoveDragging()) {
+      // Level 1b: cancel move drag — overlay stays, panel stays, toggle stays active
+      positionEditor.cancelMoveDrag();
+    } else if (positionEditor?.isMoveActive()) {
+      // Level 1c: deactivate Move toggle — overlay removed, insets restored, panel stays
+      positionEditor.deactivateMove();
     } else if (handles?.isEditing()) {
       // Level 1b: cancel active edit
       handles.cancelEdit();

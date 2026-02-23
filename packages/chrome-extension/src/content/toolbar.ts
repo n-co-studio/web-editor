@@ -96,14 +96,6 @@ const ICONS: Record<string, string> = {
     <line x1="6" y1="9" x2="10" y2="9"/>
   </svg>`,
 
-  move: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M8 2v12M2 8h12"/>
-    <polyline points="5,4 8,2 11,4"/>
-    <polyline points="5,12 8,14 11,12"/>
-    <polyline points="4,5 2,8 4,11"/>
-    <polyline points="12,5 14,8 12,11"/>
-  </svg>`,
-
   cursor: `<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" stroke="none">
     <path d="M3.5 1.5l0 11.5 3.2-3.2 2.8 5.2 1.8-1-2.8-5.2h4.5z"/>
   </svg>`,
@@ -141,7 +133,6 @@ const TOOL_LABELS: Record<EditMode, string> = {
   colors: 'Colors',
   'border-radius': 'Radius',
   position: 'Position',
-  move: 'Move',
   reorder: 'Reorder',
 };
 
@@ -155,7 +146,6 @@ const TOOL_ORDER: EditMode[] = [
   'colors',
   'border-radius',
   'position',
-  'move',
   'reorder',
 ];
 
