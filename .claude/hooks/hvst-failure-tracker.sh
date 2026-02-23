@@ -11,7 +11,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/_analytics-helper.sh"
-START_MS=$(date +%s%3N 2>/dev/null || date +%s)
+START_MS=$(now_ms)
 
 REPO_ROOT="$(get_repo_root)"
 COUNTER_FILE="$REPO_ROOT/.claude/.hvst-fail-count"

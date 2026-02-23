@@ -9,7 +9,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/_analytics-helper.sh"
-START_MS=$(date +%s%3N 2>/dev/null || date +%s)
+START_MS=$(now_ms)
 
 INPUT=$(cat)
 
@@ -172,6 +172,28 @@ if [ -f "$COUNTER_FILE" ]; then
     fi
   fi
   cleanup_session
+fi
+
+# --- Task group next-brief reminder (advisory) ---
+# If a task group contract exists with pending briefs, remind about next brief.
+# Non-blocking: prints a reminder, does not exit 2. Override: SKIP_CONTRACT_CHECK=1
+if [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
+  CONTRACT_DIR="$REPO_ROOT/docs/ai/task-groups"
+  if [ -d "$CONTRACT_DIR" ]; then
+    for CONTRACT in "$CONTRACT_DIR"/*.yaml; do
+      [ -f "$CONTRACT" ] || continue
+      # Skip the template file
+      [ "$(basename "$CONTRACT")" = "_contract-template.yaml" ] && continue
+      GROUP_NAME=$(basename "$CONTRACT" .yaml)
+      # Look for a brief with status: complete that has a next_brief value
+      if grep -q "status: complete" "$CONTRACT" 2>/dev/null; then
+        NEXT_BRIEF=$(grep -A1 "status: complete" "$CONTRACT" | grep "next_brief:" | grep -v '""' | head -1 | sed 's/.*next_brief: *//' | sed 's/^"//' | sed 's/"$//' || true)
+        if [ -n "$NEXT_BRIEF" ]; then
+          echo "Reminder: Task group '$GROUP_NAME' has a next brief — start a new Prompt B session with: $NEXT_BRIEF" >&2
+        fi
+      fi
+    done
+  fi
 fi
 
 # --- Analytics: log successful close and register repo ---
