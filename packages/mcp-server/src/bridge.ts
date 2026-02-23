@@ -32,10 +32,16 @@ export class Bridge {
   private readonly driftMap = new Map<string, DriftEntry>();
   private driftTotalEdits = 0;
   private driftTokenMatches = 0;
+  private lastToolCallAt: string | null = null;
   private readonly persistPath: string;
 
   constructor(private readonly cwd: string) {
     this.persistPath = join(cwd, PERSIST_DIR, PERSIST_FILE);
+  }
+
+  /** Record that an MCP tool was called (updates lastToolCallAt for STATUS_RESPONSE). */
+  recordToolCall(): void {
+    this.lastToolCallAt = new Date().toISOString();
   }
 
   // -----------------------------------------------------------------------
@@ -86,14 +92,19 @@ export class Bridge {
     return { diffs, notes: [...this.pendingNotes] };
   }
 
-  /** Acknowledge a diff — remove from queue, add to tombstone, persist. */
+  /** Acknowledge a diff — remove from queue, add to tombstone, notify extension, persist. */
   acknowledgeDiff(diffId: string): boolean {
     const idx = this.pendingQueue.findIndex((d) => d.id === diffId);
     if (idx === -1) return false;
 
+    const diff = this.pendingQueue[idx];
     this.pendingQueue.splice(idx, 1);
     this.processedIds.add(diffId);
     this.safePersistQueue();
+
+    // Push DIFF_APPLIED to the originating extension tab (best-effort)
+    this.pushDiffApplied(diff.context.tabId, [diffId]);
+
     return true;
   }
 
@@ -105,15 +116,21 @@ export class Bridge {
     return count;
   }
 
-  /** Reject a diff — remove from queue, add to tombstone, log reason, persist. */
+  /** Reject a diff — remove from queue, add to tombstone, notify extension, persist. */
   rejectDiff(diffId: string, reason: string): boolean {
     const idx = this.pendingQueue.findIndex((d) => d.id === diffId);
     if (idx === -1) return false;
 
+    const diff = this.pendingQueue[idx];
     console.error(`[frontend-editor] Diff ${diffId} rejected: ${reason}`);
     this.pendingQueue.splice(idx, 1);
     this.processedIds.add(diffId);
     this.safePersistQueue();
+
+    // Push DIFF_APPLIED to the originating extension tab (best-effort)
+    // Uses the same message type — the diff is no longer pending regardless of reason
+    this.pushDiffApplied(diff.context.tabId, [diffId]);
+
     return true;
   }
 
@@ -341,6 +358,10 @@ export class Bridge {
         // No response needed
         break;
 
+      case MessageType.STATUS_REQUEST:
+        this.handleStatusRequest(ws);
+        break;
+
       case MessageType.ERROR:
         console.error(
           `[frontend-editor] Extension error: ${typed.payload.code} — ${typed.payload.message}`,
@@ -424,6 +445,35 @@ export class Bridge {
     console.error(
       `[frontend-editor] Received ${diffs.length} diffs (${newDiffs.length} new, ${diffs.length - newDiffs.length} already known)`,
     );
+  }
+
+  private handleStatusRequest(ws: WebSocket): void {
+    const perDiff = this.pendingQueue.map((d) => ({
+      id: d.id,
+      serverStatus: 'pending' as const,
+    }));
+
+    this.send(ws, {
+      type: MessageType.STATUS_RESPONSE,
+      version: PROTOCOL_VERSION,
+      payload: {
+        pendingCount: this.pendingQueue.length,
+        deliveredCount: this.processedIds.size,
+        lastToolCallAt: this.lastToolCallAt,
+        perDiff,
+      },
+    });
+  }
+
+  /** Push DIFF_APPLIED to the originating tab's WebSocket (best-effort). */
+  private pushDiffApplied(tabId: string, diffIds: string[]): void {
+    const client = this.clients.get(tabId);
+    if (!client) return;
+    this.send(client.ws, {
+      type: MessageType.DIFF_APPLIED,
+      version: PROTOCOL_VERSION,
+      payload: { diffIds },
+    });
   }
 
   private trackDrift(diffs: readonly VisualDiff[]): void {

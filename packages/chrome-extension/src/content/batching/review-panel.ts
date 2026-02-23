@@ -6,6 +6,7 @@ import type { PendingQueue } from './queue';
 import type { WebSocketClient } from '../websocket-client';
 import type { DiffBuilder } from './diff-builder';
 import type { NotesStore } from './notes-store';
+import { serializeToPrompt } from './prompt-serializer';
 
 type VoidCallback = () => void;
 
@@ -129,8 +130,26 @@ export class ReviewPanel {
     const active = this.queue.getActive();
     const totalCount = active.length + notes.length;
 
+    const titleColumn = createElement('div', {}, {
+      display: 'flex',
+      flexDirection: 'column',
+    });
     const title = createText('span', `Changes (${totalCount})`, 'heading');
-    header.appendChild(title);
+    titleColumn.appendChild(title);
+
+    // Elapsed time since oldest pending change
+    if (active.length > 0) {
+      const oldest = active[0].timestamp;
+      const elapsed = formatElapsed(oldest);
+      if (elapsed) {
+        const subtitle = createText('span', `oldest ${elapsed}`, 'mono');
+        subtitle.style.color = OVERLAY.textMuted;
+        subtitle.style.marginTop = '1px';
+        titleColumn.appendChild(subtitle);
+      }
+    }
+    header.appendChild(titleColumn);
+
     const closeBtn = createButton('\u00d7', 'ghost', () => {
       this.hide();
       this.closeCb?.();
@@ -429,6 +448,53 @@ export class ReviewPanel {
           group.appendChild(row);
         }
       }
+
+      // Insert changes
+      if (diff.insertChanges) {
+        for (const ic of diff.insertChanges) {
+          const row = createElement('div', {}, {
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            padding: '2px 0',
+            fontFamily: OVERLAY.monoFamily,
+            fontSize: OVERLAY.monoSize,
+          });
+
+          const desc = createElement('span', {}, { color: OVERLAY.text });
+          desc.textContent = `insert: <${ic.tagName}> at position ${ic.insertIndex + 1}`;
+          row.appendChild(desc);
+
+          const badge = createElement('span', {}, {
+            background: 'rgba(16, 185, 129, 0.2)',
+            color: '#10b981',
+            padding: '1px 3px',
+            borderRadius: '2px',
+            fontSize: '9px',
+          });
+          badge.textContent = 'new';
+          row.appendChild(badge);
+
+          const removeBtn = createElement('button', {}, {
+            background: 'none',
+            border: 'none',
+            color: OVERLAY.textMuted,
+            cursor: 'pointer',
+            padding: '0 2px',
+            fontSize: '11px',
+            marginLeft: 'auto',
+            pointerEvents: 'auto',
+          });
+          removeBtn.textContent = '\u00d7';
+          removeBtn.title = 'Remove this change';
+          removeBtn.addEventListener('click', () => {
+            this.queue.remove(diff.id);
+          });
+          row.appendChild(removeBtn);
+
+          group.appendChild(row);
+        }
+      }
     }
 
     return group;
@@ -476,7 +542,7 @@ export class ReviewPanel {
       });
 
       const label = createElement('span');
-      const changeCount = item.diff.changes.length + (item.diff.reorderChanges?.length ?? 0);
+      const changeCount = item.diff.changes.length + (item.diff.reorderChanges?.length ?? 0) + (item.diff.insertChanges?.length ?? 0);
       label.textContent = `${item.diff.element.selector.slice(0, 30)} (${changeCount} change${changeCount !== 1 ? 's' : ''})`;
       row.appendChild(label);
 
@@ -512,6 +578,34 @@ export class ReviewPanel {
     countText.style.color = OVERLAY.textMuted;
     bar.appendChild(countText);
 
+    // Button group (copy + apply)
+    const btnGroup = createElement('div', {}, {
+      display: 'flex',
+      gap: '6px',
+      alignItems: 'center',
+    });
+
+    // "Copy as Prompt" — works regardless of connection status
+    const copyDisabled = totalCount === 0;
+    const copyBtn = createButton('Copy as Prompt', 'ghost', () => {
+      const notes = this.notesStore.getAll();
+      const prompt = serializeToPrompt(active, notes.length > 0 ? notes : undefined);
+      navigator.clipboard.writeText(prompt).then(() => {
+        // Green flash confirmation
+        copyBtn.style.background = 'rgba(34, 197, 94, 0.15)';
+        setTimeout(() => { copyBtn.style.background = 'transparent'; }, 300);
+      }).catch(() => {
+        // Silent fail — clipboard API may be unavailable
+      });
+    });
+    copyBtn.style.fontSize = '11px';
+    if (copyDisabled) {
+      copyBtn.style.opacity = '0.5';
+      copyBtn.style.pointerEvents = 'none';
+    }
+    btnGroup.appendChild(copyBtn);
+
+    // "Apply Changes" — requires connection
     const sendDisabled =
       totalCount === 0 || this.connectionStatus !== 'connected' || this.sending;
 
@@ -522,7 +616,9 @@ export class ReviewPanel {
       sendBtn.style.opacity = '0.5';
       sendBtn.style.pointerEvents = 'none';
     }
-    bar.appendChild(sendBtn);
+    btnGroup.appendChild(sendBtn);
+
+    bar.appendChild(btnGroup);
 
     return bar;
   }
@@ -580,4 +676,17 @@ export class ReviewPanel {
     }
     return groups;
   }
+}
+
+/** Format elapsed time since an ISO timestamp as a compact string. */
+function formatElapsed(isoTimestamp: string): string | null {
+  const ms = Date.now() - new Date(isoTimestamp).getTime();
+  if (ms < 0 || Number.isNaN(ms)) return null;
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 1) return '<1m ago';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
 }

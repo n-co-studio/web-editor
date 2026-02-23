@@ -3,6 +3,7 @@ import type {
   ElementInfo,
   PropertyChange,
   ReorderChange,
+  InsertChange,
   PageContext,
 } from '@frontend-editor/shared';
 import type { TokenStore } from '../tokens/store';
@@ -39,6 +40,20 @@ export class DiffBuilder {
       element: elementInfo,
       changes: [],
       reorderChanges: [reorderChange],
+      context: this.buildPageContext(),
+      status: 'pending',
+      sourceVerified: Boolean(elementInfo.sourceFile),
+    };
+  }
+
+  /** Build a VisualDiff for an insert operation (no CSS property changes). */
+  buildInsert(elementInfo: ElementInfo, insertChange: InsertChange): VisualDiff {
+    return {
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      element: elementInfo,
+      changes: [],
+      insertChanges: [insertChange],
       context: this.buildPageContext(),
       status: 'pending',
       sourceVerified: Boolean(elementInfo.sourceFile),

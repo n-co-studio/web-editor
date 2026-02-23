@@ -4,9 +4,10 @@ import type { VisualDiff } from '@frontend-editor/shared';
  * Tracks committed edits for undo/redo/reset.
  *
  * Discriminated union on `type`:
- *  - 'css'     — inline style changes (spacing, dimensions, typography, etc.)
- *  - 'removal' — element deleted from DOM
- *  - 'reorder' — element moved within its parent container
+ *  - 'css'       — inline style changes (spacing, dimensions, typography, etc.)
+ *  - 'removal'   — element deleted from DOM
+ *  - 'reorder'   — element moved within its parent container
+ *  - 'insertion' — new element inserted into a container
  */
 
 interface CssHistoryEntry {
@@ -35,7 +36,15 @@ interface ReorderHistoryEntry {
   readonly diff: VisualDiff;
 }
 
-export type HistoryEntry = CssHistoryEntry | RemovalHistoryEntry | ReorderHistoryEntry;
+interface InsertionHistoryEntry {
+  readonly type: 'insertion';
+  readonly element: HTMLElement;
+  readonly container: HTMLElement;
+  readonly insertIndex: number;
+  readonly diff: VisualDiff;
+}
+
+export type HistoryEntry = CssHistoryEntry | RemovalHistoryEntry | ReorderHistoryEntry | InsertionHistoryEntry;
 
 type HistoryCallback = () => void;
 
@@ -80,6 +89,9 @@ export class EditHistory {
         }
         break;
       }
+      case 'insertion':
+        entry.element.remove();
+        break;
     }
 
     this.redoStack.push(entry);
@@ -114,6 +126,9 @@ export class EditHistory {
         }
         break;
       }
+      case 'insertion':
+        entry.container.insertBefore(entry.element, entry.container.children[entry.insertIndex] || null);
+        break;
     }
 
     this.undoStack.push(entry);
@@ -155,6 +170,9 @@ export class EditHistory {
           }
           break;
         }
+        case 'insertion':
+          entry.element.remove();
+          break;
       }
       diffIds.push(entry.diff.id);
     }

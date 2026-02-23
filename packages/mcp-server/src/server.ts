@@ -68,11 +68,17 @@ function registerTools(server: McpServer, bridge: Bridge): void {
       title: 'Get Pending Visual Changes',
       description:
         'Returns all visual diffs and operator notes queued by the Chrome extension. ' +
-        'Diffs may include CSS property changes (in `changes`) and/or element reorder operations ' +
-        '(in `reorderChanges`). When `reorderChanges` is present with empty `changes`, the intent is ' +
+        'Diffs may include CSS property changes (in `changes`), element reorder operations ' +
+        '(in `reorderChanges`), and/or element insertion operations (in `insertChanges`). ' +
+        'When `reorderChanges` is present with empty `changes`, the intent is ' +
         'to physically reorder children in the source file at `element.sourceFile:element.sourceLine`, ' +
         'not to add a CSS `order` property. Each reorder change includes fromIndex, toIndex, ' +
         'siblingSelectors (original child order), containerSelector, and containerDirection. ' +
+        'When `insertChanges` is present, the intent is to create a new element in the source file. ' +
+        'Each insert change includes tagName, insertIndex, containerSelector, and a sibling bracket ' +
+        '(prevSibling/nextSibling with sourceFile+sourceLine) indicating the exact JSX insertion point. ' +
+        'sameSiblingSource=true means siblings share a .map() call; crossFileInsertion=true means the ' +
+        'container and siblings are from different source files. ' +
         'Optionally filter by tab session ID.',
       inputSchema: z.object({
         tabId: z
@@ -82,6 +88,7 @@ function registerTools(server: McpServer, bridge: Bridge): void {
       }),
     },
     async ({ tabId }) => {
+      bridge.recordToolCall();
       const { diffs, notes } = bridge.getPendingChanges(tabId);
       return {
         content: [{ type: 'text' as const, text: JSON.stringify({ changes: diffs, notes }, null, 2) }],
@@ -101,6 +108,7 @@ function registerTools(server: McpServer, bridge: Bridge): void {
       }),
     },
     async ({ diffId }) => {
+      bridge.recordToolCall();
       const success = bridge.acknowledgeDiff(diffId);
       return {
         content: [{ type: 'text' as const, text: JSON.stringify({ success }) }],
@@ -121,6 +129,7 @@ function registerTools(server: McpServer, bridge: Bridge): void {
       }),
     },
     async ({ diffId, reason }) => {
+      bridge.recordToolCall();
       const success = bridge.rejectDiff(diffId, reason);
       return {
         content: [{ type: 'text' as const, text: JSON.stringify({ success }) }],
@@ -138,6 +147,7 @@ function registerTools(server: McpServer, bridge: Bridge): void {
       inputSchema: z.object({}),
     },
     async () => {
+      bridge.recordToolCall();
       const cleared = bridge.clearNotes();
       return {
         content: [{ type: 'text' as const, text: JSON.stringify({ cleared }) }],
@@ -160,6 +170,7 @@ function registerTools(server: McpServer, bridge: Bridge): void {
       }),
     },
     async ({ category }) => {
+      bridge.recordToolCall();
       const result = bridge.getTokens(category);
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
@@ -184,6 +195,7 @@ function registerTools(server: McpServer, bridge: Bridge): void {
       }),
     },
     async ({ property, value }) => {
+      bridge.recordToolCall();
       const allTokens = bridge.getAllTokensFlat();
       const result = resolveToToken(property, value, allTokens);
       return {
@@ -202,6 +214,7 @@ function registerTools(server: McpServer, bridge: Bridge): void {
       inputSchema: z.object({}),
     },
     async () => {
+      bridge.recordToolCall();
       const report = bridge.getDriftReport();
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(report, null, 2) }],
@@ -226,6 +239,7 @@ function registerTools(server: McpServer, bridge: Bridge): void {
       }),
     },
     async ({ outputPath }) => {
+      bridge.recordToolCall();
       const result = await bridge.exportSession(outputPath);
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(result) }],
@@ -247,6 +261,7 @@ function registerTools(server: McpServer, bridge: Bridge): void {
       }),
     },
     async ({ inputPath }) => {
+      bridge.recordToolCall();
       const result = await bridge.importSession(inputPath);
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(result) }],
