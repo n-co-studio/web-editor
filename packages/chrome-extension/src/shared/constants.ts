@@ -126,6 +126,21 @@ export const DROP_INDICATOR = {
   activeThickness: 3,
 } as const;
 
+// Insert indicator for insert tool drop zones and phantom
+export const INSERT_INDICATOR = {
+  color: '#10b981',
+  activeColor: '#34d399',
+  phantomBorder: '#6b7280',
+  phantomBg: 'rgba(107, 114, 128, 0.08)',
+  thickness: 2,
+  activeThickness: 3,
+  plusSize: 20,
+} as const;
+
+// Insert element picker panel
+export const INSERT_PANEL_WIDTH = 240;
+export const INSERT_PANEL_MAX_HEIGHT = 420;
+
 // Box model diagram colors (reuses zone overlay palette)
 export const BOX_MODEL = {
   marginFill: 'rgba(251, 113, 133, 0.20)',

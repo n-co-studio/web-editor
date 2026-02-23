@@ -60,4 +60,4 @@ Operators working on projects inspect the front end and identify visual adjustme
 - Not a hosted service — everything runs locally
 - Not for production use — dev tooling only
 - Does not handle JavaScript behavior changes — visual/CSS properties only
-- Does not create or delete components — only edits existing elements
+- Can insert and delete elements within scoped containers — see boundaries.md for expansion details

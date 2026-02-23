@@ -27,6 +27,9 @@ import { GridOverlay } from './grid-overlay';
 import { RulerOverlay } from './ruler-overlay';
 import { ReorderEditor, getReorderBlockReason } from './editing/reorder';
 import type { ReorderCommitCallback } from './editing/reorder';
+import { InsertEditor, getInsertBlockReason } from './editing/insert';
+import type { InsertCommitCallback } from './editing/insert';
+import { buildInsertChange } from './editing/insert-source';
 import { GridSettingsPanel } from './grid-settings';
 import { MeasureOverlay } from './selection/measure-overlay';
 import { MultiSelectManager } from './selection/multi-select';
@@ -69,6 +72,7 @@ let notesStore: NotesStore | null = null;
 let notesEditor: NotesEditor | null = null;
 let gridOverlay: GridOverlay | null = null;
 let reorderEditor: ReorderEditor | null = null;
+let insertEditor: InsertEditor | null = null;
 let gridSettingsPanel: GridSettingsPanel | null = null;
 let measureOverlay: MeasureOverlay | null = null;
 let measureRafId: number | null = null;
@@ -130,6 +134,10 @@ async function activate(): Promise<void> {
       reviewPanel?.refresh();
       devtoolsPanel?.log(`${payload.diffIds.length} diff(s) acknowledged`);
     },
+    onDiffApplied: (payload) => {
+      // Phase 3 will transition diffs to 'applied' lifecycle status
+      devtoolsPanel?.log(`${payload.diffIds.length} diff(s) applied`);
+    },
     onTokenData: (payload) => {
       tokenStore!.setAll(payload.tokens, payload.sources);
       devtoolsPanel?.log(`Received ${payload.tokens.length} design tokens`);
@@ -137,6 +145,10 @@ async function activate(): Promise<void> {
     onTokenUpdate: (payload) => {
       tokenStore!.update(payload.tokens, payload.sources);
       devtoolsPanel?.log(`Token update: ${payload.tokens.length} tokens`);
+    },
+    onStatusResponse: (payload) => {
+      // Phase 3 will update per-diff lifecycle status in the review panel
+      devtoolsPanel?.log(`Status: ${payload.pendingCount} pending, last activity: ${payload.lastToolCallAt ?? 'none'}`);
     },
     onError: (payload) => {
       devtoolsPanel?.log(`Server error: ${payload.code} — ${payload.message}`, 'error');
@@ -174,6 +186,7 @@ async function activate(): Promise<void> {
   gridOverlay = new GridOverlay(shadow, tokenStore);
   rulerOverlay = new RulerOverlay(shadow, () => gridOverlay!.getEffectiveSettings(), () => gridOverlay?.isVisible() ?? false);
   reorderEditor = new ReorderEditor(shadow);
+  insertEditor = new InsertEditor(shadow);
   gridSettingsPanel = new GridSettingsPanel(gridOverlay.getEffectiveSettings());
   measureOverlay = new MeasureOverlay(shadow, host);
   multiSelect = new MultiSelectManager(shadow, host);
@@ -279,6 +292,7 @@ async function activate(): Promise<void> {
     spacingEditor!.cleanup();
     positionEditor!.cleanup();
     reorderEditor!.cleanup();
+    insertEditor!.cleanup();
     staleDetector!.watch(element, () => {
       selection!.markStale();
       handles!.hideHandles();
@@ -292,9 +306,11 @@ async function activate(): Promise<void> {
     // Determine disabled tools
     const dimBlock = getDimensionBlockReason(element);
     const reorderBlock = getReorderBlockReason(element);
+    const insertBlock = getInsertBlockReason(element);
     const disabled: Partial<Record<EditMode, string>> = {};
     if (dimBlock) disabled['dimensions'] = dimBlock;
     if (reorderBlock) disabled['reorder'] = reorderBlock;
+    if (insertBlock) disabled['insert'] = insertBlock;
     toolbar!.setDisabledTools(disabled);
 
     // Re-apply the previous active tool for the new element (preserve tool state).
@@ -323,6 +339,7 @@ async function activate(): Promise<void> {
     spacingEditor!.cleanup();
     positionEditor!.cleanup();
     reorderEditor!.cleanup();
+    insertEditor!.cleanup();
     measureOverlay!.disable();
     measureOverlay!.clear();
     staleDetector!.cleanup();
@@ -397,6 +414,7 @@ async function activate(): Promise<void> {
       spacingEditor!.cleanup();
       positionEditor!.cleanup();
       reorderEditor!.cleanup();
+      insertEditor!.cleanup();
       notesEditor!.cleanup();
       gridSettingsPanel!.cleanup();
       multiSelectToolbar!.cleanup();
@@ -671,6 +689,13 @@ async function activate(): Promise<void> {
     else { toolbar!.setActiveMode('cursor'); }
   });
 
+  // Wire insert editor close → fall back to cursor tool
+  insertEditor.onClose(() => {
+    const el = selection?.getSelectedElement();
+    if (el) { activateToolForElement(el, 'cursor'); }
+    else { toolbar!.setActiveMode('cursor'); }
+  });
+
   // Wire delete element
   toolbar.onDelete(() => {
     deleteSelectedElement();
@@ -779,6 +804,7 @@ function deactivate(): void {
   spacingEditor?.cleanup();
   positionEditor?.cleanup();
   reorderEditor?.cleanup();
+  insertEditor?.cleanup();
   notesEditor?.cleanup();
   gridOverlay?.hide();
   rulerOverlay?.hide();
@@ -835,6 +861,7 @@ function deactivate(): void {
   gridOverlay = null;
   rulerOverlay = null;
   reorderEditor = null;
+  insertEditor = null;
   gridSettingsPanel = null;
   measureOverlay = null;
   measureRafId = null;
@@ -868,6 +895,7 @@ function activateToolForElement(el: Element, mode: EditMode): void {
   spacingEditor!.cleanup();
   positionEditor!.cleanup();
   reorderEditor!.cleanup();
+  insertEditor!.cleanup();
 
   if (mode === 'cursor') {
     // Cursor/select mode: show dimension handles only (no mini panel)
@@ -931,6 +959,9 @@ function activateToolForElement(el: Element, mode: EditMode): void {
   } else if (mode === 'reorder') {
     reorderEditor!.render(el, makeReorderCommit(el));
     toolbar!.setActiveMode('reorder');
+  } else if (mode === 'insert') {
+    insertEditor!.enter(el as HTMLElement, makeInsertCommit(el));
+    toolbar!.setActiveMode('insert');
   } else {
     handles!.showHandles(el, mode);
     toolbar!.setActiveMode(mode);
@@ -1019,6 +1050,45 @@ function makeReorderCommit(el: Element): ReorderCommitCallback {
 }
 
 // ---------------------------------------------------------------------------
+// Insert commit helper — builds diff + history entry
+// ---------------------------------------------------------------------------
+
+function makeInsertCommit(_containerEl: Element): InsertCommitCallback {
+  // Callback fires BEFORE DOM insertion — container children are pre-insert state.
+  // The element is built but not yet in the DOM, so buildInsertChange reads
+  // correct sibling anchors and child snapshot.
+  return (element, container, insertIndex, config) => {
+    const containerInfo = buildElementInfo(container);
+
+    const tagName = config?.tagName ?? 'div';
+    const initialStyles = config?.initialStyles ?? [];
+
+    const insertChange = buildInsertChange(
+      container, insertIndex, tagName, initialStyles, config?.compoundChildren,
+    );
+
+    const diff = diffBuilder!.buildInsert(containerInfo, insertChange);
+
+    queue!.add(diff);
+    editHistory!.push({
+      type: 'insertion',
+      element,
+      container,
+      insertIndex,
+      diff,
+    });
+    badge!.update();
+    reviewPanel!.refresh();
+    devtoolsPanel?.refreshProperties();
+    selection?.refreshHighlight();
+
+    // Auto-select is deferred — element will be in DOM after callback returns
+    // (commitInsert inserts after callback). Schedule via microtask.
+    queueMicrotask(() => selection?.select(element));
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Reorder editor refresh after undo/redo — keeps drop zones in sync with DOM
 // ---------------------------------------------------------------------------
 
@@ -1094,6 +1164,7 @@ function handleScroll(): void {
     handles?.refreshHandles();
     positionEditor?.refreshMoveOverlay();
     reorderEditor?.refreshOverlay();
+    insertEditor?.refreshOverlay();
     gridOverlay?.refreshScroll();
     rulerOverlay?.refreshGuides();
     if (measureOverlay?.isActive()) measureOverlay.clear();
@@ -1320,6 +1391,15 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
     } else if (gridSettingsPanel?.isOpen()) {
       // Level 0b: close grid settings panel
       gridSettingsPanel.cleanup();
+    } else if (insertEditor?.isActive() && insertEditor.getState() === 'configuring') {
+      // Level 0c: cancel insert configuring → return to scanning
+      insertEditor.cancel();
+    } else if (insertEditor?.isActive()) {
+      // Level 0d: exit insert scanning → cursor
+      insertEditor.cleanup();
+      const el = selection?.getSelectedElement();
+      if (el) { activateToolForElement(el, 'cursor'); }
+      else { toolbar?.setActiveMode('cursor'); }
     } else if (rulerOverlay?.isDragging()) {
       // Level 1a: cancel guide drag
       rulerOverlay.cancelDrag();

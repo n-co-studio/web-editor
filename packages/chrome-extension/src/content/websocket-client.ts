@@ -6,8 +6,10 @@ import type {
   VisualDiff,
   ServerHelloPayload,
   DiffAckPayload,
+  DiffAppliedPayload,
   TokenDataPayload,
   TokenUpdatePayload,
+  StatusResponsePayload,
   ErrorPayload,
   ExtensionToServerMessage,
   ServerToExtensionMessage,
@@ -32,8 +34,10 @@ export interface WebSocketClientCallbacks {
   onStatusChange(status: ConnectionStatus): void;
   onServerHello(payload: ServerHelloPayload): void;
   onDiffAck(payload: DiffAckPayload): void;
+  onDiffApplied(payload: DiffAppliedPayload): void;
   onTokenData(payload: TokenDataPayload): void;
   onTokenUpdate(payload: TokenUpdatePayload): void;
+  onStatusResponse(payload: StatusResponsePayload): void;
   onError(payload: ErrorPayload): void;
 }
 
@@ -69,6 +73,17 @@ export class WebSocketClient {
       type: MessageType.VISUAL_DIFF_BATCH,
       version: PROTOCOL_VERSION,
       payload: batchNote ? { diffs, batchNote } : { diffs },
+    });
+    return true;
+  }
+
+  /** Send a STATUS_REQUEST to query server queue state. */
+  sendStatusRequest(): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false;
+    this.send({
+      type: MessageType.STATUS_REQUEST,
+      version: PROTOCOL_VERSION,
+      payload: {},
     });
     return true;
   }
@@ -200,11 +215,17 @@ export class WebSocketClient {
       case MessageType.DIFF_ACK:
         this.cb.onDiffAck(typed.payload);
         break;
+      case MessageType.DIFF_APPLIED:
+        this.cb.onDiffApplied(typed.payload);
+        break;
       case MessageType.TOKEN_DATA:
         this.cb.onTokenData(typed.payload);
         break;
       case MessageType.TOKEN_UPDATE:
         this.cb.onTokenUpdate(typed.payload);
+        break;
+      case MessageType.STATUS_RESPONSE:
+        this.cb.onStatusResponse(typed.payload);
         break;
       case MessageType.ERROR:
         this.cb.onError(typed.payload);

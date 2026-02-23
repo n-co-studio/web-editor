@@ -75,6 +75,48 @@ export interface ReorderChange {
   readonly containerDirection: string;
 }
 
+/** Identifies a sibling element adjacent to an insert position. */
+export interface SiblingAnchor {
+  readonly selector: string;
+  readonly sourceFile: string;
+  readonly sourceLine: number;
+  readonly instanceIndex?: number;
+}
+
+/** Snapshot of an existing child in the target container (for context). */
+export interface ChildSnapshotEntry {
+  readonly tagName: string;
+  readonly selector: string;
+  readonly sourceFile: string;
+  readonly sourceLine: number;
+  readonly instanceIndex?: number;
+}
+
+/** Describes a child element to create as part of a compound insert. */
+export interface CompoundChildDescriptor {
+  readonly tagName: string;
+  readonly textContent?: string;
+  readonly children?: readonly CompoundChildDescriptor[];
+}
+
+/**
+ * An insert operation — creates a new element within a container.
+ * Stored as a parallel array on VisualDiff (separate from PropertyChange[]).
+ */
+export interface InsertChange {
+  readonly type: 'insert';
+  readonly tagName: string;
+  readonly insertIndex: number;
+  readonly containerSelector: string;
+  readonly prevSibling: SiblingAnchor | null;
+  readonly nextSibling: SiblingAnchor | null;
+  readonly sameSiblingSource: boolean;
+  readonly crossFileInsertion: boolean;
+  readonly initialStyles: readonly PropertyChange[];
+  readonly childSnapshot?: readonly ChildSnapshotEntry[];
+  readonly compoundChildren?: readonly CompoundChildDescriptor[];
+}
+
 /** Page state at the time of edit. */
 export interface PageContext {
   readonly url: string;
@@ -96,6 +138,7 @@ export interface VisualDiff {
   readonly element: ElementInfo;
   readonly changes: readonly PropertyChange[];
   readonly reorderChanges?: readonly ReorderChange[];
+  readonly insertChanges?: readonly InsertChange[];
   readonly context: PageContext;
   readonly status: DiffStatus;
   readonly sourceVerified: boolean;
