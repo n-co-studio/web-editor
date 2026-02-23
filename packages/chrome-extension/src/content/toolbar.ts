@@ -106,6 +106,12 @@ const ICONS: Record<string, string> = {
     <circle cx="6" cy="12" r="1.25"/><circle cx="10" cy="12" r="1.25"/>
   </svg>`,
 
+  insert: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <circle cx="8" cy="8" r="6.5"/>
+    <line x1="8" y1="5" x2="8" y2="11"/>
+    <line x1="5" y1="8" x2="11" y2="8"/>
+  </svg>`,
+
   delete: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
     <path d="M3 4.5h10"/>
     <path d="M6.5 2.5h3"/>
@@ -134,6 +140,7 @@ const TOOL_LABELS: Record<EditMode, string> = {
   'border-radius': 'Radius',
   position: 'Position',
   reorder: 'Reorder',
+  insert: 'Insert',
 };
 
 const TOOLBAR_STORAGE_KEY = 'frontend-editor-toolbar-position';
@@ -147,6 +154,7 @@ const TOOL_ORDER: EditMode[] = [
   'border-radius',
   'position',
   'reorder',
+  'insert',
 ];
 
 // ---------------------------------------------------------------------------
