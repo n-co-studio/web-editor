@@ -24,7 +24,7 @@ import type { HistoryEntry } from './history';
 import { NotesStore } from './batching/notes-store';
 import { NotesEditor } from './editing/notes';
 import { GridOverlay } from './grid-overlay';
-import { MoveEditor, getMoveBlockReason } from './editing/move';
+import { RulerOverlay } from './ruler-overlay';
 import { ReorderEditor, getReorderBlockReason } from './editing/reorder';
 import type { ReorderCommitCallback } from './editing/reorder';
 import { GridSettingsPanel } from './grid-settings';
@@ -68,17 +68,23 @@ let editHistory: EditHistory | null = null;
 let notesStore: NotesStore | null = null;
 let notesEditor: NotesEditor | null = null;
 let gridOverlay: GridOverlay | null = null;
-let moveEditor: MoveEditor | null = null;
 let reorderEditor: ReorderEditor | null = null;
 let gridSettingsPanel: GridSettingsPanel | null = null;
 let measureOverlay: MeasureOverlay | null = null;
 let measureRafId: number | null = null;
 let devtoolsUserClosed = false;
 let devtoolsOpenBeforeCollapse = false;
+let gridVisibleBeforeCollapse = false;
+let rulerOverlay: RulerOverlay | null = null;
+let rulersVisibleBeforeCollapse = false;
 let multiSelect: MultiSelectManager | null = null;
 let multiSelectToolbar: MultiSelectToolbar | null = null;
 let multiSelectClickHandler: ((e: MouseEvent) => void) | null = null;
 let notePickMode: { noteIndex: number; handler: (e: MouseEvent) => void } | null = null;
+
+// Preserved tool mode across deselect→reselect cycle (selection.select() calls
+// deselect() before onSelect fires, so onDeselect would reset the toolbar mode).
+let preservedToolMode: EditMode | null = null;
 
 // Tab session ID — stable for the tab's lifetime
 let tabId: string | null = null;
@@ -150,7 +156,7 @@ async function activate(): Promise<void> {
   selection = new SelectionManager(shadow, host, tokenStore);
   devtoolsPanel = new DevToolsPanel(shadow!, tokenStore!, queue!);
   toolbar = new FloatingToolbar(shadow);
-  handles = new DragHandleManager(shadow, snapping, preview);
+  handles = new DragHandleManager(shadow, snapping, preview, () => rulerOverlay?.getGuidePositions() ?? { x: [], y: [] });
   keyboard = new KeyboardHandler(shadow, handles, null as any, selection);
   reviewPanel = new ReviewPanel(shadow!, queue!, wsClient!, diffBuilder!, notesStore!, (selector) => {
     const el = document.querySelector(selector);
@@ -163,10 +169,10 @@ async function activate(): Promise<void> {
   colorEditor = new ColorEditor(tokenStore, snapping, preview);
   dimensionsEditor = new DimensionsEditor(preview);
   spacingEditor = new SpacingEditor(tokenStore, preview);
-  positionEditor = new PositionEditor(preview);
+  positionEditor = new PositionEditor(shadow, preview);
   notesEditor = new NotesEditor(notesStore, shadow);
   gridOverlay = new GridOverlay(shadow, tokenStore);
-  moveEditor = new MoveEditor(shadow, preview);
+  rulerOverlay = new RulerOverlay(shadow, () => gridOverlay!.getEffectiveSettings(), () => gridOverlay?.isVisible() ?? false);
   reorderEditor = new ReorderEditor(shadow);
   gridSettingsPanel = new GridSettingsPanel(gridOverlay.getEffectiveSettings());
   measureOverlay = new MeasureOverlay(shadow, host);
@@ -245,6 +251,12 @@ async function activate(): Promise<void> {
   // Show toolbar immediately (stays visible for entire active session)
   toolbar.show();
 
+  // Wire ruler overlay hover suppression
+  rulerOverlay!.setHoverSuppressor(
+    () => { hover!.disable(); if (host) host.style.pointerEvents = 'none'; },
+    () => { hover!.enable(); if (host) host.style.pointerEvents = ''; },
+  );
+
   // Wire selection → panel, toolbar, handles, stale detection
   selection.onSelect((info, element, _rect) => {
     // Exit multi-select on normal (non-Option) selection
@@ -266,42 +278,39 @@ async function activate(): Promise<void> {
     dimensionsEditor!.cleanup();
     spacingEditor!.cleanup();
     positionEditor!.cleanup();
-    moveEditor!.cleanup();
     reorderEditor!.cleanup();
     staleDetector!.watch(element, () => {
       selection!.markStale();
       handles!.hideHandles();
+      // Transition notes panel from element → toolbar mode
+      if (notesEditor?.isOpen() && notesEditor.getPositionMode() === 'element') {
+        notesEditor.clearAnchoredElement();
+        notesEditor.reposition(toolbar!.getButtonPosition('notes'));
+      }
     });
 
     // Determine disabled tools
     const dimBlock = getDimensionBlockReason(element);
-    const moveBlock = getMoveBlockReason(element);
     const reorderBlock = getReorderBlockReason(element);
     const disabled: Partial<Record<EditMode, string>> = {};
     if (dimBlock) disabled['dimensions'] = dimBlock;
-    if (moveBlock) disabled['move'] = moveBlock;
     if (reorderBlock) disabled['reorder'] = reorderBlock;
     toolbar!.setDisabledTools(disabled);
 
-    // Auto-activate dimensions if not blocked
-    if (!dimBlock) {
-      handles!.showHandles(element, 'dimensions');
-      const pos = toolbar!.getButtonPosition('dimensions');
-      const dimControls = dimensionsEditor!.render(element, pos, (changes) => {
-        const info = buildElementInfo(element);
-        const diff = diffBuilder!.build(info, changes);
-        commitEdit(element, changes, diff);
-        selection!.refreshHighlight();
-        handles!.refreshHandles();
-      });
-      shadow!.appendChild(dimControls);
-      toolbar!.setActiveMode('dimensions');
-    } else {
-      toolbar!.setActiveMode(null);
-    }
+    // Re-apply the previous active tool for the new element (preserve tool state).
+    // onDeselect fires before onSelect during re-selection and resets toolbar to cursor,
+    // so we read from the preserved mode that onDeselect captured before resetting.
+    const previousMode = preservedToolMode ?? toolbar!.getActiveMode();
+    preservedToolMode = null;
+    const modeToApply = (previousMode && !disabled[previousMode]) ? previousMode : 'cursor';
+    activateToolForElement(element, modeToApply);
   });
 
   selection.onDeselect(() => {
+    // Preserve active tool mode so onSelect can restore it (select() calls
+    // deselect() before onSelect fires, which would otherwise lose the mode).
+    preservedToolMode = toolbar!.getActiveMode();
+
     if (multiSelect?.isActive()) {
       exitMultiSelectMode();
     }
@@ -313,14 +322,18 @@ async function activate(): Promise<void> {
     dimensionsEditor!.cleanup();
     spacingEditor!.cleanup();
     positionEditor!.cleanup();
-    moveEditor!.cleanup();
     reorderEditor!.cleanup();
     measureOverlay!.disable();
     measureOverlay!.clear();
     staleDetector!.cleanup();
     preview!.revert();
-    toolbar!.setActiveMode(null);
+    toolbar!.setActiveMode('cursor');
     toolbar!.setDisabledTools({});
+    // Transition notes panel from element → toolbar mode
+    if (notesEditor?.isOpen() && notesEditor.getPositionMode() === 'element') {
+      notesEditor.clearAnchoredElement();
+      notesEditor.reposition(toolbar!.getButtonPosition('notes'));
+    }
   });
 
   // Wire toolbar tool selection → handles or floating editors
@@ -328,93 +341,7 @@ async function activate(): Promise<void> {
     if (multiSelect?.isActive()) return; // ignore tool changes during multi-select
     const el = selection!.getSelectedElement();
     if (!el) return;
-
-    // Clean up previous edit mode
-    handles!.hideHandles();
-    typographyEditor!.cleanup();
-    colorEditor!.cleanup();
-    dimensionsEditor!.cleanup();
-    spacingEditor!.cleanup();
-    positionEditor!.cleanup();
-    moveEditor!.cleanup();
-    reorderEditor!.cleanup();
-
-    // Toggle off if clicking the active tool
-    if (selectedMode === toolbar!.getActiveMode()) {
-      toolbar!.setActiveMode(null);
-      return;
-    }
-
-    if (selectedMode === 'typography') {
-      const pos = toolbar!.getButtonPosition('typography');
-      const controls = typographyEditor!.render(el, pos, (changes) => {
-        const info = buildElementInfo(el);
-        const diff = diffBuilder!.build(info, changes);
-        commitEdit(el, changes, diff);
-      });
-      shadow!.appendChild(controls);
-      toolbar!.setActiveMode('typography');
-    } else if (selectedMode === 'colors') {
-      const pos = toolbar!.getButtonPosition('colors');
-      const controls = colorEditor!.render(el, 'color', pos, (changes) => {
-        const info = buildElementInfo(el);
-        const diff = diffBuilder!.build(info, changes);
-        commitEdit(el, changes, diff);
-      });
-      shadow!.appendChild(controls);
-      toolbar!.setActiveMode('colors');
-    } else if (selectedMode === 'dimensions') {
-      // Dimensions: handles for drag + mini panel for presets
-      handles!.showHandles(el, selectedMode);
-      const pos = toolbar!.getButtonPosition('dimensions');
-      const controls = dimensionsEditor!.render(el, pos, (changes) => {
-        const info = buildElementInfo(el);
-        const diff = diffBuilder!.build(info, changes);
-        commitEdit(el, changes, diff);
-        selection!.refreshHighlight();
-        handles!.refreshHandles();
-      });
-      shadow!.appendChild(controls);
-      toolbar!.setActiveMode('dimensions');
-    } else if (selectedMode === 'spacing') {
-      // Spacing: handles for drag + mini panel for token-based value selection
-      handles!.showHandles(el, selectedMode);
-      const pos = toolbar!.getButtonPosition('spacing');
-      const controls = spacingEditor!.render(el, pos, (changes) => {
-        const info = buildElementInfo(el);
-        const diff = diffBuilder!.build(info, changes);
-        commitEdit(el, changes, diff);
-        selection!.refreshHighlight();
-        handles!.refreshHandles();
-      });
-      shadow!.appendChild(controls);
-      toolbar!.setActiveMode('spacing');
-    } else if (selectedMode === 'position') {
-      const pos = toolbar!.getButtonPosition('position');
-      const controls = positionEditor!.render(el, pos, (changes) => {
-        const info = buildElementInfo(el);
-        const diff = diffBuilder!.build(info, changes);
-        commitEdit(el, changes, diff);
-        selection!.refreshHighlight();
-      });
-      shadow!.appendChild(controls);
-      toolbar!.setActiveMode('position');
-    } else if (selectedMode === 'move') {
-      moveEditor!.render(el, (changes) => {
-        const info = buildElementInfo(el);
-        const diff = diffBuilder!.build(info, changes);
-        commitEdit(el, changes, diff);
-        selection!.refreshHighlight();
-        moveEditor!.refreshOverlay();
-      });
-      toolbar!.setActiveMode('move');
-    } else if (selectedMode === 'reorder') {
-      reorderEditor!.render(el, makeReorderCommit(el));
-      toolbar!.setActiveMode('reorder');
-    } else {
-      handles!.showHandles(el, selectedMode);
-      toolbar!.setActiveMode(selectedMode);
-    }
+    activateToolForElement(el, selectedMode);
   });
 
   // Wire DevTools toggle button
@@ -438,41 +365,28 @@ async function activate(): Promise<void> {
     devtoolsUserClosed = true;
   });
 
-  // Wire toolbar toggle → hide/show tool mini-panels + bottom DevTools panel
-  toolbar.onToggle((expanded) => {
-    if (!expanded) {
-      // Save DevTools state before collapsing
+  // Wire collapse → hide/restore all overlay UI when toolbar is collapsed/expanded.
+  toolbar.onCollapse((collapsed) => {
+    if (collapsed) {
+      // Save DevTools state before hiding
       devtoolsOpenBeforeCollapse = devtoolsPanel!.isOpen();
       if (devtoolsOpenBeforeCollapse) {
         devtoolsPanel!.hide();
         toolbar!.setInspectorOpen('devtools', false);
       }
-      typographyEditor!.cleanup();
-      colorEditor!.cleanup();
-      dimensionsEditor!.cleanup();
-      spacingEditor!.cleanup();
-      positionEditor!.cleanup();
-      moveEditor!.cleanup();
-      reorderEditor!.cleanup();
-      notesEditor!.cleanup();
-      gridSettingsPanel!.cleanup();
-      multiSelectToolbar!.cleanup();
-      toolbar!.setNotesOpen(false);
-      // Keep handles and overlay visible — only UI chrome hides
-    } else {
-      // Restore DevTools if it was open before collapse and user hasn't manually closed it
-      if (devtoolsOpenBeforeCollapse && !devtoolsUserClosed) {
-        const el = selection?.getSelectedElement() ?? undefined;
-        const info = el ? buildElementInfo(el) : undefined;
-        devtoolsPanel!.show(el, info);
-        toolbar!.setInspectorOpen('devtools', true);
-      }
-    }
-  });
 
-  // Wire cursor mode → switch between DOM inspection and page browsing
-  toolbar.onCursorModeChange((cursorMode) => {
-    if (cursorMode === 'page') {
+      // Save grid overlay state
+      gridVisibleBeforeCollapse = gridOverlay!.isVisible();
+      if (gridVisibleBeforeCollapse) {
+        gridOverlay!.hide();
+      }
+
+      // Save rulers overlay state
+      rulersVisibleBeforeCollapse = rulerOverlay!.isVisible();
+      if (rulersVisibleBeforeCollapse) {
+        rulerOverlay!.hide();
+      }
+
       // Pause inspection — let user interact with the page normally
       hover!.disable();
       selection!.hideHighlight();
@@ -482,10 +396,10 @@ async function activate(): Promise<void> {
       dimensionsEditor!.cleanup();
       spacingEditor!.cleanup();
       positionEditor!.cleanup();
-      moveEditor!.cleanup();
       reorderEditor!.cleanup();
       notesEditor!.cleanup();
       gridSettingsPanel!.cleanup();
+      multiSelectToolbar!.cleanup();
       toolbar!.setNotesOpen(false);
       if (reviewPanel!.isOpen()) {
         reviewPanel!.hide();
@@ -502,6 +416,26 @@ async function activate(): Promise<void> {
       document.body.style.cursor = 'crosshair';
       hover!.enable();
       selection!.restoreHighlight();
+
+      // Restore DevTools if it was open before page mode
+      if (devtoolsOpenBeforeCollapse && !devtoolsUserClosed) {
+        const el = selection?.getSelectedElement() ?? undefined;
+        const info = el ? buildElementInfo(el) : undefined;
+        devtoolsPanel!.show(el, info);
+        toolbar!.setInspectorOpen('devtools', true);
+      }
+
+      // Restore grid overlay if it was visible
+      if (gridVisibleBeforeCollapse) {
+        gridOverlay!.show();
+        toolbar!.setGridEnabled(true);
+      }
+
+      // Restore rulers overlay if it was visible
+      if (rulersVisibleBeforeCollapse) {
+        rulerOverlay!.show();
+        toolbar!.setRulersEnabled(true);
+      }
     }
   });
 
@@ -512,31 +446,42 @@ async function activate(): Promise<void> {
     dimensionsEditor!.reposition(toolbar!.getButtonPosition('dimensions'));
     spacingEditor!.reposition(toolbar!.getButtonPosition('spacing'));
     positionEditor!.reposition(toolbar!.getButtonPosition('position'));
-    notesEditor!.reposition(toolbar!.getButtonPosition('notes'));
-    moveEditor!.reposition(toolbar!.getButtonPosition('move'));
+    if (notesEditor!.getPositionMode() === 'toolbar') {
+      notesEditor!.reposition(toolbar!.getButtonPosition('notes'));
+    }
     reorderEditor!.reposition(toolbar!.getButtonPosition('reorder'));
     gridSettingsPanel!.reposition(toolbar!.getButtonPosition('grid'));
     multiSelectToolbar!.reposition(toolbar!.getPosition());
     reviewPanel!.reposition(toolbar!.getButtonPosition('review'));
   });
 
-  // Wire editor close buttons → deactivate tool
+  // Wire editor close buttons → fall back to cursor tool
   typographyEditor.onClose(() => {
-    toolbar!.setActiveMode(null);
+    const el = selection?.getSelectedElement();
+    if (el) { activateToolForElement(el, 'cursor'); }
+    else { toolbar!.setActiveMode('cursor'); }
   });
   colorEditor.onClose(() => {
-    toolbar!.setActiveMode(null);
+    const el = selection?.getSelectedElement();
+    if (el) { activateToolForElement(el, 'cursor'); }
+    else { toolbar!.setActiveMode('cursor'); }
   });
   dimensionsEditor.onClose(() => {
     handles!.hideHandles();
-    toolbar!.setActiveMode(null);
+    const el = selection?.getSelectedElement();
+    if (el) { activateToolForElement(el, 'cursor'); }
+    else { toolbar!.setActiveMode('cursor'); }
   });
   spacingEditor.onClose(() => {
     handles!.hideHandles();
-    toolbar!.setActiveMode(null);
+    const el = selection?.getSelectedElement();
+    if (el) { activateToolForElement(el, 'cursor'); }
+    else { toolbar!.setActiveMode('cursor'); }
   });
   positionEditor.onClose(() => {
-    toolbar!.setActiveMode(null);
+    const el = selection?.getSelectedElement();
+    if (el) { activateToolForElement(el, 'cursor'); }
+    else { toolbar!.setActiveMode('cursor'); }
   });
 
   // Wire review panel toggle
@@ -561,6 +506,24 @@ async function activate(): Promise<void> {
       notesEditor!.cleanup();
       toolbar!.setNotesOpen(false);
     } else {
+      const selectedEl = selection?.getSelectedElement();
+      const isMulti = multiSelect?.isActive();
+
+      // Element mode only for single selection (no multi-select)
+      if (selectedEl && !isMulti) {
+        const info = buildElementInfo(selectedEl);
+        notesEditor!.setAnchoredElement(selectedEl, {
+          selector: info.selector,
+          tagName: info.tagName,
+          textContent: info.textContent,
+          sourceFile: info.sourceFile,
+          sourceLine: info.sourceLine,
+          instanceIndex: info.instanceIndex,
+        });
+      } else {
+        notesEditor!.clearAnchoredElement();
+      }
+
       const pos = toolbar!.getButtonPosition('notes');
       const notePanel = notesEditor!.render(pos);
       shadow!.appendChild(notePanel);
@@ -663,6 +626,15 @@ async function activate(): Promise<void> {
   });
   toolbar.setGridBlockReason(gridOverlay.getBlockReason());
 
+  // Wire rulers toggle
+  toolbar.onRulersToggle((enabled) => {
+    if (enabled) {
+      rulerOverlay!.show();
+    } else {
+      rulerOverlay!.hide();
+    }
+  });
+
   // Wire grid settings panel (long-press on grid button)
   toolbar.onGridSettingsToggle(() => {
     if (gridSettingsPanel!.isOpen()) {
@@ -692,14 +664,11 @@ async function activate(): Promise<void> {
     gridSettingsPanel?.updateDefaults(effective.baseSpacing, effective.majorSpacing);
   });
 
-  // Wire move editor close → deactivate tool
-  moveEditor.onClose(() => {
-    toolbar!.setActiveMode(null);
-  });
-
-  // Wire reorder editor close → deactivate tool
+  // Wire reorder editor close → fall back to cursor tool
   reorderEditor.onClose(() => {
-    toolbar!.setActiveMode(null);
+    const el = selection?.getSelectedElement();
+    if (el) { activateToolForElement(el, 'cursor'); }
+    else { toolbar!.setActiveMode('cursor'); }
   });
 
   // Wire delete element
@@ -762,7 +731,7 @@ async function activate(): Promise<void> {
   // Wire disabled mode feedback (e.g. dimension resize blocked by layout)
   handles.onDisabled((reason) => {
     devtoolsPanel?.log(`Edit mode blocked: ${reason}`, 'warn');
-    toolbar!.setActiveMode(null);
+    toolbar!.setActiveMode('cursor');
   });
 
   // Wire editing → diff creation → queue + history
@@ -809,10 +778,10 @@ function deactivate(): void {
   dimensionsEditor?.cleanup();
   spacingEditor?.cleanup();
   positionEditor?.cleanup();
-  moveEditor?.cleanup();
   reorderEditor?.cleanup();
   notesEditor?.cleanup();
   gridOverlay?.hide();
+  rulerOverlay?.hide();
   gridSettingsPanel?.cleanup();
   multiSelect?.clear();
   multiSelectToolbar?.cleanup();
@@ -837,6 +806,8 @@ function deactivate(): void {
   // Reset state
   devtoolsUserClosed = false;
   devtoolsOpenBeforeCollapse = false;
+  gridVisibleBeforeCollapse = false;
+  rulersVisibleBeforeCollapse = false;
   mode = 'inactive';
   wsClient = null;
   hover = null;
@@ -862,7 +833,7 @@ function deactivate(): void {
   notesStore = null;
   notesEditor = null;
   gridOverlay = null;
-  moveEditor = null;
+  rulerOverlay = null;
   reorderEditor = null;
   gridSettingsPanel = null;
   measureOverlay = null;
@@ -881,6 +852,88 @@ function toggleActive(): void {
     activate();
   } else {
     deactivate();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Activate tool for element — shared by onSelect and onToolSelect
+// ---------------------------------------------------------------------------
+
+function activateToolForElement(el: Element, mode: EditMode): void {
+  // Clean up previous edit mode
+  handles!.hideHandles();
+  typographyEditor!.cleanup();
+  colorEditor!.cleanup();
+  dimensionsEditor!.cleanup();
+  spacingEditor!.cleanup();
+  positionEditor!.cleanup();
+  reorderEditor!.cleanup();
+
+  if (mode === 'cursor') {
+    // Cursor/select mode: show dimension handles only (no mini panel)
+    const dimBlock = getDimensionBlockReason(el);
+    if (!dimBlock) {
+      handles!.showHandles(el, 'dimensions');
+    }
+    toolbar!.setActiveMode('cursor');
+  } else if (mode === 'typography') {
+    const pos = toolbar!.getButtonPosition('typography');
+    const controls = typographyEditor!.render(el, pos, (changes) => {
+      const info = buildElementInfo(el);
+      const diff = diffBuilder!.build(info, changes);
+      commitEdit(el, changes, diff);
+    });
+    shadow!.appendChild(controls);
+    toolbar!.setActiveMode('typography');
+  } else if (mode === 'colors') {
+    const pos = toolbar!.getButtonPosition('colors');
+    const controls = colorEditor!.render(el, 'color', pos, (changes) => {
+      const info = buildElementInfo(el);
+      const diff = diffBuilder!.build(info, changes);
+      commitEdit(el, changes, diff);
+    });
+    shadow!.appendChild(controls);
+    toolbar!.setActiveMode('colors');
+  } else if (mode === 'dimensions') {
+    handles!.showHandles(el, mode);
+    const pos = toolbar!.getButtonPosition('dimensions');
+    const controls = dimensionsEditor!.render(el, pos, (changes) => {
+      const info = buildElementInfo(el);
+      const diff = diffBuilder!.build(info, changes);
+      commitEdit(el, changes, diff);
+      selection!.refreshHighlight();
+      handles!.refreshHandles();
+    });
+    shadow!.appendChild(controls);
+    toolbar!.setActiveMode('dimensions');
+  } else if (mode === 'spacing') {
+    handles!.showHandles(el, mode);
+    const pos = toolbar!.getButtonPosition('spacing');
+    const controls = spacingEditor!.render(el, pos, (changes) => {
+      const info = buildElementInfo(el);
+      const diff = diffBuilder!.build(info, changes);
+      commitEdit(el, changes, diff);
+      selection!.refreshHighlight();
+      handles!.refreshHandles();
+    });
+    shadow!.appendChild(controls);
+    toolbar!.setActiveMode('spacing');
+  } else if (mode === 'position') {
+    const pos = toolbar!.getButtonPosition('position');
+    const controls = positionEditor!.render(el, pos, (changes) => {
+      const info = buildElementInfo(el);
+      const diff = diffBuilder!.build(info, changes);
+      commitEdit(el, changes, diff);
+      selection!.refreshHighlight();
+    });
+    shadow!.appendChild(controls);
+    toolbar!.setActiveMode('position');
+  } else if (mode === 'reorder') {
+    reorderEditor!.render(el, makeReorderCommit(el));
+    toolbar!.setActiveMode('reorder');
+  } else {
+    handles!.showHandles(el, mode);
+    toolbar!.setActiveMode(mode);
   }
 }
 
@@ -1039,11 +1092,16 @@ function handleScroll(): void {
     selection?.refreshHighlight();
     hover?.refreshHighlight();
     handles?.refreshHandles();
-    moveEditor?.refreshOverlay();
+    positionEditor?.refreshMoveOverlay();
     reorderEditor?.refreshOverlay();
+    gridOverlay?.refreshScroll();
+    rulerOverlay?.refreshGuides();
     if (measureOverlay?.isActive()) measureOverlay.clear();
     if (notesEditor?.isOpen()) {
       notesEditor.refreshHighlights();
+      if (notesEditor.getPositionMode() === 'element') {
+        notesEditor.repositionToElement();
+      }
     }
     if (multiSelect?.isActive()) {
       multiSelect.refreshHighlights();
@@ -1150,9 +1208,8 @@ function enterMultiSelectMode(): void {
   dimensionsEditor?.cleanup();
   spacingEditor?.cleanup();
   positionEditor?.cleanup();
-  moveEditor?.cleanup();
   reorderEditor?.cleanup();
-  toolbar?.setActiveMode(null);
+  toolbar?.setActiveMode('cursor');
 
   // Show multi-select toolbar (or update it)
   if (multiSelectToolbar?.isOpen()) {
@@ -1249,22 +1306,7 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
         if (devtoolsPanel?.isOpen()) {
           devtoolsPanel.updateProperties(primary);
         }
-        const dimBlock = getDimensionBlockReason(primary);
-        if (!dimBlock) {
-          handles?.showHandles(primary, 'dimensions');
-          const pos = toolbar!.getButtonPosition('dimensions');
-          const dimControls = dimensionsEditor!.render(primary, pos, (changes) => {
-            const dimInfo = buildElementInfo(primary);
-            const diff = diffBuilder!.build(dimInfo, changes);
-            commitEdit(primary, changes, diff);
-            selection!.refreshHighlight();
-            handles!.refreshHandles();
-          });
-          shadow!.appendChild(dimControls);
-          toolbar?.setActiveMode('dimensions');
-        } else {
-          toolbar?.setActiveMode(null);
-        }
+        activateToolForElement(primary, 'cursor');
       }
     } else if (notePickMode) {
       // Level 0a: exit note pick mode (notes panel stays open)
@@ -1278,22 +1320,18 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
     } else if (gridSettingsPanel?.isOpen()) {
       // Level 0b: close grid settings panel
       gridSettingsPanel.cleanup();
+    } else if (rulerOverlay?.isDragging()) {
+      // Level 1a: cancel guide drag
+      rulerOverlay.cancelDrag();
     } else if (reorderEditor?.isDragging()) {
       // Level 1a: cancel reorder drag — revert preview, stay in reorder mode
       reorderEditor.cancelDrag();
-    } else if (moveEditor?.isDragging()) {
-      // Level 1b: cancel move drag — revert and stay in move mode
-      moveEditor.cleanup();
-      const el = selection?.getSelectedElement();
-      if (el) {
-        moveEditor.render(el, (changes) => {
-          const info = buildElementInfo(el);
-          const diff = diffBuilder!.build(info, changes);
-          commitEdit(el, changes, diff);
-          selection!.refreshHighlight();
-          moveEditor!.refreshOverlay();
-        });
-      }
+    } else if (positionEditor?.isMoveDragging()) {
+      // Level 1b: cancel move drag — overlay stays, panel stays, toggle stays active
+      positionEditor.cancelMoveDrag();
+    } else if (positionEditor?.isMoveActive()) {
+      // Level 1c: deactivate Move toggle — overlay removed, insets restored, panel stays
+      positionEditor.deactivateMove();
     } else if (handles?.isEditing()) {
       // Level 1b: cancel active edit
       handles.cancelEdit();

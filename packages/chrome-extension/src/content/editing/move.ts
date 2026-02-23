@@ -14,7 +14,6 @@ type ChangeCallback = (changes: PropertyChange[]) => void;
 export class MoveEditor {
   private currentElement: Element | null = null;
   private currentOnCommit: ChangeCallback | null = null;
-  private closeCb: (() => void) | null = null;
 
   // Drag state
   private dragging = false;
@@ -37,10 +36,6 @@ export class MoveEditor {
     private readonly shadow: ShadowRoot,
     private readonly preview: PreviewManager,
   ) {}
-
-  onClose(cb: () => void): void {
-    this.closeCb = cb;
-  }
 
   /**
    * Activate move mode on the given element.
@@ -115,9 +110,6 @@ export class MoveEditor {
   isDragging(): boolean {
     return this.dragging;
   }
-
-  /** No-op — MoveEditor has no positioned mini panel. */
-  reposition(_anchorPos: { x: number; y: number }): void {}
 
   // -----------------------------------------------------------------------
   // Pointer handlers
