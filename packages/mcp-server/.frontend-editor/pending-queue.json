@@ -1,0 +1,303 @@
+{
+  "version": "0.1.0",
+  "diffs": [
+    {
+      "id": "27db008c-a334-4e2c-bac5-ba98c5ecadf0",
+      "timestamp": "2026-02-21T03:39:36.390Z",
+      "element": {
+        "selector": "[data-source-file=\"src\\/app\\/about\\/page\\.tsx\"][data-source-line=\"\\32 4\"]",
+        "tagName": "div",
+        "sourceFile": "src/app/about/page.tsx",
+        "sourceLine": 24,
+        "attributes": {
+          "class": "page_aboutProfile__H1dhQ",
+          "data-source-file": "src/app/about/page.tsx",
+          "data-source-line": "24"
+        },
+        "boundingRect": {
+          "x": 96.3984375,
+          "y": 314,
+          "width": 1030,
+          "height": 0,
+          "top": 314,
+          "right": 1126.3984375,
+          "bottom": 314,
+          "left": 96.3984375
+        }
+      },
+      "changes": [
+        {
+          "property": "display",
+          "fromValue": "block",
+          "toValue": "none"
+        }
+      ],
+      "context": {
+        "url": "http://localhost:3000/about",
+        "viewport": {
+          "width": 1728,
+          "height": 996
+        },
+        "tabId": "3b694e57-1fcb-49e5-8364-7c06f1ff9cb8"
+      },
+      "status": "pending",
+      "sourceVerified": true
+    },
+    {
+      "id": "7516f438-e5c0-42db-a48b-cbe327b06123",
+      "timestamp": "2026-02-21T04:09:25.583Z",
+      "element": {
+        "selector": "[data-source-file=\"src\\/app\\/about\\/page\\.tsx\"][data-source-line=\"\\34 5\"]",
+        "tagName": "div",
+        "sourceFile": "src/app/about/page.tsx",
+        "sourceLine": 45,
+        "attributes": {
+          "class": "page_selectLogos__vplvb page_l6__P6G_A",
+          "data-source-file": "src/app/about/page.tsx",
+          "data-source-line": "45"
+        },
+        "boundingRect": {
+          "x": 96.3984375,
+          "y": 40.1953125,
+          "width": 206,
+          "height": 150,
+          "top": 40.1953125,
+          "right": 302.3984375,
+          "bottom": 190.1953125,
+          "left": 96.3984375
+        }
+      },
+      "changes": [
+        {
+          "property": "display",
+          "fromValue": "block",
+          "toValue": "none"
+        }
+      ],
+      "context": {
+        "url": "http://localhost:3000/about",
+        "viewport": {
+          "width": 1728,
+          "height": 996
+        },
+        "tabId": "3b694e57-1fcb-49e5-8364-7c06f1ff9cb8"
+      },
+      "status": "pending",
+      "sourceVerified": true
+    },
+    {
+      "id": "0531951b-4b75-491d-863d-87f964c37b5f",
+      "timestamp": "2026-02-21T04:09:33.205Z",
+      "element": {
+        "selector": "[data-source-file=\"src\\/app\\/about\\/page\\.tsx\"][data-source-line=\"\\34 7\"]",
+        "tagName": "p",
+        "textContent": "*Select clients.",
+        "sourceFile": "src/app/about/page.tsx",
+        "sourceLine": 47,
+        "attributes": {
+          "class": "page_aboutSubText__6R_km page_selectLogosLabel__PBA_M",
+          "data-source-file": "src/app/about/page.tsx",
+          "data-source-line": "47"
+        },
+        "boundingRect": {
+          "x": 96.3984375,
+          "y": 314.1953125,
+          "width": 84.0859375,
+          "height": 19.1953125,
+          "top": 314.1953125,
+          "right": 180.484375,
+          "bottom": 333.390625,
+          "left": 96.3984375
+        }
+      },
+      "changes": [
+        {
+          "property": "width",
+          "fromValue": "500px",
+          "toValue": "fit-content"
+        }
+      ],
+      "context": {
+        "url": "http://localhost:3000/about",
+        "viewport": {
+          "width": 1728,
+          "height": 996
+        },
+        "tabId": "3b694e57-1fcb-49e5-8364-7c06f1ff9cb8"
+      },
+      "status": "pending",
+      "sourceVerified": true
+    },
+    {
+      "id": "b22d7973-bf2b-4dc0-ba31-2d8066cc0d61",
+      "timestamp": "2026-02-21T04:55:17.102Z",
+      "element": {
+        "selector": "[data-source-file=\"src\\/app\\/about\\/page\\.tsx\"][data-source-line=\"\\34 5\"]",
+        "tagName": "div",
+        "sourceFile": "src/app/about/page.tsx",
+        "sourceLine": 45,
+        "attributes": {
+          "class": "page_selectLogos__vplvb page_l6__P6G_A",
+          "data-source-file": "src/app/about/page.tsx",
+          "data-source-line": "45"
+        },
+        "boundingRect": {
+          "x": 96.3984375,
+          "y": 322.1953125,
+          "width": 206,
+          "height": 150,
+          "top": 322.1953125,
+          "right": 302.3984375,
+          "bottom": 472.1953125,
+          "left": 96.3984375
+        }
+      },
+      "changes": [
+        {
+          "property": "display",
+          "fromValue": "block",
+          "toValue": "none"
+        }
+      ],
+      "context": {
+        "url": "http://localhost:3000/about",
+        "viewport": {
+          "width": 1728,
+          "height": 996
+        },
+        "tabId": "6e0c1f8b-fd41-44b3-9894-7f882afc58f1"
+      },
+      "status": "pending",
+      "sourceVerified": true
+    },
+    {
+      "id": "04b408f0-a522-474f-9d3c-f22598a0a1e5",
+      "timestamp": "2026-02-21T04:55:20.759Z",
+      "element": {
+        "selector": "[data-source-file=\"src\\/app\\/about\\/page\\.tsx\"][data-source-line=\"\\34 7\"]",
+        "tagName": "p",
+        "textContent": "*Select clients.",
+        "sourceFile": "src/app/about/page.tsx",
+        "sourceLine": 47,
+        "attributes": {
+          "class": "page_aboutSubText__6R_km page_selectLogosLabel__PBA_M",
+          "data-source-file": "src/app/about/page.tsx",
+          "data-source-line": "47"
+        },
+        "boundingRect": {
+          "x": 96.3984375,
+          "y": 342.1953125,
+          "width": 84.0859375,
+          "height": 19.1953125,
+          "top": 342.1953125,
+          "right": 180.484375,
+          "bottom": 361.390625,
+          "left": 96.3984375
+        }
+      },
+      "changes": [
+        {
+          "property": "width",
+          "fromValue": "500px",
+          "toValue": "fit-content"
+        }
+      ],
+      "context": {
+        "url": "http://localhost:3000/about",
+        "viewport": {
+          "width": 1728,
+          "height": 996
+        },
+        "tabId": "6e0c1f8b-fd41-44b3-9894-7f882afc58f1"
+      },
+      "status": "pending",
+      "sourceVerified": true
+    },
+    {
+      "id": "68c3e202-4f79-49b8-b385-67799c6083f2",
+      "timestamp": "2026-02-21T05:51:44.968Z",
+      "element": {
+        "selector": "[data-source-file=\"src\\/app\\/about\\/page\\.tsx\"][data-source-line=\"\\34 5\"]",
+        "tagName": "div",
+        "sourceFile": "src/app/about/page.tsx",
+        "sourceLine": 45,
+        "attributes": {
+          "class": "page_selectLogos__vplvb page_l6__P6G_A",
+          "data-source-file": "src/app/about/page.tsx",
+          "data-source-line": "45"
+        },
+        "boundingRect": {
+          "x": 96.3984375,
+          "y": 367.6953125,
+          "width": 206,
+          "height": 150,
+          "top": 367.6953125,
+          "right": 302.3984375,
+          "bottom": 517.6953125,
+          "left": 96.3984375
+        }
+      },
+      "changes": [
+        {
+          "property": "display",
+          "fromValue": "block",
+          "toValue": "none"
+        }
+      ],
+      "context": {
+        "url": "http://localhost:3000/about",
+        "viewport": {
+          "width": 1728,
+          "height": 996
+        },
+        "tabId": "4de4f374-f73b-41d4-975c-af0eca833e40"
+      },
+      "status": "pending",
+      "sourceVerified": true
+    },
+    {
+      "id": "8d05f07b-0ef6-4d38-8c78-b96f2d6498f0",
+      "timestamp": "2026-02-21T05:51:47.395Z",
+      "element": {
+        "selector": "[data-source-file=\"src\\/app\\/about\\/page\\.tsx\"][data-source-line=\"\\34 7\"]",
+        "tagName": "p",
+        "textContent": "*Select clients.",
+        "sourceFile": "src/app/about/page.tsx",
+        "sourceLine": 47,
+        "attributes": {
+          "class": "page_aboutSubText__6R_km page_selectLogosLabel__PBA_M",
+          "data-source-file": "src/app/about/page.tsx",
+          "data-source-line": "47"
+        },
+        "boundingRect": {
+          "x": 96.3984375,
+          "y": 387.6953125,
+          "width": 84.0859375,
+          "height": 19.1953125,
+          "top": 387.6953125,
+          "right": 180.484375,
+          "bottom": 406.890625,
+          "left": 96.3984375
+        }
+      },
+      "changes": [
+        {
+          "property": "width",
+          "fromValue": "500px",
+          "toValue": "fit-content"
+        }
+      ],
+      "context": {
+        "url": "http://localhost:3000/about",
+        "viewport": {
+          "width": 1728,
+          "height": 996
+        },
+        "tabId": "4de4f374-f73b-41d4-975c-af0eca833e40"
+      },
+      "status": "pending",
+      "sourceVerified": true
+    }
+  ],
+  "savedAt": "2026-02-21T05:52:52.108Z"
+}
