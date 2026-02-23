@@ -173,4 +173,5 @@ Each session adds one entry. Keep entries high-signal and readable.
 ### Follow-ups
 - W3 (deferred): Insertion redo uses stale `insertIndex` if DOM mutated between undo/redo — acceptable for MVP, needs revisiting for production
 - I1–I5 (informational): Keyboard shortcut for insert, container auto-detect heuristic refinement, compound element undo granularity, catalog extensibility API, insert+reorder combined workflow
+- PR #9 created to merge `feature/reorder-phase-1` → `main`
 
