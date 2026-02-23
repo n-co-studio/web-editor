@@ -47,10 +47,16 @@ export interface EditorState {
 // Batching
 // ---------------------------------------------------------------------------
 
+export type DiffLifecycle = 'pending' | 'sent' | 'applied';
+
 export interface PendingEdit {
   readonly diffId: string;
   readonly diff: VisualDiff;
   removedAt?: number;
+  lifecycleStatus?: DiffLifecycle;
+  sentAt?: number;
+  copiedToClipboard?: boolean;
+  copiedAt?: number;
 }
 
 // ---------------------------------------------------------------------------

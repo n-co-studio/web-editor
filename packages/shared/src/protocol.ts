@@ -25,7 +25,8 @@ export interface ExtensionHelloPayload {
 }
 
 export interface ServerHelloPayload {
-  readonly knownDiffIds: readonly string[];
+  readonly pendingDiffIds: readonly string[];
+  readonly appliedDiffIds: readonly string[];
   readonly protocolVersion: string;
 }
 

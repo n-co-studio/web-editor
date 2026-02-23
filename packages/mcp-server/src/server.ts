@@ -79,6 +79,11 @@ function registerTools(server: McpServer, bridge: Bridge): void {
         '(prevSibling/nextSibling with sourceFile+sourceLine) indicating the exact JSX insertion point. ' +
         'sameSiblingSource=true means siblings share a .map() call; crossFileInsertion=true means the ' +
         'container and siblings are from different source files. ' +
+        'When `groupChanges` is present, the intent is to wrap the elements identified by ' +
+        '`wrappedSelectors` in a new wrapper element at the specified position in the container. ' +
+        'Each group change includes wrapperTagName, wrapperInitialStyles (display:flex etc.), ' +
+        'containerSelector, insertIndex, wrappedSelectors[], and a sibling bracket ' +
+        '(prevSibling/nextSibling) indicating the JSX insertion point for the wrapper. ' +
         'Optionally filter by tab session ID.',
       inputSchema: z.object({
         tabId: z

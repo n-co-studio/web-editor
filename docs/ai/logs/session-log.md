@@ -38,37 +38,35 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 -->
 
-## Session 16 — 2026-02-22 — Merge Move Tool into Position Panel
+## Session 21 — 2026-02-23 — Group Elements Phase 2 (UI, Shortcut, Wiring, Server, Boundary)
 
 **Status:** complete
 **Decisions applied:** 0001, 0002, 0008
-**Commits:** 04bd412 — feat: merge Move tool into Position panel as toggle button
+**Commits:** b1b8142 — feat: group elements phase 2 — UI, shortcut, wiring, server, boundary
 
 ### Goal
-- Eliminate standalone Move toolbar tool by embedding drag-to-reposition as a Move toggle inside the Position mini panel
-- Reduce toolbar clutter (9 → 8 buttons), restore "every tool opens a panel" consistency
-- Create smoother workflow: change position type → drag, without switching tools
+- Wire Group operation into user-facing UI: Group button in MultiSelectToolbar, Cmd+G keyboard shortcut, makeGroupCommit() orchestrator helper, MCP server description, review panel rendering, boundary expansion
 
 ### Plan Summary
-1. Remove `'move'` from `EditMode` union — use TypeScript as checklist for downstream references
-2. Clean up toolbar: remove move from TOOL_ORDER, TOOL_LABELS, ICONS
-3. Expand PositionEditor: accept `shadow`, compose MoveEditor internally (composition, not absorption)
-4. Add Move toggle row between position selector and inset section
-5. Expose delegation methods: `isMoveActive()`, `isMoveDragging()`, `cancelMoveDrag()`, `deactivateMove()`, `refreshMoveOverlay()`
-6. Wire 3-level Escape ladder: cancel drag → deactivate toggle → close panel
-7. Remove all `moveEditor` references from index.ts
-8. Clean up dead `onClose`/`closeCb` and `reposition` stub from MoveEditor (cohesion finding)
+1. Add Group button to `multi-select-toolbar.ts` with block-reason guard, tooltip, dashed bounding-box hover preview
+2. Add `makeGroupCommit()` to `index.ts` following reorder/insert commit pattern
+3. Wire `multiSelectToolbar.onGroup()` callback and Cmd+G / Ctrl+G shortcut
+4. Update MCP server tool description to document `groupChanges`
+5. Add group change rendering to `review-panel.ts`
+6. Add boundary expansion to `boundaries.md`
+7. Fix cohesion findings: prompt-serializer group section + Cmd+G preventDefault ordering
 
 ### Changes Made
-- `packages/chrome-extension/src/shared/types.ts` — Removed `'move'` from `EditMode` union
-- `packages/chrome-extension/src/content/toolbar.ts` — Removed `'move'` from `TOOL_ORDER` (9→8), `TOOL_LABELS`, `ICONS`
-- `packages/chrome-extension/src/content/editing/position.ts` — Added `shadow` constructor param, composed `MoveEditor`, added Move toggle button with icon/disabled state/tooltip, 5 new public delegation methods, `cleanup()` calls `moveEditor.cleanup()`, position-type change refreshes toggle enabled state
-- `packages/chrome-extension/src/content/editing/move.ts` — Removed dead `onClose`/`closeCb` and no-op `reposition` stub (cohesion cleanup)
-- `packages/chrome-extension/src/content/index.ts` — Removed import, module var, instantiation, nulling for `moveEditor`; removed `getMoveBlockReason` from disabled tools; replaced scroll handler with `positionEditor.refreshMoveOverlay()`; replaced Escape ladder `moveEditor.isDragging()` block with 3-level hierarchy via `positionEditor`
-- `docs/ai/logs/session-log.md` — Added Session 16 entry, rotated Session 13 to archive
+- `packages/chrome-extension/src/content/editing/multi-select-toolbar.ts` — Added `ShadowRoot` param, `onGroup` callback, `buildGroupSection()`, dashed bounding-box preview overlay
+- `packages/chrome-extension/src/content/index.ts` — `makeGroupCommit()`, `multiSelectToolbar.onGroup()` wiring, Cmd+G/Ctrl+G shortcut
+- `packages/mcp-server/src/server.ts` — Extended `get_pending_visual_changes` description with `groupChanges`
+- `packages/chrome-extension/src/content/batching/review-panel.ts` — Group change rendering (purple "wrap" badge), `groupChanges` in removed count
+- `packages/chrome-extension/src/content/batching/prompt-serializer.ts` — Group changes collection + "## Group Changes" prompt section
+- `docs/spec/compiled/v1/boundaries.md` — "DOM element reparenting for group" boundary expansion
+- `docs/ai/task-groups/group-elements.yaml` — Phase 2 marked complete, session 21 decisions
 
 ### Verification (Gates Evidence)
-- Commit gates: A1 pass (0001/0002/0008), A2 pass (plan documented, scope advisory: 5 files ~168 net lines), A3 pass (`tsc --noEmit` clean, `npm run build` clean), A4 pass (no secrets), A5 pass (cohesion: 0 critical, 3 warnings — W1 dead API fixed, W2 pre-existing, W3 safe via external guard)
+- Commit gates: A1 pass, A2 pass, A3 pass (typecheck + build clean), A4 pass, A5 pass (cohesion: C1 fixed, R4 fixed, R2/R3 deferred), A6 pass (contract updated)
 
 ### Failed Attempts (Brief)
 - None
@@ -77,101 +75,97 @@ Each session adds one entry. Keep entries high-signal and readable.
 - None
 
 ### Follow-ups
-- Pre-existing `iconKey as EditMode` cast in toolbar.ts `buildIconButton` mouseleave handler (cohesion W2) — applies to all non-tool buttons, not introduced by this change
-- Move overlay does not reposition during toolbar drag (cohesion I1) — acceptable since overlay is element-anchored
+- Cohesion R2: `refreshGroupAfterHistoryChange` not needed today (no active group overlay)
+- Cohesion R3: bridge drift tracking skips structural change styles (consistent with reorder/insert)
 
 ---
 
-## Session 15 — 2026-02-21 — Contextual Note Panel Positioning
+## Session 20 — 2026-02-23 — Group Elements Phase 1 (Types, Diff, History, DOM Logic)
 
 **Status:** complete
 **Decisions applied:** 0001, 0002, 0008
-**Commits:** 21812d4 — feat: contextual note panel positioning — anchor to selected element
+**Commits:** 39d8cc8 — feat: group elements phase 1 — types, diff builder, history, DOM logic
 
 ### Goal
-- Position the notes mini-panel relative to the selected element instead of the toolbar button
-- Auto-assign the selected element to newly created notes
-- Dragging detaches the panel; deselection and stale detection fall back to toolbar mode
+- Define shared types, diff builder method, history entry, and core DOM mutation for Group operation (wrapping 2+ sibling elements in a flex container)
+- Build foundational layer for Phase 2 UI wiring
 
 ### Plan Summary
-1. Add `NOTES_PANEL_MAX_HEIGHT` and `NOTES_PANEL_WIDTH` constants
-2. Add `NotePositionMode` type and anchoring state fields to `NotesEditor`
-3. Add `computeElementAnchoredPosition()` pure geometry function (inset for tall, below for short, viewport clamp)
-4. Update `render()` to check anchored element and choose positioning mode
-5. Wire `makeDraggable` on header — transitions to `'detached'` on first drag
-6. Auto-assign anchored element to each new note via `addElementToNote()`
-7. Guard `reposition()` and `toolbar.onMove` against non-toolbar modes
-8. Wire `onNotesToggle`, `onDeselect`, stale callback, and scroll handler in index.ts
-9. Fix pre-existing `gridSpacing` type error in ruler-overlay.ts
+1. Add `GroupChange` interface to `packages/shared/src/diff.ts`, add `groupChanges` to `VisualDiff`, re-export from `index.ts`
+2. Add `buildGroup()` to `diff-builder.ts` following `buildReorder()`/`buildInsert()` pattern
+3. Add `GroupHistoryEntry` to `history.ts` with undo (reverse iteration), redo (wrapper before first element), and resetAll cases
+4. Create `editing/group.ts` with `groupElements()` (DOM mutation) and `getGroupBlockReason()` (guard)
+5. Create task group contract at `docs/ai/task-groups/group-elements.yaml`
 
 ### Changes Made
-- `packages/chrome-extension/src/shared/constants.ts` — Added `NOTES_PANEL_MAX_HEIGHT` (320), `NOTES_PANEL_WIDTH` (260)
-- `packages/chrome-extension/src/content/editing/notes.ts` — Added `NotePositionMode` type, 4 new fields, 4 new public methods (`getPositionMode`, `setAnchoredElement`, `clearAnchoredElement`, `repositionToElement`), ResizeObserver lifecycle, `computeElementAnchoredPosition()` pure helper, draggable header via `makeDraggable`, auto-assignment in `addNote` closure, mode guard in `reposition()`, full cleanup in `cleanup()`
-- `packages/chrome-extension/src/content/index.ts` — `onNotesToggle` checks selection for element anchoring, `onDeselect` and stale callback transition to toolbar mode, `handleScroll` tracks element position, `toolbar.onMove` guarded for non-toolbar modes
-- `packages/chrome-extension/src/content/ruler-overlay.ts` — Fixed missing `gridSpacing` variable declaration (pre-existing type error)
-- `packages/chrome-extension/src/content/selection/devtools-panel.ts` — Added `minHeight: '0'` and overflow fixes for tree pane (operator change)
+- `packages/shared/src/diff.ts` — Added `GroupChange` interface (type, wrapperTagName, wrapperInitialStyles, containerSelector, insertIndex, wrappedSelectors, prevSibling, nextSibling), added `groupChanges` to `VisualDiff`
+- `packages/shared/src/index.ts` — Re-exported `GroupChange`
+- `packages/chrome-extension/src/content/batching/diff-builder.ts` — Added `buildGroup()` method
+- `packages/chrome-extension/src/content/history.ts` — Added `GroupHistoryEntry` with reverse-iteration undo/resetAll and correct redo wrapper positioning
+- `packages/chrome-extension/src/content/editing/group.ts` — **New**: `getGroupBlockReason()` guard + `groupElements()` DOM mutation with moveBefore/appendChild fallback
+- `docs/ai/task-groups/group-elements.yaml` — **New**: task group contract for group-elements briefs 1+2
 
 ### Verification (Gates Evidence)
-- Commit gates: A1 pass (0001/0002/0008 followed), A2 pass (plan documented, 5 files), A3 pass (`npm run build` clean, `tsc --noEmit` clean — pre-existing ruler-overlay errors fixed), A4 pass (no secrets), A5 pending
-- Push gates: B1 pending, B2 pending, B3 pending
+- Commit gates: A1 pass (0001/0002/0008), A2 pass (plan documented, 6 files ~68 net lines), A3 pass (`tsc --noEmit` clean, `npm run build` clean for shared + chrome-extension), A4 pass (no secrets), A5 pass (cohesion: 0 critical after fixes — C1 redo refNode fixed, W1 reverse iteration fixed), A6 pass (contract created)
 
 ### Failed Attempts (Brief)
-- `render()` calls `cleanup()` first which wiped `anchoredElement` before the positioning logic could read it — fixed by saving/restoring anchoring state across the cleanup call
+- None
 
 ### Known Issues Logged
 - None
 
 ### Follow-ups
-- A5 cohesion review deferred (operator closing session)
+- Phase 2: Wire group into toolbar, keyboard shortcut (Cmd+G), multi-select integration, `EditMode` union
+- Cohesion W3 (deferred): `GroupHistoryEntry.originalPositions` type is defined inline rather than importing `OriginalPosition` from `group.ts` — intentional to keep history.ts import-free from editing/
+- Cohesion I5/I6: `EditMode` does not include 'group' yet, no `refreshGroupAfterHistoryChange` — both Phase 2 scope
 
 ---
 
-## Session 17 — 2026-02-22 — Insert Element Feature (Phases 0–2) + Cohesion Fixes
+## Session 19 — 2026-02-23 — MCP Connection Resilience Phases 3–4
 
 **Status:** complete
 **Decisions applied:** 0001, 0002, 0008
-**Commits:** fd34bff — feat: insert element tool — phases 0-2 with cohesion fixes
+**Commits:** 8827b46 — feat: MCP connection resilience — lifecycle tracking + clipboard reconciliation
 
 ### Goal
-- Implement Insert Element tool across 3 phases: geometry engine (Phase 0), visual editor FSM (Phase 1), element catalog + panel (Phase 2)
-- Run cohesion audit across the full diff and fix findings
-- Add prompt serializer for "Copy as Prompt" clipboard export
+- Phase 3: Implement diff lifecycle tracking (`pending → sent → applied`) instead of hard-deleting on DIFF_ACK
+- Phase 4: Clipboard reconciliation — track which diffs were copied via "Copy as Prompt"
 
 ### Plan Summary
-1. Phase 0: Extract gap-math from reorder.ts, define InsertChange/SiblingAnchor/CompoundChildDescriptor types in shared, add insert-source.ts for sibling bracket source mapping
-2. Phase 1: InsertEditor class with 3-state FSM (SCANNING→CONFIGURING→COMMITTED), drop zone overlay, phantom preview, history integration
-3. Phase 2: InsertPanel with searchable element catalog (7 categories, 35 entries), sizing controls (Auto/Stretch/Fixed), compound children support
-4. Prompt serializer + review panel integration for clipboard export
-5. MCP protocol bump to 0.3.0 with DIFF_APPLIED, STATUS_REQUEST, STATUS_RESPONSE messages
+**Phase 3 — Lifecycle Tracking:**
+1. Extend `PendingEdit` with `lifecycleStatus` and `sentAt` fields
+2. Rewrite `queue.acknowledge()` to transition to 'sent' instead of hard-delete
+3. Add lifecycle methods: `markApplied`, `updateFromServerStatus`, `getLifecycleStatus`, `clearStale`, `clearApplied`, `clearPending`
+4. Split `ServerHelloPayload` from `knownDiffIds` → `pendingDiffIds` + `appliedDiffIds`
+5. Update bridge SERVER_HELLO construction
+6. Add `peekUndo()` to EditHistory, wire undo guard in index.ts
+7. Wire `onDiffApplied`, `onStatusResponse` callbacks in index.ts
+8. Add lifecycle badges, "Check Status" button, stale/applied sections in review panel
+
+**Phase 4 — Clipboard Reconciliation:**
+9. Add `copiedToClipboard` + `copiedAt` to PendingEdit
+10. Add `markCopied()` + `isCopied()` to queue
+11. Wire "Copy as Prompt" callback to mark diffs, show "Copied" badge in review panel
 
 ### Changes Made
-- `packages/chrome-extension/src/content/editing/gap-math.ts` — **New**: extracted `computeGapZones`, `detectContainerLayout`, `hitTestGapZone` from reorder.ts
-- `packages/chrome-extension/src/content/editing/insert.ts` — **New** (~620 lines): InsertEditor FSM class
-- `packages/chrome-extension/src/content/editing/insert-panel.ts` — **New** (~780 lines): searchable element picker with sizing controls
-- `packages/chrome-extension/src/content/editing/insert-catalog.ts` — **New**: static catalog with 7 categories, SVG icons, compound children descriptors
-- `packages/chrome-extension/src/content/editing/insert-source.ts` — **New**: `buildInsertChange` with sibling bracket source mapping
-- `packages/chrome-extension/src/content/batching/prompt-serializer.ts` — **New**: `serializeToPrompt()` for clipboard export
-- `packages/chrome-extension/src/content/editing/reorder.ts` — Refactored to import shared geometry from gap-math.ts
-- `packages/chrome-extension/src/content/index.ts` — Wired InsertEditor lifecycle, `makeInsertCommit`, escape ladder, scroll handler
-- `packages/chrome-extension/src/content/history.ts` — Added `InsertionHistoryEntry` with undo/redo/reset
-- `packages/chrome-extension/src/content/batching/review-panel.ts` — Insert change rendering, elapsed time, "Copy as Prompt" button
-- `packages/shared/src/diff.ts` — Added `SiblingAnchor`, `ChildSnapshotEntry`, `CompoundChildDescriptor`, `InsertChange` types; `insertChanges` on `VisualDiff`
-- `packages/shared/src/protocol.ts` — Bumped to v0.3.0, added 3 new message types
-- `packages/chrome-extension/src/shared/types.ts` — Added `'insert'` to `EditMode`, added `InsertState` type
-- `packages/mcp-server/src/bridge.ts` — Added `recordToolCall`, `handleStatusRequest`, `pushDiffApplied`
-- `packages/mcp-server/src/server.ts` — Updated tool description for insertChanges
+- `packages/chrome-extension/src/shared/types.ts` — Added `DiffLifecycle` type, `lifecycleStatus?`, `sentAt?`, `copiedToClipboard?`, `copiedAt?` to `PendingEdit`
+- `packages/chrome-extension/src/content/batching/queue.ts` — Lifecycle transitions in `acknowledge()`, new methods (`markApplied`, `updateFromServerStatus`, `getLifecycleStatus`, `clearStale`, `clearApplied`, `clearPending`, `getSent`, `getApplied`, `markCopied`, `isCopied`), `pendingCount` getter, updated `getActive()`, `collapseExisting()`, `reconcile()`
+- `packages/shared/src/protocol.ts` — Split `ServerHelloPayload` into `pendingDiffIds` + `appliedDiffIds`
+- `packages/mcp-server/src/bridge.ts` — Updated SERVER_HELLO to construct split IDs from `pendingQueue` + `processedIds`
+- `packages/chrome-extension/src/content/history.ts` — Added `peekUndo()` method
+- `packages/chrome-extension/src/content/index.ts` — Wired lifecycle callbacks (`onDiffApplied`, `onStatusResponse`), undo guard via `tryUndo()`, badge uses `pendingCount`, reset uses `clearPending()`
+- `packages/chrome-extension/src/content/batching/review-panel.ts` — Lifecycle badges (sent/applied/copied), "Sent to Server" and "Applied" sections, "Check Status" button, stale notice, "Clear applied" link, clipboard marking on copy
 
 ### Verification (Gates Evidence)
-- Commit gates: A1 pass (0001/0002/0008), A2 pass (plan documented, 22 files ~449 net lines), A3 pass (`tsc --noEmit` clean, `npm run build` clean), A4 pass (no secrets), A5 pass (cohesion: 3 findings fixed — C1 CompoundChild alias, W1 buildInsertChange signature, W2 empty container zones)
+- Commit gates: A1 pass (0001/0002/0008), A2 pass (plan documented, 7 files), A3 pass (`tsc --noEmit` clean, `npm run build` clean for shared + chrome-extension + mcp-server), A4 pass (no secrets), A5 pending
 
 ### Failed Attempts (Brief)
-- None
+- protocol.ts and history.ts had been modified by concurrent Session 17 — required re-reads before edits
 
 ### Known Issues Logged
 - None
 
 ### Follow-ups
-- W3 (deferred): Insertion redo uses stale `insertIndex` if DOM mutated between undo/redo — acceptable for MVP, needs revisiting for production
-- I1–I5 (informational): Keyboard shortcut for insert, container auto-detect heuristic refinement, compound element undo granularity, catalog extensibility API, insert+reorder combined workflow
-- PR #9 created to merge `feature/reorder-phase-1` → `main`
+- A5 cohesion review deferred
+
 
