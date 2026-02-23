@@ -79,7 +79,7 @@ Do not finalize without explicit operator approval.
 
 #### Step 5 — Output
 
-Display the finalized task brief in a self-contained fenced code block. Follow the Session Handoff Convention (see `workflow.md`): first line is a plain-text short title that becomes the VS Code tab label.
+Display the finalized task brief in a self-contained fenced code block. Follow the Session Handoff Convention (see `workflow.md`): first line is a plain-text short title that becomes the VS Code tab label. **For phased briefs (Narrow path):** display each brief in its own separate fenced code block so the operator can copy-paste them individually. Do not bundle multiple briefs into a single block.
 
 ~~~
 [Short Title] — Task Brief
@@ -134,7 +134,7 @@ Follow docs/ai/prompts/prompt-b-product-build.md.
 - `docs/spec/compiled/{active}/[file]` — [why relevant]
 ~~~
 
-After displaying the brief, instruct: "Copy the block above and paste it into a new session to begin implementation."
+After displaying the brief, instruct: "Copy the block above and paste it into a new session to begin implementation." For phased briefs, instruct: "Copy each block into its own new session. Run them in order."
 
 ## Rules
 
