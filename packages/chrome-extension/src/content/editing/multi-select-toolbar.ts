@@ -1,16 +1,18 @@
 import type { PropertyChange } from '@frontend-editor/shared';
 import { createElement, createText, createButton } from '../../shared/ui-utils';
 import { getComputedProperty } from '../../shared/dom-utils';
-import { OVERLAY, TOOLBAR_WIDTH } from '../../shared/constants';
+import { OVERLAY, TOOLBAR_WIDTH, INSERT_INDICATOR } from '../../shared/constants';
 import { computeMeasurements } from '../selection/measure-overlay';
 import type { TokenStore } from '../tokens/store';
 import type { PreviewManager } from './preview';
+import { getGroupBlockReason } from './group';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 type CommitCallback = (element: Element, changes: PropertyChange[]) => void;
+type GroupCallback = (elements: Element[]) => void;
 
 function extractUnit(value: string): string | undefined {
   const match = value.match(/[\d.]+(.+)$/);
@@ -93,14 +95,21 @@ export class MultiSelectToolbar {
   private closeCb: (() => void) | null = null;
   private elements: Element[] = [];
   private onCommit: CommitCallback | null = null;
+  private onGroupCb: GroupCallback | null = null;
+  private groupPreview: HTMLDivElement | null = null;
 
   constructor(
+    private readonly shadow: ShadowRoot,
     private readonly tokenStore: TokenStore,
     private readonly preview: PreviewManager,
   ) {}
 
   onClose(cb: () => void): void {
     this.closeCb = cb;
+  }
+
+  onGroup(cb: GroupCallback): void {
+    this.onGroupCb = cb;
   }
 
   render(
@@ -184,6 +193,8 @@ export class MultiSelectToolbar {
       this.buildDistanceSection(body, elements[0], elements[1]);
     }
 
+    this.buildGroupSection(body);
+
     container.appendChild(body);
 
     this.body = body;
@@ -219,6 +230,7 @@ export class MultiSelectToolbar {
   }
 
   cleanup(): void {
+    this.removeGroupPreview();
     this.container?.remove();
     this.container = null;
     this.body = null;
@@ -226,6 +238,42 @@ export class MultiSelectToolbar {
 
   isOpen(): boolean {
     return this.container !== null;
+  }
+
+  // -----------------------------------------------------------------------
+  // Group preview overlay
+  // -----------------------------------------------------------------------
+
+  private removeGroupPreview(): void {
+    this.groupPreview?.remove();
+    this.groupPreview = null;
+  }
+
+  private showGroupPreview(): void {
+    this.removeGroupPreview();
+    if (this.elements.length < 2) return;
+
+    // Compute union bounding rect of all selected elements
+    const rects = this.elements.map((el) => el.getBoundingClientRect());
+    const left = Math.min(...rects.map((r) => r.left));
+    const top = Math.min(...rects.map((r) => r.top));
+    const right = Math.max(...rects.map((r) => r.right));
+    const bottom = Math.max(...rects.map((r) => r.bottom));
+
+    const overlay = createElement('div', {}, {
+      position: 'fixed',
+      left: `${left - 2}px`,
+      top: `${top - 2}px`,
+      width: `${right - left + 4}px`,
+      height: `${bottom - top + 4}px`,
+      border: `2px dashed ${INSERT_INDICATOR.phantomBorder}`,
+      borderRadius: '4px',
+      pointerEvents: 'none',
+      zIndex: '100',
+    });
+
+    this.groupPreview = overlay;
+    this.shadow.appendChild(overlay);
   }
 
   // -----------------------------------------------------------------------
@@ -547,6 +595,41 @@ export class MultiSelectToolbar {
     });
 
     return input;
+  }
+
+  private buildGroupSection(parent: HTMLDivElement): void {
+    const blockReason = getGroupBlockReason(this.elements);
+
+    const section = createElement('div', {}, {
+      borderTop: `1px solid ${OVERLAY.border}`,
+      paddingTop: '8px',
+    });
+
+    const btn = createButton('Group', 'ghost', () => {
+      if (!blockReason && this.onGroupCb) {
+        this.onGroupCb([...this.elements]);
+      }
+    });
+    btn.style.width = '100%';
+    btn.style.justifyContent = 'center';
+    btn.style.fontSize = '11px';
+    btn.style.padding = '5px 0';
+    btn.style.border = `1px solid ${OVERLAY.border}`;
+    btn.style.borderRadius = OVERLAY.radiusSm;
+
+    if (blockReason) {
+      btn.style.opacity = '0.4';
+      btn.style.cursor = 'not-allowed';
+      btn.style.pointerEvents = 'none';
+      btn.title = blockReason;
+    } else {
+      btn.title = 'Wrap selected elements in a flex container (⌘G)';
+      btn.addEventListener('mouseenter', () => this.showGroupPreview());
+      btn.addEventListener('mouseleave', () => this.removeGroupPreview());
+    }
+
+    section.appendChild(btn);
+    parent.appendChild(section);
   }
 
   // -----------------------------------------------------------------------

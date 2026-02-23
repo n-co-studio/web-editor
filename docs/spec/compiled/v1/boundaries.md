@@ -18,6 +18,7 @@ These expand specific boundary restrictions for well-scoped operations:
 - **DOM node relocation for reorder**: `insertBefore`/`moveBefore` is permitted for reorder operations within the same parent container. This relocates an existing element without creating or deleting nodes.
 - **DOM element creation for insert**: `document.createElement` + `insertBefore`/`appendChild` is permitted for insert operations within a scoped parent container. The new element is empty and styled via the standard visual diff pipeline.
 - **DOM element removal for delete**: `element.remove()` is permitted for delete operations on existing elements. Already implemented in the content script.
+- **DOM element reparenting for group**: `document.createElement` + `insertBefore` + `moveBefore`/`appendChild` is permitted for group operations that wrap sibling elements within the same parent into a new container element.
 
 ## Future Considerations
 

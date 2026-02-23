@@ -573,6 +573,55 @@ export class ReviewPanel {
           group.appendChild(row);
         }
       }
+
+      // Group changes
+      if (diff.groupChanges) {
+        for (const gc of diff.groupChanges) {
+          const row = createElement('div', {}, {
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            padding: '2px 0',
+            fontFamily: OVERLAY.monoFamily,
+            fontSize: OVERLAY.monoSize,
+          });
+
+          const desc = createElement('span', {}, { color: OVERLAY.text });
+          desc.textContent = `group: ${gc.wrappedSelectors.length} elements into flex container`;
+          row.appendChild(desc);
+
+          const badge = createElement('span', {}, {
+            background: 'rgba(168, 85, 247, 0.2)',
+            color: '#a855f7',
+            padding: '1px 3px',
+            borderRadius: '2px',
+            fontSize: '9px',
+          });
+          badge.textContent = 'wrap';
+          row.appendChild(badge);
+
+          if (!isReadOnly) {
+            const removeBtn = createElement('button', {}, {
+              background: 'none',
+              border: 'none',
+              color: OVERLAY.textMuted,
+              cursor: 'pointer',
+              padding: '0 2px',
+              fontSize: '11px',
+              marginLeft: 'auto',
+              pointerEvents: 'auto',
+            });
+            removeBtn.textContent = '\u00d7';
+            removeBtn.title = 'Remove this change';
+            removeBtn.addEventListener('click', () => {
+              this.queue.remove(diff.id);
+            });
+            row.appendChild(removeBtn);
+          }
+
+          group.appendChild(row);
+        }
+      }
     }
 
     return group;
@@ -620,7 +669,7 @@ export class ReviewPanel {
       });
 
       const label = createElement('span');
-      const changeCount = item.diff.changes.length + (item.diff.reorderChanges?.length ?? 0) + (item.diff.insertChanges?.length ?? 0);
+      const changeCount = item.diff.changes.length + (item.diff.reorderChanges?.length ?? 0) + (item.diff.insertChanges?.length ?? 0) + (item.diff.groupChanges?.length ?? 0);
       label.textContent = `${item.diff.element.selector.slice(0, 30)} (${changeCount} change${changeCount !== 1 ? 's' : ''})`;
       row.appendChild(label);
 

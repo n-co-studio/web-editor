@@ -38,6 +38,48 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 -->
 
+## Session 21 — 2026-02-23 — Group Elements Phase 2 (UI, Shortcut, Wiring, Server, Boundary)
+
+**Status:** complete
+**Decisions applied:** 0001, 0002, 0008
+**Commits:** b1b8142 — feat: group elements phase 2 — UI, shortcut, wiring, server, boundary
+
+### Goal
+- Wire Group operation into user-facing UI: Group button in MultiSelectToolbar, Cmd+G keyboard shortcut, makeGroupCommit() orchestrator helper, MCP server description, review panel rendering, boundary expansion
+
+### Plan Summary
+1. Add Group button to `multi-select-toolbar.ts` with block-reason guard, tooltip, dashed bounding-box hover preview
+2. Add `makeGroupCommit()` to `index.ts` following reorder/insert commit pattern
+3. Wire `multiSelectToolbar.onGroup()` callback and Cmd+G / Ctrl+G shortcut
+4. Update MCP server tool description to document `groupChanges`
+5. Add group change rendering to `review-panel.ts`
+6. Add boundary expansion to `boundaries.md`
+7. Fix cohesion findings: prompt-serializer group section + Cmd+G preventDefault ordering
+
+### Changes Made
+- `packages/chrome-extension/src/content/editing/multi-select-toolbar.ts` — Added `ShadowRoot` param, `onGroup` callback, `buildGroupSection()`, dashed bounding-box preview overlay
+- `packages/chrome-extension/src/content/index.ts` — `makeGroupCommit()`, `multiSelectToolbar.onGroup()` wiring, Cmd+G/Ctrl+G shortcut
+- `packages/mcp-server/src/server.ts` — Extended `get_pending_visual_changes` description with `groupChanges`
+- `packages/chrome-extension/src/content/batching/review-panel.ts` — Group change rendering (purple "wrap" badge), `groupChanges` in removed count
+- `packages/chrome-extension/src/content/batching/prompt-serializer.ts` — Group changes collection + "## Group Changes" prompt section
+- `docs/spec/compiled/v1/boundaries.md` — "DOM element reparenting for group" boundary expansion
+- `docs/ai/task-groups/group-elements.yaml` — Phase 2 marked complete, session 21 decisions
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass, A2 pass, A3 pass (typecheck + build clean), A4 pass, A5 pass (cohesion: C1 fixed, R4 fixed, R2/R3 deferred), A6 pass (contract updated)
+
+### Failed Attempts (Brief)
+- None
+
+### Known Issues Logged
+- None
+
+### Follow-ups
+- Cohesion R2: `refreshGroupAfterHistoryChange` not needed today (no active group overlay)
+- Cohesion R3: bridge drift tracking skips structural change styles (consistent with reorder/insert)
+
+---
+
 ## Session 20 — 2026-02-23 — Group Elements Phase 1 (Types, Diff, History, DOM Logic)
 
 **Status:** complete
@@ -125,33 +167,5 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 ### Follow-ups
 - A5 cohesion review deferred
-
----
-
-## Session 18 — 2026-02-22 — Housekeeping: Template Sync + Uncommitted Triage
-
-**Status:** complete
-**Decisions applied:** none
-**Commits:** 73a14e5 — chore: sync Repo OS template updates, e017490 — chore: update manifest and service worker
-
-### Goal
-- Triage 25 uncommitted changes across the working tree
-- Commit Repo OS template sync and product changes separately
-
-### Changes Made
-- `.claude/agents/`, `.claude/hooks/`, `AI.md`, `docs/ai/` — Repo OS template sync (23 files: updated agents, hooks, prompts, workflow, gates; new decision 0011, auditor agent, prompt-c, contract template; removed session-archive.md)
-- `packages/chrome-extension/manifest.json`, `src/service-worker/index.ts` — Manifest + service worker updates
-
-### Verification (Gates Evidence)
-- Commit gates: A1 n/a (no decisions), A2 n/a (housekeeping), A3 n/a (no product logic), A4 pass (no secrets), A5 n/a
-
-### Failed Attempts (Brief)
-- None
-
-### Known Issues Logged
-- 7 uncommitted product files remain (queue.ts, review-panel.ts, history.ts, index.ts, types.ts, bridge.ts, protocol.ts) — likely in-progress work from operator
-
-### Follow-ups
-- None
 
 
