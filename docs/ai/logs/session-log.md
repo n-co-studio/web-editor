@@ -72,11 +72,12 @@ Each session adds one entry. Keep entries high-signal and readable.
 - None
 
 ### Known Issues Logged
-- None
+- PR #11 diff was ~14k lines because `feature/reorder-phase-1` branch accumulated commits from sessions 10–21 (reorder, insert, MCP resilience, group). Future task groups should branch from main to keep PRs scoped.
 
 ### Follow-ups
 - Cohesion R2: `refreshGroupAfterHistoryChange` not needed today (no active group overlay)
 - Cohesion R3: bridge drift tracking skips structural change styles (consistent with reorder/insert)
+- Create fresh branches per task group to avoid bloated PRs
 
 ### Post-commit
 - Created PR #11, resolved merge conflict in `docs/ai/prompts/prompt-t-task-definition.md` (kept phased-brief instructions from feature branch), merged to main
