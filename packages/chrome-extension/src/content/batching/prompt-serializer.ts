@@ -29,9 +29,10 @@ export function serializeToPrompt(
     return a[0].localeCompare(b[0]);
   });
 
-  // Collect reorder and insert changes separately
+  // Collect structural changes separately
   const reorders: Array<{ diff: VisualDiff }> = [];
   const inserts: Array<{ diff: VisualDiff }> = [];
+  const groups: Array<{ diff: VisualDiff }> = [];
 
   for (const [file, fileDiffs] of sorted) {
     const heading = file
@@ -65,6 +66,13 @@ export function serializeToPrompt(
       if (diff.insertChanges) {
         for (const _ic of diff.insertChanges) {
           inserts.push({ diff });
+        }
+      }
+
+      // Collect group changes for a separate section
+      if (diff.groupChanges) {
+        for (const _gc of diff.groupChanges) {
+          groups.push({ diff });
         }
       }
 
@@ -111,6 +119,31 @@ export function serializeToPrompt(
           const styleDesc = ic.initialStyles.map(s => `${s.property}: ${s.toValue}`).join(', ');
           sections.push(`  Initial styles: ${styleDesc}`);
         }
+      }
+    }
+    sections.push('');
+  }
+
+  // Group changes section
+  if (groups.length > 0) {
+    sections.push('## Group Changes\n');
+    const seen = new Set<string>();
+    for (const { diff } of groups) {
+      if (seen.has(diff.id)) continue;
+      seen.add(diff.id);
+      for (const gc of diff.groupChanges!) {
+        const bracketInfo = [];
+        if (gc.prevSibling) bracketInfo.push(`after ${gc.prevSibling.sourceFile}:${gc.prevSibling.sourceLine}`);
+        if (gc.nextSibling) bracketInfo.push(`before ${gc.nextSibling.sourceFile}:${gc.nextSibling.sourceLine}`);
+        const bracket = bracketInfo.length > 0 ? ` (${bracketInfo.join(', ')})` : '';
+        sections.push(
+          `- Wrap ${gc.wrappedSelectors.length} elements in \`<${gc.wrapperTagName}>\` at position ${gc.insertIndex + 1} in \`${gc.containerSelector}\`${bracket}`,
+        );
+        if (gc.wrapperInitialStyles.length > 0) {
+          const styleDesc = gc.wrapperInitialStyles.map(s => `${s.property}: ${s.toValue}`).join(', ');
+          sections.push(`  Wrapper styles: ${styleDesc}`);
+        }
+        sections.push(`  Wrapped: ${gc.wrappedSelectors.map(s => `\`${s}\``).join(', ')}`);
       }
     }
     sections.push('');

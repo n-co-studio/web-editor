@@ -12,9 +12,9 @@ briefs:
     next_brief: "Group Elements — Phase 2 (UI Wiring)"
   - title: "Group Elements — Phase 2 (UI Wiring)"
     sequence: 2
-    session: null
-    branch: ""
-    status: pending
+    session: 21
+    branch: "feature/reorder-phase-1"
+    status: complete
     next_brief: ""
 
 conventions:
@@ -75,3 +75,9 @@ session_decisions:
   - session: 20
     decision: "group.ts _shadow parameter reserved but unused in Phase 1"
     rationale: "Phase 2 will use it for overlay rendering; including now avoids API change later"
+  - session: 21
+    decision: "Group button lives in MultiSelectToolbar, not main FloatingToolbar"
+    rationale: "Group is a multi-select action, not a persistent edit mode — placing in main toolbar would waste space for single-select"
+  - session: 21
+    decision: "Cmd+G preventDefault fires unconditionally when multi-select is active"
+    rationale: "Suppress Chrome Find Next even when grouping is blocked, matching the Cmd+Z suppress-first pattern"
