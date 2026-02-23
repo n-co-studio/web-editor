@@ -7,7 +7,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/_analytics-helper.sh"
-START_MS=$(date +%s%3N 2>/dev/null || date +%s)
+START_MS=$(now_ms)
 
 FAILED=0
 B1_WARN=false

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pre-commit gate verification (A4 Safety + A2 Process)
+# Pre-commit gate verification (A4 Safety + A2 Process + A6 Task Group advisory)
 # Runs automatically before git commit via .claude/settings.json hook.
 # Exit non-zero to block the commit.
 
@@ -7,10 +7,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/_analytics-helper.sh"
-START_MS=$(date +%s%3N 2>/dev/null || date +%s)
+START_MS=$(now_ms)
 
 FAILED=0
 A2_WARN=false
+A6_WARN=false
 
 # --- A4: Safety — Secret Scanning ---
 # Scan staged files for common secret patterns (single-pass grep).
@@ -44,6 +45,25 @@ if [ -n "$STAGED_FILES" ]; then
   fi
 fi
 
+# --- A6: Task Group — Contract Staging Check (advisory) ---
+# Warn if a task group contract was modified but not staged.
+# Never blocks — advisory only. Override: SKIP_CONTRACT_CHECK=1
+
+if [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
+  REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo ".")"
+  CONTRACT_DIR="$REPO_ROOT/docs/ai/task-groups"
+  if [ -d "$CONTRACT_DIR" ]; then
+    UNSTAGED_CONTRACTS=$(git diff --name-only -- "$CONTRACT_DIR"/*.yaml 2>/dev/null || true)
+    if [ -n "$UNSTAGED_CONTRACTS" ]; then
+      ALREADY_STAGED=$(echo "$STAGED_FILES" | grep "^docs/ai/task-groups/.*\.yaml$" || true)
+      if [ -z "$ALREADY_STAGED" ]; then
+        A6_WARN=true
+        echo "GATE A6 WARNING: Task group contract modified but not staged: $UNSTAGED_CONTRACTS" >&2
+      fi
+    fi
+  fi
+fi
+
 # --- Project-Specific Checks ---
 # Add project-specific gate checks below. Examples:
 #
@@ -65,4 +85,5 @@ fi
 
 REASON="pass"
 [ "$A2_WARN" = true ] && REASON="A2_scope_warning"
+[ "$A6_WARN" = true ] && REASON="A6_contract_warning"
 log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "$REASON"

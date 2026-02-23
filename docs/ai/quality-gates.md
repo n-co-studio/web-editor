@@ -13,6 +13,7 @@ Verification details: `.claude/agents/qa-verifier.md`
 | **A3 Quality** (if tooling exists) | Formatter run. Lint passes. Build/compile passes. |
 | **A4 Safety** | No secrets (tokens, keys, credentials, private URLs). No PII in logs/fixtures. |
 | **A5 Cohesion** (standard+ branches) | Critic (cohesion mode) reviewed diff for internal codebase coherence. All critical findings resolved. Re-run clean after fixes. |
+| **A6 Task Group Compliance** (when applicable) | Task group contract exists at `docs/ai/task-groups/{group-name}.yaml` and is current. Conventions from contract followed. Contract updated at session close. Applies only when task brief contains `### Task Group`. Override: `SKIP_CONTRACT_CHECK=1`. |
 
 ## B) Push Gates
 
