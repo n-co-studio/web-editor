@@ -7,6 +7,7 @@
 import { createElement } from '../../shared/ui-utils';
 import { HANDLE_COLORS, DROP_INDICATOR, OVERLAY } from '../../shared/constants';
 import { OrderPreview } from './order-preview';
+import { detectContainerLayout, computeGapZones, hitTestGapZone, type ContainerLayout, type GapZone } from './gap-math';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -21,12 +22,8 @@ export type ReorderCommitCallback = (
   originalChildOrder: HTMLElement[],
 ) => void;
 
-/** A computed drop zone between siblings (or at container start/end). */
-interface DropZone {
-  /** Visual center of this gap on the layout axis (px, viewport coords). */
-  readonly center: number;
-  /** The child index this zone represents (insert-before index). */
-  insertIndex: number;
+/** A drop zone with an attached visual indicator element. */
+interface DropZone extends GapZone {
   /** DOM element for the visual indicator line. */
   indicator: HTMLDivElement | null;
 }
@@ -80,8 +77,7 @@ export class ReorderEditor {
   private originalIndex = -1;
   private currentInsertIndex = -1;
   private originalChildOrder: HTMLElement[] = [];
-  private direction: 'row' | 'column' = 'row';
-  private isReversed = false;
+  private layout: ContainerLayout = { direction: 'row', isReversed: false };
 
   // --- Geometry ---
   private dropZones: DropZone[] = [];
@@ -145,7 +141,7 @@ export class ReorderEditor {
     this.onCommitCb = onCommit;
 
     // Determine layout direction
-    this.computeContainerInfo();
+    this.layout = detectContainerLayout(this.container);
 
     // Capture original child order (HTMLElement children only)
     this.originalChildOrder = Array.from(this.container.children)
@@ -153,8 +149,9 @@ export class ReorderEditor {
     this.originalIndex = this.originalChildOrder.indexOf(this.currentElement);
     this.currentInsertIndex = this.originalIndex;
 
-    // Compute drop zones
-    this.computeDropZones();
+    // Compute drop zones (gap-math returns GapZone[], extend with indicator field)
+    this.dropZones = computeGapZones(this.container, this.originalChildOrder, this.layout)
+      .map((gz) => ({ ...gz, indicator: null }));
 
     // Render cursor overlay
     this.renderCursorOverlay();
@@ -216,86 +213,6 @@ export class ReorderEditor {
     this.onCommitCb = null;
     this.dropZones = [];
     this.originalChildOrder = [];
-  }
-
-  // -----------------------------------------------------------------------
-  // Container & drop zone computation
-  // -----------------------------------------------------------------------
-
-  private computeContainerInfo(): void {
-    const cs = getComputedStyle(this.container!);
-
-    if (cs.display.includes('grid')) {
-      const flow = cs.gridAutoFlow || 'row';
-      this.direction = flow.includes('column') ? 'column' : 'row';
-      this.isReversed = false;
-    } else {
-      const dir = cs.flexDirection || 'row';
-      this.direction = dir.startsWith('column') ? 'column' : 'row';
-      this.isReversed = dir.endsWith('-reverse');
-    }
-  }
-
-  /**
-   * Gap-center algorithm: for N children, create N+1 drop zones.
-   * Each zone center is the midpoint of the gap between adjacent sibling edges.
-   */
-  private computeDropZones(): void {
-    this.dropZones = [];
-    const children = this.originalChildOrder;
-    if (children.length === 0) return;
-
-    const isRow = this.direction === 'row';
-    const containerRect = this.container!.getBoundingClientRect();
-    const rects = children.map((c) => c.getBoundingClientRect());
-
-    for (let i = 0; i <= children.length; i++) {
-      let center: number;
-
-      if (i === 0) {
-        // Before first child
-        const firstStart = isRow ? rects[0].left : rects[0].top;
-        const containerStart = isRow ? containerRect.left : containerRect.top;
-        center = (containerStart + firstStart) / 2;
-      } else if (i === children.length) {
-        // After last child
-        const lastEnd = isRow ? rects[i - 1].right : rects[i - 1].bottom;
-        const containerEnd = isRow ? containerRect.right : containerRect.bottom;
-        center = (lastEnd + containerEnd) / 2;
-      } else {
-        // Between child[i-1] and child[i]
-        const prevEnd = isRow ? rects[i - 1].right : rects[i - 1].bottom;
-        const nextStart = isRow ? rects[i].left : rects[i].top;
-        center = (prevEnd + nextStart) / 2;
-      }
-
-      this.dropZones.push({ center, insertIndex: i, indicator: null });
-    }
-
-    // For reversed directions, invert the insertIndex mapping.
-    // Physical positions stay the same but DOM indices are reversed.
-    if (this.isReversed) {
-      const n = this.dropZones.length;
-      for (let i = 0; i < n; i++) {
-        this.dropZones[i].insertIndex = n - 1 - i;
-      }
-    }
-  }
-
-  /** Find the closest drop zone to the pointer along the layout axis. */
-  private hitTestDropZone(pointerPos: number): number {
-    let bestIndex = this.currentInsertIndex;
-    let bestDist = Infinity;
-
-    for (const zone of this.dropZones) {
-      const dist = Math.abs(pointerPos - zone.center);
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestIndex = zone.insertIndex;
-      }
-    }
-
-    return bestIndex;
   }
 
   // -----------------------------------------------------------------------
@@ -373,8 +290,8 @@ export class ReorderEditor {
     }
 
     // Hit-test along layout axis
-    const pos = this.direction === 'row' ? e.clientX : e.clientY;
-    const newIndex = this.hitTestDropZone(pos);
+    const pos = this.layout.direction === 'row' ? e.clientX : e.clientY;
+    const newIndex = hitTestGapZone(this.dropZones, pos);
 
     // Midpoint crossing throttle — only update on index change
     if (newIndex !== this.currentInsertIndex) {
@@ -580,7 +497,7 @@ export class ReorderEditor {
 
   private renderDropIndicators(): void {
     const containerRect = this.container!.getBoundingClientRect();
-    const isRow = this.direction === 'row';
+    const isRow = this.layout.direction === 'row';
 
     for (const zone of this.dropZones) {
       const indicator = createElement('div', {}, {
@@ -612,7 +529,7 @@ export class ReorderEditor {
   }
 
   private updateActiveIndicator(insertIndex: number): void {
-    const isRow = this.direction === 'row';
+    const isRow = this.layout.direction === 'row';
 
     for (const zone of this.dropZones) {
       if (!zone.indicator) continue;

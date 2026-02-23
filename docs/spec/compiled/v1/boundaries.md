@@ -2,7 +2,7 @@
 
 ## What This Product Does NOT Do
 
-- Does not create or delete DOM elements/components — only edits existing elements
+- Does not create or delete DOM elements/components — except via scoped insert and delete operations (see Boundary Expansions)
 - Does not work on production builds (dev-plugin is dev-only)
 - Does not access cross-origin iframe content
 - Does not modify closed Shadow DOM content
@@ -16,6 +16,8 @@
 These expand specific boundary restrictions for well-scoped operations:
 
 - **DOM node relocation for reorder**: `insertBefore`/`moveBefore` is permitted for reorder operations within the same parent container. This relocates an existing element without creating or deleting nodes.
+- **DOM element creation for insert**: `document.createElement` + `insertBefore`/`appendChild` is permitted for insert operations within a scoped parent container. The new element is empty and styled via the standard visual diff pipeline.
+- **DOM element removal for delete**: `element.remove()` is permitted for delete operations on existing elements. Already implemented in the content script.
 
 ## Future Considerations
 
