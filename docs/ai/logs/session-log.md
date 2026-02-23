@@ -81,6 +81,7 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 ### Post-commit
 - Created PR #11, resolved merge conflict in `docs/ai/prompts/prompt-t-task-definition.md` (kept phased-brief instructions from feature branch), merged to main
+- Fixed `.gitignore` — added missing `node_modules/`, `dist/`, `*.tsbuildinfo` entries that caused 5k+ untracked files in VS Code source control
 
 ---
 
