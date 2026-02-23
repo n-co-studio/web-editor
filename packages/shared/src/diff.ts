@@ -100,6 +100,22 @@ export interface CompoundChildDescriptor {
 }
 
 /**
+ * A group operation — wraps 2+ sibling elements in a new flex container.
+ * Stored as a parallel array on VisualDiff (separate from PropertyChange[]).
+ * Natural inverse is ungroup (unwrap).
+ */
+export interface GroupChange {
+  readonly type: 'group';
+  readonly wrapperTagName: string;
+  readonly wrapperInitialStyles: readonly PropertyChange[];
+  readonly containerSelector: string;
+  readonly insertIndex: number;
+  readonly wrappedSelectors: readonly string[];
+  readonly prevSibling: SiblingAnchor | null;
+  readonly nextSibling: SiblingAnchor | null;
+}
+
+/**
  * An insert operation — creates a new element within a container.
  * Stored as a parallel array on VisualDiff (separate from PropertyChange[]).
  */
@@ -139,6 +155,7 @@ export interface VisualDiff {
   readonly changes: readonly PropertyChange[];
   readonly reorderChanges?: readonly ReorderChange[];
   readonly insertChanges?: readonly InsertChange[];
+  readonly groupChanges?: readonly GroupChange[];
   readonly context: PageContext;
   readonly status: DiffStatus;
   readonly sourceVerified: boolean;

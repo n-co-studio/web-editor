@@ -1,0 +1,77 @@
+identity:
+  group_name: "group-elements"
+  created_by_session: 20
+  created_date: "2026-02-23"
+
+briefs:
+  - title: "Group Elements — Phase 1 (Types, Diff, History, DOM Logic)"
+    sequence: 1
+    session: 20
+    branch: "feature/reorder-phase-1"
+    status: in_progress
+    next_brief: "Group Elements — Phase 2 (UI Wiring)"
+  - title: "Group Elements — Phase 2 (UI Wiring)"
+    sequence: 2
+    session: null
+    branch: ""
+    status: pending
+    next_brief: ""
+
+conventions:
+  naming:
+    - pattern: "GroupChange, groupChanges, buildGroup, GroupHistoryEntry, groupElements, getGroupBlockReason"
+      scope: "All group-related types, functions, and diff fields"
+    - pattern: "group.ts in editing/ directory"
+      scope: "DOM mutation module — follows reorder.ts/insert.ts pattern"
+  patterns:
+    - pattern: "Discriminated union on HistoryEntry.type — add 'group' case to undo/redo/resetAll"
+      rationale: "Existing pattern for css/removal/reorder/insertion history entries"
+    - pattern: "DiffBuilder method per operation type — buildGroup() alongside build()/buildReorder()/buildInsert()"
+      rationale: "Each operation type gets its own builder method returning VisualDiff with the relevant changes array"
+    - pattern: "moveBefore with appendChild fallback for DOM reparenting"
+      rationale: "Chrome 133+ moveBefore preserves state; appendChild is the safe fallback"
+    - pattern: "Block-reason guard returns string|null — null means allowed"
+      rationale: "Matches getReorderBlockReason pattern; UI shows reason string when non-null"
+  decisions: []
+  boundaries:
+    - module: "packages/shared/src/diff.ts — GroupChange type, groupChanges on VisualDiff"
+      owner_brief: "Group Elements — Phase 1 (Types, Diff, History, DOM Logic)"
+    - module: "packages/chrome-extension/src/content/batching/diff-builder.ts — buildGroup()"
+      owner_brief: "Group Elements — Phase 1 (Types, Diff, History, DOM Logic)"
+    - module: "packages/chrome-extension/src/content/history.ts — GroupHistoryEntry + undo/redo/reset"
+      owner_brief: "Group Elements — Phase 1 (Types, Diff, History, DOM Logic)"
+    - module: "packages/chrome-extension/src/content/editing/group.ts — groupElements() + getGroupBlockReason()"
+      owner_brief: "Group Elements — Phase 1 (Types, Diff, History, DOM Logic)"
+    - module: "packages/chrome-extension/src/content/index.ts — toolbar wiring, keyboard shortcut, commit flow"
+      owner_brief: "Group Elements — Phase 2 (UI Wiring)"
+    - module: "packages/chrome-extension/src/content/toolbar.ts — group button"
+      owner_brief: "Group Elements — Phase 2 (UI Wiring)"
+
+integration_points:
+  - name: "GroupChange type"
+    producer: "Group Elements — Phase 1 (Types, Diff, History, DOM Logic)"
+    consumer: "Group Elements — Phase 2 (UI Wiring)"
+    artifact: "packages/shared/src/diff.ts — GroupChange interface"
+  - name: "groupElements() DOM mutation"
+    producer: "Group Elements — Phase 1 (Types, Diff, History, DOM Logic)"
+    consumer: "Group Elements — Phase 2 (UI Wiring)"
+    artifact: "packages/chrome-extension/src/content/editing/group.ts"
+  - name: "GroupHistoryEntry"
+    producer: "Group Elements — Phase 1 (Types, Diff, History, DOM Logic)"
+    consumer: "Group Elements — Phase 2 (UI Wiring)"
+    artifact: "packages/chrome-extension/src/content/history.ts"
+  - name: "buildGroup() diff builder"
+    producer: "Group Elements — Phase 1 (Types, Diff, History, DOM Logic)"
+    consumer: "Group Elements — Phase 2 (UI Wiring)"
+    artifact: "packages/chrome-extension/src/content/batching/diff-builder.ts"
+
+session_decisions:
+  - session: 20
+    decision: "GroupChange uses SiblingAnchor for prevSibling/nextSibling (reuses existing type)"
+    rationale: "Consistent with InsertChange; provides source-mapping context for Claude Code"
+  - session: 20
+    decision: "Wrapper always uses display:flex with inherited flex-direction from parent"
+    rationale: "Matches Figma/Webflow pattern — group first, configure layout after. No flex/grid choice UI in Phase 1"
+  - session: 20
+    decision: "group.ts _shadow parameter reserved but unused in Phase 1"
+    rationale: "Phase 2 will use it for overlay rendering; including now avoids API change later"

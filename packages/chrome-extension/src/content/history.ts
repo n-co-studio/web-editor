@@ -44,7 +44,15 @@ interface InsertionHistoryEntry {
   readonly diff: VisualDiff;
 }
 
-export type HistoryEntry = CssHistoryEntry | RemovalHistoryEntry | ReorderHistoryEntry | InsertionHistoryEntry;
+interface GroupHistoryEntry {
+  readonly type: 'group';
+  readonly wrapper: HTMLElement;
+  readonly originalParent: HTMLElement;
+  readonly originalPositions: ReadonlyArray<{ element: HTMLElement; nextSibling: Node | null }>;
+  readonly diff: VisualDiff;
+}
+
+export type HistoryEntry = CssHistoryEntry | RemovalHistoryEntry | ReorderHistoryEntry | InsertionHistoryEntry | GroupHistoryEntry;
 
 type HistoryCallback = () => void;
 
@@ -92,6 +100,14 @@ export class EditHistory {
       case 'insertion':
         entry.element.remove();
         break;
+      case 'group':
+        // Iterate in reverse so each nextSibling is already back in the parent
+        for (let gi = entry.originalPositions.length - 1; gi >= 0; gi--) {
+          const pos = entry.originalPositions[gi];
+          entry.originalParent.insertBefore(pos.element, pos.nextSibling);
+        }
+        entry.wrapper.remove();
+        break;
     }
 
     this.redoStack.push(entry);
@@ -129,6 +145,16 @@ export class EditHistory {
       case 'insertion':
         entry.container.insertBefore(entry.element, entry.container.children[entry.insertIndex] || null);
         break;
+      case 'group': {
+        // Insert wrapper before the first grouped element (back in parent after undo)
+        const firstEl = entry.originalPositions[0]?.element ?? null;
+        entry.originalParent.insertBefore(entry.wrapper, firstEl);
+        // Move elements into wrapper in DOM order
+        for (const pos of entry.originalPositions) {
+          entry.wrapper.appendChild(pos.element);
+        }
+        break;
+      }
     }
 
     this.undoStack.push(entry);
@@ -172,6 +198,13 @@ export class EditHistory {
         }
         case 'insertion':
           entry.element.remove();
+          break;
+        case 'group':
+          for (let gi = entry.originalPositions.length - 1; gi >= 0; gi--) {
+            const pos = entry.originalPositions[gi];
+            entry.originalParent.insertBefore(pos.element, pos.nextSibling);
+          }
+          entry.wrapper.remove();
           break;
       }
       diffIds.push(entry.diff.id);
