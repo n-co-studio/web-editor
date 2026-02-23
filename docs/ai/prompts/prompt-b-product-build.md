@@ -22,4 +22,11 @@ Before planning new features or architectural work, check `docs/spec/prototypes/
 ## Operating Rules
 - After Builder signals done, Orchestrator runs a cohesion review (Critic in cohesion mode) before invoking QA. Critical cohesion findings must be resolved before commit. See `quality-gates.md` gate A5.
 - Use HVST (see `workflow.md`) when debugging or instability appears. When HVST debugging stalls (2+ consecutive failures), Orchestrator dispatches HVST Review Board for multi-agent hypothesis review before further fix attempts. See `_hvst-review.md`
+- **Task Group Contract** — If the task brief contains a `### Task Group` section, this session is part of a multi-brief group:
+  - **First session** (no contract file exists at `docs/ai/task-groups/{group-name}.yaml`): Create the contract file from brief metadata, following `docs/ai/task-groups/_contract-template.yaml`. Populate identity, brief roster, conventions (naming/patterns/decisions/boundaries discovered during planning), and integration points
+  - **Subsequent sessions** (contract file exists): Read the contract at session start. Conventions are REQUIRE-level constraints — follow all naming patterns, architectural patterns, decisions, and module boundaries. Read `session_decisions` for context from prior sessions
+  - **At session close**: Update the contract — mark this brief's status as `complete`, set session number and branch, append any new session decisions. If this is not the last brief, confirm `next_brief` is set
+  - **Standalone sessions** (no `### Task Group` section in brief): No contract-related behavior. Skip entirely
+  - See `docs/ai/quality-gates.md` gate A6 for verification requirements
+- Include git trailers on commits per the convention in `docs/ai/workflow.md` (Session Lifecycle → Git Trailer Convention)
 - All other rules (human-led architecture, gates, decisions, small scope, session log) are defined in AI.md and enforced by the Repo OS

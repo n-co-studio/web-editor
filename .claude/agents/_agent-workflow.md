@@ -20,6 +20,8 @@ Lightweight spec-mode dispatch of Architect + Exploration + Critic for task scop
 
 No file artifacts. No session log entry. No handoff to Build Flow — the operator manually carries the brief to a new Prompt B session.
 
+**Narrow path (multi-brief):** When the operator narrows a task, each sub-brief includes a `### Task Group` section with group name, sequence, and integration notes. The first Prompt B session creates the task group contract; subsequent sessions read and comply. See `docs/ai/task-groups/_contract-template.yaml`.
+
 ---
 
 ## HVST Review Flow (Debug Stall)
@@ -38,6 +40,25 @@ Runs when HVST debugging stalls (2+ consecutive failures) or when the operator p
 
 ---
 
+## Audit Flow (Project Health)
+
+Runs on-demand when the operator invokes Prompt C. Read-only — no file modifications, no session log entries. See `docs/ai/prompts/prompt-c-project-audit.md` for the full prompt and `.claude/agents/auditor.md` for the Auditor agent definition.
+
+### Handoff Chain
+1. **Operator → Orchestrator**: Dimension selection + tier (Quick / Standard / Deep)
+2. **Orchestrator → Auditor (per dimension) + Security/Performance (if selected)**: Parallel dispatch with mode and scope
+3. **Auditor → Orchestrator**: Dimension briefs (with `[ESCALATE: agent-name]` tags if any)
+4. **Orchestrator → Specialist (if escalated)**: Focused follow-up on tagged findings
+5. **Specialist → Orchestrator**: Escalation brief
+6. **Orchestrator → Operator**: Synthesized Audit Report for per-finding review (accept / reject / defer)
+
+### Specialist Collaboration Variants
+- **Escalation**: Auditor tags a finding → Orchestrator dispatches specialist → one-shot response
+- **Co-audit**: Operator requests specialist alongside Auditor → both dispatched in parallel → briefs merged
+- **Workshop**: Iterative loop (Auditor → specialist → Auditor refine) → capped at 2 rounds → surface to operator
+
+---
+
 ## Build Flow (Implementation)
 
 ```
@@ -47,6 +68,7 @@ Runs when HVST debugging stalls (2+ consecutive failures) or when the operator p
                             ▼
                       ORCHESTRATOR
                plans → gets approval → delegates
+          (reads/creates task group contract if applicable)
                             │
                             ▼
                         BUILDER
@@ -68,7 +90,7 @@ Runs when HVST debugging stalls (2+ consecutive failures) or when the operator p
                             │
                             ▼
                     QA / VERIFIER ⚠️ COMMIT BLOCKER
-              verifies all gates (A1–A5) → BLOCK or APPROVE
+              verifies all gates (A1–A6) → BLOCK or APPROVE
                             │
                   ┌─────────┴─────────┐
                PASS                 FAIL → back to Builder
@@ -143,12 +165,20 @@ Runs when HVST debugging stalls (2+ consecutive failures) or when the operator p
 | **Exploration** | HVST stall (2+ failures) or operator requests debug review | No (advisory) |
 | **Critic** (hypothesis mode) | HVST stall (2+ failures) or operator requests debug review | No (advisory) |
 
+### Audit (Operator-Invoked)
+
+| Agent | Invoke When | Blocks Commit? |
+|-------|------------|----------------|
+| **Auditor** | Operator runs Prompt C — dispatched per dimension (drift, compliance, cohesion-drift, governance) | No (read-only) |
+
+Audit agents are dispatched by the Orchestrator during Prompt C. Security/Privacy and Performance Engineer may also be dispatched in audit scope (full-codebase, not diff-scoped). See `docs/ai/prompts/prompt-c-project-audit.md`.
+
 ### Operations (Operator-Invoked Tools)
 
 | Agent | Invoke When | Blocks Commit? |
 |-------|------------|----------------|
 | **Analytics** | Operator requests hook telemetry analysis or cross-repo reporting | No (standalone) |
 
-Operations agents are invoked directly by the operator, not as part of the plan→build→verify chain. They do not participate in handoffs.
+Operations and Audit agents are invoked directly by the operator, not as part of the plan→build→verify chain. They do not participate in handoffs.
 
 Subagents load their own definitions from `.claude/agents/`. Do not read subagent files into orchestrator context.

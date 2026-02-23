@@ -32,12 +32,12 @@ Agent-allowed:
 
 On-demand (loaded by orchestrator.md triggers, not at session start):
 - docs/spec/_templates/ (read during Prompt 0 only)
-- docs/ai/logs/session-archive.md (read when investigating multi-session patterns)
 - .claude/agents/_advisory-board.md (read during Prompt A Phase 1)
 - .claude/agents/_cohesion-review.md (read after Builder signals completion)
 - .claude/agents/_hvst-review.md (read when HVST debugging stalls or operator requests debug review)
+- docs/ai/task-groups/ (loaded when task brief contains `### Task Group`)
 
-Hooks (`.claude/hooks/`) enforce automatically: branch protection on Edit/Write (blocks file changes on `main`), A4 secret scanning on commit, B1 naming convention on push, session log check on stop, PR reminder on stop for mergeable branches (advisory). Subagent frontmatter hooks block Builder/QA/Security from running git commit/push. Settings (`.claude/settings.json`) are auto-loaded by Claude Code. Neither hooks nor settings need to be read into context.
+Hooks (`.claude/hooks/`) enforce automatically: branch protection on Edit/Write (blocks file changes on `main`), A4 secret scanning on commit, A6 task group contract staging check on commit (advisory), B1 naming convention on push, session log check on stop, PR reminder on stop for mergeable branches (advisory), next-brief reminder on stop for task groups (advisory). Subagent frontmatter hooks block Builder/QA/Security from running git commit/push. Settings (`.claude/settings.json`) are auto-loaded by Claude Code. Neither hooks nor settings need to be read into context.
 
 ## Spec Convention
 - **Templates** (`docs/spec/_templates/`): Blank spec files with placeholder fields. Synced from the upstream template repo. Do not fill these directly.
@@ -51,7 +51,8 @@ Hooks (`.claude/hooks/`) enforce automatically: branch protection on Edit/Write 
 - docs/ai/prompts/prompt-0.5-prototype.md
 - docs/ai/prompts/prompt-a-repo-os.md
 - docs/ai/prompts/prompt-b-product-build.md
+- docs/ai/prompts/prompt-c-project-audit.md
 - docs/ai/prompts/prompt-t-task-definition.md
 
 ## Versioning
-Template versions use CalVer git tags (e.g., `v2026.02.1`). See GitHub Releases for changelog.
+Template versions use CalVer git tags (e.g., `v2026.02.1`). Tags are auto-created on merge to `main` when Repo OS files change (`.github/workflows/auto-version-tag.yml`). See GitHub Releases for changelog.

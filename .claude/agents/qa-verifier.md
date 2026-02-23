@@ -50,6 +50,7 @@ Verification methods:
 | A4: Secrets | Scan diff for keys, tokens, credentials |
 | A4: PII | Review added content for sensitive data |
 | A5: Cohesion | Verify Critic (cohesion mode) was invoked, cohesion brief produced, critical findings resolved. If fixes were applied, verify Critic was re-run clean. |
+| A6: Task Group | If task group present: verify contract exists at `docs/ai/task-groups/{group-name}.yaml`, conventions followed, contract updated at close. If no task group: skip (n/a). Override: `SKIP_CONTRACT_CHECK=1`. |
 
 ### Push Gates (additional)
 
@@ -88,6 +89,7 @@ Verification methods:
 | A3 | `npm run lint` | PASS/FAIL |
 | A4 | secret scan | PASS/FAIL |
 | A5 | cohesion brief review | PASS/FAIL |
+| A6 | task group contract check | PASS/FAIL/N/A |
 
 If blocked: [specific gate(s) that failed]
 ```

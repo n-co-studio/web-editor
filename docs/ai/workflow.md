@@ -1,10 +1,14 @@
 # Workflow
 
+## Session Handoff Convention
+
+Every pastable block for a new session must start with a plain-text short title (no `#` syntax). VS Code uses the first input line as the tab label.
+
 ## Execution Loop
 
 1. **Plan** — goal, scope, files, verification steps
 2. **Build** — small, reviewable increments
-3. **Verify** — cohesion review (Critic checks diff for internal coherence), then gate checks (QA verifies A1–A5 + push gates)
+3. **Verify** — cohesion review (Critic checks diff for internal coherence), then gate checks (QA verifies A1–A6 + push gates)
 4. **Commit** — only after all gates pass
 
 ## Advisory Board Review
@@ -38,6 +42,19 @@ Work happens on categorized branches. Never commit directly to `main` — merge 
 
 At session close: verify all changes, commit, update session log (`docs/ai/logs/session-log.md`). Zero-change sessions (no commits, no working tree changes) are exempt from the session log requirement — the stop hook downgrades to advisory instead of blocking. Ask operator whether to create a PR to merge to `main` — do not skip or defer without explicit operator direction. Does not apply to `experiment/*` branches.
 
+### Git Trailer Convention
+
+Commits include structured trailers for session metadata. Add trailers to the commit message body (after a blank line):
+
+```
+Session: N
+Decisions: 0001, 0002
+Gates-A: A1-pass A2-pass A3-n/a A4-pass A5-pass
+Gates-B: B1-pass B2-n/a B3-n/a
+```
+
+Query session history: `git log --format="%(trailers:key=Session)"` or `git log --format="%(trailers)"` for all trailers.
+
 ### Prototype Sessions
 
 Prototype sessions on `experiment/*` branches follow a lighter lifecycle. See `docs/ai/prompts/prompt-0.5-prototype.md` for full details. Key differences:
@@ -54,3 +71,14 @@ Prompt T facilitates exploration and task planning without producing file artifa
 - **Brief**: 3-agent team (Architect, Exploration, Critic) produces a structured task brief for Prompt B.
 
 Task definition sessions are fully ephemeral — no files written, no session log entries, no gates apply. The output is a terminal-displayed task brief the operator copy-pastes into a new Prompt B session. See `docs/ai/prompts/prompt-t-task-definition.md` for full details.
+
+### Task Group Sessions
+
+When Prompt T splits a task into multiple briefs (Narrow path), each brief includes a `### Task Group` section. The briefs share a task group contract at `docs/ai/task-groups/{group-name}.yaml` that coordinates naming, patterns, decisions, and integration points across sessions.
+
+- **Contract lifecycle**: First Prompt B session creates the contract from brief metadata. Subsequent sessions read and update it. Prompt T never writes files
+- **Conventions are REQUIRE-level**: All sessions must follow the naming patterns, architectural patterns, decisions, and module boundaries established in the contract
+- **Sequential execution recommended**: Briefs are numbered and should be executed in order. The contract tracks `next_brief` for sequencing
+- **Gate A6**: Verifies contract compliance when a task group is present. Skipped automatically for standalone briefs. Override: `SKIP_CONTRACT_CHECK=1`
+
+See `docs/ai/task-groups/_contract-template.yaml` for the contract structure and `docs/ai/quality-gates.md` for gate A6 details.
