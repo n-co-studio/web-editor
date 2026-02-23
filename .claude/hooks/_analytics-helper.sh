@@ -5,9 +5,20 @@
 #
 # Usage (in hook scripts):
 #   REPO_ROOT="$(get_repo_root)"
-#   START_MS=$(date +%s%3N 2>/dev/null || date +%s)
+#   START_MS=$(now_ms)
 #   ... hook logic ...
 #   log_hook_event "hook-name" "PreToolUse" "Edit" "allow" "$START_MS" "reason_code"
+
+# --- Portable millisecond timestamp ---
+# GNU date supports %N (nanoseconds); macOS date does not — it outputs literal "N".
+now_ms() {
+  local ms
+  ms=$(date +%s%3N 2>/dev/null)
+  if [[ "$ms" =~ [^0-9] ]]; then
+    ms=$(( $(date +%s) * 1000 ))
+  fi
+  echo "$ms"
+}
 
 # --- Repo root cache (never changes within a session) ---
 get_repo_root() {
@@ -50,7 +61,7 @@ log_hook_event() {
   local sid
   sid="$(get_session_id "$repo_root")"
   local end_ms
-  end_ms=$(date +%s%3N 2>/dev/null || date +%s)
+  end_ms=$(now_ms)
   local dur=$(( end_ms - start_ms ))
 
   local events_dir="$repo_root/.claude/analytics/events"

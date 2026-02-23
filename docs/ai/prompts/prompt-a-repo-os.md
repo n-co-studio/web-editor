@@ -60,6 +60,14 @@ Silently validate:
 - Gate enforcement behavior is configured
 - Project-specific conditional gates (if any) are coherent
 
-If all checks pass: confirm "Repo OS ready" and instruct operator to proceed to Prompt B.
+If all checks pass: confirm "Repo OS ready" and output a handoff block (see Session Handoff Convention in `workflow.md`):
+
+~~~
+[Project or Feature Name] Build — Prompt B
+
+Follow docs/ai/prompts/prompt-b-product-build.md.
+~~~
+
+If a task brief exists, instruct the operator to append it.
 
 If issues found: list only the problems, propose fixes, and wait for operator approval before confirming readiness.
