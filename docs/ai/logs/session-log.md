@@ -126,33 +126,51 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 ---
 
-## Session 14 — 2026-02-21 — Design Guide System + Ruler/Grid Enhancements
+## Session 17 — 2026-02-22 — Insert Element Feature (Phases 0–2) + Cohesion Fixes
 
 **Status:** complete
 **Decisions applied:** 0001, 0002, 0008
-**Commits:** ce77439 — feat: add Design Guide System, 5fd44c9 — fix: ruler overlay enhancements
+**Commits:** fd34bff — feat: insert element tool — phases 0-2 with cohesion fixes
 
 ### Goal
-- Build Design Guide System: ruler bars with draggable guide lines for arbitrary alignment references
-- Fix guide snap (HVST: sub-pixel grid spacing dominating edge snap)
-- Add canvas-based pixel ruler bars, scroll-aware grid/guides, snap exclusivity, edge highlighting
+- Implement Insert Element tool across 3 phases: geometry engine (Phase 0), visual editor FSM (Phase 1), element catalog + panel (Phase 2)
+- Run cohesion audit across the full diff and fix findings
+- Add prompt serializer for "Copy as Prompt" clipboard export
+
+### Plan Summary
+1. Phase 0: Extract gap-math from reorder.ts, define InsertChange/SiblingAnchor/CompoundChildDescriptor types in shared, add insert-source.ts for sibling bracket source mapping
+2. Phase 1: InsertEditor class with 3-state FSM (SCANNING→CONFIGURING→COMMITTED), drop zone overlay, phantom preview, history integration
+3. Phase 2: InsertPanel with searchable element catalog (7 categories, 35 entries), sizing controls (Auto/Stretch/Fixed), compound children support
+4. Prompt serializer + review panel integration for clipboard export
+5. MCP protocol bump to 0.3.0 with DIFF_APPLIED, STATUS_REQUEST, STATUS_RESPONSE messages
 
 ### Changes Made
-- `packages/chrome-extension/src/shared/constants.ts` — Added guide overlay constants
-- `packages/chrome-extension/src/content/editing/guide-snap.ts` — **New**: pure `snapToGuides()` function
-- `packages/chrome-extension/src/content/ruler-overlay.ts` — **New then rewritten** (~870 lines): canvas rulers, page-coord guides, edge snap, grid/edge exclusivity
-- `packages/chrome-extension/src/content/editing/handles.ts` — Guide snap integration
-- `packages/chrome-extension/src/content/toolbar.ts` — Ruler toggle button
-- `packages/chrome-extension/src/content/index.ts` — Full lifecycle wiring
-- `packages/chrome-extension/src/content/grid-overlay.ts` — Added `refreshScroll()`
+- `packages/chrome-extension/src/content/editing/gap-math.ts` — **New**: extracted `computeGapZones`, `detectContainerLayout`, `hitTestGapZone` from reorder.ts
+- `packages/chrome-extension/src/content/editing/insert.ts` — **New** (~620 lines): InsertEditor FSM class
+- `packages/chrome-extension/src/content/editing/insert-panel.ts` — **New** (~780 lines): searchable element picker with sizing controls
+- `packages/chrome-extension/src/content/editing/insert-catalog.ts` — **New**: static catalog with 7 categories, SVG icons, compound children descriptors
+- `packages/chrome-extension/src/content/editing/insert-source.ts` — **New**: `buildInsertChange` with sibling bracket source mapping
+- `packages/chrome-extension/src/content/batching/prompt-serializer.ts` — **New**: `serializeToPrompt()` for clipboard export
+- `packages/chrome-extension/src/content/editing/reorder.ts` — Refactored to import shared geometry from gap-math.ts
+- `packages/chrome-extension/src/content/index.ts` — Wired InsertEditor lifecycle, `makeInsertCommit`, escape ladder, scroll handler
+- `packages/chrome-extension/src/content/history.ts` — Added `InsertionHistoryEntry` with undo/redo/reset
+- `packages/chrome-extension/src/content/batching/review-panel.ts` — Insert change rendering, elapsed time, "Copy as Prompt" button
+- `packages/shared/src/diff.ts` — Added `SiblingAnchor`, `ChildSnapshotEntry`, `CompoundChildDescriptor`, `InsertChange` types; `insertChanges` on `VisualDiff`
+- `packages/shared/src/protocol.ts` — Bumped to v0.3.0, added 3 new message types
+- `packages/chrome-extension/src/shared/types.ts` — Added `'insert'` to `EditMode`, added `InsertState` type
+- `packages/mcp-server/src/bridge.ts` — Added `recordToolCall`, `handleStatusRequest`, `pushDiffApplied`
+- `packages/mcp-server/src/server.ts` — Updated tool description for insertChanges
 
 ### Verification (Gates Evidence)
-- Commit gates: A1 pass, A2 pass, A3 pass, A4 pass, A5 pass
+- Commit gates: A1 pass (0001/0002/0008), A2 pass (plan documented, 22 files ~449 net lines), A3 pass (`tsc --noEmit` clean, `npm run build` clean), A4 pass (no secrets), A5 pass (cohesion: 3 findings fixed — C1 CompoundChild alias, W1 buildInsertChange signature, W2 empty container zones)
+
+### Failed Attempts (Brief)
+- None
 
 ### Known Issues Logged
-- Grid snap exclusivity not fully validated
+- None
 
 ### Follow-ups
-- Validate grid snap exclusivity with debug log output
-- Grid snap with tiny baseSpacing (0.2px) may need majorSpacing fallback
+- W3 (deferred): Insertion redo uses stale `insertIndex` if DOM mutated between undo/redo — acceptable for MVP, needs revisiting for production
+- I1–I5 (informational): Keyboard shortcut for insert, container auto-detect heuristic refinement, compound element undo granularity, catalog extensibility API, insert+reorder combined workflow
 

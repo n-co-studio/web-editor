@@ -6,6 +6,38 @@ This file is not read during normal sessions. Referenced for deep investigation 
 
 ---
 
+## Session 14 — 2026-02-21 — Design Guide System + Ruler/Grid Enhancements
+
+**Status:** complete
+**Decisions applied:** 0001, 0002, 0008
+**Commits:** ce77439 — feat: add Design Guide System, 5fd44c9 — fix: ruler overlay enhancements
+
+### Goal
+- Build Design Guide System: ruler bars with draggable guide lines for arbitrary alignment references
+- Fix guide snap (HVST: sub-pixel grid spacing dominating edge snap)
+- Add canvas-based pixel ruler bars, scroll-aware grid/guides, snap exclusivity, edge highlighting
+
+### Changes Made
+- `packages/chrome-extension/src/shared/constants.ts` — Added guide overlay constants
+- `packages/chrome-extension/src/content/editing/guide-snap.ts` — **New**: pure `snapToGuides()` function
+- `packages/chrome-extension/src/content/ruler-overlay.ts` — **New then rewritten** (~870 lines): canvas rulers, page-coord guides, edge snap, grid/edge exclusivity
+- `packages/chrome-extension/src/content/editing/handles.ts` — Guide snap integration
+- `packages/chrome-extension/src/content/toolbar.ts` — Ruler toggle button
+- `packages/chrome-extension/src/content/index.ts` — Full lifecycle wiring
+- `packages/chrome-extension/src/content/grid-overlay.ts` — Added `refreshScroll()`
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass, A2 pass, A3 pass, A4 pass, A5 pass
+
+### Known Issues Logged
+- Grid snap exclusivity not fully validated
+
+### Follow-ups
+- Validate grid snap exclusivity with debug log output
+- Grid snap with tiny baseSpacing (0.2px) may need majorSpacing fallback
+
+---
+
 ## Session 13 — 2026-02-21 — State Toggles, CSS Variables, Attributes & Accessibility
 
 **Status:** complete
