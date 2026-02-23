@@ -1,21 +1,28 @@
-import type { VisualDiff } from '@frontend-editor/shared';
+import type { VisualDiff, DiffServerStatus } from '@frontend-editor/shared';
 import { MAX_DIFFS_PER_BATCH } from '../../shared/constants';
-import type { PendingEdit } from '../../shared/types';
+import type { PendingEdit, DiffLifecycle } from '../../shared/types';
 
 const STORAGE_KEY = 'frontend-editor-pending-queue';
 
 /**
  * Manages the pending edit queue with chrome.storage.session persistence.
- * Handles deduplication, collapse, reconciliation with the server,
- * and the "Removed" section (soft-delete with restore).
+ * Handles deduplication, collapse, lifecycle transitions, reconciliation
+ * with the server, and the "Removed" section (soft-delete with restore).
  */
 export class PendingQueue {
   private items: PendingEdit[] = [];
   private changeCallbacks: Array<() => void> = [];
 
-  /** Number of active (non-removed) items in the queue. */
+  /** Number of active (non-removed) items in the queue (all statuses). */
   get count(): number {
     return this.items.filter((i) => !i.removedAt).length;
+  }
+
+  /** Number of pending (unsent, non-removed) items. */
+  get pendingCount(): number {
+    return this.items.filter(
+      (i) => !i.removedAt && (!i.lifecycleStatus || i.lifecycleStatus === 'pending'),
+    ).length;
   }
 
   /** Add a diff to the queue. Collapses duplicate property edits on same element. */
@@ -48,9 +55,21 @@ export class PendingQueue {
     }
   }
 
-  /** Get all active (non-removed) diffs. */
+  /** Get all active pending (non-removed, non-sent/applied) diffs. */
   getActive(): VisualDiff[] {
-    return this.items.filter((i) => !i.removedAt).map((i) => i.diff);
+    return this.items
+      .filter((i) => !i.removedAt && (!i.lifecycleStatus || i.lifecycleStatus === 'pending'))
+      .map((i) => i.diff);
+  }
+
+  /** Get items that have been sent to the server (awaiting AI processing). */
+  getSent(): PendingEdit[] {
+    return this.items.filter((i) => !i.removedAt && i.lifecycleStatus === 'sent');
+  }
+
+  /** Get items that have been applied by the AI. */
+  getApplied(): PendingEdit[] {
+    return this.items.filter((i) => !i.removedAt && i.lifecycleStatus === 'applied');
   }
 
   /** Get removed items. */
@@ -61,6 +80,12 @@ export class PendingQueue {
   /** Get all diff IDs (including removed — for reconciliation). */
   getDiffIds(): string[] {
     return this.items.map((i) => i.diffId);
+  }
+
+  /** Get the lifecycle status of a specific diff. */
+  getLifecycleStatus(diffId: string): DiffLifecycle {
+    const item = this.items.find((i) => i.diffId === diffId);
+    return item?.lifecycleStatus ?? 'pending';
   }
 
   /**
@@ -80,22 +105,97 @@ export class PendingQueue {
 
   /**
    * Reconcile with server on reconnect.
-   * Removes diffs the server already has (by ID).
+   * Updates lifecycle status based on server-side state.
    */
-  reconcile(serverKnownIds: readonly string[]): void {
-    const known = new Set(serverKnownIds);
-    this.items = this.items.filter((i) => !known.has(i.diffId));
+  reconcile(pendingDiffIds: readonly string[], appliedDiffIds: readonly string[]): void {
+    const serverPending = new Set(pendingDiffIds);
+    const serverApplied = new Set(appliedDiffIds);
+    const now = Date.now();
+    for (const item of this.items) {
+      if (serverApplied.has(item.diffId)) {
+        item.lifecycleStatus = 'applied';
+      } else if (serverPending.has(item.diffId)) {
+        item.lifecycleStatus = 'sent';
+        if (!item.sentAt) item.sentAt = now;
+      }
+      // Items not in either set remain at current status (likely 'pending')
+    }
     this.persist();
     this.notify();
   }
 
   /**
-   * Acknowledge diffs that were successfully sent.
-   * Called when DIFF_ACK is received.
+   * Transition diffs to 'sent' status.
+   * Called when DIFF_ACK is received from the server.
    */
   acknowledge(diffIds: readonly string[]): void {
     const acked = new Set(diffIds);
-    this.items = this.items.filter((i) => !acked.has(i.diffId));
+    const now = Date.now();
+    for (const item of this.items) {
+      if (acked.has(item.diffId) && !item.removedAt) {
+        item.lifecycleStatus = 'sent';
+        item.sentAt = now;
+      }
+    }
+    this.persist();
+    this.notify();
+  }
+
+  /**
+   * Transition diffs to 'applied' status.
+   * Called when DIFF_APPLIED is received from the server.
+   */
+  markApplied(diffIds: readonly string[]): void {
+    const applied = new Set(diffIds);
+    for (const item of this.items) {
+      if (applied.has(item.diffId)) {
+        item.lifecycleStatus = 'applied';
+      }
+    }
+    this.persist();
+    this.notify();
+  }
+
+  /**
+   * Update lifecycle status from server STATUS_RESPONSE.
+   * Maps server statuses to extension lifecycle.
+   */
+  updateFromServerStatus(perDiff: readonly DiffServerStatus[]): void {
+    const statusMap = new Map(perDiff.map((d) => [d.id, d.serverStatus]));
+    let changed = false;
+    for (const item of this.items) {
+      const serverStatus = statusMap.get(item.diffId);
+      if (!serverStatus) continue;
+      const newLifecycle: DiffLifecycle =
+        serverStatus === 'applied' || serverStatus === 'rejected' ? 'applied' : 'sent';
+      if (item.lifecycleStatus !== newLifecycle) {
+        item.lifecycleStatus = newLifecycle;
+        if (newLifecycle === 'sent' && !item.sentAt) item.sentAt = Date.now();
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.persist();
+      this.notify();
+    }
+  }
+
+  /** Check if a diff was copied to clipboard. */
+  isCopied(diffId: string): boolean {
+    const item = this.items.find((i) => i.diffId === diffId);
+    return item?.copiedToClipboard === true;
+  }
+
+  /** Mark diffs as copied to clipboard. */
+  markCopied(diffIds: readonly string[]): void {
+    const copied = new Set(diffIds);
+    const now = Date.now();
+    for (const item of this.items) {
+      if (copied.has(item.diffId)) {
+        item.copiedToClipboard = true;
+        item.copiedAt = now;
+      }
+    }
     this.persist();
     this.notify();
   }
@@ -105,6 +205,42 @@ export class PendingQueue {
     this.items = [];
     this.persist();
     this.notify();
+  }
+
+  /** Clear only pending items (keeps sent/applied). */
+  clearPending(): void {
+    this.items = this.items.filter(
+      (i) => i.lifecycleStatus && i.lifecycleStatus !== 'pending',
+    );
+    this.persist();
+    this.notify();
+  }
+
+  /** Remove all applied items. Returns count cleared. */
+  clearApplied(): number {
+    const before = this.items.length;
+    this.items = this.items.filter((i) => i.lifecycleStatus !== 'applied');
+    const cleared = before - this.items.length;
+    if (cleared > 0) {
+      this.persist();
+      this.notify();
+    }
+    return cleared;
+  }
+
+  /** Remove sent items older than 24h. Returns count cleared. */
+  clearStale(): number {
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const before = this.items.length;
+    this.items = this.items.filter(
+      (i) => !(i.lifecycleStatus === 'sent' && i.sentAt && i.sentAt < cutoff),
+    );
+    const cleared = before - this.items.length;
+    if (cleared > 0) {
+      this.persist();
+      this.notify();
+    }
+    return cleared;
   }
 
   /** Register callback for queue changes. */
@@ -150,12 +286,14 @@ export class PendingQueue {
    * Collapse duplicate property edits on the same element.
    * If a pending diff already has a change for the same element+property,
    * update it to the latest value instead of adding a new diff.
+   * Only collapses into pending items — sent/applied items are immutable.
    * Returns true if the newDiff was fully collapsed (should not be added).
    */
   private collapseExisting(newDiff: VisualDiff): boolean {
     for (let i = 0; i < this.items.length; i++) {
       const item = this.items[i];
       if (item.removedAt) continue;
+      if (item.lifecycleStatus && item.lifecycleStatus !== 'pending') continue;
       if (item.diff.element.selector !== newDiff.element.selector) continue;
 
       // Same element — check for overlapping property changes

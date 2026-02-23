@@ -183,6 +183,11 @@ export class EditHistory {
     return diffIds;
   }
 
+  /** Peek at the top undo entry without modifying the stack. */
+  peekUndo(): HistoryEntry | null {
+    return this.undoStack.length > 0 ? this.undoStack[this.undoStack.length - 1] : null;
+  }
+
   get canUndo(): boolean {
     return this.undoStack.length > 0;
   }

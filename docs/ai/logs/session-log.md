@@ -82,47 +82,52 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 ---
 
-## Session 15 — 2026-02-21 — Contextual Note Panel Positioning
+## Session 19 — 2026-02-23 — MCP Connection Resilience Phases 3–4
 
 **Status:** complete
 **Decisions applied:** 0001, 0002, 0008
-**Commits:** 21812d4 — feat: contextual note panel positioning — anchor to selected element
+**Commits:** 8827b46 — feat: MCP connection resilience — lifecycle tracking + clipboard reconciliation
 
 ### Goal
-- Position the notes mini-panel relative to the selected element instead of the toolbar button
-- Auto-assign the selected element to newly created notes
-- Dragging detaches the panel; deselection and stale detection fall back to toolbar mode
+- Phase 3: Implement diff lifecycle tracking (`pending → sent → applied`) instead of hard-deleting on DIFF_ACK
+- Phase 4: Clipboard reconciliation — track which diffs were copied via "Copy as Prompt"
 
 ### Plan Summary
-1. Add `NOTES_PANEL_MAX_HEIGHT` and `NOTES_PANEL_WIDTH` constants
-2. Add `NotePositionMode` type and anchoring state fields to `NotesEditor`
-3. Add `computeElementAnchoredPosition()` pure geometry function (inset for tall, below for short, viewport clamp)
-4. Update `render()` to check anchored element and choose positioning mode
-5. Wire `makeDraggable` on header — transitions to `'detached'` on first drag
-6. Auto-assign anchored element to each new note via `addElementToNote()`
-7. Guard `reposition()` and `toolbar.onMove` against non-toolbar modes
-8. Wire `onNotesToggle`, `onDeselect`, stale callback, and scroll handler in index.ts
-9. Fix pre-existing `gridSpacing` type error in ruler-overlay.ts
+**Phase 3 — Lifecycle Tracking:**
+1. Extend `PendingEdit` with `lifecycleStatus` and `sentAt` fields
+2. Rewrite `queue.acknowledge()` to transition to 'sent' instead of hard-delete
+3. Add lifecycle methods: `markApplied`, `updateFromServerStatus`, `getLifecycleStatus`, `clearStale`, `clearApplied`, `clearPending`
+4. Split `ServerHelloPayload` from `knownDiffIds` → `pendingDiffIds` + `appliedDiffIds`
+5. Update bridge SERVER_HELLO construction
+6. Add `peekUndo()` to EditHistory, wire undo guard in index.ts
+7. Wire `onDiffApplied`, `onStatusResponse` callbacks in index.ts
+8. Add lifecycle badges, "Check Status" button, stale/applied sections in review panel
+
+**Phase 4 — Clipboard Reconciliation:**
+9. Add `copiedToClipboard` + `copiedAt` to PendingEdit
+10. Add `markCopied()` + `isCopied()` to queue
+11. Wire "Copy as Prompt" callback to mark diffs, show "Copied" badge in review panel
 
 ### Changes Made
-- `packages/chrome-extension/src/shared/constants.ts` — Added `NOTES_PANEL_MAX_HEIGHT` (320), `NOTES_PANEL_WIDTH` (260)
-- `packages/chrome-extension/src/content/editing/notes.ts` — Added `NotePositionMode` type, 4 new fields, 4 new public methods (`getPositionMode`, `setAnchoredElement`, `clearAnchoredElement`, `repositionToElement`), ResizeObserver lifecycle, `computeElementAnchoredPosition()` pure helper, draggable header via `makeDraggable`, auto-assignment in `addNote` closure, mode guard in `reposition()`, full cleanup in `cleanup()`
-- `packages/chrome-extension/src/content/index.ts` — `onNotesToggle` checks selection for element anchoring, `onDeselect` and stale callback transition to toolbar mode, `handleScroll` tracks element position, `toolbar.onMove` guarded for non-toolbar modes
-- `packages/chrome-extension/src/content/ruler-overlay.ts` — Fixed missing `gridSpacing` variable declaration (pre-existing type error)
-- `packages/chrome-extension/src/content/selection/devtools-panel.ts` — Added `minHeight: '0'` and overflow fixes for tree pane (operator change)
+- `packages/chrome-extension/src/shared/types.ts` — Added `DiffLifecycle` type, `lifecycleStatus?`, `sentAt?`, `copiedToClipboard?`, `copiedAt?` to `PendingEdit`
+- `packages/chrome-extension/src/content/batching/queue.ts` — Lifecycle transitions in `acknowledge()`, new methods (`markApplied`, `updateFromServerStatus`, `getLifecycleStatus`, `clearStale`, `clearApplied`, `clearPending`, `getSent`, `getApplied`, `markCopied`, `isCopied`), `pendingCount` getter, updated `getActive()`, `collapseExisting()`, `reconcile()`
+- `packages/shared/src/protocol.ts` — Split `ServerHelloPayload` into `pendingDiffIds` + `appliedDiffIds`
+- `packages/mcp-server/src/bridge.ts` — Updated SERVER_HELLO to construct split IDs from `pendingQueue` + `processedIds`
+- `packages/chrome-extension/src/content/history.ts` — Added `peekUndo()` method
+- `packages/chrome-extension/src/content/index.ts` — Wired lifecycle callbacks (`onDiffApplied`, `onStatusResponse`), undo guard via `tryUndo()`, badge uses `pendingCount`, reset uses `clearPending()`
+- `packages/chrome-extension/src/content/batching/review-panel.ts` — Lifecycle badges (sent/applied/copied), "Sent to Server" and "Applied" sections, "Check Status" button, stale notice, "Clear applied" link, clipboard marking on copy
 
 ### Verification (Gates Evidence)
-- Commit gates: A1 pass (0001/0002/0008 followed), A2 pass (plan documented, 5 files), A3 pass (`npm run build` clean, `tsc --noEmit` clean — pre-existing ruler-overlay errors fixed), A4 pass (no secrets), A5 pending
-- Push gates: B1 pending, B2 pending, B3 pending
+- Commit gates: A1 pass (0001/0002/0008), A2 pass (plan documented, 7 files), A3 pass (`tsc --noEmit` clean, `npm run build` clean for shared + chrome-extension + mcp-server), A4 pass (no secrets), A5 pending
 
 ### Failed Attempts (Brief)
-- `render()` calls `cleanup()` first which wiped `anchoredElement` before the positioning logic could read it — fixed by saving/restoring anchoring state across the cleanup call
+- protocol.ts and history.ts had been modified by concurrent Session 17 — required re-reads before edits
 
 ### Known Issues Logged
 - None
 
 ### Follow-ups
-- A5 cohesion review deferred (operator closing session)
+- A5 cohesion review deferred
 
 ---
 

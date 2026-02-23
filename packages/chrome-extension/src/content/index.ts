@@ -125,8 +125,9 @@ async function activate(): Promise<void> {
     getPendingDiffIds: () => queue!.getDiffIds(),
     onStatusChange: handleStatusChange,
     onServerHello: (payload) => {
-      queue!.reconcile(payload.knownDiffIds);
+      queue!.reconcile(payload.pendingDiffIds, payload.appliedDiffIds);
       badge!.update();
+      reviewPanel?.refresh();
     },
     onDiffAck: (payload) => {
       queue!.acknowledge(payload.diffIds);
@@ -135,7 +136,9 @@ async function activate(): Promise<void> {
       devtoolsPanel?.log(`${payload.diffIds.length} diff(s) acknowledged`);
     },
     onDiffApplied: (payload) => {
-      // Phase 3 will transition diffs to 'applied' lifecycle status
+      queue!.markApplied(payload.diffIds);
+      badge!.update();
+      reviewPanel?.refresh();
       devtoolsPanel?.log(`${payload.diffIds.length} diff(s) applied`);
     },
     onTokenData: (payload) => {
@@ -147,7 +150,9 @@ async function activate(): Promise<void> {
       devtoolsPanel?.log(`Token update: ${payload.tokens.length} tokens`);
     },
     onStatusResponse: (payload) => {
-      // Phase 3 will update per-diff lifecycle status in the review panel
+      queue!.updateFromServerStatus(payload.perDiff);
+      badge!.update();
+      reviewPanel?.refresh();
       devtoolsPanel?.log(`Status: ${payload.pendingCount} pending, last activity: ${payload.lastToolCallAt ?? 'none'}`);
     },
     onError: (payload) => {
@@ -701,25 +706,15 @@ async function activate(): Promise<void> {
     deleteSelectedElement();
   });
 
-  // Push pending count to toolbar badge
+  // Push pending count to toolbar badge (only unsent items)
   queue.onChange(() => {
-    toolbar?.setPendingCount(queue!.count);
+    toolbar?.setPendingCount(queue!.pendingCount);
   });
   // Initialize count from any restored queue items
-  toolbar.setPendingCount(queue.count);
+  toolbar.setPendingCount(queue.pendingCount);
 
   // Wire undo/redo/reset
-  toolbar.onUndo(() => {
-    const entry = editHistory!.undo();
-    if (entry) {
-      queue!.remove(entry.diff.id);
-      badge!.update();
-      reviewPanel!.refresh();
-      selection?.refreshHighlight();
-      refreshReorderAfterHistoryChange(entry);
-      devtoolsPanel?.log('Undo');
-    }
-  });
+  toolbar.onUndo(() => tryUndo());
 
   toolbar.onRedo(() => {
     const entry = editHistory!.redo();
@@ -735,11 +730,11 @@ async function activate(): Promise<void> {
 
   toolbar.onReset(() => {
     editHistory!.resetAll();
-    queue!.clear();
+    queue!.clearPending();
     badge!.update();
     reviewPanel!.refresh();
     selection?.deselect();
-    devtoolsPanel?.log('All changes reset');
+    devtoolsPanel?.log('Pending changes reset');
   });
 
   // Update toolbar undo/redo button states when history changes
@@ -1102,6 +1097,30 @@ function refreshReorderAfterHistoryChange(entry: HistoryEntry): void {
 }
 
 // ---------------------------------------------------------------------------
+// Undo helper — blocks undo for diffs already sent to the server
+// ---------------------------------------------------------------------------
+
+function tryUndo(): void {
+  const top = editHistory?.peekUndo();
+  if (top && queue) {
+    const status = queue.getLifecycleStatus(top.diff.id);
+    if (status !== 'pending') {
+      devtoolsPanel?.log('Cannot undo — change already sent to server', 'warn');
+      return;
+    }
+  }
+  const entry = editHistory?.undo();
+  if (entry) {
+    queue?.remove(entry.diff.id);
+    badge?.update();
+    reviewPanel?.refresh();
+    selection?.refreshHighlight();
+    refreshReorderAfterHistoryChange(entry);
+    devtoolsPanel?.log('Undo');
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Delete element helper — removes from DOM, tracked as a diff
 // ---------------------------------------------------------------------------
 
@@ -1350,15 +1369,7 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
         devtoolsPanel?.log('Redo');
       }
     } else {
-      const entry = editHistory?.undo();
-      if (entry) {
-        queue?.remove(entry.diff.id);
-        badge?.update();
-        reviewPanel?.refresh();
-        selection?.refreshHighlight();
-        refreshReorderAfterHistoryChange(entry);
-        devtoolsPanel?.log('Undo');
-      }
+      tryUndo();
     }
     return;
   }
