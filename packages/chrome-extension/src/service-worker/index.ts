@@ -12,11 +12,23 @@
 // Toolbar icon click
 // ---------------------------------------------------------------------------
 
-chrome.action.onClicked.addListener((tab) => {
+chrome.action.onClicked.addListener(async (tab) => {
   if (!tab.id) return;
-  chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_EXTENSION' }).catch(() => {
-    // Content script not injected on this page (non-localhost)
-  });
+  try {
+    // Try sending to already-injected content script (localhost auto-inject)
+    await chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_EXTENSION' });
+  } catch {
+    // Content script not present — inject programmatically, then toggle
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ['content.js'],
+      });
+      await chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_EXTENSION' });
+    } catch {
+      // Injection failed (chrome://, web store, etc.) — silently ignore
+    }
+  }
 });
 
 // ---------------------------------------------------------------------------
