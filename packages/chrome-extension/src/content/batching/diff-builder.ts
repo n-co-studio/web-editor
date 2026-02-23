@@ -4,6 +4,7 @@ import type {
   PropertyChange,
   ReorderChange,
   InsertChange,
+  GroupChange,
   PageContext,
 } from '@frontend-editor/shared';
 import type { TokenStore } from '../tokens/store';
@@ -54,6 +55,20 @@ export class DiffBuilder {
       element: elementInfo,
       changes: [],
       insertChanges: [insertChange],
+      context: this.buildPageContext(),
+      status: 'pending',
+      sourceVerified: Boolean(elementInfo.sourceFile),
+    };
+  }
+
+  /** Build a VisualDiff for a group operation (wrapping siblings in a flex container). */
+  buildGroup(elementInfo: ElementInfo, groupChange: GroupChange): VisualDiff {
+    return {
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      element: elementInfo,
+      changes: [],
+      groupChanges: [groupChange],
       context: this.buildPageContext(),
       status: 'pending',
       sourceVerified: Boolean(elementInfo.sourceFile),

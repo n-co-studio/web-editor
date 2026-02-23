@@ -5,6 +5,7 @@ export type {
   NoteEntry,
   PropertyChange,
   ReorderChange,
+  GroupChange,
   SiblingAnchor,
   ChildSnapshotEntry,
   InsertChange,
