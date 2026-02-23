@@ -1,7 +1,10 @@
 import type { NoteElementRef, NoteEntry } from '@frontend-editor/shared';
-import { createElement, createText, createButton } from '../../shared/ui-utils';
-import { OVERLAY, TOOLBAR_WIDTH } from '../../shared/constants';
+import { createElement, createText, createButton, makeDraggable } from '../../shared/ui-utils';
+import { OVERLAY, TOOLBAR_WIDTH, NOTES_PANEL_MAX_HEIGHT, NOTES_PANEL_WIDTH } from '../../shared/constants';
+import type { PanelPosition } from '../../shared/types';
 import type { NotesStore } from '../batching/notes-store';
+
+type NotePositionMode = 'toolbar' | 'element' | 'detached';
 
 /**
  * Notes editing mini-panel. Renders a text input for adding notes,
@@ -17,6 +20,10 @@ export class NotesEditor {
   private listEl: HTMLDivElement | null = null;
   private highlights = new Map<string, HTMLDivElement>();
   private activePickIndex: number | null = null;
+  private positionMode: NotePositionMode = 'toolbar';
+  private anchoredElement: Element | null = null;
+  private anchoredElementRef: NoteElementRef | null = null;
+  private resizeObserver: ResizeObserver | null = null;
 
   constructor(
     private readonly notesStore: NotesStore,
@@ -53,14 +60,65 @@ export class NotesEditor {
     this.refreshList();
   }
 
-  render(anchorPos: { x: number; y: number }): HTMLDivElement {
-    this.cleanup();
+  /** Return current positioning mode for external guards. */
+  getPositionMode(): NotePositionMode {
+    return this.positionMode;
+  }
 
-    const panelLeft = Math.min(
-      anchorPos.x + TOOLBAR_WIDTH + 8,
-      window.innerWidth - 268,
-    );
-    const panelTop = Math.max(8, anchorPos.y);
+  /** Set the element to anchor to. Called from index.ts before render(). */
+  setAnchoredElement(element: Element, ref: NoteElementRef): void {
+    this.anchoredElement = element;
+    this.anchoredElementRef = ref;
+  }
+
+  /** Clear element anchor (transitions to toolbar mode). */
+  clearAnchoredElement(): void {
+    this.disconnectResizeObserver();
+    this.anchoredElement = null;
+    this.anchoredElementRef = null;
+    this.positionMode = 'toolbar';
+  }
+
+  /** Reposition panel to track the anchored element. Called from scroll handler. */
+  repositionToElement(): void {
+    if (!this.container || !this.anchoredElement || this.positionMode !== 'element') return;
+    if (!document.contains(this.anchoredElement)) {
+      this.clearAnchoredElement();
+      return;
+    }
+    const rect = this.anchoredElement.getBoundingClientRect();
+    const pos = computeElementAnchoredPosition(rect, NOTES_PANEL_WIDTH, NOTES_PANEL_MAX_HEIGHT);
+    this.container.style.left = `${pos.x}px`;
+    this.container.style.top = `${pos.y}px`;
+  }
+
+  render(anchorPos: { x: number; y: number }): HTMLDivElement {
+    // Save anchoring state before cleanup (which resets it)
+    const savedElement = this.anchoredElement;
+    const savedRef = this.anchoredElementRef;
+    this.cleanup();
+    this.anchoredElement = savedElement;
+    this.anchoredElementRef = savedRef;
+
+    let panelLeft: number;
+    let panelTop: number;
+
+    if (this.anchoredElement && document.contains(this.anchoredElement)) {
+      this.positionMode = 'element';
+      const rect = this.anchoredElement.getBoundingClientRect();
+      const pos = computeElementAnchoredPosition(rect, NOTES_PANEL_WIDTH, NOTES_PANEL_MAX_HEIGHT);
+      panelLeft = pos.x;
+      panelTop = pos.y;
+    } else {
+      this.positionMode = 'toolbar';
+      this.anchoredElement = null;
+      this.anchoredElementRef = null;
+      panelLeft = Math.min(
+        anchorPos.x + TOOLBAR_WIDTH + 8,
+        window.innerWidth - (NOTES_PANEL_WIDTH + 8),
+      );
+      panelTop = Math.max(8, anchorPos.y);
+    }
 
     const container = createElement('div', {
       role: 'dialog',
@@ -69,8 +127,8 @@ export class NotesEditor {
       position: 'fixed',
       left: `${panelLeft}px`,
       top: `${panelTop}px`,
-      width: '260px',
-      maxHeight: '320px',
+      width: `${NOTES_PANEL_WIDTH}px`,
+      maxHeight: `${NOTES_PANEL_MAX_HEIGHT}px`,
       background: OVERLAY.bg,
       border: `1px solid ${OVERLAY.border}`,
       borderRadius: OVERLAY.radiusMd,
@@ -105,6 +163,15 @@ export class NotesEditor {
     header.appendChild(closeBtn);
     container.appendChild(header);
 
+    // Make panel draggable via header
+    makeDraggable(header, container, undefined, () => {
+      if (this.positionMode !== 'detached') {
+        this.positionMode = 'detached';
+        this.disconnectResizeObserver();
+        this.anchoredElement = null;
+      }
+    });
+
     // Input row
     const inputRow = createElement('div', {}, {
       display: 'flex',
@@ -135,6 +202,11 @@ export class NotesEditor {
       const value = input.value.trim();
       if (value) {
         this.notesStore.add(value);
+        // Auto-assign the anchored element to the newly created note
+        if (this.anchoredElementRef) {
+          const noteIndex = this.notesStore.count - 1;
+          this.notesStore.addElementToNote(noteIndex, this.anchoredElementRef);
+        }
         input.value = '';
       }
     };
@@ -165,15 +237,18 @@ export class NotesEditor {
     container.appendChild(this.listEl);
 
     this.container = container;
+    if (this.positionMode === 'element') {
+      this.connectResizeObserver();
+    }
     this.rebuildHighlights();
     return container;
   }
 
   reposition(anchorPos: { x: number; y: number }): void {
-    if (!this.container) return;
+    if (!this.container || this.positionMode !== 'toolbar') return;
     const panelLeft = Math.min(
       anchorPos.x + TOOLBAR_WIDTH + 8,
-      window.innerWidth - 268,
+      window.innerWidth - (NOTES_PANEL_WIDTH + 8),
     );
     const panelTop = Math.max(8, anchorPos.y);
     this.container.style.left = `${panelLeft}px`;
@@ -185,6 +260,10 @@ export class NotesEditor {
     this.container = null;
     this.listEl = null;
     this.activePickIndex = null;
+    this.disconnectResizeObserver();
+    this.anchoredElement = null;
+    this.anchoredElementRef = null;
+    this.positionMode = 'toolbar';
     this.clearHighlights();
   }
 
@@ -219,6 +298,26 @@ export class NotesEditor {
       div.remove();
     }
     this.highlights.clear();
+  }
+
+  // -----------------------------------------------------------------------
+  // ResizeObserver lifecycle
+  // -----------------------------------------------------------------------
+
+  private connectResizeObserver(): void {
+    if (!this.anchoredElement) return;
+    this.disconnectResizeObserver();
+    this.resizeObserver = new ResizeObserver(() => {
+      this.repositionToElement();
+    });
+    this.resizeObserver.observe(this.anchoredElement);
+  }
+
+  private disconnectResizeObserver(): void {
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+      this.resizeObserver = null;
+    }
   }
 
   // -----------------------------------------------------------------------
@@ -484,4 +583,41 @@ function getPillLabel(ref: NoteElementRef): string {
   // Last segment of selector
   const parts = ref.selector.split(/\s*>\s*/);
   return parts[parts.length - 1].slice(0, 16);
+}
+
+/**
+ * Compute fixed-position coordinates for element-anchored placement.
+ *
+ * Strategy:
+ *   1. Element height >= panelMaxHeight → INSET at top-left + offset
+ *   2. Element height < panelMaxHeight → BELOW bottom-left + offset
+ *   3. Always clamp to keep panel fully within viewport
+ */
+function computeElementAnchoredPosition(
+  elementRect: DOMRect,
+  panelWidth: number,
+  panelMaxHeight: number,
+): PanelPosition {
+  const OFFSET = 8;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+
+  let x: number;
+  let y: number;
+
+  if (elementRect.height >= panelMaxHeight) {
+    // Inset: top-left corner of element, offset inward
+    x = elementRect.left + OFFSET;
+    y = elementRect.top + OFFSET;
+  } else {
+    // Below: under element's bottom-left corner
+    x = elementRect.left;
+    y = elementRect.bottom + OFFSET;
+  }
+
+  // Clamp to viewport (8px padding from edges)
+  x = Math.max(OFFSET, Math.min(x, vw - panelWidth - OFFSET));
+  y = Math.max(OFFSET, Math.min(y, vh - panelMaxHeight - OFFSET));
+
+  return { x, y };
 }

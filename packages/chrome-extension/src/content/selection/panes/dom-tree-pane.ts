@@ -100,6 +100,14 @@ export class DomTreePane {
     const root = document.body;
     if (!root) return;
     this.renderNode(container, root, 0, selectedElement);
+
+    // Scroll the selected row into view (centered)
+    requestAnimationFrame(() => {
+      const selectedRow = container.querySelector('[data-fe-selected]');
+      if (selectedRow) {
+        selectedRow.scrollIntoView({ block: 'center', behavior: 'instant' });
+      }
+    });
   }
 
   private renderNode(
@@ -145,7 +153,7 @@ export class DomTreePane {
     hasChildren: boolean,
     isExpanded: boolean,
   ): HTMLDivElement {
-    const row = createElement('div', {}, {
+    const row = createElement('div', isSelected ? { 'data-fe-selected': '' } : {}, {
       display: 'flex',
       alignItems: 'center',
       padding: '1px 4px',

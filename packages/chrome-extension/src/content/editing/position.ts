@@ -3,6 +3,7 @@ import { createElement, createText, createButton } from '../../shared/ui-utils';
 import { getComputedProperty } from '../../shared/dom-utils';
 import { OVERLAY, TOOLBAR_WIDTH } from '../../shared/constants';
 import type { PreviewManager } from './preview';
+import { MoveEditor, getMoveBlockReason } from './move';
 
 type ChangeCallback = (changes: PropertyChange[]) => void;
 
@@ -19,10 +20,22 @@ const INSET_LABELS: Record<string, string> = {
   left: 'L',
 };
 
+/** 4-way arrow SVG icon reused from the old toolbar Move button. */
+const MOVE_ICON = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M8 2v12M2 8h12"/>
+  <polyline points="5,4 8,2 11,4"/>
+  <polyline points="5,12 8,14 11,12"/>
+  <polyline points="4,5 2,8 4,11"/>
+  <polyline points="12,5 14,8 12,11"/>
+</svg>`;
+
 /**
  * Position editing controls rendered as a floating mini-panel.
- * Shows a position-type selector and, when the position is absolute or fixed,
- * editable inset fields (top, right, bottom, left).
+ * Shows a position-type selector, a Move toggle button, and
+ * when the position is absolute or fixed, editable inset fields.
+ *
+ * Composes MoveEditor internally — the Move toggle activates/deactivates
+ * the drag-to-reposition overlay without requiring a separate toolbar tool.
  */
 export class PositionEditor {
   private container: HTMLDivElement | null = null;
@@ -30,10 +43,17 @@ export class PositionEditor {
   private insetSection: HTMLDivElement | null = null;
   private currentElement: Element | null = null;
   private currentOnCommit: ChangeCallback | null = null;
+  private moveToggleBtn: HTMLButtonElement | null = null;
+  private moveActive = false;
+
+  private readonly moveEditor: MoveEditor;
 
   constructor(
+    private readonly shadow: ShadowRoot,
     private readonly preview: PreviewManager,
-  ) {}
+  ) {
+    this.moveEditor = new MoveEditor(shadow, preview);
+  }
 
   onClose(cb: () => void): void {
     this.closeCb = cb;
@@ -101,6 +121,9 @@ export class PositionEditor {
     // Position type selector
     body.appendChild(this.buildPositionSelector(element, onCommit));
 
+    // Move toggle row (between position selector and inset section)
+    body.appendChild(this.buildMoveToggle(element, onCommit));
+
     // Inset section (conditionally visible)
     this.insetSection = createElement('div', {}, {
       display: 'flex',
@@ -127,11 +150,179 @@ export class PositionEditor {
   }
 
   cleanup(): void {
+    this.moveEditor.cleanup();
+    this.moveActive = false;
+    this.moveToggleBtn = null;
     this.container?.remove();
     this.container = null;
     this.insetSection = null;
     this.currentElement = null;
     this.currentOnCommit = null;
+  }
+
+  // -----------------------------------------------------------------------
+  // Move delegation methods (for index.ts integration)
+  // -----------------------------------------------------------------------
+
+  /** Whether the Move toggle is currently active. */
+  isMoveActive(): boolean {
+    return this.moveActive;
+  }
+
+  /** Whether a drag is in progress within the MoveEditor. */
+  isMoveDragging(): boolean {
+    return this.moveEditor.isDragging();
+  }
+
+  /** Cancel an active drag but keep Move toggle active (re-renders overlay). */
+  cancelMoveDrag(): void {
+    if (!this.currentElement || !this.currentOnCommit) return;
+    this.moveEditor.cleanup();
+    this.moveEditor.render(this.currentElement, this.makeMoveCommit());
+  }
+
+  /** Turn off Move toggle, clean up overlay, restore inset section. */
+  deactivateMove(): void {
+    this.moveEditor.cleanup();
+    this.moveActive = false;
+    this.applyMoveToggleStyle();
+    // Restore inset section
+    if (this.insetSection && this.currentElement && this.currentOnCommit) {
+      this.insetSection.style.display = 'flex';
+      this.buildInsetControls(this.currentElement, this.currentOnCommit);
+    }
+  }
+
+  /** Refresh the cursor overlay position (e.g., after scroll). */
+  refreshMoveOverlay(): void {
+    this.moveEditor.refreshOverlay();
+  }
+
+  // -----------------------------------------------------------------------
+  // Move toggle button
+  // -----------------------------------------------------------------------
+
+  private buildMoveToggle(
+    element: Element,
+    _onCommit: ChangeCallback,
+  ): HTMLDivElement {
+    const row = createElement('div', {}, {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '6px',
+    });
+
+    const btn = createElement('button', {}, {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '6px',
+      width: '100%',
+      padding: '5px 8px',
+      border: `1px solid ${OVERLAY.border}`,
+      borderRadius: OVERLAY.radiusSm,
+      background: 'transparent',
+      color: OVERLAY.textMuted,
+      cursor: 'pointer',
+      fontFamily: OVERLAY.fontFamily,
+      fontSize: '11px',
+      transition: 'background 0.1s, color 0.1s',
+      pointerEvents: 'auto',
+    }) as HTMLButtonElement;
+
+    const iconSpan = createElement('span', {}, {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: '14px',
+      height: '14px',
+      flexShrink: '0',
+    });
+    iconSpan.innerHTML = MOVE_ICON;
+    btn.appendChild(iconSpan);
+
+    const label = createElement('span', {}, {});
+    label.textContent = 'Move';
+    btn.appendChild(label);
+
+    this.moveToggleBtn = btn;
+
+    // Check if move is blocked
+    const blockReason = getMoveBlockReason(element);
+    if (blockReason) {
+      btn.style.opacity = '0.3';
+      btn.style.cursor = 'not-allowed';
+      btn.title = `Move \u2014 ${blockReason}`;
+    } else {
+      btn.title = 'Drag to reposition element';
+    }
+
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!this.currentElement || !this.currentOnCommit) return;
+
+      // Re-check block reason (position may have changed)
+      const reason = getMoveBlockReason(this.currentElement);
+      if (reason) return;
+
+      if (this.moveActive) {
+        // Toggle OFF
+        this.deactivateMove();
+      } else {
+        // Toggle ON
+        this.moveActive = true;
+        this.applyMoveToggleStyle();
+        // Hide inset section
+        if (this.insetSection) {
+          this.insetSection.style.display = 'none';
+        }
+        this.moveEditor.render(this.currentElement, this.makeMoveCommit());
+      }
+    });
+
+    btn.addEventListener('mouseenter', () => {
+      if (btn.style.opacity !== '0.3' && !this.moveActive) {
+        btn.style.background = 'rgba(255, 255, 255, 0.08)';
+      }
+    });
+    btn.addEventListener('mouseleave', () => {
+      this.applyMoveToggleStyle();
+    });
+
+    row.appendChild(btn);
+    return row;
+  }
+
+  private applyMoveToggleStyle(): void {
+    if (!this.moveToggleBtn) return;
+    if (!this.currentElement) return;
+
+    const blockReason = getMoveBlockReason(this.currentElement);
+    if (blockReason) {
+      this.moveToggleBtn.style.opacity = '0.3';
+      this.moveToggleBtn.style.cursor = 'not-allowed';
+      this.moveToggleBtn.style.background = 'transparent';
+      this.moveToggleBtn.style.color = OVERLAY.textMuted;
+      this.moveToggleBtn.title = `Move \u2014 ${blockReason}`;
+    } else if (this.moveActive) {
+      this.moveToggleBtn.style.opacity = '1';
+      this.moveToggleBtn.style.cursor = 'pointer';
+      this.moveToggleBtn.style.background = 'rgba(6, 182, 212, 0.12)';
+      this.moveToggleBtn.style.color = OVERLAY.primary;
+      this.moveToggleBtn.title = 'Drag to reposition element';
+    } else {
+      this.moveToggleBtn.style.opacity = '1';
+      this.moveToggleBtn.style.cursor = 'pointer';
+      this.moveToggleBtn.style.background = 'transparent';
+      this.moveToggleBtn.style.color = OVERLAY.textMuted;
+      this.moveToggleBtn.title = 'Drag to reposition element';
+    }
+  }
+
+  /** Build the onCommit callback for the composed MoveEditor. */
+  private makeMoveCommit(): ChangeCallback {
+    return (changes) => {
+      this.currentOnCommit?.(changes);
+    };
   }
 
   // -----------------------------------------------------------------------
@@ -184,6 +375,9 @@ export class PositionEditor {
         // Refresh inset section visibility
         this.refreshInsetVisibility(pos);
 
+        // Refresh move toggle enabled state
+        this.refreshMoveToggleState();
+
         // Re-style all buttons in this row
         for (const child of Array.from(btnRow.children) as HTMLButtonElement[]) {
           const val = child.dataset.posValue;
@@ -224,7 +418,8 @@ export class PositionEditor {
     const currentPosition = getComputedProperty(element, 'position');
     const showInsets = currentPosition === 'absolute' || currentPosition === 'fixed';
 
-    if (!showInsets) {
+    // Don't show insets while move is active
+    if (!showInsets || this.moveActive) {
       this.insetSection.style.display = 'none';
       return;
     }
@@ -321,12 +516,31 @@ export class PositionEditor {
   }
 
   // -----------------------------------------------------------------------
-  // Refresh inset section after position type change
+  // Refresh helpers
   // -----------------------------------------------------------------------
 
-  private refreshInsetVisibility(newPosition: string): void {
+  private refreshInsetVisibility(_newPosition: string): void {
     if (!this.insetSection || !this.currentElement || !this.currentOnCommit) return;
     this.buildInsetControls(this.currentElement, this.currentOnCommit);
+  }
+
+  /** Re-evaluate the Move toggle's enabled/disabled state after position type change. */
+  private refreshMoveToggleState(): void {
+    if (!this.moveToggleBtn || !this.currentElement) return;
+
+    const blockReason = getMoveBlockReason(this.currentElement);
+
+    if (!blockReason && this.moveToggleBtn.style.opacity === '0.3') {
+      // Position changed from blocked → movable: auto-enable is just making it clickable
+      // (don't auto-activate the toggle — just enable the button)
+    }
+
+    if (blockReason && this.moveActive) {
+      // Position changed to blocked while move was active — deactivate
+      this.deactivateMove();
+    }
+
+    this.applyMoveToggleStyle();
   }
 }
 
