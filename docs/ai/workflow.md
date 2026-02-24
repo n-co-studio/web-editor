@@ -49,7 +49,7 @@ Commits include structured trailers for session metadata. Add trailers to the co
 ```
 Session: N
 Decisions: 0001, 0002
-Gates-A: A1-pass A2-pass A3-n/a A4-pass A5-pass
+Gates-A: A1-pass A2-pass A3-n/a A4-pass A5-pass A6-n/a
 Gates-B: B1-pass B2-n/a B3-n/a
 ```
 
@@ -82,3 +82,15 @@ When Prompt T splits a task into multiple briefs (Narrow path), each brief inclu
 - **Gate A6**: Verifies contract compliance when a task group is present. Skipped automatically for standalone briefs. Override: `SKIP_CONTRACT_CHECK=1`
 
 See `docs/ai/task-groups/_contract-template.yaml` for the contract structure and `docs/ai/quality-gates.md` for gate A6 details.
+
+### Governance Layers
+
+Three mechanical governance layers enforce process integrity:
+
+1. **Inter-session pipeline** (`docs/ai/governance/`): Committed evidence files proving Prompt 0 (`spec-compiled`) and Prompt A (`advisory-reviewed`) completed. Written by the model at prompt completion. Read by Prompt B at session start and by `branch-guard.sh` on first edit (advisory).
+
+2. **Phase chain governance** (task group `governance:` section): Per-brief gate evidence in the task group contract. Written by the model at session close. Verified by `branch-guard.sh` on first edit in subsequent task group sessions (advisory). Enables sequential integrity — Brief N+1 can confirm Brief N completed with passing gates.
+
+3. **Override audit** (`.claude/.state/overrides.log`): Session-scoped log of all governance override env vars used. Written by `log_override()` in `_analytics-helper.sh`. Summarized by `session-close-check.sh` at session end. Cleaned at session close.
+
+State files in `.claude/.state/` are cleaned at session close to prevent stale state from leaking across sessions.

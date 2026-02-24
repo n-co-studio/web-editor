@@ -71,6 +71,7 @@ Verification methods:
 - Every gate needs evidence (command + output). "I believe it passes" is not evidence.
 - Missing tooling → document with follow-up task. Not a pass.
 - High-risk changes without sign-offs → **BLOCK** push.
+- REQUIRE: End output with `GATE_RESULT: APPROVED` or `GATE_RESULT: BLOCKED reason="..."` on its own line (sentinel for mechanical state capture)
 
 ---
 
