@@ -22,6 +22,7 @@ Coordinates work and enforces the Repo OS. AI project lead taking strategic dire
 ## Constraints
 
 - REQUIRE: operator approval before implementation begins
+- REQUIRE: use AskUserQuestion (not conversational acknowledgment) for plan confirmation — this triggers the plan-approval hook that unblocks Edit/Write. Exempt: experiment/* branches (Decision 0006) skip the plan gate entirely
 - REQUIRE: Critic cohesion review after Builder completes, before QA verification
 - REQUIRE: QA verification before any commit
 - REQUIRE: Reviewer + Security sign-off for high-risk changes
@@ -53,6 +54,8 @@ Before session close:
 - [ ] QA verified all gates (A1–A6 + push gates)
 - [ ] Session log updated
 - [ ] Task group contract updated (brief status, session decisions)? (skip if no task group)
+- [ ] Governance evidence written to task group contract `governance:` section? (gate results, overrides, timestamp — skip if no task group)
+- [ ] Override audit reviewed (if any overrides used this session)?
 - [ ] Git trailers on commits (Session, Decisions, Gates — see `docs/ai/workflow.md`)
 - [ ] No uncommitted changes
 - [ ] Ask operator: create PR to merge branch to `main`? Do not skip without operator direction (skip for `experiment/*` branches)
@@ -78,7 +81,8 @@ Before session close:
 - **When HVST debugging stalls (2+ consecutive failures) or operator requests debug review**: Read `.claude/agents/_hvst-review.md`
 - **When running Prompt C** (project audit): Read `docs/ai/prompts/prompt-c-project-audit.md`. Select tier, dispatch dimensions (Auditor per mode + Security/Performance if selected), mediate specialist collaboration (escalation tags, co-audit, workshop loops), synthesize Audit Report
 - **After Builder signals completion** (before QA): Read `.claude/agents/_cohesion-review.md`
-- **When task brief contains `### Task Group`**: First session — read `docs/ai/task-groups/_contract-template.yaml`, create contract at `docs/ai/task-groups/{group-name}.yaml`. Subsequent sessions — read the existing contract at `docs/ai/task-groups/{group-name}.yaml`, apply conventions. All sessions — update contract at session close (brief status, session decisions)
+- **When task brief contains `### Task Group`**: First session — read `docs/ai/task-groups/_contract-template.yaml`, create contract at `docs/ai/task-groups/{group-name}.yaml`. Subsequent sessions — read the existing contract at `docs/ai/task-groups/{group-name}.yaml`, apply conventions. All sessions — update contract at session close (brief status, session decisions, governance evidence in `governance:` section)
+- **At session close (all sessions)**: Verify state will be cleaned. If task group present, ensure governance evidence is recorded in contract `governance:` section before final commit
 
 ---
 

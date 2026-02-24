@@ -76,6 +76,24 @@ log_hook_event() {
     >> "$events_dir/$today.ndjson" 2>/dev/null || true
 }
 
+# --- Log override usage for session audit ---
+# Appends to .claude/.state/overrides.log (gitignored, session-scoped).
+# Session-close hook reads this for override audit summary.
+log_override() {
+  local hook="$1"
+  local env_var="$2"
+
+  local repo_root
+  repo_root="$(get_repo_root)"
+  local state_dir="$repo_root/.claude/.state"
+  mkdir -p "$state_dir" 2>/dev/null || true
+
+  local ts
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  printf '%s %s %s\n' "$ts" "$hook" "$env_var" \
+    >> "$state_dir/overrides.log" 2>/dev/null || true
+}
+
 # --- Cleanup: delete event files older than 90 days ---
 cleanup_old_analytics() {
   local repo_root="$1"

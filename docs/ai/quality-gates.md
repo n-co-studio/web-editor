@@ -8,12 +8,12 @@ Verification details: `.claude/agents/qa-verifier.md`
 
 | Gate | Checks |
 |------|--------|
-| **A1 Decision Compliance** | All applicable decisions identified and followed. Conflicts → propose new decision record before committing. |
-| **A2 Process** | Plan exists before code. Changes explainable (what + why). Session log updated at close. Scope is small/reviewable — scope threshold (>100 lines, >3 files) triggers advisory warning, not a block. Large scope requires documented operator approval. |
+| **A1 Decision Compliance** | All applicable decisions identified and followed. Conflicts → propose new decision record before committing. Mechanically enforced via trigger parser: decisions with `## Triggers` sections are matched against staged files and `+` diff lines — triggered decisions must be declared in `Decisions:` git trailer. Blocking (enforced by `docs/ai/decisions/.a1-triggers-enforced` sentinel). New decisions must include a `## Triggers` section. |
+| **A2 Process** | Plan exists before code. Changes explainable (what + why). Session log updated at close. Scope >100 lines blocks commit unless `plan-approved` state file contains `large-scope: true`. Hotfix branches: A2 scope relaxed (check skipped). |
 | **A3 Quality** (if tooling exists) | Formatter run. Lint passes. Build/compile passes. |
-| **A4 Safety** | No secrets (tokens, keys, credentials, private URLs). No PII in logs/fixtures. |
-| **A5 Cohesion** (standard+ branches) | Critic (cohesion mode) reviewed diff for internal codebase coherence. All critical findings resolved. Re-run clean after fixes. |
-| **A6 Task Group Compliance** (when applicable) | Task group contract exists at `docs/ai/task-groups/{group-name}.yaml` and is current. Conventions from contract followed. Contract updated at session close. Applies only when task brief contains `### Task Group`. Override: `SKIP_CONTRACT_CHECK=1`. |
+| **A4 Safety** | No secrets (tokens, keys, credentials, private URLs). No PII in logs/fixtures. High-risk pattern detection: staged files matching risk paths (`auth`, `login`, `session`, `payment`, `billing`, `crypto`, `migration`, `schema`) or containing risk content (`password`, `secret`, `token`) require Reviewer + Security sign-off. Test/fixture/mock paths and governance docs (`docs/ai/`, `.claude/`, `AI.md`, `CLAUDE.md`) excluded from high-risk scanning (A4 secret scanning still applies to all files). |
+| **A5 Cohesion** (standard+ branches) | Critic (cohesion mode) reviewed diff for internal codebase coherence. All critical findings resolved. Re-run clean after fixes. Mechanically verified: `cohesion-reviewed` state file must exist at commit time. |
+| **A6 Task Group Compliance** (when applicable) | Task group contract exists at `docs/ai/task-groups/{group-name}.yaml` and is current. Conventions from contract followed. Contract updated at session close. **Blocking**: modified contract must be staged. Applies only when task brief contains `### Task Group`. Override: `SKIP_CONTRACT_CHECK=1`. |
 
 ## B) Push Gates
 
@@ -21,7 +21,7 @@ All Commit Gates, plus:
 
 | Gate | Checks |
 |------|--------|
-| **B1 Process** | Meaningful commit message. High-risk changes (auth, payments, data persistence, security, PII, external integrations) → Reviewer + Security sign-off. |
+| **B1 Process** | **Blocking**: branch name must match naming convention (`<category>/<description>`). Meaningful commit message. |
 | **B2 Quality** (if tooling exists) | Tests pass. Typecheck passes. |
 | **B3 Safety** (when applicable) | Dependency audit if deps changed. No debug flags left enabled. |
 
@@ -55,3 +55,21 @@ Apply to `release/*` branches before merge to `main`:
 | **C1 Release Checklist** | Version bumped. Changelog updated. Release notes drafted. |
 | **C2 Full Verification** | All A + B gates pass. Full test suite (not just related tests). |
 | **C3 Sign-offs** | Reviewer + Security sign-off required on every release merge. |
+
+## State File Dependencies
+
+Pre-commit gates verify governance steps completed by checking state files in `.claude/.state/`. State files are written by hooks (shell I/O only — never model tools).
+
+| State File | Writer | Required By |
+|------------|--------|-------------|
+| `plan-approved` | `plan-approval.sh` | State verification, A2 scope (large-scope flag) |
+| `cohesion-reviewed` | `state-writer.sh` (critic) | State verification (skipped on `hotfix/*`) |
+| `qa-verified` | `state-writer.sh` (qa-verifier) | State verification |
+| `reviewer-signed` | `state-writer.sh` (reviewer) | High-risk detection |
+| `security-signed` | `state-writer.sh` (security-privacy) | High-risk detection |
+| `high-risk-detected` | `pre-commit-gates.sh` | Audit trail (written when risk patterns match) |
+| `governance-checked` | `branch-guard.sh` (Gate 3) | First-fire marker (inter-session governance advisory) |
+| `phase-chain-checked` | `branch-guard.sh` (Gate 4) | First-fire marker (phase chain verification advisory) |
+| `overrides.log` | `_analytics-helper.sh` (`log_override`) | Override audit summary (session-close-check) |
+
+**Recovery override:** Set `REPO_OS_RECOVER=1` to skip all state-dependent checks in pre-commit, pre-push, and branch-guard (Edit/Write) gates. Emergency path for hook crashes or debugging sessions.
