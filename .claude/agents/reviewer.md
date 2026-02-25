@@ -35,6 +35,7 @@ Read `.claude/agents/_agent-glossary.md` and `.claude/agents/_agent-workflow.md`
 - ALLOW: Style differences that aren't defects
 - FOCUS: Defects over polish — good enough is good enough
 - ESCALATE: Fundamental approach disagreements to Orchestrator
+- REQUIRE: End output with `GATE_RESULT: APPROVED` or `GATE_RESULT: BLOCKED reason="..."` on its own line (sentinel for mechanical state capture)
 
 ---
 

@@ -22,10 +22,12 @@ Coordinates work and enforces the Repo OS. AI project lead taking strategic dire
 ## Constraints
 
 - REQUIRE: operator approval before implementation begins
+- REQUIRE: use AskUserQuestion (not conversational acknowledgment) for plan confirmation — this triggers the plan-approval hook that unblocks Edit/Write. Exempt: experiment/* branches (Decision 0006) skip the plan gate entirely
 - REQUIRE: Critic cohesion review after Builder completes, before QA verification
 - REQUIRE: QA verification before any commit
 - REQUIRE: Reviewer + Security sign-off for high-risk changes
 - REQUIRE: task group contract compliance when task group present (Decision 0011)
+- REQUIRE: one session per branch — no reuse of branches from closed sessions (Decision 0013, task groups exempt)
 - BLOCK: implementation without approved plan
 - BLOCK: proceeding on ambiguity — stop and ask
 - BLOCK: assumptions about requirements, architecture, or intent
@@ -53,9 +55,13 @@ Before session close:
 - [ ] QA verified all gates (A1–A6 + push gates)
 - [ ] Session log updated
 - [ ] Task group contract updated (brief status, session decisions)? (skip if no task group)
+- [ ] Governance evidence written to task group contract `governance:` section? (gate results, overrides, timestamp — skip if no task group)
+- [ ] Deferred findings written to Known Limitations in known-issues.md? (skip if no deferrals)
+- [ ] Override audit reviewed (if any overrides used this session)?
 - [ ] Git trailers on commits (Session, Decisions, Gates — see `docs/ai/workflow.md`)
 - [ ] No uncommitted changes
 - [ ] Ask operator: create PR to merge branch to `main`? Do not skip without operator direction (skip for `experiment/*` branches)
+- [ ] Branch will be sealed after close — ensure all work is committed and PR created (Decision 0013)
 - [ ] Follow-ups documented
 
 ---
@@ -77,8 +83,10 @@ Before session close:
 - **When running Prompt T Brief mode** (task definition): Dispatch Architect + Exploration + Critic for task-scoped analysis. See `docs/ai/prompts/prompt-t-task-definition.md`
 - **When HVST debugging stalls (2+ consecutive failures) or operator requests debug review**: Read `.claude/agents/_hvst-review.md`
 - **When running Prompt C** (project audit): Read `docs/ai/prompts/prompt-c-project-audit.md`. Select tier, dispatch dimensions (Auditor per mode + Security/Performance if selected), mediate specialist collaboration (escalation tags, co-audit, workshop loops), synthesize Audit Report
+- **When operator defers findings** (Prompt C audit or Prompt A Phase 2 review): Write `.claude/.deferrals-pending` (timestamp as content). Then write each deferred finding to the Known Limitations table in `known-issues.md` (template mode: `.claude/local/known-issues.md`; product mode: `docs/ai/logs/known-issues.md`). For Prompt C sessions, these are the only permitted file modifications — the session is no longer zero-change, so follow normal session close procedures (session log, commit)
 - **After Builder signals completion** (before QA): Read `.claude/agents/_cohesion-review.md`
-- **When task brief contains `### Task Group`**: First session — read `docs/ai/task-groups/_contract-template.yaml`, create contract at `docs/ai/task-groups/{group-name}.yaml`. Subsequent sessions — read the existing contract at `docs/ai/task-groups/{group-name}.yaml`, apply conventions. All sessions — update contract at session close (brief status, session decisions)
+- **When task brief contains `### Task Group`**: Contract path depends on repo mode (template mode: `.claude/local/task-groups/{group-name}.yaml`; product mode: `docs/ai/task-groups/{group-name}.yaml`). First session — read `docs/ai/task-groups/_contract-template.yaml`, create contract at the mode-appropriate path. Subsequent sessions — read the existing contract, apply conventions. All sessions — update contract at session close (brief status, session decisions, governance evidence in `governance:` section)
+- **At session close (all sessions)**: Verify state will be cleaned. If task group present, ensure governance evidence is recorded in contract `governance:` section before final commit
 
 ---
 

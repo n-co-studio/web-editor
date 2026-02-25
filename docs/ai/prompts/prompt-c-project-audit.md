@@ -18,6 +18,7 @@ Select which dimensions to audit. Not all-or-nothing — pick what's relevant.
 | Security | Security/Privacy | full-codebase scope | — (already specialist) |
 | Performance | Performance Engineer | code-review scope | — (already specialist) |
 | Governance | Auditor | `governance` | Analytics |
+| Tech debt | Auditor | `tech-debt` | Analytics |
 | Dependency health | Security/Privacy | full dep audit | — |
 
 ## Depth Tiers
@@ -27,8 +28,10 @@ The operator selects a tier, or the Orchestrator defaults based on context.
 | Tier | When | Dimensions |
 |---|---|---|
 | **Quick** | Routine check-in | Governance + Security |
-| **Standard** | Milestone or pre-release | Operator-selected dimensions |
+| **Standard** | Milestone or pre-release | Operator-selected dimensions (tech-debt available) |
 | **Deep** | Full health audit | All dimensions |
+
+Tech debt is available at Standard and Deep tiers. Not included in Quick tier.
 
 If no tier is specified:
 - Operator selected specific dimensions → **Standard**
@@ -47,6 +50,7 @@ If `manifest.json` has `"active": null` (no compiled specs):
 | Security | **Run** — works on code alone |
 | Performance | **Run** — works on code alone |
 | Governance | **Degrade** — check session log and known issues only, skip decision staleness |
+| Tech debt | **Run** — governance-scoped when no product code exists (categories 1–4 only; categories 5–7 adapt to available file types) |
 | Dependency health | **Run** — works on code alone |
 
 Inform the operator which dimensions were skipped or degraded and why.
@@ -55,7 +59,7 @@ Inform the operator which dimensions were skipped or degraded and why.
 
 The Orchestrator dispatches selected dimensions in parallel:
 
-- **Auditor dimensions** (drift, compliance, cohesion-drift, governance): Dispatch Auditor via Task with the mode specified. Each mode runs as a separate Task dispatch.
+- **Auditor dimensions** (drift, compliance, cohesion-drift, governance, tech-debt): Dispatch Auditor via Task with the mode specified. Each mode runs as a separate Task dispatch.
 - **Security dimension**: Dispatch Security/Privacy via Task with explicit scope: "Full-codebase security review — not scoped to a diff or spec. Audit all source code for vulnerabilities, secrets, and security risks."
 - **Performance dimension**: Dispatch Performance Engineer via Task with explicit scope: "Full-codebase performance review — not scoped to a diff or spec. Audit source code for performance issues, inefficient patterns, and optimization opportunities."
 - **Dependency health dimension**: Dispatch Security/Privacy via Task with explicit scope: "Full dependency audit — check all dependency manifests for known vulnerabilities, outdated packages, and supply chain risks."
@@ -119,8 +123,8 @@ No auto-remediation — audit is read-only. The operator decides what action to 
 
 ## Rules
 
-- **Never write files.** Prompt C is read-only. All output goes to the terminal.
-- **Never create session log entries.** Zero-change rule — no commits, no artifacts. Audit sessions are exempt.
+- **Never write files.** Prompt C is read-only. All output goes to the terminal. **Exception:** Sessions that produce operator deferrals write to `known-issues.md` (Known Limitations table) and `.claude/.deferrals-pending` only — no other file modifications. The session is no longer zero-change, so follow normal session close procedures (session log, commit).
+- **Never create session log entries.** Zero-change rule — no commits, no artifacts. Audit sessions are exempt. Does not apply when the deferral exception above is active.
 - **Specialist collaboration is Orchestrator-mediated.** The Auditor cannot dispatch agents directly. The Orchestrator detects escalation tags and handles all specialist dispatch.
 - **Cap workshop loops at 2 rounds**, then surface to operator.
 - **Context management.** Each dimension scopes its scan (Glob patterns, file type filters) rather than loading the entire codebase. The Auditor defines scan boundaries per mode in its agent definition.

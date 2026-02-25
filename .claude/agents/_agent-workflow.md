@@ -20,7 +20,7 @@ Lightweight spec-mode dispatch of Architect + Exploration + Critic for task scop
 
 No file artifacts. No session log entry. No handoff to Build Flow — the operator manually carries the brief to a new Prompt B session.
 
-**Narrow path (multi-brief):** When the operator narrows a task, each sub-brief includes a `### Task Group` section with group name, sequence, and integration notes. The first Prompt B session creates the task group contract; subsequent sessions read and comply. See `docs/ai/task-groups/_contract-template.yaml`.
+**Narrow path (multi-brief):** When the operator narrows a task, each sub-brief includes a `### Task Group` section with group name, sequence, and integration notes. The first Prompt B session creates the task group contract; subsequent sessions read and comply. Contract path depends on repo mode (template mode: `.claude/local/task-groups/{group-name}.yaml`; product mode: `docs/ai/task-groups/{group-name}.yaml`). See `docs/ai/task-groups/_contract-template.yaml` for the contract structure.
 
 ---
 
@@ -169,7 +169,7 @@ Runs on-demand when the operator invokes Prompt C. Read-only — no file modific
 
 | Agent | Invoke When | Blocks Commit? |
 |-------|------------|----------------|
-| **Auditor** | Operator runs Prompt C — dispatched per dimension (drift, compliance, cohesion-drift, governance) | No (read-only) |
+| **Auditor** | Operator runs Prompt C — dispatched per dimension (drift, compliance, cohesion-drift, governance, tech-debt) | No (read-only) |
 
 Audit agents are dispatched by the Orchestrator during Prompt C. Security/Privacy and Performance Engineer may also be dispatched in audit scope (full-codebase, not diff-scoped). See `docs/ai/prompts/prompt-c-project-audit.md`.
 

@@ -30,7 +30,7 @@ Use when: fixing bugs, failing tests, unstable behavior. Not required for simple
 
 Loop: **Hypothesis** → **Validate** (smallest experiment) → **Solve** (minimal fix) → **Test** (rerun checks) → **Record**
 
-**Record** (after 2+ failed cycles): When resolved, add entry to `docs/ai/logs/known-issues.md` if not already present. At 2 consecutive failures, check `known-issues.md` for matches before continuing.
+**Record** (after 2+ failed cycles): When resolved, add entry to `docs/ai/logs/known-issues.md` if not already present. At 2 consecutive failures, check `known-issues.md` for matches before continuing. Known-issues documentation is blocking at session close — the stop hook blocks if 2+ HVST failures occurred and `known-issues.md` was not updated. Override: `SKIP_KNOWN_ISSUES_CHECK=1` (use when failures were transient — network, timing).
 
 **Review Board** (optional): At 2+ consecutive failures or on operator request, Orchestrator dispatches Architect + Exploration + Critic (hypothesis mode) to review failure context and produce ranked hypotheses before further fix attempts. See `.claude/agents/_hvst-review.md`.
 
@@ -40,7 +40,9 @@ Work happens on categorized branches. Never commit directly to `main` — merge 
 
 ## Session Lifecycle
 
-At session close: verify all changes, commit, update session log (`docs/ai/logs/session-log.md`). Zero-change sessions (no commits, no working tree changes) are exempt from the session log requirement — the stop hook downgrades to advisory instead of blocking. Ask operator whether to create a PR to merge to `main` — do not skip or defer without explicit operator direction. Does not apply to `experiment/*` branches.
+At session close: verify all changes, commit, update session log (`docs/ai/logs/session-log.md`). Zero-change sessions (no commits, no working tree changes) are exempt from the session log requirement — the stop hook downgrades to advisory instead of blocking. Ask operator whether to create a PR to merge to `main` — do not skip or defer without explicit operator direction. Does not apply to `experiment/*` branches. The stop hook enforces: session log modification (blocking), uncommitted changes (blocking), and open PR on mergeable branches (blocking). Overrides: `SKIP_SESSION_LOG=1`, `SKIP_UNCOMMITTED_CHECK=1`, `SKIP_PR_CHECK=1`.
+
+**Session branch isolation** (Decision 0013): Each session uses a dedicated branch. When a session closes, the branch is sealed — no future session may edit files on it. Create a new branch for new work. Task group sessions are exempt (multi-brief groups may reuse branches across sessions). Override: `REPO_OS_SKIP_BRANCH_REUSE=1`.
 
 ### Git Trailer Convention
 
@@ -49,7 +51,7 @@ Commits include structured trailers for session metadata. Add trailers to the co
 ```
 Session: N
 Decisions: 0001, 0002
-Gates-A: A1-pass A2-pass A3-n/a A4-pass A5-pass
+Gates-A: A1-pass A2-pass A3-n/a A4-pass A5-pass A6-n/a
 Gates-B: B1-pass B2-n/a B3-n/a
 ```
 
@@ -74,7 +76,7 @@ Task definition sessions are fully ephemeral — no files written, no session lo
 
 ### Task Group Sessions
 
-When Prompt T splits a task into multiple briefs (Narrow path), each brief includes a `### Task Group` section. The briefs share a task group contract at `docs/ai/task-groups/{group-name}.yaml` that coordinates naming, patterns, decisions, and integration points across sessions.
+When Prompt T splits a task into multiple briefs (Narrow path), each brief includes a `### Task Group` section. The briefs share a task group contract that coordinates naming, patterns, decisions, and integration points across sessions. Contract path depends on repo mode (template mode: `.claude/local/task-groups/{group-name}.yaml`; product mode: `docs/ai/task-groups/{group-name}.yaml`).
 
 - **Contract lifecycle**: First Prompt B session creates the contract from brief metadata. Subsequent sessions read and update it. Prompt T never writes files
 - **Conventions are REQUIRE-level**: All sessions must follow the naming patterns, architectural patterns, decisions, and module boundaries established in the contract
@@ -82,3 +84,15 @@ When Prompt T splits a task into multiple briefs (Narrow path), each brief inclu
 - **Gate A6**: Verifies contract compliance when a task group is present. Skipped automatically for standalone briefs. Override: `SKIP_CONTRACT_CHECK=1`
 
 See `docs/ai/task-groups/_contract-template.yaml` for the contract structure and `docs/ai/quality-gates.md` for gate A6 details.
+
+### Governance Layers
+
+Three mechanical governance layers enforce process integrity:
+
+1. **Inter-session pipeline** (`docs/ai/governance/`): Committed evidence files proving Prompt 0 (`spec-compiled`) and Prompt A (`advisory-reviewed`) completed. Written by the model at prompt completion. Read by Prompt B at session start. Verified by `branch-guard.sh` on first Bash write and by `pre-commit-gates.sh` at commit-time (both advisory, first-fire).
+
+2. **Phase chain governance** (task group `governance:` section): Per-brief gate evidence in the task group contract. Written by the model at session close. Verified by `branch-guard.sh` on first Bash write and by `pre-commit-gates.sh` at commit-time (both advisory, first-fire). Enables sequential integrity — Brief N+1 can confirm Brief N completed with passing gates.
+
+3. **Override audit** (`.claude/.state/overrides.log`): Session-scoped log of all governance override env vars used. Written by `log_override()` in `_analytics-helper.sh`. Summarized by `session-close-check.sh` at session end. Cleaned at session close.
+
+State files in `.claude/.state/` are cleaned at session close to prevent stale state from leaking across sessions.

@@ -71,3 +71,18 @@ Follow docs/ai/prompts/prompt-b-product-build.md.
 If a task brief exists, instruct the operator to append it.
 
 If issues found: list only the problems, propose fixes, and wait for operator approval before confirming readiness.
+
+## Governance Evidence
+
+After Phase 3 validation passes ("Repo OS ready"), write a governance evidence file at `docs/ai/governance/advisory-reviewed`:
+
+```
+timestamp: <ISO 8601 UTC>
+session: <current session number>
+spec_version: <active version from manifest.json>
+review_tier: <lite | standard | full | skip>
+mode: <initialize | re-initialize>
+status: complete
+```
+
+This file is committed and read by subsequent Prompt B sessions as inter-session governance proof.
