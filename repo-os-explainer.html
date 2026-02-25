@@ -353,6 +353,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
     <a href="#gates">Quality Gates</a>
     <a href="#decisions">Decisions</a>
     <a href="#hooks">Hooks &amp; Files</a>
+    <a href="#modes">Operating Modes</a>
     <a href="#prototyping">Prototyping</a>
     <div class="sb-group">Scaling</div>
     <a href="#branches">Branch Categories</a>
@@ -394,7 +395,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
   <table class="ref">
     <tr><td style="color:var(--cyn)">You (operator)</td><td>Own architecture, approve plans, accept risk, decide when done. These are non-delegable.</td></tr>
     <tr><td style="color:var(--grn)">Prompt 0</td><td>Before any code: guided interview builds your complete project spec (product, architecture, design system, data, features, integrations, boundaries). Baked-in design system defaults. Figma MCP integration.</td></tr>
-    <tr><td style="color:var(--acc2)">AI agents</td><td>Two teams: <strong>Advisory Board</strong> (8 specialists review specs before build) and <strong>Build Team</strong> (Orchestrator plans, Builder codes, QA blocks bad commits, Reviewer + Security sign off high-risk, Accessibility advises).</td></tr>
+    <tr><td style="color:var(--acc2)">AI agents</td><td>Two teams: <strong>Advisory Board</strong> (7 specialists review specs before build) and <strong>Build Team</strong> (Orchestrator plans, Builder codes, QA blocks bad commits, Reviewer + Security sign off high-risk, Accessibility advises).</td></tr>
     <tr><td style="color:var(--orn)">Repo OS</td><td>Enforces decisions (mandatory rules), gates (verification before commit/push), and roles (who can do what). Hooks run automatically.</td></tr>
   </table>
   <div class="callout">
@@ -454,6 +455,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
       <tr><td><span class="tag t-cyn">Template sync</span></td><td>Automatic &mdash; Prompt 0 only if spec templates changed</td><td>Governance updates auto-merge weekly</td></tr>
       <tr><td><span class="tag t-pnk">Prototype / spike</span></td><td>Prompt 0.5</td><td>Quick test, architecture spike, or proof of concept on an experiment branch</td></tr>
       <tr><td><span class="tag t-cyn">Explore / investigate</span></td><td>Prompt T</td><td>Feasibility check, task planning, or quick Q&amp;A &mdash; produces a task brief for Prompt B</td></tr>
+      <tr><td><span class="tag t-pnk">Project audit</span></td><td>Prompt C</td><td>On-demand health check &mdash; cohesion, governance, security, performance</td></tr>
     </tbody>
   </table>
 </section>
@@ -536,7 +538,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
     <tbody>
       <tr><td><strong>Plan</strong></td><td>Define goal, scope, applicable decisions, files, verification approach. Operator approves before work begins.</td><td>Orchestrator + Operator</td></tr>
       <tr><td><strong>Build</strong></td><td>Implement in small increments (&lt;100 lines, &le;3 files). Follow plan exactly. Run local checks as you go (format, lint, build, tests).</td><td>Builder</td></tr>
-      <tr><td><strong>Verify</strong></td><td>Cohesion review (Critic checks diff for internal coherence). Then gate checks: A1&ndash;A5. Record evidence: command, output, pass/fail. Block if any gate fails.</td><td>Critic + QA/Verifier</td></tr>
+      <tr><td><strong>Verify</strong></td><td>Cohesion review (Critic checks diff for internal coherence). Then gate checks: A1&ndash;A6 (when applicable). Record evidence: command, output, pass/fail. Block if any gate fails.</td><td>Critic + QA/Verifier</td></tr>
       <tr><td><strong>Commit</strong></td><td>Only after all gates pass. Pre-commit hooks run automatically (secret scan, scope warning). Push gates (B1&ndash;B3) checked before push.</td><td>System + QA</td></tr>
     </tbody>
   </table>
@@ -608,7 +610,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
     </div>
     <div class="agent-expand"><div class="agent-body">
       <h4>What It Checks</h4>
-      <p><strong>A1</strong> Decision compliance &mdash; all decisions followed. <strong>A2</strong> Process &mdash; plan exists, scope small, changes explainable. <strong>A3</strong> Quality &mdash; format, lint, build. <strong>A4</strong> Safety &mdash; secret scan, PII check. For pushes: <strong>B1&ndash;B3</strong> meaningful message, sign-offs, tests, typecheck, dependency audit.</p>
+      <p><strong>A1</strong> Decision compliance &mdash; all decisions followed. <strong>A2</strong> Process &mdash; plan exists, scope small, changes explainable. <strong>A3</strong> Quality &mdash; format, lint, build. <strong>A4</strong> Safety &mdash; secret scan, PII check. <strong>A5</strong> Cohesion &mdash; diff coherence review. <strong>A6</strong> Task Group &mdash; contract compliance (when applicable). For pushes: <strong>B1&ndash;B3</strong> naming convention, tests, typecheck, dependency audit.</p>
       <h4>Tools</h4>
       <div class="tools"><span class="tool ok">Read</span><span class="tool ok">Glob</span><span class="tool ok">Grep</span><span class="tool ok">Bash</span><span class="tool no">Edit</span><span class="tool no">Write</span><span class="tool no">Task</span></div>
       <h4>Rule</h4>
@@ -879,15 +881,16 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
 
   <div class="g-panel on" id="ga">
     <div class="gate"><div class="gate-id gi-a">A1</div><div class="gate-text"><h3>Decision Compliance</h3><p>All decisions from <code>docs/ai/decisions/</code> identified and followed.</p><div class="gate-note">Violation &rarr; commit blocked. No exceptions.</div></div></div>
-    <div class="gate"><div class="gate-id gi-a">A2</div><div class="gate-text"><h3>Process</h3><p>Plan exists before code. Changes explainable (what + why). Session log updated at close. Scope is small/reviewable &mdash; scope threshold (&gt;100 lines, &gt;3 files) triggers <strong>advisory warning</strong>, not a block.</p><div class="gate-note">Large scope requires documented operator approval.</div></div></div>
+    <div class="gate"><div class="gate-id gi-a">A2</div><div class="gate-text"><h3>Process</h3><p>Plan exists before code. Changes explainable (what + why). Session log updated at close. Scope is small/reviewable &mdash; scope &gt;100 lines <strong>blocks commit</strong> unless <code>plan-approved</code> state file contains <code>large-scope: true</code>. Hotfix branches: scope check skipped.</p><div class="gate-note">Large scope requires documented operator approval.</div></div></div>
     <div class="gate"><div class="gate-id gi-a">A3</div><div class="gate-text"><h3>Quality</h3><p>Formatting, linting, and build pass. Each check documented with command and result.</p><div class="gate-note">Applies when tooling exists in repo.</div></div></div>
     <div class="gate"><div class="gate-id gi-a">A4</div><div class="gate-text"><h3>Safety</h3><p>No secrets (API keys, tokens, passwords, private keys). No PII in logs/fixtures.</p><div class="gate-note">Enforced automatically by pre-commit hook.</div></div></div>
     <div class="gate"><div class="gate-id gi-a">A5</div><div class="gate-text"><h3>Cohesion</h3><p>Critic (cohesion mode) reviewed the diff for internal codebase coherence: broken references, dangling imports, naming inconsistencies, incomplete integrations. All critical findings resolved.</p><div class="gate-note">Applies to standard+ branches (not experiment or hotfix).</div></div></div>
+    <div class="gate"><div class="gate-id gi-a">A6</div><div class="gate-text"><h3>Task Group Compliance</h3><p>Task group contract exists and is current. Conventions followed. Contract updated at session close. Modified contract must be staged.</p><div class="gate-note">Applies when task brief contains <code>### Task Group</code>. Override: <code>SKIP_CONTRACT_CHECK=1</code>.</div></div></div>
   </div>
 
   <div class="g-panel" id="gb">
-    <div class="gate"><div class="gate-id gi-b">B1</div><div class="gate-text"><h3>Process (Push)</h3><p>Meaningful commit message. High-risk changes have Reviewer + Security sign-off.</p><div class="gate-note">Required for auth, payments, data persistence, security, PII, external integrations.</div></div></div>
-    <div class="gate"><div class="gate-id gi-b">B2</div><div class="gate-text"><h3>Quality (Push)</h3><p>Tests pass. Typecheck passes. All commit gates (A1&ndash;A5) also satisfied.</p></div></div>
+    <div class="gate"><div class="gate-id gi-b">B1</div><div class="gate-text"><h3>Process (Push)</h3><p>Branch name must match naming convention (<code>&lt;category&gt;/&lt;description&gt;</code>). Meaningful commit message.</p><div class="gate-note">Enforced by pre-push hook. Unrecognized branch names block push.</div></div></div>
+    <div class="gate"><div class="gate-id gi-b">B2</div><div class="gate-text"><h3>Quality (Push)</h3><p>Tests pass. Typecheck passes. All commit gates (A1&ndash;A6) also satisfied.</p></div></div>
     <div class="gate"><div class="gate-id gi-b">B3</div><div class="gate-text"><h3>Safety (Push)</h3><p>Dependency audit if dependencies changed. No debug flags left enabled.</p></div></div>
   </div>
 
@@ -913,7 +916,10 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
   <div class="card dec"><div class="dec-id">0006</div><h3>Prototyping Tiers</h3><p>Three-tier prototyping system (Napkin / Spike / PoC) on <code>experiment/*</code> branches. Operator self-selects tier based on complexity. Prompt 0.5 facilitates. Only learnings are promoted &mdash; code is disposable. Experiment briefs stored in <code>docs/spec/prototypes/</code>.</p></div>
   <div class="card dec"><div class="dec-id">0007</div><h3>Advisory Board</h3><p>7 read-only specialist agents review compiled specs before build. Mix of always-on (Architect, Critic, Exploration) and conditional (Security Analyst, UX Strategist, Performance Engineer, Data Strategist). Prompt A orchestrates in 3 phases. Prompt 0 gains Feature mode for individual feature additions.</p></div>
   <div class="card dec"><div class="dec-id">0008</div><h3>Cohesion Review Gate</h3><p>Post-build coherence review via Critic (cohesion mode). Checks diff + neighbors for broken references, dangling imports, naming inconsistencies, incomplete integrations. Gate A5 verified by QA. Applies to standard+ branches. Critic stays read-only &mdash; Orchestrator passes diff context.</p></div>
+  <div class="card dec"><div class="dec-id">0009</div><h3>Analytics &amp; Observability Layer</h3><p>Hook telemetry via NDJSON events to <code>.claude/analytics/</code>. Analytics agent is the sole consumer (operator-invoked). All hooks emit events via <code>_analytics-helper.sh</code>. Override audit trail via <code>overrides.log</code>. Data lifecycle: 90-day retention, session-scoped IDs, fail-silent writes.</p></div>
   <div class="card dec"><div class="dec-id">0010</div><h3>Task Definition Prompt</h3><p>Prompt T for task exploration and planning. Two modes: Query (conversational Q&amp;A) and Brief (3-agent team produces structured task brief). Fully ephemeral &mdash; no files, no session log, no gates. Task brief is copy-pasted alongside Prompt B in a new session.</p></div>
+  <div class="card dec"><div class="dec-id">0011</div><h3>Task Group Contracts</h3><p>Multi-brief coordination via YAML contracts at <code>docs/ai/task-groups/</code>. Gate A6 enforcement: contract exists, conventions followed, contract updated at session close, modified contract staged. Sequential brief execution with <code>next_brief</code> chaining. Override: <code>SKIP_CONTRACT_CHECK=1</code>.</p></div>
+  <div class="card dec"><div class="dec-id">0012</div><h3>File Edit Restrictions (Mode Guard)</h3><p>Three operating modes &mdash; template (governance only), child (product + limited governance), autonomous (product + minimal governance) &mdash; controlling which files agents can modify. Declared in <code>.claude/repo-mode</code>. Default-deny on governance prefixes with per-mode carve-outs. Immune paths (<code>mode-guard.sh</code>, <code>repo-mode</code>). Bash command scanning for write patterns.</p></div>
 </section>
 
 <!-- ══════ HOOKS & FILES ══════ -->
@@ -925,12 +931,16 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
   <table class="ref">
     <thead><tr><th>Hook</th><th>When</th><th>What it does</th><th>Blocks?</th></tr></thead>
     <tbody>
-      <tr><td><code>branch-guard.sh</code></td><td>Before every <code>Edit</code> or <code>Write</code></td><td>Blocks file modifications on <code>main</code>. Fires before any work is done, not at commit time. Override: <code>REPO_OS_ALLOW_MAIN=1</code>.</td><td><span class="tag t-red">yes</span> (exit 2)</td></tr>
-      <tr><td><code>pre-commit-gates.sh</code></td><td>Before every <code>git commit</code></td><td>A4: Secret pattern scanning. A2: Advisory scope warning if &gt;100 lines.</td><td><span class="tag t-red">yes</span> (secrets)</td></tr>
-      <tr><td><code>pre-push-gates.sh</code></td><td>Before every <code>git push</code></td><td>B1: Branch naming convention check (advisory). Stubs for B2 tests/typecheck and B3 dependency audit &mdash; activate per project.</td><td><span class="tag t-grn">no</span> (template default)</td></tr>
+      <tr><td><code>branch-guard.sh</code></td><td>Before every <code>Edit</code> or <code>Write</code></td><td>Gate 1: Blocks file modifications on <code>main</code>. Gate 2: Blocks edits without approved plan (<code>.claude/.state/plan-approved</code>). Gate 3: Inter-session governance check (advisory). Gate 4: Phase chain verification for task groups (advisory). Override: <code>REPO_OS_ALLOW_MAIN=1</code> (Gate 1), <code>REPO_OS_SKIP_PLAN_GATE=1</code> (Gate 2).</td><td><span class="tag t-red">yes</span> (exit 2)</td></tr>
+      <tr><td><code>state-guard.sh</code></td><td>Before every <code>Edit</code>, <code>Write</code>, or <code>Bash</code></td><td>Blocks model writes to <code>.claude/.state/</code> &mdash; only governance hooks can write state files via shell I/O. Override: <code>REPO_OS_SKIP_STATE_GUARD=1</code>, <code>REPO_OS_RECOVER=1</code>.</td><td><span class="tag t-red">yes</span> (exit 2)</td></tr>
+      <tr><td><code>mode-guard.sh</code></td><td>Before every <code>Edit</code>, <code>Write</code>, or <code>Bash</code></td><td>Restricts file modifications based on operating mode (template/child/autonomous). Blocks edits outside active mode scope. Override: <code>REPO_OS_SKIP_MODE_GUARD=1</code>, <code>REPO_OS_UNLOCK_PATH=&lt;path&gt;</code>, <code>REPO_OS_MODE=&lt;mode&gt;</code>.</td><td><span class="tag t-red">yes</span> (exit 2)</td></tr>
+      <tr><td><code>pre-commit-gates.sh</code></td><td>Before every <code>git commit</code></td><td>A4: Secret scanning (blocks). State file verification (blocks). A2: Scope &gt;100 lines (blocks unless large-scope approved). A6: Task group contract staging (blocks). High-risk pattern detection (blocks). A1: Decision trigger parser (blocking). Override: <code>REPO_OS_RECOVER=1</code>.</td><td><span class="tag t-red">yes</span> (exit 1)</td></tr>
+      <tr><td><code>pre-push-gates.sh</code></td><td>Before every <code>git push</code></td><td>B1: Branch naming convention (blocks). Stubs for B2 tests/typecheck and B3 dependency audit &mdash; activate per project. Override: <code>REPO_OS_RECOVER=1</code>.</td><td><span class="tag t-red">yes</span> (exit 1)</td></tr>
+      <tr><td><code>plan-approval.sh</code></td><td>After <code>AskUserQuestion</code></td><td>Captures operator plan approvals. Writes <code>.claude/.state/plan-approved</code> when operator confirms a plan. Never blocks (PostToolUse).</td><td><span class="tag t-grn">no</span> (post-tool)</td></tr>
+      <tr><td><code>state-writer.sh</code></td><td>After subagent completes</td><td>Captures governance agent verdicts (Critic, QA, Reviewer, Security) as state files in <code>.claude/.state/</code>. Extracts <code>GATE_RESULT:</code> sentinel. Never blocks.</td><td><span class="tag t-grn">no</span> (post-agent)</td></tr>
       <tr><td><code>agent-git-guard.sh</code></td><td>Builder/QA/Security Bash calls</td><td>Blocks <code>git commit</code> and <code>git push</code> commands in subagents. Only the Orchestrator can commit/push.</td><td><span class="tag t-red">yes</span> (exit 2)</td></tr>
       <tr><td><code>hvst-failure-tracker.sh</code></td><td>After every Bash command</td><td>Tracks consecutive failures. After 2+ failures, reminds agent to check <code>known-issues.md</code> and follow HVST protocol.</td><td><span class="tag t-grn">no</span> (advisory)</td></tr>
-      <tr><td><code>session-close-check.sh</code></td><td>When Claude stops responding</td><td>Blocks session close if session log not updated; zero-change sessions (no commits, no working tree changes) downgrade to advisory (override: <code>SKIP_SESSION_LOG=1</code>). Advisory PR-to-main reminder for mergeable branches. Advisory HVST known-issues reminder.</td><td><span class="tag t-red">yes</span> (session log)</td></tr>
+      <tr><td><code>session-close-check.sh</code></td><td>When Claude stops responding</td><td>Blocks session close if session log not updated; zero-change sessions downgrade to advisory. Override audit summary (advisory). Governance evidence verification for task groups (advisory). PR-to-main and next-brief reminders (advisory). Session-scoped state cleanup. Override: <code>SKIP_SESSION_LOG=1</code>, <code>SKIP_CONTRACT_CHECK=1</code>.</td><td><span class="tag t-red">yes</span> (session log)</td></tr>
       <tr><td>YAML frontmatter</td><td>Agent invocation</td><td>Restricts tools per agent (e.g., Builder can&rsquo;t use Task, QA can&rsquo;t use Edit/Write). Frontmatter hooks wire <code>agent-git-guard.sh</code>.</td><td><span class="tag t-red">yes</span> (runtime)</td></tr>
     </tbody>
   </table>
@@ -945,17 +955,24 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
 <span class="p">├── </span><span class="f">.templatesyncignore</span> <span class="n">&mdash; protects compiled specs, logs, decisions from sync</span>
 <span class="p">├── </span><span class="d">.github/</span>
 <span class="p">│   └── </span><span class="d">workflows/</span>
-<span class="p">│       └── </span><span class="f">template-sync.yml</span> <span class="n">&mdash; daily sync from upstream template</span>
+<span class="p">│       ├── </span><span class="f">template-sync.yml</span> <span class="n">&mdash; daily sync from upstream template</span>
+<span class="p">│       └── </span><span class="f">auto-version-tag.yml</span> <span class="n">&mdash; CalVer tags on merge to main</span>
 <span class="p">├── </span><span class="d">.claude/</span>
 <span class="p">│   ├── </span><span class="f">settings.json</span> <span class="n">&mdash; team hooks &amp; permissions (committed)</span>
 <span class="p">│   ├── </span><span class="f">settings.local.json</span> <span class="n">&mdash; personal overrides (gitignored)</span>
+<span class="p">│   ├── </span><span class="d">.state/</span> <span class="n">&mdash; session-scoped governance state files (gitignored except .gitkeep)</span>
 <span class="p">│   ├── </span><span class="d">hooks/</span>
-<span class="p">│   │   ├── </span><span class="f">branch-guard.sh</span> <span class="n">&mdash; blocks file edits on main (fires before work starts)</span>
-<span class="p">│   │   ├── </span><span class="f">pre-commit-gates.sh</span> <span class="n">&mdash; secret scan + scope check</span>
-<span class="p">│   │   ├── </span><span class="f">pre-push-gates.sh</span> <span class="n">&mdash; branch naming + B-gate stubs</span>
+<span class="p">│   │   ├── </span><span class="f">_analytics-helper.sh</span> <span class="n">&mdash; shared helper (log_hook_event, log_override)</span>
+<span class="p">│   │   ├── </span><span class="f">branch-guard.sh</span> <span class="n">&mdash; 4-gate edit guard (main, plan, inter-session, phase chain)</span>
+<span class="p">│   │   ├── </span><span class="f">state-guard.sh</span> <span class="n">&mdash; blocks model writes to .state/ directory</span>
+<span class="p">│   │   ├── </span><span class="f">mode-guard.sh</span> <span class="n">&mdash; file edit restrictions by operating mode</span>
+<span class="p">│   │   ├── </span><span class="f">state-writer.sh</span> <span class="n">&mdash; captures agent verdicts as state files</span>
+<span class="p">│   │   ├── </span><span class="f">plan-approval.sh</span> <span class="n">&mdash; captures operator plan approvals as state</span>
+<span class="p">│   │   ├── </span><span class="f">pre-commit-gates.sh</span> <span class="n">&mdash; A-gates: secrets, state, scope, contracts, risk, decisions</span>
+<span class="p">│   │   ├── </span><span class="f">pre-push-gates.sh</span> <span class="n">&mdash; B-gates: naming, test/typecheck/audit stubs</span>
 <span class="p">│   │   ├── </span><span class="f">agent-git-guard.sh</span> <span class="n">&mdash; blocks git commit/push in subagents</span>
 <span class="p">│   │   ├── </span><span class="f">hvst-failure-tracker.sh</span> <span class="n">&mdash; consecutive failure tracking</span>
-<span class="p">│   │   └── </span><span class="f">session-close-check.sh</span> <span class="n">&mdash; session log enforcement (blocking; zero-change exempt)</span>
+<span class="p">│   │   └── </span><span class="f">session-close-check.sh</span> <span class="n">&mdash; session log, override audit, state cleanup (blocking; zero-change exempt)</span>
 <span class="p">│   └── </span><span class="d">agents/</span>
 <span class="p">│       ├── </span><span class="f">_agent-glossary.md</span> <span class="n">&mdash; shared terms (all agents read)</span>
 <span class="p">│       ├── </span><span class="f">_agent-workflow.md</span> <span class="n">&mdash; handoff flow (all agents read)</span>
@@ -974,7 +991,10 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
 <span class="p">│       ├── </span><span class="f">security-analyst.md</span> <span class="n">&mdash; threat review, conditional</span>
 <span class="p">│       ├── </span><span class="f">ux-strategist.md</span> <span class="n">&mdash; interaction review, conditional</span>
 <span class="p">│       ├── </span><span class="f">performance-engineer.md</span> <span class="n">&mdash; performance review, conditional</span>
-<span class="p">│       └── </span><span class="f">data-strategist.md</span> <span class="n">&mdash; schema review, conditional</span>
+<span class="p">│       ├── </span><span class="f">data-strategist.md</span> <span class="n">&mdash; schema review, conditional</span>
+<span class="p">│       ├── </span><span class="f">auditor.md</span> <span class="n">&mdash; project health audit, four modes</span>
+<span class="p">│       ├── </span><span class="f">analytics.md</span> <span class="n">&mdash; hook telemetry analysis, operator-invoked</span>
+<span class="p">│       └── </span><span class="f">_hvst-review.md</span> <span class="n">&mdash; HVST review board procedure (on-demand)</span>
 <span class="p">├── </span><span class="d">docs/</span>
 <span class="p">│   ├── </span><span class="d">spec/</span>
 <span class="p">│   │   ├── </span><span class="d">_templates/</span> <span class="n">&mdash; blank spec templates (synced from upstream)</span>
@@ -995,7 +1015,9 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
 <span class="p">│   └── </span><span class="d">ai/</span>
 <span class="p">│       ├── </span><span class="f">workflow.md</span> <span class="n">&mdash; execution model, HVST protocol</span>
 <span class="p">│       ├── </span><span class="f">quality-gates.md</span> <span class="n">&mdash; gate definitions (A/B/C)</span>
-<span class="p">│       ├── </span><span class="d">decisions/</span> <span class="n">&mdash; 0001&ndash;0007 baseline decisions</span>
+<span class="p">│       ├── </span><span class="d">decisions/</span> <span class="n">&mdash; 0001&ndash;0012 baseline decisions</span>
+<span class="p">│       ├── </span><span class="d">governance/</span> <span class="n">&mdash; inter-session governance evidence (spec-compiled, advisory-reviewed)</span>
+<span class="p">│       ├── </span><span class="d">task-groups/</span> <span class="n">&mdash; task group contracts (YAML)</span>
 <span class="p">│       ├── </span><span class="d">logs/</span>
 <span class="p">│       │   ├── </span><span class="f">session-log.md</span> <span class="n">&mdash; session audit trail (rolling cap: last 5)</span>
 <span class="p">│       │   └── </span><span class="f">known-issues.md</span> <span class="n">&mdash; HVST failure log</span>
@@ -1004,8 +1026,52 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
 <span class="p">│           ├── </span><span class="f">prompt-0.5-prototype.md</span> <span class="n">&mdash; rapid prototype session</span>
 <span class="p">│           ├── </span><span class="f">prompt-a-repo-os.md</span> <span class="n">&mdash; initialization prompt</span>
 <span class="p">│           ├── </span><span class="f">prompt-b-product-build.md</span> <span class="n">&mdash; development prompt</span>
-<span class="p">│           └── </span><span class="f">prompt-t-task-definition.md</span> <span class="n">&mdash; task exploration &amp; planning</span>
+<span class="p">│           ├── </span><span class="f">prompt-t-task-definition.md</span> <span class="n">&mdash; task exploration &amp; planning</span>
+<span class="p">│           └── </span><span class="f">prompt-c-project-audit.md</span> <span class="n">&mdash; project audit prompt</span>
 <span class="p">└── </span><span class="d">src/</span> <span class="n">&mdash; your product code</span></div>
+</section>
+
+<!-- ══════ OPERATING MODES ══════ -->
+<section id="modes">
+  <div class="sec-num">File Access Control</div>
+  <h2>Operating Modes</h2>
+  <p>Three modes control which files an agent can modify. Enforced by <code>mode-guard.sh</code> (Decision 0012). The mode is declared in <code>.claude/repo-mode</code> &mdash; a single word: <code>template</code>, <code>child</code>, or <code>autonomous</code>.</p>
+
+  <h3>Mode summary</h3>
+  <table class="ref">
+    <thead><tr><th>Mode</th><th>Product code</th><th>Governance access</th><th>When to use</th></tr></thead>
+    <tbody>
+      <tr><td><strong>template</strong></td><td><span class="tag t-red">blocked</span></td><td>Full governance: agents, hooks, settings, prompts, decisions, logs, workflow, gates, spec templates, AI.md, CLAUDE.md, .github/</td><td>Upstream template repo development</td></tr>
+      <tr><td><strong>child</strong></td><td><span class="tag t-grn">allowed</span></td><td>Limited carve-outs: project decisions (0100+), logs, governance evidence, task group contracts, compiled specs, prototypes, settings.local.json</td><td>Project repos created from template (default)</td></tr>
+      <tr><td><strong>autonomous</strong></td><td><span class="tag t-grn">allowed</span></td><td>Minimal carve-outs: logs, task group contracts only</td><td>Headless operation with maximum governance protection</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Mode resolution</h3>
+  <p>Priority (highest first):</p>
+  <ol class="tight">
+    <li><code>REPO_OS_MODE</code> environment variable (force any mode)</li>
+    <li><code>.claude/repo-mode</code> file (committed, single word)</li>
+    <li>Default: <code>child</code> (when file is missing)</li>
+  </ol>
+
+  <h3>Immune paths</h3>
+  <p><code>mode-guard.sh</code> and <code>repo-mode</code> cannot be modified in any mode &mdash; no override accepted. This is self-protection against circumvention. To maintain these files: set <code>REPO_OS_SKIP_MODE_GUARD=1</code> (disables the entire guard, logged in <code>overrides.log</code>).</p>
+
+  <h3>Overrides</h3>
+  <table class="ref">
+    <thead><tr><th>Override</th><th>What it does</th><th>Scope</th></tr></thead>
+    <tbody>
+      <tr><td><code>REPO_OS_UNLOCK_PATH=&lt;path&gt;</code></td><td>Unlocks a single governance file for editing</td><td>One file per invocation. Immune paths rejected.</td></tr>
+      <tr><td><code>REPO_OS_MODE=&lt;mode&gt;</code></td><td>Forces a specific mode (e.g., template access in a child repo)</td><td>Emergency use. Logged via <code>overrides.log</code>.</td></tr>
+      <tr><td><code>REPO_OS_SKIP_MODE_GUARD=1</code></td><td>Disables mode-guard entirely</td><td>Recovery/debugging. Logged via <code>overrides.log</code>.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Decision range convention</h3>
+  <div class="callout">
+    <strong>Decisions 0001&ndash;0099</strong> are template-synced and locked in child/autonomous modes. <strong>Decisions 0100+</strong> (<code>0[1-9][0-9][0-9]-*.md</code>) are project-specific and editable in child mode. This preserves governance consistency while allowing project-level customization.
+  </div>
 </section>
 
 <!-- ══════ PROTOTYPING ══════ -->
@@ -1130,7 +1196,7 @@ experiment/new-caching-strategy</div>
 
   <h3>What Repo OS handles</h3>
   <ul class="tight">
-    <li>Each session independently enforces all gates (A1&ndash;A4, B1&ndash;B3)</li>
+    <li>Each session independently enforces all gates (A1&ndash;A6, B1&ndash;B3)</li>
     <li>Secret scanning runs per-session before every commit</li>
     <li>Agent tool boundaries apply identically across all sessions</li>
     <li>Decision compliance is checked per-session</li>
@@ -1289,7 +1355,7 @@ experiment/new-caching-strategy</div>
 
   <div class="checks">
     <div class="chk"><div class="chk-ico">&#10003;</div><div><div class="chk-txt">Commits are clean</div><div class="chk-sub">No uncommitted work left behind</div></div></div>
-    <div class="chk"><div class="chk-ico">&#10003;</div><div><div class="chk-txt">Gates satisfied</div><div class="chk-sub">A1&ndash;A5, B1&ndash;B3 passed with evidence</div></div></div>
+    <div class="chk"><div class="chk-ico">&#10003;</div><div><div class="chk-txt">Gates satisfied</div><div class="chk-sub">A1&ndash;A6, B1&ndash;B3 passed with evidence</div></div></div>
     <div class="chk"><div class="chk-ico">&#10003;</div><div><div class="chk-txt">Session log updated</div><div class="chk-sub">Goal, changes, evidence, follow-ups</div></div></div>
     <div class="chk"><div class="chk-ico">&#10003;</div><div><div class="chk-txt">Next steps clear</div><div class="chk-sub">Follow-ups documented for next session</div></div></div>
     <div class="chk"><div class="chk-ico">&#10003;</div><div><div class="chk-txt">PR to main &mdash; ask operator</div><div class="chk-sub">Always ask the operator whether to create a PR. Never skip or defer without explicit direction. Not for experiment/* branches.</div></div></div>
@@ -1306,7 +1372,7 @@ experiment/new-caching-strategy</div>
 <span class="k">Changes Made:</span> <span class="v">Bullets of what changed</span>
 
 <span class="k">Verification:</span>
-  <span class="v">Commit gates: A1 ✓  A2 ✓  A3 ✓  A4 ✓</span>
+  <span class="v">Commit gates: A1 ✓  A2 ✓  A3 ✓  A4 ✓  A5 ✓  A6 ✓</span>
   <span class="v">Push gates:   B1 ✓  B2 ✓  B3 ✓</span>
   <span class="v">Evidence: [cmd] → [output] → [pass/fail]</span>
 
@@ -1337,7 +1403,7 @@ experiment/new-caching-strategy</div>
     <dl class="gl"><dt>HVST</dt><dd>Hypothesis &rarr; Validate &rarr; Solve &rarr; Test &rarr; Record. 5-step debugging protocol. Prevents random-fix loops.</dd></dl>
     <dl class="gl"><dt>Experiment Brief</dt><dd>Lightweight document capturing hypothesis, method, success criteria, and learnings for a prototype session. Template at <code>docs/spec/_templates/_experiment-brief.md</code>.</dd></dl>
     <dl class="gl"><dt>Prototype Tier</dt><dd>Operator-selected documentation level for experiments: Napkin (no artifact), Spike (experiment brief), Proof of Concept (brief + mini-spec notes). See <a href="#prototyping">Prototyping</a>.</dd></dl>
-    <dl class="gl"><dt>Advisory Board</dt><dd>8 specialist agents that review compiled specs before build. Runs during Prompt A Phase 1. All findings are advisory &mdash; operator decides.</dd></dl>
+    <dl class="gl"><dt>Advisory Board</dt><dd>7 specialist agents that review compiled specs before build. Runs during Prompt A Phase 1. All findings are advisory &mdash; operator decides.</dd></dl>
     <dl class="gl"><dt>Refinement Report</dt><dd>Synthesized output of advisory board review. Contains critical findings, recommendations, and ideas. Operator reviews per-item.</dd></dl>
     <dl class="gl"><dt>Feature Brief</dt><dd>Lightweight spec template for individual feature additions. Created by Prompt 0 Feature mode. Drives advisory board activation via &ldquo;What It Touches&rdquo; field.</dd></dl>
     <dl class="gl"><dt>Cohesion Review</dt><dd>Post-build review by Critic (cohesion mode) checking the diff and surrounding code for internal codebase coherence: broken references, dangling imports, inconsistent naming, incomplete integrations. Gate A5. Distinct from spec review (advisory board).</dd></dl>
@@ -1713,7 +1779,7 @@ const DT = {
             outcome:'New '+term('Decision record')+' committed. '+term('Prompt A')+' re-initialized with resolved conflict.',
             steps:[
             'Do NOT silently ignore either decision',
-            'Create a new '+term('Decision record')+' at docs/ai/decisions/ (use the next sequential number, e.g., 0009-title.md)',
+            'Create a new '+term('Decision record')+' at docs/ai/decisions/ (use the next sequential number, e.g., 0013-title.md)',
             'Reference which decisions it supersedes (e.g., \u201cSupersedes 0003, 0005\u201d)',
             'Paste the '+term('Prompt A')+' starter below and choose <strong>Re-initialize</strong> mode'
           ],cmds:[{label:'Re-initialize after resolving conflict',value:'Follow docs/ai/prompts/prompt-a-repo-os.md.'}],

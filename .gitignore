@@ -16,5 +16,9 @@
 .claude/.session-baseline-sha
 .claude/.session-id
 
+# Governance state files (session-scoped, written by SubagentStop hook)
+.claude/.state/*
+!.claude/.state/.gitkeep
+
 # Analytics data (consumed by analytics agent on-demand, not for version control)
 .claude/analytics/

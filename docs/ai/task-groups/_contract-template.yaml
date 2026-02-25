@@ -48,3 +48,23 @@ session_decisions:
   - session: 0
     decision: ""
     rationale: ""
+
+# Governance evidence — per-brief gate results recorded at session close.
+# Enables phase chain verification: subsequent sessions confirm prior briefs
+# completed with passing gates before proceeding.
+# Each brief appends its own entry at session close.
+governance:
+  - brief_sequence: 1        # matches briefs[].sequence
+    gates_a:
+      A1: ""                  # pass | n/a | skip
+      A2: ""
+      A3: ""
+      A4: ""
+      A5: ""
+      A6: ""
+    gates_b:
+      B1: ""
+      B2: ""
+      B3: ""
+    overrides_used: []        # list of override env vars used (e.g., REPO_OS_RECOVER)
+    timestamp: ""             # ISO 8601 when governance was recorded
