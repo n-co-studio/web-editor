@@ -1,0 +1,139 @@
+identity:
+  group_name: "repo-os-audit-remediation"
+  created_by_session: 34
+  created_date: "2026-02-23"
+
+briefs:
+  - title: "Hook Mechanical Fixes"
+    sequence: 1
+    session: 34
+    branch: "feature/task-group-contracts"
+    status: complete
+    next_brief: "Documentation Updates"
+  - title: "Documentation Updates"
+    sequence: 2
+    session: 35
+    branch: "fix/audit-remediation-hooks"
+    status: complete
+    next_brief: "Explainer"
+  - title: "Explainer"
+    sequence: 3
+    session: 36
+    branch: "fix/audit-remediation-hooks"
+    status: complete
+    next_brief: ""
+
+conventions:
+  naming:
+    - pattern: "REPO_OS_ prefix for override env vars"
+      scope: "Hook scripts"
+    - pattern: "log_override + log_hook_event for all override early-exits"
+      scope: "Hook scripts"
+    - pattern: "warn() for advisory messages, block() for blocking failures"
+      scope: "pre-commit-gates.sh"
+  patterns:
+    - pattern: "REPO_OS_RECOVER early-exit: log_override, log_hook_event with recovery_bypass, stderr message, exit 0"
+      rationale: "Consistent pattern across state-guard.sh, pre-commit-gates.sh, and now branch-guard.sh"
+    - pattern: "Trailing slash on .claude/.state/ in glob/substring matches"
+      rationale: "Prevents false matches on paths like .claude/.state-backup (matches mode-guard.sh pattern)"
+    - pattern: "cleanup_session called in all exit paths that close the session (not just successful close)"
+      rationale: "Prevents stale state files persisting into next session"
+  decisions:
+    - "0004"
+    - "0012"
+  boundaries:
+    - module: ".claude/hooks/session-close-check.sh"
+      owner_brief: "Hook Mechanical Fixes"
+    - module: ".claude/hooks/pre-commit-gates.sh"
+      owner_brief: "Hook Mechanical Fixes"
+    - module: ".claude/hooks/branch-guard.sh"
+      owner_brief: "Hook Mechanical Fixes"
+    - module: ".claude/hooks/state-guard.sh"
+      owner_brief: "Hook Mechanical Fixes"
+    - module: "AI.md (REPO_OS_RECOVER description)"
+      owner_brief: "Hook Mechanical Fixes"
+    - module: "AI.md (remaining hooks summary updates)"
+      owner_brief: "Documentation Updates"
+    - module: "docs/ai/quality-gates.md"
+      owner_brief: "Documentation Updates"
+
+integration_points:
+  - name: "Fixed hook behavior"
+    producer: "Hook Mechanical Fixes"
+    consumer: "Documentation Updates"
+    artifact: "4 hook scripts with corrected behavior"
+  - name: "Accurate docs for explainer"
+    producer: "Documentation Updates"
+    consumer: "Explainer"
+    artifact: "Updated governance docs reflecting fixes"
+
+session_decisions:
+  - session: 34
+    decision: "C5 Bash scanner false-positive requires no code change"
+    rationale: "known-issues.md Session 33 entry and Decision 0012 point 9 are both current — acknowledged as best-effort heuristic limitation"
+  - session: 34
+    decision: "cleanup_session is safe in stop_hook_active path"
+    rationale: "stop_hook_active=true means second stop attempt after a block — session is definitively closing, not continuing"
+  - session: 34
+    decision: "quality-gates.md REPO_OS_RECOVER description deferred to Brief 2"
+    rationale: "Brief 1 scope is hook fixes only. quality-gates.md is owned by Documentation Updates brief. Temporary cross-doc inconsistency is expected and tracked."
+
+  - session: 35
+    decision: "AI.md REPO_OS_RECOVER description already current from Brief 1"
+    rationale: "Brief 2 task brief listed AI.md update but Brief 1 already added 'and branch-guard gates'. No change needed — verified only."
+  - session: 35
+    decision: "quality-gates.md State File Dependencies table intentionally excludes operational files"
+    rationale: "Table documents pre-commit gate dependencies only. Operational files (session-log-hash, baseline-sha, session-id, hvst-fail-count) are not checked by pre-commit gates. Documented separately in glossary."
+
+  - session: 36
+    decision: "Python file I/O used for product-path edits in template mode"
+    rationale: "repo-os-explainer.html is a product path blocked by mode-guard in template mode. Decision 0012 point 15 documents Python file I/O as the legitimate maintenance escape hatch."
+  - session: 36
+    decision: "Hotfix/A6 interaction left unstated in explainer"
+    rationale: "quality-gates.md is silent on A6 for hotfix branches. Explainer faithfully mirrors source of truth gap. Deferred to future governance update."
+
+governance:
+  - brief_sequence: 1
+    gates_a:
+      A1: "pass"
+      A2: "pass"
+      A3: "n/a"
+      A4: "pass"
+      A5: "pass"
+      A6: "pass"
+    gates_b:
+      B1: "pass"
+      B2: "n/a"
+      B3: "n/a"
+    overrides_used: ["mode-guard/python-io"]
+    timestamp: "2026-02-24T05:20:00Z"
+
+  - brief_sequence: 2
+    gates_a:
+      A1: "pass"
+      A2: "pass"
+      A3: "n/a"
+      A4: "pass"
+      A5: "pass"
+      A6: "pass"
+    gates_b:
+      B1: "pass"
+      B2: "n/a"
+      B3: "n/a"
+    overrides_used: ["mode-guard/python-io"]
+    timestamp: "2026-02-24T05:57:00Z"
+
+  - brief_sequence: 3
+    gates_a:
+      A1: "pass"
+      A2: "pass"
+      A3: "n/a"
+      A4: "pass"
+      A5: "pass"
+      A6: "pass"
+    gates_b:
+      B1: "pass"
+      B2: "n/a"
+      B3: "n/a"
+    overrides_used: ["mode-guard/python-io"]
+    timestamp: "2026-02-24T06:30:00Z"

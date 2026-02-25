@@ -119,6 +119,22 @@ Spec Review — Prompt A
 Follow docs/ai/prompts/prompt-a-repo-os.md. Initialize mode.
 ~~~
 
+### Governance Evidence
+
+After the operator confirms "Spec complete" (or "Feature brief complete" for feature mode), write a governance evidence file:
+
+**Full spec / update mode**: Write `docs/ai/governance/spec-compiled` with:
+```
+timestamp: <ISO 8601 UTC>
+session: <current session number>
+spec_version: <active version from manifest.json>
+status: complete
+```
+
+**Feature mode**: Update the existing `spec-compiled` file with a new timestamp (the spec version doesn't change for feature additions).
+
+This file is committed and read by subsequent Prompt B sessions as inter-session governance proof.
+
 ### What "complete" means
 
 - Every spec file in the target version directory has been filled out

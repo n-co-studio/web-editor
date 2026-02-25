@@ -42,16 +42,32 @@ update_baseline() {
   git rev-parse HEAD > "$BASELINE_SHA_FILE" 2>/dev/null || true
 }
 
-# --- Session cleanup (HVST counter + session ID + old analytics) ---
+# --- Session cleanup (state files + HVST counter + session ID + analytics) ---
+# Removes all session-scoped state files to prevent stale state leaking
+# across sessions. Preserves .gitkeep.
 cleanup_session() {
   rm -f "$COUNTER_FILE"
   rm -f "$REPO_ROOT/.claude/.session-id"
   cleanup_old_analytics "$REPO_ROOT"
+  # Clean session-scoped governance state files
+  local state_dir="$REPO_ROOT/.claude/.state"
+  if [ -d "$state_dir" ]; then
+    rm -f "$state_dir/plan-approved"
+    rm -f "$state_dir/cohesion-reviewed"
+    rm -f "$state_dir/qa-verified"
+    rm -f "$state_dir/reviewer-signed"
+    rm -f "$state_dir/security-signed"
+    rm -f "$state_dir/high-risk-detected"
+    rm -f "$state_dir/governance-checked"
+    rm -f "$state_dir/phase-chain-checked"
+    rm -f "$state_dir/overrides.log"
+  fi
 }
 
 # --- Infinite loop guard ---
 # When a Stop hook blocks (exit 2), Claude continues working.
-# On the next stop attempt, stop_hook_active=true. Allow it to prevent loops.
+# On the next stop attempt, stop_hook_active=true — the session is closing
+# (second attempt after block). Clean up state files to prevent stale state.
 STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
 if [ "$STOP_HOOK_ACTIVE" = "true" ]; then
   update_baseline
@@ -61,6 +77,16 @@ fi
 
 # --- Operator override ---
 if [ "${SKIP_SESSION_LOG:-0}" = "1" ]; then
+  log_override "session-close-check" "SKIP_SESSION_LOG"
+  # Print override audit before cleanup (overrides.log is deleted by cleanup_session)
+  OVERRIDES_LOG="$REPO_ROOT/.claude/.state/overrides.log"
+  if [ -f "$OVERRIDES_LOG" ]; then
+    OVERRIDE_COUNT=$(wc -l < "$OVERRIDES_LOG" | tr -d ' ')
+    if [ "$OVERRIDE_COUNT" -gt 0 ]; then
+      UNIQUE_OVERRIDES=$(awk '{print $3}' "$OVERRIDES_LOG" | sort -u | tr '\n' ', ' | sed 's/,$//')
+      echo "Override audit: $OVERRIDE_COUNT override(s) this session — $UNIQUE_OVERRIDES" >&2
+    fi
+  fi
   update_baseline
   cleanup_session
   exit 0
@@ -131,6 +157,54 @@ if [ "$SESSION_LOG_MODIFIED" = false ]; then
   exit 2
 fi
 
+# --- Override audit (advisory) ---
+# Summarize any governance overrides used during this session.
+OVERRIDES_LOG="$REPO_ROOT/.claude/.state/overrides.log"
+if [ -f "$OVERRIDES_LOG" ]; then
+  OVERRIDE_COUNT=$(wc -l < "$OVERRIDES_LOG" | tr -d ' ')
+  if [ "$OVERRIDE_COUNT" -gt 0 ]; then
+    UNIQUE_OVERRIDES=$(awk '{print $3}' "$OVERRIDES_LOG" | sort -u | tr '\n' ', ' | sed 's/,$//')
+    echo "Override audit: $OVERRIDE_COUNT override(s) this session — $UNIQUE_OVERRIDES" >&2
+    echo "  Include in Overrides: git trailer if committing." >&2
+  fi
+fi
+
+# --- Log SKIP_CONTRACT_CHECK override (once, covers governance + next-brief checks) ---
+if [ "${SKIP_CONTRACT_CHECK:-0}" = "1" ]; then
+  log_override "session-close-check" "SKIP_CONTRACT_CHECK"
+fi
+
+# --- Governance evidence check (advisory) ---
+# Verifies that governance evidence was recorded in task group contract.
+# Model writes this as part of normal contract update; hook only verifies.
+if [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
+  CONTRACT_DIR="$REPO_ROOT/docs/ai/task-groups"
+  if [ -d "$CONTRACT_DIR" ]; then
+    for CONTRACT in "$CONTRACT_DIR"/*.yaml; do
+      [ -f "$CONTRACT" ] || continue
+      [ "$(basename "$CONTRACT")" = "_contract-template.yaml" ] && continue
+
+      # Check if any brief is marked in_progress (current session)
+      if grep -q "status: in_progress" "$CONTRACT" 2>/dev/null; then
+        GROUP_NAME=$(basename "$CONTRACT" .yaml)
+        # Check for governance section presence
+        if ! grep -q "^governance:" "$CONTRACT" 2>/dev/null; then
+          echo "Advisory: Task group '$GROUP_NAME' contract has no governance: section — add gate evidence before final commit." >&2
+        else
+          # Check if governance entry exists for current brief sequence
+          CURRENT_SEQ=$(grep -B1 "status: in_progress" "$CONTRACT" 2>/dev/null \
+            | grep "sequence:" | sed 's/.*sequence: *//' | head -1 || true)
+          if [ -n "$CURRENT_SEQ" ]; then
+            if ! grep -q "brief_sequence: $CURRENT_SEQ" "$CONTRACT" 2>/dev/null; then
+              echo "Advisory: Task group '$GROUP_NAME' — no governance entry for current brief (sequence $CURRENT_SEQ)." >&2
+            fi
+          fi
+        fi
+      fi
+    done
+  fi
+fi
+
 # --- PR reminder (advisory) ---
 # Remind the agent to create a PR if on a mergeable branch with no open PR.
 # Non-blocking: prints a reminder, does not exit 2.
@@ -171,7 +245,6 @@ if [ -f "$COUNTER_FILE" ]; then
       echo "Reminder: $FAIL_COUNT HVST failures but known-issues.md not updated — record per HVST Record step." >&2
     fi
   fi
-  cleanup_session
 fi
 
 # --- Task group next-brief reminder (advisory) ---
@@ -202,3 +275,6 @@ register_repo "$REPO_ROOT"
 
 # --- Update baseline for next session ---
 update_baseline
+
+# --- Final cleanup ---
+cleanup_session

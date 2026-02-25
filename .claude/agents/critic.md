@@ -48,6 +48,7 @@ The Orchestrator specifies which mode in the Task prompt.
 **Cohesion mode only:**
 - REQUIRE: Cite specific files and line ranges where incoherence exists
 - REQUIRE: Reference both sides of any broken connection (the source and the target)
+- REQUIRE: End output with `GATE_RESULT: APPROVED` or `GATE_RESULT: BLOCKED reason="..."` on its own line (sentinel for mechanical state capture)
 - SCOPE: Diff + files touched + immediate neighbors (imports/exports). Do not review unrelated parts of the codebase
 
 **Hypothesis mode only:**
