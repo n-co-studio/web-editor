@@ -5,11 +5,15 @@
 # Extracts GATE_RESULT: sentinel from last non-empty line of agent output.
 # Writes state files via shell I/O — never the Write tool.
 # Never blocks (always exit 0) — enforcement happens at commit time.
+# Phase advancement: advances phase on APPROVED results for critic and qa-verifier.
+# critic APPROVED: advance review → verify. qa-verifier APPROVED: advance verify → commit.
+# BLOCKED results: no phase advance (orchestrator handles loop-back).
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/_analytics-helper.sh"
+source "$SCRIPT_DIR/_phase-helper.sh"
 START_MS=$(now_ms)
 
 # --- Read SubagentStop payload ---
@@ -58,5 +62,30 @@ TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 printf 'timestamp: %s\nagent: %s\n%s\n' "$TIMESTAMP" "$AGENT_TYPE" "$LAST_LINE" \
   > "$STATE_DIR/$STATE_FILE" 2>/dev/null || true
 
-log_hook_event "state-writer" "SubagentStop" "$AGENT_TYPE" "write" "$START_MS" "$STATE_FILE"
+# --- Phase advancement based on agent verdict ---
+# Only advance on APPROVED results (BLOCKED loops back to build via orchestrator).
+# Fail-silent: if phase-state absent, skip advancement.
+GATE_VALUE=$(echo "$LAST_LINE" | sed 's/^GATE_RESULT: *//' | awk '{print $1}')
+
+if [ -n "$(get_phase)" ]; then
+  case "$AGENT_TYPE" in
+    critic)
+      # critic (cohesion-reviewed): advance review → verify on APPROVED only
+      if [ "$GATE_VALUE" = "APPROVED" ]; then
+        advance_phase "verify" 2>/dev/null || true
+      fi
+      ;;
+    qa-verifier)
+      # qa-verifier (qa-verified): advance verify → commit on APPROVED only
+      if [ "$GATE_VALUE" = "APPROVED" ]; then
+        advance_phase "commit" 2>/dev/null || true
+      fi
+      ;;
+    # reviewer, security-privacy: no phase advancement (sub-steps within verify)
+  esac
+fi
+
+# Capture GATE_RESULT value for analytics (truncate to 64 chars)
+GATE_RESULT_DETAIL=$(printf '%.64s' "$LAST_LINE")
+log_hook_event "state-writer" "SubagentStop" "$AGENT_TYPE" "write" "$START_MS" "$STATE_FILE" "$GATE_RESULT_DETAIL"
 exit 0

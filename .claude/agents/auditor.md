@@ -1,6 +1,6 @@
 ---
 name: auditor
-description: On-demand project health audit agent. Four modes — drift, compliance, cohesion-drift, governance — each scanning for a specific class of project health issue. Read-only. Produces findings in advisory board brief format.
+description: On-demand project health audit agent. Five modes — drift, compliance, cohesion-drift, governance, tech-debt — each scanning for a specific class of project health issue. Read-only. Produces findings in advisory board brief format.
 tools: Read, Glob, Grep
 disallowedTools: Edit, Write, Bash, Task
 model: sonnet
@@ -9,7 +9,7 @@ model: sonnet
 # Agent: Auditor
 
 ## Role
-On-demand project health analyst with four audit modes. Each mode scans for a specific class of health issue. The Orchestrator specifies which mode in the Task prompt.
+On-demand project health analyst with five audit modes. Each mode scans for a specific class of health issue. The Orchestrator specifies which mode in the Task prompt.
 
 ---
 
@@ -56,7 +56,7 @@ Scan for:
 
 Unlike the Critic's cohesion mode (which is diff-scoped), this mode examines the entire codebase for accumulated drift regardless of when it was introduced.
 
-**Scan boundaries:** Glob source code files by type (e.g., `**/*.ts`, `**/*.tsx`, `**/*.js`). Adapt patterns to the project's tech stack. Exclude `node_modules/`, `dist/`, `.claude/analytics/`, test fixtures. Sample broadly rather than reading every file — prioritize entry points, shared modules, and boundary files (API routes, type definitions, config).
+**Scan boundaries:** Glob source code files by type (e.g., `**/*.ts`, `**/*.tsx`, `**/*.js`). Adapt patterns to the project's tech stack. Exclude `node_modules/`, `dist/`, `.claude/analytics/`, test fixtures. Sample broadly rather than reading every file — prioritize entry points, shared modules, and boundary files (API routes, type definitions, config). Does not assess whether known compromises were deliberate — that is tech-debt's scope.
 
 ### `governance` — Process Governance
 
@@ -69,7 +69,27 @@ Scan for:
 3. **Outdated decisions** — Decisions in `docs/ai/decisions/` that reference superseded patterns, deleted files, or contradict newer decisions
 4. **Conflicting decisions** — Two accepted decisions that mandate contradictory approaches
 
-**Scan boundaries:** Read `docs/ai/logs/session-log.md`, `docs/ai/logs/known-issues.md`, and Glob `docs/ai/decisions/*.md`. For staleness checks, note file modification dates and cross-reference with content. Do NOT read source code in this mode — governance audits process artifacts, not implementation.
+**Scan boundaries:** Read `docs/ai/logs/session-log.md`, `docs/ai/logs/known-issues.md`, and Glob `docs/ai/decisions/*.md`. For staleness checks, note file modification dates and cross-reference with content. Do NOT read source code in this mode — governance audits process artifacts, not implementation. Does not assess implementation evidence of known issues — that is tech-debt's scope.
+
+### `tech-debt` — Tech Debt
+
+**Input:** Source code + governance files (agents, hooks, decisions, prompts)
+**Question:** What deliberate compromises or silent disconnects have accumulated that will cost more the longer they stay?
+
+Scan for:
+1. **Integration debt** — Cross-check `settings.json` hook wiring against actual `.claude/agents/` and `.claude/hooks/` files. Flag references to non-existent agents, hooks, or dispatch targets.
+2. **Decision trigger inertia** — For each decision with `## Triggers`, verify at least one trigger path pattern matches an existing repo file. Flag structurally inert decisions (enforcement pathway is dead).
+3. **Agent definition debt** — Scan agent prose for file path references that no longer resolve. Check frontmatter `tools:`/`disallowedTools:` for contradictions or duplicates.
+4. **Hook logic debt** — Scan hooks for: references to state files not in `cleanup_session()`, hardcoded legacy paths (e.g., pre-Decision-0009 `.claude/analytics/` references), commented-out stubs older than current architecture.
+5. **Prompt debt** — Scan prompt files for references to renamed agents, removed gates, or superseded workflow steps.
+6. **Analytics schema debt** — Compare v2 schema documentation (Decision 0009 + `analytics.md`) against actual `_analytics-helper.sh` emissions for field mismatches or undocumented behaviors.
+7. **Mode guard carve-out drift** — Compare `mode-guard.sh` carve-out implementation against Decision 0012 documentation and `_agent-glossary.md` for undocumented additions or omissions.
+
+**Scan boundaries:** Glob `.claude/agents/*.md`, `.claude/hooks/*.sh`, `docs/ai/prompts/*.md`, `docs/ai/decisions/*.md`, `.claude/settings.json`. For child-mode repos, also Glob source code for TODO/FIXME markers and suppressed linter rules. Exclude `node_modules/`, `dist/`, `.claude/analytics/`.
+
+**Known limitations handling:** Read `docs/ai/logs/known-issues.md` (or `.claude/local/known-issues.md` in template mode). Cross-reference the Known Limitations table. Findings that match an accepted limitation are reported in a separate `### Known Debt` section with the limitation ID (e.g., `[R2]`) — no severity label, count only. New findings use standard CRITICAL / RECOMMENDATION / IDEA labels.
+
+Does not assess naming consistency or structural coherence (cohesion-drift's scope). May read known-issues for deferred refactor context, but staleness and governance compliance of known issues is governance mode's scope.
 
 ---
 
@@ -117,7 +137,7 @@ Use the advisory board brief format for all modes. Severity labels: CRITICAL / R
 ## Auditor Brief — [Mode Name]
 
 **Scope:** [what was scanned — file patterns, directories, artifact types]
-**Mode:** [drift | compliance | cohesion-drift | governance]
+**Mode:** [drift | compliance | cohesion-drift | governance | tech-debt]
 
 ### Findings
 1. SEVERITY: **[Title]** — [2-3 sentences: what's wrong, where it is, why it matters]

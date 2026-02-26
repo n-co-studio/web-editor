@@ -1,0 +1,82 @@
+name: Feature Request
+description: Propose a new feature or enhancement to Repo OS
+title: "[Feature] "
+labels: []
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of Repo OS does this affect?
+      options:
+        - Prompt (new or modified prompt)
+        - Agent (new or modified agent)
+        - Hook (enforcement script)
+        - Gate (quality gate logic)
+        - Decision (governance policy)
+        - Workflow (GitHub Actions / CI)
+        - Documentation
+        - Template Sync
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Behavior
+      description: Describe the desired behavior. Include examples if relevant.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: needs-decision
+    attributes:
+      label: Needs Decision Record?
+      description: Would this require a new or modified decision in docs/ai/decisions/?
+      options:
+        - "Yes — new decision needed"
+        - "Yes — modifies existing decision"
+        - "No"
+        - "Unsure"
+    validations:
+      required: true
+
+  - type: textarea
+    id: decision-context
+    attributes:
+      label: Decision Context
+      description: If yes above, which decision(s) are affected or what policy needs to be established?
+      placeholder: "Modifies Decision 0004 (mechanical enforcement) — needs new hook binding for..."
+    validations:
+      required: false
+
+  - type: dropdown
+    id: downstream-impact
+    attributes:
+      label: Downstream Impact
+      description: How does this affect child repos on next template-sync?
+      options:
+        - "Breaking — child repos need action after sync"
+        - "Safe — transparent to child repos"
+        - "N/A — documentation only"
+        - "Unsure"
+    validations:
+      required: true
+
+  - type: textarea
+    id: downstream-detail
+    attributes:
+      label: Downstream Detail
+      description: If breaking, describe what child repos would need to do after syncing this change.
+    validations:
+      required: false
+
+  - type: textarea
+    id: mode-impact
+    attributes:
+      label: Mode Impact
+      description: Which operating modes are affected? Any mode-guard carve-out changes needed?
+      placeholder: "Affects child and autonomous modes. No mode-guard changes needed."
+    validations:
+      required: false

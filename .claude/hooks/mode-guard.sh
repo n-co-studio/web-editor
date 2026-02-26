@@ -39,24 +39,14 @@ if [ -n "$FILE_PATH" ] && [[ "$FILE_PATH" == *".claude/.state/"* ]]; then
   exit 0
 fi
 if [ -n "$COMMAND" ]; then
-  # Check write targets only (same pattern as state-guard.sh) — not raw substring
-  DEFER_REDIR=$(echo "$COMMAND" | grep -oE '[>]{1,2}\s*[^ |;&]+' | sed 's/[>]*//' | sed 's/^[[:space:]]*//' || true)
-  DEFER_TEE=$(echo "$COMMAND" | grep -oE 'tee\s+(-a\s+)?[^ |;&]+' | sed 's/tee\s*//' | sed 's/-a\s*//' || true)
-  for WT in $DEFER_REDIR $DEFER_TEE; do
+  # Check write targets via shared helper — defer to state-guard if targeting .state/
+  DEFER_TARGETS=$(extract_write_targets "$COMMAND")
+  while IFS= read -r WT; do
     [ -z "$WT" ] && continue
-    [[ "$WT" == /dev/* ]] && continue
     if [[ "$WT" == *".claude/.state/"* ]]; then
       exit 0
     fi
-  done
-fi
-
-# .claude/analytics/ paths: analytics passthrough (not governance)
-if [ -n "$FILE_PATH" ] && [[ "$FILE_PATH" == *".claude/analytics/"* ]]; then
-  exit 0
-fi
-if [ -n "$COMMAND" ] && [[ "$COMMAND" == *".claude/analytics/"* ]]; then
-  exit 0
+  done <<< "$DEFER_TARGETS"
 fi
 
 # --- Resolve operating mode ---
@@ -82,16 +72,7 @@ case "$MODE" in
     ;;
 esac
 
-# --- Path normalization (portable, macOS-safe) ---
-normalize_path() {
-  local raw="$1"
-  if command -v python3 &>/dev/null; then
-    python3 -c "import os.path,sys; print(os.path.normpath(sys.argv[1]))" "$raw" 2>/dev/null || echo "$raw"
-  else
-    echo "$raw"
-  fi
-}
-
+# --- Path helpers (normalize_path, resolve_path sourced from _analytics-helper.sh) ---
 # Make path relative to repo root for prefix matching
 make_relative() {
   local p="$1"
@@ -123,6 +104,7 @@ is_governance() {
     .github/*) return 0 ;;
     AI.md) return 0 ;;
     CLAUDE.md) return 0 ;;
+    repo-os-explainer.html) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -139,6 +121,9 @@ is_carved_out() {
         .claude/hooks/*) return 0 ;;
         .claude/settings.json) return 0 ;;
         .claude/settings.local.json) return 0 ;;
+        .claude/local/session-log.md) return 0 ;;
+        .claude/local/known-issues.md) return 0 ;;
+        .claude/local/task-groups/*) return 0 ;;
         docs/ai/prompts/*) return 0 ;;
         docs/ai/decisions/*) return 0 ;;
         docs/ai/logs/*) return 0 ;;
@@ -148,6 +133,7 @@ is_carved_out() {
         docs/spec/_templates/*) return 0 ;;
         AI.md) return 0 ;;
         CLAUDE.md) return 0 ;;
+        repo-os-explainer.html) return 0 ;;
         .github/*) return 0 ;;
         *) return 1 ;;
       esac
@@ -177,6 +163,43 @@ is_carved_out() {
   return 1
 }
 
+# --- Fast-exit for non-template modes ---
+# In child/autonomous modes, product code always passes and governance path
+# blocking is deferred to review-time. Template mode retains full edit-time
+# enforcement. Immune paths are still checked in all modes (self-protection).
+if [ "$MODE" != "template" ]; then
+  # Immune path check on Edit/Write file_path
+  if [ -n "$FILE_PATH" ]; then
+    ABS_PATH_FE=$(resolve_path "$FILE_PATH")
+    if is_in_repo "$ABS_PATH_FE" "$REPO_ROOT"; then
+      REL_PATH_FE=$(make_relative "$FILE_PATH")
+      if is_immune "$REL_PATH_FE"; then
+        log_hook_event "mode-guard" "PreToolUse" "" "block" "$START_MS" "file_immune_path" "" "$REL_PATH_FE"
+        echo "BLOCKED: $REL_PATH_FE is an immune path — cannot be modified in any mode (no override)" >&2
+        exit 2
+      fi
+    fi
+  fi
+  # Immune path check on Bash write targets (redirect/tee)
+  if [ -n "$COMMAND" ] && [ -z "$FILE_PATH" ]; then
+    FE_TARGETS=$(extract_write_targets "$COMMAND")
+    while IFS= read -r FE_WT; do
+      [ -z "$FE_WT" ] && continue
+      FE_WT_ABS=$(resolve_path "$FE_WT")
+      if is_in_repo "$FE_WT_ABS" "$REPO_ROOT"; then
+        FE_WT_REL=$(make_relative "$FE_WT")
+        if is_immune "$FE_WT_REL"; then
+          log_hook_event "mode-guard" "PreToolUse" "" "block" "$START_MS" "bash_immune_path" "" "$FE_WT_REL"
+          echo "BLOCKED: $FE_WT_REL is an immune path — cannot be modified in any mode (no override)" >&2
+          exit 2
+        fi
+      fi
+    done <<< "$FE_TARGETS"
+  fi
+  log_hook_event "mode-guard" "PreToolUse" "" "allow" "$START_MS" "fast_exit_${MODE}"
+  exit 0
+fi
+
 # --- Check a single path against mode restrictions ---
 check_path() {
   local rel="$1"
@@ -184,7 +207,7 @@ check_path() {
 
   # Immune paths — block unconditionally, no override
   if is_immune "$rel"; then
-    log_hook_event "mode-guard" "PreToolUse" "" "block" "$START_MS" "${context}_immune_path"
+    log_hook_event "mode-guard" "PreToolUse" "" "block" "$START_MS" "${context}_immune_path" "" "$rel"
     echo "BLOCKED: $rel is an immune path — cannot be modified in any mode (no override)" >&2
     exit 2
   fi
@@ -194,7 +217,7 @@ check_path() {
     UNLOCK_REL=$(make_relative "$REPO_OS_UNLOCK_PATH")
     if [ "$rel" = "$UNLOCK_REL" ]; then
       log_override "mode-guard" "REPO_OS_UNLOCK_PATH"
-      log_hook_event "mode-guard" "PreToolUse" "" "allow" "$START_MS" "unlock_path"
+      log_hook_event "mode-guard" "PreToolUse" "" "allow" "$START_MS" "unlock_path" "" "$rel"
       exit 0
     fi
   fi
@@ -202,43 +225,51 @@ check_path() {
   # Governance vs product
   if is_governance "$rel"; then
     if ! is_carved_out "$MODE" "$rel"; then
-      log_hook_event "mode-guard" "PreToolUse" "" "block" "$START_MS" "${context}_governance_${MODE}"
+      log_hook_event "mode-guard" "PreToolUse" "" "block" "$START_MS" "${context}_governance_${MODE}" "" "$rel"
       echo "BLOCKED: $rel is a governance path — not editable in '$MODE' mode (override: REPO_OS_UNLOCK_PATH=$rel or REPO_OS_SKIP_MODE_GUARD=1)" >&2
       exit 2
     fi
   else
     # Product code
     if [ "$MODE" = "template" ]; then
-      log_hook_event "mode-guard" "PreToolUse" "" "block" "$START_MS" "${context}_product_in_template"
+      log_hook_event "mode-guard" "PreToolUse" "" "block" "$START_MS" "${context}_product_in_template" "" "$rel"
       echo "BLOCKED: $rel is a product path — not editable in 'template' mode (override: REPO_OS_SKIP_MODE_GUARD=1)" >&2
       exit 2
     fi
   fi
 }
 
+# --- Resolve path for allow event (best-effort) ---
+ALLOW_PATH=""
+
 # --- File path check (Edit/Write) ---
 if [ -n "$FILE_PATH" ]; then
+  ABS_PATH=$(resolve_path "$FILE_PATH")
+  if ! is_in_repo "$ABS_PATH" "$REPO_ROOT"; then
+    log_hook_event "mode-guard" "PreToolUse" "" "allow" "$START_MS" "out_of_repo" "" "$FILE_PATH"
+    exit 0
+  fi
   REL_PATH=$(make_relative "$FILE_PATH")
+  ALLOW_PATH="$REL_PATH"
   check_path "$REL_PATH" "file"
 fi
 
 # --- Bash command scanning for write patterns ---
 if [ -n "$COMMAND" ] && [ -z "$FILE_PATH" ]; then
-  # Extract potential write targets from redirection and tee patterns
-  WRITE_TARGETS=""
-  REDIR_TARGETS=$(echo "$COMMAND" | grep -oE '[>]{1,2}\s*[^ |;&]+' | sed 's/[>]*//' | sed 's/^[[:space:]]*//' || true)
-  TEE_TARGETS=$(echo "$COMMAND" | grep -oE 'tee\s+(-a\s+)?[^ |;&]+' | sed 's/tee\s*//' | sed 's/-a\s*//' || true)
-  WRITE_TARGETS="$REDIR_TARGETS $TEE_TARGETS"
-
-  for WT in $WRITE_TARGETS; do
+  # Extract write targets via shared helper
+  TARGETS=$(extract_write_targets "$COMMAND")
+  while IFS= read -r WT; do
     [ -z "$WT" ] && continue
-    # Skip /dev/null and other device files (not real write targets)
-    [[ "$WT" == /dev/* ]] && continue
+    WT_ABS=$(resolve_path "$WT")
+    if ! is_in_repo "$WT_ABS" "$REPO_ROOT"; then
+      continue
+    fi
     WT_REL=$(make_relative "$WT")
+    [ -z "$ALLOW_PATH" ] && ALLOW_PATH="$WT_REL"
     check_path "$WT_REL" "bash"
-  done
+  done <<< "$TARGETS"
 fi
 
 # --- Allow ---
-log_hook_event "mode-guard" "PreToolUse" "" "allow" "$START_MS" "pass_${MODE}"
+log_hook_event "mode-guard" "PreToolUse" "" "allow" "$START_MS" "pass_${MODE}" "" "$ALLOW_PATH"
 exit 0

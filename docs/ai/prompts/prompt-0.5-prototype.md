@@ -26,6 +26,16 @@ The operator chooses the tier. The tiers are a menu, not a gate — they determi
 
 If the scope naturally escalates (a napkin test turns into a half-day exploration), suggest upgrading: "This is growing past napkin scope — want to create an experiment brief to track it?"
 
+### Phase Sequences
+
+**Napkin:** `init[agent] → build[agent] → close[agent]`
+
+**Spike:** `init[agent] → build[agent] → evaluate[both] → close[agent]`
+
+**Proof of Concept:** `init[agent] → build[agent] → evaluate[both] → document[agent] → close[agent]`
+
+Phase-state is managed automatically by hooks. See Decision 0014 for canonical definitions.
+
 ### Entry
 
 1. Confirm you are on an `experiment/*` branch (not required for Napkin tier). If not and the tier needs one, create it:
