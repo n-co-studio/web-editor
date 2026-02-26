@@ -1,0 +1,28 @@
+[
+  { "name": "type: prompt",    "color": "0075ca", "description": "Prompt system (0, 0.5, A, B, T, C)" },
+  { "name": "type: agent",     "color": "0075ca", "description": "Agent definitions (.claude/agents/)" },
+  { "name": "type: hook",      "color": "0075ca", "description": "Hook scripts (.claude/hooks/)" },
+  { "name": "type: gate",      "color": "0075ca", "description": "Quality gates (A1-A6, B1-B3, C1-C3)" },
+  { "name": "type: decision",  "color": "0075ca", "description": "Decision records (docs/ai/decisions/)" },
+  { "name": "type: workflow",  "color": "0075ca", "description": "CI/CD and GitHub Actions" },
+  { "name": "type: docs",      "color": "0075ca", "description": "Documentation and README" },
+
+  { "name": "area: enforcement",    "color": "d876e3", "description": "Mechanical enforcement (hooks, state files, guards)" },
+  { "name": "area: advisory-board", "color": "d876e3", "description": "Advisory board review flow" },
+  { "name": "area: build-flow",     "color": "d876e3", "description": "Build flow (plan-build-verify-commit)" },
+  { "name": "area: audit",          "color": "d876e3", "description": "Project audit (Prompt C dimensions)" },
+  { "name": "area: analytics",      "color": "d876e3", "description": "Hook telemetry and observability" },
+  { "name": "area: task-groups",    "color": "d876e3", "description": "Task group contracts and phase chain" },
+  { "name": "area: template-sync",  "color": "d876e3", "description": "Upstream template sync behavior" },
+
+  { "name": "P0: critical", "color": "b60205", "description": "Blocks all usage — fix immediately" },
+  { "name": "P1: high",     "color": "d93f0b", "description": "Significant impact — fix this cycle" },
+  { "name": "P2: normal",   "color": "fbca04", "description": "Standard priority" },
+
+  { "name": "downstream: breaking", "color": "b60205", "description": "Breaking change for child repos on next sync" },
+  { "name": "downstream: safe",     "color": "0e8a16", "description": "Safe for child repos — no action needed" },
+
+  { "name": "mode: template",   "color": "c5def5", "description": "Affects template mode behavior" },
+  { "name": "mode: child",      "color": "c5def5", "description": "Affects child mode behavior" },
+  { "name": "mode: autonomous", "color": "c5def5", "description": "Affects autonomous mode behavior" }
+]

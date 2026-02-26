@@ -63,7 +63,7 @@ fi
 # Final exit
 # ============================================================
 if [ "$FAILED" -ne 0 ]; then
-  log_hook_event "pre-push-gates" "PreToolUse" "Bash" "block" "$START_MS" "B1_naming_violation"
+  log_hook_event "pre-push-gates" "PreToolUse" "Bash" "block" "$START_MS" "B1_naming_violation" "branch:$CURRENT_BRANCH"
   echo "Push blocked by pre-push gate check." >&2
   exit 1
 fi

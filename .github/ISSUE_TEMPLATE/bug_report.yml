@@ -1,0 +1,96 @@
+name: Bug Report
+description: Report a bug in Repo OS governance, hooks, or prompts
+title: "[Bug] "
+labels: []
+body:
+  - type: dropdown
+    id: affected-area
+    attributes:
+      label: Affected Area
+      options:
+        - Hook (enforcement script)
+        - Prompt (session prompt)
+        - Agent (subagent definition)
+        - Gate (quality gate logic)
+        - Decision (decision record)
+        - Workflow (GitHub Actions)
+        - Mode Guard (file restrictions)
+        - Template Sync
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: operating-mode
+    attributes:
+      label: Operating Mode
+      description: Which mode was active when the bug occurred?
+      options:
+        - template
+        - child
+        - autonomous
+        - "Unknown / N/A"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: branch-type
+    attributes:
+      label: Branch Type
+      options:
+        - "feature/*"
+        - "fix/*"
+        - "hotfix/*"
+        - "experiment/*"
+        - "release/*"
+        - main
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Minimal steps to trigger the bug.
+      placeholder: |
+        1. Start a session on branch feature/...
+        2. Run Prompt B with task brief...
+        3. Builder completes, commit attempted...
+        4. Hook output shows...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: Include the full hook output or error message if available.
+    validations:
+      required: true
+
+  - type: textarea
+    id: overrides
+    attributes:
+      label: Override Environment Variables
+      description: List any REPO_OS_* or SKIP_* env vars that were set.
+      placeholder: |
+        REPO_OS_RECOVER=1
+        SKIP_SESSION_LOG=1
+    validations:
+      required: false
+
+  - type: textarea
+    id: analytics
+    attributes:
+      label: Analytics Event
+      description: Paste the relevant NDJSON event line from ~/.local/share/repo-os-analytics/<repo>/events/ if available.
+      render: json
+    validations:
+      required: false
