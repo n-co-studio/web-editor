@@ -11,9 +11,9 @@ Verification details: `.claude/agents/qa-verifier.md`
 | **A1 Decision Compliance** | All applicable decisions identified and followed. Conflicts → propose new decision record before committing. Mechanically enforced via trigger parser: decisions with `## Triggers` sections are matched against staged files and `+` diff lines — triggered decisions must be declared in `Decisions:` git trailer. Blocking (enforced by `docs/ai/decisions/.a1-triggers-enforced` sentinel). New decisions must include a `## Triggers` section. |
 | **A2 Process** | Plan exists before code. Changes explainable (what + why). Session log updated at close. Scope >100 lines blocks commit unless `plan-approved` state file contains `large-scope: true`. Hotfix branches: A2 scope relaxed (check skipped). |
 | **A3 Quality** (if tooling exists) | Formatter run. Lint passes. Build/compile passes. |
-| **A4 Safety** | No secrets (tokens, keys, credentials, private URLs). No PII in logs/fixtures. High-risk pattern detection: staged files matching risk paths (`auth`, `login`, `session`, `payment`, `billing`, `crypto`, `migration`, `schema`) or containing risk content (`password`, `secret`, `token`) require Reviewer + Security sign-off. Test/fixture/mock paths and governance docs (`docs/ai/`, `.claude/`, `AI.md`, `CLAUDE.md`) excluded from high-risk scanning (A4 secret scanning still applies to all files). |
+| **A4 Safety** | No secrets (tokens, keys, credentials, private URLs). No PII in logs/fixtures. High-risk pattern detection: staged files matching risk paths (`auth`, `login`, `session`, `payment`, `billing`, `crypto`, `migration`, `schema`) or containing risk content (`password`, `secret`, `token`) require Reviewer + Security sign-off. Test/fixture/mock paths and governance docs (`docs/ai/`, `.claude/`, `AI.md`, `CLAUDE.md`, `repo-os-explainer.html`) excluded from high-risk scanning (A4 secret scanning still applies to all files). |
 | **A5 Cohesion** (standard+ branches) | Critic (cohesion mode) reviewed diff for internal codebase coherence. All critical findings resolved. Re-run clean after fixes. Mechanically verified: `cohesion-reviewed` state file must exist at commit time. |
-| **A6 Task Group Compliance** (when applicable) | Task group contract exists at `docs/ai/task-groups/{group-name}.yaml` and is current. Conventions from contract followed. Contract updated at session close. **Blocking**: modified contract must be staged. Applies only when task brief contains `### Task Group`. Override: `SKIP_CONTRACT_CHECK=1`. |
+| **A6 Task Group Compliance** (when applicable) | Task group contract exists and is current (template mode: `.claude/local/task-groups/{group-name}.yaml`; product mode: `docs/ai/task-groups/{group-name}.yaml`). Conventions from contract followed. Contract updated at session close. **Blocking**: modified contract must be staged. Applies only when task brief contains `### Task Group`. Override: `SKIP_CONTRACT_CHECK=1`. |
 
 ## B) Push Gates
 
@@ -31,7 +31,7 @@ Branch type determines which gates apply and at what strictness.
 
 | Branch Pattern | Purpose | Gate Profile |
 |----------------|---------|-------------|
-| `main` | Production-ready code | All gates (A + B). Protected — no direct commits. Merge via PR only. |
+| `main` | Production-ready code | All gates (A + B). Protected — no direct commits. Solo mode (Decision 0015): mergeable branches merge directly at session close. |
 | `release/*` | Release candidates | All gates (A + B) + release checklist (C gates). Reviewer + Security required on every merge. |
 | `feature/*` | New functionality | Standard gates (A + B). Normal workflow. |
 | `fix/*` | Bug fixes | Standard gates (A + B). Normal workflow. |
@@ -68,8 +68,23 @@ Pre-commit gates verify governance steps completed by checking state files in `.
 | `reviewer-signed` | `state-writer.sh` (reviewer) | High-risk detection |
 | `security-signed` | `state-writer.sh` (security-privacy) | High-risk detection |
 | `high-risk-detected` | `pre-commit-gates.sh` | Audit trail (written when risk patterns match) |
-| `governance-checked` | `branch-guard.sh` (Gate 3) | First-fire marker (inter-session governance advisory) |
-| `phase-chain-checked` | `branch-guard.sh` (Gate 4) | First-fire marker (phase chain verification advisory) |
+| `governance-checked` | `branch-guard.sh` (Gate 3, Bash) or `pre-commit-gates.sh` (Gate 3, commit) | First-fire marker (inter-session governance advisory) |
+| `phase-state` | `_phase-helper.sh` (via hooks) | Phase-aware flow tracking (read by hooks for phase assertions) |
 | `overrides.log` | `_analytics-helper.sh` (`log_override`) | Override audit summary (session-close-check) |
 
-**Recovery override:** Set `REPO_OS_RECOVER=1` to skip all state-dependent checks in pre-commit, pre-push, and branch-guard (Edit/Write) gates. Emergency path for hook crashes or debugging sessions.
+Note: Gate 5 (session isolation, Decision 0013) uses `.claude/local/closed-branches` — a persistent ledger, not a session-scoped state file. It is not listed in the table above because it is not cleaned at session close. Gate 5 is enforced by `branch-guard-edit.sh` on Edit/Write and `branch-guard.sh` on Bash.
+
+**Recovery override:** Set `REPO_OS_RECOVER=1` to skip all state-dependent checks in pre-commit, pre-push, and branch-guard gates. Emergency path for hook crashes or debugging sessions.
+
+## Phase-to-Gate Mapping
+
+Which gates apply varies by session type. Enforced at `verify`/`commit` phases. See Decision 0014 for the full mapping:
+
+| Session Types | Gate Profile |
+|---------------|-------------|
+| `standard`, `taskgroup` | Full gates (A1–A6, B1–B3). A6 applies only to taskgroup |
+| `hotfix` | Expedited (A2 scope relaxed, A5 skipped) |
+| `experiment`, `prototype-*` | A4 safety only |
+| `spec-fresh`, `spec-update`, `advisory-init`, `advisory-reinit` | Advisory only (governance evidence at close) |
+| `audit` | Read-only (no gates unless deferrals create file changes) |
+| `taskdef-query`, `taskdef-brief` | No gates (fully ephemeral) |

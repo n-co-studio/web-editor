@@ -20,6 +20,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/_analytics-helper.sh"
+source "$SCRIPT_DIR/_phase-helper.sh"
 START_MS=$(now_ms)
 
 # --- Read PostToolUse payload ---
@@ -35,7 +36,13 @@ fi
 # --- Extract question text ---
 QUESTIONS_TEXT=$(echo "$INPUT" | jq -r '[.tool_input.questions[]?.question // empty] | join(" ")' 2>/dev/null)
 
-# Gate 1: Question must mention "plan"
+# --- Universal AskUserQuestion tracking (item 14) ---
+# Emit event for every AskUserQuestion call, regardless of plan relevance.
+# Truncate question text to 64 chars for detail field (no PII risk for governance questions).
+QUESTION_PREVIEW=$(printf '%.64s' "$QUESTIONS_TEXT")
+log_hook_event "plan-approval" "PostToolUse" "AskUserQuestion" "allow" "$START_MS" "ask_user_question" "$QUESTION_PREVIEW"
+
+# Gate 1: Question must mention "plan" — non-plan questions exit after universal event
 if ! echo "$QUESTIONS_TEXT" | grep -iqE '\bplan\b'; then
   exit 0
 fi
@@ -78,19 +85,47 @@ if echo "$QUESTIONS_TEXT $TOOL_OUTPUT" | grep -iqE '\blarge[ -]?scope\b'; then
   LARGE_SCOPE=true
 fi
 
+# --- Detect auto/review mode from operator answer ---
+# Scan answer text and option labels for explicit mode indication.
+# "review" wins if both keywords appear (conservative default per Decision 0014).
+DETECTED_MODE="review"
+if echo "$TOOL_OUTPUT $OPTION_LABELS" | grep -iqE '\bauto\b'; then
+  DETECTED_MODE="auto"
+fi
+if echo "$TOOL_OUTPUT $OPTION_LABELS" | grep -iqE '\breview\b'; then
+  DETECTED_MODE="review"
+fi
+
 # --- Write plan-approved state file ---
 REPO_ROOT="$(get_repo_root)"
 STATE_DIR="$REPO_ROOT/.claude/.state"
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 
 TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-QUESTION_HASH=$(printf '%s' "$QUESTIONS_TEXT" | shasum -a 256 | cut -c1-12)
+QUESTION_HASH=$(printf '%s' "$QUESTIONS_TEXT" | portable_hash | cut -c1-12)
 
 {
   printf 'timestamp: %s\n' "$TIMESTAMP"
   printf 'question_hash: %s\n' "$QUESTION_HASH"
   printf 'large-scope: %s\n' "$LARGE_SCOPE"
+  printf 'mode: %s\n' "$DETECTED_MODE"
 } > "$STATE_DIR/plan-approved" 2>/dev/null || true
 
-log_hook_event "plan-approval" "PostToolUse" "AskUserQuestion" "write" "$START_MS" "plan_approved"
+# --- Phase: set mode and advance through approval → next phase ---
+# If phase-state active, set mode then advance through approval to the
+# post-approval phase (queried dynamically from the phase sequence).
+# standard/taskgroup/hotfix → build. spec-fresh/spec-update → governance.
+# Fail-silent if no phase-state or if session type lacks these phases.
+CURRENT_PHASE=$(get_phase)
+if [ -n "$CURRENT_PHASE" ]; then
+  set_phase_mode "$DETECTED_MODE" 2>/dev/null || true
+  advance_phase "approval" 2>/dev/null || true
+  SESSION_TYPE=$(get_session_type)
+  NEXT_PHASE=$(get_post_approval_phase "$SESSION_TYPE")
+  if [ -n "$NEXT_PHASE" ]; then
+    advance_phase "$NEXT_PHASE" 2>/dev/null || true
+  fi
+fi
+
+log_hook_event "plan-approval" "PostToolUse" "AskUserQuestion" "write" "$START_MS" "plan_approved" "mode:$DETECTED_MODE"
 exit 0

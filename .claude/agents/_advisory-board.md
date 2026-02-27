@@ -165,4 +165,4 @@ When running Prompt A Phase 1 (advisory board review), the Orchestrator follows 
 7. **Present** report to operator for per-item review (accept / reject / defer)
 8. **Record** operator decisions — no build begins until all Critical findings are addressed
 
-For Feature mode: scan the feature brief's "What It Touches" checkboxes for activation signals. Default tier is Lite.
+For feature briefs: scan the feature brief's "What It Touches" checkboxes for activation signals. Default tier is Lite.
