@@ -1,0 +1,126 @@
+identity:
+  group_name: "phase-model-redesign"
+  created_by_session: 1
+  created_date: "2026-02-25"
+
+briefs:
+  - title: "Phase Model Foundation"
+    sequence: 1
+    session: 1
+    branch: "feature/phase-model-foundation"
+    status: complete
+    next_brief: "Hook Phase Integration"
+  - title: "Hook Phase Integration"
+    sequence: 2
+    session: null
+    branch: ""
+    status: complete
+    next_brief: "Session Close & Solo Mode"
+  - title: "Session Close & Solo Mode"
+    sequence: 3
+    session: 3
+    branch: "feature/session-close-solo-mode"
+    status: complete
+    next_brief: "Documentation & Migration"
+  - title: "Documentation & Migration"
+    sequence: 4
+    session: 4
+    branch: "feature/brief4-prompts-docs-governance"
+    status: in_progress
+    next_brief: ""
+
+conventions:
+  naming:
+    - pattern: "_phase-helper.sh"
+      scope: "Sourced helper in .claude/hooks/ (underscore prefix = not a standalone hook)"
+    - pattern: "phase-state"
+      scope: "State file in .claude/.state/ — session-scoped key-value format"
+    - pattern: "get_phase_*, get_solo, set_solo, init_phase, advance_phase, assert_phase"
+      scope: "Public API functions in _phase-helper.sh"
+    - pattern: "is_final_brief, add_failure"
+      scope: "Helper functions in session-close-check.sh"
+    - pattern: ".stop-attempt-count"
+      scope: "Session-scoped counter file in .claude/ — 3-attempt safety valve"
+  patterns:
+    - pattern: "Case statements for Bash 3 compatibility (no associative arrays)"
+      rationale: "macOS ships Bash 3 which lacks associative arrays"
+    - pattern: "Shell I/O for state file writes (printf > file), never model tools"
+      rationale: "Bypasses state-guard.sh which only intercepts model tool calls"
+    - pattern: "Session ID validation on every read from phase-state"
+      rationale: "Prevents stale state from crashed/prior sessions"
+  decisions:
+    - "0014"
+    - "0015"
+  boundaries:
+    - module: ".claude/hooks/_phase-helper.sh"
+      owner_brief: "Phase Model Foundation"
+    - module: ".claude/.state/phase-state"
+      owner_brief: "Phase Model Foundation"
+    - module: "Hook consumers (branch-guard, pre-commit-gates, etc.)"
+      owner_brief: "Hook Phase Integration"
+    - module: ".claude/hooks/session-close-check.sh (solo merge, single-pass, task group lifecycle)"
+      owner_brief: "Session Close & Solo Mode"
+    - module: "Prompt-level init_phase calls"
+      owner_brief: "Documentation & Migration"
+    - module: "docs/ai/workflow.md phase model documentation"
+      owner_brief: "Documentation & Migration"
+
+integration_points:
+  - name: "Phase helper API"
+    producer: "Phase Model Foundation"
+    consumer: "Hook Integration"
+    artifact: ".claude/hooks/_phase-helper.sh"
+  - name: "Phase-state file schema"
+    producer: "Phase Model Foundation"
+    consumer: "Hook Integration"
+    artifact: ".claude/.state/phase-state"
+  - name: "get_session_type function"
+    producer: "Phase Model Foundation"
+    consumer: "Hook Integration"
+    artifact: ".claude/hooks/_analytics-helper.sh"
+
+session_decisions:
+  - session: 1
+    decision: "Named phase mode getter get_phase_mode instead of get_mode"
+    rationale: "Avoid collision with existing get_mode in _analytics-helper.sh (returns template/child/autonomous)"
+  - session: 1
+    decision: "Used contract-init as unified phase for both contract-create and contract-sync"
+    rationale: "Single phase name simplifies sequence; behavior difference is semantic, not positional"
+  - session: 1
+    decision: "Solo mode uses separate solo field, not mode field"
+    rationale: "Solo (how merges happen) is orthogonal to mode (when operator reviews) — cohesion review caught the conflict"
+  - session: 1
+    decision: "Deferred: solo field not written by init_phase — Hook Integration brief adds it"
+    rationale: "Decision 0015 defines solo field but implementation deferred to merge-logic brief"
+  - session: 1
+    decision: "Deferred: log_hook_event still reads .session-type directly, not get_session_type()"
+    rationale: "Performance tradeoff — adding grep overhead to every analytics event is costly. Hook Integration brief should evaluate"
+  - session: 3
+    decision: "Replaced stop_hook_active boolean with .stop-attempt-count file counter"
+    rationale: "Need 3-attempt threshold (check → re-check → safety valve) but stop_hook_active is only a boolean"
+  - session: 3
+    decision: "Gate 5 task group exemption removed from branch-guard hooks"
+    rationale: "Non-final briefs no longer seal the branch, so the exemption is unnecessary — upstream suppression instead of downstream exception"
+  - session: 3
+    decision: "release/* excluded from solo merge path"
+    rationale: "Decision 0015 scopes solo merge to feature/*/fix/*/hotfix/* only; release branches always require PR"
+  - session: 3
+    decision: "Solo field added to phase-state schema with false default"
+    rationale: "Resolves Brief 1 deferral — get_solo/set_solo functions now in _phase-helper.sh"
+
+governance:
+  - brief_sequence: 1
+    gates_a:
+      A1: "pass"
+      A2: "pass"
+      A3: "pass"
+      A4: "pass"
+      A5: "pass"
+      A6: "pass"
+    gates_b:
+      B1: "pass"
+      B2: "n/a"
+      B3: "n/a"
+    overrides_used:
+      - "REPO_OS_RECOVER (test execution only)"
+    timestamp: "2026-02-25T18:00:00Z"

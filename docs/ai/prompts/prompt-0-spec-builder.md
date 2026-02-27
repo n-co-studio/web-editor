@@ -15,8 +15,8 @@ You must:
 2. Read all template files in `docs/spec/_templates/`
 3. Determine mode:
    - **If `manifest.json` has `"active": null`** → Fresh mode. Target: `docs/spec/compiled/v1/`
-   - **If versions exist AND operator says "add a feature"** → Feature mode. Target: `docs/spec/compiled/{active}/features/`
    - **If versions exist** → Update mode. Read the latest compiled version. Target: `docs/spec/compiled/v{n+1}/`
+   - **If the operator says "add a feature"** → Redirect to Prompt T. To add a feature to an existing spec, use Prompt T with a significant feature description. Prompt T will produce a task group that includes spec writing as Brief 1.
 4. Walk the operator through each spec file, one at a time, in this order:
    - `product.md` — What the product is and who it's for
    - `architecture.md` — Tech stack and structure
@@ -32,6 +32,14 @@ You must:
    - Add a version entry with: `version`, `created` (ISO 8601 timestamp), `templateCommit` (output of `git rev-parse --short HEAD`), `specFiles` (list of filenames), `featureFiles` (list of filenames)
 8. Present a summary for operator review
 9. Get explicit approval: "Spec complete"
+
+### Phase Sequences
+
+**Fresh mode:** `init[agent] → interview[both] → write[agent] → approval[operator] → governance[agent] → close[agent]`
+
+**Update mode:** `init[agent] → interview[both] → write[agent] → approval[operator] → governance[agent] → close[agent]`
+
+Phase-state is managed automatically by hooks. See Decision 0014 for canonical definitions.
 
 ### Fresh Mode vs Update Mode
 
@@ -67,30 +75,7 @@ You must:
 - Walk through the defaults section by section
 - For each section: present the defaults, ask "accept as-is or override?"
 - The operator must confirm each section (a blanket "accept all" is fine)
-- Brand colors (primary, accent) have no defaults — the operator must define these
-
-### Feature Mode
-
-**Feature mode** (active version exists AND operator wants to add a feature):
-- Read the active compiled spec version for project context
-- Read `docs/spec/_templates/feature-brief.md` for the brief template
-- Interview the operator to fill out the feature brief — focused interview, not full 7-page spec
-- The "What It Touches" section is critical — it determines which advisory board specialists activate
-- If the feature was promoted from a PoC, ask the operator for the experiment brief path and link it in the "Prior Art" field
-- Write the completed brief to `docs/spec/compiled/{active}/features/brief-{name}.md`
-- Do NOT update `manifest.json` (this is a feature addition, not a version change)
-- When complete, confirm **"Feature brief complete"** and output a handoff block (see Session Handoff Convention in `workflow.md`):
-
-~~~
-[Feature Name] Review — Prompt A
-
-Follow docs/ai/prompts/prompt-a-repo-os.md. Initialize mode.
-~~~
-
-Feature mode is lighter than a full spec update:
-- No re-interview of product, architecture, design system, or boundaries
-- Focus only on the new feature's requirements, constraints, and touchpoints
-- The existing compiled spec provides the context for what the feature integrates with
+- REQUIRE: brand colors (primary, accent) have no defaults — the operator must define these
 
 ### Feature Specs
 
@@ -101,16 +86,14 @@ Feature mode is lighter than a full spec update:
 
 ### Rules
 
-- **Never fill in a field yourself.** Every value comes from the operator.
-- **Never assume.** If something is unclear, ask. Do not guess.
-- **Never suggest features** the operator hasn't mentioned.
-- **Never write product code.** Spec files only.
-- **Never skip a spec file.** Every file must be addressed.
-- **If the operator is unsure**, present options and tradeoffs — but they decide.
+- REQUIRE: **never fill in a field yourself.** Every value comes from the operator.
+- REQUIRE: **never assume.** If something is unclear, ask. Do not guess.
+- REQUIRE: **never suggest features** the operator hasn't mentioned.
+- REQUIRE: **never write product code.** Spec files only.
+- REQUIRE: **never skip a spec file.** Every file must be addressed.
+- GUIDE: **if the operator is unsure**, present options and tradeoffs — but they decide.
 - **Companion tools**: When walking through `integrations.md`, mention any companion tool templates present in the MCP section. Do not push adoption — only surface the option if the project involves front-end UI.
-- **If a field can't be defined yet**, mark it `[TBD]` and flag it. All TBDs must be resolved before moving to Prompt A.
-- **Feature brief rule:** The "What It Touches" checkboxes must have at least one item checked. If the operator checks none, ask what the feature interacts with — every feature touches something.
-
+- REQUIRE: **if a field can't be defined yet**, mark it `[TBD]` and flag it. All TBDs must be resolved before moving to Prompt A.
 When complete, confirm **"Spec complete"** and output a handoff block (see Session Handoff Convention in `workflow.md`):
 
 ~~~
@@ -121,9 +104,8 @@ Follow docs/ai/prompts/prompt-a-repo-os.md. Initialize mode.
 
 ### Governance Evidence
 
-After the operator confirms "Spec complete" (or "Feature brief complete" for feature mode), write a governance evidence file:
+After the operator confirms "Spec complete", write a governance evidence file at `docs/ai/governance/spec-compiled`:
 
-**Full spec / update mode**: Write `docs/ai/governance/spec-compiled` with:
 ```
 timestamp: <ISO 8601 UTC>
 session: <current session number>
@@ -131,9 +113,11 @@ spec_version: <active version from manifest.json>
 status: complete
 ```
 
-**Feature mode**: Update the existing `spec-compiled` file with a new timestamp (the spec version doesn't change for feature additions).
-
 This file is committed and read by subsequent Prompt B sessions as inter-session governance proof.
+
+### Close Sequence
+
+At close: update session log, commit all changes (including governance evidence and compiled specs), present closing summary. See `docs/ai/workflow.md` Close Sequence.
 
 ### What "complete" means
 
@@ -142,9 +126,3 @@ This file is committed and read by subsequent Prompt B sessions as inter-session
 - The operator has explicitly approved the full spec
 - `boundaries.md` → "Assumptions: NONE" section is empty
 - `manifest.json` has been updated with the new active version
-
-**Feature mode complete** means:
-- Feature brief filled out with no `[TBD]` fields
-- "What It Touches" has at least one checked item
-- Operator has explicitly approved the brief
-- Brief saved at `docs/spec/compiled/{active}/features/brief-{name}.md`

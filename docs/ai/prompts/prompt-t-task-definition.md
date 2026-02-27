@@ -22,6 +22,25 @@ The operator signals the mode. If they don't specify, infer from language:
 
 If ambiguous, ask: "Are you exploring a question (Query) or defining a task to build (Brief)?"
 
+### Phase Sequences
+
+**Query mode:** `init[agent] → conversation[both] → close[agent]`
+
+**Brief mode:** `init[agent] → dispatch[agent] → synthesize[agent] → op-review[operator] → output[agent] → close[agent]`
+
+Phase-state is managed automatically by hooks. See Decision 0014 for canonical definitions.
+
+### Significant Feature Detection
+
+When in Brief mode and the operator describes a feature that requires spec-level definition — a new user-facing capability, a new data model, or a new integration — Prompt T produces a **two-brief task group** instead of a single brief:
+
+- **Brief 1** — "Write feature spec and governance evidence": Runs as Prompt B. Writes the feature spec to `docs/spec/compiled/{active}/features/brief-{name}.md` and updates `spec-compiled` governance evidence.
+- **Brief 2** — "Build the feature": Standard Prompt B build consuming the feature spec from Brief 1.
+
+**Detection signals**: The operator describes something that touches data contracts, integrations, or system boundaries — or explicitly asks for a feature spec. When detected, inform the operator: "This looks like a significant feature that needs a spec first. I'll produce a two-brief task group: spec writing, then implementation."
+
+The operator may override: "No spec needed — just the build brief." Honor the override.
+
 ### Query Mode
 
 Conversational. The Orchestrator answers directly using compiled specs and codebase context. No agent dispatch — this is a discussion, not a review.
@@ -72,7 +91,7 @@ The Orchestrator synthesizes specialist findings into a draft task brief:
 Present the draft task brief to the operator. The operator reviews and may:
 - **Approve** — Brief is final. Displayed in copy-paste format.
 - **Revise** — Operator requests changes. Update and re-present.
-- **Narrow** — Operator says "too big." Split into multiple smaller briefs. Each sub-brief gets a `### Task Group` section with a shared group name, sequence number (N of M), and integration notes (produces/consumes). The first brief in the group creates the task group contract during its Prompt B session; subsequent briefs read and update it. See `docs/ai/task-groups/_contract-template.yaml` for the contract structure.
+- **Narrow** — Operator says "too big." Split into multiple smaller briefs. Each sub-brief gets a `### Task Group` section with a shared group name, sequence number (N of M), and integration notes (produces/consumes). The first brief in the group creates the task group contract during its Prompt B session; subsequent briefs read and update it. See `docs/ai/task-groups/_contract-template.yaml` for the contract structure. When producing a task group, ask the operator whether to pre-approve all briefs (**auto** mode — agent completes each brief through merge autonomously) or review each brief individually (**review** mode — agent pauses for operator review before commit). The contract carries this setting.
 - **Abandon** — Operator decides not to proceed. No output.
 
 Do not finalize without explicit operator approval.
@@ -138,11 +157,11 @@ After displaying the brief, instruct: "Copy the block above and paste it into a 
 
 ## Rules
 
-- **Never write files.** Prompt T is fully ephemeral. All output goes to the terminal.
-- **Never make code changes.** This is an exploration and planning session only.
-- **Never create session log entries.** Prompt T sessions produce no artifacts and are exempt via the zero-change rule.
-- **Never dispatch specialists in Query mode.** Query mode is conversational — the Orchestrator answers directly.
-- **Always dispatch all three specialists in Brief mode.** No tier selection — the 3-agent team is fixed.
-- **Never finalize a brief without operator approval.** Always present the draft for review first.
-- **If specs don't exist, say so.** Note in the brief's Spec References section that specs were unavailable and the brief was grounded in codebase analysis alone.
-- **If the task is too large for a single brief**, proactively suggest splitting. A brief that maps to more than one Prompt B session should be broken into sequential briefs.
+- REQUIRE: **never write files.** Prompt T is fully ephemeral. All output goes to the terminal.
+- REQUIRE: **never make code changes.** This is an exploration and planning session only.
+- REQUIRE: **never create session log entries.** Prompt T sessions produce no artifacts and are exempt via the zero-change rule.
+- REQUIRE: **never dispatch specialists in Query mode.** Query mode is conversational — the Orchestrator answers directly.
+- REQUIRE: **always dispatch all three specialists in Brief mode.** No tier selection — the 3-agent team is fixed.
+- REQUIRE: **never finalize a brief without operator approval.** Always present the draft for review first.
+- REQUIRE: **if specs don't exist, say so.** Note in the brief's Spec References section that specs were unavailable and the brief was grounded in codebase analysis alone.
+- GUIDE: **if the task is too large for a single brief**, proactively suggest splitting. A brief that maps to more than one Prompt B session should be broken into sequential briefs.

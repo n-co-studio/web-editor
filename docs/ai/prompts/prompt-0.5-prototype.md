@@ -26,6 +26,16 @@ The operator chooses the tier. The tiers are a menu, not a gate — they determi
 
 If the scope naturally escalates (a napkin test turns into a half-day exploration), suggest upgrading: "This is growing past napkin scope — want to create an experiment brief to track it?"
 
+### Phase Sequences
+
+**Napkin:** `init[agent] → build[agent] → close[agent]`
+
+**Spike:** `init[agent] → build[agent] → evaluate[both] → close[agent]`
+
+**Proof of Concept:** `init[agent] → build[agent] → evaluate[both] → document[agent] → close[agent]`
+
+Phase-state is managed automatically by hooks. See Decision 0014 for canonical definitions.
+
 ### Entry
 
 1. Confirm you are on an `experiment/*` branch (not required for Napkin tier). If not and the tier needs one, create it:
@@ -72,12 +82,12 @@ When the operator says they're done, or the time-box expires:
 2. If disposition is **Promote**, draft recommended additions to the compiled spec (which spec files would change, what sections). This becomes input for the next Prompt 0 update run.
 3. If the exploration validated or invalidated an architectural approach, suggest a decision record.
 
-Update session log with one-line summary for all tiers.
+At close for all tiers: update session log, commit all changes, present closing summary. See `docs/ai/workflow.md` Close Sequence.
 
 ### Rules
 
-- **Never merge an experiment branch to main.** The code is disposable. Only learnings survive.
-- **Never skip A4 (safety).** Secrets scanning still applies, always.
-- **Never run the full agent chain** unless the operator explicitly asks for review.
-- **The tier determines the documentation bar.** Don't impose Spike overhead on a Napkin, or Napkin informality on a PoC.
+- BLOCK: **never merge an experiment branch to main** — enforced by session-close-check.sh (experiment branches excluded from solo-mode merge). The code is disposable. Only learnings survive.
+- BLOCK: **A4 safety always applies** — enforced by pre-commit-gates.sh (secrets scanning runs on all branches including experiment).
+- GUIDE: **do not run the full agent chain** unless the operator explicitly asks for review.
+- GUIDE: **the tier determines the documentation bar.** Don't impose Spike overhead on a Napkin, or Napkin informality on a PoC.
 - If compiled specs exist, read them for context — but do not enforce spec compliance during prototyping.

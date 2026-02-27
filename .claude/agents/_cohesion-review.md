@@ -12,7 +12,7 @@ Read by the Orchestrator after Builder signals completion, before invoking QA.
    - **Clear fix**: Unambiguous broken reference or inconsistency → delegate to Builder
    - **Ambiguous**: Could be intentional or could be a problem → surface to operator for decision
 4. **Resolve** — If clear fixes exist, delegate to Builder with specific instructions. If ambiguous findings exist, pause and present to operator.
-5. **Re-run** — If Builder made fixes, invoke Critic (cohesion mode) again to verify resolution. Cap at 2 rounds — after that, escalate remaining findings to operator for accept/defer.
+5. **Re-run** — If Builder made fixes, invoke Critic (cohesion mode) again to verify resolution. GUIDE: cap at 2 rounds — after that, escalate remaining findings to operator for accept/defer.
 6. **Proceed** — When Cohesion Brief shows clean (zero critical findings, or all findings operator-accepted) → invoke QA for gate verification.
 
 ---

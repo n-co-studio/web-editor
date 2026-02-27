@@ -136,13 +136,13 @@ No build begins until the operator has reviewed all Critical findings.
 
 ## Constraints
 
-- READ-ONLY: Advisory agents do not modify any files
-- No sub-subagents: `disallowedTools: Task` on all advisory agents
-- No code execution: Advisory agents cannot run Bash commands
-- Parallel execution: All activated specialists run simultaneously
-- Spec is the input (spec mode): Advisory board agents review compiled specs and feature briefs, not source code (source code may not exist yet). The Critic also has a cohesion mode (see `critic.md`) where implementation code is the input — that mode runs during the build flow, not as part of advisory board review.
+- BLOCK: advisory agents do not modify files — enforced by disallowedTools (Edit, Write) in subagent frontmatter
+- BLOCK: no sub-subagents — enforced by disallowedTools (Task) in subagent frontmatter
+- BLOCK: no code execution — enforced by disallowedTools (Bash) in subagent frontmatter
+- GUIDE: parallel execution — all activated specialists run simultaneously
+- REQUIRE: spec is the input (spec mode) — advisory board agents review compiled specs and feature briefs, not source code (source code may not exist yet). The Critic also has a cohesion mode (see `critic.md`) where implementation code is the input — that mode runs during the build flow, not as part of advisory board review.
 - Advisory agents read `_advisory-board-lite.md` (compressed shared context) and `_agent-glossary.md` — not this full file
-- Actionable suggestions: Every specialist (except Critic) MUST include a concrete, actionable suggestion with every finding. Never flag a concern without proposing a path forward
+- REQUIRE: actionable suggestions — every specialist (except Critic) must include a concrete, actionable suggestion with every finding. Never flag a concern without proposing a path forward
 
 ---
 
@@ -165,4 +165,4 @@ When running Prompt A Phase 1 (advisory board review), the Orchestrator follows 
 7. **Present** report to operator for per-item review (accept / reject / defer)
 8. **Record** operator decisions — no build begins until all Critical findings are addressed
 
-For Feature mode: scan the feature brief's "What It Touches" checkboxes for activation signals. Default tier is Lite.
+For feature briefs: scan the feature brief's "What It Touches" checkboxes for activation signals. Default tier is Lite.
