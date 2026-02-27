@@ -33,16 +33,13 @@ if [ "$EVENT" = "PostToolUseFailure" ]; then
     log_hook_event "hvst-failure-tracker" "PostToolUseFailure" "Bash" "allow" "$START_MS" "failure_${NEW_COUNT}"
   fi
 elif [ "$EVENT" = "PostToolUse" ]; then
-  # Bash command succeeded — reset counter only if it was non-zero
+  # Bash command succeeded — emit only on state transition (counter resets from non-zero)
+  # Suppresses already_zero and no_counter events (~80-90% noise reduction)
   if [ -f "$COUNTER_FILE" ]; then
     CURRENT=$(cat "$COUNTER_FILE" 2>/dev/null || echo "0")
     if [ "$CURRENT" != "0" ]; then
       echo "0" > "$COUNTER_FILE"
       log_hook_event "hvst-failure-tracker" "PostToolUse" "Bash" "allow" "$START_MS" "reset_from_${CURRENT}"
-    else
-      log_hook_event "hvst-failure-tracker" "PostToolUse" "Bash" "allow" "$START_MS" "already_zero"
     fi
-  else
-    log_hook_event "hvst-failure-tracker" "PostToolUse" "Bash" "allow" "$START_MS" "no_counter"
   fi
 fi
