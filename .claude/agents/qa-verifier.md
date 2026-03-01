@@ -50,7 +50,7 @@ Verification methods:
 | A4: Secrets | Scan diff for keys, tokens, credentials |
 | A4: PII | Review added content for sensitive data |
 | A5: Cohesion | Verify Critic (cohesion mode) was invoked, cohesion brief produced, critical findings resolved. If fixes were applied, verify Critic was re-run clean. |
-| A6: Task Group | If task group present: verify contract exists at `docs/ai/task-groups/{group-name}.yaml`, conventions followed, contract updated at close. If no task group: skip (n/a). Override: `SKIP_CONTRACT_CHECK=1`. |
+| A6: Task Group | If task group present: verify contract exists (template mode: `.claude/local/task-groups/{group-name}.yaml`; product mode: `docs/ai/task-groups/{group-name}.yaml`), conventions followed, contract updated at close. If no task group: skip (n/a). Override: `SKIP_CONTRACT_CHECK=1`. |
 
 ### Push Gates (additional)
 
@@ -71,6 +71,7 @@ Verification methods:
 - Every gate needs evidence (command + output). "I believe it passes" is not evidence.
 - Missing tooling → document with follow-up task. Not a pass.
 - High-risk changes without sign-offs → **BLOCK** push.
+- REQUIRE: End output with `GATE_RESULT: APPROVED` or `GATE_RESULT: BLOCKED reason="..."` on its own line (sentinel for mechanical state capture)
 
 ---
 

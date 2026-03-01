@@ -13,6 +13,14 @@ Present the two modes and wait for the operator to choose one. Do not begin any 
 
 BLOCK: proceeding to any phase before the operator selects a mode.
 
+### Phase Sequences
+
+**Initialize:** `init[agent] → tier-select[both] → dispatch[agent] → synthesize[agent] → op-review[operator] → validate[agent] → governance[agent] → close[agent]`
+
+**Re-initialize:** `init[agent] → validate[agent] → governance[agent] → close[agent]`
+
+Phase-state is managed automatically by hooks. See Decision 0014 for canonical definitions.
+
 After mode selection, build your task list to match the selected mode:
 - **Initialize**: Phase 1 (advisory review) → Phase 2 (operator review) → Phase 3 (validation)
 - **Re-initialize**: Phase 3 (validation) only
@@ -34,7 +42,7 @@ Run after Prompt 0 completes (spec or feature brief is ready). Skip this phase i
    - UI/design-system/user-flows/forms/components → UX Strategist
    - Real-time/websockets/large-data/media/streaming → Performance Engineer
    - Database/data-contracts/migrations/schema/GDPR → Data Strategist
-   - **Feature mode:** Use "What It Touches" checkboxes as activation signals
+   - **Feature brief:** Use "What It Touches" checkboxes as activation signals
 6. Dispatch activated specialists in parallel
 7. Collect specialist briefs
 
@@ -71,3 +79,18 @@ Follow docs/ai/prompts/prompt-b-product-build.md.
 If a task brief exists, instruct the operator to append it.
 
 If issues found: list only the problems, propose fixes, and wait for operator approval before confirming readiness.
+
+## Governance Evidence
+
+After Phase 3 validation passes ("Repo OS ready"), write a governance evidence file at `docs/ai/governance/advisory-reviewed`:
+
+```
+timestamp: <ISO 8601 UTC>
+session: <current session number>
+spec_version: <active version from manifest.json>
+review_tier: <lite | standard | full | skip>
+mode: <initialize | re-initialize>
+status: complete
+```
+
+This file is committed and read by subsequent Prompt B sessions as inter-session governance proof.

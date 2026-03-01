@@ -22,6 +22,14 @@ dist/
 .claude/.session-log-hash
 .claude/.session-baseline-sha
 .claude/.session-id
+.claude/.session-type
 
-# Analytics data (consumed by analytics agent on-demand, not for version control)
+# Governance state files (session-scoped, written by SubagentStop hook)
+.claude/.state/*
+!.claude/.state/.gitkeep
+
+# Local-only template development files (not shipped to products)
+.claude/local/
+
+# Analytics data — legacy per-repo location (active data now at ~/.local/share/repo-os-analytics/)
 .claude/analytics/
