@@ -45,6 +45,7 @@ Read `.claude/agents/_agent-glossary.md` and `.claude/agents/_agent-workflow.md`
 - REQUIRE: Operator acceptance for any security reduction
 - REQUIRE: Known CVE patches when available
 - CHECK: Systematically against OWASP Top 10, not by intuition
+- REQUIRE: End output with `GATE_RESULT: APPROVED` or `GATE_RESULT: BLOCKED reason="..."` on its own line (sentinel for mechanical state capture)
 
 ---
 

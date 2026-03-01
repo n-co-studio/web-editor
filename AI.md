@@ -6,7 +6,7 @@
 - Work happens in small, verifiable increments.
 - **Gates must pass before commits (and before any push).**
 - **Accepted decisions are mandatory. Decision violations block commits.**
-- Session log is updated at session close. Zero-change sessions (no commits, no working tree changes) are exempt — the hook downgrades to advisory. Agent asks operator about PR to main for mergeable branches — never skip without operator direction.
+- Session log is updated at session close. Zero-change sessions (no commits, no working tree changes) are exempt — the hook downgrades to advisory.
 
 ## Authority
 Operator-only:
@@ -26,6 +26,7 @@ Agent-allowed:
 - docs/ai/decisions/
 - docs/ai/logs/session-log.md
 - docs/ai/logs/known-issues.md
+- docs/ai/governance/ (inter-session governance evidence)
 - .claude/agents/orchestrator.md
 - .claude/agents/_agent-glossary.md
 - .claude/agents/_agent-workflow.md
@@ -35,14 +36,14 @@ On-demand (loaded by orchestrator.md triggers, not at session start):
 - .claude/agents/_advisory-board.md (read during Prompt A Phase 1)
 - .claude/agents/_cohesion-review.md (read after Builder signals completion)
 - .claude/agents/_hvst-review.md (read when HVST debugging stalls or operator requests debug review)
-- docs/ai/task-groups/ (loaded when task brief contains `### Task Group`)
+- docs/ai/task-groups/ (loaded when task brief contains `### Task Group`; template mode uses `.claude/local/task-groups/` for contracts)
 
-Hooks (`.claude/hooks/`) enforce automatically: branch protection on Edit/Write (blocks file changes on `main`), A4 secret scanning on commit, A6 task group contract staging check on commit (advisory), B1 naming convention on push, session log check on stop, PR reminder on stop for mergeable branches (advisory), next-brief reminder on stop for task groups (advisory). Subagent frontmatter hooks block Builder/QA/Security from running git commit/push. Settings (`.claude/settings.json`) are auto-loaded by Claude Code. Neither hooks nor settings need to be read into context.
+Hooks (`.claude/hooks/`) enforce automatically via phase-aware flow management (Decision 0014): mode-based file restrictions on Edit/Write/Bash (blocks edits outside active mode scope — template/child/autonomous per `.claude/repo-mode`; non-template modes fast-exit after immune path check), branch protection on Edit/Write (blocks file changes on `main` via `branch-guard-edit.sh`), phase-aware edit gating on Edit/Write (blocks edits in init/plan phase via `branch-guard-edit.sh`), session branch isolation on Edit/Write (blocks edits on branches from closed sessions — task groups exempt, Decision 0013), plan-approval gate on Bash writes (blocks without operator-approved plan — experiment branches exempt), inter-session governance check on first Bash write or commit (advisory — warns if `spec-compiled` or `advisory-reviewed` missing), plan-approval capture on AskUserQuestion (writes `.claude/.state/plan-approved` when operator confirms a plan), A4 secret scanning on commit (blocks), state file verification on commit (blocks without `plan-approved`/`cohesion-reviewed`/`qa-verified`), A2 scope >100 lines on commit (blocks unless large-scope approved), A6 task group contract staging on commit (blocks if contract modified but not staged), high-risk pattern detection on commit (blocks if risk patterns match and Reviewer/Security sign-offs missing), A1 decision trigger parser on commit (blocking — triggered decisions must be declared in Decisions: trailer), B1 naming convention on push (blocks), session log check on stop, override audit summary on stop (advisory — lists all governance overrides used), governance evidence verification on stop for task groups (advisory — warns if governance entry not written to contract), solo mode merge on stop (merges feature/fix/hotfix branches directly to main when solo=true — Decision 0015), next-brief reminder on stop for task groups (advisory), branch sealing on stop (records branch in closed-branches ledger — Decision 0013; task group non-final briefs skip seal), state file cleanup on stop (removes all session-scoped `.state/` files). Experiment branches: A4 only (all state checks skipped). Emergency recovery: `REPO_OS_RECOVER=1` skips all state-dependent checks and branch-guard gates. Subagent frontmatter hooks block Builder/QA/Security from running git commit/push. Settings (`.claude/settings.json`) are auto-loaded by Claude Code. Neither hooks nor settings need to be read into context.
 
 ## Spec Convention
 - **Templates** (`docs/spec/_templates/`): Blank spec files with placeholder fields. Synced from the upstream template repo. Do not fill these directly.
 - **Compiled** (`docs/spec/compiled/`): Operator-filled specs, organized by version. Created by Prompt 0.
-- **Feature Briefs** (`docs/spec/compiled/{active}/features/brief-{name}.md`): Lightweight feature specs for individual feature additions. Created by Prompt 0 Feature mode. Template at `docs/spec/_templates/feature-brief.md`.
+- **Feature Briefs** (`docs/spec/compiled/{active}/features/brief-{name}.md`): Lightweight feature specs for individual feature additions. Created via Prompt T significant feature path (two-brief task group). Template at `docs/spec/_templates/feature-brief.md`.
 - **Manifest** (`docs/spec/compiled/manifest.json`): Tracks the active version. Read `active` field to resolve the current spec path: `docs/spec/compiled/{active}/`.
 - If `manifest.json` has `"active": null`, specs have not been compiled yet. Run Prompt 0.
 
