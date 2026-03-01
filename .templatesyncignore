@@ -4,8 +4,9 @@ docs/spec/compiled/
 # Session logs and known issues
 docs/ai/logs/
 
-# Decision records (project-specific)
-docs/ai/decisions/
+# Decision records: NOT excluded. Template decisions (0001-0099) sync to child repos.
+# Child decisions (0100+) are safe — actions-template-sync operates add/update-only
+# (does not delete child-only files), so project-specific decisions remain untouched.
 
 # Prototype briefs and learnings
 docs/spec/prototypes/
@@ -13,7 +14,7 @@ docs/spec/prototypes/
 # Local Claude settings
 .claude/settings.local.json
 
-# Analytics data (per-repo, never synced)
+# Analytics data — legacy per-repo location (active data now at ~/.local/share/repo-os-analytics/)
 .claude/analytics/
 
 # Workflow files (repo-specific; GITHUB_TOKEN cannot push workflow changes)
