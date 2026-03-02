@@ -64,7 +64,7 @@ Before session close:
 - [ ] Override audit reviewed (if any overrides used this session)?
 - [ ] Git trailers on commits (Session, Decisions, Gates — see `docs/ai/workflow.md`)
 - [ ] No uncommitted changes
-- [ ] Solo mode: run `git checkout main && git merge --ff-only <branch>` (fallback `--no-ff`), then call `write_merge_signal "<branch>"` on success. Check `solo=true` first. Standard/hotfix and task group final briefs (Gate 7 allows merge in close phase). Non-final task group briefs close without merge. Skip for `experiment/*` and `release/*` branches. Merge failure: `git merge --abort && git checkout <branch>`, notify operator
+- [ ] Solo mode: run `git checkout main && git merge --ff-only <branch>` (fallback `--no-ff`), then `git push origin main` (advisory — warn on failure, do not block; skip in template mode and when no remote configured; never force-push), then call `write_merge_signal "<branch>"`. Check `solo=true` first. Standard/hotfix and task group final briefs (Gate 7 allows merge in close phase). Non-final task group briefs close without merge. Skip for `experiment/*` and `release/*` branches. Merge failure: `git merge --abort && git checkout <branch>`, notify operator. Push failure: warn operator to push manually, continue close sequence
 - [ ] Branch will be sealed after close — ensure all work is committed (Decision 0013; task group non-final briefs skip seal)
 - [ ] Follow-ups documented
 

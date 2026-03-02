@@ -6,6 +6,72 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 ---
 
+## Session 113 — 2026-03-02 — Push after merge (advisory push across all merge sites)
+
+**Status:** complete
+**Decisions:** 0015, 0017
+**Branch:** `feature/push-after-merge`
+
+### Goal
+- Add advisory `git push origin main` after every merge-to-main operation across all three merge sites (agent close, stop hook, runner). Resolve AI.md authority ambiguity. Skip push in template mode.
+
+### Changes Made
+- `AI.md` — Authority section: removed contradictory "Decide when/where to push" from operator-only; consolidated remote setup; updated agent-allowed push wording to advisory
+- `docs/ai/workflow.md` — Close sequence step 3: added post-merge push sub-bullet, preserved Gate 1 guidance, documented stop hook and runner push parity
+- `docs/ai/decisions/t-0015-solo-mode.md` — Branch lifecycle: added push to auto/review close, added post-merge push and push-failure-recovery bullets; Consequences: documented push in session-close-check.sh and runner.sh
+- `.claude/hooks/session-close-check.sh` — Added `advisory_push_to_remote()` shared helper (template-mode skip, no-remote skip, advisory-only, quiet stdout); called from 4 merge-detection paths (no-init, zero-change, agent-merge, solo-merge)
+- `.claude/.automation/runner.sh` — Added inline advisory push after solo merge success in `_run_single_entry` (template-mode skip, no-remote skip, advisory-only)
+- `.claude/agents/orchestrator.md` — Updated solo-mode checklist item to include push step between merge and write_merge_signal
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass, A2 pass, A3 n-a, A4 pass, A5 pass, A6 n-a
+- Push gates: B1 pass, B2 n-a, B3 n-a
+- Cohesion review: 1 CRITICAL found and fixed (two fast-exit paths missing push call), 6 recommendations (stdout redirect fixed, others advisory)
+
+### Follow-ups
+- None
+
+---
+
+## Session 112 — 2026-03-02 — Template decision naming convention (`t-` prefix)
+
+**Status:** complete
+**Decisions:** 0002, 0004, 0012, 0022
+**Branch:** `feature/template-decision-naming`
+
+### Goal
+- Introduce `t-` prefix naming convention for template-owned decision records, enabling visual distinction and safe deletion propagation via manifest-based orphan cleanup.
+
+### Changes Made
+- `docs/ai/decisions/t-0022-template-decision-naming.md` (NEW) — decision record documenting the `t-` prefix convention, manifest, cleanup mechanism, migration steps
+- `docs/ai/decisions/t-manifest.txt` (NEW) — authoritative list of 22 template decision filenames for child-repo cleanup
+- `.claude/.automation/lib/child-sync-decisions.sh` (NEW) — cleanup helper: reads manifest, computes orphans, deletes via `git rm`, supports `--dry-run`
+- `.claude/.automation/templates/template-sync-with-cleanup.yml` (NEW) — reference workflow template for child repos
+- `.claude/hooks/write-guard.sh` — child-mode `is_carved_out` explicit `t-*.md` block; fast-exit path template decision protection with `REPO_OS_UNLOCK_PATH` support
+- `.claude/hooks/pre-commit-gates.sh` — A1 trigger parser: dual-glob iteration (`t-*.md` + `0*.md`), updated ID extraction via `sed -E 's/^(t-)?([0-9]+)-.*/\2/'`
+- `.claude/hooks/tests/layer3-hook-integration.sh` — 3 new test cases: child-mode t-*.md blocking, child-mode 0100+ allowing, autonomous-mode t-*.md blocking
+- `docs/ai/decisions/.a1-trigger-index` — header comment, 4 entries for Decision 0022 (decisions dir, write-guard, pre-commit-gates, child-sync-decisions)
+- `docs/ai/quality-gates.md` — A1 regeneration script updated for dual-glob and t-prefix ID extraction
+- `README.md` — decision path references updated, range convention -> `t-` prefix convention
+- `.claude/agents/_agent-glossary.md` — Decision Range Convention -> Decision Naming Convention with `t-` prefix
+- `.claude/agents/_cohesion-review.md`, `_user-review-tier-{1,2,3}.md` — decision path references
+- `docs/ai/decisions/t-0012-file-edit-restrictions.md` — points 3, 6, and consequences updated for `t-` prefix
+- `docs/ai/decisions/t-0020-task-contract-system.md`, `t-0021-user-review-system.md` — self-reference updates
+- `repo-os-explainer.html` — decision naming convention text, fixed `.templatesyncignore` contradiction
+- `.templatesyncignore` — updated comments for `t-*` prefix and manifest-based cleanup
+- 21 decision files renamed via `git mv` (0001-0021 -> t-0001 through t-0021)
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass, A2 pass (large-scope approved), A3 n-a, A4 pass, A5 pass, A6 n-a
+- Push gates: B1 pass, B2 pass (all 4 layers), B3 n-a
+- Cohesion review: 2 rounds — first found 1 CRITICAL + 4 RECOMMENDATIONs (all fixed), second APPROVED with 3 RECOMMENDATIONs (all addressed)
+- QA verification: APPROVED
+
+### Follow-ups
+- None
+
+---
+
 ## Session 111 — 2026-02-28 — Audit CRITICAL remediation (11 findings, round 2)
 
 **Status:** complete
@@ -96,75 +162,9 @@ Each session adds one entry. Keep entries high-signal and readable.
 ### Follow-ups
 - Consider adding trigger coverage for `docs/ai/quality-gates.md` and `docs/ai/workflow.md` (core governance files with no path triggers)
 
----
-
-## Session 107 — 2026-02-28 — Gate 7 close-phase exemption for task group merge
-
-**Status:** complete
-**Decisions:** 0015, 0018
-**Branch:** `feature/agent-close-sequence-merge-fix`
-
-### Goal
-- Extend agent-executed merge to task group final briefs by adding a close-phase exemption to Gate 7 (branch-guard.sh). Previously, Gate 7 blocked all merge commands for task group sessions, making the stop hook the primary merge path — which was unreliable when phase state went missing.
-
-### Plan Summary
-- Add close-phase exemption to Gate 7: check `get_phase()`, allow merge when phase is "close"
-- Update workflow.md, orchestrator, Decision 0015, Decision 0018, and AI.md to remove stale "task groups use hook merge" references
-
-### Changes Made
-- `.claude/hooks/branch-guard.sh` — Gate 7: added `get_phase()` check before blocking; if phase is `close`, log exemption and allow merge. Updated header comment.
-- `docs/ai/workflow.md` — Close sequence step 3: replaced "Task group sessions are excluded" with "Task group final briefs included — Gate 7 allows merge in the close phase"
-- `.claude/agents/orchestrator.md` — Solo mode checklist: replaced "task groups use hook merge" with "task group final briefs (Gate 7 allows merge in close phase)"
-- `docs/ai/decisions/0015-solo-mode.md` — Consequences: changed "hook merge exclusively" to "agent in close phase (Gate 7 close-phase exemption)"
-- `docs/ai/decisions/0018-mechanical-taskgroup-enforcement.md` — Gate 7 description: added "Close-phase exemption" sentence
-- `AI.md` — Hooks paragraph: removed stale "primary merge path for task group sessions where Gate 7 blocks agent merge"
-
-### Verification (Gates Evidence)
-- Commit gates: A1 pass, A2 pass, A3 n-a, A4 pass, A5 pass, A6 n-a
-- Push gates: B1 pass, B2 n-a, B3 n-a
-- Cohesion review: 1 critical found and fixed (AI.md stale reference), 2 recommendations (header comment fixed, glossary row minor — no change needed)
-
-### Failed Attempts (Brief)
-- None
-
-### Known Issues Logged
-- None
-
-### Follow-ups
-- None
-
----
-
-## Session 106 — 2026-02-28 — User Review Prompt & Workflow Integration (Brief 2/2)
-
-**Status:** complete
-**Decisions:** 0001, 0002, 0003, 0004, 0010, 0014, 0021
-**Branch:** `feature/user-review-system`
-
-### Goal
-- Integrate the User Review system into the phase model, prompt pipeline, and orchestrator routing — Brief 2 of 2 (user-review-system task group).
-
-### Changes Made
-- `docs/ai/decisions/0014-phase-aware-flow-model.md` — amended standard and taskgroup sequences with `user-review` phase
-- `docs/ai/decisions/0021-user-review-system.md` — point 11 updated (dedicated phase), body references corrected
-- `.claude/hooks/_phase-helper.sh` — registered `user-review` in phase sequences and tag mappings
-- `docs/ai/prompts/prompt-t-task-definition.md` — User Review section in brief template, `user_review` in task contract
-- `docs/ai/prompts/prompt-b-product-build.md` — User Review Dispatch section with 7-step procedure
-- `.claude/agents/orchestrator.md` — On-Demand Procedure entry for User Review dispatch
-- `docs/ai/workflow.md` — User Review section with phase position, opt-in, dispatch flow
-- `docs/ai/quality-gates.md` — advisory note for User Review
-
-### Verification (Gates Evidence)
-- Commit gates: A1 pass, A2 pass, A3 n-a, A4 pass, A5 pass, A6 pass
-- Cohesion: 2 criticals found and fixed, 4 recommendations addressed
-
----
-
-
-
 <!-- Sessions 63-64: zero-change sessions, no log entry per workflow.md exemption -->
 <!-- Session 109: audit session, zero-change exempt -->
-<!-- Sessions 65-105: dropped per rolling cap -->
+<!-- Sessions 65-107: dropped per rolling cap -->
 
 <!-- Template: copy this block for each new session entry
 
