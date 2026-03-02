@@ -3,6 +3,14 @@
 ## Status
 Accepted
 
+## Triggers
+
+- type: process
+- enforced_by: `.claude/.state/cohesion-reviewed`
+- path: `\.claude/agents/_cohesion-review\.md`
+- path: `\.claude/agents/critic\.md`
+- keywords: `cohesion, A5`
+
 ## Decision
 - New commit gate **A5 (Cohesion)** requires a post-build coherence review before commit
 - The existing Critic agent operates in a second mode (cohesion) alongside its spec mode (advisory board)

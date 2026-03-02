@@ -6,10 +6,12 @@ identity:
   group_name: ""          # kebab-case identifier (matches filename)
   created_by_session: 0   # session number that created this contract
   created_date: ""        # YYYY-MM-DD
+  execution: sequential   # sequential | parallel (parallel enables boundaries, completion markers, merge brief)
 
 # Brief roster — ordered list of briefs in execution sequence.
 # First session populates all briefs from Prompt T output.
 # Each session updates its own entry at close.
+# For parallel groups, the merge brief is appended as the last entry.
 briefs:
   - title: ""             # brief title from ### Task Group section
     sequence: 1           # 1-indexed position in the group
@@ -17,6 +19,19 @@ briefs:
     branch: ""            # branch name (set when session starts)
     status: pending       # pending | in_progress | complete
     next_brief: ""        # title of the next brief (empty for last)
+    boundaries: []        # file paths/globs this brief owns (parallel: enforced, sequential: advisory)
+
+# Intent — per-brief task contract fields (Decision 0020).
+# Populated by each brief at contract-init phase from Prompt T output.
+# Optional — existing groups without this block continue to work.
+intent:
+  goal: ""                    # what this task accomplishes (1-2 sentences)
+  verification:               # falsifiable criteria for completion
+    - ""
+  scope_files:                # files likely affected
+    - ""
+  spec_references:            # paths to relevant spec files
+    - ""
 
 # Shared conventions — REQUIRE-level constraints for all sessions.
 # Established by the first session, read by all subsequent sessions.
@@ -48,6 +63,22 @@ session_decisions:
   - session: 0
     decision: ""
     rationale: ""
+
+# Completion markers — per-brief completion tracking for parallel groups.
+# Only present when execution: parallel. Each content brief writes a marker
+# file at session close; the merge brief checks all markers before proceeding.
+completion_markers:
+  - brief_sequence: 1
+    marker_file: ""       # .claude/.state/tg-{group}-brief-{seq}.complete
+    completed_at: ""      # ISO 8601 timestamp (set at brief close)
+
+# Merge brief — metadata for the parallel group's final integration brief.
+# Only present when execution: parallel. The merge brief also appears in the
+# briefs roster as the last entry (for is_final_brief compatibility).
+merge_brief:
+  title: ""               # merge brief title
+  session: null           # session number (set when merge session starts)
+  status: pending         # pending | in_progress | complete
 
 # Governance evidence — per-brief gate results recorded at session close.
 # Enables phase chain verification: subsequent sessions confirm prior briefs

@@ -34,10 +34,10 @@ Activated when spec contains:
 
 ## Constraints
 
-- FOCUS: Data model correctness and evolution safety, not ORM choice
-- REQUIRE: Cross-reference every data contract against the features that consume it
-- BLOCK: Recommending specific database products unless spec is ambiguous
-- CHECK: Every entity for CRUD completeness — can all features that need this data access it?
+- GUIDE: focus on data model correctness and evolution safety, not ORM choice
+- REQUIRE: cross-reference every data contract against the features that consume it
+- REQUIRE: do not recommend specific database products unless spec is ambiguous
+- REQUIRE: check every entity for CRUD completeness — can all features that need this data access it?
 
 **First action:** Read `.claude/agents/_advisory-board-lite.md` and `.claude/agents/_agent-glossary.md` for shared definitions and brief format before beginning review.
 

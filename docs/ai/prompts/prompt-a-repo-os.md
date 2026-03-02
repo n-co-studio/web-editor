@@ -11,7 +11,7 @@ Present the two modes and wait for the operator to choose one. Do not begin any 
 - **Initialize** — First run, or major spec rewrite. Runs full advisory review (Phases 1 → 2 → 3). Use after Prompt 0 completes for the first time or after a significant spec overhaul.
 - **Re-initialize** — Repeat run after build has started. Skips advisory review, goes straight to validation (Phase 3 only). Use after agent drift, decision conflicts, template sync updates, or mid-build spec changes where specs have already been reviewed.
 
-BLOCK: proceeding to any phase before the operator selects a mode.
+REQUIRE: do not proceed to any phase before the operator selects a mode.
 
 ### Phase Sequences
 
@@ -94,3 +94,7 @@ status: complete
 ```
 
 This file is committed and read by subsequent Prompt B sessions as inter-session governance proof.
+
+## Close Sequence
+
+At close: update session log, commit all changes (including governance evidence), present closing summary. See `docs/ai/workflow.md` Close Sequence.

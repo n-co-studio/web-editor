@@ -24,15 +24,16 @@ Coordinates work and enforces the Repo OS. AI project lead taking strategic dire
 - REQUIRE: create branch from main at init phase: `git checkout -b <category>/<description>`
 - REQUIRE: operator approval before implementation begins
 - REQUIRE: use AskUserQuestion (not conversational acknowledgment) for plan confirmation — this triggers the plan-approval hook that unblocks Edit/Write. Exempt: experiment/* branches (Decision 0006) skip the plan gate entirely
-- REQUIRE: include auto/review as options when presenting plan for approval. Use these exact option labels so the hook can match reliably: **"Auto — proceed autonomously"** and **"Review — pause for my review before commit"**
+- REQUIRE: include auto/review as options when presenting plan for approval. Use these exact option labels so the hook can match reliably: **"Auto — proceed autonomously"** and **"Review — pause for my review before commit"**. For task group sessions, auto mode also activates the automation runner — remaining pending briefs are queued for headless execution (Decision 0017)
 - REQUIRE: Critic cohesion review after Builder completes, before QA verification
 - REQUIRE: QA verification before any commit
 - REQUIRE: Reviewer + Security sign-off for high-risk changes
 - REQUIRE: task group contract compliance when task group present (Decision 0011)
 - REQUIRE: one session per branch — no reuse of branches from closed sessions (Decision 0013, task groups exempt)
-- BLOCK: implementation without approved plan
-- BLOCK: proceeding on ambiguity — stop and ask
-- BLOCK: assumptions about requirements, architecture, or intent
+- REQUIRE: session registry — `register_session()` is called mechanically by `init_phase()`. If session overlap is detected on the same branch, non-task-group sessions are blocked (Decision 0013). Task group sessions receive advisory warning. Override: `REPO_OS_SKIP_OVERLAP_CHECK=1`
+- BLOCK: implementation without approved plan — enforced by branch-guard.sh / branch-guard-edit.sh (phase gate blocks edits until plan-approved state file exists)
+- REQUIRE: stop and ask on ambiguity — do not proceed when requirements, scope, or intent are unclear
+- REQUIRE: no assumptions about requirements, architecture, or intent — ask the operator
 - DELEGATE: implementation → Builder
 - DELEGATE: gate verification → QA/Verifier
 
@@ -63,7 +64,7 @@ Before session close:
 - [ ] Override audit reviewed (if any overrides used this session)?
 - [ ] Git trailers on commits (Session, Decisions, Gates — see `docs/ai/workflow.md`)
 - [ ] No uncommitted changes
-- [ ] Solo mode: branch merges to main at close (auto: autonomously; review: after operator acceptance). Skip for `experiment/*` branches
+- [ ] Solo mode: run `git checkout main && git merge --ff-only <branch>` (fallback `--no-ff`), then call `write_merge_signal "<branch>"` on success. Check `solo=true` first. Standard/hotfix and task group final briefs (Gate 7 allows merge in close phase). Non-final task group briefs close without merge. Skip for `experiment/*` and `release/*` branches. Merge failure: `git merge --abort && git checkout <branch>`, notify operator
 - [ ] Branch will be sealed after close — ensure all work is committed (Decision 0013; task group non-final briefs skip seal)
 - [ ] Follow-ups documented
 
@@ -87,8 +88,11 @@ Before session close:
 - **When HVST debugging stalls (2+ consecutive failures) or operator requests debug review**: Read `.claude/agents/_hvst-review.md`
 - **When running Prompt C** (project audit): Read `docs/ai/prompts/prompt-c-project-audit.md`. Select tier, dispatch dimensions (Auditor per mode + Security/Performance if selected), mediate specialist collaboration (escalation tags, co-audit, workshop loops), synthesize Audit Report
 - **When operator defers findings** (Prompt C audit or Prompt A Phase 2 review): Write `.claude/.deferrals-pending` (timestamp as content). Then write each deferred finding to the Known Limitations table in `known-issues.md` (template mode: `.claude/local/known-issues.md`; product mode: `docs/ai/logs/known-issues.md`). For Prompt C sessions, these are the only permitted file modifications — the session is no longer zero-change, so follow normal session close procedures (session log, commit)
-- **After Builder signals completion** (before QA): Read `.claude/agents/_cohesion-review.md`
-- **When task brief contains `### Task Group`**: Contract path depends on repo mode (template mode: `.claude/local/task-groups/{group-name}.yaml`; product mode: `docs/ai/task-groups/{group-name}.yaml`). First session — read `docs/ai/task-groups/_contract-template.yaml`, create contract at the mode-appropriate path. Subsequent sessions — read the existing contract, apply conventions. All sessions — update contract at session close (brief status, session decisions, governance evidence in `governance:` section)
+- **After Builder signals completion** (before QA): Read `.claude/.state/task-contract.yaml` (singular) or the `intent:` block from the task group contract (groups) — if present, pass the `verification:` criteria to Critic alongside the diff. Then read `.claude/agents/_cohesion-review.md`
+- **When task brief contains `### Task Group`**: Contract path depends on repo mode (template mode: `.claude/local/task-groups/{group-name}.yaml`; product mode: `docs/ai/task-groups/{group-name}.yaml`). Follow the contract lifecycle in `docs/ai/workflow.md` § Task Group Sessions
+- **When task brief has `Execution: parallel` in `### Task Group`** (parallel content brief): Restrict edits to declared `Boundaries`. At session close, write completion marker: `.claude/.state/tg-{group}-brief-{seq}.complete`. Follow boundary enforcement rules in `docs/ai/prompts/prompt-b-product-build.md`
+- **When running a merge brief** (`taskgroup-merge` session type): Initialize as `taskgroup-merge`. In `contract-init`, sync from contract and verify all content briefs completed (check completion markers). In `cohesion` phase, run cross-session cohesion review (Critic in cohesion mode) across the combined diff from all parallel briefs. Resolve integration issues (loop: `cohesion→cohesion`). In `verify`, run QA gates. At close, merge to main and seal branch
+- **When task brief or contract contains `user_review` and phase is `user-review`** (User Review dispatch): Dispatch `_user-review-tier-{N}.md` agents in parallel per scenario definitions from the task contract. Each agent receives its persona profile, scenario YAML, and list of modified files. Collect results, deduplicate across tiers, escalate to highest severity when multiple tiers flag the same issue. Synthesize into a single User Review Report. Present to operator as advisory — no gate blocked, no state file. Operator dispositions each finding (accept / note / dismiss). See `docs/ai/prompts/prompt-b-product-build.md` § User Review Dispatch and Decision 0021
 - **At session close (all sessions)**: Verify state will be cleaned. If task group present, ensure governance evidence is recorded in contract `governance:` section before final commit
 
 ---
@@ -107,4 +111,5 @@ Before session close:
 - **Critic (cohesion mode)**: Diff summary, changed files list, context for coherence review — after Builder completes, before QA
 - **QA**: Verification request after cohesion review clean
 - **Reviewer/Security**: Code for review (when high-risk), or full-codebase audit scope (Prompt C)
+- **Accessibility**: UI code with context (when applicable)
 - **Operator**: Questions, session summaries, completion reports, Audit Reports

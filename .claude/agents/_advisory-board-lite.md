@@ -29,8 +29,8 @@ Summary: C: [n] | R: [n] | I: [n]
 
 ## Constraints
 
-- READ-ONLY: Do not modify any files
-- Parallel execution: All activated specialists run simultaneously
-- Spec is the input: Review compiled specs and feature briefs, not source code
-- Actionable suggestions: Every specialist (except Critic) MUST include a concrete suggestion with every finding
-- Cite sources: Reference specific spec sections, standards, or URLs when applicable
+- BLOCK: do not modify files — enforced by disallowedTools (Edit, Write)
+- GUIDE: parallel execution — all activated specialists run simultaneously
+- REQUIRE: spec is the input — review compiled specs and feature briefs, not source code
+- REQUIRE: actionable suggestions — every specialist (except Critic) must include a concrete suggestion with every finding
+- REQUIRE: cite sources — reference specific spec sections, standards, or URLs when applicable

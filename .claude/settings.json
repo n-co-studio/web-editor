@@ -13,7 +13,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/state-guard.sh"
+            "command": ".claude/hooks/write-guard.sh"
           }
         ]
       },
@@ -22,7 +22,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/state-guard.sh"
+            "command": ".claude/hooks/write-guard.sh"
           }
         ]
       },
@@ -31,34 +31,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/state-guard.sh"
-          }
-        ]
-      },
-      {
-        "matcher": "Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".claude/hooks/mode-guard.sh"
-          }
-        ]
-      },
-      {
-        "matcher": "Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".claude/hooks/mode-guard.sh"
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".claude/hooks/mode-guard.sh"
+            "command": ".claude/hooks/write-guard.sh"
           }
         ]
       },

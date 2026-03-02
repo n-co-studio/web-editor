@@ -129,10 +129,14 @@ No auto-remediation — audit is read-only. The operator decides what action to 
 
 ## Rules
 
-- **Never write files.** Prompt C is read-only. All output goes to the terminal. **Exception:** Sessions that produce operator deferrals write to `known-issues.md` (Known Limitations table) and `.claude/.deferrals-pending` only — no other file modifications. The session is no longer zero-change, so follow normal session close procedures (session log, commit).
-- **Never create session log entries.** Zero-change rule — no commits, no artifacts. Audit sessions are exempt. Does not apply when the deferral exception above is active.
-- **Specialist collaboration is Orchestrator-mediated.** The Auditor cannot dispatch agents directly. The Orchestrator detects escalation tags and handles all specialist dispatch.
-- **Cap workshop loops at 2 rounds**, then surface to operator.
-- **Context management.** Each dimension scopes its scan (Glob patterns, file type filters) rather than loading the entire codebase. The Auditor defines scan boundaries per mode in its agent definition.
-- **Finding prioritization.** Auditor caps findings at ~10 per dimension, CRITICAL first. Note if truncated.
-- **Inform on skips.** Always tell the operator which dimensions were skipped or degraded, and why (pre-spec, operator choice, etc.).
+- REQUIRE: **never write files.** Prompt C is read-only. All output goes to the terminal. **Exception:** Sessions that produce operator deferrals write to `known-issues.md` (Known Limitations table) and `.claude/.deferrals-pending` only — no other file modifications. The session is no longer zero-change, so follow the Close Sequence in `docs/ai/workflow.md` (update session log, commit deferral files and session log, present closing summary).
+- REQUIRE: **never create session log entries.** Zero-change rule — no commits, no artifacts. Audit sessions are exempt. Does not apply when the deferral exception above is active.
+- BLOCK: **specialist collaboration is Orchestrator-mediated** — enforced by disallowedTools (Task) on the Auditor. The Orchestrator detects escalation tags and handles all specialist dispatch.
+- GUIDE: **cap workshop loops at 2 rounds**, then surface to operator.
+- GUIDE: **context management** — each dimension scopes its scan (Glob patterns, file type filters) rather than loading the entire codebase. The Auditor defines scan boundaries per mode in its agent definition.
+- GUIDE: **finding prioritization** — auditor caps findings at ~10 per dimension, CRITICAL first. Note if truncated.
+- REQUIRE: **inform on skips** — always tell the operator which dimensions were skipped or degraded, and why (pre-spec, operator choice, etc.).
+
+## Close Sequence
+
+At close: update session log, commit all changes, present closing summary. See `docs/ai/workflow.md` Close Sequence. For zero-change audit sessions (no deferrals), the session log requirement is exempt.

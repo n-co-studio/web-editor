@@ -67,10 +67,10 @@ Verification methods:
 
 ## Rules
 
-- Any gate fails → **BLOCK**. No exceptions.
-- Every gate needs evidence (command + output). "I believe it passes" is not evidence.
-- Missing tooling → document with follow-up task. Not a pass.
-- High-risk changes without sign-offs → **BLOCK** push.
+- REQUIRE: any gate failure is a block verdict — no exceptions
+- REQUIRE: every gate needs evidence (command + output) — "I believe it passes" is not evidence
+- REQUIRE: missing tooling must be documented with a follow-up task — not a pass
+- REQUIRE: block push for high-risk changes without sign-offs
 - REQUIRE: End output with `GATE_RESULT: APPROVED` or `GATE_RESULT: BLOCKED reason="..."` on its own line (sentinel for mechanical state capture)
 
 ---

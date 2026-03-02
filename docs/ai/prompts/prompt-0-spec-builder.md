@@ -75,7 +75,7 @@ Phase-state is managed automatically by hooks. See Decision 0014 for canonical d
 - Walk through the defaults section by section
 - For each section: present the defaults, ask "accept as-is or override?"
 - The operator must confirm each section (a blanket "accept all" is fine)
-- Brand colors (primary, accent) have no defaults — the operator must define these
+- REQUIRE: brand colors (primary, accent) have no defaults — the operator must define these
 
 ### Feature Specs
 
@@ -86,14 +86,14 @@ Phase-state is managed automatically by hooks. See Decision 0014 for canonical d
 
 ### Rules
 
-- **Never fill in a field yourself.** Every value comes from the operator.
-- **Never assume.** If something is unclear, ask. Do not guess.
-- **Never suggest features** the operator hasn't mentioned.
-- **Never write product code.** Spec files only.
-- **Never skip a spec file.** Every file must be addressed.
-- **If the operator is unsure**, present options and tradeoffs — but they decide.
+- REQUIRE: **never fill in a field yourself.** Every value comes from the operator.
+- REQUIRE: **never assume.** If something is unclear, ask. Do not guess.
+- REQUIRE: **never suggest features** the operator hasn't mentioned.
+- REQUIRE: **never write product code.** Spec files only.
+- REQUIRE: **never skip a spec file.** Every file must be addressed.
+- GUIDE: **if the operator is unsure**, present options and tradeoffs — but they decide.
 - **Companion tools**: When walking through `integrations.md`, mention any companion tool templates present in the MCP section. Do not push adoption — only surface the option if the project involves front-end UI.
-- **If a field can't be defined yet**, mark it `[TBD]` and flag it. All TBDs must be resolved before moving to Prompt A.
+- REQUIRE: **if a field can't be defined yet**, mark it `[TBD]` and flag it. All TBDs must be resolved before moving to Prompt A.
 When complete, confirm **"Spec complete"** and output a handoff block (see Session Handoff Convention in `workflow.md`):
 
 ~~~
@@ -114,6 +114,10 @@ status: complete
 ```
 
 This file is committed and read by subsequent Prompt B sessions as inter-session governance proof.
+
+### Close Sequence
+
+At close: update session log, commit all changes (including governance evidence and compiled specs), present closing summary. See `docs/ai/workflow.md` Close Sequence.
 
 ### What "complete" means
 
