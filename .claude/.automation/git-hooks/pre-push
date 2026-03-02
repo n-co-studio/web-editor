@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# pre-push hook — spawns child-sync as a background process after push to main.
+#
+# Git pre-push receives lines on stdin: <local ref> <local sha> <remote ref> <remote sha>
+# We detect pushes to refs/heads/main and trigger the sync pipeline.
+#
+# The sync runs in the background so the push returns immediately.
+# Progress is logged to /tmp/repo-os-child-sync.log.
+# A macOS notification fires when complete.
+#
+# Install: .claude/.automation/lib/install-hooks.sh
+
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+SYNC_SCRIPT="$REPO_ROOT/.claude/.automation/lib/child-sync.sh"
+
+# Only proceed if the sync script exists
+[ -x "$SYNC_SCRIPT" ] || exit 0
+
+PUSH_TO_MAIN=false
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if [ "$remote_ref" = "refs/heads/main" ]; then
+    PUSH_TO_MAIN=true
+  fi
+done
+
+if [ "$PUSH_TO_MAIN" = true ]; then
+  # Brief delay so the push completes before workflows trigger.
+  # Script handles its own logging to /tmp/repo-os-child-sync.log via tee.
+  (sleep 5 && "$SYNC_SCRIPT") >/dev/null 2>&1 &
+  disown
+fi
+
+# Always exit 0 — never block the push
+exit 0
