@@ -237,7 +237,8 @@ is_carved_out() {
         docs/ai/logs/*) return 0 ;;
         docs/ai/task-groups/_*) return 1 ;;
         docs/ai/task-groups/*.yaml) return 0 ;;
-        docs/ai/decisions/0[1-9][0-9][0-9]-*.md) return 0 ;;
+        docs/ai/decisions/t-*.md) return 1 ;;  # template decisions — blocked in child mode (Decision 0022)
+        docs/ai/decisions/0[1-9][0-9][0-9]-*.md) return 0 ;;  # child decisions (0100+) — allowed
         docs/spec/compiled/*) return 0 ;;
         docs/spec/prototypes/*) return 0 ;;
         *) return 1 ;;
@@ -270,6 +271,23 @@ if [ "$MODE" != "template" ]; then
         echo "BLOCKED: $REL_PATH_FE is an immune path — cannot be modified in any mode (no override)" >&2
         exit 2
       fi
+      # Template decision protection — t-*.md files are immutable in child/autonomous modes (Decision 0022)
+      case "$REL_PATH_FE" in
+        docs/ai/decisions/t-*.md)
+          # Check REPO_OS_UNLOCK_PATH override before blocking
+          if [ -n "${REPO_OS_UNLOCK_PATH:-}" ]; then
+            _UNLOCK_REL_FE=$(make_relative "$REPO_OS_UNLOCK_PATH")
+            if [ "$REL_PATH_FE" = "$_UNLOCK_REL_FE" ]; then
+              log_override "mode-guard" "REPO_OS_UNLOCK_PATH"
+              log_hook_event "mode-guard" "PreToolUse" "" "allow" "$START_MS" "unlock_path" "" "$REL_PATH_FE"
+              exit 0
+            fi
+          fi
+          log_hook_event "mode-guard" "PreToolUse" "" "block" "$START_MS" "file_template_decision" "" "$REL_PATH_FE"
+          echo "BLOCKED: $REL_PATH_FE is a template decision (t-* prefix) — immutable in '$MODE' mode (override: REPO_OS_UNLOCK_PATH=$REL_PATH_FE or REPO_OS_SKIP_MODE_GUARD=1)" >&2
+          exit 2
+          ;;
+      esac
     fi
   fi
   # Immune path check on Bash write targets (redirect/tee)
@@ -285,6 +303,14 @@ if [ "$MODE" != "template" ]; then
           echo "BLOCKED: $FE_WT_REL is an immune path — cannot be modified in any mode (no override)" >&2
           exit 2
         fi
+        # Template decision protection — t-*.md files are immutable in child/autonomous modes (Decision 0022)
+        case "$FE_WT_REL" in
+          docs/ai/decisions/t-*.md)
+            log_hook_event "mode-guard" "PreToolUse" "" "block" "$START_MS" "bash_template_decision" "" "$FE_WT_REL"
+            echo "BLOCKED: $FE_WT_REL is a template decision (t-* prefix) — immutable in '$MODE' mode (override: REPO_OS_UNLOCK_PATH=$FE_WT_REL or REPO_OS_SKIP_MODE_GUARD=1)" >&2
+            exit 2
+            ;;
+        esac
       fi
     done <<< "$FE_TARGETS"
   fi

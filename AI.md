@@ -10,13 +10,12 @@
 
 ## Authority
 Operator-only:
-- Create GitHub repo, manage org/user/visibility/credentials
-- Decide when/where to push
+- Create GitHub repo, manage org/user/visibility/credentials, configure remote
 
 Agent-allowed:
 - Read/write files, run local commands
 - Git operations (status/add/commit) once gates pass
-- Push only when gates pass
+- Push to remote after merge (advisory — warn on failure, do not block)
 
 ## Source of Truth
 - docs/spec/compiled/ (active version per manifest.json)

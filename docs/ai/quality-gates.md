@@ -32,10 +32,11 @@ The trigger parser uses a compiled index at `docs/ai/decisions/.a1-trigger-index
 **Regenerate after adding or modifying decision triggers:**
 
 ```bash
-# From repo root — rebuilds the index from all 0*.md decision files:
-for f in docs/ai/decisions/0*.md; do
+# From repo root — rebuilds the index from all t-*.md and 0*.md decision files:
+for f in docs/ai/decisions/t-*.md docs/ai/decisions/0*.md; do
+  [ -f "$f" ] || continue
   grep -q '^## Triggers' "$f" || continue
-  id=$(basename "$f" | grep -oE '^[0-9]+')
+  id=$(basename "$f" | sed -E 's/^(t-)?([0-9]+)-.*/\2/')
   block=$(sed -n '/^## Triggers/,/^## /{ /^## Triggers/d; /^## /d; p; }' "$f")
   paths=$(echo "$block" | grep -oE 'paths?:\s*`[^`]*`' | sed -E 's/^paths?:[[:space:]]*`//' | sed 's/`$//')
   keywords=$(echo "$block" | grep -oE 'keywords?:\s*`[^`]*`' | sed -E 's/^keywords?:[[:space:]]*`//' | sed 's/`$//')
