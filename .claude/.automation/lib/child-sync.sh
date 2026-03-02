@@ -27,8 +27,16 @@ _TRIGGERED=0
 _PULL_SUCCESS=0
 _PULL_FAILED=0
 
-# --- Logging (always to stderr so stdout capture isn't polluted) ---
-log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*" >&2; }
+# --- Logging ---
+# Always appends to LOG file. Also prints to stderr when a terminal is
+# attached (interactive use). When spawned by pre-push hook (no terminal),
+# only the log file receives output.
+log() {
+  local msg
+  msg=$(printf '[%s] %s' "$(date +%H:%M:%S)" "$*")
+  printf '%s\n' "$msg" >> "$LOG" 2>/dev/null || true
+  [ -t 2 ] && printf '%s\n' "$msg" >&2
+}
 
 # --- Parse config ---
 read_repos() {
@@ -147,4 +155,4 @@ main() {
   log "=== Done ==="
 }
 
-main "$@" 2>&1 | tee -a "$LOG"
+main "$@"
