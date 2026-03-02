@@ -1,0 +1,19 @@
+# Queue Entry Schema — defines a single automation task in the queue.
+# State machine: pending-review → approved → running → completed/failed/review/blocked
+
+entry:
+  id: ""                    # unique entry identifier (UUID or timestamp-based)
+  status: pending-review    # pending-review | approved | running | completed | failed | review | blocked
+  session_type: ""          # Decision 0014 enum (15 types, not extended)
+  branch: ""                # target branch name
+  brief_path: ""            # path to task brief (if applicable)
+  prompt: ""                # assembled prompt for claude -p (written at dequeue, not creation)
+  auto_mode: false          # true = skip op-review phase
+  solo_mode: false          # true = merge to main at close (Decision 0015)
+  retry_count: 0            # number of retry attempts so far
+  max_retries: 3            # maximum retries before marking blocked
+  error_log: ""             # path to blocker-report on failure
+  work_order_id: ""         # (v1.1.0) parent work order ID (optional)
+  created_at: ""            # ISO 8601 timestamp
+  updated_at: ""            # ISO 8601 timestamp
+  completed_at: ""          # ISO 8601 timestamp (set on terminal state)

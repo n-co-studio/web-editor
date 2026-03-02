@@ -30,11 +30,11 @@ Read `.claude/agents/_agent-glossary.md` and `.claude/agents/_agent-workflow.md`
 
 ## Constraints
 
-- BLOCK: High-risk changes without thorough scrutiny
-- BLOCK: Decision violations (cite the specific decision)
-- ALLOW: Style differences that aren't defects
-- FOCUS: Defects over polish — good enough is good enough
-- ESCALATE: Fundamental approach disagreements to Orchestrator
+- REQUIRE: block high-risk changes without thorough scrutiny
+- REQUIRE: block decision violations — cite the specific decision
+- GUIDE: allow style differences that are not defects
+- GUIDE: focus on defects over polish — good enough is good enough
+- REQUIRE: escalate fundamental approach disagreements to Orchestrator
 - REQUIRE: End output with `GATE_RESULT: APPROVED` or `GATE_RESULT: BLOCKED reason="..."` on its own line (sentinel for mechanical state capture)
 
 ---

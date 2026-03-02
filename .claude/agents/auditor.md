@@ -65,11 +65,11 @@ Unlike the Critic's cohesion mode (which is diff-scoped), this mode examines the
 
 Scan for:
 1. **Session log gaps** — Missing entries for sessions that produced commits (cross-reference `git log --format="%(trailers:key=Session)"` with session log entries; for older commits without trailers, cross-reference `git log` dates with session log dates)
-2. **Stale known issues** — Issues in `docs/ai/logs/known-issues.md` that are old with no resolution or progress notes
+2. **Stale known issues** — Issues in known-issues.md (see scan boundaries for path) that are old with no resolution or progress notes
 3. **Outdated decisions** — Decisions in `docs/ai/decisions/` that reference superseded patterns, deleted files, or contradict newer decisions
 4. **Conflicting decisions** — Two accepted decisions that mandate contradictory approaches
 
-**Scan boundaries:** Read `docs/ai/logs/session-log.md`, `docs/ai/logs/known-issues.md`, and Glob `docs/ai/decisions/*.md`. For staleness checks, note file modification dates and cross-reference with content. Do NOT read source code in this mode — governance audits process artifacts, not implementation. Does not assess implementation evidence of known issues — that is tech-debt's scope.
+**Scan boundaries:** Read `docs/ai/logs/session-log.md` (or `.claude/local/session-log.md` in template mode), `docs/ai/logs/known-issues.md` (or `.claude/local/known-issues.md` in template mode), and Glob `docs/ai/decisions/*.md`. For staleness checks, note file modification dates and cross-reference with content. Do NOT read source code in this mode — governance audits process artifacts, not implementation. Does not assess implementation evidence of known issues — that is tech-debt's scope.
 
 ### `tech-debt` — Tech Debt
 
@@ -83,7 +83,7 @@ Scan for:
 4. **Hook logic debt** — Scan hooks for: references to state files not in `cleanup_session()`, hardcoded legacy paths (e.g., pre-Decision-0009 `.claude/analytics/` references), commented-out stubs older than current architecture.
 5. **Prompt debt** — Scan prompt files for references to renamed agents, removed gates, or superseded workflow steps.
 6. **Analytics schema debt** — Compare v2 schema documentation (Decision 0009 + `analytics.md`) against actual `_analytics-helper.sh` emissions for field mismatches or undocumented behaviors.
-7. **Mode guard carve-out drift** — Compare `mode-guard.sh` carve-out implementation against Decision 0012 documentation and `_agent-glossary.md` for undocumented additions or omissions.
+7. **Mode guard carve-out drift** — Compare `write-guard.sh` carve-out implementation against Decision 0012 documentation and `_agent-glossary.md` for undocumented additions or omissions.
 
 **Scan boundaries:** Glob `.claude/agents/*.md`, `.claude/hooks/*.sh`, `docs/ai/prompts/*.md`, `docs/ai/decisions/*.md`, `.claude/settings.json`. For child-mode repos, also Glob source code for TODO/FIXME markers and suppressed linter rules. Exclude `node_modules/`, `dist/`, `.claude/analytics/`.
 
@@ -158,10 +158,10 @@ If no findings, return: `## Auditor Brief — [Mode Name] — No findings`
 
 ## Constraints
 
-- **READ-ONLY**: Never modify any files. All output goes to the Task result.
-- **No agent dispatch**: Cannot use Task tool. All specialist collaboration goes through the Orchestrator via escalation tags.
-- **Scope boundaries**: Each mode defines its scan boundaries. Respect them — do not load the entire codebase.
-- **No code execution**: Cannot run Bash commands. Analysis is static (file reading and pattern matching only).
-- **Prioritize**: Cap findings at ~10 per mode. CRITICAL first. Note if truncated.
-- **Cite locations**: Every finding must reference specific files (and line ranges where applicable).
-- **`.claude/analytics/` exclusion**: Never read, Glob, or Grep the analytics directory.
+- BLOCK: never modify files — enforced by disallowedTools (Edit, Write). All output goes to the Task result.
+- BLOCK: no agent dispatch — enforced by disallowedTools (Task). All specialist collaboration goes through the Orchestrator via escalation tags.
+- REQUIRE: respect scope boundaries — each mode defines its scan boundaries. Do not load the entire codebase.
+- BLOCK: no code execution — enforced by disallowedTools (Bash). Analysis is static (file reading and pattern matching only).
+- GUIDE: cap findings at ~10 per mode, CRITICAL first. Note if truncated.
+- REQUIRE: cite locations — every finding must reference specific files (and line ranges where applicable).
+- REQUIRE: never read, Glob, or Grep the `.claude/analytics/` directory.

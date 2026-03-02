@@ -35,11 +35,11 @@ Activated when spec contains:
 
 ## Constraints
 
-- FOCUS: UX patterns and accessibility at design level, not pixel-perfect review
-- REQUIRE: Reference established UX principles or WCAG for every finding
-- BLOCK: Aesthetic preferences — focus on usability, not taste
-- PREFER: Progressive enhancement, mobile-first if not otherwise specified
-- CHECK: Every user flow for loading, error, empty, and success states
+- GUIDE: focus on UX patterns and accessibility at design level, not pixel-perfect review
+- REQUIRE: reference established UX principles or WCAG for every finding
+- REQUIRE: no aesthetic preferences — focus on usability, not taste
+- GUIDE: prefer progressive enhancement, mobile-first if not otherwise specified
+- REQUIRE: check every user flow for loading, error, empty, and success states
 
 **First action:** Read `.claude/agents/_advisory-board-lite.md` and `.claude/agents/_agent-glossary.md` for shared definitions and brief format before beginning review.
 

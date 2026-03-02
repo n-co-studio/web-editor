@@ -20,7 +20,7 @@ Lightweight spec-mode dispatch of Architect + Exploration + Critic for task scop
 
 No file artifacts. No session log entry. No handoff to Build Flow — the operator manually carries the brief to a new Prompt B session.
 
-**Narrow path (multi-brief):** When the operator narrows a task, each sub-brief includes a `### Task Group` section with group name, sequence, and integration notes. The first Prompt B session creates the task group contract; subsequent sessions read and comply. Contract path depends on repo mode (template mode: `.claude/local/task-groups/{group-name}.yaml`; product mode: `docs/ai/task-groups/{group-name}.yaml`). See `docs/ai/task-groups/_contract-template.yaml` for the contract structure.
+**Narrow path (multi-brief):** When the operator narrows a task, each sub-brief includes a `### Task Group` section with group name, sequence, and integration notes. If sub-briefs have non-overlapping file scope, Prompt T offers parallel execution — parallel groups include `Execution: parallel`, per-brief `Boundaries:`, and an auto-generated merge brief (Brief M) that runs as `taskgroup-merge` session type. See `docs/ai/workflow.md` § Task Group Sessions for contract lifecycle and `docs/ai/task-groups/_contract-template.yaml` for the contract structure.
 
 ---
 
@@ -42,7 +42,7 @@ Runs when HVST debugging stalls (2+ consecutive failures) or when the operator p
 
 ## Audit Flow (Project Health)
 
-Runs on-demand when the operator invokes Prompt C. Read-only — no file modifications, no session log entries. See `docs/ai/prompts/prompt-c-project-audit.md` for the full prompt and `.claude/agents/auditor.md` for the Auditor agent definition.
+Runs on-demand when the operator invokes Prompt C. Read-only — no file modifications, no session log entries. Exception: operator deferrals write to `known-issues.md` and `.claude/.deferrals-pending` only (see `prompt-c-project-audit.md` § Rules). See `docs/ai/prompts/prompt-c-project-audit.md` for the full prompt and `.claude/agents/auditor.md` for the Auditor agent definition.
 
 ### Handoff Chain
 1. **Operator → Orchestrator**: Dimension selection + tier (Quick / Standard / Deep)
@@ -113,6 +113,11 @@ Phase labels correspond to Decision 0014 phase sequences. Auto/review mode set a
           │               │
           └───────┴───────┘
                   │
+         [user-review phase]
+       (optional — skipped when no
+        User Review in task brief)
+       dispatch persona agents → synthesize
+                  │
                   ▼
             [commit phase]
            ✓ COMMIT ALLOWED
@@ -124,6 +129,56 @@ Phase labels correspond to Decision 0014 phase sequences. Auto/review mode set a
             [close phase]
          merge branch to main (solo mode)
          seal branch (Decision 0013)
+```
+
+---
+
+## Merge Brief Flow (Parallel Task Group Integration)
+
+Phase labels correspond to Decision 0014 `taskgroup-merge` phase sequence. Runs after all parallel content briefs complete.
+
+```
+                     OPERATOR
+           (approves merged output)
+                         │
+                  [init phase]
+           check out task group branch
+                         │
+              [contract-init phase]
+         sync from contract
+         verify all completion markers exist
+         (.claude/.state/tg-{group}-brief-{seq}.complete)
+                         │
+               ┌─────────┤
+               │  [cohesion phase]
+               │  CRITIC (cohesion mode)
+               │  git diff main...HEAD (full branch diff)
+               │  reviews all parallel briefs' combined output
+               │         │
+               │   ┌─────┴─────┐
+               │ CLEAN      FINDINGS
+               │   │           │
+               │   │     fix directly (merge brief)
+               │   │     ambiguity → Operator
+               │   │           │
+               │   │    ┌──────┘
+               │   │    │ (self-loop: cohesion→cohesion)
+               └───┴────┘
+                         │
+                  [verify phase]
+                  QA / VERIFIER
+           verifies all gates (A1–A6, B1–B3)
+                         │
+                  [commit phase]
+                 ✓ COMMIT ALLOWED
+                         │
+                [op-review phase]
+          (review mode: pause for operator)
+          (auto mode: skip to close)
+                         │
+                  [close phase]
+          merge branch to main + seal branch
+          clean completion markers
 ```
 
 ---
@@ -197,4 +252,14 @@ Audit agents are dispatched by the Orchestrator during Prompt C. Security/Privac
 
 Operations and Audit agents are invoked directly by the operator, not as part of the plan→build→verify chain. They do not participate in handoffs.
 
-Subagents load their own definitions from `.claude/agents/`. Do not read subagent files into orchestrator context.
+### User Review (User-Review Phase)
+
+| Agent | Invoke When | Blocks Commit? |
+|-------|------------|----------------|
+| **User Review Tier 1** (Power User) | Task brief/contract declares `user_review` with tier-1, or operator requests during session | No (advisory) |
+| **User Review Tier 2** (Everyday) | Task brief/contract declares `user_review` with tier-2, or operator requests during session | No (advisory) |
+| **User Review Tier 3** (Novice) | Task brief/contract declares `user_review` with tier-3, or operator requests during session | No (advisory) |
+
+User Review agents are dispatched by the Orchestrator during the `user-review` phase (after `verify`, before `commit`). The phase is skipped when the task brief has no User Review section. Agents simulate user personas walking through implementation scenarios using JTBD job stories. Results are synthesized (deduplicated, severity-escalated) and presented during `op-review`. All findings are advisory — the operator decides disposition (accept / note / dismiss). Available in child mode only. See Decision 0021.
+
+Subagents load their own definitions from `.claude/agents/`. REQUIRE: do not read subagent files into orchestrator context.

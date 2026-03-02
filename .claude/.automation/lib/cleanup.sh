@@ -1,0 +1,327 @@
+#!/usr/bin/env bash
+# Cleanup — retention-based deletion of stale runtime artifacts.
+# Sourced by runner.sh. NOT executed standalone.
+# Decision 0017 — Operator Automation Layer.
+#
+# Cleanup targets:
+#   - Completed queue entries older than queue_days config
+#   - Failed/blocked/review queue entries older than 2x queue_days
+#   - Blocker reports older than report_days config
+#   - Resolved escalations older than escalation_days config
+#   - Stale heartbeat files older than 24h
+#   - Closed-branches compaction (branches no longer in reflog)
+#
+# Depends on (sourced by runner.sh before this file):
+#   runner.sh sets REPO_ROOT, AUTOMATION_DIR, CONFIG_FILE
+#   queue-manager.sh — _parse_config_field, _queue_dir, _rebuild_queue_index
+
+set -euo pipefail
+
+# --- Portable stat for modification time (audit C4: cross-platform) ---
+# Arguments:
+#   $1 — file path
+# Output: epoch seconds on stdout (0 on failure)
+_portable_mod_epoch() {
+  local file="$1"
+  case "${OSTYPE:-}" in
+    darwin*) stat -f %m "$file" 2>/dev/null || echo "0" ;;
+    *)       stat -c %Y "$file" 2>/dev/null || echo "0" ;;
+  esac
+}
+
+# --- Get file age in days ---
+# Arguments:
+#   $1 — file path
+# Output: integer days on stdout
+_file_age_days() {
+  local file="$1"
+  [ -f "$file" ] || { echo "0"; return; }
+
+  local mod_epoch now_epoch
+  mod_epoch=$(_portable_mod_epoch "$file")
+  now_epoch=$(date +%s)
+
+  if [ "$mod_epoch" -gt 0 ]; then
+    echo $(( (now_epoch - mod_epoch) / 86400 ))
+  else
+    echo "0"
+  fi
+}
+
+# --- Get file age in hours (for heartbeat staleness) ---
+# Arguments:
+#   $1 — file path
+# Output: integer hours on stdout
+_file_age_hours() {
+  local file="$1"
+  [ -f "$file" ] || { echo "0"; return; }
+
+  local mod_epoch now_epoch
+  mod_epoch=$(_portable_mod_epoch "$file")
+  now_epoch=$(date +%s)
+
+  if [ "$mod_epoch" -gt 0 ]; then
+    echo $(( (now_epoch - mod_epoch) / 3600 ))
+  else
+    echo "0"
+  fi
+}
+
+# --- Clean queue entries by status and retention ---
+# Arguments:
+#   $1 — status directory name (completed, failed, review, blocked)
+#   $2 — max age in days
+# Output: count of deleted entries on stdout
+_clean_queue_status() {
+  local status="$1"
+  local max_days="$2"
+  local qdir
+  qdir=$(_queue_dir)
+  local dir="$qdir/$status"
+  local deleted=0
+
+  [ -d "$dir" ] || { echo "0"; return; }
+
+  local f
+  for f in "$dir"/*.yaml; do
+    [ -f "$f" ] || continue
+    local age
+    age=$(_file_age_days "$f")
+    if [ "$age" -ge "$max_days" ]; then
+      rm -f "$f"
+      deleted=$((deleted + 1))
+    fi
+  done
+
+  echo "$deleted"
+}
+
+# --- Clean blocker reports by retention ---
+# Arguments:
+#   $1 — max age in days
+# Output: count of deleted reports on stdout
+_clean_reports() {
+  local max_days="$1"
+  local reports_dir="${AUTOMATION_DIR:-$REPO_ROOT/.claude/.automation}/reports"
+  local deleted=0
+
+  [ -d "$reports_dir" ] || { echo "0"; return; }
+
+  local f
+  for f in "$reports_dir"/*.yaml; do
+    [ -f "$f" ] || continue
+    local age
+    age=$(_file_age_days "$f")
+    if [ "$age" -ge "$max_days" ]; then
+      rm -f "$f"
+      deleted=$((deleted + 1))
+    fi
+  done
+
+  echo "$deleted"
+}
+
+# --- Clean resolved escalations by retention ---
+# Only deletes escalations where resolved: true.
+# Arguments:
+#   $1 — max age in days
+# Output: count of deleted escalations on stdout
+_clean_escalations() {
+  local max_days="$1"
+  local esc_dir="${AUTOMATION_DIR:-$REPO_ROOT/.claude/.automation}/escalations"
+  local deleted=0
+
+  [ -d "$esc_dir" ] || { echo "0"; return; }
+
+  local f
+  for f in "$esc_dir"/*.yaml; do
+    [ -f "$f" ] || continue
+    # Only delete resolved escalations
+    if grep -q 'resolved: true' "$f" 2>/dev/null; then
+      local age
+      age=$(_file_age_days "$f")
+      if [ "$age" -ge "$max_days" ]; then
+        rm -f "$f"
+        deleted=$((deleted + 1))
+      fi
+    fi
+  done
+
+  echo "$deleted"
+}
+
+# --- Clean stale heartbeat files ---
+# Heartbeats older than 24h indicate orphaned runners.
+# Output: count of deleted heartbeats on stdout
+_clean_stale_heartbeats() {
+  local qdir
+  qdir=$(_queue_dir)
+  local hb_dir="$qdir/running"
+  local deleted=0
+
+  [ -d "$hb_dir" ] || { echo "0"; return; }
+
+  local f
+  for f in "$hb_dir"/*.heartbeat; do
+    [ -f "$f" ] || continue
+    local age
+    age=$(_file_age_hours "$f")
+    if [ "$age" -ge 24 ]; then
+      rm -f "$f"
+      deleted=$((deleted + 1))
+    fi
+  done
+
+  echo "$deleted"
+}
+
+# --- Compact closed-branches ledger ---
+# Removes entries for branches no longer in git reflog.
+# Uses atomic write-to-tmp-then-mv pattern.
+# Output: count of removed entries on stdout
+_compact_closed_branches() {
+  local closed_file="$REPO_ROOT/.claude/local/closed-branches"
+  local removed=0
+
+  [ -f "$closed_file" ] || { echo "0"; return; }
+
+  local tmp_file="${closed_file}.tmp"
+  local kept_lines=""
+  local branch
+
+  while IFS= read -r branch || [ -n "$branch" ]; do
+    [ -z "$branch" ] && continue
+    # Check if branch exists in reflog (any trace of it)
+    if git reflog show "$branch" > /dev/null 2>&1 || \
+       git rev-parse --verify "$branch" > /dev/null 2>&1; then
+      # Branch still has reflog or ref — keep entry
+      if [ -z "$kept_lines" ]; then
+        kept_lines="$branch"
+      else
+        kept_lines="${kept_lines}
+${branch}"
+      fi
+    else
+      removed=$((removed + 1))
+    fi
+  done < "$closed_file"
+
+  # Write compacted file atomically
+  if [ "$removed" -gt 0 ]; then
+    if [ -n "$kept_lines" ]; then
+      printf '%s\n' "$kept_lines" > "$tmp_file"
+    else
+      : > "$tmp_file"
+    fi
+    mv "$tmp_file" "$closed_file"
+  fi
+
+  echo "$removed"
+}
+
+# --- Clean terminal work orders by retention ---
+# Deletes completed/escalated work orders older than max_days.
+# Arguments:
+#   $1 — max age in days
+# Output: count of deleted work orders on stdout
+_clean_work_orders() {
+  local max_days="$1"
+  local wo_dir
+  wo_dir="$(_queue_dir)/work-orders"
+  local deleted=0
+
+  [ -d "$wo_dir" ] || { echo "0"; return; }
+
+  local f
+  for f in "$wo_dir"/*.yaml; do
+    [ -f "$f" ] || continue
+    # Only delete terminal work orders (completed or escalated)
+    if grep -q 'status: completed' "$f" 2>/dev/null || \
+       grep -q 'status: escalated' "$f" 2>/dev/null; then
+      local age
+      age=$(_file_age_days "$f")
+      if [ "$age" -ge "$max_days" ]; then
+        rm -f "$f"
+        deleted=$((deleted + 1))
+      fi
+    fi
+  done
+
+  echo "$deleted"
+}
+
+# ============================================================
+# Public API
+# ============================================================
+
+# --- Run full cleanup pass ---
+# Reads retention config and cleans all stale artifacts.
+# Output: summary to stderr
+run_cleanup() {
+  # Read retention config
+  local queue_days report_days escalation_days
+  queue_days=$(_parse_config_field "retention" "queue_days" 2>/dev/null || true)
+  queue_days="${queue_days:-30}"
+  report_days=$(_parse_config_field "retention" "report_days" 2>/dev/null || true)
+  report_days="${report_days:-90}"
+  escalation_days=$(_parse_config_field "retention" "escalation_days" 2>/dev/null || true)
+  escalation_days="${escalation_days:-90}"
+
+  local failed_days=$((queue_days * 2))
+
+  local total_deleted=0 count
+
+  # Queue entries
+  count=$(_clean_queue_status "completed" "$queue_days")
+  total_deleted=$((total_deleted + count))
+  [ "$count" -gt 0 ] && echo "cleanup: removed $count completed entries (>${queue_days}d)" >&2
+
+  count=$(_clean_queue_status "failed" "$failed_days")
+  total_deleted=$((total_deleted + count))
+  [ "$count" -gt 0 ] && echo "cleanup: removed $count failed entries (>${failed_days}d)" >&2
+
+  count=$(_clean_queue_status "blocked" "$failed_days")
+  total_deleted=$((total_deleted + count))
+  [ "$count" -gt 0 ] && echo "cleanup: removed $count blocked entries (>${failed_days}d)" >&2
+
+  count=$(_clean_queue_status "review" "$failed_days")
+  total_deleted=$((total_deleted + count))
+  [ "$count" -gt 0 ] && echo "cleanup: removed $count review entries (>${failed_days}d)" >&2
+
+  # Blocker reports
+  count=$(_clean_reports "$report_days")
+  total_deleted=$((total_deleted + count))
+  [ "$count" -gt 0 ] && echo "cleanup: removed $count reports (>${report_days}d)" >&2
+
+  # Escalations (resolved only)
+  count=$(_clean_escalations "$escalation_days")
+  total_deleted=$((total_deleted + count))
+  [ "$count" -gt 0 ] && echo "cleanup: removed $count resolved escalations (>${escalation_days}d)" >&2
+
+  # Review log compaction
+  if type review_log_compact > /dev/null 2>&1; then
+    count=$(review_log_compact)
+    total_deleted=$((total_deleted + count))
+  fi
+
+  # Work orders (terminal status, same retention as queue entries)
+  count=$(_clean_work_orders "$queue_days")
+  total_deleted=$((total_deleted + count))
+  [ "$count" -gt 0 ] && echo "cleanup: removed $count terminal work orders (>${queue_days}d)" >&2
+
+  # Stale heartbeats
+  count=$(_clean_stale_heartbeats)
+  total_deleted=$((total_deleted + count))
+  [ "$count" -gt 0 ] && echo "cleanup: removed $count stale heartbeats (>24h)" >&2
+
+  # Closed-branches compaction
+  count=$(_compact_closed_branches)
+  [ "$count" -gt 0 ] && echo "cleanup: compacted $count stale closed-branch entries" >&2
+
+  # Rebuild queue index if any queue entries were deleted
+  if [ "$total_deleted" -gt 0 ]; then
+    _rebuild_queue_index
+  fi
+
+  echo "cleanup: complete ($total_deleted artifacts removed)" >&2
+}

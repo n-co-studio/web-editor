@@ -1,0 +1,18 @@
+# Operator Automation Layer — default configuration.
+# Schema: .claude/.automation/schemas/runner-config.yaml
+# Set enabled: true to activate headless runner infrastructure.
+
+runner:
+  enabled: false
+  default_auto_mode: false
+  default_solo_mode: false
+  max_retries: 3
+  heartbeat_interval: 30
+  stderr_tail_lines: 50
+  cohesion_trigger: 100
+
+retention:
+  queue_days: 30
+  report_days: 90
+  escalation_days: 90
+  review_log_days: 90

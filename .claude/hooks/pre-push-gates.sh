@@ -28,7 +28,7 @@ fi
 # ============================================================
 # B1: Process — Branch Naming Convention (blocking)
 # ============================================================
-CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
 VALID_PATTERNS="^(main|feature/|fix/|hotfix/|release/|experiment/).+$"
 
 if [ -n "$CURRENT_BRANCH" ] && [ "$CURRENT_BRANCH" != "main" ]; then

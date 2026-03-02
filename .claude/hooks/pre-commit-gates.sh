@@ -15,7 +15,7 @@
 #
 # Overrides:
 #   REPO_OS_RECOVER=1    — skip all state-dependent checks (emergency recovery)
-#   SKIP_CONTRACT_CHECK=1 — skip A6 contract staging check
+#   SKIP_CONTRACT_CHECK=1 — skip A6 contract checks (existence + staging)
 #
 # Branch profiles:
 #   experiment/*  — A4 only (all state checks skipped)
@@ -28,10 +28,14 @@ source "$SCRIPT_DIR/_analytics-helper.sh"
 source "$SCRIPT_DIR/_phase-helper.sh"
 START_MS=$(now_ms)
 
-# --- jq presence guard (fail-open) ---
+# --- jq presence guard (fail-closed) ---
+# jq is required for parsing hook payloads. Without it, security gates (A4,
+# A1, high-risk) cannot inspect the commit command, so we block rather than
+# silently skipping checks. Install jq: https://jqlang.github.io/jq/download/
 if ! command -v jq &>/dev/null; then
-  echo "Warning: jq not found — pre-commit gate checks requiring JSON parsing will be skipped" >&2
-  exit 0
+  echo "GATE BLOCKED: jq is required for pre-commit gate checks but was not found." >&2
+  echo "  Install jq (https://jqlang.github.io/jq/download/) and retry." >&2
+  exit 2
 fi
 
 REPO_ROOT="$(get_repo_root)"
@@ -74,17 +78,38 @@ fi
 # --- Staged files (used by multiple checks) ---
 STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || true)
 
+# --- Cached staged diff for content scanning (lazy-loaded, shared by A4 + high-risk + A1) ---
+_CACHED_STAGED_DIFF=""
+_CACHED_STAGED_DIFF_LOADED=false
+
+_get_staged_diff() {
+  if [ "$_CACHED_STAGED_DIFF_LOADED" = false ]; then
+    _CACHED_STAGED_DIFF=$(git diff --cached -U0 2>/dev/null || true)
+    _CACHED_STAGED_DIFF_LOADED=true
+  fi
+  printf '%s\n' "$_CACHED_STAGED_DIFF"
+}
+
 # ============================================================
 # A4: Safety — Secret Scanning (always runs, blocking)
+# Scans added lines in staged diff (not working-tree files) to catch
+# only what's being committed. Pre-existing secrets are not flagged.
 # ============================================================
-SECRET_PATTERN='sk_live_|sk_test_|ghp_[A-Za-z0-9]|AKIA[A-Z0-9]|AIza[A-Za-z0-9]|-----BEGIN.*PRIVATE KEY-----|password[[:space:]]*=[[:space:]]*["\x27][^"\x27]|secret[[:space:]]*=[[:space:]]*["\x27][^"\x27]|token[[:space:]]*=[[:space:]]*["\x27][^"\x27]'
+SECRET_PATTERN='sk_live_|sk_test_|sk-ant-api[0-9]+-[A-Za-z0-9_-]+|ghp_[A-Za-z0-9]|AKIA[A-Z0-9]|AIza[A-Za-z0-9]|-----BEGIN.*PRIVATE KEY-----|://[^/:@[:space:]]+:[^/@[:space:]]+@[^[:space:]]+|password[[:space:]]*=[[:space:]]*["\x27][^"\x27]|secret[[:space:]]*=[[:space:]]*["\x27][^"\x27]|token[[:space:]]*=[[:space:]]*["\x27][^"\x27]'
 
 if [ -n "$STAGED_FILES" ]; then
-  MATCHES=$(echo "$STAGED_FILES" | tr '\n' '\0' | xargs -0 grep -lE "$SECRET_PATTERN" 2>/dev/null || true)
-  if [ -n "$MATCHES" ]; then
-    echo "GATE A4 FAILED: Possible secret in: $MATCHES" >&2
+  # Scan added lines only (^+ prefix) from staged diff — catches what's being
+  # committed, not pre-existing content. Uses _get_staged_diff lazy cache.
+  A4_ADDED_LINES=$(_get_staged_diff | awk '
+    /^\+\+\+ / { file=substr($0,5); next }
+    /^\+/ && !/^\+\+\+/ { print file ": " substr($0,2) }
+  ')
+  A4_MATCHES=$(echo "$A4_ADDED_LINES" | grep -iE "$SECRET_PATTERN" 2>/dev/null || true)
+  if [ -n "$A4_MATCHES" ]; then
+    A4_FIRST_FILE=$(echo "$A4_MATCHES" | head -1 | sed 's/^b\///' | sed 's/: .*//')
+    echo "GATE A4 FAILED: Possible secret in staged diff (added lines): $A4_FIRST_FILE" >&2
     block "A4_secret_detected"
-    log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A4_secret_detected" "" "$(echo "$MATCHES" | head -1)"
+    log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A4_secret_detected" "" "$A4_FIRST_FILE"
   fi
 fi
 
@@ -234,22 +259,51 @@ if [ "$SKIP_STATE" = false ] && [ "$IS_HOTFIX" = false ] && [ -n "$STAGED_FILES"
 fi
 
 # ============================================================
-# A6: Task Group — Contract Staging Check (blocking)
+# A6: Task Group — Contract Checks (blocking)
 # Override: SKIP_CONTRACT_CHECK=1
+# A6.1: Contract existence — task group sessions must have an active contract.
+# A6.2: Contract staging — modified contracts must be staged.
 # Note: Template-mode contracts live in .claude/local/task-groups/ (gitignored),
-# so git diff won't detect them — staging check is inherently N/A for those.
-# The mode-routing is kept for consistency with session-close-check.sh.
+# so git diff won't detect them — A6.2 staging check is inherently N/A for those.
+# A6.1 uses filesystem check (not git diff), so it works in both modes.
 # ============================================================
 if [ "${SKIP_CONTRACT_CHECK:-0}" = "1" ]; then
   log_override "pre-commit-gates" "SKIP_CONTRACT_CHECK"
 fi
-if [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
+if [ "$SKIP_STATE" = false ] && [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
   REPO_MODE_FILE="$REPO_ROOT/.claude/repo-mode"
   if [ -f "$REPO_MODE_FILE" ] && grep -q "template" "$REPO_MODE_FILE" 2>/dev/null; then
     CONTRACT_DIR="$REPO_ROOT/.claude/local/task-groups"
   else
     CONTRACT_DIR="$REPO_ROOT/docs/ai/task-groups"
   fi
+
+  # A6.1: Contract existence (blocking for task group sessions, Decision 0018)
+  # Task group sessions must have a contract with status: in_progress before
+  # committing. Prevents the failure where an agent commits without ever
+  # creating the contract during contract-init phase.
+  A6_SESSION_TYPE=$(get_session_type)
+  if [ "$A6_SESSION_TYPE" = "taskgroup" ] || [ "$A6_SESSION_TYPE" = "taskgroup-merge" ]; then
+    CONTRACT_FOUND=false
+    if [ -d "$CONTRACT_DIR" ]; then
+      for _a6_cf in "$CONTRACT_DIR"/*.yaml; do
+        [ -f "$_a6_cf" ] || continue
+        # Skip template files (prefixed with _)
+        case "$(basename "$_a6_cf")" in _*) continue ;; esac
+        if grep -q "status: in_progress" "$_a6_cf" 2>/dev/null; then
+          CONTRACT_FOUND=true
+          break
+        fi
+      done
+    fi
+    if [ "$CONTRACT_FOUND" = false ]; then
+      echo "GATE A6 FAILED: Task group session ($A6_SESSION_TYPE) but no contract with 'status: in_progress' found — create the contract during contract-init phase (override: SKIP_CONTRACT_CHECK=1)" >&2
+      block "A6_contract_missing"
+      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A6_contract_missing" "session_type:$A6_SESSION_TYPE"
+    fi
+  fi
+
+  # A6.2: Contract staging (blocking for all sessions with modified contracts)
   if [ -d "$CONTRACT_DIR" ]; then
     UNSTAGED_CONTRACTS=$(git diff --name-only -- "$CONTRACT_DIR"/*.yaml 2>/dev/null || true)
     if [ -n "$UNSTAGED_CONTRACTS" ]; then
@@ -295,10 +349,12 @@ if [ "$SKIP_STATE" = false ] && [ -n "$STAGED_FILES" ]; then
   if [ "$HIGH_RISK" = false ] && [ -n "$NON_TEST_FILES" ]; then
     RISK_CONTENT_PATTERN='(password|secret|token)'
     # Scan added lines in non-test files only
-    RISK_CONTENT_MATCHES=$(echo "$NON_TEST_FILES" | tr '\n' '\0' \
-      | xargs -0 git diff --cached -U0 -- 2>/dev/null \
-      | grep '^+' | grep -v '^+++' \
-      | grep -iE "$RISK_CONTENT_PATTERN" || true)
+    _HR_FILE_LIST=$(echo "$NON_TEST_FILES" | tr '\n' '|' | sed 's/|$//')
+    RISK_CONTENT_MATCHES=$(_get_staged_diff | awk -v files="$_HR_FILE_LIST" '
+      BEGIN { n=split(files, fa, "|"); for(i=1;i<=n;i++) wanted["b/"fa[i]]=1 }
+      /^\+\+\+ / { f=substr($0,5); active=(f in wanted) ? 1 : 0; next }
+      active && /^\+/ && !/^\+\+\+/ { print }
+    ' | grep -iE "$RISK_CONTENT_PATTERN" || true)
     if [ -n "$RISK_CONTENT_MATCHES" ]; then
       HIGH_RISK=true
     fi
@@ -338,8 +394,29 @@ if [ "$SKIP_STATE" = false ] && [ -n "$STAGED_FILES" ]; then
   fi
 fi
 
+# --- Platform guard: timeout command availability ---
+# timeout is needed for ReDoS protection on user-supplied regex patterns.
+# GNU coreutils provides it on Linux; macOS may lack it (Homebrew: `brew install coreutils`).
+_REPO_OS_HAS_TIMEOUT=false
+command -v timeout &>/dev/null && _REPO_OS_HAS_TIMEOUT=true
+if [ "$_REPO_OS_HAS_TIMEOUT" = false ]; then
+  echo "Advisory: 'timeout' command not found — A1 regex matching runs without ReDoS protection. Install coreutils for hardened matching." >&2
+fi
+
+# Helper: run grep with optional timeout guard for ReDoS protection.
+# Usage: _guarded_grep -E "$pattern" (or -iE, etc.)
+_guarded_grep() {
+  if [ "$_REPO_OS_HAS_TIMEOUT" = true ]; then
+    timeout 2 grep "$@"
+  else
+    grep "$@"
+  fi
+}
+
 # ============================================================
 # A1: Decision Trigger Parser (blocking — enforced by .a1-triggers-enforced sentinel)
+# Uses compiled index (.a1-trigger-index) when present for fast matching.
+# Falls back to file-by-file parsing when index is absent.
 # ============================================================
 if [ -n "$STAGED_FILES" ] && [ -d "$DECISIONS_DIR" ]; then
   A1_BLOCKING=false
@@ -351,60 +428,131 @@ if [ -n "$STAGED_FILES" ] && [ -d "$DECISIONS_DIR" ]; then
   fi
 
   TRIGGERED_DECISIONS=""
-  MISSING_TRIGGERS=0
-  TOTAL_DECISIONS=0
+  A1_INDEX="$DECISIONS_DIR/.a1-trigger-index"
 
-  for DECISION_FILE in "$DECISIONS_DIR"/0*.md; do
-    [ -f "$DECISION_FILE" ] || continue
-    TOTAL_DECISIONS=$((TOTAL_DECISIONS + 1))
+  if [ -f "$A1_INDEX" ]; then
+    # --- Fast path: compiled trigger index ---
+    # Index format: decision_id|path_regex|keywords (pipe-delimited)
+    # Eliminates per-file grep/sed expansion (~80 forks → ~5-10 typical)
 
-    DECISION_ID=$(basename "$DECISION_FILE" | grep -oE '^[0-9]+')
+    # Staleness guard: warn if any decision file is newer than the index
+    for _A1_DF in "$DECISIONS_DIR"/0*.md; do
+      [ -f "$_A1_DF" ] || continue
+      if [ "$_A1_DF" -nt "$A1_INDEX" ]; then
+        echo "A1 WARNING: .a1-trigger-index may be stale — regenerate (see index file header for command)" >&2
+        warn "A1_index_stale"
+        break
+      fi
+    done
 
-    # Check if ## Triggers section exists
-    if ! grep -q '^## Triggers' "$DECISION_FILE"; then
-      MISSING_TRIGGERS=$((MISSING_TRIGGERS + 1))
-      continue
-    fi
+    while IFS='|' read -r _A1_DID _A1_PATH _A1_KW; do
+      # Skip comments and blank lines
+      case "$_A1_DID" in '#'*|'') continue ;; esac
+      [ -z "$_A1_PATH" ] && continue
 
-    # Extract trigger block (from ## Triggers to next ## or EOF)
-    TRIGGER_BLOCK=$(sed -n '/^## Triggers/,/^## /{ /^## Triggers/d; /^## /d; p; }' "$DECISION_FILE")
-    [ -z "$TRIGGER_BLOCK" ] && continue
+      # Match staged files against path pattern (guarded against ReDoS)
+      _A1_MATCHING=$(echo "$STAGED_FILES" | _guarded_grep -E "$_A1_PATH" || true)
+      [ -z "$_A1_MATCHING" ] && continue
 
-    # Extract paths (lines starting with - path: or - paths:)
-    TRIGGER_PATHS=$(echo "$TRIGGER_BLOCK" | grep -oE 'paths?:\s*.*' | sed -E 's/^paths?:[[:space:]]*//' || true)
-    # Extract keywords
-    TRIGGER_KEYWORDS=$(echo "$TRIGGER_BLOCK" | grep -oE 'keywords?:\s*.*' | sed -E 's/^keywords?:[[:space:]]*//' || true)
+      # If keywords defined, check diff content in matching files
+      if [ -n "$_A1_KW" ]; then
+        _A1_KW_PAT=$(echo "$_A1_KW" | sed 's/[[:space:]]*,[[:space:]]*/|/g')
+        _A1_FLIST=$(echo "$_A1_MATCHING" | tr '\n' '|' | sed 's/|$//')
+        _A1_KW_HIT=$(_get_staged_diff | awk -v files="$_A1_FLIST" '
+          BEGIN { n=split(files, fa, "|"); for(i=1;i<=n;i++) wanted["b/"fa[i]]=1 }
+          /^\+\+\+ / { f=substr($0,5); active=(f in wanted) ? 1 : 0; next }
+          active && /^\+/ && !/^\+\+\+/ { print }
+        ' | _guarded_grep -iE "$_A1_KW_PAT" || true)
+        [ -z "$_A1_KW_HIT" ] && continue
+      fi
 
-    # Match staged files against trigger paths
-    DECISION_TRIGGERED=false
-    if [ -n "$TRIGGER_PATHS" ]; then
-      while IFS= read -r GLOB_PATTERN; do
-        GLOB_PATTERN=$(echo "$GLOB_PATTERN" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//' | sed 's/^`//' | sed 's/`$//')
-        [ -z "$GLOB_PATTERN" ] && continue
-        # Match staged files against glob
-        MATCHING_FILES=$(echo "$STAGED_FILES" | grep -E "$GLOB_PATTERN" || true)
-        if [ -n "$MATCHING_FILES" ]; then
-          if [ -n "$TRIGGER_KEYWORDS" ]; then
-            # If keywords defined, also check content
-            KW_PATTERN=$(echo "$TRIGGER_KEYWORDS" | sed 's/`//g' | sed 's/[[:space:]]*,[[:space:]]*/|/g' | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
-            KW_MATCHES=$(echo "$MATCHING_FILES" | tr '\n' '\0' \
-              | xargs -0 git diff --cached -U0 -- 2>/dev/null \
-              | grep '^+' | grep -v '^+++' \
-              | grep -iE "$KW_PATTERN" || true)
-            [ -n "$KW_MATCHES" ] && DECISION_TRIGGERED=true
-          else
-            DECISION_TRIGGERED=true
+      # Decision triggered — deduplicate (pure Bash, no forks)
+      case ",$TRIGGERED_DECISIONS," in
+        *",$_A1_DID,"*) ;;
+        *) TRIGGERED_DECISIONS="${TRIGGERED_DECISIONS:+$TRIGGERED_DECISIONS, }$_A1_DID" ;;
+      esac
+    done < "$A1_INDEX"
+
+  else
+    # --- Fallback: parse decision files directly (no index) ---
+    MISSING_TRIGGERS=0
+    TOTAL_DECISIONS=0
+
+    for DECISION_FILE in "$DECISIONS_DIR"/0*.md; do
+      [ -f "$DECISION_FILE" ] || continue
+      TOTAL_DECISIONS=$((TOTAL_DECISIONS + 1))
+
+      DECISION_ID=$(basename "$DECISION_FILE" | grep -oE '^[0-9]+')
+
+      # Check if ## Triggers section exists
+      if ! grep -q '^## Triggers' "$DECISION_FILE"; then
+        MISSING_TRIGGERS=$((MISSING_TRIGGERS + 1))
+        continue
+      fi
+
+      # Extract trigger block (from ## Triggers to next ## or EOF)
+      TRIGGER_BLOCK=$(sed -n '/^## Triggers/,/^## /{ /^## Triggers/d; /^## /d; p; }' "$DECISION_FILE")
+      [ -z "$TRIGGER_BLOCK" ] && continue
+
+      # Extract paths (lines starting with - path: or - paths:)
+      TRIGGER_PATHS=$(echo "$TRIGGER_BLOCK" | grep -oE 'paths?:\s*.*' | sed -E 's/^paths?:[[:space:]]*//' || true)
+      # Extract keywords
+      TRIGGER_KEYWORDS=$(echo "$TRIGGER_BLOCK" | grep -oE 'keywords?:\s*.*' | sed -E 's/^keywords?:[[:space:]]*//' || true)
+
+      # Match staged files against trigger paths
+      DECISION_TRIGGERED=false
+      if [ -n "$TRIGGER_PATHS" ]; then
+        while IFS= read -r GLOB_PATTERN; do
+          GLOB_PATTERN=$(echo "$GLOB_PATTERN" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//' | sed 's/^`//' | sed 's/`$//')
+          [ -z "$GLOB_PATTERN" ] && continue
+          # Validate pattern is a safe regex (guarded against catastrophic backtracking)
+          if ! _guarded_grep -qE "$GLOB_PATTERN" /dev/null 2>/dev/null; then
+            echo "A1 WARNING: Skipping invalid path pattern in decision $DECISION_ID: $GLOB_PATTERN" >&2
+            continue
           fi
-        fi
-      done <<< "$TRIGGER_PATHS"
-    fi
+          # Match staged files against glob (guarded against ReDoS)
+          MATCHING_FILES=$(echo "$STAGED_FILES" | _guarded_grep -E "$GLOB_PATTERN" || true)
+          if [ -n "$MATCHING_FILES" ]; then
+            if [ -n "$TRIGGER_KEYWORDS" ]; then
+              # If keywords defined, also check content
+              KW_PATTERN=$(echo "$TRIGGER_KEYWORDS" | sed 's/`//g' | sed 's/[[:space:]]*,[[:space:]]*/|/g' | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
+              # Validate keyword pattern before use (guarded against ReDoS)
+              if ! _guarded_grep -qiE "$KW_PATTERN" /dev/null 2>/dev/null; then
+                echo "A1 WARNING: Skipping invalid keyword pattern in decision $DECISION_ID: $KW_PATTERN" >&2
+                continue
+              fi
+              _A1_FILE_LIST=$(echo "$MATCHING_FILES" | tr '\n' '|' | sed 's/|$//')
+              KW_MATCHES=$(_get_staged_diff | awk -v files="$_A1_FILE_LIST" '
+                BEGIN { n=split(files, fa, "|"); for(i=1;i<=n;i++) wanted["b/"fa[i]]=1 }
+                /^\+\+\+ / { f=substr($0,5); active=(f in wanted) ? 1 : 0; next }
+                active && /^\+/ && !/^\+\+\+/ { print }
+              ' | _guarded_grep -iE "$KW_PATTERN" || true)
+              [ -n "$KW_MATCHES" ] && DECISION_TRIGGERED=true
+            else
+              DECISION_TRIGGERED=true
+            fi
+          fi
+        done <<< "$TRIGGER_PATHS"
+      fi
 
-    if [ "$DECISION_TRIGGERED" = true ]; then
-      TRIGGERED_DECISIONS="${TRIGGERED_DECISIONS:+$TRIGGERED_DECISIONS, }$DECISION_ID"
-    fi
-  done
+      if [ "$DECISION_TRIGGERED" = true ]; then
+        TRIGGERED_DECISIONS="${TRIGGERED_DECISIONS:+$TRIGGERED_DECISIONS, }$DECISION_ID"
+      fi
+    done
 
-  # Check Decisions: trailer in commit message
+    # --- A1 structural check (fallback path only) ---
+    if [ "$MISSING_TRIGGERS" -gt 0 ]; then
+      if [ "$A1_BLOCKING" = true ]; then
+        echo "GATE A1 FAILED: $MISSING_TRIGGERS of $TOTAL_DECISIONS decision files lack ## Triggers section" >&2
+        block "A1_missing_triggers"
+      else
+        echo "GATE A1 WARNING: $MISSING_TRIGGERS of $TOTAL_DECISIONS decision files lack ## Triggers section" >&2
+        warn "A1_structural_advisory"
+      fi
+    fi
+  fi
+
+  # --- Trailer check (shared by both paths) ---
   if [ -n "$TRIGGERED_DECISIONS" ]; then
     DECISIONS_TRAILER=$(echo "$COMMIT_CMD" | grep -oE 'Decisions:[^\n]+' || true)
     MISSING_DECISION_IDS=""
@@ -429,17 +577,6 @@ if [ -n "$STAGED_FILES" ] && [ -d "$DECISIONS_DIR" ]; then
         warn "A1_decisions_advisory"
         log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "warn" "$START_MS" "A1_decisions_advisory" "$A1_DETAIL"
       fi
-    fi
-  fi
-
-  # --- A1 structural check ---
-  if [ "$MISSING_TRIGGERS" -gt 0 ]; then
-    if [ "$A1_BLOCKING" = true ]; then
-      echo "GATE A1 FAILED: $MISSING_TRIGGERS of $TOTAL_DECISIONS decision files lack ## Triggers section" >&2
-      block "A1_missing_triggers"
-    else
-      echo "GATE A1 WARNING: $MISSING_TRIGGERS of $TOTAL_DECISIONS decision files lack ## Triggers section" >&2
-      warn "A1_structural_advisory"
     fi
   fi
 fi

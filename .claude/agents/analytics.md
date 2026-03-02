@@ -3,6 +3,12 @@ name: analytics
 description: On-demand analytics specialist for hook telemetry analysis and cross-repo reporting.
 tools: Read, Grep, Glob, Bash
 disallowedTools: Edit, Write, Task, NotebookEdit
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: ".claude/hooks/agent-git-guard.sh"
 ---
 
 # Agent: Analytics
@@ -69,7 +75,7 @@ Operator invokes directly. Never auto-triggered by other agents. Examples:
 ---
 
 ## Constraints
-- **Read-only**: Never modify analytics data, hook scripts, or settings
-- **On-demand only**: Never run automatically or as part of the build flow
-- **Bash for jq**: Use Bash only for `jq` queries against NDJSON files — no other shell operations
-- **Cross-repo access**: Read sibling repos via `~/.local/share/repo-os-analytics/<repo-name>/events/`. The operator's local filesystem is the boundary — no network access
+- BLOCK: never modify files — enforced by disallowedTools (Edit, Write)
+- REQUIRE: on-demand only — never run automatically or as part of the build flow
+- REQUIRE: use Bash only for jq queries against NDJSON files — no other shell operations
+- REQUIRE: cross-repo access via `~/.local/share/repo-os-analytics/<repo-name>/events/` only — the operator's local filesystem is the boundary, no network access

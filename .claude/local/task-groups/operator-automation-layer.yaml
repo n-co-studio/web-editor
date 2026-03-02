@@ -1,0 +1,383 @@
+identity:
+  group_name: "operator-automation-layer"
+  created_by_session: 88
+  created_date: "2026-02-27"
+  execution: sequential
+
+briefs:
+  - title: "Decision 0017 + Automation Schemas"
+    sequence: 1
+    session: 88
+    branch: "feature/operator-automation-layer"
+    status: complete
+    next_brief: "Brief 2"
+    boundaries:
+      - "docs/ai/decisions/0017-*.md"
+      - ".claude/.automation/schemas/*"
+      - ".claude/.automation/config.yaml"
+  - title: "Runner Foundation"
+    sequence: 2
+    session: 89
+    branch: "feature/operator-automation-layer"
+    status: complete
+    next_brief: "Brief 3"
+    boundaries:
+      - ".claude/.automation/runner.sh"
+      - ".claude/.automation/lib/state-manager.sh"
+      - ".claude/.automation/lib/branch-manager.sh"
+      - ".claude/.automation/lib/outcome-detector.sh"
+  - title: "Queue Processing + On/Off Toggle"
+    sequence: 3
+    session: 90
+    branch: "feature/operator-automation-layer"
+    status: complete
+    next_brief: "Brief 4"
+    boundaries:
+      - ".claude/.automation/lib/queue-manager.sh"
+      - ".claude/.automation/lib/prompt-assembler.sh"
+      - ".claude/.automation/runner.sh"
+  - title: "Governance Integration + Brief Templates"
+    sequence: 4
+    session: 91
+    branch: "feature/operator-automation-layer"
+    status: complete
+    next_brief: "Brief 5"
+    boundaries:
+      - ".claude/.automation/templates/build-brief.md"
+      - ".claude/.automation/templates/taskgroup-brief.md"
+      - ".claude/.automation/lib/permission-profiles.sh"
+      - ".claude/.automation/lib/prompt-assembler.sh"
+      - ".claude/.automation/runner.sh"
+      - ".claude/hooks/_analytics-helper.sh"
+  - title: "Operator Additions + Dev Orchestrator"
+    sequence: 5
+    session: 92
+    branch: "feature/operator-automation-layer"
+    status: complete
+    next_brief: "Brief 6"
+    boundaries:
+      - ".claude/.automation/lib/blocker-reporter.sh"
+      - ".claude/.automation/lib/cohesion-trigger.sh"
+      - ".claude/.automation/lib/cleanup.sh"
+      - ".claude/.automation/lib/drift-detector.sh"
+      - ".claude/.automation/templates/dev-orchestrator-brief.md"
+      - ".claude/agents/dev-orchestrator.md"
+      - ".claude/.automation/runner.sh"
+      - ".claude/.automation/lib/outcome-detector.sh"
+  - title: "External Integration + Documentation"
+    sequence: 6
+    session: 93
+    branch: "feature/operator-automation-layer"
+    status: complete
+    next_brief: "Brief 7"
+    boundaries:
+      - ".claude/.automation/lib/queue-validator.sh"
+      - ".claude/.automation/lib/cache-builder.sh"
+      - ".claude/.automation/lib/file-lock.sh"
+      - ".claude/.automation/decision-cache.yaml"
+      - ".claude/.automation/local-decision-cache.yaml"
+      - ".claude/.automation/schemas/SCHEMA-CHANGELOG.md"
+      - ".claude/.automation/runner.sh"
+      - "AI.md"
+      - "docs/ai/workflow.md"
+      - ".claude/agents/_agent-glossary.md"
+      - "repo-os-explainer.html"
+  - title: "Merge Brief"
+    sequence: 7
+    session: 94
+    branch: "feature/operator-automation-layer"
+    status: complete
+    next_brief: ""
+    boundaries: []
+
+conventions:
+  naming:
+    - pattern: "kebab-case for YAML schema files and config"
+      scope: ".claude/.automation/"
+    - pattern: "kebab-case with dots for state machine values (e.g., pending-review)"
+      scope: "queue-entry status field"
+  patterns:
+    - pattern: "YAML schemas use empty-string/zero/false defaults as type hints"
+      rationale: "Consistent with _contract-template.yaml; missing fields are detectable"
+    - pattern: "Runtime artifacts gitignored; schemas and config tracked"
+      rationale: "Decision 0017 invariant — ephemeral data is machine-local"
+    - pattern: "Runners invoke claude -p with --disallowedTools permission profile"
+      rationale: "Headless hook verification confirmed this is enforced correctly"
+  decisions:
+    - "0017"
+    - "0012"
+    - "0014"
+    - "0015"
+    - "0016"
+  boundaries:
+    - module: ".claude/.automation/schemas/"
+      owner_brief: "Decision 0017 + Automation Schemas"
+    - module: ".claude/.automation/config.yaml"
+      owner_brief: "Decision 0017 + Automation Schemas"
+    - module: "docs/ai/decisions/0017-operator-automation-layer.md"
+      owner_brief: "Decision 0017 + Automation Schemas"
+    - module: ".claude/.automation/runner.sh"
+      owner_brief: "Runner Foundation"
+    - module: ".claude/.automation/lib/state-manager.sh"
+      owner_brief: "Runner Foundation"
+    - module: ".claude/.automation/lib/branch-manager.sh"
+      owner_brief: "Runner Foundation"
+    - module: ".claude/.automation/lib/outcome-detector.sh"
+      owner_brief: "Runner Foundation"
+    - module: ".claude/.automation/lib/queue-manager.sh"
+      owner_brief: "Queue Processing + On/Off Toggle"
+    - module: ".claude/.automation/lib/prompt-assembler.sh"
+      owner_brief: "Queue Processing + On/Off Toggle"
+    - module: ".claude/.automation/templates/build-brief.md"
+      owner_brief: "Governance Integration + Brief Templates"
+    - module: ".claude/.automation/templates/taskgroup-brief.md"
+      owner_brief: "Governance Integration + Brief Templates"
+    - module: ".claude/.automation/lib/permission-profiles.sh"
+      owner_brief: "Governance Integration + Brief Templates"
+    - module: ".claude/.automation/lib/blocker-reporter.sh"
+      owner_brief: "Operator Additions + Dev Orchestrator"
+    - module: ".claude/.automation/lib/cohesion-trigger.sh"
+      owner_brief: "Operator Additions + Dev Orchestrator"
+    - module: ".claude/.automation/lib/cleanup.sh"
+      owner_brief: "Operator Additions + Dev Orchestrator"
+    - module: ".claude/.automation/lib/drift-detector.sh"
+      owner_brief: "Operator Additions + Dev Orchestrator"
+    - module: ".claude/.automation/templates/dev-orchestrator-brief.md"
+      owner_brief: "Operator Additions + Dev Orchestrator"
+    - module: ".claude/agents/dev-orchestrator.md"
+      owner_brief: "Operator Additions + Dev Orchestrator"
+    - module: ".claude/.automation/lib/queue-validator.sh"
+      owner_brief: "External Integration + Documentation"
+    - module: ".claude/.automation/lib/cache-builder.sh"
+      owner_brief: "External Integration + Documentation"
+    - module: ".claude/.automation/lib/file-lock.sh"
+      owner_brief: "External Integration + Documentation"
+    - module: ".claude/.automation/decision-cache.yaml"
+      owner_brief: "External Integration + Documentation"
+    - module: ".claude/.automation/local-decision-cache.yaml"
+      owner_brief: "External Integration + Documentation"
+    - module: ".claude/.automation/schemas/SCHEMA-CHANGELOG.md"
+      owner_brief: "External Integration + Documentation"
+
+integration_points:
+  - name: "Queue entry schema"
+    producer: "Decision 0017 + Automation Schemas"
+    consumer: "Runner Foundation"
+    artifact: ".claude/.automation/schemas/queue-entry.yaml"
+  - name: "Escalation schema"
+    producer: "Decision 0017 + Automation Schemas"
+    consumer: "Runner Foundation"
+    artifact: ".claude/.automation/schemas/escalation.yaml"
+  - name: "Blocker report schema"
+    producer: "Decision 0017 + Automation Schemas"
+    consumer: "Runner Foundation"
+    artifact: ".claude/.automation/schemas/blocker-report.yaml"
+  - name: "Runner config schema"
+    producer: "Decision 0017 + Automation Schemas"
+    consumer: "Runner Foundation"
+    artifact: ".claude/.automation/schemas/runner-config.yaml"
+  - name: "Default config"
+    producer: "Decision 0017 + Automation Schemas"
+    consumer: "Runner Foundation"
+    artifact: ".claude/.automation/config.yaml"
+  - name: "Runner entry point"
+    producer: "Runner Foundation"
+    consumer: "Brief 3"
+    artifact: ".claude/.automation/runner.sh"
+  - name: "State manager library"
+    producer: "Runner Foundation"
+    consumer: "Brief 3"
+    artifact: ".claude/.automation/lib/state-manager.sh"
+  - name: "Branch manager library"
+    producer: "Runner Foundation"
+    consumer: "Brief 3"
+    artifact: ".claude/.automation/lib/branch-manager.sh"
+  - name: "Outcome detector library"
+    producer: "Runner Foundation"
+    consumer: "Brief 3"
+    artifact: ".claude/.automation/lib/outcome-detector.sh"
+  - name: "Queue manager library"
+    producer: "Queue Processing + On/Off Toggle"
+    consumer: "Governance Integration + Brief Templates"
+    artifact: ".claude/.automation/lib/queue-manager.sh"
+  - name: "Prompt assembler library"
+    producer: "Queue Processing + On/Off Toggle"
+    consumer: "Governance Integration + Brief Templates"
+    artifact: ".claude/.automation/lib/prompt-assembler.sh"
+  - name: "Runner daemon mode"
+    producer: "Queue Processing + On/Off Toggle"
+    consumer: "Governance Integration + Brief Templates"
+    artifact: ".claude/.automation/runner.sh"
+  - name: "Build brief template"
+    producer: "Governance Integration + Brief Templates"
+    consumer: "Brief 5"
+    artifact: ".claude/.automation/templates/build-brief.md"
+  - name: "Taskgroup brief template"
+    producer: "Governance Integration + Brief Templates"
+    consumer: "Brief 5"
+    artifact: ".claude/.automation/templates/taskgroup-brief.md"
+  - name: "Permission profiles library"
+    producer: "Governance Integration + Brief Templates"
+    consumer: "Operator Additions + Dev Orchestrator"
+    artifact: ".claude/.automation/lib/permission-profiles.sh"
+  - name: "Blocker reporter library"
+    producer: "Operator Additions + Dev Orchestrator"
+    consumer: "Brief 6"
+    artifact: ".claude/.automation/lib/blocker-reporter.sh"
+  - name: "Cohesion trigger library"
+    producer: "Operator Additions + Dev Orchestrator"
+    consumer: "Brief 6"
+    artifact: ".claude/.automation/lib/cohesion-trigger.sh"
+  - name: "Cleanup library"
+    producer: "Operator Additions + Dev Orchestrator"
+    consumer: "Brief 6"
+    artifact: ".claude/.automation/lib/cleanup.sh"
+  - name: "Drift detector library"
+    producer: "Operator Additions + Dev Orchestrator"
+    consumer: "Brief 6"
+    artifact: ".claude/.automation/lib/drift-detector.sh"
+  - name: "Dev orchestrator agent"
+    producer: "Operator Additions + Dev Orchestrator"
+    consumer: "Brief 6"
+    artifact: ".claude/agents/dev-orchestrator.md"
+  - name: "Dev orchestrator brief template"
+    producer: "Operator Additions + Dev Orchestrator"
+    consumer: "Brief 6"
+    artifact: ".claude/.automation/templates/dev-orchestrator-brief.md"
+
+session_decisions:
+  - session: 88
+    decision: "Decision numbered 0017, not 0016 as in original task brief"
+    rationale: "0016 already taken by Auditor Prompt C. Task brief anticipated this risk."
+  - session: 88
+    decision: "write-guard.sh carve-out requires operator manual edit (immune path)"
+    rationale: "write-guard.sh is self-protecting — agents cannot modify it in any mode. Operator must add .claude/.automation/* carve-out manually."
+  - session: 88
+    decision: ".gitignore edit deferred — requires operator manual edit (product path blocked in template mode)"
+    rationale: ".gitignore is a product path, not carved out in template mode. Operator appends automation runtime artifact exclusions."
+  - session: 90
+    decision: "Unsealed task group branch from closed-branches ledger"
+    rationale: "Branch was incorrectly sealed by a previous session. Task group non-final briefs should skip sealing per Decision 0013. Operator approved removal."
+  - session: 90
+    decision: ".gitignore updated by operator (product path blocked in template mode)"
+    rationale: "Operator manually added 3 automation runtime artifact exclusions per Decision 0017."
+  - session: 91
+    decision: "Unsealed task group branch from closed-branches ledger (recurring)"
+    rationale: "Branch re-sealed by session-close-check. Task group non-final briefs should skip sealing per Decision 0013. Same fix as session 90."
+  - session: 92
+    decision: "Dev orchestrator uses existing audit session type instead of new dev-review type"
+    rationale: "Adding a new session type to _phase-helper.sh is outside Brief 5 boundaries. The audit session type has the correct phase sequence and permissions for read-only review sessions."
+  - session: 93
+    decision: "Decision cache placed at .claude/.automation/ instead of docs/ai/governance/ and .claude/local/"
+    rationale: "Both docs/ai/governance/ and .claude/local/decision-cache.yaml are blocked by template mode write-guard. The .claude/.automation/* carve-out from Decision 0017 provides access."
+  - session: 93
+    decision: "Unsealed task group branch from closed-branches ledger (recurring)"
+    rationale: "Branch re-sealed by session-close-check. Task group non-final briefs should skip sealing per Decision 0013. Same fix as sessions 90-92."
+  - session: 94
+    decision: "Unsealed task group branch from closed-branches ledger (recurring)"
+    rationale: "Branch re-sealed by session 93 close. Same recurring issue. Final brief — will seal permanently at close."
+
+governance:
+  - brief_sequence: 1
+    gates_a:
+      A1: "pass"
+      A2: "pass"
+      A3: "n/a"
+      A4: "pass"
+      A5: "n/a"
+      A6: "n/a"
+    gates_b:
+      B1: ""
+      B2: ""
+      B3: ""
+    overrides_used: []
+    timestamp: "2026-02-27T00:00:00Z"
+  - brief_sequence: 2
+    gates_a:
+      A1: "pass"
+      A2: "pass"
+      A3: "n/a"
+      A4: "pass"
+      A5: "pass"
+      A6: "pass"
+    gates_b:
+      B1: "pass"
+      B2: "n/a"
+      B3: "n/a"
+    overrides_used: []
+    timestamp: "2026-02-27T23:00:00Z"
+  - brief_sequence: 3
+    gates_a:
+      A1: "pass"
+      A2: "pass"
+      A3: "n/a"
+      A4: "pass"
+      A5: "pass"
+      A6: "pass"
+    gates_b:
+      B1: "pass"
+      B2: "n/a"
+      B3: "n/a"
+    overrides_used:
+      - "REPO_OS_SKIP_BRANCH_REUSE (unsealed task group branch from closed-branches ledger)"
+    timestamp: "2026-02-27T23:30:00Z"
+  - brief_sequence: 4
+    gates_a:
+      A1: "pass"
+      A2: "pass"
+      A3: "n/a"
+      A4: "pass"
+      A5: "pass"
+      A6: "pass"
+    gates_b:
+      B1: "pass"
+      B2: "n/a"
+      B3: "n/a"
+    overrides_used:
+      - "REPO_OS_SKIP_BRANCH_REUSE (unsealed task group branch from closed-branches ledger)"
+    timestamp: "2026-02-27T23:45:00Z"
+  - brief_sequence: 5
+    gates_a:
+      A1: "pass"
+      A2: "pass"
+      A3: "n/a"
+      A4: "pass"
+      A5: "pass"
+      A6: "pass"
+    gates_b:
+      B1: ""
+      B2: ""
+      B3: ""
+    overrides_used:
+      - "REPO_OS_SKIP_BRANCH_REUSE (unsealed task group branch from closed-branches ledger)"
+    timestamp: "2026-02-28T00:00:00Z"
+  - brief_sequence: 6
+    gates_a:
+      A1: "pass"
+      A2: "pass"
+      A3: "n/a"
+      A4: "pass"
+      A5: "pass"
+      A6: "pass"
+    gates_b:
+      B1: ""
+      B2: ""
+      B3: ""
+    overrides_used:
+      - "REPO_OS_SKIP_BRANCH_REUSE (unsealed task group branch from closed-branches ledger)"
+    timestamp: "2026-02-28T00:15:00Z"
+  - brief_sequence: 7
+    gates_a:
+      A1: "pass"
+      A2: "pass"
+      A3: "n/a"
+      A4: "pass"
+      A5: "pass"
+      A6: "pass"
+    gates_b:
+      B1: "pass"
+      B2: "n/a"
+      B3: "n/a"
+    overrides_used:
+      - "REPO_OS_SKIP_BRANCH_REUSE (unsealed task group branch from closed-branches ledger)"
+    timestamp: "2026-02-28T01:00:00Z"
