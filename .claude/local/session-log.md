@@ -6,6 +6,45 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 ---
 
+## Session 112 — 2026-03-02 — Template decision naming convention (`t-` prefix)
+
+**Status:** complete
+**Decisions:** 0002, 0004, 0012, 0022
+**Branch:** `feature/template-decision-naming`
+
+### Goal
+- Introduce `t-` prefix naming convention for template-owned decision records, enabling visual distinction and safe deletion propagation via manifest-based orphan cleanup.
+
+### Changes Made
+- `docs/ai/decisions/t-0022-template-decision-naming.md` (NEW) — decision record documenting the `t-` prefix convention, manifest, cleanup mechanism, migration steps
+- `docs/ai/decisions/t-manifest.txt` (NEW) — authoritative list of 22 template decision filenames for child-repo cleanup
+- `.claude/.automation/lib/child-sync-decisions.sh` (NEW) — cleanup helper: reads manifest, computes orphans, deletes via `git rm`, supports `--dry-run`
+- `.claude/.automation/templates/template-sync-with-cleanup.yml` (NEW) — reference workflow template for child repos
+- `.claude/hooks/write-guard.sh` — child-mode `is_carved_out` explicit `t-*.md` block; fast-exit path template decision protection with `REPO_OS_UNLOCK_PATH` support
+- `.claude/hooks/pre-commit-gates.sh` — A1 trigger parser: dual-glob iteration (`t-*.md` + `0*.md`), updated ID extraction via `sed -E 's/^(t-)?([0-9]+)-.*/\2/'`
+- `.claude/hooks/tests/layer3-hook-integration.sh` — 3 new test cases: child-mode t-*.md blocking, child-mode 0100+ allowing, autonomous-mode t-*.md blocking
+- `docs/ai/decisions/.a1-trigger-index` — header comment, 4 entries for Decision 0022 (decisions dir, write-guard, pre-commit-gates, child-sync-decisions)
+- `docs/ai/quality-gates.md` — A1 regeneration script updated for dual-glob and t-prefix ID extraction
+- `README.md` — decision path references updated, range convention -> `t-` prefix convention
+- `.claude/agents/_agent-glossary.md` — Decision Range Convention -> Decision Naming Convention with `t-` prefix
+- `.claude/agents/_cohesion-review.md`, `_user-review-tier-{1,2,3}.md` — decision path references
+- `docs/ai/decisions/t-0012-file-edit-restrictions.md` — points 3, 6, and consequences updated for `t-` prefix
+- `docs/ai/decisions/t-0020-task-contract-system.md`, `t-0021-user-review-system.md` — self-reference updates
+- `repo-os-explainer.html` — decision naming convention text, fixed `.templatesyncignore` contradiction
+- `.templatesyncignore` — updated comments for `t-*` prefix and manifest-based cleanup
+- 21 decision files renamed via `git mv` (0001-0021 -> t-0001 through t-0021)
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass, A2 pass (large-scope approved), A3 n-a, A4 pass, A5 pass, A6 n-a
+- Push gates: B1 pass, B2 pass (all 4 layers), B3 n-a
+- Cohesion review: 2 rounds — first found 1 CRITICAL + 4 RECOMMENDATIONs (all fixed), second APPROVED with 3 RECOMMENDATIONs (all addressed)
+- QA verification: APPROVED
+
+### Follow-ups
+- None
+
+---
+
 ## Session 111 — 2026-02-28 — Audit CRITICAL remediation (11 findings, round 2)
 
 **Status:** complete
@@ -132,34 +171,6 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 ### Follow-ups
 - None
-
----
-
-## Session 106 — 2026-02-28 — User Review Prompt & Workflow Integration (Brief 2/2)
-
-**Status:** complete
-**Decisions:** 0001, 0002, 0003, 0004, 0010, 0014, 0021
-**Branch:** `feature/user-review-system`
-
-### Goal
-- Integrate the User Review system into the phase model, prompt pipeline, and orchestrator routing — Brief 2 of 2 (user-review-system task group).
-
-### Changes Made
-- `docs/ai/decisions/0014-phase-aware-flow-model.md` — amended standard and taskgroup sequences with `user-review` phase
-- `docs/ai/decisions/0021-user-review-system.md` — point 11 updated (dedicated phase), body references corrected
-- `.claude/hooks/_phase-helper.sh` — registered `user-review` in phase sequences and tag mappings
-- `docs/ai/prompts/prompt-t-task-definition.md` — User Review section in brief template, `user_review` in task contract
-- `docs/ai/prompts/prompt-b-product-build.md` — User Review Dispatch section with 7-step procedure
-- `.claude/agents/orchestrator.md` — On-Demand Procedure entry for User Review dispatch
-- `docs/ai/workflow.md` — User Review section with phase position, opt-in, dispatch flow
-- `docs/ai/quality-gates.md` — advisory note for User Review
-
-### Verification (Gates Evidence)
-- Commit gates: A1 pass, A2 pass, A3 n-a, A4 pass, A5 pass, A6 pass
-- Cohesion: 2 criticals found and fixed, 4 recommendations addressed
-
----
-
 
 
 <!-- Sessions 63-64: zero-change sessions, no log entry per workflow.md exemption -->
