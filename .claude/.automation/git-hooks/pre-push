@@ -24,8 +24,9 @@ while read -r local_ref local_sha remote_ref remote_sha; do
 done
 
 if [ "$PUSH_TO_MAIN" = true ]; then
-  # Brief delay so the push completes before workflows trigger
-  (sleep 5 && "$SYNC_SCRIPT") >> /tmp/repo-os-child-sync.log 2>&1 &
+  # Brief delay so the push completes before workflows trigger.
+  # Script logs directly to /tmp/repo-os-child-sync.log.
+  (sleep 5 && "$SYNC_SCRIPT") &
   disown
 fi
 
