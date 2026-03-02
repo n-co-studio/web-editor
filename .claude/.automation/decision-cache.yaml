@@ -1,0 +1,17 @@
+# Decision Cache — project-level
+# Frequently referenced decisions prepended to automation prompts.
+# Max 10 entries. Merged with local-level cache (.claude/local/decision-cache.yaml).
+# Local can extend or narrow, never elevate enforcement level.
+#
+# Enforcement levels: BLOCK (mechanically enforced), REQUIRE (process obligation), GUIDE (advisory).
+#
+# Example:
+#   entries:
+#     - number: "0012"
+#       summary: "File edit restrictions — mode-based write guard"
+#       enforcement: BLOCK
+#     - number: "0014"
+#       summary: "Phase model — phase-aware hook enforcement"
+#       enforcement: BLOCK
+
+entries: []

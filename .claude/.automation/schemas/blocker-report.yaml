@@ -1,0 +1,19 @@
+# Blocker Report Schema — runner-written failure report.
+# Written when a headless session exits with non-zero or governance failure.
+
+report:
+  id: ""                    # unique report identifier
+  queue_entry_id: ""        # references the originating queue entry
+  timestamp: ""             # ISO 8601 timestamp when report was written
+  type: ""                  # failure classification: crash | timeout | clean-failure | gate_failure
+  exit_code: 0              # process exit code from claude -p
+  branch: ""                # branch name at failure time
+  phase_at_exit: ""         # phase when failure occurred
+  tag_at_exit: ""           # phase automation tag at failure
+  stderr_tail: ""           # last N lines of stderr (N from runner-config)
+  git_status: ""            # output of git status at failure time
+  analytics_events: []      # relevant analytics events from the session
+  resolution:
+    status: ""              # unresolved | escalated | resolved | retried
+    notes: ""               # operator or runner resolution notes
+    resolved_at: ""         # ISO 8601 timestamp

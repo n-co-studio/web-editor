@@ -21,9 +21,11 @@ get_phases_for_type() {
   local stype="$1"
   case "$stype" in
     standard)
-      echo "init plan approval build review verify commit op-review close" ;;
+      # user-review is skippable: forward-jump verify→commit permitted (Decision 0021)
+      echo "init plan approval build review verify user-review commit op-review close" ;;
     taskgroup)
-      echo "init contract-init plan approval build review verify commit contract-update op-review close" ;;
+      # user-review is skippable: forward-jump verify→commit permitted (Decision 0021)
+      echo "init contract-init plan approval build review verify user-review commit contract-update op-review close" ;;
     hotfix)
       echo "init plan approval build verify commit close" ;;
     experiment)
@@ -46,6 +48,8 @@ get_phases_for_type() {
       echo "init conversation close" ;;
     taskdef-brief)
       echo "init dispatch synthesize op-review output close" ;;
+    taskgroup-merge)
+      echo "init contract-init cohesion verify commit op-review close" ;;
     *)
       echo "" ;;
   esac
@@ -65,14 +69,15 @@ get_tag_for_phase() {
   case "$stype" in
     standard)
       case "$phase" in
-        plan)       echo "agent" ;;
-        approval)   echo "operator" ;;
-        build)      echo "agent" ;;
-        review)     echo "agent" ;;
-        verify)     echo "agent" ;;
-        commit)     echo "agent" ;;
-        op-review)  echo "operator" ;;
-        *)          echo "agent" ;;
+        plan)         echo "agent" ;;
+        approval)     echo "operator" ;;
+        build)        echo "agent" ;;
+        review)       echo "agent" ;;
+        verify)       echo "agent" ;;
+        user-review)  echo "agent" ;;
+        commit)       echo "agent" ;;
+        op-review)    echo "operator" ;;
+        *)            echo "agent" ;;
       esac
       ;;
     taskgroup)
@@ -83,6 +88,7 @@ get_tag_for_phase() {
         build)           echo "agent" ;;
         review)          echo "agent" ;;
         verify)          echo "agent" ;;
+        user-review)     echo "agent" ;;
         commit)          echo "agent" ;;
         contract-update) echo "agent" ;;
         op-review)       echo "operator" ;;
@@ -169,6 +175,16 @@ get_tag_for_phase() {
         *)          echo "agent" ;;
       esac
       ;;
+    taskgroup-merge)
+      case "$phase" in
+        contract-init) echo "agent" ;;
+        cohesion)      echo "agent" ;;
+        verify)        echo "agent" ;;
+        commit)        echo "agent" ;;
+        op-review)     echo "operator" ;;
+        *)             echo "agent" ;;
+      esac
+      ;;
     *)
       echo "agent" ;;
   esac
@@ -236,12 +252,44 @@ get_loops_for_type() {
   case "$stype" in
     standard|taskgroup) echo "review:build verify:build" ;;
     hotfix)             echo "verify:build" ;;
+    taskgroup-merge)    echo "cohesion:cohesion" ;;
     *)                  echo "" ;;
   esac
 }
 
+# --- Bulk-read phase-state file into cached variables (zero-fork) ---
+# Reads the 9-line phase-state file once using while-read with file redirect
+# (current-shell, no subshell). Populates _PS_* module variables.
+# Returns 1 if the file is missing.
+_PS_SESSION_TYPE="" _PS_SESSION_ID="" _PS_MODE="" _PS_CURRENT_PHASE=""
+_PS_CYCLE="" _PS_PHASES_COMPLETED="" _PS_SOLO="" _PS_TAG="" _PS_TIMESTAMP=""
+# Audit C8: validation cache sentinel — avoids redundant file reads per invocation
+_PS_VALIDATED=false
+
+_load_phase_state() {
+  local state_file="$1"
+  _PS_SESSION_TYPE="" _PS_SESSION_ID="" _PS_MODE="" _PS_CURRENT_PHASE=""
+  _PS_CYCLE="" _PS_PHASES_COMPLETED="" _PS_SOLO="" _PS_TAG="" _PS_TIMESTAMP=""
+  [ -f "$state_file" ] || return 1
+  local _line
+  while IFS= read -r _line || [ -n "$_line" ]; do
+    case "$_line" in
+      "session_type: "*)       _PS_SESSION_TYPE="${_line#session_type: }" ;;
+      "session_id: "*)         _PS_SESSION_ID="${_line#session_id: }" ;;
+      "mode: "*)               _PS_MODE="${_line#mode: }" ;;
+      "current_phase: "*)      _PS_CURRENT_PHASE="${_line#current_phase: }" ;;
+      "cycle: "*)              _PS_CYCLE="${_line#cycle: }" ;;
+      "phases_completed: "*)   _PS_PHASES_COMPLETED="${_line#phases_completed: }" ;;
+      "solo: "*)               _PS_SOLO="${_line#solo: }" ;;
+      "tag: "*)                _PS_TAG="${_line#tag: }" ;;
+      "timestamp: "*)          _PS_TIMESTAMP="${_line#timestamp: }" ;;
+    esac
+  done < "$state_file"
+}
+
 # --- Read a field from the phase-state file ---
-# Internal helper. Returns the value for a given key, or empty string.
+# Single-field reader for callers that need only one field.
+# Prefer _load_phase_state + _PS_* variables for bulk reads.
 _read_phase_field() {
   local key="$1"
   local state_file="$2"
@@ -250,15 +298,29 @@ _read_phase_field() {
 
 # --- Session ID validation ---
 # Internal helper. Returns 0 if phase-state session_id matches current session.
+# Calls _load_phase_state to populate _PS_* cache for downstream callers.
+# Audit C8: caches validation result to avoid redundant file reads.
 _validate_phase_session() {
   local state_file="$1"
+
+  # Fast path: already validated for this session (audit C8)
+  if [ "$_PS_VALIDATED" = true ] && [ -n "$_PS_SESSION_ID" ]; then
+    local _cached_sid
+    _cached_sid=$(cat "$(get_repo_root)/.claude/.session-id" 2>/dev/null)
+    if [ "$_PS_SESSION_ID" = "$_cached_sid" ]; then
+      return 0
+    fi
+    # Session ID changed — invalidate cache
+    _PS_VALIDATED=false
+  fi
+
+  _load_phase_state "$state_file" || return 1
   local repo_root
   repo_root="$(get_repo_root)"
-  local sid
-  sid=$(_read_phase_field "session_id" "$state_file")
   local current_sid
   current_sid=$(cat "$repo_root/.claude/.session-id" 2>/dev/null)
-  if [ -n "$sid" ] && [ "$sid" = "$current_sid" ]; then
+  if [ -n "$_PS_SESSION_ID" ] && [ "$_PS_SESSION_ID" = "$current_sid" ]; then
+    _PS_VALIDATED=true
     return 0
   fi
   return 1
@@ -298,10 +360,16 @@ init_phase() {
 
   mkdir -p "$state_dir" 2>/dev/null || true
 
-  # Shell I/O — bypasses state-guard.sh (established pattern, see Decision 0014)
+  # Shell I/O — bypasses write-guard.sh (established pattern, see Decision 0014)
   printf 'session_type: %s\nsession_id: %s\nmode: review\ncurrent_phase: init\ncycle: 1\nphases_completed: \nsolo: false\ntag: %s\ntimestamp: %s\n' \
     "$stype" "$sid" "$tag" "$ts" \
     > "$state_dir/phase-state" 2>/dev/null || true
+
+  # Invalidate validation cache — file contents changed (audit C8)
+  _PS_VALIDATED=false
+
+  # Register session in the session registry (Decision 0013 overlap awareness)
+  register_session "$stype" || true
 }
 
 # --- Advance to a new phase ---
@@ -320,22 +388,20 @@ advance_phase() {
     return 1
   fi
 
-  # Session ID validation
+  # Session ID validation (also populates _PS_* cache)
   if ! _validate_phase_session "$state_file"; then
     echo "ERROR: Phase state is stale (session ID mismatch)" >&2
     return 1
   fi
 
-  # Read current state
-  local stype current_phase cycle phases_completed mode solo
-  stype=$(_read_phase_field "session_type" "$state_file")
-  current_phase=$(_read_phase_field "current_phase" "$state_file")
-  cycle=$(_read_phase_field "cycle" "$state_file")
-  phases_completed=$(_read_phase_field "phases_completed" "$state_file")
-  mode=$(_read_phase_field "mode" "$state_file")
-  solo=$(_read_phase_field "solo" "$state_file")
-  local sid
-  sid=$(_read_phase_field "session_id" "$state_file")
+  # Read current state from cache (zero forks)
+  local stype="$_PS_SESSION_TYPE"
+  local current_phase="$_PS_CURRENT_PHASE"
+  local cycle="$_PS_CYCLE"
+  local phases_completed="$_PS_PHASES_COMPLETED"
+  local mode="$_PS_MODE"
+  local solo="$_PS_SOLO"
+  local sid="$_PS_SESSION_ID"
 
   # Defaults
   cycle="${cycle:-1}"
@@ -387,10 +453,13 @@ advance_phase() {
   local ts
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-  # Shell I/O — bypasses state-guard.sh
+  # Shell I/O — bypasses write-guard.sh
   printf 'session_type: %s\nsession_id: %s\nmode: %s\ncurrent_phase: %s\ncycle: %s\nphases_completed: %s\nsolo: %s\ntag: %s\ntimestamp: %s\n' \
     "$stype" "$sid" "$mode" "$new_phase" "$cycle" "$phases_completed" "$solo" "$tag" "$ts" \
     > "$state_file" 2>/dev/null || true
+
+  # Invalidate validation cache — file contents changed (audit C8)
+  _PS_VALIDATED=false
 }
 
 # --- Assert current phase meets requirement ---
@@ -407,18 +476,14 @@ assert_phase() {
     return 1
   fi
 
-  # Session ID validation
+  # Session ID validation (also populates _PS_* cache)
   if ! _validate_phase_session "$state_file"; then
     return 1
   fi
 
-  local stype current_phase
-  stype=$(_read_phase_field "session_type" "$state_file")
-  current_phase=$(_read_phase_field "current_phase" "$state_file")
-
   local current_idx required_idx
-  current_idx=$(get_phase_index "$stype" "$current_phase")
-  required_idx=$(get_phase_index "$stype" "$required")
+  current_idx=$(get_phase_index "$_PS_SESSION_TYPE" "$_PS_CURRENT_PHASE")
+  required_idx=$(get_phase_index "$_PS_SESSION_TYPE" "$required")
 
   if [ "$required_idx" -eq 0 ]; then
     return 1
@@ -444,13 +509,13 @@ get_phase() {
     return
   fi
 
-  # Session ID validation
+  # Session ID validation (also populates _PS_* cache)
   if ! _validate_phase_session "$state_file"; then
     echo ""
     return
   fi
 
-  _read_phase_field "current_phase" "$state_file"
+  echo "$_PS_CURRENT_PHASE"
 }
 
 # --- Get auto/review mode ---
@@ -467,9 +532,9 @@ get_phase_mode() {
     return
   fi
 
-  local mode
-  mode=$(_read_phase_field "mode" "$state_file")
-  echo "${mode:-review}"
+  # Load cache (validates session ID as side effect)
+  _load_phase_state "$state_file" || { echo "review"; return; }
+  echo "${_PS_MODE:-review}"
 }
 
 # --- Get current automation tag ---
@@ -485,18 +550,18 @@ get_tag() {
     return
   fi
 
-  # Session ID validation (consistent with get_phase, get_phase_mode, assert_phase)
+  # Session ID validation (also populates _PS_* cache)
   if ! _validate_phase_session "$state_file"; then
     echo ""
     return
   fi
 
-  _read_phase_field "tag" "$state_file"
+  echo "$_PS_TAG"
 }
 
 # --- Get solo mode flag ---
 # Returns "true" or "false" (default: "false" if absent/stale).
-# Solo mode controls merge strategy (direct vs PR) — orthogonal to mode (auto/review).
+# Solo mode controls merge strategy (direct merge to main) — orthogonal to mode (auto/review).
 # Decision 0015 — Solo Mode.
 # Usage: solo=$(get_solo)
 get_solo() {
@@ -514,13 +579,11 @@ get_solo() {
     return
   fi
 
-  local solo
-  solo=$(_read_phase_field "solo" "$state_file")
-  echo "${solo:-false}"
+  echo "${_PS_SOLO:-false}"
 }
 
 # --- Set solo mode ---
-# Updates the solo field in phase-state. Solo controls merge strategy (direct vs PR).
+# Updates the solo field in phase-state. Solo controls merge strategy (direct merge to main).
 # Returns 0 on success, 1 if phase-state is missing/stale or value invalid.
 # Decision 0015 — Solo Mode.
 # Usage: set_solo "true"
@@ -534,6 +597,7 @@ set_solo() {
     return 1
   fi
 
+  # _validate_phase_session populates _PS_* cache
   if ! _validate_phase_session "$state_file"; then
     return 1
   fi
@@ -543,25 +607,20 @@ set_solo() {
     *) echo "ERROR: Invalid solo value '$new_solo' — must be 'true' or 'false'" >&2; return 1 ;;
   esac
 
-  # Read all fields, replace solo, rewrite atomically
-  local stype sid mode current_phase cycle phases_completed tag
-  stype=$(_read_phase_field "session_type" "$state_file")
-  sid=$(_read_phase_field "session_id" "$state_file")
-  mode=$(_read_phase_field "mode" "$state_file")
-  current_phase=$(_read_phase_field "current_phase" "$state_file")
-  cycle=$(_read_phase_field "cycle" "$state_file")
-  phases_completed=$(_read_phase_field "phases_completed" "$state_file")
-  tag=$(_read_phase_field "tag" "$state_file")
-  cycle="${cycle:-1}"
-  mode="${mode:-review}"
+  # Read all fields from cache (zero forks), replace solo, rewrite atomically
+  local cycle="${_PS_CYCLE:-1}"
+  local mode="${_PS_MODE:-review}"
 
   local ts
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-  # Shell I/O — bypasses state-guard.sh
+  # Shell I/O — bypasses write-guard.sh
   printf 'session_type: %s\nsession_id: %s\nmode: %s\ncurrent_phase: %s\ncycle: %s\nphases_completed: %s\nsolo: %s\ntag: %s\ntimestamp: %s\n' \
-    "$stype" "$sid" "$mode" "$current_phase" "$cycle" "$phases_completed" "$new_solo" "$tag" "$ts" \
+    "$_PS_SESSION_TYPE" "$_PS_SESSION_ID" "$mode" "$_PS_CURRENT_PHASE" "$cycle" "$_PS_PHASES_COMPLETED" "$new_solo" "$_PS_TAG" "$ts" \
     > "$state_file" 2>/dev/null || true
+
+  # Invalidate validation cache — file contents changed (audit C8)
+  _PS_VALIDATED=false
 }
 
 # --- Set auto/review mode ---
@@ -579,6 +638,7 @@ set_phase_mode() {
     return 1
   fi
 
+  # _validate_phase_session populates _PS_* cache
   if ! _validate_phase_session "$state_file"; then
     return 1
   fi
@@ -588,23 +648,37 @@ set_phase_mode() {
     *) echo "ERROR: Invalid mode '$new_mode' — must be 'auto' or 'review'" >&2; return 1 ;;
   esac
 
-  # Read all fields, replace mode, rewrite atomically
-  local stype sid current_phase cycle phases_completed solo tag
-  stype=$(_read_phase_field "session_type" "$state_file")
-  sid=$(_read_phase_field "session_id" "$state_file")
-  current_phase=$(_read_phase_field "current_phase" "$state_file")
-  cycle=$(_read_phase_field "cycle" "$state_file")
-  phases_completed=$(_read_phase_field "phases_completed" "$state_file")
-  solo=$(_read_phase_field "solo" "$state_file")
-  tag=$(_read_phase_field "tag" "$state_file")
-  cycle="${cycle:-1}"
-  solo="${solo:-false}"
+  # Read all fields from cache (zero forks), replace mode, rewrite atomically
+  local cycle="${_PS_CYCLE:-1}"
+  local solo="${_PS_SOLO:-false}"
 
   local ts
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-  # Shell I/O — bypasses state-guard.sh
+  # Shell I/O — bypasses write-guard.sh
   printf 'session_type: %s\nsession_id: %s\nmode: %s\ncurrent_phase: %s\ncycle: %s\nphases_completed: %s\nsolo: %s\ntag: %s\ntimestamp: %s\n' \
-    "$stype" "$sid" "$new_mode" "$current_phase" "$cycle" "$phases_completed" "$solo" "$tag" "$ts" \
+    "$_PS_SESSION_TYPE" "$_PS_SESSION_ID" "$new_mode" "$_PS_CURRENT_PHASE" "$cycle" "$_PS_PHASES_COMPLETED" "$solo" "$_PS_TAG" "$ts" \
     > "$state_file" 2>/dev/null || true
+
+  # Invalidate validation cache — file contents changed (audit C8)
+  _PS_VALIDATED=false
+}
+
+# --- Write merge source signal ---
+# Records the branch name in .claude/.state/merge-source-branch so the stop
+# hook can detect that the agent completed the merge in the close phase.
+# Shell I/O — bypasses write-guard.sh (same pattern as init_phase, set_solo).
+# Called by the agent AFTER a successful git merge on main.
+# Usage: write_merge_signal "feature/my-feature"
+write_merge_signal() {
+  local branch_name="$1"
+  if [ -z "$branch_name" ]; then
+    echo "ERROR: write_merge_signal requires a branch name" >&2
+    return 1
+  fi
+  local repo_root
+  repo_root="$(get_repo_root)"
+  local state_dir="$repo_root/.claude/.state"
+  mkdir -p "$state_dir" 2>/dev/null || true
+  printf '%s\n' "$branch_name" > "$state_dir/merge-source-branch" 2>/dev/null || true
 }

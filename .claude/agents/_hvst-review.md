@@ -21,7 +21,7 @@ Provide each specialist with failure artifacts and local context only:
 - **Hypotheses attempted so far** — what was tried and what each attempt ruled out
 - **Files touched during debugging** — list of files modified in the HVST loop
 - **Recent changes** — `git log --since` for changes in the current session
-- **Known issues** — relevant entries from `docs/ai/logs/known-issues.md` (if any match)
+- **Known issues** — relevant entries from `docs/ai/logs/known-issues.md` (template mode: `.claude/local/known-issues.md`) (if any match)
 
 **Scope boundary**: Failure artifacts + local code context only. Do NOT pass full specs, full codebase scans, or unrelated module context. Keep input tight to control context window pressure.
 
@@ -96,5 +96,5 @@ They operate at different points in the workflow and serve different purposes.
 
 - **Critic agent definition:** `.claude/agents/critic.md` (hypothesis mode scope, constraints, brief format)
 - **HVST protocol:** `docs/ai/workflow.md` (full protocol definition)
-- **Known issues:** `docs/ai/logs/known-issues.md` (checked as input during dispatch)
+- **Known issues:** `docs/ai/logs/known-issues.md` (template mode: `.claude/local/known-issues.md`) (checked as input during dispatch)
 - **Cohesion review:** `.claude/agents/_cohesion-review.md` (complementary post-build review)

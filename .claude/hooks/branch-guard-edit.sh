@@ -5,12 +5,17 @@
 # Gate 1: Main branch protection — blocks edits on main.
 # Gate 2: Phase gate (blocking) — blocks edits in init/plan phase.
 #          Exempt: .claude/.state/, .claude/local/, governance evidence,
-#          session types without plan phase. Fail-open if no phase-state.
+#          session types without plan phase. Fail-closed when sentinel
+#          present and no phase-state (Decision 0019). Advisory when absent.
+# Gate 6: Session overlap check (Decision 0013) — blocks concurrent
+#          non-task-group sessions on the same branch. Advisory for task
+#          groups. Exempt: taskdef-query, taskdef-brief (Prompt T).
 # Gate 5: Session branch isolation (Decision 0013) — blocks edits on
 #          branches closed by a previous session. Task group non-final
 #          briefs never seal the branch, so no exemption logic needed.
 #
-# Override: REPO_OS_ALLOW_MAIN=1 (Gate 1), REPO_OS_SKIP_BRANCH_REUSE=1 (Gate 5)
+# Override: REPO_OS_ALLOW_MAIN=1 (Gate 1), REPO_OS_SKIP_PLAN_GATE=1 (Gate 2),
+#           REPO_OS_SKIP_OVERLAP_CHECK=1 (Gate 6), REPO_OS_SKIP_BRANCH_REUSE=1 (Gate 5)
 #           REPO_OS_RECOVER=1 (bypass all gates — emergency recovery)
 
 set -euo pipefail
@@ -24,7 +29,7 @@ START_MS=$(now_ms)
 INPUT=$(cat)
 
 REPO_ROOT="$(get_repo_root)"
-CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+CURRENT_BRANCH=$(get_branch)
 
 # --- REPO_OS_RECOVER override ---
 if [ "${REPO_OS_RECOVER:-0}" = "1" ]; then
@@ -51,7 +56,7 @@ fi
 # Exempt: experiment/* branches (Decision 0006), .claude/.state/ (bootstrap),
 #         .claude/local/ (session-scoped), governance evidence paths,
 #         session types without plan phase.
-# Fail-open: if phase-state absent/stale, allow (backwards compat).
+# Fail-closed when sentinel present, advisory when absent (Decision 0019).
 if [ "$ALLOW_REASON" = "pass" ] && [[ "$CURRENT_BRANCH" != experiment/* ]]; then
   CURRENT_PHASE=$(get_phase)
   if [ -n "$CURRENT_PHASE" ]; then
@@ -93,7 +98,43 @@ if [ "$ALLOW_REASON" = "pass" ] && [[ "$CURRENT_BRANCH" != experiment/* ]]; then
         fi
         ;;
     esac
+  else
+    # Phase-state absent/stale — sentinel controls fail-closed vs advisory (Decision 0019).
+    # Check path exemptions before blocking (same paths as init|plan exemptions above).
+    _FC_EXEMPT=false
+    _FC_FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null || true)
+    if [ -n "$_FC_FILE_PATH" ]; then
+      case "$_FC_FILE_PATH" in
+        "$REPO_ROOT/.claude/.state/"*)    _FC_EXEMPT=true ;;
+        "$REPO_ROOT/.claude/local/"*)     _FC_EXEMPT=true ;;
+        "$REPO_ROOT/docs/ai/governance/"*) _FC_EXEMPT=true ;;
+        "$REPO_ROOT/docs/ai/task-groups/"*) _FC_EXEMPT=true ;;
+      esac
+    fi
+
+    if [ "$_FC_EXEMPT" = true ]; then
+      ALLOW_REASON="phase_exempt"
+    elif [ "${REPO_OS_SKIP_PLAN_GATE:-0}" = "1" ]; then
+      log_override "branch-guard-edit" "REPO_OS_SKIP_PLAN_GATE"
+      ALLOW_REASON="plan_gate_override"
+    elif [ -f "$REPO_ROOT/docs/ai/decisions/.fail-closed-enforced" ]; then
+      log_hook_event "branch-guard-edit" "PreToolUse" "" "block" "$START_MS" "phase_gate_no_state"
+      echo "BLOCKED: No phase-state — session not initialized. Call init_phase() via the orchestrator before editing files. (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
+      exit 2
+    else
+      log_hook_event "branch-guard-edit" "PreToolUse" "" "warn" "$START_MS" "phase_gate_no_state_advisory"
+      echo "Advisory: No phase-state found — session may not be initialized. Consider calling init_phase() via the orchestrator." >&2
+    fi
   fi
+fi
+
+# --- Gate 6: Session overlap check (Decision 0013 concurrent awareness) ---
+# Checks for same-branch overlap with another active session.
+# Advisory for task groups; blocking for all other types.
+# Override: REPO_OS_SKIP_OVERLAP_CHECK=1
+if ! check_session_overlap; then
+  log_hook_event "branch-guard-edit" "PreToolUse" "" "block" "$START_MS" "session_overlap"
+  exit 2
 fi
 
 # --- Gate 5: Session branch isolation (blocking, Decision 0013) ---

@@ -6,33 +6,126 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 ---
 
-## Session 62 — 2026-02-25 — Phase Model Hardening
+## Session 111 — 2026-02-28 — Audit CRITICAL remediation (11 findings, round 2)
 
 **Status:** complete
-**Decisions:** 0014
+**Decisions:** 0013, 0014, 0017
+**Branch:** `fix/audit-critical-remediation-2`
 
 ### Goal
-- Make the phase model self-describing so hooks query phase sequences instead of hardcoding phase names. Fix a Bash write blocker for 7 session types, a stuck-phase bug in spec sessions, and two documentation gaps.
-
-### Plan Summary
-- Added `has_plan_gate` and `get_post_approval_phase` helper functions to `_phase-helper.sh`
-- Replaced hardcoded 4-type exempt list in `branch-guard.sh` Gate 2 with `has_plan_gate` call
-- Replaced hardcoded `advance_phase "build"` in `plan-approval.sh` with dynamic `get_post_approval_phase` lookup
-- Updated Decision 0014: lifecycle clarification (agent-initiated, fail-open), contract-init path exemption note, new helper functions in API list
+- Remediate all 11 CRITICAL findings from the Deep Audit (Session 109, Brief 2) that were not addressed in Session 110's first pass.
 
 ### Changes Made
-- `.claude/hooks/_phase-helper.sh` — Added `has_plan_gate` (returns 0 if session type has approval phase) and `get_post_approval_phase` (returns phase after approval, e.g. build or governance)
-- `.claude/hooks/branch-guard.sh` — Gate 2: replaced `case "$SESSION_TYPE" in experiment|prototype-*` exempt list with `has_plan_gate "$SESSION_TYPE"` call; updated header comment
-- `.claude/hooks/plan-approval.sh` — After `advance_phase "approval"`, now queries `get_session_type` and `get_post_approval_phase` for dynamic next phase instead of hardcoded "build"
-- `docs/ai/decisions/0014-phase-aware-flow-model.md` — Section 11: clarified agent-initiated lifecycle and fail-open behavior; Section 3: added contract-init path exemption note; Section 10: added `has_plan_gate` and `get_post_approval_phase` to helper functions list
+- `.claude/hooks/_cleanup-helper.sh` (NEW) — C5: shared cleanup functions extracted from session-close-check.sh and state-manager.sh; `cleanup_session_files()` and `record_closed_branch()`
+- `.claude/hooks/session-close-check.sh` — C5: delegates to shared `cleanup_session_files()` and `record_closed_branch()` from _cleanup-helper.sh
+- `.claude/.automation/lib/state-manager.sh` — C5: delegates to shared `cleanup_session_files()` from _cleanup-helper.sh
+- `.claude/.automation/runner.sh` — C1: solo merge + branch seal after external cleanup; C4: portable stat via OSTYPE case in `_check_same_filesystem()`; C5: sources _cleanup-helper.sh
+- `.claude/hooks/_automation-bridge.sh` — C2: added missing source lines for work-order-manager.sh and review-log.sh
+- `.claude/.automation/lib/queue-validator.sh` — C3: added branch validation for taskgroup/taskgroup-merge and solo_mode validation
+- `.claude/.automation/lib/cleanup.sh` — C4: portable stat via `_portable_mod_epoch()` OSTYPE case
+- `.claude/.automation/lib/outcome-detector.sh` — C6: added `_validate_phase_session` guard
+- `.claude/.automation/lib/blocker-reporter.sh` — C6: added `_validate_phase_session` guard
+- `.claude/hooks/_analytics-helper.sh` — C7: process-scoped `_SESSION_OVERLAP_CHECKED` cache for `check_session_overlap()`
+- `.claude/hooks/_phase-helper.sh` — C8: `_PS_VALIDATED` sentinel with cache invalidation on phase-state writes
+- `.claude/hooks/branch-guard.sh` — C9: reordered Gate 7 to call `get_phase()` before `get_session_type()` for cache priming
+- `.claude/hooks/tests/layer1b-registry-functions.sh` — test fix: added `_SESSION_OVERLAP_CHECKED=false` resets between scenarios for C7 cache
+- `.claude/local/session-log.md` — C10: added Session 109 zero-change exempt comment
+- `.claude/local/closed-branches` — C11: added fix/audit-critical-remediation (Session 110 branch)
 
 ### Verification (Gates Evidence)
-- Commit gates: A1 pass, A2 pass, A3 pass (bash sources cleanly), A4 pass, A5 n/a (small-scope, no structural change), A6 n/a
-- Push gates: B1 pass, B2 n/a, B3 n/a
-- Shell verification: 28/28 checks passed — all 14 session types validated for both new functions
+- Commit gates: A1 pass, A2 pass, A3 n-a, A4 pass, A5 pass, A6 n-a
+- Test suite: L1 324/324, L1b 24/24, L2 228/228, L3 164/164 (740 total)
+- Headless sandbox: 52/52 (Layer A)
+- Cohesion review: 1 CRITICAL (pre-existing `date -j -f` in runner.sh:247 — outside audit scope), 4 RECOMMENDATIONs (non-blocking)
+- QA verification: tests pass (792 assertions)
+
+### Follow-ups
+- Cohesion finding: `_check_stale_locks` in runner.sh uses macOS-only `date -j -f` for ISO 8601 parsing — should use `_iso_to_epoch()` from _analytics-helper.sh for cross-platform compatibility (not in audit scope, deferred)
+
+---
+
+## Session 110 — 2026-02-28 — Audit CRITICAL remediation (9 findings)
+
+**Status:** complete
+**Decisions:** 0004, 0017, 0019
+**Branch:** `fix/audit-critical-remediation`
+
+### Goal
+- Remediate all 9 CRITICAL findings from the Deep Audit (Session 109).
+
+### Changes Made
+- `.claude/.automation/lib/state-manager.sh` — CD-1/CD-2: added task-contract.yaml and merge-source-branch cleanup to runner_external_cleanup(); TD-2: added set -euo pipefail; added .stop-attempt-count cleanup for full parity
+- `.claude/.automation/lib/queue-validator.sh` — CD-3: whitespace trimming on brief_path after quote stripping
+- `.claude/.automation/lib/branch-manager.sh` — TD-2: added set -euo pipefail
+- `.claude/.automation/lib/prompt-assembler.sh` — TD-3: added audit route to dev-orchestrator-brief.md
+- `docs/ai/decisions/0017-operator-automation-layer.md` — TD-1: fixed phantom large-scope-approved reference to plan-approved with large-scope: true
+- `.claude/hooks/_analytics-helper.sh` — PF-1: cached get_session_type() with boolean sentinel; PF-2: cached analytics dir and date, replaced manual .session-type read
+- `.claude/local/session-log.md` — GV-1: updated rolling cap comment range to include session 103
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass, A2 pass, A3 n-a, A4 pass, A5 pass, A6 n-a
+- Test suite: L1 324/324, L1b 24/24, L2 228/228, L3 164/164 (740 total)
+- Headless sandbox: 52/52 (Layer A)
+- Cohesion review: APPROVED (reviewer agent)
+- QA verification: APPROVED (qa-verifier agent)
+
+---
+
+## Session 108 — 2026-02-28 — Pre-audit mechanical baseline
+
+**Status:** complete
+**Decisions:** 0004, 0021
+**Branch:** `feature/pre-audit-baseline`
+
+### Goal
+- Establish a verified mechanical baseline before running a comprehensive audit — confirm all hook tests pass, settings.json wiring is complete, agent frontmatter hooks are correct, A1 trigger index is current, and decision trigger paths match real files.
+
+### Changes Made
+- `.claude/hooks/tests/layer1-phase-functions.sh` — updated 7 stale test expectations for Decision 0021 `user-review` phase: L1.2 standard/taskgroup sequences now include `user-review`, L1.8 index assertions updated for shifted positions
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass, A2 pass, A3 n-a, A4 pass, A5 pass, A6 n-a
+- Push gates: B1 pass, B2 n-a, B3 n-a
+- Test suite: L1 324/324, L1b 24/24, L2 228/228, L3 164/164 (740 total)
+- Headless sandbox: 52/52
+- Settings.json wiring: 9/9 non-helper hooks correctly mapped (agent-git-guard.sh is frontmatter-only, by design)
+- Agent frontmatter: 5/5 Bash-capable agents have git-guard hook
+- A1 trigger index: current (matches regeneration output)
+- Decision triggers: 29/31 path patterns match real files (2 expected: out-of-repo analytics path, runtime task-contract state file)
+
+### Follow-ups
+- Consider adding trigger coverage for `docs/ai/quality-gates.md` and `docs/ai/workflow.md` (core governance files with no path triggers)
+
+---
+
+## Session 107 — 2026-02-28 — Gate 7 close-phase exemption for task group merge
+
+**Status:** complete
+**Decisions:** 0015, 0018
+**Branch:** `feature/agent-close-sequence-merge-fix`
+
+### Goal
+- Extend agent-executed merge to task group final briefs by adding a close-phase exemption to Gate 7 (branch-guard.sh). Previously, Gate 7 blocked all merge commands for task group sessions, making the stop hook the primary merge path — which was unreliable when phase state went missing.
+
+### Plan Summary
+- Add close-phase exemption to Gate 7: check `get_phase()`, allow merge when phase is "close"
+- Update workflow.md, orchestrator, Decision 0015, Decision 0018, and AI.md to remove stale "task groups use hook merge" references
+
+### Changes Made
+- `.claude/hooks/branch-guard.sh` — Gate 7: added `get_phase()` check before blocking; if phase is `close`, log exemption and allow merge. Updated header comment.
+- `docs/ai/workflow.md` — Close sequence step 3: replaced "Task group sessions are excluded" with "Task group final briefs included — Gate 7 allows merge in the close phase"
+- `.claude/agents/orchestrator.md` — Solo mode checklist: replaced "task groups use hook merge" with "task group final briefs (Gate 7 allows merge in close phase)"
+- `docs/ai/decisions/0015-solo-mode.md` — Consequences: changed "hook merge exclusively" to "agent in close phase (Gate 7 close-phase exemption)"
+- `docs/ai/decisions/0018-mechanical-taskgroup-enforcement.md` — Gate 7 description: added "Close-phase exemption" sentence
+- `AI.md` — Hooks paragraph: removed stale "primary merge path for task group sessions where Gate 7 blocks agent merge"
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass, A2 pass, A3 n-a, A4 pass, A5 pass, A6 n-a
+- Push gates: B1 pass, B2 n-a, B3 n-a
+- Cohesion review: 1 critical found and fixed (AI.md stale reference), 2 recommendations (header comment fixed, glossary row minor — no change needed)
 
 ### Failed Attempts (Brief)
-- Plan file write blocked by branch-guard Gate 1 (on main) — created fix branch
+- None
 
 ### Known Issues Logged
 - None
@@ -42,174 +135,36 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 ---
 
-## Session 61 — 2026-02-25 — Explainer HTML Phase Model Update
+## Session 106 — 2026-02-28 — User Review Prompt & Workflow Integration (Brief 2/2)
 
 **Status:** complete
-**Decisions:** 0014, 0015
+**Decisions:** 0001, 0002, 0003, 0004, 0010, 0014, 0021
+**Branch:** `feature/user-review-system`
 
 ### Goal
-- Update repo-os-explainer.html to reflect phase-aware flow model, solo mode, and remove old PR-based session workflow references
-
-### Plan Summary
-- Added new Phase Model section with phase sequences for all 4 Prompt B session types, auto/review mode, solo mode, task group branch strategy
-- Replaced all session-context PR references with solo/team merge language
-- Preserved template sync PR references (GitHub Actions workflow, unrelated)
-- Added Decisions 0014 and 0015 to decisions section
-- Added Phase, Solo Mode, Auto Mode glossary entries
-- Updated Daily Workflow flow diagram with op-review and close phases
+- Integrate the User Review system into the phase model, prompt pipeline, and orchestrator routing — Brief 2 of 2 (user-review-system task group).
 
 ### Changes Made
-- `repo-os-explainer.html` — New Phase Model section (id="phases") after Daily Workflow; sidebar nav link added; Daily Workflow flow diagram extended with Op-Review and Close nodes and 2 new table rows; Branch Categories main row updated for solo/team merge; Multi-Agent Teams flow node, merge governance row, and checklist updated; Session Hygiene 5th checklist item updated; Glossary Session definition updated, 3 new entries (Phase, Solo Mode, Auto Mode); Decisions 0014 and 0015 added; Decision Tree JS outcome strings updated; Hooks table PR check description updated
+- `docs/ai/decisions/0014-phase-aware-flow-model.md` — amended standard and taskgroup sequences with `user-review` phase
+- `docs/ai/decisions/0021-user-review-system.md` — point 11 updated (dedicated phase), body references corrected
+- `.claude/hooks/_phase-helper.sh` — registered `user-review` in phase sequences and tag mappings
+- `docs/ai/prompts/prompt-t-task-definition.md` — User Review section in brief template, `user_review` in task contract
+- `docs/ai/prompts/prompt-b-product-build.md` — User Review Dispatch section with 7-step procedure
+- `.claude/agents/orchestrator.md` — On-Demand Procedure entry for User Review dispatch
+- `docs/ai/workflow.md` — User Review section with phase position, opt-in, dispatch flow
+- `docs/ai/quality-gates.md` — advisory note for User Review
 
 ### Verification (Gates Evidence)
-- Commit gates: A1 pass, A2 pass (large-scope), A3 n/a (HTML docs), A4 pass, A5 pending, A6 n/a
-- Push gates: B1 pass, B2 n/a, B3 n/a
-- PR reference audit: grep confirms zero old-model PR refs outside template sync (lines 1575–1655)
-
-### Failed Attempts (Brief)
-- Plan file write blocked by branch-guard Gate 1 (on main) — created feature branch
-- Branch `feature/brief4-prompts-docs-governance` sealed by prior session — created `feature/brief4-explainer-phase-model`
-
-### Known Issues Logged
-- None
-
-### Follow-ups
-- Manual browser check for visual rendering (CSS classes, tabs, decision tree navigation)
+- Commit gates: A1 pass, A2 pass, A3 n-a, A4 pass, A5 pass, A6 pass
+- Cohesion: 2 criticals found and fixed, 4 recommendations addressed
 
 ---
 
-## Session 60 — 2026-02-25 — Legacy Artifact Cleanup
 
-**Status:** complete
-**Decisions:** 0004, 0014
-**Commits:** `1d1d7b4`
 
-### Goal
-- Remove dead artifacts from the pre-phase-model enforcement system: Gate 4 references, plan-approved file fallback, infer_session_type() inference logic, phase-chain-checked state file
-
-### Plan Summary
-- Audited all hooks, docs, and agent definitions for artifacts now dead or redundant with phase model
-- Removed Gate 2 plan-approved file fallback from branch-guard.sh (fail-open parity with branch-guard-edit.sh)
-- Replaced 47-line infer_session_type() with 5-line get_session_type() wrapper
-- Removed phase-chain-checked from cleanup code, state file tables, and all documentation
-- Removed Gate 4 references from Decision 0004, AI.md hooks paragraph, workflow.md governance layers, repo-os-explainer.html
-
-### Changes Made
-- `.claude/hooks/branch-guard.sh` — Removed Gate 2 plan-approved file fallback, updated header comments
-- `.claude/hooks/session-close-check.sh` — Simplified infer_session_type() to get_session_type() wrapper, removed phase-chain-checked cleanup
-- `docs/ai/quality-gates.md` — Removed phase-chain-checked row from State File Dependencies table
-- `.claude/agents/_agent-glossary.md` — Removed phase-chain-checked row from State Files table
-- `AI.md` — Removed phase chain verification clause from hooks paragraph
-- `docs/ai/decisions/0004-mechanical-enforcement.md` — Removed Gate 4 references from items 5, 7, 10
-- `docs/ai/workflow.md` — Updated governance layers item 2 (phase chain verification now session-close-check only)
-- `docs/ai/decisions/0014-phase-aware-flow-model.md` — Removed phase-chain-checked from state file list
-- `repo-os-explainer.html` — Removed Gate 4 from hook table rows (cohesion fix)
-
-### Verification (Gates Evidence)
-- Commit gates: A1 pass, A2 pass, A3 n/a, A4 pass, A5 pass (cohesion: 1 critical found in explainer, fixed, re-run clean), A6 n/a
-- Push gates: B1 pass, B2 n/a, B3 n/a
-
-### Failed Attempts (Brief)
-- Plan file write blocked by branch-guard Gate 1 (on main) — created feature branch first
-
-### Known Issues Logged
-- None
-
-### Follow-ups
-- repo-os-explainer.html still has 8+ "Prompt 0 Feature mode" references — should be updated to Prompt T significant feature path (separate task)
-- Residual phase-chain-checked reference in .claude/local/spec/template-design.md (local spec file, non-blocking)
-
----
-
-## Session 57 — 2026-02-25 — Prompts, Docs & Governance (Brief 4 of 4: phase-model-redesign)
-
-**Status:** complete
-**Decisions:** 0004, 0006, 0007, 0010, 0011, 0013, 0014, 0015
-**Task Group:** phase-model-redesign (brief 4 of 4)
-
-### Goal
-- Update all prompts, workflow docs, agent definitions, and decision records to reflect phase-aware flow management, solo mode, and Prompt 0 Feature mode merge into Prompt T
-
-### Plan Summary
-- Add phase sequence tables to all 6 prompts (B, T, 0, A, 0.5, C)
-- Add Phase Model section to workflow.md, update Session Lifecycle for solo mode
-- Add Phase Model section to _agent-glossary.md, update Build Flow diagram in _agent-workflow.md
-- Add auto/review option wording and branch-from-main to orchestrator.md
-- Remove Prompt 0 Feature mode, add redirect to Prompt T significant feature path
-- Add significant feature detection, task group auto-approval to Prompt T
-- Update 6 decision records (0004, 0006, 0007, 0010, 0011, 0013) with new capabilities
-- Update AI.md hooks description for phase-aware enforcement
-- Add Phase-to-Gate Mapping to quality-gates.md
-
-### Changes Made
-- `docs/ai/prompts/prompt-b-product-build.md` — Added Phase Model section with 4 phase sequence tables (standard, taskgroup, hotfix, experiment), auto/review mode, solo mode, branch-from-main instruction
-- `docs/ai/prompts/prompt-t-task-definition.md` — Added phase sequences, significant feature detection (two-brief task group), task group auto-approval
-- `docs/ai/prompts/prompt-0-spec-builder.md` — Removed Feature mode section entirely, added redirect to Prompt T, added phase sequences for Fresh/Update
-- `docs/ai/prompts/prompt-a-repo-os.md` — Added phase sequences for Initialize/Re-initialize, changed "Feature mode" to "Feature brief"
-- `docs/ai/prompts/prompt-0.5-prototype.md` — Added phase sequences for Napkin/Spike/PoC
-- `docs/ai/prompts/prompt-c-project-audit.md` — Added phase sequence
-- `docs/ai/workflow.md` — Added Phase Model section, updated Session Lifecycle for solo mode, removed duplicate Decision 0013 paragraph, added one-branch-per-group and pre-approval to Task Group Sessions
-- `docs/ai/quality-gates.md` — Updated main branch row for solo mode, added Phase-to-Gate Mapping section
-- `AI.md` — Updated hooks description for phase-aware enforcement, updated Feature Briefs to reference Prompt T, removed PR reference from non-negotiables
-- `.claude/agents/orchestrator.md` — Added branch-from-main and auto/review wording constraints, updated verification checklist for solo mode
-- `.claude/agents/_agent-workflow.md` — Added phase labels to Build Flow diagram with solo mode close
-- `.claude/agents/_agent-glossary.md` — Added Phase Model section (definitions, tags, auto/review, solo mode), updated Session Close Overrides
-- `.claude/agents/_advisory-board.md` — Changed "Feature mode" to "feature briefs"
-- `docs/ai/decisions/0004-mechanical-enforcement.md` — Added phase-aware hooks and solo merge items, updated triggers
-- `docs/ai/decisions/0006-prototyping-tiers.md` — Added prototype phase sequences and session type keywords
-- `docs/ai/decisions/0007-advisory-board.md` — Removed Feature mode reference, updated to Prompt T
-- `docs/ai/decisions/0010-task-definition-prompt.md` — Added significant feature path, Prompt 0 Feature mode absorption, phase sequences
-- `docs/ai/decisions/0011-task-group-contracts.md` — Added one-branch-per-group, brief-level sealing, pre-approval mode
-- `docs/ai/decisions/0013-session-branch-isolation.md` — Added solo mode interaction, task group branch lifecycle
-
-### Verification (Gates Evidence)
-- Commit gates: A1 pass, A2 pass (large-scope), A3 n/a (docs only), A4 pass, A5 pass (reviewer approved), A6 pass (contract updated)
-- Push gates: B1 pass, B2 n/a, B3 n/a
-
-### Failed Attempts (Brief)
-- Branch `feature/prompts-docs-governance-phase-model` sealed by prior session — created `feature/brief4-prompts-docs-governance` instead
-- README.md edit blocked by mode-guard (product path in template mode) — skipped (not in brief scope)
-
-### Known Issues Logged
-- None
-
-### Follow-ups
-- README.md still has "merge via PR only" for main — requires product path access to fix
-
----
-
-## Session 58 — 2026-02-25 — Phase Model Cohesion Audit
-
-**Status:** complete
-**Decisions:** 0014, 0015
-
-### Goal
-- Audit the entire codebase for internal coherence between the implemented phase model and the original design intent from Decisions 0014/0015
-
-### Plan Summary
-- Cross-referenced every phase sequence, tag, and transition against Decision 0014, prompt files, `_phase-helper.sh`, workflow docs, and agent definitions
-- Verified solo mode coherence across all governance files
-- Verified state file lifecycle, decision record integrity, and session ID binding
-- Fixed 5 divergences + 1 Critic-found merge strategy contradiction + 1 documentation gap
-
-### Changes Made
-- `docs/ai/decisions/0014-phase-aware-flow-model.md` — Added `solo` field to phase-state schema (item 1); added `get_solo`, `set_solo`, `set_phase_mode` to helper function list (item 10)
-- `docs/ai/decisions/0015-solo-mode.md` — Updated "future brief" language to past tense (solo field and merge logic are implemented); fixed merge strategy to match implementation (ff-only preferred, fallback --no-ff); added `release/*` PR-always enforcement rule
-- `README.md` — Updated main branch gate profile from "merge via PR only" to "Solo: direct merge; otherwise: PR"
-
-### Verification (Gates Evidence)
-- Commit gates: A1 pass, A2 pass, A3 n/a (docs only), A4 pass, A5 pass (critic: 1 critical found and fixed, re-run clean), A6 n/a
-- Push gates: B1 pass, B2 n/a, B3 n/a
-
-### Failed Attempts (Brief)
-- Plan file write blocked by branch-guard (sealed branch) — used Bash write (out-of-repo path bypasses gate)
-- README.md edit blocked by mode-guard (product path in template mode) — used `REPO_OS_UNLOCK_PATH=README.md`
-
-### Known Issues Logged
-- None
-
-### Follow-ups
-- Recommendation: `set_solo`/`set_phase_mode` update the `timestamp` field without a phase transition — Decision 0014 defines timestamp as "last phase transition" but these are state field mutations. Pre-existing pattern, intentionally deferred.
+<!-- Sessions 63-64: zero-change sessions, no log entry per workflow.md exemption -->
+<!-- Session 109: audit session, zero-change exempt -->
+<!-- Sessions 65-105: dropped per rolling cap -->
 
 <!-- Template: copy this block for each new session entry
 

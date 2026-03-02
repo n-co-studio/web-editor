@@ -16,6 +16,14 @@ START_MS=$(now_ms)
 REPO_ROOT="$(get_repo_root)"
 COUNTER_FILE="$REPO_ROOT/.claude/.hvst-fail-count"
 
+# Resolve known-issues path based on repo mode (template → .claude/local/, child/autonomous → docs/ai/logs/)
+REPO_MODE_FILE="$REPO_ROOT/.claude/repo-mode"
+if [ -f "$REPO_MODE_FILE" ] && [ "$(head -1 "$REPO_MODE_FILE" | tr -d '[:space:]')" = "template" ]; then
+  KNOWN_ISSUES_PATH=".claude/local/known-issues.md"
+else
+  KNOWN_ISSUES_PATH="docs/ai/logs/known-issues.md"
+fi
+
 # Read JSON payload from stdin
 INPUT=$(cat)
 EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // empty' 2>/dev/null || echo "")
@@ -28,7 +36,7 @@ if [ "$EVENT" = "PostToolUseFailure" ]; then
 
   if [ "$NEW_COUNT" -ge 2 ]; then
     log_hook_event "hvst-failure-tracker" "PostToolUseFailure" "Bash" "warn" "$START_MS" "failure_${NEW_COUNT}"
-    echo "HVST: $NEW_COUNT consecutive failures — check docs/ai/logs/known-issues.md" >&2
+    echo "HVST: $NEW_COUNT consecutive failures — check $KNOWN_ISSUES_PATH" >&2
   else
     log_hook_event "hvst-failure-tracker" "PostToolUseFailure" "Bash" "allow" "$START_MS" "failure_${NEW_COUNT}"
   fi

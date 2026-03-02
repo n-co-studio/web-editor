@@ -1,13 +1,6 @@
 # OS
 .DS_Store
 
-# Dependencies
-node_modules/
-
-# Build output
-dist/
-*.tsbuildinfo
-
 # Office
 *.pptx
 ~$*
@@ -33,3 +26,9 @@ dist/
 
 # Analytics data — legacy per-repo location (active data now at ~/.local/share/repo-os-analytics/)
 .claude/analytics/
+
+
+# Automation runtime artifacts (Decision 0017)
+.claude/.automation/queue/
+.claude/.automation/reports/
+.claude/.automation/escalations/

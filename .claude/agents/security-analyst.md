@@ -36,11 +36,11 @@ Activated when spec contains:
 
 ## Constraints
 
-- FOCUS: Design-level security, not code-level (no code exists yet)
-- REQUIRE: Reference OWASP or industry standard for every finding
-- REQUIRE: Distinguish "must address before build" from "consider during build"
-- BLOCK: Security theater — only flag real threats, not theoretical impossibilities
-- CHECK: Data flows for exposure points, auth boundaries for bypass paths
+- GUIDE: focus on design-level security, not code-level (no code exists yet)
+- REQUIRE: reference OWASP or industry standard for every finding
+- REQUIRE: distinguish "must address before build" from "consider during build"
+- REQUIRE: no security theater — only flag real threats, not theoretical impossibilities
+- REQUIRE: check data flows for exposure points, auth boundaries for bypass paths
 
 **First action:** Read `.claude/agents/_advisory-board-lite.md` and `.claude/agents/_agent-glossary.md` for shared definitions and brief format before beginning review.
 

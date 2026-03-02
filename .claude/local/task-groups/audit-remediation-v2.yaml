@@ -1,0 +1,170 @@
+# Task Group Contract — audit-remediation-v2
+# Created retroactively — briefs 1–2 completed before contract existed.
+
+identity:
+  group_name: "audit-remediation-v2"
+  created_by_session: 76
+  created_date: "2026-02-26"
+
+briefs:
+  - title: "Doc cohesion — template-mode paths & stale references"
+    sequence: 1
+    session: 74
+    branch: "fix/doc-cohesion-template-paths"
+    status: complete
+    next_brief: "Governance artifact cleanup"
+  - title: "Governance artifact cleanup"
+    sequence: 2
+    session: 75
+    branch: "fix/governance-artifact-cleanup"
+    status: complete
+    next_brief: "Brief 3"
+  - title: "Decision & config hygiene"
+    sequence: 3
+    session: 77
+    branch: "feature/decision-config-hygiene"
+    status: complete
+    next_brief: "Brief 4"
+  - title: "Hook performance — caching & fork reduction"
+    sequence: 4
+    session: 78
+    branch: "feature/hook-perf-caching"
+    status: complete
+    next_brief: "Brief 5"
+  - title: "Pre-commit performance & A1 trigger optimization"
+    sequence: 5
+    session: 80
+    branch: "feature/a1-trigger-index-optimization"
+    status: complete
+    next_brief: "Brief 6"
+  - title: "Security hardening — 8 audit findings (#21–#29)"
+    sequence: 6
+    session: 81
+    branch: "fix/security-hardening"
+    status: complete
+    next_brief: "Brief 7"
+  - title: "Test coverage expansion — L3.10-L3.13 + refactoring"
+    sequence: 7
+    session: 82
+    branch: "feature/test-coverage-expansion"
+    status: complete
+    next_brief: ""
+
+conventions:
+  naming: []
+  patterns:
+    - pattern: "Governance-only edits (docs, agents, workflow)"
+      rationale: "All briefs in this group fix audit findings in governance files — no product code"
+  decisions: []
+  boundaries: []
+
+integration_points:
+  - name: "Clean governance docs"
+    producer: "Doc cohesion — template-mode paths & stale references"
+    consumer: "All subsequent briefs"
+    artifact: "Consistent dual-path qualifiers and handoff lists across .claude/agents/ and docs/ai/"
+
+session_decisions: []
+
+governance:
+  - brief_sequence: 1
+    gates_a:
+      A1: "n/a"
+      A2: "pass"
+      A3: "n/a"
+      A4: "pass"
+      A5: "n/a"
+      A6: "n/a"
+    gates_b:
+      B1: "pass"
+      B2: "n/a"
+      B3: "n/a"
+    overrides_used: []
+    timestamp: "2026-02-26T00:00:00Z"
+  - brief_sequence: 2
+    gates_a:
+      A1: "n/a"
+      A2: "pass"
+      A3: "n/a"
+      A4: "pass"
+      A5: "n/a"
+      A6: "n/a"
+    gates_b:
+      B1: "pass"
+      B2: "n/a"
+      B3: "n/a"
+    overrides_used: []
+    timestamp: "2026-02-26T00:00:00Z"
+  - brief_sequence: 3
+    gates_a:
+      A1: "pass"
+      A2: "pass"
+      A3: "n/a"
+      A4: "pass"
+      A5: "n/a"
+      A6: "pass"
+    gates_b:
+      B1: "pass"
+      B2: "n/a"
+      B3: "n/a"
+    overrides_used: []
+    timestamp: "2026-02-26"
+  - brief_sequence: 4
+    gates_a:
+      A1: "pass"
+      A2: "pass"
+      A3: "n/a"
+      A4: "pass"
+      A5: "pass"
+      A6: "pass"
+    gates_b:
+      B1: "pass"
+      B2: "n/a"
+      B3: "n/a"
+    overrides_used:
+      - "REPO_OS_SKIP_BRANCH_REUSE=1 (contract update after premature branch seal)"
+    timestamp: "2026-02-26"
+  - brief_sequence: 5
+    gates_a:
+      A1: "pass"
+      A2: "pass"
+      A3: "n/a"
+      A4: "pass"
+      A5: "pass"
+      A6: "pass"
+    gates_b:
+      B1: "pass"
+      B2: "n/a"
+      B3: "n/a"
+    overrides_used: []
+    timestamp: "2026-02-26"
+  - brief_sequence: 6
+    gates_a:
+      A1: "pass"
+      A2: "pass (advisory — 169 lines in _analytics-helper.sh)"
+      A3: "n/a"
+      A4: "pass"
+      A5: "pass"
+      A6: "pass"
+    gates_b:
+      B1: "pass"
+      B2: "n/a"
+      B3: "n/a"
+    overrides_used:
+      - "REPO_OS_SKIP_PLAN_GATE=1 (plan-approved state file not written by AskUserQuestion hook)"
+      - "REPO_OS_SKIP_MODE_GUARD=1 (write-guard.sh immune path editing via python3 I/O)"
+    timestamp: "2026-02-26"
+  - brief_sequence: 7
+    gates_a:
+      A1: "pass"
+      A2: "pass (advisory — 287 lines of test code)"
+      A3: "n/a"
+      A4: "pass"
+      A5: "pass"
+      A6: "pass"
+    gates_b:
+      B1: "pass"
+      B2: "n/a"
+      B3: "n/a"
+    overrides_used: []
+    timestamp: "2026-02-26"
