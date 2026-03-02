@@ -1,0 +1,17 @@
+# Runner Config Schema — operational configuration for automation runners.
+# config.yaml in the parent directory follows this schema.
+
+runner:
+  enabled: false            # master toggle — runners must not execute when false
+  default_auto_mode: false  # default auto_mode for new queue entries
+  default_solo_mode: false  # default solo_mode for new queue entries
+  max_retries: 3            # default max retries per queue entry
+  heartbeat_interval: 30    # seconds between runner heartbeat checks
+  stderr_tail_lines: 50     # lines of stderr to capture in blocker reports
+  cohesion_trigger: 100     # line-change threshold triggering cohesion review
+
+retention:
+  queue_days: 30            # days to retain completed queue entries
+  report_days: 90           # days to retain blocker reports
+  escalation_days: 90       # days to retain resolved escalations
+  review_log_days: 90       # days to retain review-log NDJSON files

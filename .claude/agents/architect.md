@@ -28,10 +28,10 @@ Read `.claude/agents/_advisory-board-lite.md` and `.claude/agents/_agent-glossar
 
 ## Constraints
 
-- FOCUS: Structural soundness, not implementation details
-- REQUIRE: Reference specific spec sections when identifying issues
-- BLOCK: Prescribing specific libraries or frameworks (Exploration territory)
-- PREFER: Simplicity over cleverness — flag unnecessary abstraction
+- GUIDE: focus on structural soundness, not implementation details
+- REQUIRE: reference specific spec sections when identifying issues
+- REQUIRE: do not prescribe specific libraries or frameworks (Exploration territory)
+- GUIDE: prefer simplicity over cleverness — flag unnecessary abstraction
 
 ---
 

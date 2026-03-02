@@ -42,9 +42,10 @@ The phase model tracks session progress in `.claude/.state/phase-state`. Hooks e
 | build | agent | Implement changes in small increments |
 | review | agent | Critic cohesion review of diff |
 | verify | agent | QA gate verification (A1–A6, B1–B3) |
+| user-review | agent | User Review persona dispatch (skipped when brief has no User Review section) |
 | commit | agent | Commit with git trailers |
 | op-review | operator | Operator reviews before close (review mode only — skipped in auto) |
-| close | agent | Merge branch to main, seal branch, update session log |
+| close | agent | Update session log, commit, merge to main (agent runs merge — see workflow.md Close Sequence), seal branch |
 
 Loops: `review→build` (cohesion findings), `verify→build` (QA failure)
 
@@ -59,12 +60,27 @@ Loops: `review→build` (cohesion findings), `verify→build` (QA failure)
 | build | agent | Implement changes in small increments |
 | review | agent | Critic cohesion review of diff |
 | verify | agent | QA gate verification (A1–A6, B1–B3) |
+| user-review | agent | User Review persona dispatch (skipped when brief has no User Review section) |
 | commit | agent | Commit with git trailers |
 | contract-update | agent | Update contract — brief status, session decisions, governance evidence |
 | op-review | operator | Operator reviews (review mode only — skipped in auto) |
 | close | agent | Non-final: close without merge. Final: merge to main, seal branch |
 
 Loops: `review→build`, `verify→build`
+
+**Task Group Merge (Brief M — parallel groups only):**
+
+| Phase | Tag | Description |
+|-------|-----|-------------|
+| init | agent | Check out existing task group branch |
+| contract-init | agent | Sync from contract, verify all content briefs complete (completion markers) |
+| cohesion | agent | Cross-session cohesion review across combined diff from all parallel briefs |
+| verify | agent | QA gate verification (A1–A6, B1–B3) |
+| commit | agent | Commit with git trailers |
+| op-review | operator | Operator reviews (review mode only — skipped in auto) |
+| close | agent | Merge to main, seal branch |
+
+Loops: `cohesion→cohesion` (integration fixes found during review)
 
 **Hotfix:**
 
@@ -99,24 +115,60 @@ The mode is set at plan approval and recorded in phase-state.
 
 ### Solo Mode (Decision 0015)
 
-Solo mode enables direct merge to main at session close, replacing PR-based merge:
-- Branch created from `main` at init phase: `git checkout -b <category>/<description>`
-- At close (auto): merge branch to main directly, then seal branch
-- At close (review): agent pauses at `op-review` for operator acceptance, then merges on acceptance
-- Merge failure: `git merge --abort`, notify operator with conflict details. Agent does not attempt automatic conflict resolution on main
+Branches merge to main directly at session close. See `docs/ai/workflow.md` § Solo Mode and § Task Group Sessions for full merge semantics, branch type applicability, and task group branch strategy.
 
-**Task group branch strategy**: One branch per group. Brief 1 creates the branch. Briefs 2 through N-1 commit and close without merge. Brief N (final) merges to main and seals the branch.
+## Task Contract (Decision 0020)
+
+At session init, after branch creation and spec loading, extract the task contract from the brief text:
+
+- **Singular builds**: If the brief contains a `## Task Contract` section with a YAML code block, extract the YAML content and write it to `.claude/.state/task-contract.yaml`. If `.claude/.state/task-contract.yaml` already exists (orphan from a crashed session), delete it before writing the new one and log: "Cleaned stale task contract from previous session."
+- **Task groups**: If the brief's `### Task Group` section contains a `Contract:` field, extract the contract content and write it as the `intent:` block in the task group contract YAML during the `contract-init` phase. Use the fields: `goal`, `verification`, `scope_files`, `spec_references`.
+- **No contract present**: If the brief contains neither a `## Task Contract` section nor a `Contract:` field in `### Task Group`, skip contract extraction silently (backward compatibility with legacy briefs, hotfixes, etc.).
+
+The task contract serves as the cohesion review reference — Critic uses its `verification:` criteria to evaluate whether the implementation achieves the stated intent.
+
+## User Review Dispatch (Decision 0021)
+
+After the `verify` phase, check whether the task brief or task contract contains a `user_review` section:
+
+- **No User Review defined:** Skip directly from `verify` to `commit` (forward-jump — Decision 0014 permits this).
+- **User Review defined:** Advance to `user-review` phase and execute the dispatch procedure:
+
+### Dispatch Procedure
+
+1. **Read scenario definitions** from the task contract's `user_review:` block (tiers, mode, scenarios).
+2. **Dispatch selected tier agents in parallel** via the Task tool. Each agent receives:
+   - Their persona profile (`.claude/agents/_user-review-tier-{N}.md`)
+   - The scenario definitions (YAML from the contract)
+   - The list of files modified in the build (from `git diff --name-only` against the plan baseline)
+3. **Collect results** from all dispatched agents.
+4. **Synthesize across tiers:**
+   - Aggregate findings from all tier reports
+   - Deduplicate: when multiple tiers flag the same issue, keep the finding with the highest severity
+   - Severity escalation: when Tier 1 says RECOMMENDATION and Tier 3 says CRITICAL for the same issue, the synthesized severity is CRITICAL (escalate to highest)
+   - Produce a single **User Review Report** with all findings ranked by severity
+5. **Advance to `commit` phase.** The synthesized User Review Report is carried forward for presentation.
+6. **Present User Review Report** to operator during `op-review` (or if auto mode — findings are logged in the closing summary but do not block).
+7. **Operator dispositions each finding** (accept / note / dismiss) during `op-review` — same pattern as advisory board findings (Decision 0007). No state file written, no gate blocked. Deferred findings are noted in the closing summary.
+
+### Operating Mode Exclusions
+
+User Review dispatch is skipped in:
+- Template mode (no product code to review)
+- Autonomous mode (no operator for disposition)
+- Headless/automation mode (no operator interaction)
+- Experiment sessions (lightweight lifecycle, no `user-review` phase)
+
+See Decision 0021 for system definition, scenario schema, and results format.
 
 ## Operating Rules
-- At session start, create a branch from main: `git checkout -b <category>/<description>` (standard: `feature/<description>`, hotfix: `hotfix/<description>`)
-- After Builder signals done, Orchestrator runs a cohesion review (Critic in cohesion mode) before invoking QA. Critical cohesion findings must be resolved before commit. See `quality-gates.md` gate A5.
-- Use HVST (see `workflow.md`) when debugging or instability appears. When HVST debugging stalls (2+ consecutive failures), Orchestrator dispatches HVST Review Board for multi-agent hypothesis review before further fix attempts. See `_hvst-review.md`
-- **Task Group Contract** — If the task brief contains a `### Task Group` section, this session is part of a multi-brief group. Contract path depends on repo mode (template mode: `.claude/local/task-groups/{group-name}.yaml`; product mode: `docs/ai/task-groups/{group-name}.yaml`):
-  - **First session** (no contract file exists): Create the contract file from brief metadata, following `docs/ai/task-groups/_contract-template.yaml`. Populate identity, brief roster, conventions (naming/patterns/decisions/boundaries discovered during planning), and integration points
-  - **Subsequent sessions** (contract file exists): Read the contract at session start. Conventions are REQUIRE-level constraints — follow all naming patterns, architectural patterns, decisions, and module boundaries. Read `session_decisions` for context from prior sessions
-  - **At session close**: Update the contract — mark this brief's status as `complete`, set session number and branch, append any new session decisions. If this is not the last brief, confirm `next_brief` is set. Append a `governance:` entry for the current brief recording gate results (A1-A6, B1-B3), any overrides used, and a timestamp — this enables phase chain verification by subsequent sessions
-  - **Standalone sessions** (no `### Task Group` section in brief): No contract-related behavior. Skip entirely
-  - See `docs/ai/quality-gates.md` gate A6 for verification requirements
-- **Session Branch Isolation** (Decision 0013) — Each session uses a dedicated branch. After session close, the branch is sealed and must not be reused. Start a new branch for new work. Task group sessions are exempt (multi-brief groups share one branch)
-- Include git trailers on commits per the convention in `docs/ai/workflow.md` (Session Lifecycle → Git Trailer Convention)
+- REQUIRE: at session start, create a branch from main: `git checkout -b <category>/<description>` (standard: `feature/<description>`, hotfix: `hotfix/<description>`)
+- REQUIRE: extract and write task contract at session init when present in the brief (Decision 0020). Contract serves as cohesion review reference
+- REQUIRE: after Builder signals done, Orchestrator runs a cohesion review (Critic in cohesion mode) before invoking QA. Critical cohesion findings must be resolved before commit. See `quality-gates.md` gate A5.
+- GUIDE: use HVST (see `workflow.md`) when debugging or instability appears. When HVST debugging stalls (2+ consecutive failures), Orchestrator dispatches HVST Review Board for multi-agent hypothesis review before further fix attempts. See `_hvst-review.md`
+- REQUIRE: **Task Group Contract** — if the task brief contains a `### Task Group` section, this session is part of a multi-brief group. Read and follow the contract lifecycle in `docs/ai/workflow.md` § Task Group Sessions. See `docs/ai/quality-gates.md` gate A6 for verification requirements
+- BLOCK: **Session Branch Isolation** (Decision 0013) — each session uses a dedicated branch — enforced by branch-guard.sh / branch-guard-edit.sh. After session close, the branch is sealed and must not be reused. Start a new branch for new work. Task group sessions are exempt (multi-brief groups share one branch)
+- REQUIRE: include git trailers on commits per the convention in `docs/ai/workflow.md` (Session Lifecycle → Git Trailer Convention)
+- REQUIRE: **Parallel Task Group Completion Marker** — if the task brief has `Execution: parallel` in `### Task Group`, write a per-brief completion marker file at session close: `.claude/.state/tg-{group}-brief-{seq}.complete` (content: ISO 8601 timestamp). This signals to the merge brief that this content brief has completed
+- REQUIRE: **Parallel Task Group Boundaries** — parallel briefs MUST restrict edits to files within their declared `Boundaries`. Edits outside boundaries require explicit operator approval. Shared files (e.g., index files, config) are owned by the merge brief
 - All other rules (human-led architecture, gates, decisions, small scope, session log) are defined in AI.md and enforced by the Repo OS

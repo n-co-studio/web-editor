@@ -5,21 +5,31 @@
 # Gate 1: Catches work on the wrong branch BEFORE any files are changed,
 #          rather than at commit time when all the work is already done.
 # Gate 2: Phase gate / plan approval (blocking). Phase-state check
-#          (assert_phase build). Fail-open when phase-state absent/stale
-#          (parity with branch-guard-edit.sh). Experiment branches exempt
+#          (assert_phase build). Fail-closed when sentinel present and
+#          phase-state absent/stale (Decision 0019). Advisory warn when
+#          sentinel absent (backward compat). Experiment branches exempt
 #          (Decision 0006). Session types without plan phase exempt.
 # Gate 3: Inter-session governance file check (advisory, first-fire).
 #          Warns if docs/ai/governance/spec-compiled or advisory-reviewed missing.
 # Gate 4: (Removed — covered by phase model contract-init phase.)
+# Gate 6: Session overlap check (Decision 0013). Blocks concurrent
+#          non-task-group sessions on the same branch. Advisory for task
+#          groups. Exempt: taskdef-query, taskdef-brief (Prompt T).
 # Gate 5: Session branch isolation (Decision 0013). Blocks edits on branches
 #          that were used by a previous session. Task group non-final briefs
 #          never seal the branch, so no exemption logic needed.
+# Gate 7: Task group merge protection (Decision 0018). Blocks git checkout main,
+#          git switch main, and git merge (when on main) for taskgroup and
+#          taskgroup-merge sessions during build phases. Close-phase exemption:
+#          allows merge when current phase is "close". Fires BEFORE fast-exit.
 #
-# For Bash: only fires on commands with in-repo write targets (redirect/tee).
-# Bash commands without write targets fast-exit with no gate evaluation.
+# For Bash: only fires on commands with in-repo write targets (redirect/tee),
+# EXCEPT Gate 7 which fires before the fast-exit for merge/checkout detection.
 #
 # Override: REPO_OS_ALLOW_MAIN=1 (main gate), REPO_OS_SKIP_PLAN_GATE=1 (plan gate)
+#           REPO_OS_SKIP_OVERLAP_CHECK=1 (session overlap gate)
 #           REPO_OS_SKIP_BRANCH_REUSE=1 (session branch isolation gate)
+#           REPO_OS_SKIP_MERGE_GUARD=1 (task group merge protection gate)
 #           REPO_OS_RECOVER=1 (bypass all gates — emergency recovery)
 
 set -euo pipefail
@@ -33,7 +43,56 @@ START_MS=$(now_ms)
 INPUT=$(cat)
 
 REPO_ROOT="$(get_repo_root)"
-CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+CURRENT_BRANCH=$(get_branch)
+
+# --- Gate 7: Task group merge protection (blocking, Decision 0018) ---
+# Blocks task group sessions from manually merging to main during build phases.
+# Close-phase exemption: when the current phase is "close", Gate 7 allows merge
+# commands — the agent has passed through all prior phases and determined merge
+# appropriateness. The stop hook retains solo merge as a safety net.
+# Must fire BEFORE the fast-exit: git merge/checkout have no redirect/tee patterns.
+# Zero-fork: uses [[ ]] built-in string matching (no jq, no subshells).
+# Override: REPO_OS_SKIP_MERGE_GUARD=1
+if [ "${REPO_OS_RECOVER:-0}" != "1" ] && [ "${REPO_OS_SKIP_MERGE_GUARD:-0}" != "1" ]; then
+  _TG_MERGE_BLOCK=false
+  _TG_MERGE_REASON=""
+
+  # Pattern: git checkout main / git switch main (exclude main-* and main/* false positives)
+  if [[ "$INPUT" == *'git checkout main'* ]] || [[ "$INPUT" == *'git switch main'* ]]; then
+    if [[ "$INPUT" != *'git checkout main-'* ]] && [[ "$INPUT" != *'git checkout main/'* ]] \
+    && [[ "$INPUT" != *'git switch main-'* ]] && [[ "$INPUT" != *'git switch main/'* ]]; then
+      _TG_MERGE_BLOCK=true
+      _TG_MERGE_REASON="checkout_main"
+    fi
+  fi
+
+  # Pattern: git merge when already on main (exclude git merge --abort, git merge-base)
+  if [ "$_TG_MERGE_BLOCK" = false ] && [ "$CURRENT_BRANCH" = "main" ]; then
+    if [[ "$INPUT" == *'git merge'* ]] \
+    && [[ "$INPUT" != *'git merge --abort'* ]] && [[ "$INPUT" != *'git merge-base'* ]]; then
+      _TG_MERGE_BLOCK=true
+      _TG_MERGE_REASON="merge_on_main"
+    fi
+  fi
+
+  if [ "$_TG_MERGE_BLOCK" = true ]; then
+    # Audit C9: call get_phase first to populate _PS_* cache before get_session_type
+    _TG_PHASE=$(get_phase)
+    _TG_SESSION_TYPE=$(get_session_type)
+    if [ "$_TG_SESSION_TYPE" = "taskgroup" ] || [ "$_TG_SESSION_TYPE" = "taskgroup-merge" ]; then
+      # Close-phase exemption: allow merge when agent is in the close phase
+      if [ "$_TG_PHASE" = "close" ]; then
+        log_hook_event "branch-guard" "PreToolUse" "Bash" "allow" "$START_MS" "tg_merge_close_phase" "$_TG_MERGE_REASON"
+      else
+        log_hook_event "branch-guard" "PreToolUse" "Bash" "block" "$START_MS" "tg_merge_blocked" "$_TG_MERGE_REASON"
+        echo "BLOCKED: Task group sessions must not manually merge to main — merge happens in the close phase (override: REPO_OS_SKIP_MERGE_GUARD=1)" >&2
+        exit 2
+      fi
+    fi
+  fi
+elif [ "${REPO_OS_SKIP_MERGE_GUARD:-0}" = "1" ]; then
+  log_override "branch-guard" "REPO_OS_SKIP_MERGE_GUARD"
+fi
 
 # --- Fast-exit: Bash commands without write patterns ---
 # For Bash calls (no file_path in JSON), skip all gates if no redirect/tee detected.
@@ -41,6 +100,13 @@ CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
 if [[ "$INPUT" != *'"file_path"'* ]] && [[ "$INPUT" != *'>'* ]] && [[ "$INPUT" != *'tee '* ]]; then
   log_hook_event "branch-guard" "PreToolUse" "Bash" "allow" "$START_MS" "bash_no_write_target"
   exit 0
+fi
+
+# --- jq presence guard (fail-closed) ---
+if [ "$_REPO_OS_HAS_JQ" = false ]; then
+  echo "GATE BLOCKED: jq is required for branch-guard but was not found." >&2
+  echo "  Install jq (https://jqlang.github.io/jq/download/) and retry." >&2
+  exit 2
 fi
 
 # --- Parse JSON fields ---
@@ -92,7 +158,8 @@ fi
 
 # --- Gate 2: Phase gate / plan approval (blocking) ---
 # Phase-state check (assert_phase build — must be in build or later).
-# Fail-open when phase-state absent/stale (parity with branch-guard-edit.sh).
+# Fail-closed when sentinel present and phase-state absent/stale (Decision 0019).
+# Advisory warn when sentinel absent (backward compat).
 # Exempt: experiment/* branches (Decision 0006), .claude/.state/ writes (bootstrap),
 #         .claude/local/ writes (session-scoped), governance evidence paths,
 #         session types without approval phase (self-exempting via has_plan_gate).
@@ -130,9 +197,16 @@ else
       ALLOW_REASON="session_type_no_plan_gate"
     fi
   else
-    # Phase-state absent/stale — fail-open (branch-guard-edit.sh parity).
-    # Phase model is the primary plan enforcement mechanism (Decision 0014).
-    ALLOW_REASON="no_phase_state"
+    # Phase-state absent/stale — sentinel controls fail-closed vs advisory (Decision 0019).
+    if [ -f "$REPO_ROOT/docs/ai/decisions/.fail-closed-enforced" ]; then
+      log_hook_event "branch-guard" "PreToolUse" "" "block" "$START_MS" "phase_gate_no_state"
+      echo "BLOCKED: No phase-state — session not initialized. Call init_phase() via the orchestrator before editing files. (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
+      exit 2
+    else
+      log_hook_event "branch-guard" "PreToolUse" "" "warn" "$START_MS" "phase_gate_no_state_advisory"
+      echo "Advisory: No phase-state found — session may not be initialized. Consider calling init_phase() via the orchestrator." >&2
+      ALLOW_REASON="no_phase_state"
+    fi
   fi
 fi
 
@@ -177,6 +251,15 @@ fi
 # Covered by phase model's contract-init phase and init_phase session-type
 # validation. See Decision 0014 and Brief 2 (Hook Phase Integration).
 # Retained at commit-time in pre-commit-gates.sh as Gate 3 (governance advisory).
+
+# --- Gate 6: Session overlap check (Decision 0013 concurrent awareness) ---
+# Checks for same-branch overlap with another active session.
+# Advisory for task groups; blocking for all other types.
+# Override: REPO_OS_SKIP_OVERLAP_CHECK=1
+if ! check_session_overlap; then
+  log_hook_event "branch-guard" "PreToolUse" "" "block" "$START_MS" "session_overlap"
+  exit 2
+fi
 
 # --- Gate 5: Session branch isolation (blocking, Decision 0013) ---
 # Task group non-final briefs no longer seal the branch at close, so

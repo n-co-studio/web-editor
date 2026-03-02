@@ -86,13 +86,13 @@ if echo "$QUESTIONS_TEXT $TOOL_OUTPUT" | grep -iqE '\blarge[ -]?scope\b'; then
 fi
 
 # --- Detect auto/review mode from operator answer ---
-# Scan answer text and option labels for explicit mode indication.
-# "review" wins if both keywords appear (conservative default per Decision 0014).
+# Scan only the operator's selected answer ($TOOL_OUTPUT) for mode keywords.
+# $OPTION_LABELS always contains both "Auto" and "Review" labels, so scanning
+# them would match both every time. Conservative default: review (Decision 0014).
 DETECTED_MODE="review"
-if echo "$TOOL_OUTPUT $OPTION_LABELS" | grep -iqE '\bauto\b'; then
+if echo "$TOOL_OUTPUT" | grep -iqE '\bauto\b'; then
   DETECTED_MODE="auto"
-fi
-if echo "$TOOL_OUTPUT $OPTION_LABELS" | grep -iqE '\breview\b'; then
+elif echo "$TOOL_OUTPUT" | grep -iqE '\breview\b'; then
   DETECTED_MODE="review"
 fi
 
@@ -117,13 +117,27 @@ QUESTION_HASH=$(printf '%s' "$QUESTIONS_TEXT" | portable_hash | cut -c1-12)
 # standard/taskgroup/hotfix → build. spec-fresh/spec-update → governance.
 # Fail-silent if no phase-state or if session type lacks these phases.
 CURRENT_PHASE=$(get_phase)
+SESSION_TYPE=$(get_session_type)
 if [ -n "$CURRENT_PHASE" ]; then
   set_phase_mode "$DETECTED_MODE" 2>/dev/null || true
   advance_phase "approval" 2>/dev/null || true
-  SESSION_TYPE=$(get_session_type)
   NEXT_PHASE=$(get_post_approval_phase "$SESSION_TYPE")
   if [ -n "$NEXT_PHASE" ]; then
     advance_phase "$NEXT_PHASE" 2>/dev/null || true
+  fi
+fi
+
+# --- Automation runner activation (taskgroup + auto mode) ---
+# When auto mode is selected on a taskgroup session, queue remaining
+# pending briefs from the contract and activate the runner daemon.
+# Runs in background subshell to keep PostToolUse non-blocking.
+# Decision 0017 — Operator Automation Layer.
+if [ "$DETECTED_MODE" = "auto" ] && [ "$SESSION_TYPE" = "taskgroup" ]; then
+  if [ -f "$REPO_ROOT/.claude/.automation/config.yaml" ]; then
+    (
+      source "$SCRIPT_DIR/_automation-bridge.sh" 2>/dev/null || exit 0
+      automation_activate_taskgroup 2>/dev/null || true
+    ) &
   fi
 fi
 

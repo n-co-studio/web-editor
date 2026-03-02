@@ -1,0 +1,11 @@
+# Review Log Entry Schema — shape of a single NDJSON line in review-log files.
+# Each daily file (review-log-YYYY-MM-DD.jsonl) contains one JSON object per line.
+
+review_log_entry:
+  seq: 0                    # monotonic sequence number within daily file
+  timestamp: ""             # ISO 8601 timestamp
+  event: ""                 # entry-completed | entry-escalated | entry-failed | work-order-opened | work-order-completed | work-order-escalated
+  work_order_id: ""         # parent work order identifier
+  entry_id: ""              # queue entry identifier (absent for work-order-level events)
+  summary: ""               # human-readable event description
+  detail: {}                # event-specific context (JSON object)

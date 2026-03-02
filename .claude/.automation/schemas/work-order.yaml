@@ -1,0 +1,12 @@
+# Work Order Schema — groups related queue entries into an operator-visible unit.
+# Tracks completion of multi-entry work (e.g., task group briefs).
+
+work_order:
+  id: ""                    # unique work order identifier (UUID or timestamp-based)
+  type: ""                  # single | group
+  label: ""                 # operator-provided description
+  entry_ids: []             # list of child queue entry IDs
+  status: open              # open | completed | escalated
+  created_at: ""            # ISO 8601 timestamp
+  updated_at: ""            # ISO 8601 timestamp
+  completed_at: ""          # ISO 8601 timestamp (set on terminal state)

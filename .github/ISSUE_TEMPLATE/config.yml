@@ -1,1 +1,5 @@
 blank_issues_enabled: true
+contact_links:
+  - name: Repo OS Workflow
+    url: https://github.com/{owner}/{repo}/blob/main/docs/ai/workflow.md
+    about: Internal work tracking uses the Repo OS session log (see workflow.md). GitHub Issues are for external bug reports and feature requests.

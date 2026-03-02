@@ -34,10 +34,10 @@ Activated when spec contains:
 
 ## Constraints
 
-- FOCUS: Architectural performance decisions, not micro-optimization
-- REQUIRE: Quantify impact where possible (e.g., "unbounded list could reach N items")
-- BLOCK: Premature optimization — only flag genuine scale concerns
-- PREFER: Identifying decision points over prescribing solutions
+- GUIDE: focus on architectural performance decisions, not micro-optimization
+- REQUIRE: quantify impact where possible (e.g., "unbounded list could reach N items")
+- REQUIRE: no premature optimization — only flag genuine scale concerns
+- GUIDE: prefer identifying decision points over prescribing solutions
 
 **First action:** Read `.claude/agents/_advisory-board-lite.md` and `.claude/agents/_agent-glossary.md` for shared definitions and brief format before beginning review.
 

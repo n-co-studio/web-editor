@@ -11,9 +11,44 @@ Verification details: `.claude/agents/qa-verifier.md`
 | **A1 Decision Compliance** | All applicable decisions identified and followed. Conflicts → propose new decision record before committing. Mechanically enforced via trigger parser: decisions with `## Triggers` sections are matched against staged files and `+` diff lines — triggered decisions must be declared in `Decisions:` git trailer. Blocking (enforced by `docs/ai/decisions/.a1-triggers-enforced` sentinel). New decisions must include a `## Triggers` section. |
 | **A2 Process** | Plan exists before code. Changes explainable (what + why). Session log updated at close. Scope >100 lines blocks commit unless `plan-approved` state file contains `large-scope: true`. Hotfix branches: A2 scope relaxed (check skipped). |
 | **A3 Quality** (if tooling exists) | Formatter run. Lint passes. Build/compile passes. |
-| **A4 Safety** | No secrets (tokens, keys, credentials, private URLs). No PII in logs/fixtures. High-risk pattern detection: staged files matching risk paths (`auth`, `login`, `session`, `payment`, `billing`, `crypto`, `migration`, `schema`) or containing risk content (`password`, `secret`, `token`) require Reviewer + Security sign-off. Test/fixture/mock paths and governance docs (`docs/ai/`, `.claude/`, `AI.md`, `CLAUDE.md`, `repo-os-explainer.html`) excluded from high-risk scanning (A4 secret scanning still applies to all files). |
-| **A5 Cohesion** (standard+ branches) | Critic (cohesion mode) reviewed diff for internal codebase coherence. All critical findings resolved. Re-run clean after fixes. Mechanically verified: `cohesion-reviewed` state file must exist at commit time. |
-| **A6 Task Group Compliance** (when applicable) | Task group contract exists and is current (template mode: `.claude/local/task-groups/{group-name}.yaml`; product mode: `docs/ai/task-groups/{group-name}.yaml`). Conventions from contract followed. Contract updated at session close. **Blocking**: modified contract must be staged. Applies only when task brief contains `### Task Group`. Override: `SKIP_CONTRACT_CHECK=1`. |
+| **A4 Safety** | No secrets (tokens, keys, credentials, private URLs). No PII in logs/fixtures. High-risk pattern detection: staged files matching risk paths (`auth`, `login`, `session`, `payment`, `billing`, `crypto`, `migration`, `schema`) or containing risk content (`password`, `secret`, `token`) require Reviewer + Security sign-off. Test/fixture/mock paths and governance docs (`docs/ai/`, `.claude/`, `AI.md`, `CLAUDE.md`, `repo-os-explainer.html`) excluded from high-risk scanning (A4 secret scanning still applies to all files). **Automation-specific (A4-auto)**: when `Automation: runner` trailer is present, A4 additionally covers outbound network calls added without brief justification (curl/wget/fetch), new package dependencies added without brief instruction, and writes outside the repository root. Mechanical enforcement via permission profile blocklists; review-time enforcement via security-privacy agent's Automation Runtime checks. |
+| **A5 Cohesion** (standard+ branches) | Critic (cohesion mode) reviewed diff for internal codebase coherence. All critical findings resolved. Re-run clean after fixes. When a task contract is present (Decision 0020), cohesion review also includes contract verification — Critic evaluates each `verification:` criterion as VERIFIED/UNVERIFIED/INCONCLUSIVE (advisory, not blocking). Mechanically verified: `cohesion-reviewed` state file must exist at commit time. |
+| **A6 Task Group Compliance** (when applicable) | Two sub-gates (Decision 0018). **A6.1 Contract existence** (blocking): task group sessions (`taskgroup`/`taskgroup-merge`) must have a contract with `status: in_progress` in the contract directory before committing. Uses filesystem check — works in template mode with gitignored `.claude/local/task-groups/`. **A6.2 Contract staging** (blocking): modified contract YAML must be staged. Applies only when task brief contains `### Task Group`. Override: `SKIP_CONTRACT_CHECK=1`. |
+
+### A1 Trigger Enforcement Sentinel
+
+Gate A1's trigger parser is gated by the sentinel file `docs/ai/decisions/.a1-triggers-enforced`. This is an empty file whose presence enables mechanical enforcement — repos without it skip trigger parsing entirely (A1 still applies as a manual check).
+
+**Why opt-in:** New repos and repos adopting Repo OS incrementally may not have `## Triggers` sections in their decision records yet. The sentinel lets teams enable enforcement after they've added triggers to all existing decisions.
+
+**How to enable:** `touch docs/ai/decisions/.a1-triggers-enforced` in the repo root and commit it.
+
+### A1 Trigger Index
+
+The trigger parser uses a compiled index at `docs/ai/decisions/.a1-trigger-index` for fast matching. When the index is present, the parser reads it instead of parsing each decision file individually (eliminates ~80 subprocess forks per commit). Falls back to file-by-file parsing when the index is absent.
+
+**Format:** `decision_id|path_regex|keywords` (pipe-delimited, one line per path pattern per decision). See the index file header for the full regeneration script.
+
+**Regenerate after adding or modifying decision triggers:**
+
+```bash
+# From repo root — rebuilds the index from all 0*.md decision files:
+for f in docs/ai/decisions/0*.md; do
+  grep -q '^## Triggers' "$f" || continue
+  id=$(basename "$f" | grep -oE '^[0-9]+')
+  block=$(sed -n '/^## Triggers/,/^## /{ /^## Triggers/d; /^## /d; p; }' "$f")
+  paths=$(echo "$block" | grep -oE 'paths?:\s*`[^`]*`' | sed -E 's/^paths?:[[:space:]]*`//' | sed 's/`$//')
+  keywords=$(echo "$block" | grep -oE 'keywords?:\s*`[^`]*`' | sed -E 's/^keywords?:[[:space:]]*`//' | sed 's/`$//')
+  [ -z "$paths" ] && continue
+  while IFS= read -r p; do
+    p=$(echo "$p" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
+    [ -z "$p" ] && continue
+    echo "${id}|${p}|${keywords}"
+  done <<< "$paths"
+done > docs/ai/decisions/.a1-trigger-index
+```
+
+A staleness warning is emitted when any decision file has a newer modification time than the index. The index should be committed (tracked, not gitignored).
 
 ## B) Push Gates
 
@@ -76,15 +111,34 @@ Note: Gate 5 (session isolation, Decision 0013) uses `.claude/local/closed-branc
 
 **Recovery override:** Set `REPO_OS_RECOVER=1` to skip all state-dependent checks in pre-commit, pre-push, and branch-guard gates. Emergency path for hook crashes or debugging sessions.
 
+### Fail-Closed Phase Enforcement Sentinel
+
+The branch-guard hooks (Gate 2 — phase gate) check for phase-state before allowing edits on governed branches. Behavior depends on the sentinel file `docs/ai/decisions/.fail-closed-enforced`:
+
+- **Sentinel present** → phase-state absent or stale triggers a **BLOCK**. The agent must call `init_phase()` (via the orchestrator) to initialize phase-state before editing. Override: `REPO_OS_SKIP_PLAN_GATE=1`.
+- **Sentinel absent** → phase-state absent or stale triggers an **advisory warning** and allows the edit (backward compatibility).
+
+**Why opt-in:** Mirrors the `.a1-triggers-enforced` convention. Repos that haven't adopted the phase model yet continue with advisory-only behavior. The template repo ships with the sentinel enabled.
+
+**How to enable:** `touch docs/ai/decisions/.fail-closed-enforced` in the repo root and commit it.
+
+**Exemptions:** Experiment branches (exempt before Gate 2), `.claude/.state/` writes, `.claude/local/` writes, governance paths, and task-group paths are all exempt from the phase gate. The `REPO_OS_RECOVER=1` emergency override bypasses all state-dependent checks including this one.
+
+See Decision 0019 for full implementation details.
+
 ## Phase-to-Gate Mapping
 
 Which gates apply varies by session type. Enforced at `verify`/`commit` phases. See Decision 0014 for the full mapping:
 
 | Session Types | Gate Profile |
 |---------------|-------------|
-| `standard`, `taskgroup` | Full gates (A1–A6, B1–B3). A6 applies only to taskgroup |
+| `standard`, `taskgroup`, `taskgroup-merge` | Full gates (A1–A6, B1–B3). A6 applies only to taskgroup/taskgroup-merge |
 | `hotfix` | Expedited (A2 scope relaxed, A5 skipped) |
 | `experiment`, `prototype-*` | A4 safety only |
 | `spec-fresh`, `spec-update`, `advisory-init`, `advisory-reinit` | Advisory only (governance evidence at close) |
 | `audit` | Read-only (no gates unless deferrals create file changes) |
 | `taskdef-query`, `taskdef-brief` | No gates (fully ephemeral) |
+
+**Merge brief gate ordering:** The `taskgroup-merge` session type replaces the `review` phase with `cohesion` (cross-session cohesion review using `git diff main...HEAD`). Gate A5 (cohesion) is satisfied by the `cohesion` phase rather than a separate `review` phase. Gate A6 always applies to merge briefs (task group contract must be updated). The `verify` phase runs all remaining gates (A1–A4, A6, B1–B3) after cohesion completes.
+
+**User Review (advisory):** The `user-review` phase runs after `verify` and before `commit` in standard and taskgroup sequences. User Review findings are advisory-only — they follow the Prompt C audit pattern (presented to operator but no state file written, no gate blocked). No gate number is assigned. The phase is skippable: sessions without a User Review section in the task brief forward-jump from `verify` directly to `commit`. See Decision 0021.

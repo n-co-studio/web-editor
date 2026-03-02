@@ -366,6 +366,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
     <a href="#template-sync">Template Sync</a>
     <div class="sb-group">Extending</div>
     <a href="#companion">Companion Tools</a>
+    <a href="#automation">Automation Layer</a>
     <div class="sb-group">Reference</div>
     <a href="#session">Session Hygiene</a>
     <a href="#glossary">Glossary</a>
@@ -550,7 +551,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
       <tr><td><strong>Verify</strong></td><td>Cohesion review (Critic checks diff for internal coherence). Then gate checks: A1&ndash;A6 (when applicable). Record evidence: command, output, pass/fail. Block if any gate fails.</td><td>Critic + QA/Verifier</td></tr>
       <tr><td><strong>Commit</strong></td><td>Only after all gates pass. Pre-commit hooks run automatically (secret scan, scope warning). Push gates (B1&ndash;B3) checked before push.</td><td>System + QA</td></tr>
       <tr><td><strong>Op-Review</strong></td><td>Operator reviews session results. Accept (proceed to close), give feedback (loop to build), or reject. <strong>Skipped in auto mode.</strong></td><td>Operator</td></tr>
-      <tr><td><strong>Close</strong></td><td>Merge branch to main (solo mode), seal branch, update session log. Task groups: non-final briefs close without merge.</td><td>Agent</td></tr>
+      <tr><td><strong>Close</strong></td><td>Update session log, commit, merge to main (solo mode), seal branch. Task groups: non-final briefs close without merge.</td><td>Agent</td></tr>
     </tbody>
   </table>
 
@@ -616,7 +617,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
       <tr><td><strong>verify</strong></td><td><span class="tag t-cyn">agent</span></td><td>QA gate verification (A1&ndash;A6, B1&ndash;B3)</td></tr>
       <tr><td><strong>commit</strong></td><td><span class="tag t-cyn">agent</span></td><td>Commit with git trailers</td></tr>
       <tr><td><strong>op-review</strong></td><td><span class="tag t-orn">operator</span></td><td>Operator reviews before close. <strong>Skipped in auto mode.</strong></td></tr>
-      <tr><td><strong>close</strong></td><td><span class="tag t-cyn">agent</span></td><td>Merge branch to main (solo), seal branch, update session log</td></tr>
+      <tr><td><strong>close</strong></td><td><span class="tag t-cyn">agent</span></td><td>Update session log, commit, merge to main (solo), seal branch</td></tr>
     </tbody>
   </table>
 
@@ -679,12 +680,12 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
   </table>
 
   <h3>Solo Mode</h3>
-  <p>Solo mode enables <strong>direct merge to main at session close</strong>, replacing PR-based merge. Set per-session in the phase-state file.</p>
+  <p>Solo mode enables <strong>direct merge to main at session close</strong>. Set per-session in the phase-state file.</p>
   <ul class="tight">
     <li>At close (auto): merge branch to main directly, then seal branch</li>
     <li>At close (review): agent pauses at <code>op-review</code> for operator acceptance, then merges</li>
     <li>Merge failure: <code>git merge --abort</code>, operator notified with conflict details</li>
-    <li><strong>Excluded:</strong> <code>experiment/*</code> (never merge) and <code>release/*</code> (always require PR)</li>
+    <li><strong>Excluded:</strong> <code>experiment/*</code> (never merge) and <code>release/*</code> (excluded from solo merge)</li>
   </ul>
 
   <div class="callout">
@@ -1097,7 +1098,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
   <div class="card dec"><div class="dec-id">0001</div><h3>Repo OS Baseline</h3><p>Establishes authority model (operator vs agent), prompt system (Prompt 0 for spec, A for init, B for dev; extended by 0.5 and T), mandatory gates, session-based work, GitHub template as source of truth. Baseline must exist (Commit 0) before any product code.</p></div>
   <div class="card dec"><div class="dec-id">0002</div><h3>Decisions Are Mandatory</h3><p>Decisions are binding constraints. Applicable decisions must be identified and followed for every change. Conflicts require a new decision before proceeding. Violations block commits.</p></div>
   <div class="card dec"><div class="dec-id">0003</div><h3>Agent Structure Standard</h3><p>Agent definitions use YAML frontmatter for tool boundaries. Shared files (<code>_agent-glossary.md</code>, <code>_agent-workflow.md</code>) are mandatory reading. Orchestrator is behavioral guidance only (no frontmatter, not invocable as subagent).</p></div>
-  <div class="card dec"><div class="dec-id">0004</div><h3>Mechanical Enforcement</h3><p>12-point enforcement via Claude Code native features: subagent YAML frontmatter for tool boundaries, team settings for permissions and hooks, 11 hook scripts covering edit guards (<code>branch-guard-edit.sh</code>, <code>branch-guard.sh</code>), file restrictions (<code>mode-guard.sh</code>, <code>state-guard.sh</code>), commit/push gates (<code>pre-commit-gates.sh</code>, <code>pre-push-gates.sh</code>), agent controls (<code>agent-git-guard.sh</code>), state capture (<code>plan-approval.sh</code>, <code>state-writer.sh</code>), debugging (<code>hvst-failure-tracker.sh</code>), and session lifecycle (<code>session-close-check.sh</code>). Session-scoped state files in <code>.claude/.state/</code> verify governance steps. Sentinel protocol: agents emit <code>GATE_RESULT:</code> for machine-parsed verdicts. Three governance layers: inter-session pipeline, phase chain, and override audit.</p></div>
+  <div class="card dec"><div class="dec-id">0004</div><h3>Mechanical Enforcement</h3><p>12-point enforcement via Claude Code native features: subagent YAML frontmatter for tool boundaries, team settings for permissions and hooks, 11 hook scripts covering edit guards (<code>branch-guard-edit.sh</code>, <code>branch-guard.sh</code>), file restrictions (<code>write-guard.sh</code>), commit/push gates (<code>pre-commit-gates.sh</code>, <code>pre-push-gates.sh</code>), agent controls (<code>agent-git-guard.sh</code>), state capture (<code>plan-approval.sh</code>, <code>state-writer.sh</code>), debugging (<code>hvst-failure-tracker.sh</code>), and session lifecycle (<code>session-close-check.sh</code>). Session-scoped state files in <code>.claude/.state/</code> verify governance steps. Sentinel protocol: agents emit <code>GATE_RESULT:</code> for machine-parsed verdicts. Three governance layers: inter-session pipeline, phase chain, and override audit.</p></div>
   <div class="card dec"><div class="dec-id">0005</div><h3>Companion Tool Pattern</h3><p>Companion tools extend the dev workflow without modifying Repo OS core governance. They integrate via MCP servers in <code>.claude/settings.json</code>. The template ships clean &mdash; no companion tools pre-configured.</p></div>
   <div class="card dec"><div class="dec-id">0006</div><h3>Prototyping Tiers</h3><p>Three-tier prototyping system (Napkin / Spike / PoC) on <code>experiment/*</code> branches. Operator self-selects tier based on complexity. Prompt 0.5 facilitates. Only learnings are promoted &mdash; code is disposable. Experiment briefs stored in <code>docs/spec/prototypes/</code>.</p></div>
   <div class="card dec"><div class="dec-id">0007</div><h3>Advisory Board</h3><p>7 read-only specialist agents review compiled specs before build. Lite+ tier: Architect, Critic (always). Standard+: adds Exploration. Full (conditional): Security Analyst, UX Strategist, Performance Engineer, Data Strategist. Prompt A orchestrates in 3 phases. Prompt 0 gains Feature mode for individual feature additions.</p></div>
@@ -1105,10 +1106,10 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
   <div class="card dec"><div class="dec-id">0009</div><h3>Analytics &amp; Observability Layer</h3><p>Hook telemetry via NDJSON events to centralized external storage at <code>~/.local/share/repo-os-analytics/&lt;repo&gt;/events/</code> (outside repo tree). Analytics agent is the sole consumer (operator-invoked). All hooks emit v2 events via <code>_analytics-helper.sh</code> with mode, branch, and optional detail/path fields. Override audit trail via <code>overrides.log</code>. Data lifecycle: 90-day retention, session-scoped IDs, fail-silent writes. Legacy data may remain in <code>.claude/analytics/</code> (read-only).</p></div>
   <div class="card dec"><div class="dec-id">0010</div><h3>Task Definition Prompt</h3><p>Prompt T for task exploration and planning. Two modes: Query (conversational Q&amp;A) and Brief (3-agent team produces structured task brief). Fully ephemeral &mdash; no files, no session log, no gates. Task brief is copy-pasted alongside Prompt B in a new session.</p></div>
   <div class="card dec"><div class="dec-id">0011</div><h3>Task Group Contracts</h3><p>Multi-brief coordination via YAML contracts at <code>docs/ai/task-groups/</code>. Gate A6 enforcement: contract exists, conventions followed, contract updated at session close, modified contract staged. Sequential brief execution with <code>next_brief</code> chaining. Override: <code>SKIP_CONTRACT_CHECK=1</code>.</p></div>
-  <div class="card dec"><div class="dec-id">0012</div><h3>File Edit Restrictions (Mode Guard)</h3><p>Three operating modes &mdash; template (governance only), child (product + limited governance), autonomous (product + minimal governance) &mdash; controlling which files agents can modify. Declared in <code>.claude/repo-mode</code>. Default-deny on governance prefixes with per-mode carve-outs. Immune paths (<code>mode-guard.sh</code>, <code>repo-mode</code>). Bash command scanning for write patterns.</p></div>
+  <div class="card dec"><div class="dec-id">0012</div><h3>File Edit Restrictions (Mode Guard)</h3><p>Three operating modes &mdash; template (governance only), child (product + limited governance), autonomous (product + minimal governance) &mdash; controlling which files agents can modify. Declared in <code>.claude/repo-mode</code>. Default-deny on governance prefixes with per-mode carve-outs. Immune paths (<code>write-guard.sh</code>, <code>repo-mode</code>). Bash command scanning for write patterns.</p></div>
   <div class="card dec"><div class="dec-id">0013</div><h3>Session Branch Isolation</h3><p>One session per branch. When a session closes, the branch is sealed via <code>.claude/local/closed-branches</code> ledger &mdash; no future session may edit files on it. Gate 5 in <code>branch-guard.sh</code> and <code>branch-guard-edit.sh</code> enforces the block. Task group exemption: branches with pending briefs stay open for multi-brief workflows. Zero-change sessions do not seal. Override: <code>REPO_OS_SKIP_BRANCH_REUSE=1</code>.</p></div>
   <div class="card dec"><div class="dec-id">0014</div><h3>Phase-Aware Flow Model</h3><p>Phase-state file (<code>.claude/.state/phase-state</code>) tracks session lifecycle progress. 14 session types across 6 prompt archetypes, each with a fixed phase sequence and automation tags (<code>agent</code>/<code>operator</code>/<code>both</code>). Forward-only transitions with defined loops (<code>review&rarr;build</code>, <code>verify&rarr;build</code>). Auto mode skips <code>op-review</code>; review mode (default) pauses for operator acceptance. Session ID binding prevents stale state from prior sessions.</p></div>
-  <div class="card dec"><div class="dec-id">0015</div><h3>Solo Mode</h3><p>Direct merge to main at session close, replacing PR-based merge for solo operators. One branch per task group &mdash; final brief merges, intermediates commit without merge. Merge failure triggers <code>git merge --abort</code> and operator notification. Excluded for <code>experiment/*</code> (never merge) and <code>release/*</code> (always require PR) branches.</p></div>
+  <div class="card dec"><div class="dec-id">0015</div><h3>Solo Mode</h3><p>Direct merge to main at session close for solo operators. One branch per task group &mdash; final brief merges, intermediates commit without merge. Merge failure triggers <code>git merge --abort</code> and operator notification. Excluded for <code>experiment/*</code> (never merge) and <code>release/*</code> (excluded from solo merge) branches.</p></div>
 </section>
 
 <!-- ══════ HOOKS & FILES ══════ -->
@@ -1122,15 +1123,14 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
     <tbody>
       <tr><td><code>branch-guard-edit.sh</code></td><td>Before every <code>Edit</code> or <code>Write</code></td><td>Slim edit guard. Gate 1: Blocks file modifications on <code>main</code>. Gate 5: Blocks edits on branches closed by a previous session (Decision 0013; task groups exempt). Override: <code>REPO_OS_ALLOW_MAIN=1</code> (Gate 1), <code>REPO_OS_SKIP_BRANCH_REUSE=1</code> (Gate 5), <code>REPO_OS_RECOVER=1</code> (bypass all).</td><td><span class="tag t-red">yes</span> (exit 2)</td></tr>
       <tr><td><code>branch-guard.sh</code></td><td>Before every <code>Bash</code></td><td>Full Bash write guard. Only evaluates gates when <code>extract_write_targets()</code> detects redirect (<code>&gt;</code>, <code>&gt;&gt;</code>) or <code>tee</code> targets resolving to in-repo paths; commands without write targets fast-exit. Gate 1: Blocks writes on <code>main</code>. Gate 2: Blocks writes without approved plan. Gate 3: Inter-session governance check (advisory, first-fire). Gate 5: Session branch isolation (Decision 0013; task groups exempt). Override: <code>REPO_OS_ALLOW_MAIN=1</code> (Gate 1), <code>REPO_OS_SKIP_PLAN_GATE=1</code> (Gate 2), <code>REPO_OS_SKIP_BRANCH_REUSE=1</code> (Gate 5). Experiment branches exempt from plan gate.</td><td><span class="tag t-red">yes</span> (exit 2)</td></tr>
-      <tr><td><code>state-guard.sh</code></td><td>Before every <code>Edit</code>, <code>Write</code>, or <code>Bash</code></td><td>Blocks model writes to <code>.claude/.state/</code> &mdash; only governance hooks can write state files via shell I/O. Edit/Write check <code>file_path</code>; Bash checks extracted write targets. Override: <code>REPO_OS_SKIP_STATE_GUARD=1</code>, <code>REPO_OS_RECOVER=1</code>.</td><td><span class="tag t-red">yes</span> (exit 2)</td></tr>
-      <tr><td><code>mode-guard.sh</code></td><td>Before every <code>Edit</code>, <code>Write</code>, or <code>Bash</code></td><td>Restricts file modifications based on operating mode (template/child/autonomous). Blocks edits outside active mode scope. Child/autonomous fast-exit after immune path check. Template mode retains full edit-time enforcement. Governance prefixes include <code>AI.md</code>, <code>CLAUDE.md</code>, <code>repo-os-explainer.html</code>. Override: <code>REPO_OS_SKIP_MODE_GUARD=1</code>, <code>REPO_OS_UNLOCK_PATH=&lt;path&gt;</code>, <code>REPO_OS_MODE=&lt;mode&gt;</code>.</td><td><span class="tag t-red">yes</span> (exit 2)</td></tr>
+      <tr><td><code>write-guard.sh</code></td><td>Before every <code>Edit</code>, <code>Write</code>, or <code>Bash</code></td><td>Unified state + mode enforcement. Section 1: blocks model writes to <code>.claude/.state/</code> (override: <code>REPO_OS_SKIP_STATE_GUARD=1</code>, <code>REPO_OS_RECOVER=1</code>). Section 2: restricts file modifications based on operating mode (template/child/autonomous). Child/autonomous fast-exit after immune path check. Override: <code>REPO_OS_SKIP_MODE_GUARD=1</code>, <code>REPO_OS_UNLOCK_PATH=&lt;path&gt;</code>, <code>REPO_OS_MODE=&lt;mode&gt;</code>.</td><td><span class="tag t-red">yes</span> (exit 2)</td></tr>
       <tr><td><code>pre-commit-gates.sh</code></td><td>Before every <code>git commit</code></td><td>A4: Secret scanning (blocks). State file verification (blocks &mdash; requires <code>plan-approved</code>, <code>cohesion-reviewed</code>, <code>qa-verified</code>). Gate 3: Inter-session governance check (advisory, first-fire). A2: Scope &gt;100 lines (blocks unless large-scope approved). A6: Task group contract staging (blocks). High-risk pattern detection (blocks &mdash; requires <code>reviewer-signed</code> + <code>security-signed</code>). A1: Decision trigger parser (blocking). Override: <code>REPO_OS_SKIP_PLAN_GATE=1</code>, <code>SKIP_CONTRACT_CHECK=1</code>, <code>REPO_OS_RECOVER=1</code>.</td><td><span class="tag t-red">yes</span> (exit 1)</td></tr>
       <tr><td><code>pre-push-gates.sh</code></td><td>Before every <code>git push</code></td><td>B1: Branch naming convention (blocks). Stubs for B2 tests/typecheck and B3 dependency audit &mdash; activate per project. Override: <code>REPO_OS_RECOVER=1</code>.</td><td><span class="tag t-red">yes</span> (exit 1)</td></tr>
       <tr><td><code>plan-approval.sh</code></td><td>After <code>AskUserQuestion</code></td><td>Captures operator plan approvals. Writes <code>.claude/.state/plan-approved</code> when operator confirms a plan. Never blocks (PostToolUse).</td><td><span class="tag t-grn">no</span> (post-tool)</td></tr>
       <tr><td><code>state-writer.sh</code></td><td>After subagent completes</td><td>Captures governance agent verdicts (Critic, QA, Reviewer, Security) as state files in <code>.claude/.state/</code>. Extracts <code>GATE_RESULT:</code> sentinel. Never blocks.</td><td><span class="tag t-grn">no</span> (post-agent)</td></tr>
       <tr><td><code>agent-git-guard.sh</code></td><td>Builder/QA/Security Bash calls</td><td>Blocks <code>git commit</code> and <code>git push</code> commands in subagents. Only the Orchestrator can commit/push.</td><td><span class="tag t-red">yes</span> (exit 2)</td></tr>
       <tr><td><code>hvst-failure-tracker.sh</code></td><td>After every Bash command</td><td>Tracks consecutive failures. After 2+ failures, reminds agent to check <code>known-issues.md</code> and follow HVST protocol.</td><td><span class="tag t-grn">no</span> (advisory)</td></tr>
-      <tr><td><code>session-close-check.sh</code></td><td>When Claude stops responding</td><td>Session log check (blocking; zero-change sessions downgrade to advisory). Uncommitted changes check (blocking). HVST known-issues check (blocking when <code>hvst-fail-count</code> &ge; 2). Deferrals known-issues check (blocking when <code>.deferrals-pending</code> exists). Merge check for mergeable branches (blocking; solo mode auto-satisfies). Override audit summary (advisory). Governance evidence verification for task groups (advisory). Next-brief reminder for task groups (advisory). Session-scoped state cleanup. Override: <code>SKIP_SESSION_LOG=1</code>, <code>SKIP_UNCOMMITTED_CHECK=1</code>, <code>SKIP_PR_CHECK=1</code>, <code>SKIP_KNOWN_ISSUES_CHECK=1</code>, <code>SKIP_CONTRACT_CHECK=1</code>.</td><td><span class="tag t-red">yes</span> (multiple)</td></tr>
+      <tr><td><code>session-close-check.sh</code></td><td>When Claude stops responding</td><td>Session log check (blocking; zero-change sessions downgrade to advisory). Uncommitted changes check (blocking). HVST known-issues check (blocking when <code>hvst-fail-count</code> &ge; 2). Deferrals known-issues check (blocking when <code>.deferrals-pending</code> exists). Override audit summary (advisory). Governance evidence verification for task groups (advisory). Next-brief reminder for task groups (advisory). Session-scoped state cleanup. Override: <code>SKIP_SESSION_LOG=1</code>, <code>SKIP_UNCOMMITTED_CHECK=1</code>, <code>SKIP_KNOWN_ISSUES_CHECK=1</code>, <code>SKIP_CONTRACT_CHECK=1</code>.</td><td><span class="tag t-red">yes</span> (multiple)</td></tr>
       <tr><td>YAML frontmatter</td><td>Agent invocation</td><td>Restricts tools per agent (e.g., Builder can&rsquo;t use Task, QA can&rsquo;t use Edit/Write). Frontmatter hooks wire <code>agent-git-guard.sh</code>.</td><td><span class="tag t-red">yes</span> (runtime)</td></tr>
     </tbody>
   </table>
@@ -1155,8 +1155,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
 <span class="p">│   │   ├── </span><span class="f">_analytics-helper.sh</span> <span class="n">&mdash; shared helper (log_hook_event, log_override)</span>
 <span class="p">│   │   ├── </span><span class="f">branch-guard-edit.sh</span> <span class="n">&mdash; slim edit guard for Edit/Write (main block + session isolation)</span>
 <span class="p">│   │   ├── </span><span class="f">branch-guard.sh</span> <span class="n">&mdash; 5-gate Bash write guard (main, plan, governance, phase chain, session isolation)</span>
-<span class="p">│   │   ├── </span><span class="f">state-guard.sh</span> <span class="n">&mdash; blocks model writes to .state/ directory</span>
-<span class="p">│   │   ├── </span><span class="f">mode-guard.sh</span> <span class="n">&mdash; file edit restrictions by operating mode</span>
+<span class="p">│   │   ├── </span><span class="f">write-guard.sh</span> <span class="n">&mdash; unified state + mode enforcement (blocks .state/ writes + mode restrictions)</span>
 <span class="p">│   │   ├── </span><span class="f">state-writer.sh</span> <span class="n">&mdash; captures agent verdicts as state files</span>
 <span class="p">│   │   ├── </span><span class="f">plan-approval.sh</span> <span class="n">&mdash; captures operator plan approvals as state</span>
 <span class="p">│   │   ├── </span><span class="f">pre-commit-gates.sh</span> <span class="n">&mdash; A-gates: secrets, state, scope, contracts, risk, decisions</span>
@@ -1226,7 +1225,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
 <section id="modes">
   <div class="sec-num">File Access Control</div>
   <h2>Operating Modes</h2>
-  <p>Three modes control which files an agent can modify. Enforced by <code>mode-guard.sh</code> (Decision 0012). The mode is declared in <code>.claude/repo-mode</code> &mdash; a single word: <code>template</code>, <code>child</code>, or <code>autonomous</code>.</p>
+  <p>Three modes control which files an agent can modify. Enforced by <code>write-guard.sh</code> (Decision 0012). The mode is declared in <code>.claude/repo-mode</code> &mdash; a single word: <code>template</code>, <code>child</code>, or <code>autonomous</code>.</p>
 
   <h3>Mode summary</h3>
   <table class="ref">
@@ -1247,7 +1246,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
   </ol>
 
   <h3>Immune paths</h3>
-  <p><code>mode-guard.sh</code> and <code>repo-mode</code> cannot be modified in any mode &mdash; no override accepted. This is self-protection against circumvention. To maintain these files: set <code>REPO_OS_SKIP_MODE_GUARD=1</code> (disables the entire guard, logged in <code>overrides.log</code>).</p>
+  <p><code>write-guard.sh</code> and <code>repo-mode</code> cannot be modified in any mode &mdash; no override accepted. This is self-protection against circumvention. To maintain these files: set <code>REPO_OS_SKIP_MODE_GUARD=1</code> (disables the entire guard, logged in <code>overrides.log</code>).</p>
 
   <h3>Overrides</h3>
   <table class="ref">
@@ -1255,7 +1254,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
     <tbody>
       <tr><td><code>REPO_OS_UNLOCK_PATH=&lt;path&gt;</code></td><td>Unlocks a single governance file for editing</td><td>One file per invocation. Immune paths rejected.</td></tr>
       <tr><td><code>REPO_OS_MODE=&lt;mode&gt;</code></td><td>Forces a specific mode (e.g., template access in a child repo)</td><td>Emergency use. Logged via <code>overrides.log</code>.</td></tr>
-      <tr><td><code>REPO_OS_SKIP_MODE_GUARD=1</code></td><td>Disables mode-guard entirely</td><td>Recovery/debugging. Logged via <code>overrides.log</code>.</td></tr>
+      <tr><td><code>REPO_OS_SKIP_MODE_GUARD=1</code></td><td>Disables write-guard mode checks entirely</td><td>Recovery/debugging. Logged via <code>overrides.log</code>.</td></tr>
     </tbody>
   </table>
 
@@ -1470,7 +1469,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
   <table class="ref">
     <thead><tr><th>Pattern</th><th>Purpose</th><th>Gate Profile</th></tr></thead>
     <tbody>
-      <tr><td><code>main</code></td><td>Production-ready code</td><td>All gates (A + B). <strong>Protected</strong> &mdash; no direct commits. Merge at session close (solo) or via PR (team).</td></tr>
+      <tr><td><code>main</code></td><td>Production-ready code</td><td>All gates (A + B). <strong>Protected</strong> &mdash; no direct commits. Merge at session close (solo mode).</td></tr>
       <tr><td><code>release/*</code></td><td>Release candidates</td><td>All gates (A + B) + release checklist (C). Reviewer + Security required on every merge.</td></tr>
       <tr><td><code>feature/*</code></td><td>New functionality</td><td>Standard gates (A + B). Normal workflow.</td></tr>
       <tr><td><code>fix/*</code></td><td>Bug fixes</td><td>Standard gates (A + B). Normal workflow.</td></tr>
@@ -1528,7 +1527,7 @@ experiment/new-caching-strategy</div>
     <tbody>
       <tr><td><strong>Session logs</strong></td><td>Use per-branch session logs to avoid collisions: <code>docs/ai/logs/session-log-&lt;branch-name&gt;.md</code>. Each session writes to its own file.</td></tr>
       <tr><td><strong>Branch scope</strong></td><td>Define clear ownership boundaries upfront. Each branch should own distinct files/modules. Overlapping file ownership across branches creates merge pain.</td></tr>
-      <tr><td><strong>Merge governance</strong></td><td>Merges into <code>main</code> require full gate verification (B-series). Solo sessions merge at close; parallel teams may use PRs for cross-branch integration. The operator reviews cross-branch integration &mdash; agents only see their own branch.</td></tr>
+      <tr><td><strong>Merge governance</strong></td><td>Merges into <code>main</code> require full gate verification (B-series). Solo sessions merge at close. The operator reviews cross-branch integration &mdash; agents only see their own branch.</td></tr>
       <tr><td><strong>Shared model changes</strong></td><td>If two branches need to change the same schema, API contract, or shared module &mdash; <strong>stop</strong>. Do those changes first on one branch, merge to main, then rebase the others.</td></tr>
     </tbody>
   </table>
@@ -1687,6 +1686,84 @@ experiment/new-caching-strategy</div>
   <p style="font-size:.875rem;color:var(--t3)"><strong>Design token discovery:</strong> The MCP server auto-reads tokens from your project&rsquo;s Tailwind config, tokens.json, or <code>docs/spec/compiled/{active}/design-system.md</code>. No additional configuration needed.</p>
 </section>
 
+<!-- ══════ AUTOMATION LAYER ══════ -->
+<section id="automation">
+  <div class="sec-num">Extending the Workflow</div>
+  <h2>Automation Layer</h2>
+  <p>An optional headless runner infrastructure for automated <code>claude -p</code> sessions with full governance parity. Decision 0017. Ships <strong>disabled</strong> by default &mdash; no behavioral change until the operator explicitly opts in.</p>
+
+  <div class="callout">
+    <strong>Same governance, no shortcuts.</strong> Automated sessions run the same hooks, same gates, same phase model as interactive sessions. The only difference: the Stop hook does not fire in headless mode, so the runner handles post-session cleanup externally.
+  </div>
+
+  <h3>Runner lifecycle</h3>
+  <div class="flow">
+    <div class="flow-node fn-op">Queue<br><span style="font-size:.68rem;color:var(--t3)">approved entry</span></div>
+    <span class="flow-arr">&rarr;</span>
+    <div class="flow-node fn-orch">Pre-launch<br><span style="font-size:.68rem;color:var(--t3)">branch, state, prompt</span></div>
+    <span class="flow-arr">&rarr;</span>
+    <div class="flow-node fn-build">claude -p<br><span style="font-size:.68rem;color:var(--t3)">headless session</span></div>
+    <span class="flow-arr">&rarr;</span>
+    <div class="flow-node fn-rev">Post-session<br><span style="font-size:.68rem;color:var(--t3)">cleanup, merge</span></div>
+    <span class="flow-arr">&rarr;</span>
+    <div class="fn-branch" style="border-style:solid;border-color:var(--b2);">
+      <span style="font-size:.72rem;font-weight:600;color:var(--t2);">Outcome</span>
+      <div style="display:flex;gap:.25rem;margin-top:.2rem;">
+        <div class="flow-node" style="font-size:.72rem;border-color:rgba(34,197,94,.3);color:var(--grn)">Complete</div>
+        <div class="flow-node" style="font-size:.72rem;border-color:rgba(245,158,11,.3);color:var(--orn)">Escalate</div>
+        <div class="flow-node" style="font-size:.72rem;border-color:rgba(239,68,68,.3);color:var(--red)">Fail/Retry</div>
+      </div>
+    </div>
+  </div>
+
+  <h3>Queue lifecycle</h3>
+  <table class="ref">
+    <thead><tr><th>Status</th><th>Description</th><th>Transitions to</th></tr></thead>
+    <tbody>
+      <tr><td><code>pending-review</code></td><td>New entry awaiting operator approval</td><td><code>approved</code></td></tr>
+      <tr><td><code>approved</code></td><td>Ready for runner to dequeue</td><td><code>running</code></td></tr>
+      <tr><td><code>running</code></td><td>Active headless session in progress</td><td><code>completed</code>, <code>failed</code>, <code>review</code>, <code>blocked</code></td></tr>
+      <tr><td><code>completed</code></td><td>Session finished successfully</td><td>&mdash;</td></tr>
+      <tr><td><code>failed</code></td><td>Retries exhausted</td><td>&mdash;</td></tr>
+      <tr><td><code>review</code></td><td>Escalated to operator</td><td>&mdash;</td></tr>
+      <tr><td><code>blocked</code></td><td>Unrecoverable error (invalid config, missing dependency)</td><td>&mdash;</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Enabling and disabling</h3>
+  <table class="ref">
+    <thead><tr><th>Method</th><th>Effect</th></tr></thead>
+    <tbody>
+      <tr><td>Set <code>runner.enabled: true</code> in <code>config.yaml</code></td><td>Daemon processes queue entries normally</td></tr>
+      <tr><td>Set <code>runner.enabled: false</code> in <code>config.yaml</code></td><td>Daemon sleeps (30s between checks). Queue entries preserved</td></tr>
+      <tr><td>Create <code>.claude/.automation/HALT</code> file</td><td>Daemon exits immediately. Emergency stop</td></tr>
+      <tr><td>Remove <code>HALT</code> file</td><td>Daemon resumes on next start</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Phase model integration</h3>
+  <p>Automated sessions use the same phase sequences as interactive sessions (Decision 0014). The runner pre-writes the <code>plan-approved</code> state file and initializes the phase model with <code>auto</code> mode. All hooks fire normally except the Stop hook &mdash; the runner replicates Stop hook cleanup (solo merge, registry cleanup, branch sealing) as part of the post-session phase.</p>
+
+  <h3>Dev Orchestrator</h3>
+  <p>For <a href="#taskgroups">task groups</a>, the runner invokes a Dev Orchestrator agent between content briefs and before merge briefs. The orchestrator reviews cross-brief coherence, validates contract compliance, detects boundary drift, and produces health reports. Reports are written to <code>.claude/.automation/reports/</code> (gitignored). All findings are advisory &mdash; the runner or operator decides what to act on.</p>
+
+  <h3>Key files</h3>
+  <table class="ref">
+    <thead><tr><th>Path</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td><code>.claude/.automation/config.yaml</code></td><td>Runner configuration. Master toggle, retry limits, retention</td></tr>
+      <tr><td><code>.claude/.automation/runner.sh</code></td><td>Entry point. Single-shot and daemon modes</td></tr>
+      <tr><td><code>.claude/.automation/schemas/</code></td><td>YAML schema contracts (queue-entry, escalation, blocker-report, runner-config)</td></tr>
+      <tr><td><code>.claude/.automation/templates/</code></td><td>Prompt templates for automated brief assembly</td></tr>
+      <tr><td><code>.claude/.automation/lib/</code></td><td>Runner libraries (queue, state, branches, validation, locking)</td></tr>
+      <tr><td><code>.claude/.automation/decision-cache.yaml</code></td><td>Project-level decision cache for prompt prepending</td></tr>
+      <tr><td><code>.claude/.automation/queue/</code></td><td>Runtime queue entries by status (gitignored)</td></tr>
+      <tr><td><code>.claude/.automation/reports/</code></td><td>Blocker reports and health reports (gitignored)</td></tr>
+      <tr><td><code>.claude/.automation/escalations/</code></td><td>Operator-directed escalation files (gitignored)</td></tr>
+    </tbody>
+  </table>
+</section>
+
 <!-- ══════ SESSION HYGIENE ══════ -->
 <section id="session">
   <div class="sec-num">Closing a Session</div>
@@ -1698,7 +1775,7 @@ experiment/new-caching-strategy</div>
     <div class="chk"><div class="chk-ico">&#10003;</div><div><div class="chk-txt">Gates satisfied</div><div class="chk-sub">A1&ndash;A6, B1&ndash;B3 passed with evidence</div></div></div>
     <div class="chk"><div class="chk-ico">&#10003;</div><div><div class="chk-txt">Session log updated</div><div class="chk-sub">Goal, changes, evidence, follow-ups</div></div></div>
     <div class="chk"><div class="chk-ico">&#10003;</div><div><div class="chk-txt">Next steps clear</div><div class="chk-sub">Follow-ups documented for next session</div></div></div>
-    <div class="chk"><div class="chk-ico">&#10003;</div><div><div class="chk-txt">Merge to main at close</div><div class="chk-sub">Solo mode: branch merges to main directly. Team mode: create PR for integration. Not for experiment/* branches.</div></div></div>
+    <div class="chk"><div class="chk-ico">&#10003;</div><div><div class="chk-txt">Merge to main at close</div><div class="chk-sub">Branch merges to main directly at session close. Not for experiment/* branches.</div></div></div>
   </div>
 
   <h3>Session log format</h3>
@@ -1735,7 +1812,7 @@ experiment/new-caching-strategy</div>
     <dl class="gl"><dt>Evidence</dt><dd>Proof a gate was checked: command, output excerpt, pass/fail, timestamp.</dd></dl>
     <dl class="gl"><dt>High-Risk</dt><dd>Auth, payments, data persistence, security, PII, external integrations. Requires Reviewer + Security sign-off.</dd></dl>
     <dl class="gl"><dt>Plan</dt><dd>Pre-coding roadmap: goal, decisions, steps, files, verification, risks. Required before implementation.</dd></dl>
-    <dl class="gl"><dt>Session</dt><dd>Bounded work unit. Clear start/end, scope, verification evidence, clean commits at close. Branch merges to main at close (solo) or via PR (team). <a href="#phases">Phase model</a> tracks progress.</dd></dl>
+    <dl class="gl"><dt>Session</dt><dd>Bounded work unit. Clear start/end, scope, verification evidence, clean commits at close. Branch merges to main at close (solo mode). <a href="#phases">Phase model</a> tracks progress.</dd></dl>
     <dl class="gl"><dt>Escalation</dt><dd>Routing to higher authority. Triggered when agent lacks authority, requirements ambiguous, constraints conflict.</dd></dl>
     <dl class="gl"><dt>Hook</dt><dd>Automated script at lifecycle events (pre-commit, session stop). Runs regardless of agent behavior.</dd></dl>
     <dl class="gl"><dt>Handoff</dt><dd>Formal work transition between agents. Includes summary, status, verification items.</dd></dl>
@@ -1748,8 +1825,10 @@ experiment/new-caching-strategy</div>
     <dl class="gl"><dt>Feature Brief</dt><dd>Lightweight spec template for individual feature additions. Created by Prompt 0 Feature mode. Drives advisory board activation via &ldquo;What It Touches&rdquo; field.</dd></dl>
     <dl class="gl"><dt>Cohesion Review</dt><dd>Post-build review by Critic (cohesion mode) checking the diff and surrounding code for internal codebase coherence: broken references, dangling imports, inconsistent naming, incomplete integrations. Gate A5. Distinct from spec review (advisory board).</dd></dl>
     <dl class="gl"><dt>Phase</dt><dd>Declared step in a session&rsquo;s lifecycle sequence. Each phase has an automation tag (<code>agent</code>/<code>operator</code>/<code>both</code>) indicating who acts. Tracked in <code>.claude/.state/phase-state</code>. See <a href="#phases">Phase Model</a>.</dd></dl>
-    <dl class="gl"><dt>Solo Mode</dt><dd>Merge strategy where branches merge directly to main at session close, replacing PR-based merge. Set per-session. Excluded for <code>experiment/*</code> and <code>release/*</code> branches.</dd></dl>
+    <dl class="gl"><dt>Solo Mode</dt><dd>Merge strategy where branches merge directly to main at session close. Set per-session. Excluded for <code>experiment/*</code> and <code>release/*</code> branches.</dd></dl>
     <dl class="gl"><dt>Auto Mode</dt><dd>Session mode where agent closes autonomously after all gates pass, skipping the <code>op-review</code> phase. Set at plan approval. Contrast with review mode (default), which pauses for operator acceptance.</dd></dl>
+    <dl class="gl"><dt>Automation Layer</dt><dd>Optional headless runner infrastructure for automated <code>claude -p</code> sessions with full governance parity. Ships disabled. Decision 0017. See <a href="#automation">Automation Layer</a>.</dd></dl>
+    <dl class="gl"><dt>Dev Orchestrator</dt><dd>Task-group-scoped oversight agent for cross-brief coherence review, contract compliance, drift detection, and health reports. Read-only. Invoked by the automation runner between briefs and before merge briefs.</dd></dl>
   </div>
 </section>
 

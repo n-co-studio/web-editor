@@ -8,6 +8,14 @@ source "$SCRIPT_DIR/_analytics-helper.sh"
 START_MS=$(now_ms)
 
 INPUT=$(cat)
+
+# --- jq presence guard (fail-closed) ---
+if [ "$_REPO_OS_HAS_JQ" = false ]; then
+  echo "GATE BLOCKED: jq is required for agent-git-guard but was not found." >&2
+  echo "  Install jq (https://jqlang.github.io/jq/download/) and retry." >&2
+  exit 2
+fi
+
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
 
 if [ -z "$COMMAND" ]; then

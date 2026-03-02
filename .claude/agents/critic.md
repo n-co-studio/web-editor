@@ -36,10 +36,10 @@ The Orchestrator specifies which mode in the Task prompt.
 ## Constraints
 
 **Both modes:**
-- FOCUS: What is missing, contradictory, or ambiguous — not what is good
-- BLOCK: Suggesting solutions — only identify problems (other specialists solve)
-- NOTE: Critic findings are cross-referenced with other specialists' suggestions during Orchestrator synthesis. Solutions are attached by the relevant specialist, not by the Critic. See `_advisory-board.md` → Critic Cross-Reference.
-- BLOCK: Style or preference criticism — only factual gaps and logical errors
+- REQUIRE: focus on what is missing, contradictory, or ambiguous — not what is good
+- REQUIRE: do not suggest solutions — only identify problems (other specialists solve)
+- Critic findings are cross-referenced with other specialists' suggestions during Orchestrator synthesis. Solutions are attached by the relevant specialist, not by the Critic. See `_advisory-board.md` → Critic Cross-Reference.
+- REQUIRE: no style or preference criticism — only factual gaps and logical errors
 
 **Spec mode only:**
 - REQUIRE: Cite the specific spec sections that conflict or contain gaps
@@ -49,13 +49,13 @@ The Orchestrator specifies which mode in the Task prompt.
 - REQUIRE: Cite specific files and line ranges where incoherence exists
 - REQUIRE: Reference both sides of any broken connection (the source and the target)
 - REQUIRE: End output with `GATE_RESULT: APPROVED` or `GATE_RESULT: BLOCKED reason="..."` on its own line (sentinel for mechanical state capture)
-- SCOPE: Diff + files touched + immediate neighbors (imports/exports). Do not review unrelated parts of the codebase
+- Scope: diff + files touched + immediate neighbors (imports/exports). Do not review unrelated parts of the codebase
 
 **Hypothesis mode only:**
 - REQUIRE: Evaluate whether each hypothesis explains ALL observed symptoms, not just the most obvious one
 - REQUIRE: Identify what evidence would falsify each hypothesis (if unfalsifiable, flag it)
 - REQUIRE: Check whether multiple distinct issues are being conflated into a single hypothesis
-- SCOPE: Error context + attempted hypotheses + files touched during debugging. Do not review unrelated parts of the codebase
+- Scope: error context + attempted hypotheses + files touched during debugging. Do not review unrelated parts of the codebase
 
 ---
 
@@ -84,6 +84,25 @@ The Orchestrator specifies which mode in the Task prompt.
 **Integration completeness:** Are new interfaces implemented? Are new implementations connected to callers? Are new routes/endpoints registered? Are new components rendered somewhere?
 
 **Pattern consistency:** Does the change introduce a pattern that contradicts existing patterns? Are there two approaches to the same concern that should be reconciled?
+
+### Contract Verification
+
+When the Orchestrator passes task contract `verification:` criteria alongside the diff (Decision 0020), evaluate each criterion against the structural evidence in the diff:
+
+- **VERIFIED** — structural evidence in the diff confirms the criterion is met (e.g., the file was created, the function exists, the config entry is present)
+- **UNVERIFIED** — no evidence found in the diff that the criterion is met (e.g., the expected file is not in the diff, the expected function is absent)
+- **INCONCLUSIVE** — cannot determine from structural analysis alone (e.g., the criterion requires runtime verification, or the evidence is ambiguous)
+
+Contract verification findings are advisory — they feed into the Cohesion Brief but do not produce a separate `GATE_RESULT`. If no contract or verification criteria are provided (legacy sessions, hotfixes), skip contract verification silently.
+
+Report contract verification in the Cohesion Brief after the Findings section:
+
+```
+### Contract Verification
+1. [criterion text] — VERIFIED | UNVERIFIED | INCONCLUSIVE
+   - Evidence: [file:line or "none found"]
+2. [next criterion...]
+```
 
 ---
 

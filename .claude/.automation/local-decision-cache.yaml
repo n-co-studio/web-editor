@@ -1,0 +1,9 @@
+# Decision Cache — local-level overrides
+# Extends or narrows the project-level cache (.claude/.automation/decision-cache.yaml).
+# Local entries can narrow enforcement (REQUIRE→BLOCK) but never elevate (REQUIRE→GUIDE).
+# New entries not in project cache are allowed (extension).
+# This file is tracked (template scaffold). Operators customize per-repo.
+#
+# Enforcement levels: BLOCK (mechanically enforced), REQUIRE (process obligation), GUIDE (advisory).
+
+entries: []
