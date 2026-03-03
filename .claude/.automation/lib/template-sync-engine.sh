@@ -41,6 +41,8 @@ fi
 # --- Constants ---
 REMOTE_NAME="_template_upstream"
 SYNCIGNORE="$REPO_ROOT/.templatesyncignore"
+# Extract repo name from URL for safe logging (strip token, protocol, .git suffix)
+TEMPLATE_REPO_NAME=$(echo "$TEMPLATE_REPO" | sed -E 's|https?://[^@]*@github\.com/||; s|https?://github\.com/||; s|\.git$||')
 BEGIN_MARKER="# BEGIN REPO-OS MANAGED — template-sync, see AI.md"
 END_MARKER="# END REPO-OS MANAGED"
 MANAGED_COMMENT="# DO NOT EDIT between these markers — managed by template-sync"
@@ -251,7 +253,7 @@ commit_and_push() {
   log "Committing changes..."
   REPO_OS_RECOVER=1 git commit -m "chore(template): sync from upstream
 
-Synced from $TEMPLATE_REPO ($TEMPLATE_BRANCH).
+Synced from $TEMPLATE_REPO_NAME ($TEMPLATE_BRANCH).
 Direct-push sync via template-sync-engine.sh.
 
 Decisions: 0015, 0022"

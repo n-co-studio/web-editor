@@ -1,14 +1,21 @@
-# Reference: template-sync workflow with decision cleanup step.
+# Reference: template-sync workflow using the custom sync engine.
 #
 # This file is a REFERENCE TEMPLATE — it is NOT directly used by any
 # automation. Operators must copy this content to their child repo's
 # .github/workflows/template-sync.yml manually (GITHUB_TOKEN cannot
 # push workflow changes via template-sync).
 #
-# The cleanup step runs after actions-template-sync delivers updated
-# files and before auto-merge. It removes orphaned template decisions
-# that are no longer in the upstream t-manifest.txt.
+# The sync engine replaces the PR-based actions-template-sync dependency
+# with a direct-push model. It copies files from the template repo
+# (respecting .templatesyncignore), merges .gitignore via section markers,
+# runs decision cleanup (Decision 0022), and commits directly to main.
 #
+# Preconditions:
+#   - Child repo must allow the GitHub Actions bot to push to main
+#     (no branch protection requiring reviews or status checks)
+#   - SOURCE_REPO_TOKEN secret must have read access to the template repo
+#
+# Decision 0015 — Solo mode (PR-free, direct commit to main)
 # Decision 0022 — Template Decision Naming Convention
 
 name: Template Sync
@@ -18,13 +25,16 @@ on:
   workflow_dispatch:
     inputs:
       source_repo:
-        description: 'Source template repository'
+        description: 'Source template repository (owner/name)'
         required: false
         default: ''
 
+  # Optional: scheduled sync (uncomment and adjust as needed)
+  # schedule:
+  #   - cron: '0 6 * * 1'  # Weekly on Monday at 06:00 UTC
+
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
   sync:
@@ -34,22 +44,31 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: Template Sync
-        uses: AndreasAugworx/actions-template-sync@v2
-        with:
-          source_repo_path: markpreston2/repo-OS-template
-          upstream_branch: main
-          pr_title: "chore: sync from template"
-          pr_labels: template-sync
-
-      # --- Decision cleanup step (Decision 0022) ---
-      # Runs after template-sync delivers files but before auto-merge.
-      # Removes t-*.md files not listed in the upstream t-manifest.txt.
-      - name: Clean orphaned template decisions
+      - name: Run template sync engine
+        env:
+          SOURCE_REPO_TOKEN: ${{ secrets.SOURCE_REPO_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ -f .claude/.automation/lib/child-sync-decisions.sh ]; then
-            bash .claude/.automation/lib/child-sync-decisions.sh
-          else
-            echo "child-sync-decisions.sh not found — skipping cleanup"
+          # Configure git for commit
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Set origin URL with GITHUB_TOKEN for push access
+          # (persist-credentials: false disables the default credential helper)
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
+
+          # Determine template repo URL
+          # Priority: workflow input > hardcoded default
+          TEMPLATE_REPO="${{ github.event.inputs.source_repo }}"
+          if [ -z "$TEMPLATE_REPO" ]; then
+            # Set your template repo here (owner/name format)
+            TEMPLATE_REPO="markpreston2/repo-OS-template"
           fi
+
+          # Build authenticated URL for private template repos
+          TEMPLATE_URL="https://x-access-token:${SOURCE_REPO_TOKEN}@github.com/${TEMPLATE_REPO}.git"
+
+          # Run the sync engine
+          bash .claude/.automation/lib/template-sync-engine.sh "$TEMPLATE_URL" main

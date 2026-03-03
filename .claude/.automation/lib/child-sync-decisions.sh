@@ -7,7 +7,11 @@
 # deletes them via git rm.
 #
 # Usage:
-#   bash child-sync-decisions.sh [--dry-run]
+#   bash child-sync-decisions.sh [--dry-run] [--no-commit]
+#
+# Options:
+#   --dry-run     Report orphans without deleting
+#   --no-commit   Delete orphans (git rm) but do not commit — caller commits
 #
 # Decision 0022 — Template Decision Naming Convention
 
@@ -19,9 +23,13 @@ DECISIONS_DIR="$REPO_ROOT/docs/ai/decisions"
 MANIFEST="$DECISIONS_DIR/t-manifest.txt"
 
 DRY_RUN=false
-if [ "${1:-}" = "--dry-run" ]; then
-  DRY_RUN=true
-fi
+NO_COMMIT=false
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY_RUN=true ;;
+    --no-commit) NO_COMMIT=true ;;
+  esac
+done
 
 # --- Validate manifest exists ---
 if [ ! -f "$MANIFEST" ]; then
@@ -91,7 +99,12 @@ for orphan in "${ORPHANS[@]}"; do
   git rm "docs/ai/decisions/$orphan"
 done
 
-# --- Commit if changes were made ---
+# --- Commit if changes were made (unless --no-commit) ---
+if [ "$NO_COMMIT" = true ]; then
+  echo "Staged removal of ${#ORPHANS[@]} orphaned template decision(s) (--no-commit: caller will commit)."
+  exit 0
+fi
+
 STAGED=$(git diff --cached --name-only 2>/dev/null || true)
 if [ -n "$STAGED" ]; then
   REPO_OS_RECOVER=1 git commit -m "chore: remove ${#ORPHANS[@]} orphaned template decision(s)

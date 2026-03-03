@@ -1,3 +1,7 @@
+# BEGIN REPO-OS MANAGED — template-sync, see AI.md
+# DO NOT EDIT between these markers — managed by template-sync
+# DO NOT EDIT between these markers — managed by template-sync
+
 # OS
 .DS_Store
 
@@ -27,8 +31,10 @@
 # Analytics data — legacy per-repo location (active data now at ~/.local/share/repo-os-analytics/)
 .claude/analytics/
 
-
 # Automation runtime artifacts (Decision 0017)
 .claude/.automation/queue/
 .claude/.automation/reports/
 .claude/.automation/escalations/
+.claude/.automation/briefs/
+.claude/.automation/logs/
+# END REPO-OS MANAGED

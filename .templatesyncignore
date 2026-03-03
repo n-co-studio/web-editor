@@ -4,8 +4,12 @@ docs/spec/compiled/
 # Session logs and known issues
 docs/ai/logs/
 
+# .gitignore — excluded from generic file copy; merged via section markers
+# in template-sync-engine.sh (BEGIN/END REPO-OS MANAGED block)
+.gitignore
+
 # Decision records: NOT excluded. Template decisions (`t-*`) sync to child repos.
-# Child decisions (0100+) are safe — actions-template-sync operates add/update-only
+# Child decisions (0100+) are safe — the sync engine operates add/update-only
 # (does not delete child-only files), so project-specific decisions remain untouched.
 # Orphaned template decisions are cleaned up via child-sync-decisions.sh using
 # t-manifest.txt as the authoritative source (Decision 0022).

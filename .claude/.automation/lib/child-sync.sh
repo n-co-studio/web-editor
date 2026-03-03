@@ -93,10 +93,16 @@ wait_for_syncs() {
 
     local all_done=true
     while read -r repo_name local_path; do
-      status=$(gh run list --repo "$GITHUB_ORG/$repo_name" --workflow=template-sync.yml --limit 1 --json status --jq '.[0].status' 2>/dev/null || echo "unknown")
-      if [ "$status" != "completed" ]; then
+      local run_info
+      run_info=$(gh run list --repo "$GITHUB_ORG/$repo_name" --workflow=template-sync.yml --limit 1 --json status,conclusion --jq '.[0] | "\(.status) \(.conclusion)"' 2>/dev/null || echo "unknown null")
+      local run_status="${run_info%% *}"
+      local run_conclusion="${run_info#* }"
+      if [ "$run_status" != "completed" ]; then
         all_done=false
         break
+      fi
+      if [ "$run_conclusion" = "failure" ]; then
+        log "  WARNING: $repo_name workflow completed with conclusion: failure"
       fi
     done < <(read_repos)
 
