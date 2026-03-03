@@ -1258,9 +1258,9 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
     </tbody>
   </table>
 
-  <h3>Decision range convention</h3>
+  <h3>Decision naming convention</h3>
   <div class="callout">
-    <strong>Decisions 0001&ndash;0099</strong> are template-synced and locked in child/autonomous modes. <strong>Decisions 0100+</strong> (<code>0[1-9][0-9][0-9]-*.md</code>) are project-specific and editable in child mode. This preserves governance consistency while allowing project-level customization.
+    <strong>Template decisions</strong> use the <code>t-</code> prefix (<code>t-0001-*.md</code> through <code>t-NNNN-*.md</code>) and are synced from upstream, locked in child/autonomous modes. <strong>Child decisions</strong> use plain numeric names (<code>0100-*.md</code>+) and are editable in child mode. A <code>t-manifest.txt</code> file lists all template decisions for orphan cleanup. This preserves governance consistency while allowing project-level customization.
   </div>
 </section>
 
@@ -1583,7 +1583,7 @@ experiment/new-caching-strategy</div>
     <div class="flow-node fn-done">Auto-merged &#10003;</div>
   </div>
 
-  <p>A GitHub Actions workflow (<code>.github/workflows/template-sync.yml</code>) runs daily (06:00 UTC) and compares your repo against the template. When differences are found, it creates a PR and auto-merges it. Your compiled specs, logs, and decisions are never touched &mdash; protected by <code>.templatesyncignore</code>. Every sync is recorded as a merged PR for audit.</p>
+  <p>A GitHub Actions workflow (<code>.github/workflows/template-sync.yml</code>) runs daily (06:00 UTC) and compares your repo against the template. When differences are found, it creates a PR and auto-merges it. Your compiled specs and logs are never touched &mdash; protected by <code>.templatesyncignore</code>. Template decisions (<code>t-*</code>) sync from upstream; child decisions (<code>0100+</code>) are untouched. Every sync is recorded as a merged PR for audit.</p>
 
   <h3>One-time setup</h3>
   <ol class="tight">

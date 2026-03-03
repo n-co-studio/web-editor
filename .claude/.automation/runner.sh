@@ -347,6 +347,15 @@ _run_single_entry() {
         if [ "$_merge_ok" = true ]; then
           record_closed_branch "$entry_current_branch"
           echo "Solo merge: $entry_current_branch → main (success)" >&2
+          # Advisory push to remote (skip template mode and no-remote)
+          local _repo_mode_file="$REPO_ROOT/.claude/repo-mode"
+          local _is_template=false
+          [ -f "$_repo_mode_file" ] && grep -q "template" "$_repo_mode_file" 2>/dev/null && _is_template=true
+          if [ "$_is_template" = false ] && git remote get-url origin >/dev/null 2>&1; then
+            if ! git push origin main >/dev/null 2>&1; then
+              echo "Advisory: push to origin failed — run 'git push origin main' manually" >&2
+            fi
+          fi
         else
           git merge --abort 2>/dev/null || true
           git checkout "$entry_current_branch" 2>/dev/null || true

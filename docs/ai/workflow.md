@@ -85,8 +85,9 @@ Work happens on categorized branches. BLOCK: never commit directly to `main` —
    - Merge: `git checkout main && git merge --ff-only <branch>` (fallback `--no-ff`)
    - On success: call `write_merge_signal "<branch>"` (writes `.claude/.state/merge-source-branch` via shell I/O — stop hook detects this and skips redundant merge)
    - On failure: `git merge --abort && git checkout <branch>`, notify operator. Do not attempt conflict resolution on main. Signal file is NOT written — stop hook retries merge as safety net
-   - Post-merge: after merge succeeds, agent's ONLY remaining action is step 4. No Edit/Write permitted on main (Gate 1 blocks)
-   - Safety net: stop hook retains solo merge logic for sessions where the agent fails to merge or skips the close sequence
+   - Post-merge push: `git push origin main` (advisory — warn on failure, do not block). Skipped in template mode (`repo-mode` = `template`). Skipped when no remote configured (`git remote get-url origin` fails). Never force-push. Push failure: warn operator to run `git push origin main` manually
+   - Post-merge: after push attempt (success or failure), agent's ONLY remaining action is step 4. No Edit/Write permitted on main (Gate 1 blocks)
+   - Safety net: stop hook retains solo merge logic for sessions where the agent fails to merge or skips the close sequence. Stop hook and runner also push after merge (same advisory pattern)
 4. Present closing summary to operator — this is the final agent message
 
 Zero-change sessions (no commits, no working tree changes) are exempt from the session log requirement — the stop hook downgrades to advisory. Does not apply to `experiment/*` branches. BLOCK: session log modification and uncommitted changes at close — enforced by session-close-check.sh. Overrides: `SKIP_SESSION_LOG=1`, `SKIP_UNCOMMITTED_CHECK=1`.

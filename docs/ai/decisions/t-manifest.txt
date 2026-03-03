@@ -1,0 +1,32 @@
+# Template Decision Manifest
+#
+# Authoritative list of template-owned decision files (t-*.md).
+# Synced to child repos via template-sync. The cleanup helper
+# (child-sync-decisions.sh) compares local t-*.md files against
+# this manifest to detect and remove orphaned template decisions.
+#
+# Update this file whenever template decisions are added, renamed,
+# or removed. Keep entries sorted.
+
+t-0001-repo-os-baseline.md
+t-0002-decisions-are-mandatory.md
+t-0003-agent-structure-standard.md
+t-0004-mechanical-enforcement.md
+t-0005-companion-tool-pattern.md
+t-0006-prototyping-tiers.md
+t-0007-advisory-board.md
+t-0008-cohesion-review-gate.md
+t-0009-analytics-observability-layer.md
+t-0010-task-definition-prompt.md
+t-0011-task-group-contracts.md
+t-0012-file-edit-restrictions.md
+t-0013-session-branch-isolation.md
+t-0014-phase-aware-flow-model.md
+t-0015-solo-mode.md
+t-0016-auditor-prompt-c.md
+t-0017-operator-automation-layer.md
+t-0018-mechanical-taskgroup-enforcement.md
+t-0019-fail-closed-phase-enforcement.md
+t-0020-task-contract-system.md
+t-0021-user-review-system.md
+t-0022-template-decision-naming.md

@@ -436,7 +436,8 @@ if [ -n "$STAGED_FILES" ] && [ -d "$DECISIONS_DIR" ]; then
     # Eliminates per-file grep/sed expansion (~80 forks → ~5-10 typical)
 
     # Staleness guard: warn if any decision file is newer than the index
-    for _A1_DF in "$DECISIONS_DIR"/0*.md; do
+    # Check both t-*.md (template decisions, Decision 0022) and 0*.md (child decisions)
+    for _A1_DF in "$DECISIONS_DIR"/t-*.md "$DECISIONS_DIR"/0*.md; do
       [ -f "$_A1_DF" ] || continue
       if [ "$_A1_DF" -nt "$A1_INDEX" ]; then
         echo "A1 WARNING: .a1-trigger-index may be stale — regenerate (see index file header for command)" >&2
@@ -478,11 +479,12 @@ if [ -n "$STAGED_FILES" ] && [ -d "$DECISIONS_DIR" ]; then
     MISSING_TRIGGERS=0
     TOTAL_DECISIONS=0
 
-    for DECISION_FILE in "$DECISIONS_DIR"/0*.md; do
+    # Iterate both t-*.md (template decisions, Decision 0022) and 0*.md (child decisions)
+    for DECISION_FILE in "$DECISIONS_DIR"/t-*.md "$DECISIONS_DIR"/0*.md; do
       [ -f "$DECISION_FILE" ] || continue
       TOTAL_DECISIONS=$((TOTAL_DECISIONS + 1))
 
-      DECISION_ID=$(basename "$DECISION_FILE" | grep -oE '^[0-9]+')
+      DECISION_ID=$(basename "$DECISION_FILE" | sed -E 's/^(t-)?([0-9]+)-.*/\2/')
 
       # Check if ## Triggers section exists
       if ! grep -q '^## Triggers' "$DECISION_FILE"; then
