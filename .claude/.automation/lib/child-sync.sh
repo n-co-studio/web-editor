@@ -35,7 +35,7 @@ log() {
   local msg
   msg=$(printf '[%s] %s' "$(date +%H:%M:%S)" "$*")
   printf '%s\n' "$msg" >> "$LOG" 2>/dev/null || true
-  [ -t 2 ] && printf '%s\n' "$msg" >&2
+  if [ -t 2 ]; then printf '%s\n' "$msg" >&2; fi
 }
 
 # --- Parse config ---

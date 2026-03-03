@@ -189,7 +189,7 @@ Three modes control which files an agent can modify. Enforced by `write-guard.sh
 Governance-only access. The agent can create and modify governance files (`.claude/agents/`, `.claude/hooks/`, `.claude/settings.json`, `.claude/settings.local.json`, `.claude/local/session-log.md`, `.claude/local/known-issues.md`, `.claude/local/task-groups/*`, `docs/ai/prompts/`, `docs/ai/decisions/`, `docs/ai/logs/`, `docs/ai/workflow.md`, `docs/ai/quality-gates.md`, `docs/ai/task-groups/_contract-template.yaml`, `docs/spec/_templates/`, `AI.md`, `CLAUDE.md`, `repo-os-explainer.html`, `.github/`) but cannot touch product code. Task group contracts live at `.claude/local/task-groups/` (not `docs/ai/task-groups/`). Used in the upstream template repository. Set in `.claude/repo-mode` as `template`.
 
 ### Child Mode
-Product code plus limited governance carve-outs. The agent can modify product code and: `docs/ai/decisions/0100+` (project-specific decisions), `docs/ai/logs/`, `docs/ai/governance/`, `docs/ai/task-groups/*.yaml` (non-underscore-prefixed), `docs/spec/compiled/`, `docs/spec/prototypes/`, `.claude/settings.local.json`. Template-owned governance files (0001–0099 decisions, hooks, prompts, workflows) are protected. Default mode when `.claude/repo-mode` is missing. Set as `child`.
+Product code plus limited governance carve-outs. The agent can modify product code and: `docs/ai/decisions/0100+` (project-specific decisions), `docs/ai/logs/`, `docs/ai/governance/`, `docs/ai/task-groups/*.yaml` (non-underscore-prefixed), `docs/spec/compiled/`, `docs/spec/prototypes/`, `.claude/settings.local.json`. Template-owned governance files (`t-*` decisions, hooks, prompts, workflows) are protected. Default mode when `.claude/repo-mode` is missing. Set as `child`.
 
 ### Autonomous Mode
 Product code plus minimal governance carve-outs: `docs/ai/logs/`, `docs/ai/task-groups/*.yaml` (non-underscore-prefixed). All other governance paths locked. Intended for headless operation with maximum governance protection. Set as `autonomous`.
@@ -210,8 +210,8 @@ The stop hook (`session-close-check.sh`) enforces blocking gates at session clos
 
 All overrides are logged via `log_override()` and summarized in the override audit.
 
-### Decision Range Convention
-Decisions 0001–0099 are template-synced and locked in child/autonomous modes. Decisions 0100+ are project-specific and editable in child mode. Mode-guard enforces via filename regex `0[1-9][0-9][0-9]-*.md`.
+### Decision Naming Convention
+Template decisions use the `t-` prefix (`t-0001-*.md` through `t-NNNN-*.md`) and are synced from upstream, locked in child/autonomous modes. Child decisions use plain numeric names (`0100-*.md`+) and are editable in child mode. Mode-guard enforces via the `t-` prefix check (Decision 0022). The `t-manifest.txt` file lists all template decisions for orphan cleanup in child repos.
 
 ---
 

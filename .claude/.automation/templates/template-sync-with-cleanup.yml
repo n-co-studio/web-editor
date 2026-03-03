@@ -1,0 +1,55 @@
+# Reference: template-sync workflow with decision cleanup step.
+#
+# This file is a REFERENCE TEMPLATE — it is NOT directly used by any
+# automation. Operators must copy this content to their child repo's
+# .github/workflows/template-sync.yml manually (GITHUB_TOKEN cannot
+# push workflow changes via template-sync).
+#
+# The cleanup step runs after actions-template-sync delivers updated
+# files and before auto-merge. It removes orphaned template decisions
+# that are no longer in the upstream t-manifest.txt.
+#
+# Decision 0022 — Template Decision Naming Convention
+
+name: Template Sync
+
+on:
+  # Triggered by upstream template repo (via gh workflow run)
+  workflow_dispatch:
+    inputs:
+      source_repo:
+        description: 'Source template repository'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Template Sync
+        uses: AndreasAugworx/actions-template-sync@v2
+        with:
+          source_repo_path: markpreston2/repo-OS-template
+          upstream_branch: main
+          pr_title: "chore: sync from template"
+          pr_labels: template-sync
+
+      # --- Decision cleanup step (Decision 0022) ---
+      # Runs after template-sync delivers files but before auto-merge.
+      # Removes t-*.md files not listed in the upstream t-manifest.txt.
+      - name: Clean orphaned template decisions
+        run: |
+          if [ -f .claude/.automation/lib/child-sync-decisions.sh ]; then
+            bash .claude/.automation/lib/child-sync-decisions.sh
+          else
+            echo "child-sync-decisions.sh not found — skipping cleanup"
+          fi
