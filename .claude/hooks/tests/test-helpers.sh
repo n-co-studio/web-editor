@@ -254,7 +254,7 @@ setup_hook_sandbox() {
 }
 
 # --- Run a hook script in the sandbox, capturing output ---
-# Usage: output=$(run_hook "branch-guard-edit.sh" "$fixture_json")
+# Usage: output=$(run_hook "write-guard.sh" "$fixture_json")
 # Hooks inherit _REPO_OS_TEST_ROOT + REPO_OS_TEST_MODE (set by setup_sandbox) and run with
 # CWD = sandbox (so git commands use the sandbox repo).
 run_hook() {
@@ -265,7 +265,7 @@ run_hook() {
 
 # --- Run a hook and capture exit code ---
 # Sets _LAST_RC to the hook's exit code.
-# Usage: output=$(run_hook_rc "branch-guard-edit.sh" "$fixture_json"); echo "$_LAST_RC"
+# Usage: output=$(run_hook_rc "write-guard.sh" "$fixture_json"); echo "$_LAST_RC"
 _LAST_RC=0
 run_hook_rc() {
   local hook="$1"

@@ -21,12 +21,6 @@ Distinct from the session-scoped Orchestrator — the Dev Orchestrator spans ses
 
 ---
 
-## First Action
-
-Read `.claude/agents/_agent-glossary.md` for shared definitions before beginning any review.
-
----
-
 ## Invocation
 
 Three invocation contexts:
@@ -134,3 +128,4 @@ Write the report to `.claude/.automation/reports/health-{group_name}-{timestamp}
 - REQUIRE: all findings cite specific files and line ranges where applicable
 - GUIDE: cap cohesion findings at ~15. Note if truncated.
 - REQUIRE: severity labels follow advisory board format (CRITICAL / RECOMMENDATION / IDEA)
+- **First action:** Read `.claude/agents/_agent-glossary.md` for shared definitions before beginning any review.

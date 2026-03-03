@@ -5,7 +5,7 @@
 #
 # Usage:
 #   source "$(dirname "$0")/test-fixtures.sh"
-#   fixture_pretooluse_edit "/repo/src/foo.ts" | bash "$HOOKS_DIR/branch-guard-edit.sh"
+#   fixture_pretooluse_edit "/repo/src/foo.ts" | bash "$HOOKS_DIR/write-guard.sh"
 #
 # Fragility note: These fixtures are reverse-engineered from each hook's jq
 # expressions. If Claude Code changes the hook stdin protocol, fixtures will
@@ -24,9 +24,9 @@ _json_escape() {
 }
 
 # --- PreToolUse: Edit ---
-# Consumers: branch-guard-edit.sh, write-guard.sh
+# Consumers: write-guard.sh
 # Fields parsed:
-#   .tool_input.file_path  (branch-guard-edit Gate 2 path exemptions)
+#   .tool_input.file_path  (write-guard Section 3 path exemptions)
 #   .tool_input.file_path  (write-guard .state/ detection + mode path classification)
 fixture_pretooluse_edit() {
   local file_path="$1"
@@ -36,7 +36,7 @@ fixture_pretooluse_edit() {
 }
 
 # --- PreToolUse: Write ---
-# Consumers: branch-guard-edit.sh, write-guard.sh
+# Consumers: write-guard.sh
 # Same field set as Edit.
 fixture_pretooluse_write() {
   local file_path="$1"

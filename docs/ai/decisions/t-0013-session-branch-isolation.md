@@ -7,7 +7,7 @@ Accepted
 
 - type: process
 - keywords: `branch.reuse, session.isolation, closed-branches, one.session.per.branch, solo.merge, branch.seal, session.registry, session.overlap, concurrent.session`
-- enforced_by: `.claude/hooks/branch-guard.sh`, `.claude/hooks/branch-guard-edit.sh`, `.claude/hooks/session-close-check.sh`
+- enforced_by: `.claude/hooks/branch-guard.sh`, `.claude/hooks/write-guard.sh (Section 3)`, `.claude/hooks/session-close-check.sh`
 
 ## Decision
 Enforce one session per branch. When a session closes, the branch is sealed — no future session may edit files on it:
@@ -22,7 +22,7 @@ Enforce one session per branch. When a session closes, the branch is sealed — 
 
 ## Consequences
 - `.claude/hooks/branch-guard.sh` gains Gate 5 (session isolation — blocking) and Gate 6 (session overlap — blocking/advisory)
-- `.claude/hooks/branch-guard-edit.sh` gains Gate 5 (session isolation — blocking) and Gate 6 (session overlap — blocking/advisory) for Edit/Write tool calls
+- `.claude/hooks/write-guard.sh (Section 3)` gains Gate 5 (session isolation — blocking) and Gate 6 (session overlap — blocking/advisory) for Edit/Write tool calls
 - `.claude/hooks/session-close-check.sh` gains closed-branch recording in normal, override, and loop-guard paths; `cleanup_session()` calls `unregister_session()`
 - `.claude/hooks/_analytics-helper.sh` gains `register_session()`, `unregister_session()`, `check_session_overlap()`, `_iso_to_epoch()`
 - `.claude/hooks/_phase-helper.sh` `init_phase()` calls `register_session()` at session start

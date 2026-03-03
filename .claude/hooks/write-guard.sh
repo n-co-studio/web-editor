@@ -6,8 +6,11 @@
 # Wired to PreToolUse on Edit, Write, and Bash via .claude/settings.json.
 #
 # Logical ordering (Decision 0012 point 12): state-guard checks first,
-# then mode-guard checks. State-guard blocks writes to .claude/.state/.
-# Mode-guard enforces operating mode restrictions.
+# then mode-guard checks, then branch-guard gates. State-guard blocks
+# writes to .claude/.state/. Mode-guard enforces operating mode restrictions.
+# Section 3 (Edit/Write only): branch-guard gates. Main protection,
+# phase gate, session overlap, branch isolation. Consolidated from
+# branch-guard-edit.sh (Decision 0012 point 12).
 #
 # Overrides (state-guard scope):
 #   REPO_OS_SKIP_STATE_GUARD=1  — skip state-guard checks
@@ -17,11 +20,18 @@
 #   REPO_OS_SKIP_MODE_GUARD=1   — skip mode-guard checks entirely
 #   REPO_OS_MODE=<mode>         — force operating mode
 #   REPO_OS_UNLOCK_PATH=<path>  — single-file governance unlock
+#
+# Overrides (branch-guard scope):
+#   REPO_OS_ALLOW_MAIN=1        — allow edits on main
+#   REPO_OS_SKIP_PLAN_GATE=1    — skip phase gate
+#   REPO_OS_SKIP_OVERLAP_CHECK=1 — skip overlap check
+#   REPO_OS_SKIP_BRANCH_REUSE=1 — skip branch isolation check
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/_analytics-helper.sh"
+source "$SCRIPT_DIR/_phase-helper.sh"
 START_MS=$(now_ms)
 
 # ============================================================
@@ -74,7 +84,7 @@ _TAB=$(printf '\t')
 FILE_PATH="${_jq_out%%${_TAB}*}"
 COMMAND="${_jq_out#*${_TAB}}"
 
-REPO_ROOT="$(get_repo_root)"
+REPO_ROOT="$_REPO_OS_ROOT"
 
 # ============================================================
 # Section 1: State-Guard (blocks writes to .claude/.state/)
@@ -119,11 +129,9 @@ fi
 # Section 2: Mode-Guard (enforces operating mode restrictions)
 # ============================================================
 
-if [ "$SKIP_MODE_GUARD" = true ]; then
-  exit 0
-fi
+if [ "$SKIP_MODE_GUARD" = false ]; then
 
-# If neither file_path nor command, nothing to check
+# If neither file_path nor command, nothing to check (Section 3 also needs targets)
 if [ -z "$FILE_PATH" ] && [ -z "$COMMAND" ]; then
   exit 0
 fi
@@ -315,7 +323,7 @@ if [ "$MODE" != "template" ]; then
     done <<< "$FE_TARGETS"
   fi
   log_hook_event "mode-guard" "PreToolUse" "" "allow" "$START_MS" "fast_exit_${MODE}"
-  exit 0
+  # Fall through to Section 3
 fi
 
 # --- Check a single path against mode restrictions ---
@@ -388,6 +396,132 @@ if [ -n "$COMMAND" ] && [ -z "$FILE_PATH" ]; then
   done <<< "$TARGETS"
 fi
 
-# --- Allow ---
+# --- Mode-guard allow (Section 2 complete) ---
 log_hook_event "mode-guard" "PreToolUse" "" "allow" "$START_MS" "pass_${MODE}" "" "$ALLOW_PATH"
+
+fi  # end if [ "$SKIP_MODE_GUARD" = false ]
+
+# ============================================================
+# Section 3: Branch-Guard Gates (Edit/Write only)
+# Consolidated from branch-guard-edit.sh (Decision 0012 point 12):
+#   Gate 1: Main branch protection
+#   Gate 2: Phase gate (init/plan blocking)
+#   Gate 6: Session overlap (Decision 0013)
+#   Gate 5: Session branch isolation (Decision 0013)
+#
+# Bash calls are handled by branch-guard.sh separately.
+# Override: REPO_OS_RECOVER=1 (bypass all gates — already checked above)
+# ============================================================
+
+# Branch-guard only applies to Edit/Write (file_path present)
+if [ -n "$FILE_PATH" ]; then
+
+  if [ "${REPO_OS_RECOVER:-0}" != "1" ]; then
+
+    CURRENT_BRANCH=$(get_branch)
+    BG_ALLOW_REASON="pass"
+
+    # --- Gate 1: Main branch protection ---
+    if [ "$CURRENT_BRANCH" = "main" ] && [ "${REPO_OS_ALLOW_MAIN:-0}" != "1" ]; then
+      log_hook_event "write-guard" "PreToolUse" "" "block" "$START_MS" "main_branch"
+      echo "BLOCKED: On main — run: git checkout -b feature/<description> (override: REPO_OS_ALLOW_MAIN=1)" >&2
+      exit 2
+    fi
+    if [ "$CURRENT_BRANCH" = "main" ] && [ "${REPO_OS_ALLOW_MAIN:-0}" = "1" ]; then
+      log_override "write-guard" "REPO_OS_ALLOW_MAIN"
+      BG_ALLOW_REASON="main_override"
+    fi
+
+    # --- Gate 2: Phase gate (blocking) — must be past plan to edit ---
+    if [ "$BG_ALLOW_REASON" = "pass" ] && [[ "$CURRENT_BRANCH" != experiment/* ]]; then
+      CURRENT_PHASE=$(get_phase)
+      if [ -n "$CURRENT_PHASE" ]; then
+        case "$CURRENT_PHASE" in
+          init|plan)
+            PHASE_EXEMPT=false
+            SESSION_TYPE=$(get_session_type)
+            case "$SESSION_TYPE" in
+              experiment|prototype-napkin|prototype-spike|prototype-poc)
+                PHASE_EXEMPT=true
+                ;;
+            esac
+
+            if [ "$PHASE_EXEMPT" = false ]; then
+              # Path-based exemptions (reuse FILE_PATH already parsed above)
+              if [ -n "$FILE_PATH" ]; then
+                case "$FILE_PATH" in
+                  "$REPO_ROOT/.claude/.state/"*)
+                    PHASE_EXEMPT=true ;;
+                  "$REPO_ROOT/.claude/local/"*)
+                    PHASE_EXEMPT=true ;;
+                  "$REPO_ROOT/docs/ai/governance/"*)
+                    PHASE_EXEMPT=true ;;
+                  "$REPO_ROOT/docs/ai/task-groups/"*)
+                    PHASE_EXEMPT=true ;;
+                esac
+              fi
+            fi
+
+            if [ "$PHASE_EXEMPT" = true ]; then
+              BG_ALLOW_REASON="phase_exempt"
+            else
+              log_hook_event "write-guard" "PreToolUse" "" "block" "$START_MS" "phase_gate" "phase:$CURRENT_PHASE"
+              echo "BLOCKED: Session is in '$CURRENT_PHASE' phase — get plan approval before editing files." >&2
+              exit 2
+            fi
+            ;;
+        esac
+      else
+        # Phase-state absent/stale — sentinel controls fail-closed vs advisory (Decision 0019)
+        _FC_EXEMPT=false
+        if [ -n "$FILE_PATH" ]; then
+          case "$FILE_PATH" in
+            "$REPO_ROOT/.claude/.state/"*)    _FC_EXEMPT=true ;;
+            "$REPO_ROOT/.claude/local/"*)     _FC_EXEMPT=true ;;
+            "$REPO_ROOT/docs/ai/governance/"*) _FC_EXEMPT=true ;;
+            "$REPO_ROOT/docs/ai/task-groups/"*) _FC_EXEMPT=true ;;
+          esac
+        fi
+
+        if [ "$_FC_EXEMPT" = true ]; then
+          BG_ALLOW_REASON="phase_exempt"
+        elif [ "${REPO_OS_SKIP_PLAN_GATE:-0}" = "1" ]; then
+          log_override "write-guard" "REPO_OS_SKIP_PLAN_GATE"
+          BG_ALLOW_REASON="plan_gate_override"
+        elif [ -f "$REPO_ROOT/docs/ai/decisions/.fail-closed-enforced" ]; then
+          log_hook_event "write-guard" "PreToolUse" "" "block" "$START_MS" "phase_gate_no_state"
+          echo "BLOCKED: No phase-state — session not initialized. Call init_phase() via the orchestrator before editing files. (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
+          exit 2
+        else
+          log_hook_event "write-guard" "PreToolUse" "" "warn" "$START_MS" "phase_gate_no_state_advisory"
+          echo "Advisory: No phase-state found — session may not be initialized. Consider calling init_phase() via the orchestrator." >&2
+        fi
+      fi
+    fi
+
+    # --- Gate 6: Session overlap check (Decision 0013) ---
+    if ! check_session_overlap; then
+      log_hook_event "write-guard" "PreToolUse" "" "block" "$START_MS" "session_overlap"
+      exit 2
+    fi
+
+    # --- Gate 5: Session branch isolation (Decision 0013) ---
+    CLOSED_BRANCHES_FILE="$REPO_ROOT/.claude/local/closed-branches"
+    if [ -f "$CLOSED_BRANCHES_FILE" ] && grep -qxF "$CURRENT_BRANCH" "$CLOSED_BRANCHES_FILE" 2>/dev/null; then
+      if [ "${REPO_OS_SKIP_BRANCH_REUSE:-0}" = "1" ]; then
+        log_override "write-guard" "REPO_OS_SKIP_BRANCH_REUSE"
+        BG_ALLOW_REASON="branch_reuse_override"
+      else
+        log_hook_event "write-guard" "PreToolUse" "" "block" "$START_MS" "branch_reused"
+        echo "BLOCKED: Branch '$CURRENT_BRANCH' was used by a previous session — create a new branch: git checkout -b <category>/<description> (override: REPO_OS_SKIP_BRANCH_REUSE=1)" >&2
+        exit 2
+      fi
+    fi
+
+    log_hook_event "write-guard" "PreToolUse" "" "allow" "$START_MS" "$BG_ALLOW_REASON"
+
+  fi  # end REPO_OS_RECOVER guard
+
+fi  # end FILE_PATH guard (Section 3)
+
 exit 0

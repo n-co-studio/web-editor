@@ -13,12 +13,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/_analytics-helper.sh"
 START_MS=$(now_ms)
 
-REPO_ROOT="$(get_repo_root)"
+REPO_ROOT="$_REPO_OS_ROOT"
 COUNTER_FILE="$REPO_ROOT/.claude/.hvst-fail-count"
 
 # Resolve known-issues path based on repo mode (template → .claude/local/, child/autonomous → docs/ai/logs/)
-REPO_MODE_FILE="$REPO_ROOT/.claude/repo-mode"
-if [ -f "$REPO_MODE_FILE" ] && [ "$(head -1 "$REPO_MODE_FILE" | tr -d '[:space:]')" = "template" ]; then
+if [ "$(get_mode)" = "template" ]; then
   KNOWN_ISSUES_PATH=".claude/local/known-issues.md"
 else
   KNOWN_ISSUES_PATH="docs/ai/logs/known-issues.md"
@@ -27,6 +26,11 @@ fi
 # Read JSON payload from stdin
 INPUT=$(cat)
 EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // empty' 2>/dev/null || echo "")
+
+# Fast-exit: PostToolUse with no counter file — nothing to reset
+if [ "$EVENT" = "PostToolUse" ] && [ ! -f "$COUNTER_FILE" ]; then
+  exit 0
+fi
 
 if [ "$EVENT" = "PostToolUseFailure" ]; then
   # Bash command failed — increment counter

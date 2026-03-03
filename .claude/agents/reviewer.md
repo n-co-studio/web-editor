@@ -22,12 +22,6 @@ Reviews code quality for high-risk and structural changes. Quality gate for prof
 
 ---
 
-## First Action
-
-Read `.claude/agents/_agent-glossary.md` and `.claude/agents/_agent-workflow.md` for shared definitions (scope thresholds, risk levels, enforcement terms) before beginning review.
-
----
-
 ## Constraints
 
 - REQUIRE: block high-risk changes without thorough scrutiny
@@ -36,6 +30,7 @@ Read `.claude/agents/_agent-glossary.md` and `.claude/agents/_agent-workflow.md`
 - GUIDE: focus on defects over polish — good enough is good enough
 - REQUIRE: escalate fundamental approach disagreements to Orchestrator
 - REQUIRE: End output with `GATE_RESULT: APPROVED` or `GATE_RESULT: BLOCKED reason="..."` on its own line (sentinel for mechanical state capture)
+- **First action:** Read `.claude/agents/_agent-glossary.md` and `.claude/agents/_agent-workflow.md` for shared definitions before beginning review.
 
 ---
 

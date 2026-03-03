@@ -6,8 +6,7 @@
 # Gates enforced:
 #   Phase — assert_phase commit (blocking, primary check when phase-state active)
 #   A4  Safety — secret scanning (always, blocking)
-#   State verification — plan-approved, cohesion-reviewed, qa-verified
-#       (blocking without phase-state; advisory belt-and-suspenders with it)
+#   State verification — plan-approved, cohesion-reviewed, qa-verified (always blocking)
 #   A2  Process — scope check >100 lines (blocking with large-scope override)
 #   A6  Task Group — contract staging (blocking)
 #   High-risk — pattern detection + sign-off enforcement (blocking)
@@ -129,14 +128,11 @@ fi
 # Primary check: session must have reached commit phase.
 # Falls back to individual state files if phase-state absent/stale.
 # ============================================================
-PHASE_GATE_PASSED=false
 if [ "$SKIP_STATE" = false ]; then
   CURRENT_PHASE=$(get_phase)
   if [ -n "$CURRENT_PHASE" ]; then
     # Phase-state active — use phase model as primary check
-    if assert_phase "commit"; then
-      PHASE_GATE_PASSED=true
-    else
+    if ! assert_phase "commit"; then
       echo "GATE PHASE FAILED: Session is in '$CURRENT_PHASE' phase — must reach 'commit' phase before committing. Complete QA verification to advance." >&2
       block "phase_gate_not_commit"
       log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "phase_gate_not_commit" "phase:$CURRENT_PHASE"
@@ -145,10 +141,9 @@ if [ "$SKIP_STATE" = false ]; then
 fi
 
 # ============================================================
-# State File Verification (blocking without phase-state, advisory with it)
-# When phase-state is active and passed, individual file checks are
-# belt-and-suspenders (warn but don't block). When phase-state is absent,
-# these remain the primary blocking enforcement.
+# State File Verification (always blocking — defense-in-depth)
+# Individual state files are checked regardless of phase gate status.
+# Defense-in-depth: even if phase gate passes, missing state files block.
 # ============================================================
 if [ "$SKIP_STATE" = false ]; then
   # plan-approved: required on all non-experiment branches
@@ -156,38 +151,23 @@ if [ "$SKIP_STATE" = false ]; then
   if [ "${REPO_OS_SKIP_PLAN_GATE:-0}" = "1" ]; then
     log_override "pre-commit-gates" "REPO_OS_SKIP_PLAN_GATE"
   elif [ ! -f "$STATE_DIR/plan-approved" ]; then
-    if [ "$PHASE_GATE_PASSED" = true ]; then
-      echo "Advisory: .claude/.state/plan-approved not found (phase gate passed — continuing)" >&2
-      warn "state_plan_advisory"
-    else
-      echo "GATE STATE FAILED: .claude/.state/plan-approved not found — run plan approval first (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
-      block "state_plan_missing"
-      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_plan_missing"
-    fi
+    echo "GATE STATE FAILED: .claude/.state/plan-approved not found — run plan approval first (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
+    block "state_plan_missing"
+    log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_plan_missing"
   fi
 
   # cohesion-reviewed: required except on hotfix/* (A5 skipped per gate profile)
   if [ "$IS_HOTFIX" = false ] && [ ! -f "$STATE_DIR/cohesion-reviewed" ]; then
-    if [ "$PHASE_GATE_PASSED" = true ]; then
-      echo "Advisory: .claude/.state/cohesion-reviewed not found (phase gate passed — continuing)" >&2
-      warn "state_cohesion_advisory"
-    else
-      echo "GATE STATE FAILED: .claude/.state/cohesion-reviewed not found — run Critic cohesion review first" >&2
-      block "state_cohesion_missing"
-      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_cohesion_missing"
-    fi
+    echo "GATE STATE FAILED: .claude/.state/cohesion-reviewed not found — run Critic cohesion review first" >&2
+    block "state_cohesion_missing"
+    log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_cohesion_missing"
   fi
 
   # qa-verified: required on all non-experiment branches
   if [ ! -f "$STATE_DIR/qa-verified" ]; then
-    if [ "$PHASE_GATE_PASSED" = true ]; then
-      echo "Advisory: .claude/.state/qa-verified not found (phase gate passed — continuing)" >&2
-      warn "state_qa_advisory"
-    else
-      echo "GATE STATE FAILED: .claude/.state/qa-verified not found — run QA verification first" >&2
-      block "state_qa_missing"
-      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_qa_missing"
-    fi
+    echo "GATE STATE FAILED: .claude/.state/qa-verified not found — run QA verification first" >&2
+    block "state_qa_missing"
+    log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_qa_missing"
   fi
 fi
 
@@ -229,12 +209,6 @@ if [ "$SKIP_STATE" = false ]; then
     echo "checked" > "$GOVERNANCE_CHECKED_FILE" 2>/dev/null || true
   fi
 fi
-
-# ============================================================
-# Gate 4: Phase chain verification — REMOVED
-# Covered by phase model's contract-init phase and init_phase session-type
-# validation. See Decision 0014 and Brief 2 (Hook Phase Integration).
-# ============================================================
 
 # ============================================================
 # A2: Process — Scope Check (blocking with large-scope override)

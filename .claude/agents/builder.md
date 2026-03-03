@@ -42,7 +42,7 @@ Implements scoped changes exactly as planned. Executes with precision, flags pro
 - REQUIRE: no gold-plating — no extra features, no "improvements" to adjacent code
 - REQUIRE: escalate plan gaps, unexpected complexity, out-of-scope discoveries to Orchestrator
 
-**First action:** Read `docs/ai/workflow.md`, `.claude/agents/_agent-glossary.md`, and `.claude/agents/_agent-workflow.md` for shared rules and definitions before beginning implementation.
+**First action:** Read `.claude/agents/_agent-glossary.md`, `.claude/agents/_agent-workflow.md`, and `docs/ai/workflow.md` for shared definitions before beginning implementation.
 
 ---
 

@@ -96,9 +96,9 @@ assert_eq "$phase_after" "build" "pre-write plan-approved + forward jump lands a
 mode_after=$(get_phase_mode)
 assert_eq "$mode_after" "auto" "phase mode is auto after pre-write"
 
-# --- branch-guard-edit allows edit after pre-write bypass ---
-run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
-assert_ok "$_LAST_RC" "branch-guard-edit allows edit after pre-write plan-approved bypass"
+# --- write-guard (Section 3) allows edit after pre-write bypass ---
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+assert_ok "$_LAST_RC" "write-guard allows edit after pre-write plan-approved bypass"
 
 # --- branch-guard allows bash write after pre-write bypass ---
 run_hook_rc "branch-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
@@ -393,9 +393,9 @@ advance_phase "build" 2>/dev/null
 phase=$(get_phase)
 assert_eq "$phase" "build" "experiment skips plan/approval, goes to build"
 
-# --- branch-guard-edit allows edit without plan-approved ---
+# --- write-guard (Section 3) allows edit without plan-approved ---
 rm -f "$STATE_DIR/plan-approved"
-run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
 assert_ok "$_LAST_RC" "experiment branch: edit allowed without plan-approved"
 
 # --- pre-commit allows without state files (A4 only) ---
@@ -456,8 +456,8 @@ advance_phase "build" 2>/dev/null
 phase=$(get_phase)
 assert_eq "$phase" "build" "runner pattern: forward jump lands at build"
 
-# Step 6: Agent does work — branch-guard allows
-run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+# Step 6: Agent does work — write-guard (Section 3) allows
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
 assert_ok "$_LAST_RC" "runner pattern: edit allowed in build phase"
 
 # Step 7: Agent signals review

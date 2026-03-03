@@ -34,7 +34,7 @@ After the first template-sync following this change, child repos will have both 
 3. Verify: `ls docs/ai/decisions/t-*.md` matches `t-manifest.txt`
 
 ## Consequences
-- All 21 existing template decisions renamed from `NNNN-name.md` to `t-NNNN-name.md`
+- All 22 template decisions use the `t-NNNN-name.md` format (0001–0022)
 - `t-manifest.txt` serves as the single source of truth for which template decisions should exist in child repos
 - Write-guard enforces the `t-` prefix boundary mechanically (Decision 0004)
 - Template decisions are visually distinguishable from child decisions at a glance

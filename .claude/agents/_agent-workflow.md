@@ -2,13 +2,13 @@
 
 ## Advisory Flow (Spec Review)
 
-Runs after Prompt 0, before build begins. Orchestrated by Prompt A Phase 1. Tier selected before dispatch. See `.claude/agents/_advisory-board.md` for tier definitions, activation logic, agent roster, and report structure.
+Runs after Prompt 0, before build begins. Orchestrated by Prompt A Phase 1. Tier selected before dispatch. Canonical definition: `docs/ai/workflow.md` § Advisory Board Review. Agent reference: `.claude/agents/_advisory-board.md`.
 
 ---
 
 ## Task Definition Flow (Prompt T — Brief Mode)
 
-Lightweight spec-mode dispatch of Architect + Exploration + Critic for task scoping. No file output. See `docs/ai/prompts/prompt-t-task-definition.md`.
+Lightweight spec-mode dispatch of Architect + Exploration + Critic for task scoping. No file output. Canonical definition: `docs/ai/prompts/prompt-t-task-definition.md`. See also `docs/ai/workflow.md` § Task Definition Sessions.
 
 ### Handoff Chain
 1. **Operator → Orchestrator**: Task description (what/why/constraints)
@@ -26,7 +26,7 @@ No file artifacts. No session log entry. No handoff to Build Flow — the operat
 
 ## HVST Review Flow (Debug Stall)
 
-Runs when HVST debugging stalls (2+ consecutive failures) or when the operator proactively requests a debug review. See `.claude/agents/_hvst-review.md` for the full procedure.
+Runs when HVST debugging stalls (2+ consecutive failures) or when the operator proactively requests a debug review. Canonical definition: `docs/ai/workflow.md` § HVST Protocol. Procedure: `.claude/agents/_hvst-review.md`.
 
 ### Handoff Chain
 1. **Builder stalls** — 2+ consecutive HVST failures, or operator observes unproductive debugging
@@ -42,7 +42,7 @@ Runs when HVST debugging stalls (2+ consecutive failures) or when the operator p
 
 ## Audit Flow (Project Health)
 
-Runs on-demand when the operator invokes Prompt C. Read-only — no file modifications, no session log entries. Exception: operator deferrals write to `known-issues.md` and `.claude/.deferrals-pending` only (see `prompt-c-project-audit.md` § Rules). See `docs/ai/prompts/prompt-c-project-audit.md` for the full prompt and `.claude/agents/auditor.md` for the Auditor agent definition.
+Runs on-demand when the operator invokes Prompt C. Read-only — no file modifications (exception: deferrals write to `known-issues.md`). Canonical definition: `docs/ai/prompts/prompt-c-project-audit.md`. Agent reference: `.claude/agents/auditor.md`.
 
 ### Handoff Chain
 1. **Operator → Orchestrator**: Dimension selection + tier (Quick / Standard / Deep)
@@ -98,7 +98,7 @@ Phase labels correspond to Decision 0014 phase sequences. Auto/review mode set a
                             │
                     [verify phase]
                     QA / VERIFIER ⚠️ COMMIT BLOCKER
-              verifies all gates (A1–A6) → BLOCK or APPROVE
+              verifies all gates (A1–A6, B1–B3) → BLOCK or APPROVE
                             │
                   ┌─────────┴─────────┐
                PASS                 FAIL → back to Builder

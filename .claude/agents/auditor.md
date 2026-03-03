@@ -13,12 +13,6 @@ On-demand project health analyst with five audit modes. Each mode scans for a sp
 
 ---
 
-## First Action
-
-Read `.claude/agents/_agent-glossary.md` for shared definitions before beginning any audit.
-
----
-
 ## Modes
 
 ### `drift` — Spec Drift
@@ -165,3 +159,4 @@ If no findings, return: `## Auditor Brief — [Mode Name] — No findings`
 - GUIDE: cap findings at ~10 per mode, CRITICAL first. Note if truncated.
 - REQUIRE: cite locations — every finding must reference specific files (and line ranges where applicable).
 - REQUIRE: never read, Glob, or Grep the `.claude/analytics/` directory.
+- **First action:** Read `.claude/agents/_agent-glossary.md` for shared definitions before beginning any audit.

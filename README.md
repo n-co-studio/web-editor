@@ -41,8 +41,7 @@ All hooks live in `.claude/hooks/` and are wired via `.claude/settings.json`.
 
 | Hook | Lifecycle | Role |
 |------|-----------|------|
-| `write-guard.sh` | PreToolUse (Edit/Write/Bash) | Blocks `.state/` writes + enforces mode-based file restrictions |
-| `branch-guard-edit.sh` | PreToolUse (Edit/Write) | Blocks main edits, enforces plan gate, session branch isolation |
+| `write-guard.sh` | PreToolUse (Edit/Write/Bash) | Blocks `.state/` writes, enforces mode-based file restrictions; Section 3 blocks main edits, enforces plan gate, session branch isolation |
 | `branch-guard.sh` | PreToolUse (Bash) | Blocks main writes, enforces plan gate, governance advisory, session branch isolation |
 | `plan-approval.sh` | PostToolUse (AskUserQuestion) | Captures plan approvals as state |
 | `hvst-failure-tracker.sh` | PostToolUse (Bash) | Tracks consecutive failures for HVST escalation |

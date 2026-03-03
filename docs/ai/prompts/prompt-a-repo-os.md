@@ -15,11 +15,7 @@ REQUIRE: do not proceed to any phase before the operator selects a mode.
 
 ### Phase Sequences
 
-**Initialize:** `init[agent] → tier-select[both] → dispatch[agent] → synthesize[agent] → op-review[operator] → validate[agent] → governance[agent] → close[agent]`
-
-**Re-initialize:** `init[agent] → validate[agent] → governance[agent] → close[agent]`
-
-Phase-state is managed automatically by hooks. See Decision 0014 for canonical definitions.
+Phase sequences are defined in `_agent-glossary.md` § Phase Model and enforced by `_phase-helper.sh`. See Decision 0014 for canonical definitions. Initialize: `init → tier-select → dispatch → synthesize → op-review → validate → governance → close`. Re-initialize: `init → validate → governance → close`.
 
 After mode selection, build your task list to match the selected mode:
 - **Initialize**: Phase 1 (advisory review) → Phase 2 (operator review) → Phase 3 (validation)

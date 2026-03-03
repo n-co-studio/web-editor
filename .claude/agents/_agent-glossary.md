@@ -67,7 +67,7 @@ Automation layer runtime directory (Decision 0017). Contains schemas (`schemas/`
 Automated script at lifecycle events (pre-commit, session stop). Runs regardless of agent behavior.
 
 ### Subagent
-Agent invoked via Task tool with isolated context and tool restrictions from YAML frontmatter.
+Agent invoked via Task tool with isolated context and tool restrictions from YAML frontmatter. Frontmatter hooks (e.g., `agent-git-guard.sh` on Bash PreToolUse) run inside the subagent's context — they block actions like `git commit`/`git push` within the subagent without affecting the orchestrator.
 
 ### Settings
 `.claude/settings.json` (team, committed) and `.claude/settings.local.json` (personal, gitignored).
@@ -83,7 +83,7 @@ Session-scoped governance evidence in `.claude/.state/`. Written by hooks via sh
 | `reviewer-signed` | `state-writer.sh` (reviewer) | High-risk detection |
 | `security-signed` | `state-writer.sh` (security-privacy) | High-risk detection |
 | `high-risk-detected` | `pre-commit-gates.sh` | Audit trail |
-| `governance-checked` | `branch-guard.sh` (Gate 3, Bash) or `pre-commit-gates.sh` (Gate 3, commit) | First-fire marker (inter-session governance) |
+| `governance-checked` | `pre-commit-gates.sh` (Gate 3, commit) | First-fire marker (inter-session governance) |
 | `phase-state` | `_phase-helper.sh` (via hooks) | Phase-aware flow tracking (session type, current phase, cycle) |
 | `overrides.log` | `_analytics-helper.sh` (`log_override`) | Override audit (session-close-check) |
 | `task-contract.yaml` | Orchestrator (model) | Task contract — intent reference for cohesion review (Decision 0020) |
@@ -101,6 +101,12 @@ Session-scoped governance evidence in `.claude/.state/`. Written by hooks via sh
 | `.session-type` | Operator/model (manual) or `session-close-check.sh` (inferred) | Session classification (build/qa/audit/explore) for analytics |
 | `.hvst-fail-count` | `hvst-failure-tracker.sh` | Consecutive Bash failure counter for HVST reminders |
 | `.deferrals-pending` | Orchestrator (model) | Signals deferred audit/advisory findings — consumed by session-close-check |
+
+**Session registry** (`.claude/.state/sessions/`):
+
+| File | Writer | Purpose |
+|------|--------|---------|
+| `sessions/*.yaml` | `_analytics-helper.sh` (`register_session`) | Active session tracking — branch, PID, timestamp. Cleaned by `unregister_session()` at close and stale-entry cleanup (dead PIDs, >24h age) |
 
 Note: `.stop-attempt-count` moved to `.claude/.state/` (see State Files table above) for state-guard protection.
 
@@ -218,35 +224,13 @@ Template decisions use the `t-` prefix (`t-0001-*.md` through `t-NNNN-*.md`) and
 
 ## User Review
 
-### System
-LLM persona simulation providing synthetic user perspective on implementation output. Advisory only — no gate, no state file, no mechanical enforcement. Dispatch and synthesis occur in the `user-review` phase (after `verify`, before `commit`); results are presented to the operator during `op-review` for disposition. Skipped (forward-jump to `commit`) when no User Review is defined. Opt-in via task brief (`### User Review` section) or operator request. See Decision 0021.
-
-### Persona Tiers
+LLM persona simulation providing synthetic user perspective on implementation output. Advisory only — no gate, no state file, no mechanical enforcement. Dispatched in the `user-review` phase (after `verify`, before `commit`). Skipped when no User Review is defined (forward-jump to `commit`). Available in child mode only. See `docs/ai/workflow.md` § User Review for full system definition and Decision 0021 for scenario schema.
 
 | Tier | Persona | Mental Model | Error Recovery | Confusion Threshold |
 |------|---------|-------------|----------------|---------------------|
 | **Tier 1** | Power User | Strong — infers from experience | Tries 2–3 alternatives | Low — comfortable with ambiguity |
 | **Tier 2** | Everyday User | Partial — knows common patterns | Tries once, then seeks help | Moderate — needs visible guidance |
 | **Tier 3** | Novice User | None — every interaction is new | Stops immediately | High — abandons at first friction |
-
-### Severity Mapping
-User Review findings use the advisory board severity scale (Decision 0007):
-- **CRITICAL** — Task-blocking friction (user cannot complete the job story)
-- **RECOMMENDATION** — Notable friction (user completes with confusion or extra steps)
-- **IDEA** — Enhancement opportunity (user completes smoothly, improvement plausible)
-
-### Risk Classification
-Low-risk (advisory). No commit gate, no sign-off requirement. Findings feed into `op-review` disposition only.
-
-### Operating Mode Exclusions
-User Review is available in **child mode only**. Excluded from:
-- Template mode (no product code to review)
-- Autonomous mode (no operator for disposition)
-- Headless/automation mode (no operator interaction)
-- Experiment sessions (no `user-review` phase)
-
-### LLM Persona Simulation Caveat
-All User Review outputs include a mandatory caveat acknowledging that results are LLM-simulated, not empirical user testing. Findings are hypothesis-grade input. LLM persona simulation may over-succeed — particularly at Tier 3 (Novice).
 
 ---
 

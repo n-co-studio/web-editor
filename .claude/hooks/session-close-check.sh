@@ -39,7 +39,7 @@ START_MS=$(now_ms)
 INPUT=$(cat)
 
 # --- Paths and state files ---
-REPO_ROOT="$(get_repo_root)"
+REPO_ROOT="$_REPO_OS_ROOT"
 # In template mode, session log lives locally; in product mode, it's committed.
 REPO_MODE_FILE="$REPO_ROOT/.claude/repo-mode"
 IS_TEMPLATE=false
@@ -329,6 +329,17 @@ if [ "$STOP_ATTEMPT" -ge 3 ]; then
     update_baseline
   fi
   log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "attempt_limit" "$STOP_ATTEMPT" || true
+  # Guard: if solo merge was expected but never completed (still on feature
+  # branch), do NOT seal — sealing would permanently lock the branch.
+  _SV_SOLO=$(get_solo)
+  _SV_BRANCH=$(get_branch)
+  if [ "$_SV_SOLO" = "true" ] && [ "$_SV_BRANCH" != "main" ]; then
+    echo "ERROR: Solo merge of '$_SV_BRANCH' into main never completed after $STOP_ATTEMPT attempts." >&2
+    echo "  Resolve manually: git checkout main && git merge '$_SV_BRANCH'" >&2
+    log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "solo_merge_incomplete" "" "$_SV_BRANCH" || true
+    cleanup_session
+    exit 0
+  fi
   seal_branch_if_applicable
   cleanup_session
   exit 0
@@ -513,10 +524,11 @@ if [ -f "$KNOWN_ISSUES" ]; then
       KI_MODIFIED=true
     fi
   else
-    if git diff --name-only "$KNOWN_ISSUES" 2>/dev/null | grep -q .; then
+    KNOWN_ISSUES_REL="${KNOWN_ISSUES#"$REPO_ROOT/"}"
+    if echo "$UNCOMMITTED" | grep -qxF "$KNOWN_ISSUES_REL"; then
       KI_MODIFIED=true
     fi
-    if git diff --cached --name-only "$KNOWN_ISSUES" 2>/dev/null | grep -q .; then
+    if echo "$STAGED" | grep -qxF "$KNOWN_ISSUES_REL"; then
       KI_MODIFIED=true
     fi
   fi

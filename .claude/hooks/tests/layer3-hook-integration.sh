@@ -29,74 +29,74 @@ SB="$(get_sandbox)"
 STATE_DIR="$SB/.claude/.state"
 
 # ============================================================
-# L3.1 — branch-guard-edit.sh (PreToolUse Edit/Write)
+# L3.1 — write-guard.sh Section 3 (PreToolUse Edit/Write branch-guard gates)
 # ============================================================
-tap_section "L3.1: branch-guard-edit.sh — phase gate and branch protection"
+tap_section "L3.1: write-guard.sh Section 3 — phase gate and branch protection"
 
 # --- Gate 2: Phase gate blocks in init/plan ---
 reset_phase "standard"
 # Phase is init — edit to source file should be blocked
-run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
-assert_fail "$_LAST_RC" "branch-guard-edit blocks edit in init phase"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+assert_fail "$_LAST_RC" "write-guard blocks edit in init phase"
 
 reset_phase "standard"
 advance_phase "plan" 2>/dev/null
 # Phase is plan — still blocked
-run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
-assert_fail "$_LAST_RC" "branch-guard-edit blocks edit in plan phase"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+assert_fail "$_LAST_RC" "write-guard blocks edit in plan phase"
 
 # --- Gate 2: Allows edit in build phase ---
 reset_phase "standard"
 advance_phase "plan" 2>/dev/null
 advance_phase "approval" 2>/dev/null
 advance_phase "build" 2>/dev/null
-run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
-assert_ok "$_LAST_RC" "branch-guard-edit allows edit in build phase"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+assert_ok "$_LAST_RC" "write-guard allows edit in build phase"
 
 # --- Gate 2: Allows edit in later phases (review, verify, commit) ---
 advance_phase "review" 2>/dev/null
-run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
-assert_ok "$_LAST_RC" "branch-guard-edit allows edit in review phase"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+assert_ok "$_LAST_RC" "write-guard allows edit in review phase"
 
 # --- Gate 2: Path exemptions in init phase ---
 reset_phase "standard"
 # .claude/.state/ is exempt (bootstrap writes)
-run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/.claude/.state/test-file")"
-assert_ok "$_LAST_RC" "branch-guard-edit allows .claude/.state/ edit in init phase"
+REPO_OS_SKIP_STATE_GUARD=1 REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/.claude/.state/test-file")"
+assert_ok "$_LAST_RC" "write-guard allows .claude/.state/ edit in init phase"
 
 # .claude/local/ is exempt (session-scoped)
-run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/.claude/local/session-log.md")"
-assert_ok "$_LAST_RC" "branch-guard-edit allows .claude/local/ edit in init phase"
+run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/.claude/local/session-log.md")"
+assert_ok "$_LAST_RC" "write-guard allows .claude/local/ edit in init phase"
 
-# docs/ai/governance/ is exempt
-run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/docs/ai/governance/spec-compiled")"
-assert_ok "$_LAST_RC" "branch-guard-edit allows docs/ai/governance/ edit in init phase"
+# docs/ai/governance/ is exempt (skip mode-guard — not carved out in template mode)
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/docs/ai/governance/spec-compiled")"
+assert_ok "$_LAST_RC" "write-guard allows docs/ai/governance/ edit in init phase"
 
-# docs/ai/task-groups/ is exempt
-run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/docs/ai/task-groups/test.yaml")"
-assert_ok "$_LAST_RC" "branch-guard-edit allows docs/ai/task-groups/ edit in init phase"
+# docs/ai/task-groups/ is exempt (skip mode-guard — not carved out in template mode)
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/docs/ai/task-groups/test.yaml")"
+assert_ok "$_LAST_RC" "write-guard allows docs/ai/task-groups/ edit in init phase"
 
 # --- Gate 2: Session type exemptions ---
 reset_phase "experiment"
-run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
-assert_ok "$_LAST_RC" "branch-guard-edit allows edit for experiment session type"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+assert_ok "$_LAST_RC" "write-guard allows edit for experiment session type"
 
 reset_phase "prototype-napkin"
-run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
-assert_ok "$_LAST_RC" "branch-guard-edit allows edit for prototype-napkin session type"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+assert_ok "$_LAST_RC" "write-guard allows edit for prototype-napkin session type"
 
 reset_phase "prototype-spike"
-run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
-assert_ok "$_LAST_RC" "branch-guard-edit allows edit for prototype-spike session type"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+assert_ok "$_LAST_RC" "write-guard allows edit for prototype-spike session type"
 
 reset_phase "prototype-poc"
-run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
-assert_ok "$_LAST_RC" "branch-guard-edit allows edit for prototype-poc session type"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+assert_ok "$_LAST_RC" "write-guard allows edit for prototype-poc session type"
 
 # --- Gate 2: Fail-open when no phase-state ---
 rm -f "$STATE_DIR/phase-state"
-run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
-assert_ok "$_LAST_RC" "branch-guard-edit fails open when no phase-state"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+assert_ok "$_LAST_RC" "write-guard fails open when no phase-state"
 
 # --- Gate 1: Main branch protection ---
 reset_phase "standard"
@@ -104,20 +104,20 @@ advance_phase "plan" 2>/dev/null
 advance_phase "approval" 2>/dev/null
 advance_phase "build" 2>/dev/null
 switch_sandbox_branch "main"
-run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
-assert_fail "$_LAST_RC" "branch-guard-edit blocks edit on main branch"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+assert_fail "$_LAST_RC" "write-guard blocks edit on main branch"
 
 # REPO_OS_ALLOW_MAIN=1 override
-REPO_OS_ALLOW_MAIN=1 run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
-assert_ok "$_LAST_RC" "branch-guard-edit allows edit on main with REPO_OS_ALLOW_MAIN=1"
+REPO_OS_ALLOW_MAIN=1 REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+assert_ok "$_LAST_RC" "write-guard allows edit on main with REPO_OS_ALLOW_MAIN=1"
 
 switch_sandbox_branch "feature/test"
 
 # --- REPO_OS_RECOVER=1 bypasses all gates ---
 reset_phase "standard"
 # Phase is init (would normally block)
-REPO_OS_RECOVER=1 run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
-assert_ok "$_LAST_RC" "branch-guard-edit allows edit with REPO_OS_RECOVER=1"
+REPO_OS_RECOVER=1 REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+assert_ok "$_LAST_RC" "write-guard allows edit with REPO_OS_RECOVER=1"
 
 # --- Gate 5: Closed branch protection ---
 reset_phase "standard"
@@ -126,12 +126,12 @@ advance_phase "approval" 2>/dev/null
 advance_phase "build" 2>/dev/null
 mkdir -p "$SB/.claude/local"
 echo "feature/test" > "$SB/.claude/local/closed-branches"
-run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
-assert_fail "$_LAST_RC" "branch-guard-edit blocks edit on closed branch"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+assert_fail "$_LAST_RC" "write-guard blocks edit on closed branch"
 
 # REPO_OS_SKIP_BRANCH_REUSE=1 override
-REPO_OS_SKIP_BRANCH_REUSE=1 run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
-assert_ok "$_LAST_RC" "branch-guard-edit allows edit on closed branch with REPO_OS_SKIP_BRANCH_REUSE=1"
+REPO_OS_SKIP_BRANCH_REUSE=1 REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+assert_ok "$_LAST_RC" "write-guard allows edit on closed branch with REPO_OS_SKIP_BRANCH_REUSE=1"
 
 # Clean up closed-branches for subsequent tests
 rm -f "$SB/.claude/local/closed-branches"
@@ -448,7 +448,7 @@ run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "hotfix commit")"
 assert_ok "$_LAST_RC" "pre-commit-gates allows hotfix commit without cohesion-reviewed"
 switch_sandbox_branch "feature/test"
 
-# --- Phase passed + missing state files → advisory (not blocking) ---
+# --- Phase passed + missing state files → blocks (defense-in-depth) ---
 reset_phase "standard"
 advance_phase "plan" 2>/dev/null
 advance_phase "approval" 2>/dev/null
@@ -458,9 +458,8 @@ advance_phase "verify" 2>/dev/null
 advance_phase "commit" 2>/dev/null
 rm -f "$STATE_DIR/plan-approved" "$STATE_DIR/cohesion-reviewed" "$STATE_DIR/qa-verified"
 stage_sandbox_file "src/phasepass.ts" "export const p = 7;"
-output=$(run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")")
-assert_ok "$_LAST_RC" "pre-commit-gates allows when phase passed even with missing state files"
-assert_contains "$output" "Advisory" "pre-commit-gates emits advisory warnings for missing state files"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_fail "$_LAST_RC" "pre-commit-gates blocks when phase passed but state files missing (defense-in-depth)"
 
 # --- REPO_OS_RECOVER=1 → skips state checks ---
 rm -f "$STATE_DIR/phase-state" "$STATE_DIR/plan-approved" "$STATE_DIR/cohesion-reviewed" "$STATE_DIR/qa-verified"
@@ -655,14 +654,14 @@ tap_section "L3.9: Error and edge case tests"
 
 # --- Corrupt phase-state (empty file) → hooks fail-open ---
 echo "" > "$STATE_DIR/phase-state"
-run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
-assert_ok "$_LAST_RC" "branch-guard-edit fails open on corrupt (empty) phase-state"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+assert_ok "$_LAST_RC" "write-guard fails open on corrupt (empty) phase-state"
 
 # --- Wrong session ID → hooks fail-open ---
 reset_phase "standard"
 set_test_session_id "different-session-id"
-run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
-assert_ok "$_LAST_RC" "branch-guard-edit fails open on session-ID mismatch"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+assert_ok "$_LAST_RC" "write-guard fails open on session-ID mismatch"
 
 # Also test branch-guard
 run_hook_rc "branch-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
@@ -673,8 +672,8 @@ set_test_session_id "test-session-$(date +%s)"
 
 # --- Missing phase-state file entirely → hooks fail-open ---
 rm -f "$STATE_DIR/phase-state"
-run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
-assert_ok "$_LAST_RC" "branch-guard-edit fails open when phase-state missing"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+assert_ok "$_LAST_RC" "write-guard fails open when phase-state missing"
 
 run_hook_rc "branch-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
 assert_ok "$_LAST_RC" "branch-guard fails open when phase-state missing"
@@ -1077,7 +1076,7 @@ else
   _tap_fail "init_phase registers session in registry" "session file not found"
 fi
 
-# --- L3.14.2: branch-guard-edit blocks on session overlap ---
+# --- L3.14.2: write-guard blocks on session overlap ---
 _reinit_close_sandbox
 rm -rf "$SESSIONS_DIR"
 _CACHED_BRANCH=""
@@ -1089,12 +1088,12 @@ advance_phase "build" 2>/dev/null
 # Current session is registered by init_phase; create overlapping session
 SID_L314="$(cat "$SB/.claude/.session-id")"
 create_fake_session "overlap-l314" "standard" "feature/test" "$$"
-run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")" > "$_L3_OUT" 2>&1
-assert_fail "$_LAST_RC" "branch-guard-edit blocks on session overlap"
-assert_contains "$(cat "$_L3_OUT")" "BLOCKED" "branch-guard-edit overlap emits BLOCKED"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")" > "$_L3_OUT" 2>&1
+assert_fail "$_LAST_RC" "write-guard blocks on session overlap"
+assert_contains "$(cat "$_L3_OUT")" "BLOCKED" "write-guard overlap emits BLOCKED"
 rm -f "$SESSIONS_DIR/overlap-l314.yaml"
 
-# --- L3.14.3: branch-guard-edit allows task group overlap (advisory) ---
+# --- L3.14.3: write-guard allows task group overlap (advisory) ---
 _reinit_close_sandbox
 rm -rf "$SESSIONS_DIR"
 _CACHED_BRANCH=""
@@ -1105,8 +1104,8 @@ advance_phase "approval" 2>/dev/null
 advance_phase "build" 2>/dev/null
 SID_L314="$(cat "$SB/.claude/.session-id")"
 create_fake_session "overlap-tg-l314" "taskgroup" "feature/test" "$$"
-run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")" > "$_L3_OUT" 2>&1
-assert_ok "$_LAST_RC" "branch-guard-edit allows task group overlap"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")" > "$_L3_OUT" 2>&1
+assert_ok "$_LAST_RC" "write-guard allows task group overlap"
 assert_contains "$(cat "$_L3_OUT")" "Advisory" "task group overlap emits Advisory"
 rm -f "$SESSIONS_DIR/overlap-tg-l314.yaml"
 
@@ -1119,8 +1118,8 @@ advance_phase "contract-init" 2>/dev/null
 advance_phase "cohesion" 2>/dev/null
 SID_L314="$(cat "$SB/.claude/.session-id")"
 create_fake_session "overlap-tgm-l314" "taskgroup" "feature/test" "$$"
-run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")" > "$_L3_OUT" 2>&1
-assert_ok "$_LAST_RC" "branch-guard-edit allows taskgroup-merge + taskgroup overlap"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")" > "$_L3_OUT" 2>&1
+assert_ok "$_LAST_RC" "write-guard allows taskgroup-merge + taskgroup overlap"
 assert_contains "$(cat "$_L3_OUT")" "Advisory" "taskgroup-merge + taskgroup overlap emits Advisory"
 rm -f "$SESSIONS_DIR/overlap-tgm-l314.yaml"
 
@@ -1133,8 +1132,8 @@ advance_phase "contract-init" 2>/dev/null
 advance_phase "cohesion" 2>/dev/null
 SID_L314="$(cat "$SB/.claude/.session-id")"
 create_fake_session "overlap-tgm2-l314" "taskgroup-merge" "feature/test" "$$"
-run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")" > "$_L3_OUT" 2>&1
-assert_ok "$_LAST_RC" "branch-guard-edit allows taskgroup-merge + taskgroup-merge overlap"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")" > "$_L3_OUT" 2>&1
+assert_ok "$_LAST_RC" "write-guard allows taskgroup-merge + taskgroup-merge overlap"
 assert_contains "$(cat "$_L3_OUT")" "Advisory" "taskgroup-merge + taskgroup-merge overlap emits Advisory"
 rm -f "$SESSIONS_DIR/overlap-tgm2-l314.yaml"
 
@@ -1152,7 +1151,7 @@ run_hook_rc "branch-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/fo
 assert_fail "$_LAST_RC" "branch-guard blocks on session overlap (bash redirect)"
 rm -f "$SESSIONS_DIR/overlap-bg-l314.yaml"
 
-# --- L3.14.7 (was .5): REPO_OS_SKIP_OVERLAP_CHECK=1 bypasses in branch-guard-edit ---
+# --- L3.14.7 (was .5): REPO_OS_SKIP_OVERLAP_CHECK=1 bypasses in write-guard ---
 _reinit_close_sandbox
 rm -rf "$SESSIONS_DIR"
 _CACHED_BRANCH=""
@@ -1162,8 +1161,8 @@ advance_phase "approval" 2>/dev/null
 advance_phase "build" 2>/dev/null
 SID_L314="$(cat "$SB/.claude/.session-id")"
 create_fake_session "overlap-skip-l314" "standard" "feature/test" "$$"
-REPO_OS_SKIP_OVERLAP_CHECK=1 run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
-assert_ok "$_LAST_RC" "REPO_OS_SKIP_OVERLAP_CHECK=1 bypasses overlap in branch-guard-edit"
+REPO_OS_SKIP_MODE_GUARD=1 REPO_OS_SKIP_OVERLAP_CHECK=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+assert_ok "$_LAST_RC" "REPO_OS_SKIP_OVERLAP_CHECK=1 bypasses overlap in write-guard"
 rm -f "$SESSIONS_DIR/overlap-skip-l314.yaml"
 
 # --- L3.14.8 (was .6): REPO_OS_RECOVER=1 bypasses overlap check ---
@@ -1173,8 +1172,8 @@ _CACHED_BRANCH=""
 reset_phase "standard"
 SID_L314="$(cat "$SB/.claude/.session-id")"
 create_fake_session "overlap-recover-l314" "standard" "feature/test" "$$"
-REPO_OS_RECOVER=1 run_hook_rc "branch-guard-edit.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
-assert_ok "$_LAST_RC" "REPO_OS_RECOVER=1 bypasses overlap check in branch-guard-edit"
+REPO_OS_SKIP_MODE_GUARD=1 REPO_OS_RECOVER=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+assert_ok "$_LAST_RC" "REPO_OS_RECOVER=1 bypasses overlap check in write-guard"
 rm -f "$SESSIONS_DIR/overlap-recover-l314.yaml"
 
 # --- L3.14.9 (was .7): session-close-check unregisters session ---

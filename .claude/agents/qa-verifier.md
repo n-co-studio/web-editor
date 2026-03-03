@@ -33,7 +33,7 @@ Verifies gates and reports evidence. Commit blocker — no code enters the repo 
 
 ## Gate Verification
 
-**First action:** Read `docs/ai/quality-gates.md` for canonical gate definitions, then read `.claude/agents/_agent-glossary.md` and `.claude/agents/_agent-workflow.md` for shared definitions.
+**First action:** Read `docs/ai/quality-gates.md`, `.claude/agents/_agent-glossary.md`, and `.claude/agents/_agent-workflow.md` for shared definitions and gate definitions.
 
 Verification methods:
 

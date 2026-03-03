@@ -22,11 +22,7 @@ Reviews UI changes for WCAG 2.1 AA baseline compliance. Advisory — not a commi
 - Interactive widgets (modals, dropdowns, tabs)
 - Landing pages or key user journeys
 
----
-
-## First Action
-
-Read `.claude/agents/_agent-glossary.md` and `.claude/agents/_agent-workflow.md` for shared definitions (scope thresholds, risk levels, enforcement terms) before beginning review.
+**First action:** Read `.claude/agents/_agent-glossary.md` and `.claude/agents/_agent-workflow.md` for shared definitions before beginning review.
 
 ---
 

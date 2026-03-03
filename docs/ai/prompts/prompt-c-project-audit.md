@@ -4,9 +4,7 @@ Read and follow `AI.md`. Read all files referenced in AI.md's source-of-truth se
 
 ## Phase Sequence
 
-`init[agent] → scope[both] → dispatch[agent] → synthesize[agent] → op-review[operator] → close[agent]`
-
-Phase-state is managed automatically by hooks. See Decision 0014 for canonical definitions. The close phase for audit is lightweight — zero-change unless deferrals produce file modifications.
+Phase sequences are defined in `_agent-glossary.md` § Phase Model and enforced by `_phase-helper.sh`. See Decision 0014 for canonical definitions. Audit: `init → scope → dispatch → synthesize → op-review → close`. The close phase is lightweight — zero-change unless deferrals produce file modifications.
 
 ## Project Context
 
@@ -21,7 +19,7 @@ Select which dimensions to audit. Not all-or-nothing — pick what's relevant.
 | Spec drift | Auditor | `drift` | Architect |
 | Decision compliance | Auditor | `compliance` | — |
 | Cohesion drift | Auditor | `cohesion-drift` | Architect |
-| Security | Security/Privacy | full-codebase scope | — (already specialist) |
+| Security | Security/Privacy | full-codebase scope | Security Analyst (spec-level) |
 | Performance | Performance Engineer | code-review scope | — (already specialist) |
 | Governance | Auditor | `governance` | Analytics |
 | Tech debt | Auditor | `tech-debt` | Analytics |

@@ -32,21 +32,7 @@ The trigger parser uses a compiled index at `docs/ai/decisions/.a1-trigger-index
 **Regenerate after adding or modifying decision triggers:**
 
 ```bash
-# From repo root — rebuilds the index from all t-*.md and 0*.md decision files:
-for f in docs/ai/decisions/t-*.md docs/ai/decisions/0*.md; do
-  [ -f "$f" ] || continue
-  grep -q '^## Triggers' "$f" || continue
-  id=$(basename "$f" | sed -E 's/^(t-)?([0-9]+)-.*/\2/')
-  block=$(sed -n '/^## Triggers/,/^## /{ /^## Triggers/d; /^## /d; p; }' "$f")
-  paths=$(echo "$block" | grep -oE 'paths?:\s*`[^`]*`' | sed -E 's/^paths?:[[:space:]]*`//' | sed 's/`$//')
-  keywords=$(echo "$block" | grep -oE 'keywords?:\s*`[^`]*`' | sed -E 's/^keywords?:[[:space:]]*`//' | sed 's/`$//')
-  [ -z "$paths" ] && continue
-  while IFS= read -r p; do
-    p=$(echo "$p" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
-    [ -z "$p" ] && continue
-    echo "${id}|${p}|${keywords}"
-  done <<< "$paths"
-done > docs/ai/decisions/.a1-trigger-index
+.claude/.automation/lib/rebuild-trigger-index.sh
 ```
 
 A staleness warning is emitted when any decision file has a newer modification time than the index. The index should be committed (tracked, not gitignored).
@@ -104,11 +90,11 @@ Pre-commit gates verify governance steps completed by checking state files in `.
 | `reviewer-signed` | `state-writer.sh` (reviewer) | High-risk detection |
 | `security-signed` | `state-writer.sh` (security-privacy) | High-risk detection |
 | `high-risk-detected` | `pre-commit-gates.sh` | Audit trail (written when risk patterns match) |
-| `governance-checked` | `branch-guard.sh` (Gate 3, Bash) or `pre-commit-gates.sh` (Gate 3, commit) | First-fire marker (inter-session governance advisory) |
+| `governance-checked` | `pre-commit-gates.sh` (Gate 3, commit) | First-fire marker (inter-session governance advisory) |
 | `phase-state` | `_phase-helper.sh` (via hooks) | Phase-aware flow tracking (read by hooks for phase assertions) |
 | `overrides.log` | `_analytics-helper.sh` (`log_override`) | Override audit summary (session-close-check) |
 
-Note: Gate 5 (session isolation, Decision 0013) uses `.claude/local/closed-branches` — a persistent ledger, not a session-scoped state file. It is not listed in the table above because it is not cleaned at session close. Gate 5 is enforced by `branch-guard-edit.sh` on Edit/Write and `branch-guard.sh` on Bash.
+Note: Gate 5 (session isolation, Decision 0013) uses `.claude/local/closed-branches` — a persistent ledger, not a session-scoped state file. It is not listed in the table above because it is not cleaned at session close. Gate 5 is enforced by `write-guard.sh` (Section 3) on Edit/Write and `branch-guard.sh` on Bash.
 
 **Recovery override:** Set `REPO_OS_RECOVER=1` to skip all state-dependent checks in pre-commit, pre-push, and branch-guard gates. Emergency path for hook crashes or debugging sessions.
 

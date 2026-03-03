@@ -12,6 +12,7 @@ Review compiled specs or feature briefs before build begins. All findings are ad
 - **RECOMMENDATION** — Operator decides whether to act
 - **IDEA** — Nice-to-have, alternative, or future consideration
 
+<!-- Sync Brief Format with _advisory-board.md -->
 ## Brief Format
 
 Use this compressed format. If you have no findings, return only: `## [Your Agent Name] Brief — No findings`

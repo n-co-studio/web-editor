@@ -31,6 +31,17 @@ esac
 _REPO_OS_HAS_JQ=false
 command -v jq &>/dev/null && _REPO_OS_HAS_JQ=true
 
+# --- Hash command availability (probed once at source-time) ---
+# Eliminates per-call command probing in portable_hash().
+_REPO_OS_HASH_CMD=""
+if command -v shasum &>/dev/null; then
+  _REPO_OS_HASH_CMD="shasum"
+elif command -v sha256sum &>/dev/null; then
+  _REPO_OS_HASH_CMD="sha256sum"
+else
+  _REPO_OS_HASH_CMD="openssl"
+fi
+
 now_ms() {
   if [ -n "${EPOCHREALTIME:-}" ]; then
     # Bash 5+: zero-fork millisecond timestamp
@@ -46,15 +57,13 @@ now_ms() {
 }
 
 # --- Portable SHA-256 (stdin-based) ---
-# Three-way fallback: shasum / sha256sum / openssl. Reads stdin, outputs hex digest.
+# Uses cached _REPO_OS_HASH_CMD (probed at source-time). Reads stdin, outputs hex digest.
 portable_hash() {
-  if command -v shasum &>/dev/null; then
-    shasum -a 256 | awk '{print $1}'
-  elif command -v sha256sum &>/dev/null; then
-    sha256sum | awk '{print $1}'
-  else
-    openssl sha256 | awk '{print $NF}'
-  fi
+  case "$_REPO_OS_HASH_CMD" in
+    shasum)    shasum -a 256 | awk '{print $1}' ;;
+    sha256sum) sha256sum | awk '{print $1}' ;;
+    *)         openssl sha256 | awk '{print $NF}' ;;
+  esac
 }
 
 # --- Repo root (derived from this file's location — never depends on CWD or git) ---
@@ -155,7 +164,7 @@ extract_write_targets() {
 # All repos write to ~/.local/share/repo-os-analytics/<repo-name>/events/.
 # Repo name derived from basename (same convention as register_repo).
 get_analytics_dir() {
-  local repo_root="${1:-$(get_repo_root)}"
+  local repo_root="${1:-$_REPO_OS_ROOT}"
   local repo_name
   repo_name="$(basename "$repo_root")"
   echo "$HOME/.local/share/repo-os-analytics/$repo_name/events"
@@ -173,7 +182,13 @@ get_session_id() {
   if [ -f "$sid_file" ]; then
     _CACHED_SESSION_ID=$(cat "$sid_file")
   else
-    _CACHED_SESSION_ID="$(date +%Y%m%d-%H%M%S)"
+    # Sub-second uniqueness: EPOCHREALTIME fractional (Bash 5+), PID fallback
+    if [ -n "${EPOCHREALTIME:-}" ]; then
+      local _frac="${EPOCHREALTIME#*.}"
+      _CACHED_SESSION_ID="$(date +%Y%m%d-%H%M%S)-${_frac:0:4}"
+    else
+      _CACHED_SESSION_ID="$(date +%Y%m%d-%H%M%S)-$$"
+    fi
     echo "$_CACHED_SESSION_ID" > "$sid_file" 2>/dev/null || true
   fi
   echo "$_CACHED_SESSION_ID"
@@ -193,7 +208,7 @@ _CACHED_MODE=""
 get_mode() {
   if [ -z "$_CACHED_MODE" ]; then
     local repo_root
-    repo_root="$(get_repo_root)"
+    repo_root="$_REPO_OS_ROOT"
     _CACHED_MODE="${REPO_OS_MODE:-}"
     if [ -z "$_CACHED_MODE" ]; then
       local mode_file="$repo_root/.claude/repo-mode"
@@ -215,7 +230,9 @@ get_mode() {
 _CACHED_SESSION_TYPE=""
 _CACHED_SESSION_TYPE_SET=false
 # Audit C7: process-scoped overlap check cache (avoids redundant globs per invocation)
+# PID-bound: cache only valid for the same process (prevents stale results across invocations)
 _SESSION_OVERLAP_CHECKED=false
+_SESSION_OVERLAP_CHECK_PID=""
 get_session_type() {
   if [ "$_CACHED_SESSION_TYPE_SET" = true ]; then
     echo "$_CACHED_SESSION_TYPE"
@@ -223,7 +240,7 @@ get_session_type() {
   fi
 
   local repo_root
-  repo_root="$(get_repo_root)"
+  repo_root="$_REPO_OS_ROOT"
   local state_file="$repo_root/.claude/.state/phase-state"
   local result=""
 
@@ -270,7 +287,7 @@ log_hook_event() {
   local path="${8:-}"
 
   local repo_root
-  repo_root="$(get_repo_root)"
+  repo_root="$_REPO_OS_ROOT"
   local sid
   sid="$(get_session_id "$repo_root")"
   local end_ms
@@ -347,7 +364,7 @@ log_override() {
   local env_var="$2"
 
   local repo_root
-  repo_root="$(get_repo_root)"
+  repo_root="$_REPO_OS_ROOT"
   local state_dir="$repo_root/.claude/.state"
   mkdir -p "$state_dir" 2>/dev/null || true
 
@@ -426,7 +443,7 @@ except:
 # Fail-silent: registry failures never block session start.
 register_session() {
   local repo_root
-  repo_root="$(get_repo_root)"
+  repo_root="$_REPO_OS_ROOT"
   local sid
   sid="$(get_session_id "$repo_root")"
   local stype="${1:-}"
@@ -468,7 +485,7 @@ register_session() {
 # Fail-silent: cleanup failures are non-fatal.
 unregister_session() {
   local repo_root
-  repo_root="$(get_repo_root)"
+  repo_root="$_REPO_OS_ROOT"
   local sid
   sid="$(get_session_id "$repo_root")"
 
@@ -507,7 +524,7 @@ unregister_session() {
 }
 
 # --- Check for concurrent session overlap on the same branch ---
-# Called by branch-guard-edit.sh and branch-guard.sh on each Edit/Write/Bash.
+# Called by write-guard.sh (Section 3) and branch-guard.sh on each Edit/Write/Bash.
 # Returns: 0 = no overlap or advisory only, 2 = blocking overlap.
 # Advisory for task group sharing; BLOCKING for non-task-group overlap.
 # Override: REPO_OS_SKIP_OVERLAP_CHECK=1
@@ -519,13 +536,13 @@ check_session_overlap() {
     return 0
   fi
 
-  # Audit C7: skip redundant checks after first successful pass
-  if [ "$_SESSION_OVERLAP_CHECKED" = true ]; then
+  # Audit C7: skip redundant checks after first successful pass (PID-bound)
+  if [ "$_SESSION_OVERLAP_CHECKED" = true ] && [ "$_SESSION_OVERLAP_CHECK_PID" = "$$" ]; then
     return 0
   fi
 
   local repo_root
-  repo_root="$(get_repo_root)"
+  repo_root="$_REPO_OS_ROOT"
   local sessions_dir="$repo_root/.claude/.state/sessions"
   [ -d "$sessions_dir" ] || return 0
 
@@ -586,5 +603,6 @@ check_session_overlap() {
 
   # Audit C7: cache successful check to skip redundant globs on subsequent calls
   _SESSION_OVERLAP_CHECKED=true
+  _SESSION_OVERLAP_CHECK_PID="$$"
   return 0
 }

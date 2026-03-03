@@ -60,20 +60,13 @@ if [ ${#LOCAL_FILES[@]} -eq 0 ]; then
   exit 0
 fi
 
-# --- Compute orphans (local files not in manifest) ---
+# --- Compute orphans (local files not in manifest — linear via sort+comm) ---
+MANIFEST_SORTED=$(printf '%s\n' "${MANIFEST_FILES[@]}" | sort)
+LOCAL_SORTED=$(printf '%s\n' "${LOCAL_FILES[@]}" | sort)
 ORPHANS=()
-for local_file in "${LOCAL_FILES[@]}"; do
-  found=false
-  for manifest_file in "${MANIFEST_FILES[@]}"; do
-    if [ "$local_file" = "$manifest_file" ]; then
-      found=true
-      break
-    fi
-  done
-  if [ "$found" = false ]; then
-    ORPHANS+=("$local_file")
-  fi
-done
+while IFS= read -r orphan; do
+  [ -n "$orphan" ] && ORPHANS+=("$orphan")
+done < <(comm -23 <(echo "$LOCAL_SORTED") <(echo "$MANIFEST_SORTED"))
 
 if [ ${#ORPHANS[@]} -eq 0 ]; then
   echo "No orphaned template decisions found — all local t-*.md files match manifest."

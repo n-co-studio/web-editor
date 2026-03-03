@@ -4,9 +4,11 @@ docs/spec/compiled/
 # Session logs and known issues
 docs/ai/logs/
 
-# Decision records: NOT excluded. Template decisions (0001-0099) sync to child repos.
+# Decision records: NOT excluded. Template decisions (`t-*`) sync to child repos.
 # Child decisions (0100+) are safe — actions-template-sync operates add/update-only
 # (does not delete child-only files), so project-specific decisions remain untouched.
+# Orphaned template decisions are cleaned up via child-sync-decisions.sh using
+# t-manifest.txt as the authoritative source (Decision 0022).
 
 # Prototype briefs and learnings
 docs/spec/prototypes/
@@ -16,6 +18,9 @@ docs/spec/prototypes/
 
 # Analytics data — legacy per-repo location (active data now at ~/.local/share/repo-os-analytics/)
 .claude/analytics/
+
+# Child-sync config (template-operator-specific local paths)
+.claude/.automation/child-repos.conf
 
 # Workflow files (repo-specific; GITHUB_TOKEN cannot push workflow changes)
 .github/workflows/template-sync.yml

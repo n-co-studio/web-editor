@@ -9,9 +9,6 @@
 #          phase-state absent/stale (Decision 0019). Advisory warn when
 #          sentinel absent (backward compat). Experiment branches exempt
 #          (Decision 0006). Session types without plan phase exempt.
-# Gate 3: Inter-session governance file check (advisory, first-fire).
-#          Warns if docs/ai/governance/spec-compiled or advisory-reviewed missing.
-# Gate 4: (Removed — covered by phase model contract-init phase.)
 # Gate 6: Session overlap check (Decision 0013). Blocks concurrent
 #          non-task-group sessions on the same branch. Advisory for task
 #          groups. Exempt: taskdef-query, taskdef-brief (Prompt T).
@@ -209,48 +206,6 @@ else
     fi
   fi
 fi
-
-# --- Gate 3: Inter-session governance (advisory, first-fire) ---
-# Checks that Prompt 0 (spec-compiled) and Prompt A (advisory-reviewed)
-# governance files exist before Prompt B work begins.
-# Non-blocking: prints warnings, does not exit 2.
-GOVERNANCE_CHECKED_FILE="$REPO_ROOT/.claude/.state/governance-checked"
-
-if [ ! -f "$GOVERNANCE_CHECKED_FILE" ]; then
-  GOV_DIR="$REPO_ROOT/docs/ai/governance"
-  GOV_WARNINGS=""
-
-  case "$CURRENT_BRANCH" in
-    feature/*|fix/*|hotfix/*|release/*)
-      if [ ! -f "$GOV_DIR/spec-compiled" ]; then
-        GOV_WARNINGS="${GOV_WARNINGS}Advisory: docs/ai/governance/spec-compiled not found — Prompt 0 may not have completed governance write.\n"
-      fi
-      if [ ! -f "$GOV_DIR/advisory-reviewed" ]; then
-        GOV_WARNINGS="${GOV_WARNINGS}Advisory: docs/ai/governance/advisory-reviewed not found — Prompt A may not have completed governance write.\n"
-      fi
-      ;;
-  esac
-
-  if [ -n "$GOV_WARNINGS" ]; then
-    printf '%b' "$GOV_WARNINGS" >&2
-    # Build detail: which files are missing
-    MISSING_FILES=""
-    [ ! -f "$GOV_DIR/spec-compiled" ] && MISSING_FILES="spec-compiled"
-    [ ! -f "$GOV_DIR/advisory-reviewed" ] && MISSING_FILES="${MISSING_FILES:+$MISSING_FILES,}advisory-reviewed"
-    log_hook_event "branch-guard" "PreToolUse" "" "warn" "$START_MS" "gate3_gov_warning" "$MISSING_FILES"
-  fi
-
-  # Shell I/O — branch-guard's own .state/ writes are not intercepted
-  # by Claude Code hooks (hooks only fire on model tool calls, not hook I/O)
-  mkdir -p "$REPO_ROOT/.claude/.state" 2>/dev/null || true
-  echo "checked" > "$GOVERNANCE_CHECKED_FILE" 2>/dev/null || true
-  log_hook_event "branch-guard" "PreToolUse" "" "allow" "$START_MS" "gate3_checked"
-fi
-
-# --- Gate 4: Phase chain verification — REMOVED ---
-# Covered by phase model's contract-init phase and init_phase session-type
-# validation. See Decision 0014 and Brief 2 (Hook Phase Integration).
-# Retained at commit-time in pre-commit-gates.sh as Gate 3 (governance advisory).
 
 # --- Gate 6: Session overlap check (Decision 0013 concurrent awareness) ---
 # Checks for same-branch overlap with another active session.

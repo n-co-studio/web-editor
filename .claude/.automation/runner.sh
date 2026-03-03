@@ -242,9 +242,10 @@ _check_stale_locks() {
     hb_ts=$(cat "$hb_file" 2>/dev/null || true)
     [ -z "$hb_ts" ] && continue
 
-    # Parse ISO 8601 to epoch (macOS date -j -f)
+    # Parse ISO 8601 to epoch (portable via _iso_to_epoch from _analytics-helper.sh)
     local hb_epoch now_epoch age_hours
-    hb_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$hb_ts" "+%s" 2>/dev/null || echo "0")
+    hb_epoch=$(_iso_to_epoch "$hb_ts" 2>/dev/null)
+    [ -z "$hb_epoch" ] && hb_epoch=0
     now_epoch=$(date +%s)
     if [ "$hb_epoch" -gt 0 ]; then
       age_hours=$(( (now_epoch - hb_epoch) / 3600 ))

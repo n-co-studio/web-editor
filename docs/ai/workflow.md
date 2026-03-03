@@ -70,7 +70,7 @@ Decision 0021. Optional LLM persona simulation providing synthetic user perspect
 
 ## Branch Categories
 
-Work happens on categorized branches. BLOCK: never commit directly to `main` — enforced by branch-guard.sh / branch-guard-edit.sh. In solo mode (Decision 0015), branches merge to main directly at session close. See `docs/ai/quality-gates.md` for branch types and gate mapping.
+Work happens on categorized branches. BLOCK: never commit directly to `main` — enforced by branch-guard.sh / write-guard.sh (Section 3). In solo mode (Decision 0015), branches merge to main directly at session close. See `docs/ai/quality-gates.md` for branch types and gate mapping.
 
 ## Session Lifecycle
 
@@ -98,7 +98,7 @@ Decision 0015. Branches merge to main directly at session close. Applies to `fea
 
 ### Session Branch Isolation
 
-Decision 0013. Each session uses a dedicated branch. BLOCK: when a session closes, the branch is sealed — no future session may edit files on it (enforced by branch-guard.sh / branch-guard-edit.sh). Create a new branch for new work. Task group sessions are exempt (multi-brief groups share one branch across sessions). Override: `REPO_OS_SKIP_BRANCH_REUSE=1`.
+Decision 0013. Each session uses a dedicated branch. BLOCK: when a session closes, the branch is sealed — no future session may edit files on it (enforced by branch-guard.sh / write-guard.sh (Section 3)). Create a new branch for new work. Task group sessions are exempt (multi-brief groups share one branch across sessions). Override: `REPO_OS_SKIP_BRANCH_REUSE=1`.
 
 **Concurrent session awareness**: The session registry (`.claude/.state/sessions/`) tracks active sessions. `register_session()` writes a YAML file at session init; `unregister_session()` removes it at close and cleans stale entries (dead PIDs, >24h age). When multiple sessions target the same branch, non-task-group overlap is blocked at edit time (Gate 6 in branch-guard hooks). Task group sessions sharing a branch receive an advisory warning. Prompt T sessions (taskdef-query, taskdef-brief) are exempt. Override: `REPO_OS_SKIP_OVERLAP_CHECK=1`.
 
