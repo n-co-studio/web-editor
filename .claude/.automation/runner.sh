@@ -269,6 +269,7 @@ _check_stale_locks() {
 #   $3 — session_type (Decision 0014 enum)
 #   $4 — existing_branch (optional, for task group)
 #   $5 — permission_profile (optional, default: "build")
+#   $6 — push_on_complete (optional, default: "false")
 # Output: "outcome:detail" on stdout
 _run_single_entry() {
   local brief_id="$1"
@@ -276,6 +277,7 @@ _run_single_entry() {
   local session_type="$3"
   local existing_branch="${4:-}"
   local permission_profile="${5:-build}"
+  local push_on_complete="${6:-false}"
 
   # Pre-launch setup
   state_manager_setup "$REPO_ROOT" "$session_type"
@@ -289,6 +291,8 @@ _run_single_entry() {
 
   # Set automation context for analytics hooks (inherited by claude -p child)
   export REPO_OS_AUTOMATION_ENTRY="$brief_id"
+  # Set headless flag for hooks (ask-user-deny.sh blocks AskUserQuestion)
+  export CLAUDE_HEADLESS=1
 
   # Resolve permission profile to --disallowedTools string
   local disallowed
@@ -317,6 +321,7 @@ _run_single_entry() {
 
   # Clear automation context
   unset REPO_OS_AUTOMATION_ENTRY
+  unset CLAUDE_HEADLESS
 
   # Outcome detection (with entry_id and stderr for enriched blocker reports)
   local outcome_raw
@@ -339,15 +344,70 @@ _run_single_entry() {
     case "$entry_current_branch" in
       feature/*|fix/*|hotfix/*)
         local _merge_ok=false
+        local _merge_conflict=false
+        local _conflict_files=""
         if git checkout main 2>/dev/null; then
           if git merge --ff-only "$entry_current_branch" 2>/dev/null; then
             _merge_ok=true
+          else
+            # ff-only failed — try --no-ff merge
+            if git merge --no-ff -m "Merge $entry_current_branch (auto)" "$entry_current_branch" 2>/dev/null; then
+              _merge_ok=true
+            else
+              # Merge conflict — capture conflict file list before aborting
+              _merge_conflict=true
+              _conflict_files=$(git diff --name-only --diff-filter=U 2>/dev/null || echo "unknown")
+              git merge --abort 2>/dev/null || true
+            fi
           fi
         fi
         if [ "$_merge_ok" = true ]; then
           record_closed_branch "$entry_current_branch"
           echo "Solo merge: $entry_current_branch → main (success)" >&2
+          # Push to remote — push_on_complete or advisory fallback
+          local _repo_mode_file="$REPO_ROOT/.claude/repo-mode"
+          local _is_template=false
+          [ -f "$_repo_mode_file" ] && grep -q "template" "$_repo_mode_file" 2>/dev/null && _is_template=true
+          if [ "$push_on_complete" = "true" ] && git remote get-url origin >/dev/null 2>&1; then
+            if ! git push -u origin main >/dev/null 2>&1; then
+              echo "WARNING: push_on_complete failed — run 'git push origin main' manually" >&2
+            fi
+          elif [ "$_is_template" = false ] && git remote get-url origin >/dev/null 2>&1; then
+            if ! git push origin main >/dev/null 2>&1; then
+              echo "Advisory: push to origin failed — run 'git push origin main' manually" >&2
+            fi
+          fi
+        elif [ "$_merge_conflict" = true ]; then
+          # Merge conflict — write scope-deviation escalation and transition to review
+          git checkout "$entry_current_branch" 2>/dev/null || true
+          local _esc_dir="$REPO_ROOT/.claude/.automation/escalations"
+          mkdir -p "$_esc_dir" 2>/dev/null || true
+          local _esc_id="esc-merge-$(date +%Y%m%d-%H%M%S)"
+          local _esc_context
+          _esc_context=$(printf '%s' "$_conflict_files" | tr '\n' ',' | sed 's/,$//')
+          {
+            printf 'escalation:\n'
+            printf '  id: "%s"\n' "$_esc_id"
+            printf '  queue_entry_id: "%s"\n' "$brief_id"
+            printf '  type: "scope-deviation"\n'
+            printf '  severity: "blocking"\n'
+            printf '  phase_at_exit: "close"\n'
+            printf '  tag_at_exit: "agent"\n'
+            printf '  message: "Merge conflict during solo merge of %s into main"\n' "$entry_current_branch"
+            printf '  context: "conflict_files: %s"\n' "$_esc_context"
+            printf '  scope_classification: ""\n'
+            printf '  risk_gain:\n'
+            printf '    risk: "Branch has diverged from main — manual conflict resolution required"\n'
+            printf '    gain: ""\n'
+            printf '  created_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            printf '  resolved: false\n'
+            printf '  resolution: ""\n'
+          } > "$_esc_dir/${_esc_id}.yaml" 2>/dev/null || true
+          # Override outcome to review so daemon transitions entry correctly
+          outcome_raw="review:merge-conflict"
+          echo "Solo merge conflict: $entry_current_branch — escalation $_esc_id written, entry → review" >&2
         else
+          # Non-conflict failure (e.g., checkout failed)
           git merge --abort 2>/dev/null || true
           git checkout "$entry_current_branch" 2>/dev/null || true
           echo "WARNING: Solo merge of '$entry_current_branch' into main failed — branch left open for manual resolution" >&2
@@ -358,6 +418,14 @@ _run_single_entry() {
         record_closed_branch "$entry_current_branch"
         ;;
     esac
+  elif [ "$_outcome_type" = "completed" ] && [ "$push_on_complete" = "true" ] && [ -n "$entry_current_branch" ] && [ "$entry_current_branch" != "main" ]; then
+    # Non-solo completed entry with push_on_complete — push feature branch
+    if git remote get-url origin >/dev/null 2>&1; then
+      if ! git push -u origin "$entry_current_branch" >/dev/null 2>&1; then
+        echo "WARNING: push_on_complete failed for $entry_current_branch — push manually" >&2
+      fi
+    fi
+    record_closed_branch "$entry_current_branch"
   elif [ -n "$entry_current_branch" ] && [ "$entry_current_branch" != "main" ]; then
     # Non-solo or failed outcome — still seal the branch
     record_closed_branch "$entry_current_branch"
@@ -412,7 +480,7 @@ if [ "$DAEMON_MODE" = false ]; then
   PROMPT="You are working on brief: $BRIEF_ID. Read the task brief and execute it."
 
   # Execute
-  RESULT_RAW=$(_run_single_entry "$BRIEF_ID" "$PROMPT" "$SESSION_TYPE" "$EXISTING_BRANCH")
+  RESULT_RAW=$(_run_single_entry "$BRIEF_ID" "$PROMPT" "$SESSION_TYPE" "$EXISTING_BRANCH" "build" "false")
   OUTCOME_RAW="${RESULT_RAW%%|*}"
   OUTCOME="${OUTCOME_RAW%%:*}"
 
@@ -498,6 +566,7 @@ while true; do
   ENTRY_BRANCH="$_QE_BRANCH"
   ENTRY_BRIEF_PATH="$_QE_BRIEF_PATH"
   ENTRY_WORK_ORDER_ID="$_QE_WORK_ORDER_ID"
+  ENTRY_PUSH="${_QE_PUSH_ON_COMPLETE:-false}"
 
   echo "Processing entry: $ENTRY_ID (type: $ENTRY_SESSION_TYPE)" >&2
 
@@ -518,7 +587,7 @@ while true; do
 
   # --- Execute ---
   RESULT_RAW=""
-  RESULT_RAW=$(_run_single_entry "$ENTRY_ID" "$PROMPT" "$ENTRY_SESSION_TYPE" "$ENTRY_BRANCH") || true
+  RESULT_RAW=$(_run_single_entry "$ENTRY_ID" "$PROMPT" "$ENTRY_SESSION_TYPE" "$ENTRY_BRANCH" "build" "$ENTRY_PUSH") || true
 
   # --- Stop heartbeat ---
   _stop_heartbeat

@@ -20,7 +20,9 @@
 0014|\.claude/\.state/phase-state|phase, session_type, init_phase, advance_phase, assert_phase, phase-state, get_phase, get_tag, taskgroup-merge
 0016|\.claude/agents/auditor\.md|auditor, audit, dimension, co-audit, workshop, escalation, tech-debt, cohesion-drift
 0016|docs/ai/prompts/prompt-c-project-audit\.md|auditor, audit, dimension, co-audit, workshop, escalation, tech-debt, cohesion-drift
-0017|\.claude/\.automation/|automation, headless, runner, queue, escalation, blocker, claude -p, enabled
+0017|\.claude/\.automation/|automation, headless, runner, queue, escalation, blocker, claude -p, enabled, permission-request, allowlist, scope-deviation, scope_classification
+0017|\.claude/hooks/permission-request\.sh|automation, headless, runner, queue, escalation, blocker, claude -p, enabled, permission-request, allowlist, scope-deviation, scope_classification
+0017|\.claude/hooks/_permission-allowlist\.sh|automation, headless, runner, queue, escalation, blocker, claude -p, enabled, permission-request, allowlist, scope-deviation, scope_classification
 0018|\.claude/hooks/(branch-guard|pre-commit-gates)\.sh|taskgroup, task.group, contract, merge, A6_contract_missing, tg_merge_blocked, SKIP_MERGE_GUARD
 0019|\.claude/hooks/(branch-guard|branch-guard-edit)\.sh|fail-closed, no_phase_state, phase_gate_no_state, .fail-closed-enforced
 0019|docs/ai/decisions/\.fail-closed-enforced|fail-closed, no_phase_state, phase_gate_no_state, .fail-closed-enforced
@@ -30,3 +32,7 @@
 0020|\.claude/agents/_cohesion-review\.md|task-contract, task_contract, intent:, verification:
 0020|\.claude/agents/critic\.md|task-contract, task_contract, intent:, verification:
 0021|\.claude/agents/_user-review-tier-[1-3]\.md|user-review, persona, tier
+0022|docs/ai/decisions/|t-prefix, t-manifest, template decision, decision naming, child-sync-decisions
+0022|.claude/hooks/write-guard.sh|t-prefix, t-manifest, template decision, decision naming, child-sync-decisions
+0022|.claude/hooks/pre-commit-gates.sh|t-prefix, t-manifest, template decision, decision naming, child-sync-decisions
+0022|.claude/.automation/lib/child-sync-decisions.sh|t-prefix, t-manifest, template decision, decision naming, child-sync-decisions

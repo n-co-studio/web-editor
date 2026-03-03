@@ -22,7 +22,7 @@ Set in `.claude/repo-mode`. Override per-session with `REPO_OS_MODE=<mode>`.
 | `child` | Product code + limited governance | Default for downstream projects |
 | `autonomous` | Product code + minimal governance | Headless / CI operation |
 
-See [Decision 0012](docs/ai/decisions/0012-file-edit-restrictions.md) for carve-out details.
+See [Decision 0012](docs/ai/decisions/t-0012-file-edit-restrictions.md) for carve-out details.
 
 ## Prompt Chain
 
@@ -117,7 +117,7 @@ done
 
 ### Decision Numbering
 
-- **0001–0099** — Template-synced decisions. Locked in child/autonomous modes.
+- **`t-*`** — Template-owned decisions (`t-` prefix). Synced from upstream, locked in child/autonomous modes.
 - **0100+** — Project-specific decisions. Editable in child mode.
 
 ## For Template Contributors
@@ -132,7 +132,7 @@ done
 - [AI.md](AI.md) — Canonical governance index and authority model
 - [Workflow](docs/ai/workflow.md) — Session lifecycle, HVST protocol, git trailer convention
 - [Quality Gates](docs/ai/quality-gates.md) — Gate definitions, branch profiles, state files
-- [Decisions](docs/ai/decisions/) — Accepted governance decisions (0001–0099 template-synced)
+- [Decisions](docs/ai/decisions/) — Accepted governance decisions (`t-*` template-synced)
 - [Prompts](docs/ai/prompts/) — All session prompts (0, 0.5, A, B, T, C)
 - [Agent Glossary](.claude/agents/_agent-glossary.md) — Scope definitions, risk levels, protocols
 - [Visual Explainer](repo-os-explainer.html) — Interactive system overview

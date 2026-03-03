@@ -533,8 +533,8 @@ assert_fail "$_LAST_RC" "mode-guard blocks product path in template mode"
 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/.claude/hooks/test-hook.sh")"
 assert_ok "$_LAST_RC" "mode-guard allows .claude/hooks/ in template mode"
 
-run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/docs/ai/decisions/0001-test.md")"
-assert_ok "$_LAST_RC" "mode-guard allows docs/ai/decisions/ in template mode"
+run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/docs/ai/decisions/t-0001-test.md")"
+assert_ok "$_LAST_RC" "mode-guard allows docs/ai/decisions/t-*.md in template mode"
 
 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/AI.md")"
 assert_ok "$_LAST_RC" "mode-guard allows AI.md in template mode"
@@ -562,6 +562,18 @@ assert_ok "$_LAST_RC" "mode-guard allows product path in child mode"
 # --- Child mode: immune path still blocks ---
 REPO_OS_MODE=child run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/.claude/repo-mode")"
 assert_fail "$_LAST_RC" "mode-guard blocks immune path even in child mode"
+
+# --- Child mode: template decision (t-*.md) → blocks (Decision 0022) ---
+REPO_OS_MODE=child run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/docs/ai/decisions/t-0001-test.md")"
+assert_fail "$_LAST_RC" "mode-guard blocks template decision (t-*.md) in child mode"
+
+# --- Child mode: child decision (0100+) → allows ---
+REPO_OS_MODE=child run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/docs/ai/decisions/0100-test.md")"
+assert_ok "$_LAST_RC" "mode-guard allows child decision (0100+) in child mode"
+
+# --- Autonomous mode: template decision (t-*.md) → blocks (Decision 0022) ---
+REPO_OS_MODE=autonomous run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/docs/ai/decisions/t-0001-test.md")"
+assert_fail "$_LAST_RC" "mode-guard blocks template decision (t-*.md) in autonomous mode"
 
 # ============================================================
 # L3.8 — State chain integration (full lifecycle)
