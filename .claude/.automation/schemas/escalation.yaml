@@ -1,15 +1,31 @@
 # Escalation Schema — operator-directed escalation from a runner.
-# Type taxonomy covers all runner failure modes requiring human intervention.
+# Type taxonomy covers all runner failure modes and scope deviations
+# requiring human intervention.
+#
+# 9 escalation types:
+#   gate-failure          — governance gate blocked commit/push
+#   governance-block      — hook enforcement prevented action
+#   phase-tag-escalation  — phase tag was 'operator' at exit
+#   ambiguity             — runner could not determine next action
+#   scope-exceeded        — changes exceeded configured limits
+#   dependency-missing    — required external resource unavailable
+#   security-risk         — vulnerability detected (auth bypass, injection, unsafe deserialization, etc.)
+#   structural-change     — spec-level or architectural change not in brief
+#   scope-deviation       — change outside brief scope (classified by scope_classification)
 
 escalation:
   id: ""                    # unique escalation identifier
   queue_entry_id: ""        # references the originating queue entry
-  type: ""                  # gate-failure | governance-block | phase-tag-escalation | ambiguity | scope-exceeded | dependency-missing
+  type: ""                  # gate-failure | governance-block | phase-tag-escalation | ambiguity | scope-exceeded | dependency-missing | security-risk | structural-change | scope-deviation
   severity: ""              # blocking | advisory
   phase_at_exit: ""         # phase when escalation occurred
   tag_at_exit: ""           # phase automation tag (agent/operator/both) at escalation
   message: ""               # human-readable description
   context: ""               # additional structured context (gate name, hook output, etc.)
+  scope_classification: ""  # briefed | unbriefed-in-scope | out-of-scope (populated when type is scope-deviation)
+  risk_gain:                # structured risk/gain context (populated by agent at commit time for scope deviations)
+    risk: ""                # what could go wrong if the change is accepted
+    gain: ""                # why the change helps the brief goal
   created_at: ""            # ISO 8601 timestamp
   resolved: false           # true when operator has addressed
   resolution: ""            # operator resolution notes

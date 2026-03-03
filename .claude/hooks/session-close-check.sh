@@ -22,6 +22,9 @@
 #   3. HVST failures but known-issues.md not updated
 #   4. Deferrals pending but known-issues.md not updated
 #
+# PARITY: runner.sh replicates post-session tasks externally (Decision 0017).
+# See .claude/.automation/RUNNER-PARITY.md for the full mapping.
+#
 # Overrides: SKIP_SESSION_LOG=1, SKIP_UNCOMMITTED_CHECK=1,
 #            SKIP_KNOWN_ISSUES_CHECK=1, SKIP_CONTRACT_CHECK=1
 
