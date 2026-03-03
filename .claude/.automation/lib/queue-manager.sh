@@ -33,7 +33,7 @@ _ensure_queue_dirs() {
 
 # --- Module variables (mirrors queue-entry.yaml fields) ---
 _QE_ID="" _QE_STATUS="" _QE_SESSION_TYPE="" _QE_BRANCH="" _QE_BRIEF_PATH=""
-_QE_PROMPT="" _QE_AUTO_MODE="" _QE_SOLO_MODE="" _QE_RETRY_COUNT=""
+_QE_PROMPT="" _QE_AUTO_MODE="" _QE_SOLO_MODE="" _QE_PUSH_ON_COMPLETE="" _QE_RETRY_COUNT=""
 _QE_MAX_RETRIES="" _QE_ERROR_LOG="" _QE_WORK_ORDER_ID="" _QE_CREATED_AT=""
 _QE_UPDATED_AT="" _QE_COMPLETED_AT=""
 
@@ -44,7 +44,7 @@ _QE_UPDATED_AT="" _QE_COMPLETED_AT=""
 _load_queue_entry() {
   local entry_file="$1"
   _QE_ID="" _QE_STATUS="" _QE_SESSION_TYPE="" _QE_BRANCH="" _QE_BRIEF_PATH=""
-  _QE_PROMPT="" _QE_AUTO_MODE="" _QE_SOLO_MODE="" _QE_RETRY_COUNT=""
+  _QE_PROMPT="" _QE_AUTO_MODE="" _QE_SOLO_MODE="" _QE_PUSH_ON_COMPLETE="" _QE_RETRY_COUNT=""
   _QE_MAX_RETRIES="" _QE_ERROR_LOG="" _QE_WORK_ORDER_ID="" _QE_CREATED_AT=""
   _QE_UPDATED_AT="" _QE_COMPLETED_AT=""
   [ -f "$entry_file" ] || return 1
@@ -80,6 +80,7 @@ ${_line#    }"
       "  prompt: "*)       _QE_PROMPT="${_line#  prompt: }" ;;
       "  auto_mode: "*)    _QE_AUTO_MODE="${_line#  auto_mode: }" ;;
       "  solo_mode: "*)    _QE_SOLO_MODE="${_line#  solo_mode: }" ;;
+      "  push_on_complete: "*) _QE_PUSH_ON_COMPLETE="${_line#  push_on_complete: }" ;;
       "  retry_count: "*)  _QE_RETRY_COUNT="${_line#  retry_count: }" ;;
       "  max_retries: "*)  _QE_MAX_RETRIES="${_line#  max_retries: }" ;;
       "  error_log: "*)    _QE_ERROR_LOG="${_line#  error_log: }" ;;
@@ -120,6 +121,7 @@ _write_queue_entry() {
     fi
     printf '  auto_mode: %s\n' "$_QE_AUTO_MODE"
     printf '  solo_mode: %s\n' "$_QE_SOLO_MODE"
+    printf '  push_on_complete: %s\n' "$_QE_PUSH_ON_COMPLETE"
     printf '  retry_count: %s\n' "$_QE_RETRY_COUNT"
     printf '  max_retries: %s\n' "$_QE_MAX_RETRIES"
     printf '  error_log: %s\n' "$_QE_ERROR_LOG"
@@ -350,6 +352,7 @@ _derive_work_order_label() {
 #   $4 — solo_mode (optional, default from config)
 #   $5 — branch (optional, for task group briefs)
 #   $6 — work_order_id (optional, explicit work order association)
+#   $7 — push_on_complete (optional, default from config)
 # Output: UUID on stdout
 queue_enqueue() {
   local brief_path="$1"
@@ -358,6 +361,7 @@ queue_enqueue() {
   local solo_mode="${4:-}"
   local branch="${5:-}"
   local work_order_id="${6:-}"
+  local push_on_complete="${7:-}"
 
   _ensure_queue_dirs
 
@@ -378,6 +382,10 @@ queue_enqueue() {
     solo_mode=$(_parse_config_field "runner" "default_solo_mode")
     solo_mode="${solo_mode:-false}"
   fi
+  if [ -z "$push_on_complete" ]; then
+    push_on_complete=$(_parse_config_field "runner" "default_push_on_complete")
+    push_on_complete="${push_on_complete:-false}"
+  fi
   local max_retries
   max_retries=$(_parse_config_field "runner" "max_retries")
   max_retries="${max_retries:-3}"
@@ -394,6 +402,7 @@ queue_enqueue() {
   _QE_PROMPT=""
   _QE_AUTO_MODE="$auto_mode"
   _QE_SOLO_MODE="$solo_mode"
+  _QE_PUSH_ON_COMPLETE="$push_on_complete"
   _QE_RETRY_COUNT="0"
   _QE_MAX_RETRIES="$max_retries"
   _QE_ERROR_LOG=""
