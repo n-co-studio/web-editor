@@ -1,40 +1,68 @@
+# Reference: template-sync workflow using the custom sync engine.
+#
+# This file is a REFERENCE TEMPLATE — it is NOT directly used by any
+# automation. Operators must copy this content to their child repo's
+# .github/workflows/template-sync.yml manually (GITHUB_TOKEN cannot
+# push workflow changes via template-sync).
+#
+# The sync engine replaces the PR-based actions-template-sync dependency
+# with a direct-push model. It copies files from the template repo
+# (respecting .templatesyncignore), merges .gitignore via section markers,
+# runs decision cleanup (Decision 0022), and commits directly to main.
+#
+# Preconditions:
+#   - Child repo must allow the GitHub Actions bot to push to main
+#     (no branch protection requiring reviews or status checks)
+#   - SOURCE_REPO_TOKEN secret must have read access to the template repo
+#
+# Decision 0015 — Solo mode (PR-free, direct commit to main)
+# Decision 0022 — Template Decision Naming Convention
+
 name: Template Sync
 
 on:
-  schedule:
-    - cron: "0 6 * * *"
+  # Triggered by upstream template repo (via gh workflow run)
   workflow_dispatch:
+    inputs:
+      source_repo:
+        description: 'Source template repository (owner/name)'
+        required: false
+        default: ''
+
+  # Optional: scheduled sync (uncomment and adjust as needed)
+  # schedule:
+  #   - cron: '0 6 * * 1'  # Weekly on Monday at 06:00 UTC
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
-  template-sync:
+  sync:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          persist-credentials: false
+          fetch-depth: 0
 
-      - uses: AndreasAugustin/actions-template-sync@v2
-        with:
-          source_repo_path: markpreston2/repo-OS-template
-          upstream_branch: main
-          pr_title: "chore: sync with upstream template"
-          pr_labels: template-sync
-          # Required if the template repo is private. Create a classic PAT
-          # with repo + read:org scopes and add it as a repository secret
-          # named SOURCE_REPO_TOKEN. If the template repo is public, remove
-          # this line — the default GITHUB_TOKEN works without extra setup.
-          source_gh_token: ${{ secrets.SOURCE_REPO_TOKEN }}
-          target_gh_token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Auto-merge sync PR
-        run: |
-          PR=$(gh pr list --label template-sync --state open --json number --jq '.[0].number')
-          if [ -n "$PR" ]; then
-            gh pr merge "$PR" --merge --delete-branch
-          fi
+      - name: Run template sync engine
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_REPO_TOKEN: ${{ secrets.SOURCE_REPO_TOKEN }}
+        run: |
+          # Configure git for commit
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Determine template repo URL
+          # Priority: workflow input > hardcoded default
+          TEMPLATE_REPO="${{ github.event.inputs.source_repo }}"
+          if [ -z "$TEMPLATE_REPO" ]; then
+            # Set your template repo here (owner/name format)
+            TEMPLATE_REPO="markpreston2/repo-OS-template"
+          fi
+
+          # Build authenticated URL for private template repos
+          TEMPLATE_URL="https://x-access-token:${SOURCE_REPO_TOKEN}@github.com/${TEMPLATE_REPO}.git"
+
+          # Run the sync engine
+          bash .claude/.automation/lib/template-sync-engine.sh "$TEMPLATE_URL" main
