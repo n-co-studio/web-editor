@@ -22,6 +22,9 @@
 #   3. HVST failures but known-issues.md not updated
 #   4. Deferrals pending but known-issues.md not updated
 #
+# PARITY: runner.sh replicates post-session tasks externally (Decision 0017).
+# See .claude/.automation/RUNNER-PARITY.md for the full mapping.
+#
 # Overrides: SKIP_SESSION_LOG=1, SKIP_UNCOMMITTED_CHECK=1,
 #            SKIP_KNOWN_ISSUES_CHECK=1, SKIP_CONTRACT_CHECK=1
 
@@ -111,6 +114,28 @@ _branch_in_active_contract() {
     fi
   done
   return 1
+}
+
+# --- Advisory push to remote (shared logic) ---
+# Pushes main to origin after a successful merge. Advisory only — failure
+# does not block session close or trigger retry (exit 2).
+# Skipped in template mode and when no remote is configured.
+advisory_push_to_remote() {
+  # Skip in template mode
+  if [ "$IS_TEMPLATE" = true ]; then
+    return 0
+  fi
+  # Skip when no remote configured
+  if ! git remote get-url origin >/dev/null 2>&1; then
+    return 0
+  fi
+  if ! git push origin main >/dev/null 2>&1; then
+    echo "Advisory: push to origin failed — run 'git push origin main' manually" >&2
+    log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "push_failed" "" "" || true
+  else
+    log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "push_success" "" "" || true
+  fi
+  return 0
 }
 
 # --- Conditional branch seal (shared logic) ---
@@ -322,6 +347,7 @@ if [ ! -f "$REPO_ROOT/.claude/.state/phase-state" ]; then
     _noinit_merged=$(cat "$MERGE_STATE_FILE" 2>/dev/null || true)
     if [ -n "$_noinit_merged" ]; then
       record_closed_branch "$_noinit_merged"
+      advisory_push_to_remote
       log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "agent_merged" "" "$_noinit_merged" || true
     fi
   fi
@@ -428,6 +454,7 @@ if [ -z "$UNCOMMITTED" ] && [ -z "$STAGED" ] && [ -z "$RECENT_COMMITS" ]; then
     _zc_merged=$(cat "$MERGE_STATE_FILE" 2>/dev/null || true)
     if [ -n "$_zc_merged" ]; then
       record_closed_branch "$_zc_merged"
+      advisory_push_to_remote
       log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "agent_merged" "" "$_zc_merged" || true
     fi
   fi
@@ -592,6 +619,7 @@ if [ -f "$MERGE_STATE_FILE" ]; then
   if [ -n "$AGENT_MERGED_BRANCH" ]; then
     record_closed_branch "$AGENT_MERGED_BRANCH"
     BRANCH_SEALED=true
+    advisory_push_to_remote
     log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "agent_merged" "" "$AGENT_MERGED_BRANCH" || true
   fi
 fi
@@ -645,6 +673,7 @@ if [ "$SOLO" = "true" ] && [ "$BRANCH_SEALED" = false ]; then
 
     record_closed_branch "$MERGE_BRANCH"
     BRANCH_SEALED=true
+    advisory_push_to_remote
     log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "solo_merge_success" "" "$MERGE_BRANCH" || true
   fi
 fi

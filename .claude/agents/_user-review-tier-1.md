@@ -132,6 +132,6 @@ Read `.claude/agents/_agent-glossary.md` for shared definitions before beginning
 
 ## Related References
 
-- **Decision:** `docs/ai/decisions/0021-user-review-system.md`
+- **Decision:** `docs/ai/decisions/t-0021-user-review-system.md`
 - **Glossary:** `.claude/agents/_agent-glossary.md` (User Review section)
 - **Peer agents:** `_user-review-tier-2.md` (Everyday), `_user-review-tier-3.md` (Novice)

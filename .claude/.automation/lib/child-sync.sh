@@ -18,8 +18,31 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 AUTOMATION_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONF="$AUTOMATION_DIR/child-repos.conf"
 LOG="/tmp/repo-os-child-sync.log"
-GITHUB_ORG="markpreston2"
 MAX_WAIT=180   # seconds to wait for workflow completion
+
+# --- Resolve GitHub org (three-tier fallback) ---
+# 1. REPO_OS_GITHUB_ORG env var (operator override)
+# 2. child-repos.conf header directive: "# org: <value>"
+# 3. Hardcoded fallback
+_resolve_github_org() {
+  # Tier 1: env var
+  if [ -n "${REPO_OS_GITHUB_ORG:-}" ]; then
+    printf '%s' "$REPO_OS_GITHUB_ORG"
+    return
+  fi
+  # Tier 2: conf header (first `# org:` line)
+  if [ -f "$CONF" ]; then
+    local conf_org
+    conf_org=$(grep '^# org:' "$CONF" 2>/dev/null | head -1 | sed 's/^# org:[[:space:]]*//' | tr -d '[:space:]')
+    if [ -n "$conf_org" ]; then
+      printf '%s' "$conf_org"
+      return
+    fi
+  fi
+  # Tier 3: hardcoded fallback
+  printf '%s' "markpreston2"
+}
+GITHUB_ORG="$(_resolve_github_org)"
 POLL_INTERVAL=10
 
 # --- Globals set by functions ---
@@ -35,7 +58,7 @@ log() {
   local msg
   msg=$(printf '[%s] %s' "$(date +%H:%M:%S)" "$*")
   printf '%s\n' "$msg" >> "$LOG" 2>/dev/null || true
-  [ -t 2 ] && printf '%s\n' "$msg" >&2
+  if [ -t 2 ]; then printf '%s\n' "$msg" >&2; fi
 }
 
 # --- Parse config ---

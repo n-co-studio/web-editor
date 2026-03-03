@@ -49,4 +49,4 @@ Dispatch Critic as subagent via Task with mode=cohesion. Pass the `git diff main
 
 - **Critic agent definition:** `.claude/agents/critic.md` (cohesion mode scope, constraints, brief format)
 - **Gate A5:** `docs/ai/quality-gates.md` (cohesion review gate definition)
-- **Decision 0008:** `docs/ai/decisions/0008-cohesion-review-gate.md`
+- **Decision 0008:** `docs/ai/decisions/t-0008-cohesion-review-gate.md`
