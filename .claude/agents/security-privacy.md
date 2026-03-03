@@ -32,12 +32,6 @@ Security gate for high-risk changes. Checks for vulnerabilities, secrets, and pr
 
 ---
 
-## First Action
-
-Read `.claude/agents/_agent-glossary.md` and `.claude/agents/_agent-workflow.md` for shared definitions (scope thresholds, risk levels, enforcement terms) before beginning review.
-
----
-
 ## Constraints
 
 - REQUIRE: block secrets in code — zero tolerance, no exceptions
@@ -46,6 +40,7 @@ Read `.claude/agents/_agent-glossary.md` and `.claude/agents/_agent-workflow.md`
 - REQUIRE: known CVE patches when available
 - REQUIRE: check systematically against OWASP Top 10, not by intuition
 - REQUIRE: End output with `GATE_RESULT: APPROVED` or `GATE_RESULT: BLOCKED reason="..."` on its own line (sentinel for mechanical state capture)
+- **First action:** Read `.claude/agents/_agent-glossary.md` and `.claude/agents/_agent-workflow.md` for shared definitions before beginning review.
 
 ---
 
@@ -113,3 +108,5 @@ Activates when the diff or commit trailers include `Automation: runner` (headles
 | **High** | New dependency with typosquatting pattern, path traversal, permission boundary violation | BLOCK push |
 | **Medium** | Unrecognized outbound network call, new dependency without brief justification | Request changes |
 | **Low** | Non-standard URL fetch to public docs site | Note for improvement |
+
+**Handoff boundary:** This agent reviews security at the code level during builds. For spec-level security review (before code exists), see `security-analyst.md`.

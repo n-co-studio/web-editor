@@ -39,10 +39,11 @@ _resolve_github_org() {
       return
     fi
   fi
-  # Tier 3: hardcoded fallback
-  printf '%s' "markpreston2"
+  # Tier 3: default fallback (set REPO_OS_GITHUB_ORG or add `# org:` to child-repos.conf)
+  echo "ERROR: GitHub org not configured. Set REPO_OS_GITHUB_ORG env var or add '# org: <your-org>' to child-repos.conf" >&2
+  return 1
 }
-GITHUB_ORG="$(_resolve_github_org)"
+GITHUB_ORG=$(_resolve_github_org) || exit 1
 POLL_INTERVAL=10
 
 # --- Globals set by functions ---

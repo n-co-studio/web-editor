@@ -44,7 +44,7 @@ Add a phase-aware flow management system that tracks session progress through an
    `init[agent] → contract-init[agent] → plan[agent] → approval[operator] → build[agent] → review[agent] → verify[agent] → user-review[agent] → commit[agent] → contract-update[agent] → op-review[operator] → close[agent]`
    Loops: `review→build`, `verify→build`
    Skippable: `user-review` — same rules as Standard Build.
-   Notes: `contract-init` covers create (brief 1) and sync (briefs 2+) — same phase, different behavior based on brief number. Non-final close skips merge (branch stays open). Final close merges to main. `contract-init` is intentionally outside the `init|plan` edit block in `branch-guard-edit.sh` — edits during contract-init are scoped to contract file creation/update and are permitted by existing path exemptions (`docs/ai/task-groups/`, `.claude/local/`).
+   Notes: `contract-init` covers create (brief 1) and sync (briefs 2+) — same phase, different behavior based on brief number. Non-final close skips merge (branch stays open). Final close merges to main. `contract-init` is intentionally outside the `init|plan` edit block in `write-guard.sh (Section 3)` — edits during contract-init are scoped to contract file creation/update and are permitted by existing path exemptions (`docs/ai/task-groups/`, `.claude/local/`).
 
    **Prompt B — Task Group Merge (Brief M — parallel groups):**
    `init[agent] → contract-init[agent] → cohesion[agent] → verify[agent] → commit[agent] → op-review[operator] → close[agent]`

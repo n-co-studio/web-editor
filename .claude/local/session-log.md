@@ -6,6 +6,115 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 ---
 
+## Session 119 — 2026-03-03 — Ambiguity Remediation: Post-Simplification Fixes
+
+**Status:** complete
+**Decisions:** 0012
+**Branch:** `feature/ambiguity-remediation-s119`
+
+### Goal
+- Restore inline disambiguation lost during session 118 governance simplification — phase→agent mapping in prompt-b, path prefixes in agent First Actions, workflow.md in builder read list.
+
+### Changes Made
+- `docs/ai/prompts/prompt-b-product-build.md` — added "Build Sequence — Agent Dispatch" table mapping each build phase to its responsible agent, with explicit "NOT Reviewer" disambiguation for the review phase and loop semantics (`review→build`, `verify→build`)
+- 8 agent files (`builder`, `qa-verifier`, `reviewer`, `accessibility`, `auditor`, `dev-orchestrator`, `security-privacy`, `security-analyst`) — restored `.claude/agents/` prefix on glossary/workflow references in First Actions; `qa-verifier` also restored `docs/ai/` prefix on `quality-gates.md`; `security-analyst` restored `.claude/agents/` prefix on `_advisory-board-lite.md`
+- 3 user-review tier files (`_user-review-tier-{1,2,3}.md`) — restored `.claude/agents/` prefix on `_user-review-shared.md` and `_agent-glossary.md` in First Actions
+- `.claude/agents/builder.md` — added `docs/ai/workflow.md` to First Action read list (Close Sequence, git trailers, HVST protocol access)
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass, A2 pass, A3 n-a, A4 pass, A5 pass, A6 n-a
+- Cohesion review: APPROVED — 0 critical, all 6 contract criteria verified
+- QA verification: all applicable gates pass
+
+### Follow-ups
+- None
+
+---
+
+## Session 118 — 2026-03-03 — Governance Docs: Simplification & Coherence (Brief 2/2)
+
+**Status:** complete
+**Decisions:** 0012, 0017, 0022
+**Branch:** `feature/governance-docs-simplification`
+**Task Group:** `repo-os-deep-simplification` (Brief 2 of 2, sequential — final)
+
+### Goal
+- Deduplicate governance documentation, restructure AI.md hook paragraph into scannable table, compress agent boilerplate, fix cross-reference drift, clean automation template hygiene — zero information loss.
+
+### Changes Made
+- `AI.md` — replaced ~800-word hook run-on paragraph with 11-row structured table (Hook | Event | Gates | Blocking?)
+- `docs/ai/prompts/prompt-b-product-build.md` — removed 5 full phase sequence tables (~70 lines), replaced with cross-reference to `_agent-glossary.md § Phase Model`; reduced User Review section from full system description to dispatch instructions only
+- `docs/ai/prompts/prompt-a-repo-os.md`, `prompt-c-project-audit.md`, `prompt-t-task-definition.md` — replaced inline phase sequences with cross-references
+- `.claude/agents/_agent-glossary.md` — reduced User Review section from 30 lines to brief + pointer; added session registry files to State Files table; added frontmatter hook explanation to Enforcement § Subagent
+- `.claude/agents/_user-review-shared.md` (NEW) — extracted ~60 lines of shared content (caveat, constraints, authority, output template) from 3 tier files
+- `.claude/agents/_user-review-tier-{1,2,3}.md` — removed duplicated content, added First Action referencing shared file; kept tier-specific content only
+- 8 agent files (`builder`, `qa-verifier`, `reviewer`, `accessibility`, `auditor`, `dev-orchestrator`, `security-privacy`, `security-analyst`) — compressed First Action boilerplate to single line
+- `.claude/agents/security-analyst.md`, `security-privacy.md` — added bidirectional handoff boundary cross-references
+- `.claude/agents/_advisory-board.md`, `_advisory-board-lite.md` — added Brief Format sync comments
+- `.claude/agents/_agent-workflow.md` — added canonical source cross-references to flow sections; updated build flow to include B1–B3 push gates
+- `docs/ai/decisions/t-0022-template-decision-naming.md` — fixed "21" → "22" template decision count
+- `docs/ai/prompts/prompt-c-project-audit.md` — added Security Analyst as co-audit specialist for Security dimension
+- `.claude/.automation/lib/child-sync.sh` — removed hardcoded `markpreston2`; error + exit when unconfigured
+- `.claude/.automation/runner.sh` — replaced macOS-only `date -j -f` with portable `_iso_to_epoch()` in stale lock check
+- `.claude/.automation/lib/child-sync-decisions.sh` — replaced O(n²) orphan detection with linear `sort + comm`
+- `.claude/.automation/lib/rebuild-trigger-index.sh` (NEW) — standalone A1 trigger index regeneration script
+- `docs/ai/quality-gates.md` — replaced inline regeneration bash block with reference to standalone script (cohesion finding)
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass, A2 pass (large-scope approved), A3 n-a, A4 pass, A5 pass, A6 n-a
+- 17-point verification checklist: all pass
+- Cohesion review: 0 CRITICAL, 6 RECOMMENDATION (1 fixed — quality-gates.md script reference; 1 false positive — workflow.md User Review intact; 4 pre-existing pattern divergences out of scope)
+- Net reduction: ~45% net reduction in governance doc volume
+
+### Follow-ups
+- None
+
+---
+
+## Session 117 — 2026-03-02 — Hook Engine: Performance, Consolidation, Safety (Brief 1/2)
+
+**Status:** complete
+**Decisions:** 0012, 0013, 0014, 0019
+**Branch:** `feature/hook-engine-consolidation`
+**Task Group:** `repo-os-deep-simplification` (Brief 1 of 2, sequential)
+
+### Goal
+- Simplify hook layer: consolidate redundant scripts, eliminate duplicated gate logic, cache hot paths, fix safety gaps.
+
+### Changes Made
+- `.claude/hooks/branch-guard-edit.sh` (DELETED) — all gates consolidated into `write-guard.sh` Section 3
+- `.claude/hooks/write-guard.sh` — added Section 3 (Gates 1, 2, 6, 5 from branch-guard-edit.sh), sourced _phase-helper.sh, updated analytics hook names
+- `.claude/hooks/branch-guard.sh` — removed Gate 3 (governance advisory, now only in pre-commit-gates.sh), removed Gate 4 dead-code stub
+- `.claude/hooks/pre-commit-gates.sh` — removed Gate 4 stub, made state file checks always blocking (removed advisory downgrade when PHASE_GATE_PASSED=true), removed dead PHASE_GATE_PASSED variable
+- `.claude/hooks/hvst-failure-tracker.sh` — added PostToolUse fast-exit when no counter file, replaced raw file read with get_mode(), used $_REPO_OS_ROOT
+- `.claude/hooks/session-close-check.sh` — reused computed $UNCOMMITTED/$STAGED in known-issues check (eliminated 2 extra git diff calls), added solo merge failure guard in safety valve, used $_REPO_OS_ROOT
+- `.claude/hooks/_analytics-helper.sh` — cached hash command probe at source-time (_REPO_OS_HASH_CMD), added overlap cache PID binding, replaced ~8 get_repo_root() calls with $_REPO_OS_ROOT
+- `.claude/hooks/_phase-helper.sh` — added session ID caching in _validate_phase_session() (_CACHED_CURRENT_SID), sub-second session ID precision (EPOCHREALTIME/PID), replaced ~11 get_repo_root() calls with $_REPO_OS_ROOT
+- `.claude/settings.json` — removed branch-guard-edit.sh entries for Edit and Write matchers
+- `AI.md` — updated branch-guard-edit.sh → write-guard.sh references, governance check timing
+- `docs/ai/quality-gates.md` — updated governance-checked writer and Gate 5 enforcer
+- `docs/ai/workflow.md` — updated enforcer references
+- `docs/ai/decisions/t-0004`, `t-0012`, `t-0013`, `t-0014`, `t-0019` — updated enforced_by fields and trigger paths
+- `docs/ai/decisions/.a1-trigger-index` — updated 0019 path pattern
+- `.claude/agents/orchestrator.md`, `_agent-glossary.md` — updated references
+- `docs/ai/prompts/prompt-b-product-build.md` — updated enforcer reference
+- `README.md` — merged branch-guard-edit.sh row into write-guard.sh
+- `repo-os-explainer.html` — removed deleted file from directory tree
+- `.claude/hooks/tests/layer3-hook-integration.sh` — updated L3.1 to write-guard.sh with REPO_OS_SKIP_MODE_GUARD=1, updated L3.5 to expect blocking, updated L3.9/L3.14 references
+- `.claude/hooks/tests/headless/layer-a-headless-sandbox.sh` — updated branch-guard-edit.sh references
+- `.claude/hooks/tests/test-helpers.sh`, `test-fixtures.sh`, `headless/BRIEF.md` — updated comments
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass, A2 pass (large-scope approved), A3 n-a, A4 pass, A5 pass (2 rounds), A6 pass
+- All 742 tests pass (L1: 324, L1b: 24, L2: 228, L3: 166)
+- 14-point verification checklist: all pass
+- Cohesion review: round 1 found 3 CRITICAL + 9 recommendations (all fixed); round 2 found 2 CRITICAL (fixed)
+
+### Follow-ups
+- branch-guard.sh, pre-commit-gates.sh, plan-approval.sh, state-writer.sh, permission-request.sh still use get_repo_root() (partial migration — out of scope for this brief)
+
+---
+
 ## Session 116 — 2026-03-02 — Automation Tier 1: Documentation Consolidation (Brief 3/3)
 
 **Status:** complete
@@ -65,109 +174,9 @@ Each session adds one entry. Keep entries high-signal and readable.
 ### Follow-ups
 - None
 
----
-
-## Session 114 — 2026-03-02 — Automation Tier 1: Permission & Escalation Layer (Brief 1/3)
-
-**Status:** complete
-**Decisions:** 0017
-**Branch:** `feature/automation-tier-1`
-**Task Group:** `automation-tier-1` (Brief 1 of 3, sequential)
-
-### Goal
-- Build PermissionRequest hook with audit log, expand escalation schema with scope-aware classification, and add scope classification gate to pre-commit-gates.
-
-### Changes Made
-- `.claude/hooks/permission-request.sh` (NEW) — PermissionRequest hook: auto-approves curated tools/commands, denies dangerous patterns (deny-first priority), falls through to VS Code dialog for unknowns, logs all decisions to audit log
-- `.claude/hooks/_permission-allowlist.sh` (NEW) — sourced helper defining allow/deny arrays and is_tool_allowed(), is_bash_denied(), is_bash_allowed() functions; includes network command deny with localhost carve-out
-- `.claude/settings.json` — added PermissionRequest hook entry (no matcher, catches all permission requests)
-- `.claude/.automation/schemas/escalation.yaml` — expanded type enum from 6 to 9 (+ security-risk, structural-change, scope-deviation); added scope_classification and risk_gain fields
-- `.claude/.automation/schemas/queue-entry.yaml` — added scope_classification field with schema contract comment
-- `.claude/hooks/pre-commit-gates.sh` — added scope classification gate: reads task-contract.yaml, classifies staged files against scope_files (briefed / unbriefed-in-scope / out-of-scope), blocks out-of-scope, writes escalation YAML files
-- `.claude/.automation/lib/outcome-detector.sh` — enriched escalation scanning with scope-deviation type detection, returns review:scope-deviation
-- `docs/ai/decisions/t-0017-operator-automation-layer.md` — added PermissionRequest Hook section, Scope Classification Model section, expanded escalation taxonomy to 9 types, split path triggers into separate lines
-- `docs/ai/decisions/.a1-trigger-index` — regenerated with 3 separate entries for Decision 0017 (38 total)
-- `AI.md` — updated hooks and automation layer paragraphs
-
-### Verification (Gates Evidence)
-- Commit gates: A1 pass, A2 pass (large-scope approved), A3 n-a, A4 pass, A5 pass (cohesion reviewed — 2 rounds), A6 pass
-- Shell syntax: all 4 modified/new scripts pass bash -n
-- Cohesion review: round 1 found 2 CRITICAL + 4 IMPORTANT (all fixed); round 2 confirmed all resolved, 1 false-positive IMPORTANT + 4 ADVISORY
-- QA verification: 10/10 criteria APPROVED
-
-### Follow-ups
-- `.gitignore` needs `.claude/.automation/briefs/` and `.claude/.automation/logs/` entries (blocked by write-guard immune protection on write-guard.sh in template mode)
-- Cohesion advisory: blocker-report.yaml fallback writer in outcome-detector.sh missing timestamp/type/branch fields (pre-existing, not introduced by this brief)
-
----
-
-## Session 113 — 2026-03-02 — Push after merge (advisory push across all merge sites)
-
-**Status:** complete
-**Decisions:** 0015, 0017
-**Branch:** `feature/push-after-merge`
-
-### Goal
-- Add advisory `git push origin main` after every merge-to-main operation across all three merge sites (agent close, stop hook, runner). Resolve AI.md authority ambiguity. Skip push in template mode.
-
-### Changes Made
-- `AI.md` — Authority section: removed contradictory "Decide when/where to push" from operator-only; consolidated remote setup; updated agent-allowed push wording to advisory
-- `docs/ai/workflow.md` — Close sequence step 3: added post-merge push sub-bullet, preserved Gate 1 guidance, documented stop hook and runner push parity
-- `docs/ai/decisions/t-0015-solo-mode.md` — Branch lifecycle: added push to auto/review close, added post-merge push and push-failure-recovery bullets; Consequences: documented push in session-close-check.sh and runner.sh
-- `.claude/hooks/session-close-check.sh` — Added `advisory_push_to_remote()` shared helper (template-mode skip, no-remote skip, advisory-only, quiet stdout); called from 4 merge-detection paths (no-init, zero-change, agent-merge, solo-merge)
-- `.claude/.automation/runner.sh` — Added inline advisory push after solo merge success in `_run_single_entry` (template-mode skip, no-remote skip, advisory-only)
-- `.claude/agents/orchestrator.md` — Updated solo-mode checklist item to include push step between merge and write_merge_signal
-
-### Verification (Gates Evidence)
-- Commit gates: A1 pass, A2 pass, A3 n-a, A4 pass, A5 pass, A6 n-a
-- Push gates: B1 pass, B2 n-a, B3 n-a
-- Cohesion review: 1 CRITICAL found and fixed (two fast-exit paths missing push call), 6 recommendations (stdout redirect fixed, others advisory)
-
-### Follow-ups
-- None
-
----
-
-## Session 112 — 2026-03-02 — Template decision naming convention (`t-` prefix)
-
-**Status:** complete
-**Decisions:** 0002, 0004, 0012, 0022
-**Branch:** `feature/template-decision-naming`
-
-### Goal
-- Introduce `t-` prefix naming convention for template-owned decision records, enabling visual distinction and safe deletion propagation via manifest-based orphan cleanup.
-
-### Changes Made
-- `docs/ai/decisions/t-0022-template-decision-naming.md` (NEW) — decision record documenting the `t-` prefix convention, manifest, cleanup mechanism, migration steps
-- `docs/ai/decisions/t-manifest.txt` (NEW) — authoritative list of 22 template decision filenames for child-repo cleanup
-- `.claude/.automation/lib/child-sync-decisions.sh` (NEW) — cleanup helper: reads manifest, computes orphans, deletes via `git rm`, supports `--dry-run`
-- `.claude/.automation/templates/template-sync-with-cleanup.yml` (NEW) — reference workflow template for child repos
-- `.claude/hooks/write-guard.sh` — child-mode `is_carved_out` explicit `t-*.md` block; fast-exit path template decision protection with `REPO_OS_UNLOCK_PATH` support
-- `.claude/hooks/pre-commit-gates.sh` — A1 trigger parser: dual-glob iteration (`t-*.md` + `0*.md`), updated ID extraction via `sed -E 's/^(t-)?([0-9]+)-.*/\2/'`
-- `.claude/hooks/tests/layer3-hook-integration.sh` — 3 new test cases: child-mode t-*.md blocking, child-mode 0100+ allowing, autonomous-mode t-*.md blocking
-- `docs/ai/decisions/.a1-trigger-index` — header comment, 4 entries for Decision 0022 (decisions dir, write-guard, pre-commit-gates, child-sync-decisions)
-- `docs/ai/quality-gates.md` — A1 regeneration script updated for dual-glob and t-prefix ID extraction
-- `README.md` — decision path references updated, range convention -> `t-` prefix convention
-- `.claude/agents/_agent-glossary.md` — Decision Range Convention -> Decision Naming Convention with `t-` prefix
-- `.claude/agents/_cohesion-review.md`, `_user-review-tier-{1,2,3}.md` — decision path references
-- `docs/ai/decisions/t-0012-file-edit-restrictions.md` — points 3, 6, and consequences updated for `t-` prefix
-- `docs/ai/decisions/t-0020-task-contract-system.md`, `t-0021-user-review-system.md` — self-reference updates
-- `repo-os-explainer.html` — decision naming convention text, fixed `.templatesyncignore` contradiction
-- `.templatesyncignore` — updated comments for `t-*` prefix and manifest-based cleanup
-- 21 decision files renamed via `git mv` (0001-0021 -> t-0001 through t-0021)
-
-### Verification (Gates Evidence)
-- Commit gates: A1 pass, A2 pass (large-scope approved), A3 n-a, A4 pass, A5 pass, A6 n-a
-- Push gates: B1 pass, B2 pass (all 4 layers), B3 n-a
-- Cohesion review: 2 rounds — first found 1 CRITICAL + 4 RECOMMENDATIONs (all fixed), second APPROVED with 3 RECOMMENDATIONs (all addressed)
-- QA verification: APPROVED
-
-### Follow-ups
-- None
-
 <!-- Sessions 63-64: zero-change sessions, no log entry per workflow.md exemption -->
 <!-- Session 109: audit session, zero-change exempt -->
-<!-- Sessions 65-111: dropped per rolling cap -->
+<!-- Sessions 65-114: dropped per rolling cap -->
 
 <!-- Template: copy this block for each new session entry
 

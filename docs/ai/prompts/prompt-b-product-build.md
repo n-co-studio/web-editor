@@ -28,82 +28,19 @@ These are advisory checks. The operator may direct you to proceed without them (
 
 ## Phase Model
 
-The phase model tracks session progress in `.claude/.state/phase-state`. Hooks enforce phase-appropriate actions. You do not need to read this file — hooks manage it automatically. See Decision 0014 for canonical phase definitions.
+The phase model tracks session progress in `.claude/.state/phase-state`. Hooks enforce phase-appropriate actions. You do not need to read this file — hooks manage it automatically. Phase sequences are defined in `_agent-glossary.md` § Phase Model and enforced by `_phase-helper.sh`. See Decision 0014 for canonical definitions.
 
-### Phase Sequences
+### Build Sequence — Agent Dispatch
 
-**Standard Build:**
+| Phase | Agent | Notes |
+|-------|-------|-------|
+| build | Builder | Implements changes |
+| review | **Critic** (cohesion mode) | NOT Reviewer — Critic checks internal coherence |
+| verify | QA Verifier | Commit blocker (A1–A6, B1–B3) |
+| user-review | User Review Tier agents | Optional — skipped when no User Review in brief |
+| commit | Orchestrator | Commit with trailers |
 
-| Phase | Tag | Description |
-|-------|-----|-------------|
-| init | agent | Create branch from main, load spec and governance context |
-| plan | agent | Define goal, scope, files, verification steps |
-| approval | operator | Operator reviews and approves the plan |
-| build | agent | Implement changes in small increments |
-| review | agent | Critic cohesion review of diff |
-| verify | agent | QA gate verification (A1–A6, B1–B3) |
-| user-review | agent | User Review persona dispatch (skipped when brief has no User Review section) |
-| commit | agent | Commit with git trailers |
-| op-review | operator | Operator reviews before close (review mode only — skipped in auto) |
-| close | agent | Update session log, commit, merge to main (agent runs merge — see workflow.md Close Sequence), seal branch |
-
-Loops: `review→build` (cohesion findings), `verify→build` (QA failure)
-
-**Task Group (Brief N of M):**
-
-| Phase | Tag | Description |
-|-------|-----|-------------|
-| init | agent | Create branch (brief 1) or check out existing branch (briefs 2+) |
-| contract-init | agent | Create contract (brief 1) or sync from contract (briefs 2+) |
-| plan | agent | Define goal, scope, files, verification steps |
-| approval | operator | Operator reviews plan (auto-passes for pre-approved groups) |
-| build | agent | Implement changes in small increments |
-| review | agent | Critic cohesion review of diff |
-| verify | agent | QA gate verification (A1–A6, B1–B3) |
-| user-review | agent | User Review persona dispatch (skipped when brief has no User Review section) |
-| commit | agent | Commit with git trailers |
-| contract-update | agent | Update contract — brief status, session decisions, governance evidence |
-| op-review | operator | Operator reviews (review mode only — skipped in auto) |
-| close | agent | Non-final: close without merge. Final: merge to main, seal branch |
-
-Loops: `review→build`, `verify→build`
-
-**Task Group Merge (Brief M — parallel groups only):**
-
-| Phase | Tag | Description |
-|-------|-----|-------------|
-| init | agent | Check out existing task group branch |
-| contract-init | agent | Sync from contract, verify all content briefs complete (completion markers) |
-| cohesion | agent | Cross-session cohesion review across combined diff from all parallel briefs |
-| verify | agent | QA gate verification (A1–A6, B1–B3) |
-| commit | agent | Commit with git trailers |
-| op-review | operator | Operator reviews (review mode only — skipped in auto) |
-| close | agent | Merge to main, seal branch |
-
-Loops: `cohesion→cohesion` (integration fixes found during review)
-
-**Hotfix:**
-
-| Phase | Tag | Description |
-|-------|-----|-------------|
-| init | agent | Create branch from main (`hotfix/<description>`) |
-| plan | agent | Define goal, scope, files, verification steps |
-| approval | operator | Operator reviews and approves the plan |
-| build | agent | Implement the fix |
-| verify | agent | QA gate verification (A2 scope relaxed, A5 skipped) |
-| commit | agent | Commit with git trailers |
-| close | agent | Merge branch to main, seal branch |
-
-Loops: `verify→build`
-
-**Experiment:**
-
-| Phase | Tag | Description |
-|-------|-----|-------------|
-| init | agent | Create or check out experiment branch |
-| build | agent | Build directly — no plan required |
-| commit | agent | Commit (A4 safety only) |
-| close | agent | Close session, no merge to main |
+Loops: `review→build` (cohesion findings), `verify→build` (QA failure).
 
 ### Auto/Review Mode
 
@@ -132,34 +69,16 @@ The task contract serves as the cohesion review reference — Critic uses its `v
 After the `verify` phase, check whether the task brief or task contract contains a `user_review` section:
 
 - **No User Review defined:** Skip directly from `verify` to `commit` (forward-jump — Decision 0014 permits this).
-- **User Review defined:** Advance to `user-review` phase and execute the dispatch procedure:
+- **User Review defined:** Advance to `user-review` phase and dispatch per `docs/ai/workflow.md` § User Review.
 
 ### Dispatch Procedure
 
-1. **Read scenario definitions** from the task contract's `user_review:` block (tiers, mode, scenarios).
-2. **Dispatch selected tier agents in parallel** via the Task tool. Each agent receives:
-   - Their persona profile (`.claude/agents/_user-review-tier-{N}.md`)
-   - The scenario definitions (YAML from the contract)
-   - The list of files modified in the build (from `git diff --name-only` against the plan baseline)
-3. **Collect results** from all dispatched agents.
-4. **Synthesize across tiers:**
-   - Aggregate findings from all tier reports
-   - Deduplicate: when multiple tiers flag the same issue, keep the finding with the highest severity
-   - Severity escalation: when Tier 1 says RECOMMENDATION and Tier 3 says CRITICAL for the same issue, the synthesized severity is CRITICAL (escalate to highest)
-   - Produce a single **User Review Report** with all findings ranked by severity
-5. **Advance to `commit` phase.** The synthesized User Review Report is carried forward for presentation.
-6. **Present User Review Report** to operator during `op-review` (or if auto mode — findings are logged in the closing summary but do not block).
-7. **Operator dispositions each finding** (accept / note / dismiss) during `op-review` — same pattern as advisory board findings (Decision 0007). No state file written, no gate blocked. Deferred findings are noted in the closing summary.
+1. Read scenario definitions from the task contract's `user_review:` block.
+2. Dispatch selected tier agents (`.claude/agents/_user-review-tier-{N}.md`) in parallel via Task tool. Each receives: persona profile, scenario YAML, list of modified files (`git diff --name-only`).
+3. Collect results, deduplicate across tiers, escalate severity to highest when tiers conflict.
+4. Produce a single User Review Report, advance to `commit`. Present during `op-review` (auto mode: logged in closing summary). Operator dispositions each finding (accept / note / dismiss).
 
-### Operating Mode Exclusions
-
-User Review dispatch is skipped in:
-- Template mode (no product code to review)
-- Autonomous mode (no operator for disposition)
-- Headless/automation mode (no operator interaction)
-- Experiment sessions (lightweight lifecycle, no `user-review` phase)
-
-See Decision 0021 for system definition, scenario schema, and results format.
+See `docs/ai/workflow.md` § User Review for full system definition and Decision 0021 for scenario schema.
 
 ## Operating Rules
 - REQUIRE: at session start, create a branch from main: `git checkout -b <category>/<description>` (standard: `feature/<description>`, hotfix: `hotfix/<description>`)
@@ -167,7 +86,7 @@ See Decision 0021 for system definition, scenario schema, and results format.
 - REQUIRE: after Builder signals done, Orchestrator runs a cohesion review (Critic in cohesion mode) before invoking QA. Critical cohesion findings must be resolved before commit. See `quality-gates.md` gate A5.
 - GUIDE: use HVST (see `workflow.md`) when debugging or instability appears. When HVST debugging stalls (2+ consecutive failures), Orchestrator dispatches HVST Review Board for multi-agent hypothesis review before further fix attempts. See `_hvst-review.md`
 - REQUIRE: **Task Group Contract** — if the task brief contains a `### Task Group` section, this session is part of a multi-brief group. Read and follow the contract lifecycle in `docs/ai/workflow.md` § Task Group Sessions. See `docs/ai/quality-gates.md` gate A6 for verification requirements
-- BLOCK: **Session Branch Isolation** (Decision 0013) — each session uses a dedicated branch — enforced by branch-guard.sh / branch-guard-edit.sh. After session close, the branch is sealed and must not be reused. Start a new branch for new work. Task group sessions are exempt (multi-brief groups share one branch)
+- BLOCK: **Session Branch Isolation** (Decision 0013) — each session uses a dedicated branch — enforced by branch-guard.sh / write-guard.sh (Section 3). After session close, the branch is sealed and must not be reused. Start a new branch for new work. Task group sessions are exempt (multi-brief groups share one branch)
 - REQUIRE: include git trailers on commits per the convention in `docs/ai/workflow.md` (Session Lifecycle → Git Trailer Convention)
 - REQUIRE: **Parallel Task Group Completion Marker** — if the task brief has `Execution: parallel` in `### Task Group`, write a per-brief completion marker file at session close: `.claude/.state/tg-{group}-brief-{seq}.complete` (content: ISO 8601 timestamp). This signals to the merge brief that this content brief has completed
 - REQUIRE: **Parallel Task Group Boundaries** — parallel briefs MUST restrict edits to files within their declared `Boundaries`. Edits outside boundaries require explicit operator approval. Shared files (e.g., index files, config) are owned by the merge brief

@@ -31,7 +31,7 @@ Coordinates work and enforces the Repo OS. AI project lead taking strategic dire
 - REQUIRE: task group contract compliance when task group present (Decision 0011)
 - REQUIRE: one session per branch — no reuse of branches from closed sessions (Decision 0013, task groups exempt)
 - REQUIRE: session registry — `register_session()` is called mechanically by `init_phase()`. If session overlap is detected on the same branch, non-task-group sessions are blocked (Decision 0013). Task group sessions receive advisory warning. Override: `REPO_OS_SKIP_OVERLAP_CHECK=1`
-- BLOCK: implementation without approved plan — enforced by branch-guard.sh / branch-guard-edit.sh (phase gate blocks edits until plan-approved state file exists)
+- BLOCK: implementation without approved plan — enforced by branch-guard.sh / write-guard.sh (Section 3) (phase gate blocks edits until plan-approved state file exists)
 - REQUIRE: stop and ask on ambiguity — do not proceed when requirements, scope, or intent are unclear
 - REQUIRE: no assumptions about requirements, architecture, or intent — ask the operator
 - DELEGATE: implementation → Builder

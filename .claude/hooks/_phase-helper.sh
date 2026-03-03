@@ -265,6 +265,8 @@ _PS_SESSION_TYPE="" _PS_SESSION_ID="" _PS_MODE="" _PS_CURRENT_PHASE=""
 _PS_CYCLE="" _PS_PHASES_COMPLETED="" _PS_SOLO="" _PS_TAG="" _PS_TIMESTAMP=""
 # Audit C8: validation cache sentinel — avoids redundant file reads per invocation
 _PS_VALIDATED=false
+# Cached current session ID — avoids re-reading .session-id from disk on validated fast path
+_CACHED_CURRENT_SID=""
 
 _load_phase_state() {
   local state_file="$1"
@@ -304,23 +306,22 @@ _validate_phase_session() {
   local state_file="$1"
 
   # Fast path: already validated for this session (audit C8)
+  # Uses _CACHED_CURRENT_SID to avoid re-reading .session-id from disk
   if [ "$_PS_VALIDATED" = true ] && [ -n "$_PS_SESSION_ID" ]; then
-    local _cached_sid
-    _cached_sid=$(cat "$(get_repo_root)/.claude/.session-id" 2>/dev/null)
-    if [ "$_PS_SESSION_ID" = "$_cached_sid" ]; then
+    if [ -n "$_CACHED_CURRENT_SID" ] && [ "$_PS_SESSION_ID" = "$_CACHED_CURRENT_SID" ]; then
       return 0
     fi
-    # Session ID changed — invalidate cache
+    # Session ID changed or cache empty — invalidate
     _PS_VALIDATED=false
+    _CACHED_CURRENT_SID=""
   fi
 
   _load_phase_state "$state_file" || return 1
-  local repo_root
-  repo_root="$(get_repo_root)"
   local current_sid
-  current_sid=$(cat "$repo_root/.claude/.session-id" 2>/dev/null)
+  current_sid=$(cat "$_REPO_OS_ROOT/.claude/.session-id" 2>/dev/null)
   if [ -n "$_PS_SESSION_ID" ] && [ "$_PS_SESSION_ID" = "$current_sid" ]; then
     _PS_VALIDATED=true
+    _CACHED_CURRENT_SID="$current_sid"
     return 0
   fi
   return 1
@@ -335,8 +336,7 @@ _validate_phase_session() {
 # Usage: init_phase "standard"
 init_phase() {
   local stype="$1"
-  local repo_root
-  repo_root="$(get_repo_root)"
+  local repo_root="$_REPO_OS_ROOT"
   local state_dir="$repo_root/.claude/.state"
 
   # Validate session type
@@ -367,6 +367,7 @@ init_phase() {
 
   # Invalidate validation cache — file contents changed (audit C8)
   _PS_VALIDATED=false
+  _CACHED_CURRENT_SID=""
 
   # Register session in the session registry (Decision 0013 overlap awareness)
   register_session "$stype" || true
@@ -379,8 +380,7 @@ init_phase() {
 # Usage: advance_phase "build"
 advance_phase() {
   local new_phase="$1"
-  local repo_root
-  repo_root="$(get_repo_root)"
+  local repo_root="$_REPO_OS_ROOT"
   local state_file="$repo_root/.claude/.state/phase-state"
 
   if [ ! -f "$state_file" ]; then
@@ -460,6 +460,7 @@ advance_phase() {
 
   # Invalidate validation cache — file contents changed (audit C8)
   _PS_VALIDATED=false
+  _CACHED_CURRENT_SID=""
 }
 
 # --- Assert current phase meets requirement ---
@@ -468,8 +469,7 @@ advance_phase() {
 # Usage: assert_phase "build" || echo "not in build phase yet"
 assert_phase() {
   local required="$1"
-  local repo_root
-  repo_root="$(get_repo_root)"
+  local repo_root="$_REPO_OS_ROOT"
   local state_file="$repo_root/.claude/.state/phase-state"
 
   if [ ! -f "$state_file" ]; then
@@ -500,8 +500,7 @@ assert_phase() {
 # Returns the current phase name, or empty string if missing/stale.
 # Usage: phase=$(get_phase)
 get_phase() {
-  local repo_root
-  repo_root="$(get_repo_root)"
+  local repo_root="$_REPO_OS_ROOT"
   local state_file="$repo_root/.claude/.state/phase-state"
 
   if [ ! -f "$state_file" ]; then
@@ -523,8 +522,7 @@ get_phase() {
 # Named get_phase_mode to avoid collision with get_mode in _analytics-helper.sh.
 # Usage: mode=$(get_phase_mode)
 get_phase_mode() {
-  local repo_root
-  repo_root="$(get_repo_root)"
+  local repo_root="$_REPO_OS_ROOT"
   local state_file="$repo_root/.claude/.state/phase-state"
 
   if [ ! -f "$state_file" ]; then
@@ -541,8 +539,7 @@ get_phase_mode() {
 # Returns the tag for the current phase (agent/operator/both), or empty if missing/stale.
 # Usage: tag=$(get_tag)
 get_tag() {
-  local repo_root
-  repo_root="$(get_repo_root)"
+  local repo_root="$_REPO_OS_ROOT"
   local state_file="$repo_root/.claude/.state/phase-state"
 
   if [ ! -f "$state_file" ]; then
@@ -565,8 +562,7 @@ get_tag() {
 # Decision 0015 — Solo Mode.
 # Usage: solo=$(get_solo)
 get_solo() {
-  local repo_root
-  repo_root="$(get_repo_root)"
+  local repo_root="$_REPO_OS_ROOT"
   local state_file="$repo_root/.claude/.state/phase-state"
 
   if [ ! -f "$state_file" ]; then
@@ -589,8 +585,7 @@ get_solo() {
 # Usage: set_solo "true"
 set_solo() {
   local new_solo="$1"
-  local repo_root
-  repo_root="$(get_repo_root)"
+  local repo_root="$_REPO_OS_ROOT"
   local state_file="$repo_root/.claude/.state/phase-state"
 
   if [ ! -f "$state_file" ]; then
@@ -621,6 +616,7 @@ set_solo() {
 
   # Invalidate validation cache — file contents changed (audit C8)
   _PS_VALIDATED=false
+  _CACHED_CURRENT_SID=""
 }
 
 # --- Set auto/review mode ---
@@ -630,8 +626,7 @@ set_solo() {
 # Usage: set_phase_mode "auto"
 set_phase_mode() {
   local new_mode="$1"
-  local repo_root
-  repo_root="$(get_repo_root)"
+  local repo_root="$_REPO_OS_ROOT"
   local state_file="$repo_root/.claude/.state/phase-state"
 
   if [ ! -f "$state_file" ]; then
@@ -662,6 +657,7 @@ set_phase_mode() {
 
   # Invalidate validation cache — file contents changed (audit C8)
   _PS_VALIDATED=false
+  _CACHED_CURRENT_SID=""
 }
 
 # --- Write merge source signal ---
@@ -676,8 +672,7 @@ write_merge_signal() {
     echo "ERROR: write_merge_signal requires a branch name" >&2
     return 1
   fi
-  local repo_root
-  repo_root="$(get_repo_root)"
+  local repo_root="$_REPO_OS_ROOT"
   local state_dir="$repo_root/.claude/.state"
   mkdir -p "$state_dir" 2>/dev/null || true
   printf '%s\n' "$branch_name" > "$state_dir/merge-source-branch" 2>/dev/null || true

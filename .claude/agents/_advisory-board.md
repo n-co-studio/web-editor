@@ -51,6 +51,7 @@ The Orchestrator scans compiled specs (or the feature brief's "What It Touches" 
 
 ---
 
+<!-- Sync Brief Format with _advisory-board-lite.md -->
 ## Brief Format
 
 Each specialist produces a focused brief:

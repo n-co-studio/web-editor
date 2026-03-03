@@ -24,11 +24,7 @@ If ambiguous, ask: "Are you exploring a question (Query) or defining a task to b
 
 ### Phase Sequences
 
-**Query mode:** `init[agent] → conversation[both] → close[agent]`
-
-**Brief mode:** `init[agent] → dispatch[agent] → synthesize[agent] → op-review[operator] → output[agent] → close[agent]`
-
-Phase-state is managed automatically by hooks. See Decision 0014 for canonical definitions.
+Phase sequences are defined in `_agent-glossary.md` § Phase Model and enforced by `_phase-helper.sh`. See Decision 0014 for canonical definitions. Query: `init → conversation → close`. Brief: `init → dispatch → synthesize → op-review → output → close`.
 
 ### Significant Feature Detection
 
