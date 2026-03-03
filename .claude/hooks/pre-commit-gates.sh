@@ -324,6 +324,174 @@ if [ "$SKIP_STATE" = false ] && [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
 fi
 
 # ============================================================
+# Scope Classification Gate (blocking for out-of-scope, advisory for unbriefed)
+# Compares staged files against task contract scope_files list.
+# Skip: no contract, no scope_files, experiment, REPO_OS_RECOVER.
+# ============================================================
+if [ "$SKIP_STATE" = false ] && [ -n "$STAGED_FILES" ]; then
+  CONTRACT_FILE="$STATE_DIR/task-contract.yaml"
+  if [ -f "$CONTRACT_FILE" ]; then
+    # Extract scope_files list from contract (YAML list items after scope_files:)
+    SCOPE_FILES=""
+    _IN_SCOPE=false
+    while IFS= read -r _sc_line; do
+      case "$_sc_line" in
+        "scope_files:"*) _IN_SCOPE=true; continue ;;
+        "  - "*)
+          if [ "$_IN_SCOPE" = true ]; then
+            _sf_val="${_sc_line#  - }"
+            # Strip surrounding quotes if present
+            _sf_val="${_sf_val#\"}"
+            _sf_val="${_sf_val%\"}"
+            SCOPE_FILES="${SCOPE_FILES:+$SCOPE_FILES
+}$_sf_val"
+          fi
+          ;;
+        *)
+          # Non-list-item line after scope_files: ends the block
+          if [ "$_IN_SCOPE" = true ]; then
+            _IN_SCOPE=false
+          fi
+          ;;
+      esac
+    done < "$CONTRACT_FILE"
+
+    if [ -n "$SCOPE_FILES" ]; then
+      # Collect parent directories of scope files for unbriefed-in-scope classification
+      SCOPE_PARENTS=""
+      while IFS= read -r _sp_file; do
+        [ -z "$_sp_file" ] && continue
+        _sp_parent=$(dirname "$_sp_file")
+        [ "$_sp_parent" = "." ] && continue
+        # Deduplicate (pure Bash, avoid forks)
+        case "
+$SCOPE_PARENTS
+" in
+          *"
+$_sp_parent
+"*) ;;
+          *) SCOPE_PARENTS="${SCOPE_PARENTS:+$SCOPE_PARENTS
+}$_sp_parent" ;;
+        esac
+      done <<< "$SCOPE_FILES"
+
+      OUT_OF_SCOPE_FILES=""
+      UNBRIEFED_IN_SCOPE_FILES=""
+
+      while IFS= read -r _staged; do
+        [ -z "$_staged" ] && continue
+        _classified=false
+
+        # Check exact match against scope_files
+        while IFS= read -r _sf; do
+          [ -z "$_sf" ] && continue
+          if [ "$_staged" = "$_sf" ]; then
+            _classified=true
+            break
+          fi
+        done <<< "$SCOPE_FILES"
+
+        if [ "$_classified" = true ]; then
+          continue  # briefed — no action needed
+        fi
+
+        # Check if parent directory matches any scope file parent (unbriefed-in-scope)
+        _staged_parent=$(dirname "$_staged")
+        _parent_match=false
+        while IFS= read -r _sp; do
+          [ -z "$_sp" ] && continue
+          if [ "$_staged_parent" = "$_sp" ]; then
+            _parent_match=true
+            break
+          fi
+        done <<< "$SCOPE_PARENTS"
+
+        if [ "$_parent_match" = true ]; then
+          UNBRIEFED_IN_SCOPE_FILES="${UNBRIEFED_IN_SCOPE_FILES:+$UNBRIEFED_IN_SCOPE_FILES
+}$_staged"
+        else
+          OUT_OF_SCOPE_FILES="${OUT_OF_SCOPE_FILES:+$OUT_OF_SCOPE_FILES
+}$_staged"
+        fi
+      done <<< "$STAGED_FILES"
+
+      # Out-of-scope files: block commit and write escalation
+      if [ -n "$OUT_OF_SCOPE_FILES" ]; then
+        _oos_first=$(echo "$OUT_OF_SCOPE_FILES" | head -1)
+        _oos_count=$(echo "$OUT_OF_SCOPE_FILES" | wc -l | tr -d ' ')
+        echo "GATE SCOPE FAILED: $_oos_count file(s) out of scope — not in task contract scope_files or related directories: $_oos_first" >&2
+        block "scope_out_of_scope"
+        log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "scope_out_of_scope" "count:$_oos_count" "$_oos_first"
+
+        # Write escalation file for runner integration
+        ESC_DIR="$REPO_ROOT/.claude/.automation/escalations"
+        mkdir -p "$ESC_DIR" 2>/dev/null || true
+        _esc_id="esc-scope-$(date +%Y%m%d-%H%M%S)"
+        {
+          printf 'escalation:\n'
+          printf '  id: "%s"\n' "$_esc_id"
+          printf '  queue_entry_id: ""\n'
+          printf '  type: "scope-deviation"\n'
+          printf '  severity: "blocking"\n'
+          printf '  phase_at_exit: "commit"\n'
+          printf '  tag_at_exit: "agent"\n'
+          printf '  message: "%s file(s) out of scope"\n' "$_oos_count"
+          printf '  context: "%s"\n' "$_oos_first"
+          printf '  scope_classification: "out-of-scope"\n'
+          printf '  risk_gain:\n'
+          printf '    risk: ""\n'
+          printf '    gain: ""\n'
+          printf '  created_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          printf '  resolved: false\n'
+          printf '  resolution: ""\n'
+        } > "$ESC_DIR/${_esc_id}.yaml" 2>/dev/null || true
+      fi
+
+      # Unbriefed-in-scope files: advisory escalation
+      if [ -n "$UNBRIEFED_IN_SCOPE_FILES" ]; then
+        _uis_first=$(echo "$UNBRIEFED_IN_SCOPE_FILES" | head -1)
+        _uis_count=$(echo "$UNBRIEFED_IN_SCOPE_FILES" | wc -l | tr -d ' ')
+        echo "Advisory: $_uis_count file(s) unbriefed-in-scope — in related directories but not in task contract scope_files: $_uis_first" >&2
+        warn "scope_unbriefed_in_scope"
+        log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "warn" "$START_MS" "scope_unbriefed_in_scope" "count:$_uis_count" "$_uis_first"
+
+        # Write advisory escalation with risk/gain (from state file if populated by agent)
+        ESC_DIR="$REPO_ROOT/.claude/.automation/escalations"
+        mkdir -p "$ESC_DIR" 2>/dev/null || true
+        _esc_id="esc-scope-$(date +%Y%m%d-%H%M%S)-adv"
+        _rg_risk=""
+        _rg_gain=""
+        if [ -f "$STATE_DIR/scope-risk-gain" ]; then
+          _rg_risk=$(grep '^risk:' "$STATE_DIR/scope-risk-gain" 2>/dev/null | sed 's/^risk: *//' || true)
+          _rg_gain=$(grep '^gain:' "$STATE_DIR/scope-risk-gain" 2>/dev/null | sed 's/^gain: *//' || true)
+          # Sanitize for safe YAML embedding (escape backslashes, double quotes)
+          _rg_risk="${_rg_risk//\\/\\\\}"; _rg_risk="${_rg_risk//\"/\\\"}"
+          _rg_gain="${_rg_gain//\\/\\\\}"; _rg_gain="${_rg_gain//\"/\\\"}"
+        fi
+        {
+          printf 'escalation:\n'
+          printf '  id: "%s"\n' "$_esc_id"
+          printf '  queue_entry_id: ""\n'
+          printf '  type: "scope-deviation"\n'
+          printf '  severity: "advisory"\n'
+          printf '  phase_at_exit: "commit"\n'
+          printf '  tag_at_exit: "agent"\n'
+          printf '  message: "%s file(s) unbriefed-in-scope"\n' "$_uis_count"
+          printf '  context: "%s"\n' "$_uis_first"
+          printf '  scope_classification: "unbriefed-in-scope"\n'
+          printf '  risk_gain:\n'
+          printf '    risk: "%s"\n' "$_rg_risk"
+          printf '    gain: "%s"\n' "$_rg_gain"
+          printf '  created_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          printf '  resolved: false\n'
+          printf '  resolution: ""\n'
+        } > "$ESC_DIR/${_esc_id}.yaml" 2>/dev/null || true
+      fi
+    fi
+  fi
+fi
+
+# ============================================================
 # High-Risk Pattern Detection (blocking)
 # Requires reviewer-signed + security-signed state files
 # ============================================================

@@ -6,6 +6,101 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 ---
 
+## Session 116 — 2026-03-02 — Automation Tier 1: Documentation Consolidation (Brief 3/3)
+
+**Status:** complete
+**Decisions:** 0017
+**Branch:** `feature/automation-tier1-brief3-docs`
+**Task Group:** `automation-tier-1` (Brief 3 of 3, sequential — final)
+
+### Goal
+- Update all governance docs and workflow references to reflect Tier 1 automation changes (Briefs 1 and 2).
+
+### Changes Made
+- `docs/ai/decisions/t-0017-operator-automation-layer.md` — added automated choices 9 (scope classification) and 10 (PermissionRequest auto-approval) to table, updated count from 8 to 10, added 7 missing consequences (intake.sh, push_on_complete, ask-user-deny.sh, _cleanup-helper.sh, cleanup.sh, RUNNER-PARITY.md)
+- `docs/ai/workflow.md` — updated escalation count from 6 to 9, added 5 subsections: Intake CLI, push_on_complete, Scope classification, PermissionRequest hook, AskUserQuestion deny hook
+- `.claude/.automation/RUNNER-PARITY.md` (NEW) — parity contract mapping 17 stop hook responsibilities to runner equivalents with shared code documentation
+- `.claude/hooks/session-close-check.sh` — added parity reference comment in header
+- `.claude/agents/orchestrator.md` — added scope classification context on-demand procedure (write scope-risk-gain state file before commit)
+- `AI.md` — added AskUserQuestion deny hook to hooks chain, added RUNNER-PARITY.md reference to automation paragraph
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass, A2 pass, A3 n-a, A4 pass, A5 pass, A6 n-a
+- Cohesion review: 2 CRITICALs found — 1 fixed (RUNNER-PARITY.md cleanup description clarified), 1 false positive (runner.sh exists at correct path). 1 RECOMMENDATION fixed (orchestrator.md scope classification wording).
+
+### Follow-ups
+- `scope-risk-gain` state file not listed in `_agent-glossary.md` State Files table (out of scope for this brief)
+
+---
+
+## Session 115 — 2026-03-02 — Automation Tier 1: Queue & Intake Hardening (Brief 2/3)
+
+**Status:** complete
+**Decisions:** 0017, 0004, 0001
+**Branch:** `feature/queue-intake-hardening`
+**Task Group:** `automation-tier-1` (Brief 2 of 3, sequential)
+
+### Goal
+- Close queue plumbing gaps: standalone brief intake, push-on-complete flag, merge conflict escalation, child-sync parameterization, headless AskUserQuestion deny hook.
+
+### Changes Made
+- `.claude/.automation/lib/intake.sh` (NEW) — standalone CLI for queue entry creation without the interactive bridge; accepts --brief, --auto-approve, --session-type, --solo, --push; auto-enables runner
+- `.claude/hooks/ask-user-deny.sh` (NEW) — PreToolUse hook that blocks AskUserQuestion when CLAUDE_HEADLESS=1 (defense-in-depth for headless mode)
+- `.claude/.automation/schemas/queue-entry.yaml` — added push_on_complete field (default false)
+- `.claude/.automation/schemas/runner-config.yaml` — added default_push_on_complete field
+- `.claude/.automation/config.yaml` — added default_push_on_complete: false
+- `.claude/.automation/lib/queue-manager.sh` — added _QE_PUSH_ON_COMPLETE to module vars, _load, _write, queue_enqueue ($7 parameter)
+- `.claude/.automation/runner.sh` — added push_on_complete passthrough ($6 param), CLAUDE_HEADLESS=1 export, merge conflict escalation (ff-only → no-ff → conflict with scope-deviation escalation), push logic for solo and non-solo paths
+- `.claude/.automation/lib/child-sync.sh` — replaced hardcoded GITHUB_ORG with _resolve_github_org() three-tier fallback (env var → conf header → hardcoded)
+- `.claude/.automation/child-repos.conf` — added `# org:` directive to header
+- `.claude/settings.json` — added PreToolUse AskUserQuestion matcher for ask-user-deny.sh
+- `AI.md` — updated automation layer paragraph with intake CLI, push flag, deny hook, merge conflict escalation, child-sync parameterization
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass, A2 pass (large-scope approved), A3 n-a, A4 pass, A5 pass, A6 n-a
+- Shell syntax: all scripts pass bash -n, settings.json valid JSON
+- Cohesion review: APPROVED (reviewer agent — no blocking issues)
+- QA verification: all gates verified
+
+### Follow-ups
+- None
+
+---
+
+## Session 114 — 2026-03-02 — Automation Tier 1: Permission & Escalation Layer (Brief 1/3)
+
+**Status:** complete
+**Decisions:** 0017
+**Branch:** `feature/automation-tier-1`
+**Task Group:** `automation-tier-1` (Brief 1 of 3, sequential)
+
+### Goal
+- Build PermissionRequest hook with audit log, expand escalation schema with scope-aware classification, and add scope classification gate to pre-commit-gates.
+
+### Changes Made
+- `.claude/hooks/permission-request.sh` (NEW) — PermissionRequest hook: auto-approves curated tools/commands, denies dangerous patterns (deny-first priority), falls through to VS Code dialog for unknowns, logs all decisions to audit log
+- `.claude/hooks/_permission-allowlist.sh` (NEW) — sourced helper defining allow/deny arrays and is_tool_allowed(), is_bash_denied(), is_bash_allowed() functions; includes network command deny with localhost carve-out
+- `.claude/settings.json` — added PermissionRequest hook entry (no matcher, catches all permission requests)
+- `.claude/.automation/schemas/escalation.yaml` — expanded type enum from 6 to 9 (+ security-risk, structural-change, scope-deviation); added scope_classification and risk_gain fields
+- `.claude/.automation/schemas/queue-entry.yaml` — added scope_classification field with schema contract comment
+- `.claude/hooks/pre-commit-gates.sh` — added scope classification gate: reads task-contract.yaml, classifies staged files against scope_files (briefed / unbriefed-in-scope / out-of-scope), blocks out-of-scope, writes escalation YAML files
+- `.claude/.automation/lib/outcome-detector.sh` — enriched escalation scanning with scope-deviation type detection, returns review:scope-deviation
+- `docs/ai/decisions/t-0017-operator-automation-layer.md` — added PermissionRequest Hook section, Scope Classification Model section, expanded escalation taxonomy to 9 types, split path triggers into separate lines
+- `docs/ai/decisions/.a1-trigger-index` — regenerated with 3 separate entries for Decision 0017 (38 total)
+- `AI.md` — updated hooks and automation layer paragraphs
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass, A2 pass (large-scope approved), A3 n-a, A4 pass, A5 pass (cohesion reviewed — 2 rounds), A6 pass
+- Shell syntax: all 4 modified/new scripts pass bash -n
+- Cohesion review: round 1 found 2 CRITICAL + 4 IMPORTANT (all fixed); round 2 confirmed all resolved, 1 false-positive IMPORTANT + 4 ADVISORY
+- QA verification: 10/10 criteria APPROVED
+
+### Follow-ups
+- `.gitignore` needs `.claude/.automation/briefs/` and `.claude/.automation/logs/` entries (blocked by write-guard immune protection on write-guard.sh in template mode)
+- Cohesion advisory: blocker-report.yaml fallback writer in outcome-detector.sh missing timestamp/type/branch fields (pre-existing, not introduced by this brief)
+
+---
+
 ## Session 113 — 2026-03-02 — Push after merge (advisory push across all merge sites)
 
 **Status:** complete
@@ -70,101 +165,9 @@ Each session adds one entry. Keep entries high-signal and readable.
 ### Follow-ups
 - None
 
----
-
-## Session 111 — 2026-02-28 — Audit CRITICAL remediation (11 findings, round 2)
-
-**Status:** complete
-**Decisions:** 0013, 0014, 0017
-**Branch:** `fix/audit-critical-remediation-2`
-
-### Goal
-- Remediate all 11 CRITICAL findings from the Deep Audit (Session 109, Brief 2) that were not addressed in Session 110's first pass.
-
-### Changes Made
-- `.claude/hooks/_cleanup-helper.sh` (NEW) — C5: shared cleanup functions extracted from session-close-check.sh and state-manager.sh; `cleanup_session_files()` and `record_closed_branch()`
-- `.claude/hooks/session-close-check.sh` — C5: delegates to shared `cleanup_session_files()` and `record_closed_branch()` from _cleanup-helper.sh
-- `.claude/.automation/lib/state-manager.sh` — C5: delegates to shared `cleanup_session_files()` from _cleanup-helper.sh
-- `.claude/.automation/runner.sh` — C1: solo merge + branch seal after external cleanup; C4: portable stat via OSTYPE case in `_check_same_filesystem()`; C5: sources _cleanup-helper.sh
-- `.claude/hooks/_automation-bridge.sh` — C2: added missing source lines for work-order-manager.sh and review-log.sh
-- `.claude/.automation/lib/queue-validator.sh` — C3: added branch validation for taskgroup/taskgroup-merge and solo_mode validation
-- `.claude/.automation/lib/cleanup.sh` — C4: portable stat via `_portable_mod_epoch()` OSTYPE case
-- `.claude/.automation/lib/outcome-detector.sh` — C6: added `_validate_phase_session` guard
-- `.claude/.automation/lib/blocker-reporter.sh` — C6: added `_validate_phase_session` guard
-- `.claude/hooks/_analytics-helper.sh` — C7: process-scoped `_SESSION_OVERLAP_CHECKED` cache for `check_session_overlap()`
-- `.claude/hooks/_phase-helper.sh` — C8: `_PS_VALIDATED` sentinel with cache invalidation on phase-state writes
-- `.claude/hooks/branch-guard.sh` — C9: reordered Gate 7 to call `get_phase()` before `get_session_type()` for cache priming
-- `.claude/hooks/tests/layer1b-registry-functions.sh` — test fix: added `_SESSION_OVERLAP_CHECKED=false` resets between scenarios for C7 cache
-- `.claude/local/session-log.md` — C10: added Session 109 zero-change exempt comment
-- `.claude/local/closed-branches` — C11: added fix/audit-critical-remediation (Session 110 branch)
-
-### Verification (Gates Evidence)
-- Commit gates: A1 pass, A2 pass, A3 n-a, A4 pass, A5 pass, A6 n-a
-- Test suite: L1 324/324, L1b 24/24, L2 228/228, L3 164/164 (740 total)
-- Headless sandbox: 52/52 (Layer A)
-- Cohesion review: 1 CRITICAL (pre-existing `date -j -f` in runner.sh:247 — outside audit scope), 4 RECOMMENDATIONs (non-blocking)
-- QA verification: tests pass (792 assertions)
-
-### Follow-ups
-- Cohesion finding: `_check_stale_locks` in runner.sh uses macOS-only `date -j -f` for ISO 8601 parsing — should use `_iso_to_epoch()` from _analytics-helper.sh for cross-platform compatibility (not in audit scope, deferred)
-
----
-
-## Session 110 — 2026-02-28 — Audit CRITICAL remediation (9 findings)
-
-**Status:** complete
-**Decisions:** 0004, 0017, 0019
-**Branch:** `fix/audit-critical-remediation`
-
-### Goal
-- Remediate all 9 CRITICAL findings from the Deep Audit (Session 109).
-
-### Changes Made
-- `.claude/.automation/lib/state-manager.sh` — CD-1/CD-2: added task-contract.yaml and merge-source-branch cleanup to runner_external_cleanup(); TD-2: added set -euo pipefail; added .stop-attempt-count cleanup for full parity
-- `.claude/.automation/lib/queue-validator.sh` — CD-3: whitespace trimming on brief_path after quote stripping
-- `.claude/.automation/lib/branch-manager.sh` — TD-2: added set -euo pipefail
-- `.claude/.automation/lib/prompt-assembler.sh` — TD-3: added audit route to dev-orchestrator-brief.md
-- `docs/ai/decisions/0017-operator-automation-layer.md` — TD-1: fixed phantom large-scope-approved reference to plan-approved with large-scope: true
-- `.claude/hooks/_analytics-helper.sh` — PF-1: cached get_session_type() with boolean sentinel; PF-2: cached analytics dir and date, replaced manual .session-type read
-- `.claude/local/session-log.md` — GV-1: updated rolling cap comment range to include session 103
-
-### Verification (Gates Evidence)
-- Commit gates: A1 pass, A2 pass, A3 n-a, A4 pass, A5 pass, A6 n-a
-- Test suite: L1 324/324, L1b 24/24, L2 228/228, L3 164/164 (740 total)
-- Headless sandbox: 52/52 (Layer A)
-- Cohesion review: APPROVED (reviewer agent)
-- QA verification: APPROVED (qa-verifier agent)
-
----
-
-## Session 108 — 2026-02-28 — Pre-audit mechanical baseline
-
-**Status:** complete
-**Decisions:** 0004, 0021
-**Branch:** `feature/pre-audit-baseline`
-
-### Goal
-- Establish a verified mechanical baseline before running a comprehensive audit — confirm all hook tests pass, settings.json wiring is complete, agent frontmatter hooks are correct, A1 trigger index is current, and decision trigger paths match real files.
-
-### Changes Made
-- `.claude/hooks/tests/layer1-phase-functions.sh` — updated 7 stale test expectations for Decision 0021 `user-review` phase: L1.2 standard/taskgroup sequences now include `user-review`, L1.8 index assertions updated for shifted positions
-
-### Verification (Gates Evidence)
-- Commit gates: A1 pass, A2 pass, A3 n-a, A4 pass, A5 pass, A6 n-a
-- Push gates: B1 pass, B2 n-a, B3 n-a
-- Test suite: L1 324/324, L1b 24/24, L2 228/228, L3 164/164 (740 total)
-- Headless sandbox: 52/52
-- Settings.json wiring: 9/9 non-helper hooks correctly mapped (agent-git-guard.sh is frontmatter-only, by design)
-- Agent frontmatter: 5/5 Bash-capable agents have git-guard hook
-- A1 trigger index: current (matches regeneration output)
-- Decision triggers: 29/31 path patterns match real files (2 expected: out-of-repo analytics path, runtime task-contract state file)
-
-### Follow-ups
-- Consider adding trigger coverage for `docs/ai/quality-gates.md` and `docs/ai/workflow.md` (core governance files with no path triggers)
-
 <!-- Sessions 63-64: zero-change sessions, no log entry per workflow.md exemption -->
 <!-- Session 109: audit session, zero-change exempt -->
-<!-- Sessions 65-107: dropped per rolling cap -->
+<!-- Sessions 65-111: dropped per rolling cap -->
 
 <!-- Template: copy this block for each new session entry
 

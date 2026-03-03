@@ -79,6 +79,25 @@
             "command": ".claude/hooks/pre-push-gates.sh"
           }
         ]
+      },
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/ask-user-deny.sh"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/permission-request.sh"
+          }
+        ]
       }
     ],
     "PostToolUse": [
