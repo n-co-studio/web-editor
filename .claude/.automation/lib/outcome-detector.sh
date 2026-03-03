@@ -58,14 +58,20 @@ detect_outcome() {
     has_dirty_tree=true
   fi
 
-  # Check for escalation files
+  # Check for escalation files (includes scope-deviation escalations from
+  # pre-commit-gates.sh scope classification gate)
   local escalation_dir="$repo_root/.claude/.automation/escalations"
+  local has_scope_deviation=false
   if [ -d "$escalation_dir" ]; then
     local esc_file
     for esc_file in "$escalation_dir"/*.yaml; do
       if [ -f "$esc_file" ]; then
         has_escalation=true
-        break
+        # Detect scope-deviation type for enriched outcome detail
+        if grep -q 'type: "scope-deviation"' "$esc_file" 2>/dev/null || \
+           grep -q "type: scope-deviation" "$esc_file" 2>/dev/null; then
+          has_scope_deviation=true
+        fi
       fi
     done
   fi
@@ -84,7 +90,12 @@ detect_outcome() {
   if [ "$exit_code" -eq 0 ]; then
     # Escalation check (exit 0 but needs operator review)
     if [ "$has_escalation" = true ] || [ "$has_operator_tag" = true ]; then
-      echo "review:escalation"
+      # Enrich detail when scope-deviation escalation is present
+      if [ "$has_scope_deviation" = true ]; then
+        echo "review:scope-deviation"
+      else
+        echo "review:escalation"
+      fi
       return
     fi
     # Success (exit 0 + new commits)

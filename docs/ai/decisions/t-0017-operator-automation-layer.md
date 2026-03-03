@@ -7,7 +7,9 @@ Accepted
 
 - type: file
 - path: `\.claude/\.automation/`
-- keywords: `automation, headless, runner, queue, escalation, blocker, claude -p, enabled`
+- path: `\.claude/hooks/permission-request\.sh`
+- path: `\.claude/hooks/_permission-allowlist\.sh`
+- keywords: `automation, headless, runner, queue, escalation, blocker, claude -p, enabled, permission-request, allowlist, scope-deviation, scope_classification`
 
 ## Decision
 Add an optional operator automation layer for headless `claude -p` invocations with full governance parity:
@@ -18,13 +20,13 @@ Add an optional operator automation layer for headless `claude -p` invocations w
 5. **Stop hook limitation**: The Stop hook does NOT fire in `claude -p` mode. Runners must handle post-session tasks externally: solo merge (Decision 0015), session registry cleanup (Decision 0015), branch sealing (Decision 0013), session log updates. Runner implementations must replicate the cleanup logic from `session-close-check.sh`
 6. **Runner pattern**: Pre-session setup (branch creation, session registration, phase pre-write, queue state update) → `claude -p` invocation with `--disallowedTools` permission profile → post-session cleanup (merge, registry, seal, log). This three-phase pattern is the canonical headless execution model
 7. **Queue state machine**: Queue entries transition through: `pending-review → approved → running → completed | failed | review | blocked`. Only `approved` entries may transition to `running`. The `pending-review` state requires operator approval before execution
-8. **Escalation taxonomy**: Six escalation types cover all runner failure modes: `gate-failure` (governance gate blocked), `governance-block` (hook enforcement prevented action), `phase-tag-escalation` (phase tag was `operator` at exit), `ambiguity` (runner could not determine next action), `scope-exceeded` (changes exceeded configured limits), `dependency-missing` (required external resource unavailable)
+8. **Escalation taxonomy**: Nine escalation types cover all runner failure modes and scope deviations: `gate-failure` (governance gate blocked), `governance-block` (hook enforcement prevented action), `phase-tag-escalation` (phase tag was `operator` at exit), `ambiguity` (runner could not determine next action), `scope-exceeded` (changes exceeded configured limits), `dependency-missing` (required external resource unavailable), `security-risk` (vulnerability detected — auth bypass, injection, unsafe deserialization, etc.), `structural-change` (spec-level or architectural change not in brief), `scope-deviation` (change outside brief scope — classified by `scope_classification`)
 9. **Session type compatibility**: Queue entries reference the existing 15-value session type enum from Decision 0014. The enum is not extended — automation sessions use the same types as interactive sessions. An environment variable or queue metadata distinguishes headless from interactive context
 10. **Write-guard carve-out**: `.claude/.automation/*` is carved out in template mode only (Decision 0012). Child and autonomous modes have no access to automation schemas or config
 
 ## Automated Choices
 
-When the runner invokes a headless session, eight operator decision points are resolved automatically. These replace the interactive prompts that would normally require a human operator.
+When the runner invokes a headless session, ten operator decision points are resolved automatically. These replace the interactive prompts that would normally require a human operator.
 
 | # | Decision Point | Interactive Behavior | Automated Answer | Mechanism |
 |---|---------------|---------------------|-----------------|-----------|
@@ -36,11 +38,48 @@ When the runner invokes a headless session, eight operator decision points are r
 | 6 | AskUserQuestion | Agent prompts operator for clarification | Blocked | `--disallowedTools` blocks `AskUserQuestion` in all profiles |
 | 7 | WebSearch / WebFetch | Agent requests web access | Allowed (build) / Blocked (audit) | Build profile permits web tools; audit profile blocks them |
 | 8 | Destructive git | Agent runs `git reset --hard`, `git push --force` | Blocked | `--disallowedTools` blocks destructive patterns in build profile |
+| 9 | Scope classification | Operator reviews unbriefed/out-of-scope files | Classified mechanically | `pre-commit-gates.sh` compares staged files against task contract `scope_files` — briefed passes, unbriefed-in-scope writes advisory escalation, out-of-scope blocks commit |
+| 10 | PermissionRequest auto-approval | VS Code shows permission dialog for each tool use | Auto-decided | `permission-request.sh` hook auto-approves curated tools/commands, denies dangerous patterns, falls through to dialog for unknown — all decisions logged to audit file |
 
 When `AskUserQuestion` is blocked, sessions that encounter ambiguity must escalate via the escalation protocol (file-based) rather than prompting interactively.
 
 ## Context
 The operator automation layer enables headless CI/CD-style execution of Claude sessions. The headless hook verification experiment confirmed that `claude -p` sessions run all hooks except Stop, validating the three-phase runner pattern. This decision defines only the schema contracts and directory structure — actual runner implementations are out of scope and will be built separately against these schemas. The `enabled: false` default ensures no behavioral change for existing repos until the operator explicitly opts in.
+
+## Scope Classification Model
+
+When a task contract includes a `scope_files` list, the pre-commit gate classifies staged files into three categories:
+
+| Classification | Criteria | Enforcement |
+|----------------|----------|-------------|
+| `briefed` | File matches a `scope_files` entry exactly | No action — expected |
+| `unbriefed-in-scope` | File shares a parent directory with any scope file | Advisory escalation with risk/gain context |
+| `out-of-scope` | File does not match any scope file or related directory | Blocking — commit denied, escalation written |
+
+The classification algorithm is path-based (deterministic, no LLM):
+1. Exact match against `scope_files` list → **briefed**
+2. Parent directory of staged file matches parent directory of any scope file → **unbriefed-in-scope**
+3. Everything else → **out-of-scope**
+
+Escalation entries include a `risk_gain` object (`risk:` what could go wrong, `gain:` why it helps) populated by the agent via a `.claude/.state/scope-risk-gain` state file. This context helps the operator make informed accept/reject decisions.
+
+**Limitations:** Path-based, not semantic. A file in `scope_files` could contain an out-of-scope change; a file outside `scope_files` could be a necessary dependency. Acceptable for v1 — semantic analysis is a future enhancement.
+
+## PermissionRequest Hook
+
+The `PermissionRequest` hook (`permission-request.sh`) auto-approves curated tools and Bash commands, denies dangerous commands, and falls through to the VS Code dialog for unknown patterns. Every request is logged to an append-only audit log.
+
+**Decision flow:**
+1. Non-Bash tool in allow list (Read, Edit, Write, Glob, Grep, WebSearch, WebFetch, Task, NotebookEdit) → auto-approve
+2. Bash command in deny list (rm -rf, sudo, chmod 777, curl/wget to non-localhost, kill -9, dd, mkfs) → deny
+3. Bash command in allow list (npm, node, python, git read operations, file inspection, etc.) → auto-approve
+4. Unknown → fall through to VS Code permission dialog
+
+**Audit log:** `.claude/.automation/logs/permission-audit.log` (gitignored, append-only). Records timestamp, tool name, command prefix, and decision for every request.
+
+**Deny list priority:** Deny patterns are checked before allow patterns. A command matching both lists is denied (fail-safe).
+
+**Headless mode:** PermissionRequest hooks do not fire in `claude -p` mode. Headless sessions use `--disallowedTools` profiles instead.
 
 ## Consequences
 - `.claude/.automation/schemas/` added with four schema files (tracked in git)
@@ -48,12 +87,23 @@ The operator automation layer enables headless CI/CD-style execution of Claude s
 - `.gitignore` gains runtime artifact exclusions for `queue/`, `reports/`, `escalations/`, `briefs/`, `logs/`
 - `.claude/hooks/write-guard.sh` `is_carved_out()` gains `.claude/.automation/*` in template mode
 - `AI.md` gains automation layer summary paragraph
-- No changes to `.claude/settings.json` — no new hooks added
+- `.claude/settings.json` gains `PermissionRequest` hook entry for `permission-request.sh`
 - Existing hooks work as-is for governance parity. `plan-approval.sh` gains an automation activation path (below)
 - No changes to Decision 0014 session type enum — automation uses existing types
 - Runner implementations are out of scope — they build against these schemas
 - `plan-approval.sh` PostToolUse hook wires auto mode on taskgroup sessions to runner activation via `_automation-bridge.sh` — queues pending briefs, enables runner, starts daemon
 - `.claude/.automation/briefs/` convention for pre-saved brief files (operator-populated, gitignored)
+- `.claude/hooks/permission-request.sh` and `_permission-allowlist.sh` added for PermissionRequest hook
+- `escalation.yaml` expanded from 6 to 9 types with `scope_classification` and `risk_gain` fields
+- `queue-entry.yaml` gains `scope_classification` field
+- `pre-commit-gates.sh` gains scope classification gate (between A6 and high-risk detection)
+- `outcome-detector.sh` gains scope-deviation detection in escalation file scanning
+- `.claude/.automation/lib/intake.sh` CLI for standalone queue entry creation — accepts brief path, session type, auto-approve, solo, and push flags; auto-enables runner when entries are added
+- `queue-entry.yaml` gains `push_on_complete` field — per-entry opt-in branch push after session completion (solo pushes main, non-solo pushes feature branch)
+- `.claude/hooks/ask-user-deny.sh` PreToolUse hook blocks `AskUserQuestion` in headless mode (`CLAUDE_HEADLESS=1`) — defense-in-depth alongside `--disallowedTools`
+- `.claude/hooks/_cleanup-helper.sh` extracted as shared cleanup helper — sourced by both `session-close-check.sh` and runner libraries to eliminate divergence (audit C5)
+- `.claude/.automation/lib/cleanup.sh` provides retention-based deletion of stale runtime artifacts (queue entries, reports, escalations, heartbeats, closed-branch compaction)
+- `.claude/.automation/RUNNER-PARITY.md` maintenance contract mapping every `session-close-check.sh` responsibility to its `runner.sh` equivalent
 
 ## Security Model
 

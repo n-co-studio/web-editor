@@ -14,6 +14,8 @@ entry:
   max_retries: 3            # maximum retries before marking blocked
   error_log: ""             # path to blocker-report on failure
   work_order_id: ""         # (v1.1.0) parent work order ID (optional)
+  push_on_complete: false   # true = push branch to origin after session completes (opt-in)
+  scope_classification: ""  # briefed | unbriefed-in-scope | out-of-scope (schema contract — populated by runner/queue-manager implementations at commit time when scope deviates)
   created_at: ""            # ISO 8601 timestamp
   updated_at: ""            # ISO 8601 timestamp
   completed_at: ""          # ISO 8601 timestamp (set on terminal state)

@@ -6,6 +6,7 @@ runner:
   enabled: false
   default_auto_mode: false
   default_solo_mode: false
+  default_push_on_complete: false
   max_retries: 3
   heartbeat_interval: 30
   stderr_tail_lines: 50
