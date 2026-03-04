@@ -5,16 +5,17 @@ AI-native project governance for Claude Code. Enforces quality gates, decision c
 ## Quick Start
 
 1. **Create a repo** from this template (GitHub "Use this template")
-2. Verify `.claude/repo-mode` reads `child` (default for downstream projects)
-3. Run **Prompt 0** — builds your project specification in `docs/spec/compiled/`
-4. Run **Prompt A** (Initialize) — advisory board reviews your spec, sets up governance
-5. Run **Prompt B** with a task brief — plan, build, verify, commit
+2. Run **Prompt 0** — builds your project specification in `docs/spec/compiled/`
+3. Run **Prompt A** (Initialize) — advisory board reviews your spec, sets up governance
+4. Run **Prompt B** with a task brief — plan, build, verify, commit
+
+Child repos default to `child` mode automatically (no `.claude/repo-mode` file needed).
 
 Prompts live in `docs/ai/prompts/`. See [AI.md](AI.md) for the full authority model.
 
 ## Operating Modes
 
-Set in `.claude/repo-mode`. Override per-session with `REPO_OS_MODE=<mode>`.
+Resolved via three-tier chain: `REPO_OS_MODE` env var > `.claude/repo-mode` file > default `child`. File is gitignored — child repos get `child` mode automatically without any setup.
 
 | Mode | File Access | Use Case |
 |------|-------------|----------|

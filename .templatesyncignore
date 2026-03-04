@@ -20,6 +20,9 @@ docs/spec/prototypes/
 # Local Claude settings
 .claude/settings.local.json
 
+# Repo mode (absent = child default; not synced to child repos)
+.claude/repo-mode
+
 # Analytics data — legacy per-repo location (active data now at ~/.local/share/repo-os-analytics/)
 .claude/analytics/
 

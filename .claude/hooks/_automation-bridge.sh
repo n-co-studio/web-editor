@@ -43,10 +43,9 @@ source "$_BRIDGE_AUTOMATION_DIR/lib/work-order-manager.sh"
 source "$_BRIDGE_AUTOMATION_DIR/lib/review-log.sh"
 
 # --- Detect repo mode (template vs product) ---
+# Three-tier resolution: REPO_OS_MODE env var > .claude/repo-mode file > default "child"
 _BRIDGE_IS_TEMPLATE=false
-_BRIDGE_MODE_FILE="$_BRIDGE_REPO_ROOT/.claude/repo-mode"
-[ -f "$_BRIDGE_MODE_FILE" ] && grep -q "template" "$_BRIDGE_MODE_FILE" 2>/dev/null \
-  && _BRIDGE_IS_TEMPLATE=true
+[ "$(get_mode)" = "template" ] && _BRIDGE_IS_TEMPLATE=true
 
 # --- Find active task group contract ---
 # Scans contract directory for a YAML file with status: in_progress.

@@ -281,8 +281,8 @@ if [ "${SKIP_CONTRACT_CHECK:-0}" = "1" ]; then
   log_override "pre-commit-gates" "SKIP_CONTRACT_CHECK"
 fi
 if [ "$SKIP_STATE" = false ] && [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
-  REPO_MODE_FILE="$REPO_ROOT/.claude/repo-mode"
-  if [ -f "$REPO_MODE_FILE" ] && grep -q "template" "$REPO_MODE_FILE" 2>/dev/null; then
+  # Three-tier resolution: REPO_OS_MODE env var > .claude/repo-mode file > default "child"
+  if [ "$(get_mode)" = "template" ]; then
     CONTRACT_DIR="$REPO_ROOT/.claude/local/task-groups"
   else
     CONTRACT_DIR="$REPO_ROOT/docs/ai/task-groups"

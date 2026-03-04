@@ -12,6 +12,9 @@
 # Claude Code personal settings
 .claude/settings.local.json
 
+# Repo mode (absent = child default; template repos create this locally)
+.claude/repo-mode
+
 # HVST failure counter (session-scoped temp file)
 .claude/.hvst-fail-count
 

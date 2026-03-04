@@ -31,3 +31,4 @@ t-0020-task-contract-system.md
 t-0021-user-review-system.md
 t-0022-template-decision-naming.md
 t-0023-editor-live-session-type.md
+t-0024-child-repo-default-mode.md

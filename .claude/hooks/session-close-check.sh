@@ -107,9 +107,9 @@ fi
 # --- Paths and state files ---
 REPO_ROOT="$_REPO_OS_ROOT"
 # In template mode, session log lives locally; in product mode, it's committed.
-REPO_MODE_FILE="$REPO_ROOT/.claude/repo-mode"
+# Three-tier resolution: REPO_OS_MODE env var > .claude/repo-mode file > default "child"
 IS_TEMPLATE=false
-[ -f "$REPO_MODE_FILE" ] && grep -q "template" "$REPO_MODE_FILE" 2>/dev/null && IS_TEMPLATE=true
+[ "$(get_mode)" = "template" ] && IS_TEMPLATE=true
 if [ "$IS_TEMPLATE" = true ]; then
   SESSION_LOG="$REPO_ROOT/.claude/local/session-log.md"
 else
