@@ -16,15 +16,15 @@
 0011|\.claude/local/task-groups/|task.group, contract, A6, next_brief, pre-approval, one.branch.per.group, parallel, execution, completion_markers, merge_brief, boundaries
 0012|\.claude/hooks/write-guard\.sh|write-guard, mode-guard, REPO_OS_MODE, REPO_OS_UNLOCK_PATH, REPO_OS_SKIP_MODE_GUARD, is_in_repo
 0012|\.claude/repo-mode|write-guard, mode-guard, REPO_OS_MODE, REPO_OS_UNLOCK_PATH, REPO_OS_SKIP_MODE_GUARD, is_in_repo
-0014|\.claude/hooks/_phase-helper\.sh|phase, session_type, init_phase, advance_phase, assert_phase, phase-state, get_phase, get_tag, taskgroup-merge
-0014|\.claude/\.state/phase-state|phase, session_type, init_phase, advance_phase, assert_phase, phase-state, get_phase, get_tag, taskgroup-merge
+0014|\.claude/hooks/_phase-helper\.sh|phase, session_type, init_phase, advance_phase, assert_phase, phase-state, get_phase, get_tag, taskgroup-merge, editor-live
+0014|\.claude/\.state/phase-state|phase, session_type, init_phase, advance_phase, assert_phase, phase-state, get_phase, get_tag, taskgroup-merge, editor-live
 0016|\.claude/agents/auditor\.md|auditor, audit, dimension, co-audit, workshop, escalation, tech-debt, cohesion-drift
 0016|docs/ai/prompts/prompt-c-project-audit\.md|auditor, audit, dimension, co-audit, workshop, escalation, tech-debt, cohesion-drift
 0017|\.claude/\.automation/|automation, headless, runner, queue, escalation, blocker, claude -p, enabled, permission-request, allowlist, scope-deviation, scope_classification
 0017|\.claude/hooks/permission-request\.sh|automation, headless, runner, queue, escalation, blocker, claude -p, enabled, permission-request, allowlist, scope-deviation, scope_classification
 0017|\.claude/hooks/_permission-allowlist\.sh|automation, headless, runner, queue, escalation, blocker, claude -p, enabled, permission-request, allowlist, scope-deviation, scope_classification
-0018|\.claude/hooks/(branch-guard|pre-commit-gates)\.sh|taskgroup, task.group, contract, merge, A6_contract_missing, tg_merge_blocked, SKIP_MERGE_GUARD
-0019|\.claude/hooks/(branch-guard|write-guard)\.sh|fail-closed, no_phase_state, phase_gate_no_state, .fail-closed-enforced
+0018|\.claude/hooks/(bash-guard|branch-guard|pre-commit-gates)\.sh|taskgroup, task.group, contract, merge, A6_contract_missing, tg_merge_blocked, SKIP_MERGE_GUARD
+0019|\.claude/hooks/(bash-guard|branch-guard|write-guard)\.sh|fail-closed, no_phase_state, phase_gate_no_state, .fail-closed-enforced
 0019|docs/ai/decisions/\.fail-closed-enforced|fail-closed, no_phase_state, phase_gate_no_state, .fail-closed-enforced
 0020|\.claude/\.state/task-contract\.yaml|task-contract, task_contract, intent:, verification:
 0020|docs/ai/task-groups/.*\.yaml|task-contract, task_contract, intent:, verification:
@@ -36,3 +36,5 @@
 0022|.claude/hooks/write-guard.sh|t-prefix, t-manifest, template decision, decision naming, child-sync-decisions
 0022|.claude/hooks/pre-commit-gates.sh|t-prefix, t-manifest, template decision, decision naming, child-sync-decisions
 0022|.claude/.automation/lib/child-sync-decisions.sh|t-prefix, t-manifest, template decision, decision naming, child-sync-decisions
+0023|\.claude/hooks/_phase-helper\.sh|editor-live, fswatch, visual change, pending_visual_changes, acknowledge_visual_change, commit:build
+0023|\.claude/\.state/phase-state|editor-live, fswatch, visual change, pending_visual_changes, acknowledge_visual_change, commit:build

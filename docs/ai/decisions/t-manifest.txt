@@ -30,3 +30,4 @@ t-0019-fail-closed-phase-enforcement.md
 t-0020-task-contract-system.md
 t-0021-user-review-system.md
 t-0022-template-decision-naming.md
+t-0023-editor-live-session-type.md

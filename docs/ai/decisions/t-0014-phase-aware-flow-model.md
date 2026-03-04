@@ -8,14 +8,14 @@ Accepted
 - type: file
 - path: `\.claude/hooks/_phase-helper\.sh`
 - path: `\.claude/\.state/phase-state`
-- keywords: `phase, session_type, init_phase, advance_phase, assert_phase, phase-state, get_phase, get_tag, taskgroup-merge`
+- keywords: `phase, session_type, init_phase, advance_phase, assert_phase, phase-state, get_phase, get_tag, taskgroup-merge, editor-live`
 - enforced_by: `.claude/hooks/_phase-helper.sh`
 
 ## Decision
 Add a phase-aware flow management system that tracks session progress through an ordered sequence of phases. Replaces implicit phase detection with an explicit state machine:
 
 1. **Phase-state file**: `.claude/.state/phase-state` (session-scoped, key-value format). Fields:
-   - `session_type` — one of the 15 session type enum values
+   - `session_type` — one of the 17 session type enum values
    - `session_id` — bound to `.claude/.session-id` for staleness protection
    - `mode` — `auto` or `review` (default: `review`)
    - `current_phase` — the phase the session is currently in
@@ -25,13 +25,14 @@ Add a phase-aware flow management system that tracks session progress through an
    - `tag` — automation tag for the current phase (`agent`, `operator`, or `both`)
    - `timestamp` — ISO 8601 UTC timestamp of last phase transition
 
-2. **Session type enum** (15 types):
-   - Prompt B: `standard`, `taskgroup`, `taskgroup-merge`, `hotfix`, `experiment`
+2. **Session type enum** (17 types):
+   - Prompt B: `standard`, `taskgroup`, `taskgroup-merge`, `hotfix`, `experiment`, `editor-live`
    - Prompt 0: `spec-fresh`, `spec-update`
    - Prompt 0.5: `prototype-napkin`, `prototype-spike`, `prototype-poc`
    - Prompt A: `advisory-init`, `advisory-reinit`
    - Prompt C: `audit`
    - Prompt T: `taskdef-query`, `taskdef-brief`
+   - Ephemeral: `ephemeral`
 
 3. **Phase sequences** — each session type defines an ordered list of phases with automation tags. Transitions are forward-only except for defined loops. Full sequences:
 
@@ -59,6 +60,11 @@ Add a phase-aware flow management system that tracks session progress through an
    **Prompt B — Experiment:**
    `init[agent] → build[agent] → commit[agent] → close[agent]`
    Notes: No plan phase (experiment brief is the plan). A4 safety only at commit.
+
+   **Prompt B — Editor-Live:**
+   `init[agent] → build[agent] → commit[agent] → review[agent] → verify[agent] → op-review[operator] → close[agent]`
+   Loops: `commit→build` (next change iteration), `verify→build` (QA failure)
+   Notes: No plan phase (operator's live edits are the plan). `commit:build` is a novel backward transition — the first from the `commit` phase. A4 safety per-loop commit; full gates (A5 + QA) at final review/verify before close. Child mode only. Cycle advisory at 50 iterations. `has_plan_gate` returns false (no approval phase).
 
    **Prompt 0 — Spec Builder (Fresh):**
    `init[agent] → interview[both] → write[agent] → approval[operator] → governance[agent] → close[agent]`
@@ -92,6 +98,7 @@ Add a phase-aware flow management system that tracks session progress through an
 
 4. **Phase-to-gate-profile mapping** — which gates apply varies by session type and is enforced at `verify`/`commit` phases:
    - `standard`, `taskgroup`, `taskgroup-merge`: Full gates (A1–A6, B1–B3). A6 applies only to taskgroup/taskgroup-merge
+   - `editor-live`: A4 per-loop commit; full gates (A1–A5, B1–B3) at final review/verify. A6 n/a (not a task group type)
    - `hotfix`: Expedited (A2 scope relaxed, A5 skipped)
    - `experiment`, `prototype-*`: A4 safety only
    - `spec-fresh`, `spec-update`: Advisory only (governance evidence at close)
@@ -114,7 +121,7 @@ Add a phase-aware flow management system that tracks session progress through an
 
 8. **Transition rules**:
    - Forward-only: `advance_phase` validates that the target phase appears after the current phase in the session type's sequence
-   - Defined loops: `review→build` and `verify→build` for standard, taskgroup (hotfix has `verify→build` only; taskgroup-merge has `cohesion→cohesion` self-loop). Each loop-back increments the `cycle` counter
+   - Defined loops: `review→build` and `verify→build` for standard, taskgroup (hotfix has `verify→build` only; taskgroup-merge has `cohesion→cohesion` self-loop; editor-live has `commit→build` and `verify→build`). Each loop-back increments the `cycle` counter
    - All other backward transitions are illegal and return error
    - Skipping phases is allowed (forward jumps) — enables auto mode to skip `op-review`
 

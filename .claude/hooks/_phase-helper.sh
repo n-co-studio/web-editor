@@ -52,6 +52,8 @@ get_phases_for_type() {
       echo "init dispatch synthesize op-review output close" ;;
     taskgroup-merge)
       echo "init contract-init cohesion verify commit op-review close" ;;
+    editor-live)
+      echo "init build commit review verify op-review close" ;;
     *)
       echo "" ;;
   esac
@@ -193,6 +195,16 @@ get_tag_for_phase() {
         *)             echo "agent" ;;
       esac
       ;;
+    editor-live)
+      case "$phase" in
+        build)     echo "agent" ;;
+        commit)    echo "agent" ;;
+        review)    echo "agent" ;;
+        verify)    echo "agent" ;;
+        op-review) echo "operator" ;;
+        *)         echo "agent" ;;
+      esac
+      ;;
     *)
       echo "agent" ;;
   esac
@@ -261,6 +273,7 @@ get_loops_for_type() {
     standard|taskgroup) echo "review:build verify:build" ;;
     hotfix)             echo "verify:build" ;;
     taskgroup-merge)    echo "cohesion:cohesion" ;;
+    editor-live)        echo "commit:build verify:build" ;;
     *)                  echo "" ;;
   esac
 }

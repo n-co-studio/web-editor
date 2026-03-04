@@ -19,6 +19,7 @@
 # Branch profiles:
 #   experiment/*  — A4 only (all state checks skipped)
 #   hotfix/*      — A2 scope relaxed, A5 cohesion skipped
+#   editor-live   — per-loop: A4 only; close: full gates minus plan-approved
 
 set -euo pipefail
 
@@ -123,6 +124,38 @@ if [ "$IS_EXPERIMENT" = true ]; then
   exit 0
 fi
 
+# --- Editor-live session type detection ---
+# Per-loop commits (review NOT in phases_completed): A4 only, skip state checks.
+# Close commits (review IS in phases_completed): full gates minus plan-approved.
+IS_EDITOR_LIVE_LOOP=false
+IS_EDITOR_LIVE_CLOSE=false
+if [ "$SKIP_STATE" = false ]; then
+  _EL_STYPE=$(get_session_type)
+  if [ "$_EL_STYPE" = "editor-live" ]; then
+    _EL_STATE_FILE="$REPO_ROOT/.claude/.state/phase-state"
+    if [ -f "$_EL_STATE_FILE" ] && _validate_phase_session "$_EL_STATE_FILE"; then
+      case ",$_PS_PHASES_COMPLETED," in
+        *",review,"*) IS_EDITOR_LIVE_CLOSE=true ;;
+        *)            IS_EDITOR_LIVE_LOOP=true ;;
+      esac
+    else
+      # No phase-state or stale session — treat as per-loop (safe default: A4 only)
+      IS_EDITOR_LIVE_LOOP=true
+    fi
+  fi
+fi
+
+# Exit early for editor-live per-loop commits (A4 only — same as experiment)
+if [ "$IS_EDITOR_LIVE_LOOP" = true ]; then
+  if [ "$FAILED" -ne 0 ]; then
+    log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "$BLOCKED_REASONS"
+    echo "Commit blocked by pre-commit gate check." >&2
+    exit 1
+  fi
+  log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "editor_live_loop"
+  exit 0
+fi
+
 # ============================================================
 # Phase Gate: assert_phase commit (blocking — skipped by REPO_OS_RECOVER)
 # Primary check: session must have reached commit phase.
@@ -148,7 +181,10 @@ fi
 if [ "$SKIP_STATE" = false ]; then
   # plan-approved: required on all non-experiment branches
   # Override: REPO_OS_SKIP_PLAN_GATE=1 (parity with branch-guard plan gate)
-  if [ "${REPO_OS_SKIP_PLAN_GATE:-0}" = "1" ]; then
+  # editor-live: skip (never has plan gate — no approval phase)
+  if [ "$IS_EDITOR_LIVE_CLOSE" = true ]; then
+    : # editor-live never has plan-approved — skip silently
+  elif [ "${REPO_OS_SKIP_PLAN_GATE:-0}" = "1" ]; then
     log_override "pre-commit-gates" "REPO_OS_SKIP_PLAN_GATE"
   elif [ ! -f "$STATE_DIR/plan-approved" ]; then
     echo "GATE STATE FAILED: .claude/.state/plan-approved not found — run plan approval first (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2

@@ -106,6 +106,13 @@ _PERMISSION_ALLOW_BASH=(
   # Source helper scripts (common in Repo OS hooks)
   'source '
   '\. '
+
+  # File watching (read-only passive tools — editor-live session type)
+  'fswatch '
+  'fswatch$'
+  'inotifywait '
+  'inotifywait$'
+  '.claude/hooks/editor-watch.sh '
 )
 
 # --- Dangerous Bash commands that always trigger denial ---

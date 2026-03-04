@@ -648,6 +648,151 @@ phase_after=$(get_phase)
 assert_eq "$phase_after" "verify" "loop: second critic APPROVED advances to verify"
 
 # ============================================================
+# L3.8c — Editor-live session type: loop mechanics + gate profile
+# ============================================================
+tap_section "L3.8c: Editor-live — loop mechanics, gate profile, write-guard exemption"
+
+# --- Loop mechanics: init → build → commit → (loop commit→build) → review → verify ---
+reset_phase "editor-live"
+advance_phase "build" 2>/dev/null
+phase_after=$(get_phase)
+assert_eq "$phase_after" "build" "editor-live: init→build succeeds"
+
+advance_phase "commit" 2>/dev/null
+phase_after=$(get_phase)
+assert_eq "$phase_after" "commit" "editor-live: build→commit succeeds"
+
+# commit→build loop (defined in get_loops_for_type)
+advance_phase "build" 2>/dev/null
+phase_after=$(get_phase)
+assert_eq "$phase_after" "build" "editor-live: commit→build loop succeeds"
+
+# Verify cycle incremented (should be 2 after one loop)
+_load_phase_state "$STATE_DIR/phase-state"
+assert_eq "$_PS_CYCLE" "2" "editor-live: cycle increments on commit→build loop"
+
+# Second iteration: build → commit → build (cycle 3)
+advance_phase "commit" 2>/dev/null
+advance_phase "build" 2>/dev/null
+_load_phase_state "$STATE_DIR/phase-state"
+assert_eq "$_PS_CYCLE" "3" "editor-live: cycle increments to 3 on second loop"
+
+# Exit loop: build → commit → review → verify
+advance_phase "commit" 2>/dev/null
+advance_phase "review" 2>/dev/null
+advance_phase "verify" 2>/dev/null
+phase_after=$(get_phase)
+assert_eq "$phase_after" "verify" "editor-live: commit→review→verify succeeds (exit loop)"
+
+# verify→build loop
+advance_phase "build" 2>/dev/null
+phase_after=$(get_phase)
+assert_eq "$phase_after" "build" "editor-live: verify→build loop succeeds"
+_load_phase_state "$STATE_DIR/phase-state"
+assert_eq "$_PS_CYCLE" "4" "editor-live: cycle increments on verify→build loop"
+
+# --- Per-loop commit (A4 only): no plan-approved/cohesion-reviewed/qa-verified needed ---
+reset_phase "editor-live"
+advance_phase "build" 2>/dev/null
+advance_phase "commit" 2>/dev/null
+# No state files — per-loop commit should pass (A4 only)
+rm -f "$STATE_DIR/plan-approved" "$STATE_DIR/cohesion-reviewed" "$STATE_DIR/qa-verified"
+stage_sandbox_file "src/el-loop.ts" "export const loop = 1;"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "editor-live per-loop commit")"
+assert_ok "$_LAST_RC" "editor-live per-loop commit allows without state files (A4 only)"
+
+# --- Per-loop commit: A4 still blocks secrets ---
+reset_phase "editor-live"
+advance_phase "build" 2>/dev/null
+advance_phase "commit" 2>/dev/null
+stage_sandbox_file "src/el-secret.ts" "const key = 'sk_live_abc123def456';"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "editor-live secret commit")"
+assert_fail "$_LAST_RC" "editor-live per-loop commit blocks on A4 secret detection"
+# Clean up staged secret file
+(cd "$SB" && git reset HEAD src/el-secret.ts 2>/dev/null && rm -f src/el-secret.ts) || true
+
+# --- Close commit (post-review): requires cohesion-reviewed + qa-verified, no plan-approved ---
+reset_phase "editor-live"
+advance_phase "build" 2>/dev/null
+advance_phase "commit" 2>/dev/null
+advance_phase "review" 2>/dev/null
+advance_phase "verify" 2>/dev/null
+advance_phase "op-review" 2>/dev/null
+advance_phase "close" 2>/dev/null
+# At close phase (review IS in phases_completed)
+# pre-commit-gates checks phases_completed for review
+# Provide cohesion-reviewed + qa-verified but NO plan-approved
+rm -f "$STATE_DIR/plan-approved"
+echo "timestamp: test" > "$STATE_DIR/cohesion-reviewed"
+echo "timestamp: test" > "$STATE_DIR/qa-verified"
+stage_sandbox_file "src/el-close.ts" "export const close = 1;"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "editor-live close commit")"
+assert_ok "$_LAST_RC" "editor-live close commit allows without plan-approved (with cohesion + qa)"
+
+# --- Close commit: blocks without cohesion-reviewed ---
+reset_phase "editor-live"
+advance_phase "build" 2>/dev/null
+advance_phase "commit" 2>/dev/null
+advance_phase "review" 2>/dev/null
+advance_phase "verify" 2>/dev/null
+advance_phase "op-review" 2>/dev/null
+advance_phase "close" 2>/dev/null
+rm -f "$STATE_DIR/plan-approved" "$STATE_DIR/cohesion-reviewed"
+echo "timestamp: test" > "$STATE_DIR/qa-verified"
+stage_sandbox_file "src/el-close2.ts" "export const close2 = 2;"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "editor-live close commit")"
+assert_fail "$_LAST_RC" "editor-live close commit blocks without cohesion-reviewed"
+
+# --- Close commit: blocks without qa-verified ---
+reset_phase "editor-live"
+advance_phase "build" 2>/dev/null
+advance_phase "commit" 2>/dev/null
+advance_phase "review" 2>/dev/null
+advance_phase "verify" 2>/dev/null
+advance_phase "op-review" 2>/dev/null
+advance_phase "close" 2>/dev/null
+rm -f "$STATE_DIR/plan-approved" "$STATE_DIR/qa-verified"
+echo "timestamp: test" > "$STATE_DIR/cohesion-reviewed"
+stage_sandbox_file "src/el-close3.ts" "export const close3 = 3;"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "editor-live close commit")"
+assert_fail "$_LAST_RC" "editor-live close commit blocks without qa-verified"
+
+# --- Close commit at commit phase (realistic: after verify:build loop) ---
+# After verify:build loop, current_phase=commit but review IS in phases_completed.
+# This is the realistic close-gate scenario (vs close phase used in tests above).
+reset_phase "editor-live"
+advance_phase "build" 2>/dev/null
+advance_phase "commit" 2>/dev/null
+advance_phase "review" 2>/dev/null
+advance_phase "verify" 2>/dev/null
+# verify:build loop — goes back to build, then forward to commit
+advance_phase "build" 2>/dev/null   # loop
+advance_phase "commit" 2>/dev/null  # now at commit with review in phases_completed
+rm -f "$STATE_DIR/plan-approved"
+echo "timestamp: test" > "$STATE_DIR/cohesion-reviewed"
+echo "timestamp: test" > "$STATE_DIR/qa-verified"
+stage_sandbox_file "src/el-close-realistic.ts" "export const closeR = 1;"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "editor-live close commit at commit phase")"
+assert_ok "$_LAST_RC" "editor-live close commit at commit phase (after verify:build loop)"
+
+# --- Write-guard exemption: edit allowed in init phase ---
+reset_phase "editor-live"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+assert_ok "$_LAST_RC" "write-guard allows edit in init phase for editor-live"
+
+# --- bash-guard: editor-live has no plan gate → allows bash redirect in init ---
+reset_phase "editor-live"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
+assert_ok "$_LAST_RC" "bash-guard allows bash redirect for editor-live (no plan gate)"
+
+# --- has_plan_gate verification ---
+if has_plan_gate "editor-live"; then
+  _tap_fail "editor-live has no plan gate" "has_plan_gate returned true"
+else
+  _tap_pass "editor-live has no plan gate"
+fi
+
+# ============================================================
 # L3.9 — Error / edge case tests
 # ============================================================
 tap_section "L3.9: Error and edge case tests"

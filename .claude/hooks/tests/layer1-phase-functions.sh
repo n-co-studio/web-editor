@@ -2,7 +2,7 @@
 # Layer 1 — Pure function unit tests for _phase-helper.sh.
 # Exercises get_phases_for_type, get_tag_for_phase, has_plan_gate,
 # get_post_approval_phase, get_loops_for_type, get_phase_index,
-# upgrade_session_type across all 16 session types.
+# upgrade_session_type across all 17 session types.
 #
 # Bash 3.2 compatible. No external dependencies.
 
@@ -15,9 +15,9 @@ source "$SCRIPT_DIR/test-helpers.sh"
 setup_sandbox
 
 # ============================================================
-# L1.1 — get_phases_for_type returns non-empty for all 14 types
+# L1.1 — get_phases_for_type returns non-empty for all 17 types
 # ============================================================
-tap_section "L1.1: get_phases_for_type — all 16 types return non-empty"
+tap_section "L1.1: get_phases_for_type — all 17 types return non-empty"
 
 for stype in $SESSION_TYPES; do
   phases=$(get_phases_for_type "$stype")
@@ -93,6 +93,10 @@ assert_eq "$(get_phases_for_type taskdef-brief)" \
   "init dispatch synthesize op-review output close" \
   "taskdef-brief phase sequence"
 
+assert_eq "$(get_phases_for_type editor-live)" \
+  "init build commit review verify op-review close" \
+  "editor-live phase sequence"
+
 assert_eq "$(get_phases_for_type ephemeral)" \
   "init conversation close" \
   "ephemeral phase sequence"
@@ -139,6 +143,9 @@ assert_eq "$(get_tag_for_phase audit op-review)" "operator" "audit op-review = o
 assert_eq "$(get_tag_for_phase taskdef-brief op-review)" "operator" "taskdef-brief op-review = operator"
 assert_eq "$(get_tag_for_phase taskgroup-merge op-review)" "operator" "taskgroup-merge op-review = operator"
 assert_eq "$(get_tag_for_phase taskgroup-merge cohesion)" "agent" "taskgroup-merge cohesion = agent"
+assert_eq "$(get_tag_for_phase editor-live op-review)" "operator" "editor-live op-review = operator"
+assert_eq "$(get_tag_for_phase editor-live build)" "agent" "editor-live build = agent"
+assert_eq "$(get_tag_for_phase editor-live commit)" "agent" "editor-live commit = agent"
 
 # Both phases
 assert_eq "$(get_tag_for_phase spec-fresh interview)" "both" "spec-fresh interview = both"
@@ -163,7 +170,7 @@ for stype in standard taskgroup hotfix spec-fresh spec-update; do
 done
 
 # Types WITHOUT plan gate (no approval phase)
-for stype in taskgroup-merge experiment prototype-napkin prototype-spike prototype-poc advisory-init advisory-reinit audit taskdef-query taskdef-brief ephemeral; do
+for stype in taskgroup-merge experiment editor-live prototype-napkin prototype-spike prototype-poc advisory-init advisory-reinit audit taskdef-query taskdef-brief ephemeral; do
   has_plan_gate "$stype" && rc=0 || rc=$?
   assert_fail "$rc" "has_plan_gate '$stype' = false (no approval)"
 done
@@ -180,7 +187,7 @@ assert_eq "$(get_post_approval_phase spec-fresh)" "governance" "spec-fresh post-
 assert_eq "$(get_post_approval_phase spec-update)" "governance" "spec-update post-approval = governance"
 
 # Types without approval return empty
-for stype in taskgroup-merge experiment prototype-napkin prototype-spike prototype-poc advisory-init advisory-reinit audit taskdef-query taskdef-brief ephemeral; do
+for stype in taskgroup-merge experiment editor-live prototype-napkin prototype-spike prototype-poc advisory-init advisory-reinit audit taskdef-query taskdef-brief ephemeral; do
   result=$(get_post_approval_phase "$stype")
   assert_eq "$result" "" "get_post_approval_phase '$stype' = empty (no approval)"
 done
@@ -194,6 +201,7 @@ assert_eq "$(get_loops_for_type standard)" "review:build verify:build" "standard
 assert_eq "$(get_loops_for_type taskgroup)" "review:build verify:build" "taskgroup loops"
 assert_eq "$(get_loops_for_type hotfix)" "verify:build" "hotfix loops"
 assert_eq "$(get_loops_for_type taskgroup-merge)" "cohesion:cohesion" "taskgroup-merge loops"
+assert_eq "$(get_loops_for_type editor-live)" "commit:build verify:build" "editor-live loops"
 
 # All other types have no loops
 for stype in experiment spec-fresh spec-update prototype-napkin prototype-spike prototype-poc advisory-init advisory-reinit audit taskdef-query taskdef-brief ephemeral; do
@@ -222,6 +230,15 @@ assert_eq "$(get_phase_index standard close)" "10" "standard close = index 10"
 assert_eq "$(get_phase_index taskgroup contract-init)" "2" "taskgroup contract-init = index 2"
 assert_eq "$(get_phase_index taskgroup contract-update)" "10" "taskgroup contract-update = index 10"
 assert_eq "$(get_phase_index taskgroup close)" "12" "taskgroup close = index 12"
+
+# Editor-live: 7 phases (init, build, commit, review, verify, op-review, close)
+assert_eq "$(get_phase_index editor-live init)" "1" "editor-live init = index 1"
+assert_eq "$(get_phase_index editor-live build)" "2" "editor-live build = index 2"
+assert_eq "$(get_phase_index editor-live commit)" "3" "editor-live commit = index 3"
+assert_eq "$(get_phase_index editor-live review)" "4" "editor-live review = index 4"
+assert_eq "$(get_phase_index editor-live verify)" "5" "editor-live verify = index 5"
+assert_eq "$(get_phase_index editor-live op-review)" "6" "editor-live op-review = index 6"
+assert_eq "$(get_phase_index editor-live close)" "7" "editor-live close = index 7"
 
 # Taskgroup-merge: 7 phases (init, contract-init, cohesion, verify, commit, op-review, close)
 assert_eq "$(get_phase_index taskgroup-merge contract-init)" "2" "taskgroup-merge contract-init = index 2"

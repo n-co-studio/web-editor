@@ -441,7 +441,7 @@ if [ -n "$FILE_PATH" ]; then
             PHASE_EXEMPT=false
             SESSION_TYPE=$(get_session_type)
             case "$SESSION_TYPE" in
-              experiment|prototype-napkin|prototype-spike|prototype-poc)
+              experiment|prototype-napkin|prototype-spike|prototype-poc|editor-live)
                 PHASE_EXEMPT=true
                 ;;
             esac

@@ -177,6 +177,10 @@ Sessions progress through ordered phases tracked in `.claude/.state/phase-state`
 | `operator` | Agent pauses for operator decision |
 | `both` | Agent and operator work concurrently |
 
+### Editor-Live Sessions
+
+Continuous visual-development session type for operator-driven editing workflows. Phase sequence: `init → build → commit → review → verify → op-review → close`. No plan gate — the operator's live edits are the plan. Loops: `commit→build` (next change iteration), `verify→build` (QA failure). A4 safety per-loop commit; full gates at final review/verify. Child mode only. Cycle advisory at 50 iterations. See Decision 0023.
+
 ### Ephemeral Sessions (Phase 3b)
 
 Lightweight session type for Q&A and exploration: `init → conversation → close`. Skips mode-guard, bash-guard branch gates, and close checks. Does not trigger solo merge or branch seal. Use `upgrade_session_type` to convert to standard mid-session when code changes are needed (resets phase to `plan`).
