@@ -47,6 +47,7 @@ export async function createServer(): Promise<void> {
 
   // Graceful shutdown
   const shutdown = async () => {
+    await bridge.writeShutdownStatus();
     await watcher.close();
     await bridge.stop();
     process.exit(0);
@@ -252,7 +253,26 @@ function registerTools(server: McpServer, bridge: Bridge): void {
     },
   );
 
-  // 8. import_session
+  // 8. get_queue_status
+  server.registerTool(
+    'get_queue_status',
+    {
+      title: 'Get Queue Status',
+      description:
+        'Returns lightweight queue status: active/closed, pending count, and last update timestamp. ' +
+        'Use this instead of get_pending_visual_changes when you only need to check whether diffs are waiting.',
+      inputSchema: z.object({}),
+    },
+    async () => {
+      bridge.recordToolCall();
+      const status = bridge.getQueueStatus();
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(status) }],
+      };
+    },
+  );
+
+  // 9. import_session
   server.registerTool(
     'import_session',
     {
