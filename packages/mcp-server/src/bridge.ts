@@ -1,5 +1,5 @@
 import { WebSocketServer, type WebSocket } from 'ws';
-import { readFile, writeFile, unlink, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, unlink, mkdir, rename } from 'node:fs/promises';
 import { join, dirname, resolve, relative } from 'node:path';
 import {
   PROTOCOL_VERSION,
@@ -34,9 +34,14 @@ export class Bridge {
   private driftTokenMatches = 0;
   private lastToolCallAt: string | null = null;
   private readonly persistPath: string;
+  private readonly statusFilePath: string;
+  private lastStatusUpdate: string = new Date().toISOString();
 
   constructor(private readonly cwd: string) {
     this.persistPath = join(cwd, PERSIST_DIR, PERSIST_FILE);
+    this.statusFilePath = process.env.VISUAL_BRIDGE_STATUS_FILE
+      ? resolve(cwd, process.env.VISUAL_BRIDGE_STATUS_FILE)
+      : join(cwd, 'editor-queue-status.yaml');
   }
 
   /** Record that an MCP tool was called (updates lastToolCallAt for STATUS_RESPONSE). */
@@ -56,6 +61,8 @@ export class Bridge {
       const bound = await this.tryPort(port);
       if (bound) {
         await this.restoreQueue();
+        // Initialize status file — reflects restored queue state or clean start
+        await this.writeStatusFile(this.pendingQueue.length > 0 ? 'active' : 'closed');
         console.error(`[frontend-editor] WebSocket server listening on port ${port}`);
         return port;
       }
@@ -101,6 +108,7 @@ export class Bridge {
     this.pendingQueue.splice(idx, 1);
     this.processedIds.add(diffId);
     this.safePersistQueue();
+    this.safeWriteStatusFile(this.pendingQueue.length > 0 ? 'active' : 'closed');
 
     // Push DIFF_APPLIED to the originating extension tab (best-effort)
     this.pushDiffApplied(diff.context.tabId, [diffId]);
@@ -126,6 +134,7 @@ export class Bridge {
     this.pendingQueue.splice(idx, 1);
     this.processedIds.add(diffId);
     this.safePersistQueue();
+    this.safeWriteStatusFile(this.pendingQueue.length > 0 ? 'active' : 'closed');
 
     // Push DIFF_APPLIED to the originating extension tab (best-effort)
     // Uses the same message type — the diff is no longer pending regardless of reason
@@ -430,6 +439,9 @@ export class Bridge {
     if (newDiffs.length > 0 || batchNote) {
       this.trackDrift(newDiffs);
       this.safePersistQueue();
+      if (newDiffs.length > 0) {
+        this.safeWriteStatusFile('active');
+      }
     }
 
     // Acknowledge all diff IDs from the batch
@@ -515,6 +527,45 @@ export class Bridge {
     for (const client of this.clients.values()) {
       this.send(client.ws, msg);
     }
+  }
+
+  // -----------------------------------------------------------------------
+  // Queue status signal
+  // -----------------------------------------------------------------------
+
+  /** Get lightweight queue status (for the get_queue_status MCP tool). */
+  getQueueStatus(): { status: 'active' | 'closed'; pending_count: number; updated_at: string } {
+    return {
+      status: this.pendingQueue.length > 0 ? 'active' : 'closed',
+      pending_count: this.pendingQueue.length,
+      updated_at: this.lastStatusUpdate,
+    };
+  }
+
+  /** Write status: closed to the status file (for shutdown). */
+  async writeShutdownStatus(): Promise<void> {
+    await this.writeStatusFile('closed');
+  }
+
+  /** Atomically write the queue status file (temp + rename). */
+  private async writeStatusFile(status: 'active' | 'closed'): Promise<void> {
+    this.lastStatusUpdate = new Date().toISOString();
+    const content =
+      `status: ${status}\n` +
+      `updated_at: ${this.lastStatusUpdate}\n` +
+      `pending_count: ${this.pendingQueue.length}\n`;
+
+    const tmpPath = this.statusFilePath + '.tmp';
+    await writeFile(tmpPath, content);
+    await rename(tmpPath, this.statusFilePath);
+  }
+
+  /** Fire-and-forget status file write with error logging. */
+  private safeWriteStatusFile(status: 'active' | 'closed'): void {
+    this.writeStatusFile(status).catch((error: unknown) => {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(`[frontend-editor] Failed to write status file: ${msg}`);
+    });
   }
 
   // -----------------------------------------------------------------------
