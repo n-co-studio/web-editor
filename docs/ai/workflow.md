@@ -46,7 +46,7 @@ Use when: fixing bugs, failing tests, unstable behavior. Not required for simple
 
 Loop: **Hypothesis** → **Validate** (smallest experiment) → **Solve** (minimal fix) → **Test** (rerun checks) → **Record**
 
-**Record** (after 2+ failed cycles): When resolved, add entry to `docs/ai/logs/known-issues.md` (template mode: `.claude/local/known-issues.md`) if not already present. At 2 consecutive failures, check `known-issues.md` for matches before continuing. BLOCK: known-issues documentation at session close — enforced by session-close-check.sh (blocks if 2+ HVST failures occurred and `known-issues.md` was not updated). Override: `SKIP_KNOWN_ISSUES_CHECK=1` (use when failures were transient — network, timing).
+**Record** (after 2+ failed cycles): When resolved, add entry to `docs/ai/logs/known-issues.md` (template mode: `.claude/local/known-issues.md`) if not already present. At 2 consecutive failures, check `known-issues.md` for matches before continuing. REQUIRE: known-issues documentation at session close (advisory reminder by session-close-check.sh when 2+ HVST failures occurred and `known-issues.md` was not updated — downgraded from blocking in Phase 2b). Override: `SKIP_KNOWN_ISSUES_CHECK=1` (use when failures were transient — network, timing).
 
 **Review Board** (optional): At 2+ consecutive failures or on operator request, Orchestrator dispatches Architect + Exploration + Critic (hypothesis mode) to review failure context and produce ranked hypotheses before further fix attempts. See `.claude/agents/_hvst-review.md`.
 
@@ -70,7 +70,7 @@ Decision 0021. Optional LLM persona simulation providing synthetic user perspect
 
 ## Branch Categories
 
-Work happens on categorized branches. BLOCK: never commit directly to `main` — enforced by branch-guard.sh / write-guard.sh (Section 3). In solo mode (Decision 0015), branches merge to main directly at session close. See `docs/ai/quality-gates.md` for branch types and gate mapping.
+Work happens on categorized branches. BLOCK: never commit directly to `main` — enforced by bash-guard.sh / write-guard.sh (Section 3). In solo mode (Decision 0015), branches merge to main directly at session close. See `docs/ai/quality-gates.md` for branch types and gate mapping.
 
 ## Session Lifecycle
 
@@ -98,9 +98,9 @@ Decision 0015. Branches merge to main directly at session close. Applies to `fea
 
 ### Session Branch Isolation
 
-Decision 0013. Each session uses a dedicated branch. BLOCK: when a session closes, the branch is sealed — no future session may edit files on it (enforced by branch-guard.sh / write-guard.sh (Section 3)). Create a new branch for new work. Task group sessions are exempt (multi-brief groups share one branch across sessions). Override: `REPO_OS_SKIP_BRANCH_REUSE=1`.
+Decision 0013. Each session uses a dedicated branch. BLOCK: when a session closes, the branch is sealed — no future session may edit files on it (enforced by bash-guard.sh / write-guard.sh (Section 3)). Create a new branch for new work. Task group sessions are exempt (multi-brief groups share one branch across sessions). Override: `REPO_OS_SKIP_BRANCH_REUSE=1`.
 
-**Concurrent session awareness**: The session registry (`.claude/.state/sessions/`) tracks active sessions. `register_session()` writes a YAML file at session init; `unregister_session()` removes it at close and cleans stale entries (dead PIDs, >24h age). When multiple sessions target the same branch, non-task-group overlap is blocked at edit time (Gate 6 in branch-guard hooks). Task group sessions sharing a branch receive an advisory warning. Prompt T sessions (taskdef-query, taskdef-brief) are exempt. Override: `REPO_OS_SKIP_OVERLAP_CHECK=1`.
+**Concurrent session awareness**: The session registry (`.claude/.state/sessions/`) tracks active sessions. `register_session()` writes a YAML file at session init; `unregister_session()` removes it at close and cleans stale entries (dead PIDs, >24h age). When multiple sessions target the same branch, non-task-group overlap is blocked at edit time (Gate 6 in bash-guard.sh / write-guard.sh). Task group sessions sharing a branch receive an advisory warning. Prompt T sessions (taskdef-query, taskdef-brief) are exempt. Override: `REPO_OS_SKIP_OVERLAP_CHECK=1`.
 
 ### Git Trailer Convention
 
@@ -131,6 +131,10 @@ Prompt T facilitates exploration and task planning without producing file artifa
 - **Brief**: 3-agent team (Architect, Exploration, Critic) produces a structured task brief for Prompt B.
 
 Task definition sessions are fully ephemeral — no files written, no session log entries, no gates apply. The output is a terminal-displayed task brief the operator copy-pastes into a new Prompt B session. See `docs/ai/prompts/prompt-t-task-definition.md` for full details.
+
+### Ephemeral Sessions
+
+Lightweight session type for Q&A and exploration (Phase 3b). Phase sequence: `init → conversation → close`. Skips mode-guard, bash-guard branch gates, and close checks (no session log, no commit check). Does not trigger solo merge or branch seal. Use `init_phase "ephemeral"` when the user's intent is Q&A or exploration with no code changes expected. If the user later requests code changes, call `upgrade_session_type` to convert to standard (resets phase to `plan`).
 
 ### Task Group Sessions
 
@@ -179,7 +183,7 @@ Decision 0017. Optional headless runner infrastructure in `.claude/.automation/`
 **Runner lifecycle:**
 
 1. **Dequeue** — pick oldest `approved` queue entry, acquire flock-based queue lock, transition to `running`, release lock
-2. **Pre-launch** — create branch (or check out existing for task groups), register session, write `plan-approved` state file, pre-seed `.claude/.session-id`. Phase-state is agent-initiated: the agent calls `init_phase()` as its first Bash action (fast-exits branch-guard.sh — no redirect/tee). With fail-closed enforcement (Decision 0019), edits before `init_phase()` are blocked when the sentinel is present. Custom runners MUST ensure `init_phase()` is called before any Edit/Write tool use
+2. **Pre-launch** — create branch (or check out existing for task groups), register session, write `plan-approved` state file, pre-seed `.claude/.session-id`. Phase-state is agent-initiated: the agent calls `init_phase()` as its first Bash action (fast-exits bash-guard.sh — no redirect/tee). With fail-closed enforcement (Decision 0019), edits before `init_phase()` are blocked when the sentinel is present. Custom runners MUST ensure `init_phase()` is called before any Edit/Write tool use
 3. **Launch** — invoke `claude -p` with `--disallowedTools` permission profile and assembled prompt (template-based or inline fallback). Decision cache entries (max 10) are prepended to the prompt. When the brief contains a `## Task Contract` block (Decision 0020), the runner includes it in the assembled prompt; the agent extracts and writes it during init
 4. **Post-session** — detect outcome (completed/failed/review), perform external cleanup (solo merge, session registry, branch sealing — Stop hook does not fire in headless mode), transition queue entry
 
@@ -220,7 +224,7 @@ Decision 0017. Optional headless runner infrastructure in `.claude/.automation/`
 
 Three mechanical governance layers enforce process integrity:
 
-1. **Inter-session pipeline** (`docs/ai/governance/`): Committed evidence files proving Prompt 0 (`spec-compiled`) and Prompt A (`advisory-reviewed`) completed. Written by the model at prompt completion. Read by Prompt B at session start. Verified by `branch-guard.sh` on first Bash write and by `pre-commit-gates.sh` at commit-time (both advisory, first-fire).
+1. **Inter-session pipeline** (`docs/ai/governance/`): Committed evidence files proving Prompt 0 (`spec-compiled`) and Prompt A (`advisory-reviewed`) completed. Written by the model at prompt completion. Read by Prompt B at session start. Verified by `bash-guard.sh` on first Bash write and by `pre-commit-gates.sh` at commit-time (both advisory, first-fire).
 
 2. **Phase chain governance** (task group `governance:` section): Per-brief gate evidence in the task group contract. Written by the model at session close. Verified by `session-close-check.sh` at session close (advisory). Enables sequential integrity — Brief N+1 can confirm Brief N completed with passing gates.
 

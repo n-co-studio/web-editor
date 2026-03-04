@@ -83,7 +83,7 @@ Session-scoped governance evidence in `.claude/.state/`. Written by hooks via sh
 | `reviewer-signed` | `state-writer.sh` (reviewer) | High-risk detection |
 | `security-signed` | `state-writer.sh` (security-privacy) | High-risk detection |
 | `high-risk-detected` | `pre-commit-gates.sh` | Audit trail |
-| `governance-checked` | `pre-commit-gates.sh` (Gate 3, commit) | First-fire marker (inter-session governance) |
+| `governance-checked` | `bash-guard.sh` (Gate 3, Bash) or `pre-commit-gates.sh` (Gate 3, commit) | First-fire marker (inter-session governance) |
 | `phase-state` | `_phase-helper.sh` (via hooks) | Phase-aware flow tracking (session type, current phase, cycle) |
 | `overrides.log` | `_analytics-helper.sh` (`log_override`) | Override audit (session-close-check) |
 | `task-contract.yaml` | Orchestrator (model) | Task contract — intent reference for cohesion review (Decision 0020) |
@@ -177,6 +177,10 @@ Sessions progress through ordered phases tracked in `.claude/.state/phase-state`
 | `operator` | Agent pauses for operator decision |
 | `both` | Agent and operator work concurrently |
 
+### Ephemeral Sessions (Phase 3b)
+
+Lightweight session type for Q&A and exploration: `init → conversation → close`. Skips mode-guard, bash-guard branch gates, and close checks. Does not trigger solo merge or branch seal. Use `upgrade_session_type` to convert to standard mid-session when code changes are needed (resets phase to `plan`).
+
 ### Auto/Review Mode
 
 - **Auto**: Agent completes through merge autonomously. `op-review` phase skipped.
@@ -206,14 +210,14 @@ Priority: `REPO_OS_MODE` env var > `.claude/repo-mode` file > default `child`. O
 
 ### Session Close Overrides
 
-The stop hook (`session-close-check.sh`) enforces blocking gates at session close:
+The stop hook (`session-close-check.sh`) enforces gates at session close. Blocking checks: session log, uncommitted changes. Advisory checks (downgraded from blocking in Phase 2b): HVST known-issues, deferrals known-issues.
 
-| Override | Gate | Effect |
-|----------|------|--------|
-| `SKIP_SESSION_LOG=1` | Session log modification | Bypasses session log check |
-| `SKIP_UNCOMMITTED_CHECK=1` | Uncommitted changes | Allows close with dirty working tree |
-| `SKIP_KNOWN_ISSUES_CHECK=1` | Known-issues documentation (HVST + deferrals) | Bypasses known-issues modification checks |
-| `SKIP_CONTRACT_CHECK=1` | Task group contract check | Bypasses A6 contract staging and governance evidence checks |
+| Override | Gate | Blocking? | Effect |
+|----------|------|-----------|--------|
+| `SKIP_SESSION_LOG=1` | Session log modification | Blocking | Bypasses session log check |
+| `SKIP_UNCOMMITTED_CHECK=1` | Uncommitted changes | Blocking | Allows close with dirty working tree |
+| `SKIP_KNOWN_ISSUES_CHECK=1` | Known-issues documentation (HVST + deferrals) | Advisory | Suppresses known-issues reminder |
+| `SKIP_CONTRACT_CHECK=1` | Task group contract check | Blocking | Bypasses A6 contract staging and governance evidence checks |
 
 All overrides are logged via `log_override()` and summarized in the override audit.
 

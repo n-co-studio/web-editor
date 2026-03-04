@@ -31,16 +31,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/write-guard.sh"
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".claude/hooks/branch-guard.sh"
+            "command": ".claude/hooks/bash-guard.sh"
           }
         ]
       },

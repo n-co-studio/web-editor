@@ -24,11 +24,13 @@ At session start, check `docs/ai/governance/` for governance evidence:
 - `spec-compiled` — confirms Prompt 0 completed. If missing, warn operator.
 - `advisory-reviewed` — confirms Prompt A completed. If missing, warn operator.
 
-These are advisory checks. The operator may direct you to proceed without them (e.g., for standalone tasks not tied to a spec). The `pre-commit-gates.sh` hook also checks for these files at commit-time (advisory, first-fire). On Bash writes, `branch-guard.sh` checks them as well.
+These are advisory checks. The operator may direct you to proceed without them (e.g., for standalone tasks not tied to a spec). The `pre-commit-gates.sh` hook also checks for these files at commit-time (advisory, first-fire). On Bash writes, `bash-guard.sh` checks them as well.
 
 ## Phase Model
 
 The phase model tracks session progress in `.claude/.state/phase-state`. Hooks enforce phase-appropriate actions. You do not need to read this file — hooks manage it automatically. Phase sequences are defined in `_agent-glossary.md` § Phase Model and enforced by `_phase-helper.sh`. See Decision 0014 for canonical definitions.
+
+**Ephemeral sessions**: When the user's intent is Q&A or exploration (no code changes expected), use `init_phase "ephemeral"` instead of `"standard"`. Ephemeral sessions have a minimal phase sequence (`init → conversation → close`) and skip mode-guard, bash-guard branch gates, and close checks. If the user later requests edits, call `upgrade_session_type` to convert to standard (resets phase to `plan`).
 
 ### Build Sequence — Agent Dispatch
 
@@ -86,7 +88,7 @@ See `docs/ai/workflow.md` § User Review for full system definition and Decision
 - REQUIRE: after Builder signals done, Orchestrator runs a cohesion review (Critic in cohesion mode) before invoking QA. Critical cohesion findings must be resolved before commit. See `quality-gates.md` gate A5.
 - GUIDE: use HVST (see `workflow.md`) when debugging or instability appears. When HVST debugging stalls (2+ consecutive failures), Orchestrator dispatches HVST Review Board for multi-agent hypothesis review before further fix attempts. See `_hvst-review.md`
 - REQUIRE: **Task Group Contract** — if the task brief contains a `### Task Group` section, this session is part of a multi-brief group. Read and follow the contract lifecycle in `docs/ai/workflow.md` § Task Group Sessions. See `docs/ai/quality-gates.md` gate A6 for verification requirements
-- BLOCK: **Session Branch Isolation** (Decision 0013) — each session uses a dedicated branch — enforced by branch-guard.sh / write-guard.sh (Section 3). After session close, the branch is sealed and must not be reused. Start a new branch for new work. Task group sessions are exempt (multi-brief groups share one branch)
+- BLOCK: **Session Branch Isolation** (Decision 0013) — each session uses a dedicated branch — enforced by bash-guard.sh / write-guard.sh (Section 3). After session close, the branch is sealed and must not be reused. Start a new branch for new work. Task group sessions are exempt (multi-brief groups share one branch)
 - REQUIRE: include git trailers on commits per the convention in `docs/ai/workflow.md` (Session Lifecycle → Git Trailer Convention)
 - REQUIRE: **Parallel Task Group Completion Marker** — if the task brief has `Execution: parallel` in `### Task Group`, write a per-brief completion marker file at session close: `.claude/.state/tg-{group}-brief-{seq}.complete` (content: ISO 8601 timestamp). This signals to the merge brief that this content brief has completed
 - REQUIRE: **Parallel Task Group Boundaries** — parallel briefs MUST restrict edits to files within their declared `Boundaries`. Edits outside boundaries require explicit operator approval. Shared files (e.g., index files, config) are owned by the merge brief

@@ -6,7 +6,7 @@ Accepted
 ## Triggers
 
 - type: file
-- path: `\.claude/hooks/(branch-guard|pre-commit-gates)\.sh`
+- path: `\.claude/hooks/(bash-guard|branch-guard|pre-commit-gates)\.sh`
 - keywords: `taskgroup, task.group, contract, merge, A6_contract_missing, tg_merge_blocked, SKIP_MERGE_GUARD`
 
 ## Decision
@@ -25,7 +25,7 @@ Both failures stem from the same gap: the governance hooks enforce rules reactiv
 
 ## Consequences
 - `pre-commit-gates.sh` A6 section expanded: header updated, A6.1 contract existence sub-gate added (~20 lines), existing staging check labeled A6.2
-- `branch-guard.sh` gains Gate 7 (~30 lines) between `CURRENT_BRANCH` assignment and fast-exit, plus header comment updates
+- `branch-guard.sh` gains Gate 7 (~30 lines) between `CURRENT_BRANCH` assignment and fast-exit, plus header comment updates. Note: Gate 7 consolidated into `bash-guard.sh` (Phase 3a); `branch-guard.sh` retained for rollback
 - `docs/ai/quality-gates.md` A6 row updated to document both sub-gates
 - `AI.md` hooks paragraph gains two new entries
 - No changes to `session-close-check.sh` — existing logic is correct

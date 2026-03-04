@@ -44,6 +44,8 @@ get_phases_for_type() {
       echo "init validate governance close" ;;
     audit)
       echo "init scope dispatch synthesize op-review close" ;;
+    ephemeral)
+      echo "init conversation close" ;;
     taskdef-query)
       echo "init conversation close" ;;
     taskdef-brief)
@@ -158,6 +160,12 @@ get_tag_for_phase() {
         synthesize) echo "agent" ;;
         op-review)  echo "operator" ;;
         *)          echo "agent" ;;
+      esac
+      ;;
+    ephemeral)
+      case "$phase" in
+        conversation) echo "both" ;;
+        *)            echo "agent" ;;
       esac
       ;;
     taskdef-query)
@@ -658,6 +666,56 @@ set_phase_mode() {
   # Invalidate validation cache — file contents changed (audit C8)
   _PS_VALIDATED=false
   _CACHED_CURRENT_SID=""
+}
+
+# --- Upgrade session type (Phase 3b) ---
+# Converts an ephemeral session to standard when code changes are needed.
+# Resets phase to "plan" (standard sequence starting point post-init).
+# Preserves session_id, mode, solo, cycle.
+# Invalidates _PS_* and session type caches.
+# Usage: upgrade_session_type
+upgrade_session_type() {
+  local repo_root="$_REPO_OS_ROOT"
+  local state_file="$repo_root/.claude/.state/phase-state"
+
+  if [ ! -f "$state_file" ]; then
+    echo "ERROR: upgrade_session_type — no phase-state file" >&2
+    return 1
+  fi
+
+  # Read current state
+  local current_type
+  current_type=$(grep '^session_type:' "$state_file" 2>/dev/null | sed 's/^session_type: *//')
+  if [ "$current_type" != "ephemeral" ]; then
+    echo "ERROR: upgrade_session_type — current type is '$current_type', not 'ephemeral'" >&2
+    return 1
+  fi
+
+  local sid mode solo cycle
+  sid=$(grep '^session_id:' "$state_file" 2>/dev/null | sed 's/^session_id: *//')
+  mode=$(grep '^mode:' "$state_file" 2>/dev/null | sed 's/^mode: *//')
+  solo=$(grep '^solo:' "$state_file" 2>/dev/null | sed 's/^solo: *//')
+  cycle=$(grep '^cycle:' "$state_file" 2>/dev/null | sed 's/^cycle: *//')
+
+  local tag ts
+  tag=$(get_tag_for_phase "standard" "plan")
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+  # Shell I/O — bypasses write-guard.sh
+  printf 'session_type: %s\nsession_id: %s\nmode: %s\ncurrent_phase: %s\ncycle: %s\nphases_completed: %s\nsolo: %s\ntag: %s\ntimestamp: %s\n' \
+    "standard" "$sid" "${mode:-default}" "plan" "${cycle:-1}" "init" "${solo:-false}" "$tag" "$ts" \
+    > "$state_file" 2>/dev/null || true
+
+  # Invalidate caches
+  _PS_VALIDATED=false
+  _CACHED_CURRENT_SID=""
+  # Invalidate session type cache in _analytics-helper.sh
+  if type invalidate_session_type_cache &>/dev/null; then
+    invalidate_session_type_cache
+  fi
+
+  # Analytics
+  log_hook_event "phase-helper" "upgrade" "" "allow" "0" "ephemeral_to_standard" "" "" || true
 }
 
 # --- Write merge source signal ---

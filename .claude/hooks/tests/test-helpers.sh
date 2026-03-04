@@ -17,8 +17,8 @@ _TAP_PASS=0
 _TAP_FAIL=0
 _TAP_FAILURES=""
 
-# --- All 15 session types (canonical order from Decision 0014) ---
-SESSION_TYPES="standard taskgroup taskgroup-merge hotfix experiment spec-fresh spec-update prototype-napkin prototype-spike prototype-poc advisory-init advisory-reinit audit taskdef-query taskdef-brief"
+# --- All 16 session types (canonical order from Decision 0014 + Phase 3b ephemeral) ---
+SESSION_TYPES="standard taskgroup taskgroup-merge hotfix experiment spec-fresh spec-update prototype-napkin prototype-spike prototype-poc advisory-init advisory-reinit audit taskdef-query taskdef-brief ephemeral"
 
 # --- Sandbox management ---
 _SANDBOX_DIR=""

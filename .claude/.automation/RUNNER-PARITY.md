@@ -13,8 +13,8 @@ Runners must handle post-session tasks externally.
 |---|---------------|--------------------------------------|----------------------------------------|-------|
 | 1 | Session log check | Blocking — verifies session log modified since baseline | N/A — runner does not enforce session log check; the agent writes it during close phase | Agent responsibility in headless mode |
 | 2 | Uncommitted changes check | Blocking — verifies no unstaged/staged changes | N/A — runner trusts agent completed cleanly | Outcome detector catches crash state |
-| 3 | HVST known-issues check | Blocking — verifies known-issues.md updated after 2+ failures | N/A — runner does not enforce | Agent responsibility via prompt instructions |
-| 4 | Deferrals known-issues check | Blocking — verifies known-issues.md updated for deferred findings | N/A — runner does not enforce | Agent responsibility via prompt instructions |
+| 3 | HVST known-issues check | Advisory — reminds agent to update known-issues.md after 2+ failures (downgraded from blocking in Phase 2b) | N/A — runner does not enforce | Agent responsibility via prompt instructions |
+| 4 | Deferrals known-issues check | Advisory — reminds agent to update known-issues.md for deferred findings (downgraded from blocking in Phase 2b) | N/A — runner does not enforce | Agent responsibility via prompt instructions |
 | 5 | Solo merge | Merges feature/fix/hotfix branch to main (ff-only → no-ff fallback) | `_run_single_entry()` performs identical merge logic post-session with merge conflict escalation | Runner adds scope-deviation escalation on merge conflict |
 | 6 | Post-merge push | Advisory push to origin after solo merge (skips template mode, no remote) | Same advisory push pattern in `_run_single_entry()` + `push_on_complete` flag for non-solo entries | Runner also supports `push_on_complete` for feature branches |
 | 7 | Branch sealing | `record_closed_branch()` via `seal_branch_if_applicable()` — conditional on session type, finality | `record_closed_branch()` in `_run_single_entry()` for all completed entries | Both use shared `_cleanup-helper.sh` |

@@ -755,7 +755,10 @@ _compute_log_hash > "$SB/.claude/.session-log-hash"
 # Invalid baseline = non-zero session
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 run_hook_rc "session-close-check.sh" "$(fixture_stop)" > "$_L3_OUT"
-assert_fail "$_LAST_RC" "session-close-check blocks when session log not modified (non-zero session)"
+# Phase 2a: block path exits 0 with JSON {decision:"block"} on stdout (jq present)
+# or exits 2 with stderr (jq absent). Test the JSON path.
+assert_ok "$_LAST_RC" "session-close-check blocks when session log not modified (non-zero session)"
+assert_contains "$(cat "$_L3_OUT")" "block" "session-close-check emits block decision"
 assert_contains "$(cat "$_L3_OUT")" "Session log not updated" "session-close-check reports session log issue"
 
 # --- Test 4: SKIP_SESSION_LOG=1 override → allow ---
@@ -1193,6 +1196,110 @@ else
 fi
 run_hook_rc "session-close-check.sh" "$(fixture_stop)" > /dev/null 2>&1
 assert_file_not_exists "$SESSIONS_DIR/${SID_L314}.yaml" "session-close-check unregisters session"
+
+# ============================================================
+# L3.2b — bash-guard.sh (Phase 3a — consolidated Bash PreToolUse)
+# ============================================================
+tap_section "L3.2b: bash-guard.sh — consolidated Bash PreToolUse"
+
+# Clean up any closed-branches from prior tests (L3.10b seals branches)
+rm -f "$SB/.claude/local/closed-branches"
+
+# --- Fast-exit for non-write Bash commands ---
+reset_phase "standard"
+run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "git status")"
+assert_ok "$_LAST_RC" "bash-guard allows bash without write target (git status)"
+
+run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "npm test")"
+assert_ok "$_LAST_RC" "bash-guard allows bash without write target (npm test)"
+
+# NOTE: REPO_OS_SKIP_MODE_GUARD=1 is used below to isolate branch-guard behavior
+# from mode-guard. Mode-guard tests are covered in L3.7 (write-guard.sh).
+
+# --- Gate 2: Bash with in-repo write target in init phase → blocks ---
+reset_phase "standard"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
+assert_fail "$_LAST_RC" "bash-guard blocks bash redirect in init phase"
+
+# --- Gate 2: Bash with write target in build phase → allows ---
+reset_phase "standard"
+advance_phase "plan" 2>/dev/null
+advance_phase "approval" 2>/dev/null
+advance_phase "build" 2>/dev/null
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
+assert_ok "$_LAST_RC" "bash-guard allows bash redirect in build phase"
+
+# --- experiment/* branch exemption ---
+reset_phase "standard"
+switch_sandbox_branch "experiment/test"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
+assert_ok "$_LAST_RC" "bash-guard allows bash redirect on experiment/* branch"
+switch_sandbox_branch "feature/test"
+
+# --- Session type without plan gate → allows ---
+reset_phase "advisory-init"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
+assert_ok "$_LAST_RC" "bash-guard allows bash redirect for advisory-init (no plan gate)"
+
+# --- Gate 1: Main branch protection ---
+reset_phase "standard"
+advance_phase "plan" 2>/dev/null
+advance_phase "approval" 2>/dev/null
+advance_phase "build" 2>/dev/null
+switch_sandbox_branch "main"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
+assert_fail "$_LAST_RC" "bash-guard blocks bash redirect on main branch"
+switch_sandbox_branch "feature/test"
+
+# --- REPO_OS_RECOVER=1 override ---
+reset_phase "standard"
+REPO_OS_RECOVER=1 run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
+assert_ok "$_LAST_RC" "bash-guard allows bash redirect with REPO_OS_RECOVER=1"
+
+# --- Out-of-repo write target → allows ---
+reset_phase "standard"
+run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > /tmp/outside.txt")"
+assert_ok "$_LAST_RC" "bash-guard allows bash redirect to out-of-repo path"
+
+# --- State-guard: blocks .state/ writes ---
+run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/.claude/.state/plan-approved")"
+assert_fail "$_LAST_RC" "bash-guard blocks bash redirect to .claude/.state/"
+
+# --- Ephemeral session fast-exit (Phase 3b) ---
+reset_phase "ephemeral"
+advance_phase "conversation" 2>/dev/null
+run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
+assert_ok "$_LAST_RC" "bash-guard allows bash redirect for ephemeral session (fast-exit)"
+
+# --- Closed branch protection (Gate 5) ---
+reset_phase "standard"
+advance_phase "plan" 2>/dev/null
+advance_phase "approval" 2>/dev/null
+advance_phase "build" 2>/dev/null
+mkdir -p "$SB/.claude/local"
+echo "feature/test" > "$SB/.claude/local/closed-branches"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
+assert_fail "$_LAST_RC" "bash-guard blocks bash redirect on closed branch"
+rm -f "$SB/.claude/local/closed-branches"
+
+# ============================================================
+# L3.10c — session-close-check.sh ephemeral session (Phase 3b)
+# ============================================================
+tap_section "L3.10c: session-close-check.sh — ephemeral session exempt path"
+
+# --- Ephemeral session → unconditional allow, no branch seal ---
+_reinit_close_sandbox
+reset_phase "ephemeral"
+advance_phase "conversation" 2>/dev/null
+rm -f "$SB/.claude/local/closed-branches"
+run_hook_rc "session-close-check.sh" "$(fixture_stop)"
+assert_ok "$_LAST_RC" "session-close-check allows ephemeral session unconditionally"
+# Ephemeral sessions should NOT seal the branch
+if [ -f "$SB/.claude/local/closed-branches" ] && grep -qxF "feature/test" "$SB/.claude/local/closed-branches" 2>/dev/null; then
+  _tap_fail "ephemeral session does not seal branch" "branch found in closed-branches"
+else
+  _tap_pass "ephemeral session does not seal branch"
+fi
 
 # ============================================================
 # L3.15 — Parallel task group: merge brief mechanics

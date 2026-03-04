@@ -374,6 +374,28 @@ log_override() {
     >> "$state_dir/overrides.log" 2>/dev/null || true
 }
 
+# --- KPI event (Phase 3c — monitoring baseline) ---
+# Lightweight wrapper around log_hook_event for KPI metrics.
+# Reuses existing NDJSON infrastructure. KPI events use "kpi" as the event type
+# and the kpi_name as the reason field for easy filtering.
+# Usage: log_kpi_event "session_kpi_summary" "blocks:0,retries:1,valve:0,tokens:0" "standard" "$START_MS"
+log_kpi_event() {
+  local kpi_name="$1"
+  local value="$2"
+  local context="${3:-}"
+  local start_ms="${4:-0}"
+  log_hook_event "kpi" "kpi" "" "metric" "$start_ms" "$kpi_name" "$value" "$context"
+}
+
+# --- Invalidate session type cache (Phase 3b — upgrade support) ---
+# Called by upgrade_session_type() when ephemeral→standard conversion changes
+# the session type in phase-state. Forces get_session_type() to re-read on
+# next call instead of returning the stale cached value.
+invalidate_session_type_cache() {
+  _CACHED_SESSION_TYPE=""
+  _CACHED_SESSION_TYPE_SET=false
+}
+
 # --- Cleanup: delete event files older than 90 days ---
 cleanup_old_analytics() {
   local repo_root="$1"

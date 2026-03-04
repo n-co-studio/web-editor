@@ -6,7 +6,7 @@ Accepted
 ## Triggers
 
 - type: file
-- path: `\.claude/hooks/(branch-guard|write-guard)\.sh`
+- path: `\.claude/hooks/(bash-guard|branch-guard|write-guard)\.sh`
 - path: `docs/ai/decisions/\.fail-closed-enforced`
 - keywords: `fail-closed, no_phase_state, phase_gate_no_state, .fail-closed-enforced`
 
@@ -31,7 +31,7 @@ The phase model (Decision 0014) is the primary enforcement mechanism for plan ap
 The sentinel pattern enables incremental adoption: repos that haven't adopted the phase model yet continue with advisory-only behavior, while repos that opt in get full enforcement.
 
 ## Consequences
-- `.claude/hooks/branch-guard.sh` Gate 2 else branch: fail-open replaced with sentinel check (~8 lines added)
+- `.claude/hooks/branch-guard.sh` Gate 2 else branch: fail-open replaced with sentinel check (~8 lines added). Note: Bash enforcement consolidated into `bash-guard.sh` (Phase 3a); Gate 2 now lives in `bash-guard.sh` for Bash calls
 - `.claude/hooks/write-guard.sh` Section 3 Gate 2: else branch added after `if [ -n "$CURRENT_PHASE" ]` with sentinel check and `REPO_OS_SKIP_PLAN_GATE` override (~10 lines added). Override added to header comment
 - `docs/ai/decisions/.fail-closed-enforced` sentinel file created (empty)
 - `AI.md` hooks paragraph updated to document fail-closed phase enforcement

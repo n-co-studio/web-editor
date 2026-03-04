@@ -94,13 +94,13 @@ Pre-commit gates verify governance steps completed by checking state files in `.
 | `phase-state` | `_phase-helper.sh` (via hooks) | Phase-aware flow tracking (read by hooks for phase assertions) |
 | `overrides.log` | `_analytics-helper.sh` (`log_override`) | Override audit summary (session-close-check) |
 
-Note: Gate 5 (session isolation, Decision 0013) uses `.claude/local/closed-branches` — a persistent ledger, not a session-scoped state file. It is not listed in the table above because it is not cleaned at session close. Gate 5 is enforced by `write-guard.sh` (Section 3) on Edit/Write and `branch-guard.sh` on Bash.
+Note: Gate 5 (session isolation, Decision 0013) uses `.claude/local/closed-branches` — a persistent ledger, not a session-scoped state file. It is not listed in the table above because it is not cleaned at session close. Gate 5 is enforced by `write-guard.sh` (Section 3) on Edit/Write and `bash-guard.sh` on Bash.
 
-**Recovery override:** Set `REPO_OS_RECOVER=1` to skip all state-dependent checks in pre-commit, pre-push, and branch-guard gates. Emergency path for hook crashes or debugging sessions.
+**Recovery override:** Set `REPO_OS_RECOVER=1` to skip all state-dependent checks in pre-commit, pre-push, and bash-guard gates. Emergency path for hook crashes or debugging sessions.
 
 ### Fail-Closed Phase Enforcement Sentinel
 
-The branch-guard hooks (Gate 2 — phase gate) check for phase-state before allowing edits on governed branches. Behavior depends on the sentinel file `docs/ai/decisions/.fail-closed-enforced`:
+The phase-gate hooks (`bash-guard.sh` for Bash, `write-guard.sh` Section 3 for Edit/Write — Gate 2) check for phase-state before allowing edits on governed branches. Behavior depends on the sentinel file `docs/ai/decisions/.fail-closed-enforced`:
 
 - **Sentinel present** → phase-state absent or stale triggers a **BLOCK**. The agent must call `init_phase()` (via the orchestrator) to initialize phase-state before editing. Override: `REPO_OS_SKIP_PLAN_GATE=1`.
 - **Sentinel absent** → phase-state absent or stale triggers an **advisory warning** and allows the edit (backward compatibility).

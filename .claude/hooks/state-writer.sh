@@ -12,14 +12,23 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# --- Read SubagentStop payload (before sourcing — cat/jq need no libraries) ---
+INPUT=$(cat)
+AGENT_TYPE=$(echo "$INPUT" | jq -r '.agent_type // empty')
+
+# --- Non-governance agent fast exit (Phase 2c — no sourcing needed) ---
+# 96% of fires are non-governance agents. Exit immediately without sourcing
+# libraries (~14ms saved per fire). No analytics for this path (unchanged).
+case "$AGENT_TYPE" in
+  critic|qa-verifier|reviewer|security-privacy) ;; # governance — continue below
+  *) exit 0 ;;
+esac
+
+# --- Source libraries (only governance agent paths reach here) ---
 source "$SCRIPT_DIR/_analytics-helper.sh"
 source "$SCRIPT_DIR/_phase-helper.sh"
 START_MS=$(now_ms)
-
-# --- Read SubagentStop payload ---
-INPUT=$(cat)
-
-AGENT_TYPE=$(echo "$INPUT" | jq -r '.agent_type // empty')
 
 # --- Map agent type to state file (Bash 3 compatible) ---
 STATE_FILE=""
@@ -28,10 +37,6 @@ case "$AGENT_TYPE" in
   qa-verifier)      STATE_FILE="qa-verified" ;;
   reviewer)         STATE_FILE="reviewer-signed" ;;
   security-privacy) STATE_FILE="security-signed" ;;
-  *)
-    # Not a governance agent — no action needed
-    exit 0
-    ;;
 esac
 
 # --- Extract last assistant message ---

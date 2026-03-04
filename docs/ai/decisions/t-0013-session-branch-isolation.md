@@ -7,7 +7,7 @@ Accepted
 
 - type: process
 - keywords: `branch.reuse, session.isolation, closed-branches, one.session.per.branch, solo.merge, branch.seal, session.registry, session.overlap, concurrent.session`
-- enforced_by: `.claude/hooks/branch-guard.sh`, `.claude/hooks/write-guard.sh (Section 3)`, `.claude/hooks/session-close-check.sh`
+- enforced_by: `.claude/hooks/bash-guard.sh`, `.claude/hooks/write-guard.sh (Section 3)`, `.claude/hooks/session-close-check.sh`
 
 ## Decision
 Enforce one session per branch. When a session closes, the branch is sealed — no future session may edit files on it:
@@ -21,7 +21,7 @@ Enforce one session per branch. When a session closes, the branch is sealed — 
 8. **Session registry**: `.claude/.state/sessions/` contains one YAML file per active session (`{session-id}.yaml` with `session_id`, `session_type`, `branch`, `pid`, `started_at`). `register_session()` writes the file at `init_phase()`. `unregister_session()` removes it at session close and cleans stale entries (dead PID or >24h age). `check_session_overlap()` runs on every Edit/Write/Bash (Gate 6) — blocks non-task-group same-branch overlap, advisory for task group sharing. Prompt T sessions (taskdef-query, taskdef-brief) are exempt. Override: `REPO_OS_SKIP_OVERLAP_CHECK=1`
 
 ## Consequences
-- `.claude/hooks/branch-guard.sh` gains Gate 5 (session isolation — blocking) and Gate 6 (session overlap — blocking/advisory)
+- `.claude/hooks/branch-guard.sh` gains Gate 5 (session isolation — blocking) and Gate 6 (session overlap — blocking/advisory). Note: Bash enforcement consolidated into `bash-guard.sh` (Phase 3a); Gates 5 and 6 now live in `bash-guard.sh` for Bash calls
 - `.claude/hooks/write-guard.sh (Section 3)` gains Gate 5 (session isolation — blocking) and Gate 6 (session overlap — blocking/advisory) for Edit/Write tool calls
 - `.claude/hooks/session-close-check.sh` gains closed-branch recording in normal, override, and loop-guard paths; `cleanup_session()` calls `unregister_session()`
 - `.claude/hooks/_analytics-helper.sh` gains `register_session()`, `unregister_session()`, `check_session_overlap()`, `_iso_to_epoch()`

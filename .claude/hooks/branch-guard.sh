@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
+# DEPRECATED: Bash calls are now handled by bash-guard.sh (Phase 3a consolidation).
+# This file is retained for rollback support. To revert, replace the single
+# Bash PreToolUse entry in .claude/settings.json with the original two entries
+# (write-guard.sh + branch-guard.sh for Bash). See exec-summary.md Phase 3a.
+#
 # Branch guard — blocks file modifications on main and without plan approval.
-# Wired to PreToolUse on Edit, Write, and Bash via .claude/settings.json.
+# Previously wired to PreToolUse on Bash via .claude/settings.json.
 #
 # Gate 1: Catches work on the wrong branch BEFORE any files are changed,
 #          rather than at commit time when all the work is already done.
@@ -32,28 +37,20 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-source "$SCRIPT_DIR/_analytics-helper.sh"
-source "$SCRIPT_DIR/_phase-helper.sh"
-START_MS=$(now_ms)
 
-# --- Read tool call input ---
+# --- Read tool call input (before sourcing — cat needs no libraries) ---
 INPUT=$(cat)
 
-REPO_ROOT="$(get_repo_root)"
-CURRENT_BRANCH=$(get_branch)
+# --- Inline branch detection (no sourced deps) ---
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
 
-# --- Gate 7: Task group merge protection (blocking, Decision 0018) ---
-# Blocks task group sessions from manually merging to main during build phases.
-# Close-phase exemption: when the current phase is "close", Gate 7 allows merge
-# commands — the agent has passed through all prior phases and determined merge
-# appropriateness. The stop hook retains solo merge as a safety net.
-# Must fire BEFORE the fast-exit: git merge/checkout have no redirect/tee patterns.
-# Zero-fork: uses [[ ]] built-in string matching (no jq, no subshells).
-# Override: REPO_OS_SKIP_MERGE_GUARD=1
+# --- Gate 7: Pattern detection (builtins only — no sourcing needed) ---
+# Uses [[ ]] built-in string matching: no jq, no subshells, no sourced functions.
+# Sets _TG_MERGE_BLOCK flag for enforcement after sourcing.
+_TG_MERGE_BLOCK=false
+_TG_MERGE_REASON=""
+
 if [ "${REPO_OS_RECOVER:-0}" != "1" ] && [ "${REPO_OS_SKIP_MERGE_GUARD:-0}" != "1" ]; then
-  _TG_MERGE_BLOCK=false
-  _TG_MERGE_REASON=""
-
   # Pattern: git checkout main / git switch main (exclude main-* and main/* false positives)
   if [[ "$INPUT" == *'git checkout main'* ]] || [[ "$INPUT" == *'git switch main'* ]]; then
     if [[ "$INPUT" != *'git checkout main-'* ]] && [[ "$INPUT" != *'git checkout main/'* ]] \
@@ -71,29 +68,48 @@ if [ "${REPO_OS_RECOVER:-0}" != "1" ] && [ "${REPO_OS_SKIP_MERGE_GUARD:-0}" != "
       _TG_MERGE_REASON="merge_on_main"
     fi
   fi
+fi
 
-  if [ "$_TG_MERGE_BLOCK" = true ]; then
-    # Audit C9: call get_phase first to populate _PS_* cache before get_session_type
-    _TG_PHASE=$(get_phase)
-    _TG_SESSION_TYPE=$(get_session_type)
-    if [ "$_TG_SESSION_TYPE" = "taskgroup" ] || [ "$_TG_SESSION_TYPE" = "taskgroup-merge" ]; then
-      # Close-phase exemption: allow merge when agent is in the close phase
-      if [ "$_TG_PHASE" = "close" ]; then
-        log_hook_event "branch-guard" "PreToolUse" "Bash" "allow" "$START_MS" "tg_merge_close_phase" "$_TG_MERGE_REASON"
-      else
-        log_hook_event "branch-guard" "PreToolUse" "Bash" "block" "$START_MS" "tg_merge_blocked" "$_TG_MERGE_REASON"
-        echo "BLOCKED: Task group sessions must not manually merge to main — merge happens in the close phase (override: REPO_OS_SKIP_MERGE_GUARD=1)" >&2
-        exit 2
-      fi
+# --- Fast-exit: deferred sourcing (Phase 2c) ---
+# When no Gate 7 match AND no write patterns, exit without sourcing libraries.
+# Saves ~14ms sourcing overhead for ~56% of fires (no-write Bash commands).
+# Analytics logging is skipped on this path (acceptable trade-off per Phase 2 spec).
+if [ "$_TG_MERGE_BLOCK" = false ] \
+&& [[ "$INPUT" != *'"file_path"'* ]] && [[ "$INPUT" != *'>'* ]] && [[ "$INPUT" != *'tee '* ]]; then
+  exit 0
+fi
+
+# --- Source libraries (only paths that need them reach here) ---
+source "$SCRIPT_DIR/_analytics-helper.sh"
+source "$SCRIPT_DIR/_phase-helper.sh"
+START_MS=$(now_ms)
+
+REPO_ROOT="$(get_repo_root)"
+
+# --- Gate 7: Enforcement (uses sourced functions) ---
+# Separated from pattern detection: sourced functions (get_phase, get_session_type)
+# are needed here but not for the pattern matching above.
+if [ "$_TG_MERGE_BLOCK" = true ]; then
+  # Audit C9: call get_phase first to populate _PS_* cache before get_session_type
+  _TG_PHASE=$(get_phase)
+  _TG_SESSION_TYPE=$(get_session_type)
+  if [ "$_TG_SESSION_TYPE" = "taskgroup" ] || [ "$_TG_SESSION_TYPE" = "taskgroup-merge" ]; then
+    # Close-phase exemption: allow merge when agent is in the close phase
+    if [ "$_TG_PHASE" = "close" ]; then
+      log_hook_event "branch-guard" "PreToolUse" "Bash" "allow" "$START_MS" "tg_merge_close_phase" "$_TG_MERGE_REASON"
+    else
+      log_hook_event "branch-guard" "PreToolUse" "Bash" "block" "$START_MS" "tg_merge_blocked" "$_TG_MERGE_REASON"
+      echo "BLOCKED: Task group sessions must not manually merge to main — merge happens in the close phase (override: REPO_OS_SKIP_MERGE_GUARD=1)" >&2
+      exit 2
     fi
   fi
 elif [ "${REPO_OS_SKIP_MERGE_GUARD:-0}" = "1" ]; then
   log_override "branch-guard" "REPO_OS_SKIP_MERGE_GUARD"
 fi
 
-# --- Fast-exit: Bash commands without write patterns ---
-# For Bash calls (no file_path in JSON), skip all gates if no redirect/tee detected.
-# Avoids jq cost for ~90% of Bash calls (git, npm, ls, etc.)
+# --- Fast-exit: Bash commands without write patterns (with analytics) ---
+# Post-sourcing fast-exit for commands that triggered Gate 7 pattern detection
+# but weren't blocked (non-taskgroup session or close-phase exempt).
 if [[ "$INPUT" != *'"file_path"'* ]] && [[ "$INPUT" != *'>'* ]] && [[ "$INPUT" != *'tee '* ]]; then
   log_hook_event "branch-guard" "PreToolUse" "Bash" "allow" "$START_MS" "bash_no_write_target"
   exit 0

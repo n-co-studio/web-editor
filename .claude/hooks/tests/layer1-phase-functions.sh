@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Layer 1 — Pure function unit tests for _phase-helper.sh.
 # Exercises get_phases_for_type, get_tag_for_phase, has_plan_gate,
-# get_post_approval_phase, get_loops_for_type, get_phase_index
-# across all 14 session types.
+# get_post_approval_phase, get_loops_for_type, get_phase_index,
+# upgrade_session_type across all 16 session types.
 #
 # Bash 3.2 compatible. No external dependencies.
 
@@ -17,7 +17,7 @@ setup_sandbox
 # ============================================================
 # L1.1 — get_phases_for_type returns non-empty for all 14 types
 # ============================================================
-tap_section "L1.1: get_phases_for_type — all 14 types return non-empty"
+tap_section "L1.1: get_phases_for_type — all 16 types return non-empty"
 
 for stype in $SESSION_TYPES; do
   phases=$(get_phases_for_type "$stype")
@@ -93,6 +93,10 @@ assert_eq "$(get_phases_for_type taskdef-brief)" \
   "init dispatch synthesize op-review output close" \
   "taskdef-brief phase sequence"
 
+assert_eq "$(get_phases_for_type ephemeral)" \
+  "init conversation close" \
+  "ephemeral phase sequence"
+
 # ============================================================
 # L1.3 — get_tag_for_phase returns valid tag for every phase
 # ============================================================
@@ -144,6 +148,7 @@ assert_eq "$(get_tag_for_phase prototype-poc evaluate)" "both" "prototype-poc ev
 assert_eq "$(get_tag_for_phase advisory-init tier-select)" "both" "advisory-init tier-select = both"
 assert_eq "$(get_tag_for_phase audit scope)" "both" "audit scope = both"
 assert_eq "$(get_tag_for_phase taskdef-query conversation)" "both" "taskdef-query conversation = both"
+assert_eq "$(get_tag_for_phase ephemeral conversation)" "both" "ephemeral conversation = both"
 
 # ============================================================
 # L1.5 — has_plan_gate
@@ -158,7 +163,7 @@ for stype in standard taskgroup hotfix spec-fresh spec-update; do
 done
 
 # Types WITHOUT plan gate (no approval phase)
-for stype in taskgroup-merge experiment prototype-napkin prototype-spike prototype-poc advisory-init advisory-reinit audit taskdef-query taskdef-brief; do
+for stype in taskgroup-merge experiment prototype-napkin prototype-spike prototype-poc advisory-init advisory-reinit audit taskdef-query taskdef-brief ephemeral; do
   has_plan_gate "$stype" && rc=0 || rc=$?
   assert_fail "$rc" "has_plan_gate '$stype' = false (no approval)"
 done
@@ -175,7 +180,7 @@ assert_eq "$(get_post_approval_phase spec-fresh)" "governance" "spec-fresh post-
 assert_eq "$(get_post_approval_phase spec-update)" "governance" "spec-update post-approval = governance"
 
 # Types without approval return empty
-for stype in taskgroup-merge experiment prototype-napkin prototype-spike prototype-poc advisory-init advisory-reinit audit taskdef-query taskdef-brief; do
+for stype in taskgroup-merge experiment prototype-napkin prototype-spike prototype-poc advisory-init advisory-reinit audit taskdef-query taskdef-brief ephemeral; do
   result=$(get_post_approval_phase "$stype")
   assert_eq "$result" "" "get_post_approval_phase '$stype' = empty (no approval)"
 done
@@ -191,7 +196,7 @@ assert_eq "$(get_loops_for_type hotfix)" "verify:build" "hotfix loops"
 assert_eq "$(get_loops_for_type taskgroup-merge)" "cohesion:cohesion" "taskgroup-merge loops"
 
 # All other types have no loops
-for stype in experiment spec-fresh spec-update prototype-napkin prototype-spike prototype-poc advisory-init advisory-reinit audit taskdef-query taskdef-brief; do
+for stype in experiment spec-fresh spec-update prototype-napkin prototype-spike prototype-poc advisory-init advisory-reinit audit taskdef-query taskdef-brief ephemeral; do
   result=$(get_loops_for_type "$stype")
   assert_eq "$result" "" "get_loops_for_type '$stype' = empty (no loops)"
 done
@@ -240,6 +245,49 @@ for stype in $SESSION_TYPES; do
     fi
   done
 done
+
+# ============================================================
+# L1.9 — Ephemeral phase index
+# ============================================================
+tap_section "L1.9: Ephemeral — phase index and conversation phase"
+
+assert_eq "$(get_phase_index ephemeral init)" "1" "ephemeral init = index 1"
+assert_eq "$(get_phase_index ephemeral conversation)" "2" "ephemeral conversation = index 2"
+assert_eq "$(get_phase_index ephemeral close)" "3" "ephemeral close = index 3"
+
+# ============================================================
+# L1.10 — upgrade_session_type
+# ============================================================
+tap_section "L1.10: upgrade_session_type — ephemeral to standard conversion"
+
+# --- Setup ephemeral session ---
+init_phase "ephemeral"
+stype_before=$(get_session_type)
+assert_eq "$stype_before" "ephemeral" "pre-upgrade session type is ephemeral"
+
+phase_before=$(get_phase)
+assert_eq "$phase_before" "init" "pre-upgrade phase is init"
+
+# --- Advance to conversation (simulate Q&A session) ---
+advance_phase "conversation" 2>/dev/null
+phase_mid=$(get_phase)
+assert_eq "$phase_mid" "conversation" "ephemeral advances to conversation"
+
+# --- Upgrade ---
+upgrade_session_type 2>/dev/null
+stype_after=$(get_session_type)
+assert_eq "$stype_after" "standard" "post-upgrade session type is standard"
+
+phase_after=$(get_phase)
+assert_eq "$phase_after" "plan" "post-upgrade phase is plan"
+
+# --- Upgrade of non-ephemeral fails ---
+init_phase "standard"
+upgrade_out=$(upgrade_session_type 2>&1 || true)
+case "$upgrade_out" in
+  *"not 'ephemeral'"*) _tap_pass "upgrade_session_type rejects non-ephemeral" ;;
+  *) _tap_fail "upgrade_session_type rejects non-ephemeral" "expected error, got: $upgrade_out" ;;
+esac
 
 # ============================================================
 # Summary

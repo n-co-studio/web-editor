@@ -19,24 +19,90 @@
 # Blocking checks (all collected before reporting):
 #   1. Session log not updated
 #   2. Uncommitted changes
-#   3. HVST failures but known-issues.md not updated
-#   4. Deferrals pending but known-issues.md not updated
+# Advisory checks (non-blocking, reported in systemMessage):
+#   3. HVST failures but known-issues.md not updated (Phase 2b — downgraded from blocking)
+#   4. Deferrals pending but known-issues.md not updated (Phase 2b — downgraded from blocking)
+#
+# Output format (Phase 2a): JSON stdout with decision/reason/systemMessage.
+#   Block: {"decision":"block","reason":"<concise for Claude>","systemMessage":"<full for operator>"}
+#   Allow: {"decision":"allow","systemMessage":"<advisories>"} or plain exit 0
+#   Fallback: when jq unavailable, legacy exit 2 + stderr for blocks.
 #
 # PARITY: runner.sh replicates post-session tasks externally (Decision 0017).
 # See .claude/.automation/RUNNER-PARITY.md for the full mapping.
 #
 # Overrides: SKIP_SESSION_LOG=1, SKIP_UNCOMMITTED_CHECK=1,
 #            SKIP_KNOWN_ISSUES_CHECK=1, SKIP_CONTRACT_CHECK=1
+#
+# --- Phase 2 Measurement Baseline (2d) ---
+# Deployed: 2026-03-03 (Phase 2 — governance-neutral refactors)
+# Changes: JSON stdout output (2a), HVST/deferrals advisory downgrade (2b),
+#          fast-path library sourcing elimination (2c).
+# Metrics to collect for Phase 3 evaluation (after 2-3 weeks):
+#   - Real-repo block rate (filter phase-test repos)
+#   - Retry depth distribution (stop_hook_active=true frequency)
+#   - Per-invocation duration (millisecond-resolution from analytics)
+#   - Safety valve rate (attempt_limit fires / total sessions)
+#   - Token cost estimate (reason field length * retry count)
+# Phase 3 decision point: evaluate after 2-3 weeks of post-Phase-2 telemetry.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# --- Read stdin early (needed for stop_hook_active parsing after sourcing) ---
+INPUT=$(cat)
+
+# --- Zero-change fast exit (before library sourcing — builtins + git only) ---
+# Compute repo root using same logic as _analytics-helper.sh (including test seam).
+# Avoids ~14ms sourcing cost for zero-change sessions with no pending state.
+if [ "${REPO_OS_TEST_MODE:-0}" = "1" ] && [ -n "${_REPO_OS_TEST_ROOT:-}" ]; then
+  _EARLY_ROOT="$_REPO_OS_TEST_ROOT"
+else
+  _EARLY_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+fi
+_ZC_BASELINE_FILE="$_EARLY_ROOT/.claude/.session-baseline-sha"
+_ZC_MERGE_FILE="$_EARLY_ROOT/.claude/.state/merge-source-branch"
+_ZC_PHASE_FILE="$_EARLY_ROOT/.claude/.state/phase-state"
+
+_ZC_UNCOMMITTED=$(git diff --name-only 2>/dev/null || echo "")
+_ZC_STAGED=$(git diff --cached --name-only 2>/dev/null || echo "")
+_ZC_RECENT=""
+if [ -f "$_ZC_BASELINE_FILE" ]; then
+  _ZC_BASELINE=$(cat "$_ZC_BASELINE_FILE")
+  if git cat-file -e "$_ZC_BASELINE" 2>/dev/null; then
+    _ZC_RECENT=$(git log --oneline "$_ZC_BASELINE..HEAD" 2>/dev/null || echo "")
+  else
+    _ZC_RECENT="baseline-missing"
+  fi
+else
+  _ZC_RECENT=$(git log --oneline --since="4 hours ago" 2>/dev/null || echo "")
+fi
+
+if [ -z "$_ZC_UNCOMMITTED" ] && [ -z "$_ZC_STAGED" ] && [ -z "$_ZC_RECENT" ]; then
+  # Zero-change session with no pending state — skip sourcing entirely.
+  # Guard: only fast-exit when no agent merge signal and no phase-state
+  # (sessions that initialized need sourced functions for proper cleanup/seal).
+  if [ ! -f "$_ZC_MERGE_FILE" ] && [ ! -f "$_ZC_PHASE_FILE" ]; then
+    git rev-parse HEAD > "$_ZC_BASELINE_FILE" 2>/dev/null || true
+    exit 0
+  fi
+fi
+
+# --- Source libraries (non-zero-change or sessions needing cleanup) ---
 source "$SCRIPT_DIR/_analytics-helper.sh"
 source "$SCRIPT_DIR/_phase-helper.sh"
 source "$SCRIPT_DIR/_cleanup-helper.sh"
 START_MS=$(now_ms)
 
-INPUT=$(cat)
+# --- Retry detection via stop_hook_active (Phase 1 optimization) ---
+# On retry (stop_hook_active=true), skip advisory-only checks but run all
+# blocking checks. Advisory checks run once on first attempt (sufficient).
+IS_RETRY=false
+if [ "$_REPO_OS_HAS_JQ" = true ]; then
+  _SHA_VAL=$(echo "$INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null || echo "false")
+  [ "$_SHA_VAL" = "true" ] && IS_RETRY=true
+fi
 
 # --- Paths and state files ---
 REPO_ROOT="$_REPO_OS_ROOT"
@@ -311,6 +377,63 @@ cleanup_session() {
   cleanup_session_files "$REPO_ROOT" "$close_stype"
 }
 
+# --- Advisory accumulator (Phase 2a/2b) ---
+# Non-blocking messages collected here and emitted via JSON systemMessage.
+# Used by gates 3-4 (Phase 2b advisory downgrade) and advisory checks
+# (override audit, governance evidence, next-brief reminder).
+# Defined early: called by safety valve, operator override, and zero-change paths.
+ADVISORIES=""
+_add_advisory() {
+  ADVISORIES="${ADVISORIES:+$ADVISORIES\n}$1"
+}
+
+# --- JSON stdout output helpers (Phase 2a) ---
+# JSON stdout gives control over what Claude sees (reason) vs what the operator
+# sees (systemMessage). Uses jq for safe JSON escaping when available.
+# Fallback: legacy exit 2 + stderr when jq absent.
+
+# Block response: reason → Claude (15-25 tokens), systemMessage → operator (zero token cost)
+_output_block() {
+  local reason="$1" sys_msg="$2"
+  if [ "$_REPO_OS_HAS_JQ" = true ]; then
+    jq -n --arg r "$reason" --arg m "$sys_msg" \
+      '{decision:"block",reason:$r,systemMessage:$m}'
+    exit 0
+  else
+    # Fallback: legacy stderr output
+    printf '%s\n' "$sys_msg" >&2
+    exit 2
+  fi
+}
+
+# Allow response with optional advisory systemMessage
+_output_allow() {
+  local sys_msg="${1:-}"
+  if [ -n "$sys_msg" ] && [ "$_REPO_OS_HAS_JQ" = true ]; then
+    jq -n --arg m "$sys_msg" '{decision:"allow",systemMessage:$m}'
+  fi
+}
+
+# --- KPI summary emission (Phase 3c) ---
+# Emits session-level KPI metrics at all exit paths (safety valve, block, normal close).
+# Captures: block count, retry depth, safety valve activation, token cost estimate.
+# Called once per exit path; the function is idempotent (no state mutation).
+_emit_kpi_summary() {
+  local block_count="${1:-0}"
+  local retry_depth="${2:-1}"
+  local reason_text="${3:-}"
+  local stype="${4:-}"
+  local _kpi_valve=0
+  [ "$retry_depth" -ge 3 ] && _kpi_valve=1
+  local _kpi_tokens=0
+  if [ -n "$reason_text" ]; then
+    _kpi_tokens=$(( ${#reason_text} / 4 ))
+  fi
+  log_kpi_event "session_kpi_summary" \
+    "blocks:${block_count},retries:${retry_depth},valve:${_kpi_valve},tokens:${_kpi_tokens}" \
+    "${stype:-unknown}" "$START_MS" || true
+}
+
 # --- 3-attempt counter guard ---
 # When the Stop hook blocks (exit 2), Claude continues working and fires Stop
 # again on the next close attempt. A counter tracks how many attempts have
@@ -323,21 +446,23 @@ printf '%s\n' "$STOP_ATTEMPT" > "$STOP_ATTEMPT_FILE" 2>/dev/null || true
 
 if [ "$STOP_ATTEMPT" -ge 3 ]; then
   # Safety valve: unconditional exit after 3 attempts.
+  # Record in override audit for governance observability (Phase 1d).
+  log_override "session-close-check" "SAFETY_VALVE_3_ATTEMPTS"
   UNCOMMITTED=$(git diff --name-only 2>/dev/null || echo "")
   STAGED=$(git diff --cached --name-only 2>/dev/null || echo "")
   if [ -z "$UNCOMMITTED" ] && [ -z "$STAGED" ]; then
     update_baseline
   fi
   log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "attempt_limit" "$STOP_ATTEMPT" || true
+  _emit_kpi_summary 0 "$STOP_ATTEMPT" "" "$(infer_session_type)"
   # Guard: if solo merge was expected but never completed (still on feature
   # branch), do NOT seal — sealing would permanently lock the branch.
   _SV_SOLO=$(get_solo)
   _SV_BRANCH=$(get_branch)
   if [ "$_SV_SOLO" = "true" ] && [ "$_SV_BRANCH" != "main" ]; then
-    echo "ERROR: Solo merge of '$_SV_BRANCH' into main never completed after $STOP_ATTEMPT attempts." >&2
-    echo "  Resolve manually: git checkout main && git merge '$_SV_BRANCH'" >&2
     log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "solo_merge_incomplete" "" "$_SV_BRANCH" || true
     cleanup_session
+    _output_allow "Solo merge of '$_SV_BRANCH' into main never completed after $STOP_ATTEMPT attempts.\n  Resolve manually: git checkout main && git merge '$_SV_BRANCH'"
     exit 0
   fi
   seal_branch_if_applicable
@@ -372,7 +497,9 @@ fi
 # phase-aware gate profile. Allow close unconditionally after cleanup.
 EPHEMERAL_STYPE=$(get_session_type)
 case "$EPHEMERAL_STYPE" in
-  taskdef-query|taskdef-brief|audit)
+  taskdef-query|taskdef-brief|audit|ephemeral)
+    # Ephemeral sessions (Phase 3b) have no blocking close checks.
+    # They must NOT trigger solo merge (Decision 0015) or branch seal.
     log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "ephemeral_exempt" "$EPHEMERAL_STYPE" || true
     cleanup_session
     exit 0
@@ -388,14 +515,15 @@ if [ "${SKIP_SESSION_LOG:-0}" = "1" ]; then
     OVERRIDE_COUNT=$(wc -l < "$OVERRIDES_LOG" | tr -d ' ')
     if [ "$OVERRIDE_COUNT" -gt 0 ]; then
       UNIQUE_OVERRIDES=$(awk '{print $3}' "$OVERRIDES_LOG" | sort -u | tr '\n' ', ' | sed 's/,$//')
-      echo "Override audit: $OVERRIDE_COUNT override(s) this session — $UNIQUE_OVERRIDES" >&2
       log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "override_audit" "$OVERRIDE_COUNT:$UNIQUE_OVERRIDES" || true
+      _OVR_MSG="Override audit: $OVERRIDE_COUNT override(s) this session — $UNIQUE_OVERRIDES\n  Include in Overrides: git trailer if committing."
     fi
   fi
   log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "skip_override" || true
   seal_branch_if_applicable
   update_baseline
   cleanup_session
+  _output_allow "${_OVR_MSG:-}"
   exit 0
 fi
 
@@ -456,7 +584,7 @@ fi
 if [ -z "$UNCOMMITTED" ] && [ -z "$STAGED" ] && [ -z "$RECENT_COMMITS" ]; then
   # Zero-change session — no blocking
   if [ "$SESSION_LOG_MODIFIED" = false ]; then
-    echo "Advisory: No code changes detected (zero-change session). Session log not updated." >&2
+    _ZC_MSG="Advisory: No code changes detected (zero-change session). Session log not updated."
   fi
   SESSION_TYPE=$(infer_session_type)
   log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "zero_change" "$SESSION_TYPE" || true
@@ -472,6 +600,7 @@ if [ -z "$UNCOMMITTED" ] && [ -z "$STAGED" ] && [ -z "$RECENT_COMMITS" ]; then
   seal_branch_if_applicable
   cleanup_session
   update_baseline
+  _output_allow "${_ZC_MSG:-}"
   exit 0
 fi
 
@@ -535,57 +664,70 @@ if [ -f "$KNOWN_ISSUES" ]; then
 fi
 
 if [ "${SKIP_KNOWN_ISSUES_CHECK:-0}" != "1" ]; then
-  # 4. HVST known-issues check
+  # 3. HVST known-issues check (Phase 2b: advisory, no longer blocking)
   if [ -f "$COUNTER_FILE" ]; then
     FAIL_COUNT=$(cat "$COUNTER_FILE" 2>/dev/null || echo "0")
     if [ "$FAIL_COUNT" -ge 2 ] && [ "$KI_MODIFIED" = false ]; then
-      add_failure "$FAIL_COUNT HVST failures but known-issues.md not updated — document per HVST Record step (override: SKIP_KNOWN_ISSUES_CHECK=1)"
+      _add_advisory "Advisory: $FAIL_COUNT HVST failures but known-issues.md not updated — document per HVST Record step"
     fi
   fi
 
-  # 5. Deferrals known-issues check
+  # 4. Deferrals known-issues check (Phase 2b: advisory, no longer blocking)
   if [ -f "$REPO_ROOT/.claude/.deferrals-pending" ]; then
     if [ "$KI_MODIFIED" = false ]; then
-      add_failure "Deferred findings pending but known-issues.md not updated — document deferrals (override: SKIP_KNOWN_ISSUES_CHECK=1)"
+      _add_advisory "Advisory: Deferred findings pending but known-issues.md not updated — document deferrals"
     fi
   fi
 else
   log_override "session-close-check" "SKIP_KNOWN_ISSUES_CHECK"
 fi
 
-# --- Failure report ---
+# --- Failure report (Phase 2a: JSON stdout) ---
 if [ "$FAILURE_COUNT" -gt 0 ]; then
   SESSION_TYPE=$(infer_session_type)
   log_hook_event "session-close-check" "Stop" "" "block" "$START_MS" "single_pass_block" "$FAILURE_COUNT" "$SESSION_TYPE" || true
-  echo "BLOCKED: $FAILURE_COUNT issue(s) must be resolved before closing:" >&2
-  printf '%b' "$FAILURES" >&2
-  echo "" >&2
-  echo "Close sequence (complete all before retrying):" >&2
-  echo "  1. Update session log" >&2
-  echo "  2. Commit all changes including session log" >&2
-  echo "  3. Merge to main (solo mode)" >&2
-  echo "  4. Present closing summary — then exit" >&2
-  exit 2
+
+  # Build concise reason for Claude (15-25 tokens)
+  _REASON_PARTS=""
+  if [ "$SESSION_LOG_MODIFIED" = false ]; then
+    _REASON_PARTS="session log not updated"
+  fi
+  if [ "${SKIP_UNCOMMITTED_CHECK:-0}" != "1" ] && { [ -n "$UNCOMMITTED" ] || [ -n "$STAGED" ]; }; then
+    _REASON_PARTS="${_REASON_PARTS:+$_REASON_PARTS; }uncommitted changes detected"
+  fi
+  _BLOCK_REASON="${_REASON_PARTS:-Close sequence incomplete} — resolve before closing"
+
+  # Build full details for operator (systemMessage — zero token cost)
+  _BLOCK_SYS_MSG="BLOCKED: $FAILURE_COUNT issue(s) must be resolved before closing:\n$(printf '%b' "$FAILURES")"
+  if [ -n "$ADVISORIES" ]; then
+    _BLOCK_SYS_MSG="${_BLOCK_SYS_MSG}\n${ADVISORIES}"
+  fi
+
+  _emit_kpi_summary "$FAILURE_COUNT" "$STOP_ATTEMPT" "$_BLOCK_REASON" "$SESSION_TYPE"
+  _output_block "$_BLOCK_REASON" "$_BLOCK_SYS_MSG"
 fi
 
-# --- Override audit (advisory) ---
+# --- Override audit (advisory — first attempt only) ---
 # Summarize any governance overrides used during this session.
-OVERRIDES_LOG="$REPO_ROOT/.claude/.state/overrides.log"
-if [ -f "$OVERRIDES_LOG" ]; then
-  OVERRIDE_COUNT=$(wc -l < "$OVERRIDES_LOG" | tr -d ' ')
-  if [ "$OVERRIDE_COUNT" -gt 0 ]; then
-    UNIQUE_OVERRIDES=$(awk '{print $3}' "$OVERRIDES_LOG" | sort -u | tr '\n' ', ' | sed 's/,$//')
-    echo "Override audit: $OVERRIDE_COUNT override(s) this session — $UNIQUE_OVERRIDES" >&2
-    echo "  Include in Overrides: git trailer if committing." >&2
-    log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "override_audit" "$OVERRIDE_COUNT:$UNIQUE_OVERRIDES" || true
+# Skipped on retry: advisory check, not needed for resolution.
+if [ "$IS_RETRY" = false ]; then
+  OVERRIDES_LOG="$REPO_ROOT/.claude/.state/overrides.log"
+  if [ -f "$OVERRIDES_LOG" ]; then
+    OVERRIDE_COUNT=$(wc -l < "$OVERRIDES_LOG" | tr -d ' ')
+    if [ "$OVERRIDE_COUNT" -gt 0 ]; then
+      UNIQUE_OVERRIDES=$(awk '{print $3}' "$OVERRIDES_LOG" | sort -u | tr '\n' ', ' | sed 's/,$//')
+      _add_advisory "Override audit: $OVERRIDE_COUNT override(s) this session — $UNIQUE_OVERRIDES\n  Include in Overrides: git trailer if committing."
+      log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "override_audit" "$OVERRIDE_COUNT:$UNIQUE_OVERRIDES" || true
+    fi
   fi
 fi
 
-# --- Governance evidence check (advisory) ---
+# --- Governance evidence check (advisory — first attempt only) ---
 # Verifies that governance evidence was recorded in task group contract.
 # Model writes this as part of normal contract update; hook only verifies.
 # In template mode, contracts live locally; in product mode, they're committed.
-if [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
+# Skipped on retry: advisory check, not needed for resolution.
+if [ "$IS_RETRY" = false ] && [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
   if [ "$IS_TEMPLATE" = true ]; then
     CONTRACT_DIR="$REPO_ROOT/.claude/local/task-groups"
   else
@@ -611,10 +753,10 @@ if [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
         GROUP_NAME=$(basename "$CONTRACT" .yaml)
         # Check for governance section presence
         if ! grep -q "^governance:" "$CONTRACT" 2>/dev/null; then
-          echo "Advisory: Task group '$GROUP_NAME' contract has no governance: section — add gate evidence before final commit." >&2
+          _add_advisory "Advisory: Task group '$GROUP_NAME' contract has no governance: section — add gate evidence before final commit."
         else
           if ! grep -q "brief_sequence: $CURRENT_SEQ" "$CONTRACT" 2>/dev/null; then
-            echo "Advisory: Task group '$GROUP_NAME' — no governance entry for current brief (sequence $CURRENT_SEQ)." >&2
+            _add_advisory "Advisory: Task group '$GROUP_NAME' — no governance entry for current brief (sequence $CURRENT_SEQ)."
           fi
         fi
       fi
@@ -679,8 +821,7 @@ if [ "$SOLO" = "true" ] && [ "$BRANCH_SEALED" = false ]; then
       git merge --abort 2>/dev/null || true
       git checkout "$MERGE_BRANCH" 2>/dev/null || true
       log_hook_event "session-close-check" "Stop" "" "block" "$START_MS" "solo_merge_failed" "" "$MERGE_BRANCH" || true
-      echo "ERROR: Solo merge of '$MERGE_BRANCH' into main failed — resolve conflicts manually." >&2
-      exit 2
+      _output_block "Solo merge failed — resolve conflicts manually" "ERROR: Solo merge of '$MERGE_BRANCH' into main failed.\n  Resolve manually: git checkout main && git merge '$MERGE_BRANCH'"
     fi
 
     record_closed_branch "$MERGE_BRANCH"
@@ -690,13 +831,14 @@ if [ "$SOLO" = "true" ] && [ "$BRANCH_SEALED" = false ]; then
   fi
 fi
 
-# --- Task group next-brief reminder (advisory) ---
+# --- Task group next-brief reminder (advisory — first attempt only) ---
 # If a task group contract exists with pending briefs, remind about next brief.
 # Non-blocking: prints a reminder, does not exit 2. Override: SKIP_CONTRACT_CHECK=1
-if [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
-  # CONTRACT_DIR already resolved above (governance evidence check)
-  if [ -d "$CONTRACT_DIR" ]; then
-    for CONTRACT in "$CONTRACT_DIR"/*.yaml; do
+# Skipped on retry: advisory check, not needed for resolution.
+if [ "$IS_RETRY" = false ] && [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
+  # CONTRACT_DIR resolved above (governance evidence check — same IS_RETRY guard)
+  if [ -d "${CONTRACT_DIR:-}" ]; then
+    for CONTRACT in "${CONTRACT_DIR:-}"/*.yaml; do
       [ -f "$CONTRACT" ] || continue
       # Skip the template file
       [ "$(basename "$CONTRACT")" = "_contract-template.yaml" ] && continue
@@ -705,7 +847,7 @@ if [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
       if grep -q "status: complete" "$CONTRACT" 2>/dev/null; then
         NEXT_BRIEF=$(grep -A1 "status: complete" "$CONTRACT" | grep "next_brief:" | grep -v '""' | head -1 | sed 's/.*next_brief: *//' | sed 's/^"//' | sed 's/"$//' || true)
         if [ -n "$NEXT_BRIEF" ]; then
-          echo "Reminder: Task group '$GROUP_NAME' has a next brief — start a new Prompt B session with: $NEXT_BRIEF" >&2
+          _add_advisory "Reminder: Task group '$GROUP_NAME' has a next brief — start a new Prompt B session with: $NEXT_BRIEF"
         fi
       fi
     done
@@ -728,3 +870,9 @@ update_baseline
 
 # --- Final cleanup ---
 cleanup_session
+
+# --- KPI summary (Phase 3c) — normal close path ---
+_emit_kpi_summary 0 "$STOP_ATTEMPT" "" "$SESSION_TYPE"
+
+# --- JSON stdout: emit collected advisories (Phase 2a) ---
+_output_allow "$ADVISORIES"
