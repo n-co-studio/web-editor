@@ -300,6 +300,9 @@ export class PendingQueue {
       const existingProps = new Set(item.diff.changes.map((c) => c.property));
       const overlapping = newDiff.changes.filter((c) => existingProps.has(c.property));
 
+      let cssCollapsed = false;
+      let updatedDiff = item.diff;
+
       if (overlapping.length > 0) {
         // Build a merged changes array: keep original fromValue, use new toValue
         const newPropsMap = new Map(newDiff.changes.map((c) => [c.property, c]));
@@ -310,18 +313,41 @@ export class PendingQueue {
           }
           return c;
         });
-
-        // Replace the item's diff with a new object (avoids readonly mutation)
-        this.items[i] = {
-          ...item,
-          diff: { ...item.diff, changes: mergedChanges },
-        };
-
-        // Check if all new changes were collapsed
+        updatedDiff = { ...updatedDiff, changes: mergedChanges };
         const remaining = newDiff.changes.filter((c) => !existingProps.has(c.property));
-        if (remaining.length === 0) {
-          return true; // fully collapsed
+        cssCollapsed = remaining.length === 0;
+      }
+
+      // Collapse overlapping attribute changes
+      const newAttrs = newDiff.attributeChanges ?? [];
+      const existingAttrs = item.diff.attributeChanges ?? [];
+      let attrCollapsed = false;
+
+      if (newAttrs.length > 0 && existingAttrs.length > 0) {
+        const existingAttrNames = new Set(existingAttrs.map((a) => a.attribute));
+        const attrOverlap = newAttrs.filter((a) => existingAttrNames.has(a.attribute));
+
+        if (attrOverlap.length > 0) {
+          const newAttrMap = new Map(newAttrs.map((a) => [a.attribute, a]));
+          const mergedAttrs = existingAttrs.map((a) => {
+            const updated = newAttrMap.get(a.attribute);
+            return updated ? { ...a, toValue: updated.toValue } : a;
+          });
+          updatedDiff = { ...updatedDiff, attributeChanges: mergedAttrs };
+          const remainingAttrs = newAttrs.filter((a) => !existingAttrNames.has(a.attribute));
+          attrCollapsed = remainingAttrs.length === 0;
         }
+      }
+
+      if (updatedDiff !== item.diff) {
+        this.items[i] = { ...item, diff: updatedDiff };
+      }
+
+      // Fully collapsed if both CSS and attribute changes were absorbed
+      const cssDone = overlapping.length === 0 ? newDiff.changes.length === 0 : cssCollapsed;
+      const attrDone = newAttrs.length === 0 || attrCollapsed;
+      if (cssDone && attrDone) {
+        return true;
       }
     }
     return false;

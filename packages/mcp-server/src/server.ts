@@ -85,6 +85,11 @@ function registerTools(server: McpServer, bridge: Bridge): void {
         'Each group change includes wrapperTagName, wrapperInitialStyles (display:flex etc.), ' +
         'containerSelector, insertIndex, wrappedSelectors[], and a sibling bracket ' +
         '(prevSibling/nextSibling) indicating the JSX insertion point for the wrapper. ' +
+        'When `attributeChanges` is present, the intent is to modify HTML attributes ' +
+        '(e.g. src, alt) on the element. Each attribute change includes attribute name, ' +
+        'fromValue, and toValue. For image src changes with data: URLs, the value should ' +
+        'be saved as a file in the project\'s assets/images directory and the src updated ' +
+        'to reference that file path. ' +
         'Optionally filter by tab session ID.',
       inputSchema: z.object({
         tabId: z

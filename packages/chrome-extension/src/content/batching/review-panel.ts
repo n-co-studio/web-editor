@@ -622,6 +622,68 @@ export class ReviewPanel {
           group.appendChild(row);
         }
       }
+
+      // Attribute changes
+      if (diff.attributeChanges) {
+        for (const ac of diff.attributeChanges) {
+          const row = createElement('div', {}, {
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            padding: '2px 0',
+            fontFamily: OVERLAY.monoFamily,
+            fontSize: OVERLAY.monoSize,
+          });
+
+          const attrEl = createElement('span', {}, { color: OVERLAY.textMuted });
+          attrEl.textContent = `${ac.attribute}:`;
+          row.appendChild(attrEl);
+
+          const badge = createElement('span', {}, {
+            background: 'rgba(245, 158, 11, 0.2)',
+            color: '#f59e0b',
+            padding: '1px 3px',
+            borderRadius: '2px',
+            fontSize: '9px',
+          });
+          badge.textContent = 'attr';
+          row.appendChild(badge);
+
+          const values = createElement('span', {}, {
+            color: OVERLAY.text,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            maxWidth: '160px',
+          });
+          const fromDisplay = this.truncateValue(ac.fromValue);
+          const toDisplay = this.truncateValue(ac.toValue);
+          values.textContent = `${fromDisplay} \u2192 ${toDisplay}`;
+          values.title = `${ac.fromValue} → ${ac.toValue}`;
+          row.appendChild(values);
+
+          if (!isReadOnly) {
+            const removeBtn = createElement('button', {}, {
+              background: 'none',
+              border: 'none',
+              color: OVERLAY.textMuted,
+              cursor: 'pointer',
+              padding: '0 2px',
+              fontSize: '11px',
+              marginLeft: 'auto',
+              pointerEvents: 'auto',
+            });
+            removeBtn.textContent = '\u00d7';
+            removeBtn.title = 'Remove this change';
+            removeBtn.addEventListener('click', () => {
+              this.queue.remove(diff.id);
+            });
+            row.appendChild(removeBtn);
+          }
+
+          group.appendChild(row);
+        }
+      }
     }
 
     return group;
@@ -808,6 +870,12 @@ export class ReviewPanel {
   // -----------------------------------------------------------------------
   // Helpers
   // -----------------------------------------------------------------------
+
+  private truncateValue(value: string): string {
+    if (value.startsWith('data:')) return 'data:…';
+    if (value.length > 40) return value.slice(0, 37) + '…';
+    return value || '(empty)';
+  }
 
   private renderLifecycleBadge(label: string, color: string): HTMLSpanElement {
     const badge = createElement('span', {}, {

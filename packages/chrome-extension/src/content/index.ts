@@ -28,6 +28,7 @@ import { RulerOverlay } from './ruler-overlay';
 import { ReorderEditor, getReorderBlockReason } from './editing/reorder';
 import type { ReorderCommitCallback } from './editing/reorder';
 import { InsertEditor, getInsertBlockReason } from './editing/insert';
+import { MediaEditor } from './editing/media';
 import type { InsertCommitCallback } from './editing/insert';
 import { buildInsertChange } from './editing/insert-source';
 import { groupElements, getGroupBlockReason } from './editing/group';
@@ -36,7 +37,7 @@ import { MeasureOverlay } from './selection/measure-overlay';
 import { MultiSelectManager } from './selection/multi-select';
 import { MultiSelectToolbar } from './editing/multi-select-toolbar';
 import { buildElementInfo, getTopElementAt, generateSelector } from '../shared/dom-utils';
-import type { VisualDiff, PropertyChange, ReorderChange, GroupChange } from '@frontend-editor/shared';
+import type { VisualDiff, PropertyChange, AttributeChange, ReorderChange, GroupChange } from '@frontend-editor/shared';
 import type { ExtensionMode, ConnectionStatus, EditMode } from '../shared/types';
 
 // ---------------------------------------------------------------------------
@@ -74,6 +75,7 @@ let notesEditor: NotesEditor | null = null;
 let gridOverlay: GridOverlay | null = null;
 let reorderEditor: ReorderEditor | null = null;
 let insertEditor: InsertEditor | null = null;
+let mediaEditor: MediaEditor | null = null;
 let gridSettingsPanel: GridSettingsPanel | null = null;
 let measureOverlay: MeasureOverlay | null = null;
 let measureRafId: number | null = null;
@@ -193,6 +195,8 @@ async function activate(): Promise<void> {
   rulerOverlay = new RulerOverlay(shadow, () => gridOverlay!.getEffectiveSettings(), () => gridOverlay?.isVisible() ?? false);
   reorderEditor = new ReorderEditor(shadow);
   insertEditor = new InsertEditor(shadow);
+  mediaEditor = new MediaEditor(preview);
+  MediaEditor.restoreHandle();
   gridSettingsPanel = new GridSettingsPanel(gridOverlay.getEffectiveSettings());
   measureOverlay = new MeasureOverlay(shadow, host);
   multiSelect = new MultiSelectManager(shadow, host);
@@ -300,6 +304,7 @@ async function activate(): Promise<void> {
     positionEditor!.cleanup();
     reorderEditor!.cleanup();
     insertEditor!.cleanup();
+    mediaEditor!.cleanup();
     staleDetector!.watch(element, () => {
       selection!.markStale();
       handles!.hideHandles();
@@ -347,6 +352,7 @@ async function activate(): Promise<void> {
     positionEditor!.cleanup();
     reorderEditor!.cleanup();
     insertEditor!.cleanup();
+    mediaEditor!.cleanup();
     measureOverlay!.disable();
     measureOverlay!.clear();
     staleDetector!.cleanup();
@@ -422,6 +428,7 @@ async function activate(): Promise<void> {
       positionEditor!.cleanup();
       reorderEditor!.cleanup();
       insertEditor!.cleanup();
+      mediaEditor!.cleanup();
       notesEditor!.cleanup();
       gridSettingsPanel!.cleanup();
       multiSelectToolbar!.cleanup();
@@ -475,6 +482,7 @@ async function activate(): Promise<void> {
       notesEditor!.reposition(toolbar!.getButtonPosition('notes'));
     }
     reorderEditor!.reposition(toolbar!.getButtonPosition('reorder'));
+    mediaEditor!.reposition(toolbar!.getButtonPosition('media'));
     gridSettingsPanel!.reposition(toolbar!.getButtonPosition('grid'));
     multiSelectToolbar!.reposition(toolbar!.getPosition());
     reviewPanel!.reposition(toolbar!.getButtonPosition('review'));
@@ -504,6 +512,11 @@ async function activate(): Promise<void> {
     else { toolbar!.setActiveMode('cursor'); }
   });
   positionEditor.onClose(() => {
+    const el = selection?.getSelectedElement();
+    if (el) { activateToolForElement(el, 'cursor'); }
+    else { toolbar!.setActiveMode('cursor'); }
+  });
+  mediaEditor.onClose(() => {
     const el = selection?.getSelectedElement();
     if (el) { activateToolForElement(el, 'cursor'); }
     else { toolbar!.setActiveMode('cursor'); }
@@ -802,6 +815,7 @@ function deactivate(): void {
   positionEditor?.cleanup();
   reorderEditor?.cleanup();
   insertEditor?.cleanup();
+  mediaEditor?.cleanup();
   notesEditor?.cleanup();
   gridOverlay?.hide();
   rulerOverlay?.hide();
@@ -859,6 +873,7 @@ function deactivate(): void {
   rulerOverlay = null;
   reorderEditor = null;
   insertEditor = null;
+  mediaEditor = null;
   gridSettingsPanel = null;
   measureOverlay = null;
   measureRafId = null;
@@ -893,6 +908,7 @@ function activateToolForElement(el: Element, mode: EditMode): void {
   positionEditor!.cleanup();
   reorderEditor!.cleanup();
   insertEditor!.cleanup();
+  mediaEditor!.cleanup();
 
   if (mode === 'cursor') {
     // Cursor/select mode: show dimension handles only (no mini panel)
@@ -959,6 +975,19 @@ function activateToolForElement(el: Element, mode: EditMode): void {
   } else if (mode === 'insert') {
     insertEditor!.enter(el as HTMLElement, makeInsertCommit(el));
     toolbar!.setActiveMode('insert');
+  } else if (mode === 'media') {
+    const pos = toolbar!.getButtonPosition('media');
+    const controls = mediaEditor!.render(el, pos, (changes) => {
+      const info = buildElementInfo(el);
+      const diff = diffBuilder!.build(info, changes);
+      commitEdit(el, changes, diff);
+    }, (attrChanges) => {
+      const info = buildElementInfo(el);
+      const diff = diffBuilder!.buildAttribute(info, attrChanges);
+      commitAttributeEdit(el, attrChanges, diff);
+    });
+    shadow!.appendChild(controls);
+    toolbar!.setActiveMode('media');
   } else {
     handles!.showHandles(el, mode);
     toolbar!.setActiveMode(mode);
@@ -1000,6 +1029,23 @@ function commitEdit(
       });
     }
   }
+  badge!.update();
+  reviewPanel!.refresh();
+  devtoolsPanel?.refreshProperties();
+}
+
+function commitAttributeEdit(
+  element: Element,
+  attrChanges: readonly AttributeChange[],
+  diff: VisualDiff,
+): void {
+  queue!.add(diff);
+  editHistory!.push({
+    type: 'attribute',
+    element: element as HTMLElement,
+    attributeChanges: attrChanges,
+    diff,
+  });
   badge!.update();
   reviewPanel!.refresh();
   devtoolsPanel?.refreshProperties();
