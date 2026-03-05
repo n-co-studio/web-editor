@@ -188,7 +188,7 @@ When Prompt T detects non-overlapping file scope across briefs, it offers parall
 
 Decision 0020. Task contracts persist the brief's intent as a lightweight YAML artifact for cohesion review reference. Two lifecycle scopes:
 
-- **Task-scoped** (singular builds): Written to `.claude/.state/task-contract.yaml` at session init by Prompt B. Cleaned at session close by `cleanup_session()` (same as other session-scoped state files). If `task-contract.yaml` already exists at session start (orphan from crashed session), delete it before writing the new one.
+- **Task-scoped** (singular builds): Prompt B extracts the YAML block from the `### Task Contract` section in the brief and writes it to `.claude/.state/task-contract.yaml` at session init. Cleaned at session close by `cleanup_session()` (same as other session-scoped state files). If `task-contract.yaml` already exists at session start (orphan from crashed session), delete it before writing the new one.
 
 - **Group-scoped** (task groups): The `intent:` block lives in the task group contract YAML. Written by each brief at `contract-init` phase from Prompt T output. The `intent:` block persists in the contract as part of the group's governance record — it is not deleted at close. Each brief updates its own `intent:` fields during `contract-init`; the final contract captures the last brief's intent alongside accumulated governance evidence.
 
@@ -202,7 +202,7 @@ Decision 0017. Optional headless runner infrastructure in `.claude/.automation/`
 
 1. **Dequeue** — pick oldest `approved` queue entry, acquire flock-based queue lock, transition to `running`, release lock
 2. **Pre-launch** — create branch (or check out existing for task groups), register session, write `plan-approved` state file, pre-seed `.claude/.session-id`. Phase-state is agent-initiated: the agent calls `init_phase()` as its first Bash action (fast-exits bash-guard.sh — no redirect/tee). With fail-closed enforcement (Decision 0019), edits before `init_phase()` are blocked when the sentinel is present. Custom runners MUST ensure `init_phase()` is called before any Edit/Write tool use
-3. **Launch** — invoke `claude -p` with `--disallowedTools` permission profile and assembled prompt (template-based or inline fallback). Decision cache entries (max 10) are prepended to the prompt. When the brief contains a `## Task Contract` block (Decision 0020), the runner includes it in the assembled prompt; the agent extracts and writes it during init
+3. **Launch** — invoke `claude -p` with `--disallowedTools` permission profile and assembled prompt (template-based or inline fallback). Decision cache entries (max 10) are prepended to the prompt. The brief text contains the task contract inline as a `### Task Contract` section (Decision 0020); the runner includes the full brief in the assembled prompt and the agent extracts and writes the contract during init
 4. **Post-session** — detect outcome (completed/failed/review), perform external cleanup (solo merge, session registry, branch sealing — Stop hook does not fire in headless mode), transition queue entry
 
 **Toggle semantics:**

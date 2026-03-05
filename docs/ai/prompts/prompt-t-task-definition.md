@@ -178,12 +178,8 @@ Follow docs/ai/prompts/prompt-b-product-build.md.
 ### Spec References
 [Which compiled spec files are relevant. The Prompt B session should read these.]
 - `docs/spec/compiled/{active}/[file]` — [why relevant]
-~~~
 
-After the task brief block, display a second fenced block containing the task contract (Decision 0020). The agent in the new session will extract this automatically:
-
-~~~
-## Task Contract
+### Task Contract
 
 ```yaml
 goal: "[1-2 sentences from the Goal section]"
@@ -216,7 +212,7 @@ lifecycle: task-scoped
 ```
 ~~~
 
-**For task groups (Narrow path):** Instead of a separate task contract block, embed the contract content in each brief's `### Task Group` section as a `Contract:` field:
+**For task groups (Narrow path):** Instead of embedding the task contract as a `### Task Contract` section, embed the contract content in each brief's `### Task Group` section as a `Contract:` field:
 
 ```
 ### Task Group
@@ -231,7 +227,7 @@ lifecycle: task-scoped
 - **Consumes:** [...]
 ```
 
-After displaying the brief, instruct: "Copy the block above (including the Task Contract) and paste it into a new session to begin implementation." For phased briefs, instruct: "Copy each block into its own new session. Run them in order." For parallel briefs, instruct: "Copy each block into its own new session. Briefs 1–N can run in parallel. Run the merge brief (Brief M) after all others complete."
+After displaying the brief, instruct: "Copy the block above and paste it into a new session to begin implementation." For phased briefs, instruct: "Copy each block into its own new session. Run them in order." For parallel briefs, instruct: "Copy each block into its own new session. Briefs 1–N can run in parallel. Run the merge brief (Brief M) after all others complete."
 
 ## Rules
 

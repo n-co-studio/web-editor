@@ -18,7 +18,7 @@ Introduce persistent task contracts that capture task-level intent (verification
 
 1. **Task contract**: A lightweight YAML artifact containing `goal`, `scope_files`, `scope_modules`, `approach`, `verification` (list of falsifiable criteria), `spec_references`, `constraints`, and `lifecycle` (enum: `task-scoped` | `group-scoped`). Schema defined below.
 
-2. **Prompt T output**: Prompt T appends a `## Task Contract` YAML block after the task brief in its terminal output. For task groups, the contract content is embedded in each brief's `### Task Group` section as a `Contract:` field. Prompt T remains fully ephemeral — no file writes.
+2. **Prompt T output**: Prompt T embeds the task contract as a `### Task Contract` section inside the single brief template (after `### Spec References`), so operators copy one block instead of two. For task groups, the contract content is embedded in each brief's `### Task Group` section as a `Contract:` field. Prompt T remains fully ephemeral — no file writes.
 
 3. **Prompt B consumption**: At session init, Prompt B extracts the task contract from the brief text and writes it to `.claude/.state/task-contract.yaml`. For task groups, the `intent:` block is written into the group contract YAML during the `contract-init` phase. Stale contract detection: if `task-contract.yaml` already exists at session start, delete it before writing the new one.
 
@@ -32,7 +32,7 @@ Introduce persistent task contracts that capture task-level intent (verification
 
 7. **Backward compatibility**: Sessions without task contracts (legacy sessions, hotfixes, experiment branches) skip contract verification silently. The `intent:` block in group contracts is optional — existing groups without it continue to work.
 
-8. **Automation layer**: Headless runners (Decision 0017) must parse the `## Task Contract` block from brief text before launching `claude -p`. The contract content is included in the assembled prompt; the agent extracts and writes it during init.
+8. **Automation layer**: Headless runners (Decision 0017) include the full brief text (which contains the `### Task Contract` section inline) in the assembled prompt. The agent extracts the contract YAML and writes it to `.claude/.state/task-contract.yaml` during init. No separate parsing step is needed — the contract is part of the brief.
 
 ## Contract Schema
 
@@ -64,8 +64,8 @@ Task contracts persist the brief's intent as a lightweight YAML artifact that th
 
 ## Consequences
 - `docs/ai/decisions/t-0020-task-contract-system.md` created (this file)
-- `docs/ai/prompts/prompt-t-task-definition.md` Step 5 updated: appends `## Task Contract` YAML block after task brief
-- `docs/ai/prompts/prompt-b-product-build.md` init sequence updated: extracts and writes task contract; operating rule added
+- `docs/ai/prompts/prompt-t-task-definition.md` Step 5 updated: embeds `### Task Contract` YAML block inside the single brief template
+- `docs/ai/prompts/prompt-b-product-build.md` init sequence updated: extraction rule references `### Task Contract` (level-3 heading inside the brief, not level-2); operating rule added
 - `docs/ai/task-groups/_contract-template.yaml` updated: `intent:` block added
 - `.claude/agents/_cohesion-review.md` procedure updated: contract retrieval and Critic instruction
 - `.claude/agents/critic.md` cohesion mode updated: Contract Verification subsection added

@@ -60,9 +60,9 @@ Branches merge to main directly at session close. See `docs/ai/workflow.md` § S
 
 At session init, after branch creation and spec loading, extract the task contract from the brief text:
 
-- **Singular builds**: If the brief contains a `## Task Contract` section with a YAML code block, extract the YAML content and write it to `.claude/.state/task-contract.yaml`. If `.claude/.state/task-contract.yaml` already exists (orphan from a crashed session), delete it before writing the new one and log: "Cleaned stale task contract from previous session."
+- **Singular builds**: If the brief contains a `### Task Contract` section with a YAML code block, extract the YAML content and write it to `.claude/.state/task-contract.yaml`. The task contract is embedded inside the brief template (not a separate block). If `.claude/.state/task-contract.yaml` already exists (orphan from a crashed session), delete it before writing the new one and log: "Cleaned stale task contract from previous session."
 - **Task groups**: If the brief's `### Task Group` section contains a `Contract:` field, extract the contract content and write it as the `intent:` block in the task group contract YAML during the `contract-init` phase. Use the fields: `goal`, `verification`, `scope_files`, `spec_references`.
-- **No contract present**: If the brief contains neither a `## Task Contract` section nor a `Contract:` field in `### Task Group`, skip contract extraction silently (backward compatibility with legacy briefs, hotfixes, etc.).
+- **No contract present**: If the brief contains neither a `### Task Contract` section nor a `Contract:` field in `### Task Group`, skip contract extraction silently (backward compatibility with legacy briefs, hotfixes, etc.).
 
 The task contract serves as the cohesion review reference — Critic uses its `verification:` criteria to evaluate whether the implementation achieves the stated intent.
 
