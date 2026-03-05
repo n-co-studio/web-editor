@@ -37,7 +37,7 @@ The phase model tracks session progress in `.claude/.state/phase-state`. Hooks e
 | Phase | Agent | Notes |
 |-------|-------|-------|
 | build | Builder | Implements changes |
-| review | **Critic** (cohesion mode) | NOT Reviewer — Critic checks internal coherence |
+| review | **Critic** (cohesion mode) + **PM Advisory** (spec-drift) | Parallel dispatch. Critic checks internal coherence; PM checks spec alignment. PM is conditional — requires compiled spec or `mvp-scope.yaml` (skipped silently otherwise). PM findings are advisory (not gating) |
 | verify | QA Verifier | Commit blocker (A1–A6, B1–B3) |
 | user-review | User Review Tier agents | Optional — skipped when no User Review in brief |
 | commit | Orchestrator | Commit with trailers |

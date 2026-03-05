@@ -59,6 +59,7 @@ Before session close:
 - [ ] All work completed or explicitly deferred
 - [ ] Critic cohesion review run (cohesion mode)
 - [ ] Cohesion findings addressed (critical: fixed or operator-accepted; if fixes made: Critic re-run clean)
+- [ ] PM spec-drift check run (parallel with Critic, advisory — skipped when no compiled spec or mvp-scope.yaml)?
 - [ ] QA verified all gates (A1–A6 + push gates)
 - [ ] Session log updated
 - [ ] Task group contract updated (brief status, session decisions)? (skip if no task group)
@@ -87,11 +88,12 @@ Before session close:
 ## On-Demand Procedures
 
 - **When running Prompt A Phase 1** (advisory board review): Read `.claude/agents/_advisory-board.md` → Orchestration Procedure section
-- **When running Prompt T Brief mode** (task definition): Dispatch Architect + Exploration + Critic for task-scoped analysis. See `docs/ai/prompts/prompt-t-task-definition.md`
+- **When running Prompt T Brief mode** (task definition): Dispatch Architect + Exploration + Critic + conditional PM for task-scoped analysis. See `docs/ai/prompts/prompt-t-task-definition.md`
 - **When HVST debugging stalls (2+ consecutive failures) or operator requests debug review**: Read `.claude/agents/_hvst-review.md`
 - **When running Prompt C** (project audit): Read `docs/ai/prompts/prompt-c-project-audit.md`. Select tier, dispatch dimensions (Auditor per mode + Security/Performance if selected), mediate specialist collaboration (escalation tags, co-audit, workshop loops), synthesize Audit Report
 - **When operator defers findings** (Prompt C audit or Prompt A Phase 2 review): Write `.claude/.deferrals-pending` (timestamp as content). Then write each deferred finding to the Known Limitations table in `known-issues.md` (template mode: `.claude/local/known-issues.md`; product mode: `docs/ai/logs/known-issues.md`). For Prompt C sessions, these are the only permitted file modifications — the session is no longer zero-change, so follow normal session close procedures (session log, commit)
-- **After Builder signals completion** (before QA): Read `.claude/.state/task-contract.yaml` (singular) or the `intent:` block from the task group contract (groups) — if present, pass the `verification:` criteria to Critic alongside the diff. Then read `.claude/agents/_cohesion-review.md`
+- **When dispatching PM Advisory** (on-demand or phase-triggered): Check conditional dispatch: compiled spec (`manifest.json` `active` ≠ null) OR `mvp-scope.yaml` exists. If neither, skip PM silently. When dispatching, PM receives: compiled spec files, `mvp-scope.yaml` (if it exists), and the relevant context (task description, feature brief, or implementation diff depending on dispatch context). PM output is advisory — does not block commits. If PM includes spec-edit proposals, present each to the operator for accept/reject/defer. For accepted proposals: execute the edit using Edit tool (Orchestrator writes on behalf of PM). For rejected/deferred: note in session log
+- **After Builder signals completion** (before QA): Read `.claude/.state/task-contract.yaml` (singular) or the `intent:` block from the task group contract (groups) — if present, pass the `verification:` criteria to Critic alongside the diff. Then read `.claude/agents/_cohesion-review.md`. Also dispatch PM Advisory for spec-drift check (parallel with Critic) — PM receives the implementation diff + compiled spec + `mvp-scope.yaml`. PM findings are advisory (presented alongside Critic verdict)
 - **When task brief contains `### Task Group`**: Contract path depends on repo mode (template mode: `.claude/local/task-groups/{group-name}.yaml`; product mode: `docs/ai/task-groups/{group-name}.yaml`). Follow the contract lifecycle in `docs/ai/workflow.md` § Task Group Sessions
 - **When task brief has `Execution: parallel` in `### Task Group`** (parallel content brief): Restrict edits to declared `Boundaries`. At session close, write completion marker: `.claude/.state/tg-{group}-brief-{seq}.complete`. Follow boundary enforcement rules in `docs/ai/prompts/prompt-b-product-build.md`
 - **When running a merge brief** (`taskgroup-merge` session type): Initialize as `taskgroup-merge`. In `contract-init`, sync from contract and verify all content briefs completed (check completion markers). In `cohesion` phase, run cross-session cohesion review (Critic in cohesion mode) across the combined diff from all parallel briefs. Resolve integration issues (loop: `cohesion→cohesion`). In `verify`, run QA gates. At close, merge to main and seal branch
@@ -103,7 +105,7 @@ Before session close:
 
 ## Handoffs
 
-**Receives:** Task requests and approvals (Operator), escalations (Builder), cohesion briefs (Critic), gate results (QA), verdicts (Reviewer/Security), specialist briefs (Advisory Board), audit dimension briefs (Auditor)
+**Receives:** Task requests and approvals (Operator), escalations (Builder), cohesion briefs (Critic), gate results (QA), verdicts (Reviewer/Security), specialist briefs (Advisory Board), PM assessments and spec-edit proposals (PM Advisory), audit dimension briefs (Auditor)
 
 **Sends to:**
 - **Advisory Board**: Compiled specs or feature briefs for review (Prompt A Phase 1)
@@ -113,6 +115,7 @@ Before session close:
 - **Auditor**: Dimension mode + scope for project audit (Prompt C) — one dispatch per dimension
 - **Specialist (audit escalation)**: Finding context from Auditor escalation tags — one-shot focused review
 - **Critic (cohesion mode)**: Diff summary, changed files list, context for coherence review — after Builder completes, before QA
+- **PM Advisory**: Compiled specs, mvp-scope.yaml, task description or diff — for scope/spec advisory (Prompt T/A/B review phase, on-demand)
 - **QA**: Verification request after cohesion review clean
 - **Reviewer/Security**: Code for review (when high-risk), or full-codebase audit scope (Prompt C)
 - **Accessibility**: UI code with context (when applicable)

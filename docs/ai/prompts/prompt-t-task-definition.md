@@ -51,7 +51,7 @@ Query mode has no structured output. The conversation IS the output.
 
 ### Brief Mode
 
-Dispatches three specialists in parallel, then synthesizes their findings into a task brief.
+Dispatches three core specialists (plus conditional PM) in parallel, then synthesizes their findings into a task brief.
 
 #### Step 1 — Gather Context
 
@@ -66,15 +66,16 @@ If the operator has already provided this context in their opening message, do n
 
 #### Step 2 — Dispatch Specialists
 
-Dispatch all three in parallel. Each receives: the operator's task description, compiled spec files (if they exist), and codebase access.
+Dispatch all specialists in parallel. Each receives: the operator's task description, compiled spec files (if they exist), and codebase access.
 
 | Specialist | Focus |
 |---|---|
 | **Architect** | Where does this change fit? Which files/modules are affected? What structural patterns apply? Are there dependencies or ordering constraints? |
 | **Exploration** | What are alternative approaches? Are there libraries, patterns, or best practices to consider? What creative options exist? |
 | **Critic** | What could go wrong? What gaps exist in the task description? What assumptions are unstated? What risks or contradictions are present? |
+| **PM Advisory** | Does this align with the MVP scope? Is it consistent with compiled specs? Are there scope or sequencing concerns? *(Conditional — dispatched only when compiled spec or `mvp-scope.yaml` exists. Skipped silently otherwise.)* |
 
-Specialists produce lightweight briefs using the advisory board format (see `.claude/agents/_advisory-board-lite.md`). Severity labels: CRITICAL / RECOMMENDATION / IDEA.
+Specialists produce lightweight briefs using the advisory board format (see `.claude/agents/_advisory-board-lite.md`). Severity labels: CRITICAL / RECOMMENDATION / IDEA. PM additionally uses scope labels: IN-SCOPE / OUT-OF-SCOPE / DEFER.
 
 **Critic and User Review:** When User Review is being included, the Critic may suggest additional scenarios the operator hasn't considered — edge cases, error flows, or alternative user paths that would benefit from persona simulation.
 
@@ -84,7 +85,9 @@ The Orchestrator synthesizes specialist findings into a draft task brief:
 - Incorporate Architect findings into the Scope and Approach sections
 - Incorporate Exploration findings into the Approach and Alternatives sections
 - Incorporate Critic findings into the Risks and Verification sections
-- Cross-reference Critic concerns with Architect/Exploration suggestions (same pattern as advisory board Critic Cross-Reference)
+- Incorporate PM findings into the Constraints and Risks sections (scope alignment, spec consistency, sequencing concerns)
+- Cross-reference Critic concerns with Architect/Exploration/PM suggestions (same pattern as advisory board Critic Cross-Reference)
+- If PM included spec-edit proposals, note them in the brief's Risks & Open Questions section for operator awareness
 
 #### Step 4 — Operator Review
 
@@ -235,7 +238,7 @@ After displaying the brief, instruct: "Copy the block above and paste it into a 
 - REQUIRE: **never make code changes.** This is an exploration and planning session only.
 - REQUIRE: **never create session log entries.** Prompt T sessions produce no artifacts and are exempt via the zero-change rule.
 - REQUIRE: **never dispatch specialists in Query mode.** Query mode is conversational — the Orchestrator answers directly.
-- REQUIRE: **always dispatch all three specialists in Brief mode.** No tier selection — the 3-agent team is fixed.
+- REQUIRE: **always dispatch the 3 core specialists in Brief mode** (Architect, Exploration, Critic). Additionally dispatch PM Advisory when a compiled spec (`manifest.json` `active` ≠ null) or `mvp-scope.yaml` exists. No tier selection — the core team is fixed, PM is conditional.
 - REQUIRE: **never finalize a brief without operator approval.** Always present the draft for review first.
 - REQUIRE: **if specs don't exist, say so.** Note in the brief's Spec References section that specs were unavailable and the brief was grounded in codebase analysis alone.
 - GUIDE: **if the task is too large for a single brief**, proactively suggest splitting. A brief that maps to more than one Prompt B session should be broken into sequential briefs.

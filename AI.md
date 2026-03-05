@@ -33,6 +33,7 @@ Agent-allowed:
 On-demand (loaded by orchestrator.md triggers, not at session start):
 - docs/spec/_templates/ (read during Prompt 0 only)
 - .claude/agents/_advisory-board.md (read during Prompt A Phase 1)
+- .claude/agents/_pm-advisor.md (read when PM Advisory dispatched — Prompt T/A/B review phase, on-demand)
 - .claude/agents/_cohesion-review.md (read after Builder signals completion)
 - .claude/agents/_hvst-review.md (read when HVST debugging stalls or operator requests debug review)
 - docs/ai/task-groups/ (loaded when task brief contains `### Task Group`; template mode uses `.claude/local/task-groups/` for contracts)

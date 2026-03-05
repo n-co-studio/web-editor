@@ -46,7 +46,7 @@ The Orchestrator scans compiled specs (or the feature brief's "What It Touches" 
 | database, data-contracts, migrations, schema, GDPR, data-lifecycle | Data Strategist |
 
 **Core pair (Lite+):** Architect, Critic — always active when advisory board runs.
-**Extended (Standard+):** Exploration — active at Standard tier and above.
+**Extended (Standard+):** Exploration, PM Advisory — active at Standard tier and above. PM requires compiled spec or `mvp-scope.yaml` (skipped silently when neither exists).
 **Conditional (Full only):** Security Analyst, UX Strategist, Performance Engineer, Data Strategist — signal-triggered, Full tier only.
 
 ---
@@ -92,6 +92,7 @@ The Orchestrator synthesizes all specialist briefs into a single report:
 | Architect | Ran | Core (Lite+) |
 | Critic | Ran | Core (Lite+) |
 | Exploration | Ran / Skipped | Standard+ |
+| PM Advisory | Ran / Skipped | Standard+ (requires compiled spec or mvp-scope.yaml) |
 | Security Analyst | Ran / Skipped | [trigger or "no signal"] |
 | UX Strategist | Ran / Skipped | [trigger or "no signal"] |
 | Performance Engineer | Ran / Skipped | [trigger or "no signal"] |
@@ -108,6 +109,9 @@ The Orchestrator synthesizes all specialist briefs into a single report:
 
 ### Unresolved Critic Findings (no specialist coverage)
 [Critic findings that no other specialist addressed — operator must provide direction or assign follow-up]
+
+### PM Spec-Edit Proposals
+[Spec-edit proposals from PM Advisory, if any. Each proposal targets a single file/section with current_value, proposed_value, and rationale. Operator may: accept (Orchestrator applies the edit), reject (no change), or defer (noted for later). Empty section if PM was not dispatched or proposed no edits.]
 ```
 
 ---
@@ -155,7 +159,7 @@ When running Prompt A Phase 1 (advisory board review), the Orchestrator follows 
 2. **Scan** compiled specs for activation signals (see Activation Logic above) — only relevant at Full tier
 3. **Activate** agents for the selected tier:
    - Lite: Architect + Critic
-   - Standard: Architect + Critic + Exploration
+   - Standard: Architect + Critic + Exploration + PM Advisory (if compiled spec or mvp-scope.yaml exists)
    - Full: Standard set + any signal-triggered conditional specialists
 4. **Dispatch** all activated specialists in parallel — each receives the compiled spec files
 5. **Collect** individual briefs from each specialist
@@ -163,6 +167,7 @@ When running Prompt A Phase 1 (advisory board review), the Orchestrator follows 
    a. Merge all non-Critic findings directly (they already include suggestions)
    b. Cross-reference each Critic finding against other specialists' briefs — if a specialist addressed the same concern, attach their suggestion to the Critic finding
    c. Any Critic finding with no matching specialist suggestion → list under "Unresolved Critic Findings" in the report (operator must provide direction)
+   d. If PM Advisory ran: preserve PM scope labels (IN-SCOPE / OUT-OF-SCOPE / DEFER) inline with PM findings — labels are informational and do not affect routing (findings still route by severity). Extract any spec-edit proposals into the "PM Spec-Edit Proposals" subsection
 7. **Present** report to operator for per-item review (accept / reject / defer)
 8. **Record** operator decisions — no build begins until all Critical findings are addressed
 

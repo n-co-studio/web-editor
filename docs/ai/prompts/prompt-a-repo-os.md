@@ -54,7 +54,8 @@ Skip entirely in Re-initialize mode.
    - **Activation Summary** — which specialists ran and why
 3. Operator reviews each item: Accept / Reject / Defer
 4. For accepted items: note what changes to make (spec updates, new constraints, follow-ups)
-5. All Critical findings must be addressed (accepted or explicitly rejected with reason) before proceeding
+5. If PM Advisory ran and included spec-edit proposals: present each proposal to the operator (accept / reject / defer). For accepted proposals, execute the edit using Edit tool (Orchestrator writes on behalf of PM). Record outcomes in session log
+6. All Critical findings must be addressed (accepted or explicitly rejected with reason) before proceeding
 
 ## Phase 3 — Repo OS Validation (both modes)
 

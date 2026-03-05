@@ -1,0 +1,15 @@
+# MVP Scope Definition
+# Created: at Prompt 0 (if operator provides MVP scope) or at first PM dispatch
+# Updated: via spec-edit proposals (PM proposes, Orchestrator executes after operator approval)
+
+goal: ""                    # 1-2 sentence MVP goal statement
+
+features:
+  - name: ""                # feature name (matches feature brief filename if one exists)
+    status: in-scope        # in-scope | out-of-scope | defer
+    rationale: ""           # why this status was chosen
+    brief: ""               # path to feature brief (optional, empty if no brief exists)
+
+status: draft               # draft | active | locked
+last_modified_by: ""        # "prompt-0" | "pm-advisory" | "operator"
+last_modified_date: ""      # ISO 8601

@@ -46,6 +46,17 @@ Docs, tests, formatting, comments, dev tooling
 ### Cohesion Review
 Post-build review by the Critic agent (cohesion mode) checking the diff and surrounding code for internal codebase coherence: broken cross-references, dangling imports, inconsistent naming, half-finished integrations, and contradictory patterns. Verified by QA as gate A5. Not the same as spec review (advisory board) — cohesion operates on code, not specs.
 
+### PM Scope Labels
+PM-specific labels orthogonal to advisory board severity levels. Applied by the PM Advisory agent alongside standard severity (CRITICAL / RECOMMENDATION / IDEA):
+
+| Label | Meaning |
+|-------|---------|
+| IN-SCOPE | Finding relates to work within the defined MVP scope |
+| OUT-OF-SCOPE | Finding relates to work outside the defined MVP scope |
+| DEFER | Finding relates to work that should be deferred to a later phase |
+
+Scope labels do not affect Refinement Report routing — findings route by severity as normal. Labels are informational context preserved inline.
+
 ---
 
 ## Reserved Directories
