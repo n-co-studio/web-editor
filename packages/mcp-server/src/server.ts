@@ -87,9 +87,11 @@ function registerTools(server: McpServer, bridge: Bridge): void {
         '(prevSibling/nextSibling) indicating the JSX insertion point for the wrapper. ' +
         'When `attributeChanges` is present, the intent is to modify HTML attributes ' +
         '(e.g. src, alt) on the element. Each attribute change includes attribute name, ' +
-        'fromValue, and toValue. For image src changes with data: URLs, the value should ' +
-        'be saved as a file in the project\'s assets/images directory and the src updated ' +
-        'to reference that file path. ' +
+        'fromValue, and toValue. When the user selects an image via the file picker, ' +
+        'the server automatically saves it to the project (in the same directory as the ' +
+        'original image, or public/images/ as fallback) and the toValue will be a ' +
+        'project-relative file path (e.g. /public/images/uploaded-xyz.png). ' +
+        'Update the source code to reference this path. ' +
         'Optionally filter by tab session ID.',
       inputSchema: z.object({
         tabId: z
