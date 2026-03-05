@@ -9,6 +9,11 @@
 *.pptx
 ~$*
 
+# Node.js / TypeScript build artifacts
+node_modules/
+dist/
+*.tsbuildinfo
+
 # Claude Code personal settings
 .claude/settings.local.json
 
