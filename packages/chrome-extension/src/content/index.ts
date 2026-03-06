@@ -1511,6 +1511,15 @@ function exitMultiSelectMode(): void {
 // ---------------------------------------------------------------------------
 
 function handleGlobalKeydown(e: KeyboardEvent): void {
+  // Skip all shortcuts when user is typing in a text field/input/contenteditable
+  const target = e.target as HTMLElement | null;
+  if (target) {
+    const tag = target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) {
+      return;
+    }
+  }
+
   // Alt/Option key — measurement mode (with selection) or pause (without)
   if (e.key === 'Alt') {
     if (mode === 'selecting' && !multiSelect?.isActive()) {
@@ -1561,37 +1570,6 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
           makeGroupCommit(allElements);
         }
       }
-    }
-    return;
-  }
-
-  // Cmd+N — toggle Notes panel
-  if (e.key === 'n' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
-    e.preventDefault();
-    e.stopPropagation();
-    if (notesEditor!.isOpen()) {
-      notesEditor!.cleanup();
-      toolbar!.setNotesOpen(false);
-    } else {
-      const selectedEl = selection?.getSelectedElement();
-      const isMulti = multiSelect?.isActive();
-      if (selectedEl && !isMulti) {
-        const info = buildElementInfo(selectedEl);
-        notesEditor!.setAnchoredElement(selectedEl, {
-          selector: info.selector,
-          tagName: info.tagName,
-          textContent: info.textContent,
-          sourceFile: info.sourceFile,
-          sourceLine: info.sourceLine,
-          instanceIndex: info.instanceIndex,
-        });
-      } else {
-        notesEditor!.clearAnchoredElement();
-      }
-      const pos = toolbar!.getButtonPosition('notes');
-      const notePanel = notesEditor!.render(pos);
-      shadow!.appendChild(notePanel);
-      toolbar!.setNotesOpen(true);
     }
     return;
   }
@@ -1720,6 +1698,37 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
         devtoolsPanel!.show(el, info);
         toolbar!.setInspectorOpen('devtools', true);
         devtoolsUserClosed = false;
+      }
+      return;
+    }
+
+    // n — toggle Notes panel (no modifiers)
+    if (e.key === 'n') {
+      e.preventDefault();
+      e.stopPropagation();
+      if (notesEditor!.isOpen()) {
+        notesEditor!.cleanup();
+        toolbar!.setNotesOpen(false);
+      } else {
+        const selectedEl = selection?.getSelectedElement();
+        const isMulti = multiSelect?.isActive();
+        if (selectedEl && !isMulti) {
+          const info = buildElementInfo(selectedEl);
+          notesEditor!.setAnchoredElement(selectedEl, {
+            selector: info.selector,
+            tagName: info.tagName,
+            textContent: info.textContent,
+            sourceFile: info.sourceFile,
+            sourceLine: info.sourceLine,
+            instanceIndex: info.instanceIndex,
+          });
+        } else {
+          notesEditor!.clearAnchoredElement();
+        }
+        const pos = toolbar!.getButtonPosition('notes');
+        const notePanel = notesEditor!.render(pos);
+        shadow!.appendChild(notePanel);
+        toolbar!.setNotesOpen(true);
       }
       return;
     }
