@@ -1732,6 +1732,19 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
       }
       return;
     }
+
+    // t — activate Typography tool (no modifiers)
+    if (e.key === 't') {
+      e.preventDefault();
+      e.stopPropagation();
+      const el = selection?.getSelectedElement();
+      if (el) {
+        activateToolForElement(el, 'typography');
+      } else {
+        toolbar!.setActiveMode('typography');
+      }
+      return;
+    }
   }
 
   // Escape ladder: cancel edit → close review → dismiss panel → deactivate
