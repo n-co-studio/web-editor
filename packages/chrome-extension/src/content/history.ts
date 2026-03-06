@@ -59,7 +59,15 @@ interface AttributeHistoryEntry {
   readonly diff: VisualDiff;
 }
 
-export type HistoryEntry = CssHistoryEntry | RemovalHistoryEntry | ReorderHistoryEntry | InsertionHistoryEntry | GroupHistoryEntry | AttributeHistoryEntry;
+interface TextHistoryEntry {
+  readonly type: 'text';
+  readonly element: HTMLElement;
+  readonly fromText: string;
+  readonly toText: string;
+  readonly diff: VisualDiff;
+}
+
+export type HistoryEntry = CssHistoryEntry | RemovalHistoryEntry | ReorderHistoryEntry | InsertionHistoryEntry | GroupHistoryEntry | AttributeHistoryEntry | TextHistoryEntry;
 
 type HistoryCallback = () => void;
 
@@ -124,6 +132,9 @@ export class EditHistory {
           }
         }
         break;
+      case 'text':
+        entry.element.textContent = entry.fromText;
+        break;
     }
 
     this.redoStack.push(entry);
@@ -176,6 +187,9 @@ export class EditHistory {
           entry.element.setAttribute(ac.attribute, ac.toValue);
         }
         break;
+      case 'text':
+        entry.element.textContent = entry.toText;
+        break;
     }
 
     this.undoStack.push(entry);
@@ -226,6 +240,18 @@ export class EditHistory {
             entry.originalParent.insertBefore(pos.element, pos.nextSibling);
           }
           entry.wrapper.remove();
+          break;
+        case 'attribute':
+          for (const ac of entry.attributeChanges) {
+            if (ac.fromValue) {
+              entry.element.setAttribute(ac.attribute, ac.fromValue);
+            } else {
+              entry.element.removeAttribute(ac.attribute);
+            }
+          }
+          break;
+        case 'text':
+          entry.element.textContent = entry.fromText;
           break;
       }
       diffIds.push(entry.diff.id);

@@ -33,6 +33,7 @@ export function serializeToPrompt(
   const reorders: Array<{ diff: VisualDiff }> = [];
   const inserts: Array<{ diff: VisualDiff }> = [];
   const groups: Array<{ diff: VisualDiff }> = [];
+  const textEdits: Array<{ diff: VisualDiff }> = [];
 
   for (const [file, fileDiffs] of sorted) {
     const heading = file
@@ -73,6 +74,13 @@ export function serializeToPrompt(
       if (diff.groupChanges) {
         for (const _gc of diff.groupChanges) {
           groups.push({ diff });
+        }
+      }
+
+      // Collect text changes for a separate section
+      if (diff.textChanges) {
+        for (const _tc of diff.textChanges) {
+          textEdits.push({ diff });
         }
       }
 
@@ -144,6 +152,27 @@ export function serializeToPrompt(
           sections.push(`  Wrapper styles: ${styleDesc}`);
         }
         sections.push(`  Wrapped: ${gc.wrappedSelectors.map(s => `\`${s}\``).join(', ')}`);
+      }
+    }
+    sections.push('');
+  }
+
+  // Text changes section
+  if (textEdits.length > 0) {
+    sections.push('## Text Changes\n');
+    const seen = new Set<string>();
+    for (const { diff } of textEdits) {
+      if (seen.has(diff.id)) continue;
+      seen.add(diff.id);
+      for (const tc of diff.textChanges!) {
+        const lineInfo = diff.element.sourceLine
+          ? ` (line ${diff.element.sourceLine})`
+          : '';
+        const fromPreview = tc.fromText.length > 60 ? tc.fromText.slice(0, 57) + '...' : tc.fromText;
+        const toPreview = tc.toText.length > 60 ? tc.toText.slice(0, 57) + '...' : tc.toText;
+        sections.push(
+          `- \`${diff.element.selector}\`${lineInfo}: "${fromPreview}" \u2192 "${toPreview}"`,
+        );
       }
     }
     sections.push('');

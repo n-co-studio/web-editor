@@ -28,6 +28,7 @@ import { RulerOverlay } from './ruler-overlay';
 import { ReorderEditor, getReorderBlockReason } from './editing/reorder';
 import type { ReorderCommitCallback } from './editing/reorder';
 import { InsertEditor, getInsertBlockReason } from './editing/insert';
+import { TextEditor, getTextBlockReason } from './editing/text';
 import { MediaEditor } from './editing/media';
 import type { InsertCommitCallback } from './editing/insert';
 import { buildInsertChange } from './editing/insert-source';
@@ -37,7 +38,7 @@ import { MeasureOverlay } from './selection/measure-overlay';
 import { MultiSelectManager } from './selection/multi-select';
 import { MultiSelectToolbar } from './editing/multi-select-toolbar';
 import { buildElementInfo, getTopElementAt, generateSelector } from '../shared/dom-utils';
-import type { VisualDiff, PropertyChange, AttributeChange, ReorderChange, GroupChange } from '@frontend-editor/shared';
+import type { VisualDiff, PropertyChange, AttributeChange, TextChange, ReorderChange, GroupChange } from '@frontend-editor/shared';
 import type { ExtensionMode, ConnectionStatus, EditMode } from '../shared/types';
 
 // ---------------------------------------------------------------------------
@@ -75,6 +76,7 @@ let notesEditor: NotesEditor | null = null;
 let gridOverlay: GridOverlay | null = null;
 let reorderEditor: ReorderEditor | null = null;
 let insertEditor: InsertEditor | null = null;
+let textEditor: TextEditor | null = null;
 let mediaEditor: MediaEditor | null = null;
 let gridSettingsPanel: GridSettingsPanel | null = null;
 let measureOverlay: MeasureOverlay | null = null;
@@ -198,6 +200,7 @@ async function activate(): Promise<void> {
   rulerOverlay = new RulerOverlay(shadow, () => gridOverlay!.getEffectiveSettings(), () => gridOverlay?.isVisible() ?? false);
   reorderEditor = new ReorderEditor(shadow);
   insertEditor = new InsertEditor(shadow);
+  textEditor = new TextEditor();
   mediaEditor = new MediaEditor(preview);
   MediaEditor.restoreHandle();
   gridSettingsPanel = new GridSettingsPanel(gridOverlay.getEffectiveSettings());
@@ -307,6 +310,7 @@ async function activate(): Promise<void> {
     positionEditor!.cleanup();
     reorderEditor!.cleanup();
     insertEditor!.cleanup();
+    textEditor!.cleanup();
     mediaEditor!.cleanup();
     staleDetector!.watch(element, () => {
       selection!.markStale();
@@ -322,10 +326,12 @@ async function activate(): Promise<void> {
     const dimBlock = getDimensionBlockReason(element);
     const reorderBlock = getReorderBlockReason(element);
     const insertBlock = getInsertBlockReason(element);
+    const textBlock = getTextBlockReason(element);
     const disabled: Partial<Record<EditMode, string>> = {};
     if (dimBlock) disabled['dimensions'] = dimBlock;
     if (reorderBlock) disabled['reorder'] = reorderBlock;
     if (insertBlock) disabled['insert'] = insertBlock;
+    if (textBlock) disabled['text'] = textBlock;
     toolbar!.setDisabledTools(disabled);
 
     // Re-apply the previous active tool for the new element (preserve tool state).
@@ -355,6 +361,7 @@ async function activate(): Promise<void> {
     positionEditor!.cleanup();
     reorderEditor!.cleanup();
     insertEditor!.cleanup();
+    textEditor!.cleanup();
     mediaEditor!.cleanup();
     measureOverlay!.disable();
     measureOverlay!.clear();
@@ -431,6 +438,7 @@ async function activate(): Promise<void> {
       positionEditor!.cleanup();
       reorderEditor!.cleanup();
       insertEditor!.cleanup();
+      textEditor!.cleanup();
       mediaEditor!.cleanup();
       notesEditor!.cleanup();
       gridSettingsPanel!.cleanup();
@@ -719,6 +727,13 @@ async function activate(): Promise<void> {
     else { toolbar!.setActiveMode('cursor'); }
   });
 
+  // Wire text editor close → fall back to cursor tool
+  textEditor.onClose(() => {
+    const el = selection?.getSelectedElement();
+    if (el) { activateToolForElement(el, 'cursor'); }
+    else { toolbar!.setActiveMode('cursor'); }
+  });
+
   // Wire delete element
   toolbar.onDelete(() => {
     deleteSelectedElement();
@@ -818,6 +833,7 @@ function deactivate(): void {
   positionEditor?.cleanup();
   reorderEditor?.cleanup();
   insertEditor?.cleanup();
+  textEditor?.cleanup();
   mediaEditor?.cleanup();
   notesEditor?.cleanup();
   gridOverlay?.hide();
@@ -876,6 +892,7 @@ function deactivate(): void {
   rulerOverlay = null;
   reorderEditor = null;
   insertEditor = null;
+  textEditor = null;
   mediaEditor = null;
   gridSettingsPanel = null;
   measureOverlay = null;
@@ -911,6 +928,7 @@ function activateToolForElement(el: Element, mode: EditMode): void {
   positionEditor!.cleanup();
   reorderEditor!.cleanup();
   insertEditor!.cleanup();
+  textEditor!.cleanup();
   mediaEditor!.cleanup();
 
   if (mode === 'cursor') {
@@ -978,6 +996,13 @@ function activateToolForElement(el: Element, mode: EditMode): void {
   } else if (mode === 'insert') {
     insertEditor!.enter(el as HTMLElement, makeInsertCommit(el));
     toolbar!.setActiveMode('insert');
+  } else if (mode === 'text') {
+    textEditor!.editElement(el as HTMLElement, (change: TextChange) => {
+      const info = buildElementInfo(el);
+      const diff = diffBuilder!.buildText(info, change);
+      commitTextEdit(el as HTMLElement, change, diff);
+    });
+    toolbar!.setActiveMode('text');
   } else if (mode === 'media') {
     const pos = toolbar!.getButtonPosition('media');
     const controls = mediaEditor!.render(el, pos, (changes) => {
@@ -1047,6 +1072,24 @@ function commitAttributeEdit(
     type: 'attribute',
     element: element as HTMLElement,
     attributeChanges: attrChanges,
+    diff,
+  });
+  badge!.update();
+  reviewPanel!.refresh();
+  devtoolsPanel?.refreshProperties();
+}
+
+function commitTextEdit(
+  element: HTMLElement,
+  change: TextChange,
+  diff: VisualDiff,
+): void {
+  queue!.add(diff);
+  editHistory!.push({
+    type: 'text',
+    element,
+    fromText: change.fromText,
+    toText: change.toText,
     diff,
   });
   badge!.update();

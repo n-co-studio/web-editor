@@ -144,6 +144,16 @@ export interface AttributeChange {
   readonly toValue: string;
 }
 
+/**
+ * A text content change — modifies the textContent of an element.
+ * Stored as a parallel array on VisualDiff (separate from CSS PropertyChange[]).
+ */
+export interface TextChange {
+  readonly type: 'text';
+  readonly fromText: string;
+  readonly toText: string;
+}
+
 /** Page state at the time of edit. */
 export interface PageContext {
   readonly url: string;
@@ -168,6 +178,7 @@ export interface VisualDiff {
   readonly insertChanges?: readonly InsertChange[];
   readonly groupChanges?: readonly GroupChange[];
   readonly attributeChanges?: readonly AttributeChange[];
+  readonly textChanges?: readonly TextChange[];
   readonly context: PageContext;
   readonly status: DiffStatus;
   readonly sourceVerified: boolean;

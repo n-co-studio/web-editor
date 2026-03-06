@@ -112,6 +112,11 @@ const ICONS: Record<string, string> = {
     <line x1="5" y1="8" x2="11" y2="8"/>
   </svg>`,
 
+  text: `<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" stroke="none">
+    <path d="M4 3h8v2h-1V4.5H8.5V12H10v1H6v-1h1.5V4.5H5V5H4V3z"/>
+    <path d="M11 10v4h1v-4h-1zm-1 1v2h-1v-2h1z"/>
+  </svg>`,
+
   media: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
     <rect x="2" y="3" width="12" height="10" rx="1.5"/>
     <circle cx="5.5" cy="6.5" r="1.25" fill="currentColor" stroke="none"/>
@@ -148,6 +153,7 @@ const TOOL_LABELS: Record<EditMode, string> = {
   position: 'Position',
   reorder: 'Reorder',
   insert: 'Insert',
+  text: 'Text',
   media: 'Media',
 };
 
@@ -163,6 +169,7 @@ const TOOL_ORDER: EditMode[] = [
   'position',
   'reorder',
   'insert',
+  'text',
   'media',
 ];
 

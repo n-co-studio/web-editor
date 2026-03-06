@@ -3,6 +3,7 @@ import type {
   ElementInfo,
   PropertyChange,
   AttributeChange,
+  TextChange,
   ReorderChange,
   InsertChange,
   GroupChange,
@@ -88,6 +89,20 @@ export class DiffBuilder {
       element: elementInfo,
       changes: [],
       groupChanges: [groupChange],
+      context: this.buildPageContext(),
+      status: 'pending',
+      sourceVerified: Boolean(elementInfo.sourceFile),
+    };
+  }
+
+  /** Build a VisualDiff for a text content change (no CSS property changes). */
+  buildText(elementInfo: ElementInfo, textChange: TextChange): VisualDiff {
+    return {
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      element: elementInfo,
+      changes: [],
+      textChanges: [textChange],
       context: this.buildPageContext(),
       status: 'pending',
       sourceVerified: Boolean(elementInfo.sourceFile),

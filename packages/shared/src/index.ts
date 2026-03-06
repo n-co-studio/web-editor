@@ -11,6 +11,7 @@ export type {
   InsertChange,
   CompoundChildDescriptor,
   AttributeChange,
+  TextChange,
   PageContext,
   DiffStatus,
   VisualDiff,
