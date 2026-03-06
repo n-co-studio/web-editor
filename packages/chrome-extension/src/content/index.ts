@@ -1511,11 +1511,13 @@ function exitMultiSelectMode(): void {
 // ---------------------------------------------------------------------------
 
 function handleGlobalKeydown(e: KeyboardEvent): void {
-  // Skip all shortcuts when user is typing in a text field/input/contenteditable
-  const target = e.target as HTMLElement | null;
-  if (target) {
-    const tag = target.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) {
+  // Skip all shortcuts when user is typing in a text field/input/contenteditable.
+  // Use composedPath() to pierce Shadow DOM boundaries — e.target is retargeted
+  // to the shadow host at document level, hiding the actual input element.
+  const composedTarget = e.composedPath()[0] as HTMLElement | undefined;
+  if (composedTarget?.tagName) {
+    const tag = composedTarget.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || composedTarget.isContentEditable) {
       return;
     }
   }
