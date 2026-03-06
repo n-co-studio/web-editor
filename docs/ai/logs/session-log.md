@@ -38,6 +38,25 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 -->
 
+## Session 24 — 2026-03-05 — Typography Shortcut Key
+
+**Status:** complete
+**Commits:** 7088ac3 — feat(shortcuts): add 't' key shortcut for typography tool
+
+### Goal
+- Add plain 't' key as a keyboard shortcut to activate the typography editing tool
+
+### Changes Made
+- `packages/chrome-extension/src/content/index.ts` — Added 't' key handler in the no-modifiers block of `handleGlobalKeydown`, activates typography tool on selected element or switches toolbar mode
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass, A2 pass, A3 pass (build clean), A4 pass (no secrets)
+
+### Follow-ups
+- None
+
+---
+
 ## Session 23 — 2026-03-05 — Keyboard Shortcuts
 
 **Status:** complete
