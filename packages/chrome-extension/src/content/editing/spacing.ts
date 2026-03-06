@@ -1,5 +1,5 @@
 import type { PropertyChange } from '@frontend-editor/shared';
-import { createElement, createText, createButton } from '../../shared/ui-utils';
+import { createElement, createText, createButton, makeDraggable } from '../../shared/ui-utils';
 import { getComputedProperty } from '../../shared/dom-utils';
 import { OVERLAY, TOOLBAR_WIDTH, HANDLE_COLORS } from '../../shared/constants';
 import type { TokenStore } from '../tokens/store';
@@ -88,6 +88,7 @@ const SIDE_LABELS: Record<string, string> = {
 export class SpacingEditor {
   private container: HTMLDivElement | null = null;
   private closeCb: (() => void) | null = null;
+  private userDragged = false;
 
   constructor(
     private readonly tokenStore: TokenStore,
@@ -151,6 +152,8 @@ export class SpacingEditor {
     header.appendChild(closeBtn);
     container.appendChild(header);
 
+    makeDraggable(header, container, undefined, () => { this.userDragged = true; });
+
     // Controls body
     const body = createElement('div', {}, {
       padding: '8px 10px',
@@ -185,6 +188,7 @@ export class SpacingEditor {
   /** Reposition the floating panel relative to a new toolbar anchor. */
   reposition(anchorPos: { x: number; y: number }): void {
     if (!this.container) return;
+    if (this.userDragged) return;
     const panelLeft = Math.min(
       anchorPos.x + TOOLBAR_WIDTH + 8,
       window.innerWidth - 228,
@@ -197,6 +201,7 @@ export class SpacingEditor {
   cleanup(): void {
     this.container?.remove();
     this.container = null;
+    this.userDragged = false;
   }
 
   // -----------------------------------------------------------------------

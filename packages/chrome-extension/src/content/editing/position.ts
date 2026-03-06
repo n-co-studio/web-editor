@@ -1,5 +1,5 @@
 import type { PropertyChange } from '@frontend-editor/shared';
-import { createElement, createText, createButton } from '../../shared/ui-utils';
+import { createElement, createText, createButton, makeDraggable } from '../../shared/ui-utils';
 import { getComputedProperty } from '../../shared/dom-utils';
 import { OVERLAY, TOOLBAR_WIDTH } from '../../shared/constants';
 import type { PreviewManager } from './preview';
@@ -40,6 +40,7 @@ const MOVE_ICON = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" s
 export class PositionEditor {
   private container: HTMLDivElement | null = null;
   private closeCb: (() => void) | null = null;
+  private userDragged = false;
   private insetSection: HTMLDivElement | null = null;
   private currentElement: Element | null = null;
   private currentOnCommit: ChangeCallback | null = null;
@@ -110,6 +111,8 @@ export class PositionEditor {
     header.appendChild(closeBtn);
     container.appendChild(header);
 
+    makeDraggable(header, container, undefined, () => { this.userDragged = true; });
+
     // Body
     const body = createElement('div', {}, {
       padding: '8px 10px',
@@ -140,6 +143,7 @@ export class PositionEditor {
 
   reposition(anchorPos: { x: number; y: number }): void {
     if (!this.container) return;
+    if (this.userDragged) return;
     const panelLeft = Math.min(
       anchorPos.x + TOOLBAR_WIDTH + 8,
       window.innerWidth - 228,
@@ -158,6 +162,7 @@ export class PositionEditor {
     this.insetSection = null;
     this.currentElement = null;
     this.currentOnCommit = null;
+    this.userDragged = false;
   }
 
   // -----------------------------------------------------------------------

@@ -1,5 +1,5 @@
 import type { PropertyChange } from '@frontend-editor/shared';
-import { createElement, createText, createButton } from '../../shared/ui-utils';
+import { createElement, createText, createButton, makeDraggable } from '../../shared/ui-utils';
 import { getComputedProperty } from '../../shared/dom-utils';
 import { OVERLAY, TOOLBAR_WIDTH } from '../../shared/constants';
 import type { TokenStore } from '../tokens/store';
@@ -15,6 +15,7 @@ type ChangeCallback = (changes: PropertyChange[]) => void;
 export class TypographyEditor {
   private container: HTMLDivElement | null = null;
   private closeCb: (() => void) | null = null;
+  private userDragged = false;
 
   constructor(
     private readonly tokenStore: TokenStore,
@@ -79,6 +80,8 @@ export class TypographyEditor {
     header.appendChild(closeBtn);
     container.appendChild(header);
 
+    makeDraggable(header, container, undefined, () => { this.userDragged = true; });
+
     // Controls body
     const body = createElement('div', {}, {
       padding: '8px 10px',
@@ -110,6 +113,7 @@ export class TypographyEditor {
   /** Reposition the floating panel relative to a new toolbar anchor. */
   reposition(anchorPos: { x: number; y: number }): void {
     if (!this.container) return;
+    if (this.userDragged) return;
     const panelLeft = Math.min(
       anchorPos.x + TOOLBAR_WIDTH + 8,
       window.innerWidth - 248,
@@ -122,6 +126,7 @@ export class TypographyEditor {
   cleanup(): void {
     this.container?.remove();
     this.container = null;
+    this.userDragged = false;
   }
 
   // -----------------------------------------------------------------------

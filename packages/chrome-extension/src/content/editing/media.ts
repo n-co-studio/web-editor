@@ -1,5 +1,5 @@
 import type { PropertyChange, AttributeChange } from '@frontend-editor/shared';
-import { createElement, createText, createButton } from '../../shared/ui-utils';
+import { createElement, createText, createButton, makeDraggable } from '../../shared/ui-utils';
 import { getComputedProperty } from '../../shared/dom-utils';
 import { OVERLAY, TOOLBAR_WIDTH } from '../../shared/constants';
 import type { PreviewManager } from './preview';
@@ -33,6 +33,7 @@ const ASPECT_RATIO_PRESETS = ['auto', '16 / 9', '4 / 3', '3 / 2', '1 / 1'] as co
 export class MediaEditor {
   private container: HTMLDivElement | null = null;
   private closeCb: (() => void) | null = null;
+  private userDragged = false;
 
   constructor(
     private readonly preview: PreviewManager,
@@ -91,6 +92,8 @@ export class MediaEditor {
     closeBtn.style.fontSize = '14px';
     header.appendChild(closeBtn);
     container.appendChild(header);
+
+    makeDraggable(header, container, undefined, () => { this.userDragged = true; });
 
     // Body
     const body = createElement('div', {}, {
@@ -222,6 +225,7 @@ export class MediaEditor {
 
   reposition(anchorPos: { x: number; y: number }): void {
     if (!this.container) return;
+    if (this.userDragged) return;
     const panelLeft = Math.min(
       anchorPos.x + TOOLBAR_WIDTH + 8,
       window.innerWidth - (PANEL_WIDTH + 8),
@@ -234,6 +238,7 @@ export class MediaEditor {
   cleanup(): void {
     this.container?.remove();
     this.container = null;
+    this.userDragged = false;
   }
 
   // ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-import { createElement, createText, createButton } from '../shared/ui-utils';
+import { createElement, createText, createButton, makeDraggable } from '../shared/ui-utils';
 import { OVERLAY, TOOLBAR_WIDTH } from '../shared/constants';
 
 // ---------------------------------------------------------------------------
@@ -44,6 +44,7 @@ export class GridSettingsPanel {
   private closeCb: (() => void) | null = null;
   private changeCb: ((settings: GridSettings) => void) | null = null;
   private settings: GridSettings;
+  private userDragged = false;
 
   constructor(initialSettings: GridSettings) {
     this.settings = { ...initialSettings };
@@ -67,11 +68,13 @@ export class GridSettingsPanel {
         x: parseFloat(this.container.style.left),
         y: parseFloat(this.container.style.top),
       };
+      const wasDragged = this.userDragged;
       const parent = this.container.parentNode;
       this.cleanup();
       if (parent) {
         parent.appendChild(this.render(pos));
       }
+      this.userDragged = wasDragged;
     }
   }
 
@@ -130,6 +133,8 @@ export class GridSettingsPanel {
     header.appendChild(closeBtn);
     container.appendChild(header);
 
+    makeDraggable(header, container, undefined, () => { this.userDragged = true; });
+
     // Body
     const body = createElement('div', {}, {
       padding: '8px 10px',
@@ -180,6 +185,7 @@ export class GridSettingsPanel {
 
   reposition(anchorPos: { x: number; y: number }): void {
     if (!this.container) return;
+    if (this.userDragged) return;
     const panelLeft = Math.min(
       anchorPos.x + TOOLBAR_WIDTH + 8,
       window.innerWidth - 216,
@@ -192,6 +198,7 @@ export class GridSettingsPanel {
   cleanup(): void {
     this.container?.remove();
     this.container = null;
+    this.userDragged = false;
   }
 
   isOpen(): boolean {

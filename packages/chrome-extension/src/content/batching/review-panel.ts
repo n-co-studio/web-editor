@@ -1,5 +1,5 @@
 import type { VisualDiff, NoteEntry } from '@frontend-editor/shared';
-import { createElement, createText, createButton } from '../../shared/ui-utils';
+import { createElement, createText, createButton, makeDraggable } from '../../shared/ui-utils';
 import { OVERLAY, SELECTOR_TRUNCATE_LENGTH, BATCH_CONFIRM_THRESHOLD, TOOLBAR_WIDTH } from '../../shared/constants';
 import type { ConnectionStatus, DiffLifecycle } from '../../shared/types';
 import type { PendingQueue } from './queue';
@@ -22,6 +22,7 @@ export class ReviewPanel {
   private sending = false;
   private closeCb: VoidCallback | null = null;
   private anchorPos: { x: number; y: number } = { x: 16, y: 16 };
+  private userDragged = false;
 
   constructor(
     private readonly shadow: ShadowRoot,
@@ -50,6 +51,7 @@ export class ReviewPanel {
     this.container?.remove();
     this.container = null;
     this.visible = false;
+    this.userDragged = false;
   }
 
   refresh(): void {
@@ -74,6 +76,7 @@ export class ReviewPanel {
   /** Reposition the panel relative to a new toolbar anchor. */
   reposition(anchorPos: { x: number; y: number }): void {
     this.anchorPos = anchorPos;
+    if (this.userDragged) return;
     if (!this.container) return;
     const panelLeft = Math.min(
       anchorPos.x + TOOLBAR_WIDTH + 8,
@@ -171,6 +174,8 @@ export class ReviewPanel {
     closeBtn.style.fontSize = '16px';
     header.appendChild(closeBtn);
     panel.appendChild(header);
+
+    makeDraggable(header, panel, undefined, () => { this.userDragged = true; });
 
     // Connection warning
     if (this.connectionStatus !== 'connected') {
