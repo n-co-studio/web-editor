@@ -41,13 +41,13 @@ Each session adds one entry. Keep entries high-signal and readable.
 ## Session 23 — 2026-03-05 — Keyboard Shortcuts
 
 **Status:** complete
-**Commits:** 6567c22 — feat(editor): add keyboard shortcuts for tools, copy/paste, and actions
+**Commits:** 6567c22 — feat(editor): add keyboard shortcuts for tools, copy/paste, and actions, ee7816b — fix(editor): change notes shortcut to plain 'n', add text field guard
 
 ### Goal
 - Add comprehensive keyboard shortcuts to the visual editor for faster workflow
 
 ### Changes Made
-- `packages/chrome-extension/src/content/index.ts` — Added `elementClipboard` state, `pasteElement()` helper, 13 shortcut handlers in `handleGlobalKeydown` (Cmd+N/R/S/C/P, V, Delete/Backspace, 1-0 tool keys, G, D)
+- `packages/chrome-extension/src/content/index.ts` — Added `elementClipboard` state, `pasteElement()` helper, 13 shortcut handlers in `handleGlobalKeydown` (N, Cmd+R/S/C/P, V, Delete/Backspace, 1-0 tool keys, G, D), text field guard to disable shortcuts during typing
 - `packages/chrome-extension/src/content/toolbar.ts` — Added public `toggle()` and `isCollapsed()` methods
 - `packages/chrome-extension/src/content/batching/review-panel.ts` — Added public `triggerSend()` method
 
@@ -55,7 +55,7 @@ Each session adds one entry. Keep entries high-signal and readable.
 - Commit gates: A1 pass, A2 pass, A3 pass (typecheck + build clean), A4 pass (no secrets)
 
 ### Follow-ups
-- Consider visual shortcut hints on toolbar button tooltips (e.g. "Notes (⌘N)")
+- Consider visual shortcut hints on toolbar button tooltips (e.g. "Notes (N)")
 - Consider shortcut help overlay (e.g. "?" key shows all shortcuts)
 
 ---
