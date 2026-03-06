@@ -89,6 +89,9 @@ let multiSelectToolbar: MultiSelectToolbar | null = null;
 let multiSelectClickHandler: ((e: MouseEvent) => void) | null = null;
 let notePickMode: { noteIndex: number; handler: (e: MouseEvent) => void } | null = null;
 
+// Element clipboard for copy/paste
+let elementClipboard: { html: string; tagName: string } | null = null;
+
 // Preserved tool mode across deselect→reselect cycle (selection.select() calls
 // deselect() before onSelect fires, so onDeselect would reset the toolbar mode).
 let preservedToolMode: EditMode | null = null;
@@ -1277,6 +1280,53 @@ function deleteSelectedElement(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Paste element helper — clones clipboard HTML and inserts after selection
+// ---------------------------------------------------------------------------
+
+function pasteElement(): void {
+  if (!elementClipboard) return;
+
+  const selectedEl = selection?.getSelectedElement();
+  const container = selectedEl?.parentElement ?? document.body;
+  const insertIndex = selectedEl
+    ? Array.from(container.children).indexOf(selectedEl) + 1
+    : container.children.length;
+
+  // Parse clipboard HTML into a live element
+  const template = document.createElement('template');
+  template.innerHTML = elementClipboard.html;
+  const clone = template.content.firstElementChild as HTMLElement;
+  if (!clone) return;
+
+  // Build diff before DOM insertion (sibling bracket reads pre-insert state)
+  const containerInfo = buildElementInfo(container);
+  const insertChange = buildInsertChange(
+    container, insertIndex, clone.tagName.toLowerCase(), [],
+  );
+  const diff = diffBuilder!.buildInsert(containerInfo, insertChange);
+
+  // Insert into DOM
+  const refNode = container.children[insertIndex] ?? null;
+  container.insertBefore(clone, refNode);
+
+  // Track in history + queue
+  queue!.add(diff);
+  editHistory!.push({
+    type: 'insertion',
+    element: clone,
+    container,
+    insertIndex,
+    diff,
+  });
+  badge!.update();
+  reviewPanel!.refresh();
+  devtoolsPanel?.log(`Pasted <${clone.tagName.toLowerCase()}>`);
+
+  // Select the pasted element
+  queueMicrotask(() => selection?.select(clone));
+}
+
+// ---------------------------------------------------------------------------
 // Status & focus
 // ---------------------------------------------------------------------------
 
@@ -1513,6 +1563,166 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
       }
     }
     return;
+  }
+
+  // Cmd+N — toggle Notes panel
+  if (e.key === 'n' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (notesEditor!.isOpen()) {
+      notesEditor!.cleanup();
+      toolbar!.setNotesOpen(false);
+    } else {
+      const selectedEl = selection?.getSelectedElement();
+      const isMulti = multiSelect?.isActive();
+      if (selectedEl && !isMulti) {
+        const info = buildElementInfo(selectedEl);
+        notesEditor!.setAnchoredElement(selectedEl, {
+          selector: info.selector,
+          tagName: info.tagName,
+          textContent: info.textContent,
+          sourceFile: info.sourceFile,
+          sourceLine: info.sourceLine,
+          instanceIndex: info.instanceIndex,
+        });
+      } else {
+        notesEditor!.clearAnchoredElement();
+      }
+      const pos = toolbar!.getButtonPosition('notes');
+      const notePanel = notesEditor!.render(pos);
+      shadow!.appendChild(notePanel);
+      toolbar!.setNotesOpen(true);
+    }
+    return;
+  }
+
+  // Cmd+R — toggle Ruler overlay
+  if (e.key === 'r' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
+    e.preventDefault();
+    e.stopPropagation();
+    const enabled = !rulerOverlay!.isVisible();
+    if (enabled) {
+      rulerOverlay!.show();
+    } else {
+      rulerOverlay!.hide();
+    }
+    toolbar!.setRulersEnabled(enabled);
+    return;
+  }
+
+  // Cmd+S — submit (apply) pending changes
+  if (e.key === 's' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!reviewPanel!.isOpen()) {
+      reviewPanel!.show(toolbar!.getButtonPosition('review'));
+      toolbar!.setReviewPanelOpen(true);
+    }
+    reviewPanel!.triggerSend();
+    return;
+  }
+
+  // Cmd+C — copy selected element
+  if (e.key === 'c' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
+    const el = selection?.getSelectedElement();
+    if (el) {
+      e.preventDefault();
+      e.stopPropagation();
+      elementClipboard = { html: el.outerHTML, tagName: el.tagName.toLowerCase() };
+      devtoolsPanel?.log(`Copied <${elementClipboard.tagName}>`);
+    }
+    return;
+  }
+
+  // Cmd+P — paste copied element after selection
+  if (e.key === 'p' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (elementClipboard) {
+      pasteElement();
+    }
+    return;
+  }
+
+  // v — collapse/expand toolbar (no modifiers)
+  if (e.key === 'v' && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+    e.preventDefault();
+    e.stopPropagation();
+    toolbar!.toggle();
+    return;
+  }
+
+  // Delete / Backspace — delete selected element
+  if ((e.key === 'Delete' || e.key === 'Backspace') && !e.metaKey && !e.ctrlKey) {
+    const el = selection?.getSelectedElement();
+    if (el) {
+      e.preventDefault();
+      e.stopPropagation();
+      deleteSelectedElement();
+    }
+    return;
+  }
+
+  // Number keys 1–0 — quick tool switching (no modifiers)
+  if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+    const TOOL_KEYS: Record<string, EditMode> = {
+      '1': 'cursor',
+      '2': 'spacing',
+      '3': 'dimensions',
+      '4': 'typography',
+      '5': 'colors',
+      '6': 'border-radius',
+      '7': 'position',
+      '8': 'reorder',
+      '9': 'insert',
+      '0': 'media',
+    };
+    const toolMode = TOOL_KEYS[e.key];
+    if (toolMode) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!multiSelect?.isActive()) {
+        const el = selection?.getSelectedElement();
+        if (el) {
+          activateToolForElement(el, toolMode);
+        } else {
+          toolbar!.setActiveMode(toolMode);
+        }
+      }
+      return;
+    }
+
+    // g — toggle grid overlay (no modifiers)
+    if (e.key === 'g') {
+      e.preventDefault();
+      e.stopPropagation();
+      const enabled = !gridOverlay!.isVisible();
+      if (enabled) {
+        gridOverlay!.show();
+      } else {
+        gridOverlay!.hide();
+      }
+      toolbar!.setGridEnabled(enabled);
+      return;
+    }
+
+    // d — toggle DevTools panel (no modifiers)
+    if (e.key === 'd') {
+      e.preventDefault();
+      e.stopPropagation();
+      if (devtoolsPanel!.isOpen()) {
+        devtoolsPanel!.hide();
+        toolbar!.setInspectorOpen('devtools', false);
+        devtoolsUserClosed = true;
+      } else {
+        const el = selection?.getSelectedElement() ?? undefined;
+        const info = el ? buildElementInfo(el) : undefined;
+        devtoolsPanel!.show(el, info);
+        toolbar!.setInspectorOpen('devtools', true);
+        devtoolsUserClosed = false;
+      }
+      return;
+    }
   }
 
   // Escape ladder: cancel edit → close review → dismiss panel → deactivate

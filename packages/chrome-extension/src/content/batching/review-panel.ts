@@ -832,6 +832,11 @@ export class ReviewPanel {
   // Send logic
   // -----------------------------------------------------------------------
 
+  /** Trigger the send flow programmatically (e.g., from keyboard shortcut). */
+  async triggerSend(): Promise<void> {
+    return this.handleSend();
+  }
+
   private async handleSend(): Promise<void> {
     if (this.sending) return;
     const { diffs } = this.queue.getBatch();
@@ -872,7 +877,6 @@ export class ReviewPanel {
   // -----------------------------------------------------------------------
 
   private truncateValue(value: string): string {
-    if (value.startsWith('data:')) return 'data:…';
     if (value.length > 40) return value.slice(0, 37) + '…';
     return value || '(empty)';
   }

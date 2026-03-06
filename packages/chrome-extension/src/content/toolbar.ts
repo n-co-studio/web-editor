@@ -867,6 +867,15 @@ export class FloatingToolbar {
   // Collapse / expand toolbar
   // -----------------------------------------------------------------------
 
+  /** Toggle collapse state programmatically (e.g., from keyboard shortcut). */
+  toggle(): void {
+    this.toggleCollapse();
+  }
+
+  isCollapsed(): boolean {
+    return this.collapsed;
+  }
+
   private toggleCollapse(): void {
     if (!this.collapsed) {
       // Collapsing — minimize toolbar to just grip + collapse button
