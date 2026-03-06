@@ -133,6 +133,17 @@ export interface InsertChange {
   readonly compoundChildren?: readonly CompoundChildDescriptor[];
 }
 
+/**
+ * An HTML attribute change (e.g. src, alt) on the target element.
+ * Stored as a parallel array on VisualDiff (separate from CSS PropertyChange[]).
+ */
+export interface AttributeChange {
+  readonly type: 'attribute';
+  readonly attribute: string;
+  readonly fromValue: string;
+  readonly toValue: string;
+}
+
 /** Page state at the time of edit. */
 export interface PageContext {
   readonly url: string;
@@ -156,6 +167,7 @@ export interface VisualDiff {
   readonly reorderChanges?: readonly ReorderChange[];
   readonly insertChanges?: readonly InsertChange[];
   readonly groupChanges?: readonly GroupChange[];
+  readonly attributeChanges?: readonly AttributeChange[];
   readonly context: PageContext;
   readonly status: DiffStatus;
   readonly sourceVerified: boolean;

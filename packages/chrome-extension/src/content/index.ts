@@ -28,6 +28,7 @@ import { RulerOverlay } from './ruler-overlay';
 import { ReorderEditor, getReorderBlockReason } from './editing/reorder';
 import type { ReorderCommitCallback } from './editing/reorder';
 import { InsertEditor, getInsertBlockReason } from './editing/insert';
+import { MediaEditor } from './editing/media';
 import type { InsertCommitCallback } from './editing/insert';
 import { buildInsertChange } from './editing/insert-source';
 import { groupElements, getGroupBlockReason } from './editing/group';
@@ -36,7 +37,7 @@ import { MeasureOverlay } from './selection/measure-overlay';
 import { MultiSelectManager } from './selection/multi-select';
 import { MultiSelectToolbar } from './editing/multi-select-toolbar';
 import { buildElementInfo, getTopElementAt, generateSelector } from '../shared/dom-utils';
-import type { VisualDiff, PropertyChange, ReorderChange, GroupChange } from '@frontend-editor/shared';
+import type { VisualDiff, PropertyChange, AttributeChange, ReorderChange, GroupChange } from '@frontend-editor/shared';
 import type { ExtensionMode, ConnectionStatus, EditMode } from '../shared/types';
 
 // ---------------------------------------------------------------------------
@@ -74,6 +75,7 @@ let notesEditor: NotesEditor | null = null;
 let gridOverlay: GridOverlay | null = null;
 let reorderEditor: ReorderEditor | null = null;
 let insertEditor: InsertEditor | null = null;
+let mediaEditor: MediaEditor | null = null;
 let gridSettingsPanel: GridSettingsPanel | null = null;
 let measureOverlay: MeasureOverlay | null = null;
 let measureRafId: number | null = null;
@@ -86,6 +88,9 @@ let multiSelect: MultiSelectManager | null = null;
 let multiSelectToolbar: MultiSelectToolbar | null = null;
 let multiSelectClickHandler: ((e: MouseEvent) => void) | null = null;
 let notePickMode: { noteIndex: number; handler: (e: MouseEvent) => void } | null = null;
+
+// Element clipboard for copy/paste
+let elementClipboard: { html: string; tagName: string } | null = null;
 
 // Preserved tool mode across deselect→reselect cycle (selection.select() calls
 // deselect() before onSelect fires, so onDeselect would reset the toolbar mode).
@@ -193,6 +198,8 @@ async function activate(): Promise<void> {
   rulerOverlay = new RulerOverlay(shadow, () => gridOverlay!.getEffectiveSettings(), () => gridOverlay?.isVisible() ?? false);
   reorderEditor = new ReorderEditor(shadow);
   insertEditor = new InsertEditor(shadow);
+  mediaEditor = new MediaEditor(preview);
+  MediaEditor.restoreHandle();
   gridSettingsPanel = new GridSettingsPanel(gridOverlay.getEffectiveSettings());
   measureOverlay = new MeasureOverlay(shadow, host);
   multiSelect = new MultiSelectManager(shadow, host);
@@ -300,6 +307,7 @@ async function activate(): Promise<void> {
     positionEditor!.cleanup();
     reorderEditor!.cleanup();
     insertEditor!.cleanup();
+    mediaEditor!.cleanup();
     staleDetector!.watch(element, () => {
       selection!.markStale();
       handles!.hideHandles();
@@ -347,6 +355,7 @@ async function activate(): Promise<void> {
     positionEditor!.cleanup();
     reorderEditor!.cleanup();
     insertEditor!.cleanup();
+    mediaEditor!.cleanup();
     measureOverlay!.disable();
     measureOverlay!.clear();
     staleDetector!.cleanup();
@@ -422,6 +431,7 @@ async function activate(): Promise<void> {
       positionEditor!.cleanup();
       reorderEditor!.cleanup();
       insertEditor!.cleanup();
+      mediaEditor!.cleanup();
       notesEditor!.cleanup();
       gridSettingsPanel!.cleanup();
       multiSelectToolbar!.cleanup();
@@ -475,6 +485,7 @@ async function activate(): Promise<void> {
       notesEditor!.reposition(toolbar!.getButtonPosition('notes'));
     }
     reorderEditor!.reposition(toolbar!.getButtonPosition('reorder'));
+    mediaEditor!.reposition(toolbar!.getButtonPosition('media'));
     gridSettingsPanel!.reposition(toolbar!.getButtonPosition('grid'));
     multiSelectToolbar!.reposition(toolbar!.getPosition());
     reviewPanel!.reposition(toolbar!.getButtonPosition('review'));
@@ -504,6 +515,11 @@ async function activate(): Promise<void> {
     else { toolbar!.setActiveMode('cursor'); }
   });
   positionEditor.onClose(() => {
+    const el = selection?.getSelectedElement();
+    if (el) { activateToolForElement(el, 'cursor'); }
+    else { toolbar!.setActiveMode('cursor'); }
+  });
+  mediaEditor.onClose(() => {
     const el = selection?.getSelectedElement();
     if (el) { activateToolForElement(el, 'cursor'); }
     else { toolbar!.setActiveMode('cursor'); }
@@ -802,6 +818,7 @@ function deactivate(): void {
   positionEditor?.cleanup();
   reorderEditor?.cleanup();
   insertEditor?.cleanup();
+  mediaEditor?.cleanup();
   notesEditor?.cleanup();
   gridOverlay?.hide();
   rulerOverlay?.hide();
@@ -859,6 +876,7 @@ function deactivate(): void {
   rulerOverlay = null;
   reorderEditor = null;
   insertEditor = null;
+  mediaEditor = null;
   gridSettingsPanel = null;
   measureOverlay = null;
   measureRafId = null;
@@ -893,6 +911,7 @@ function activateToolForElement(el: Element, mode: EditMode): void {
   positionEditor!.cleanup();
   reorderEditor!.cleanup();
   insertEditor!.cleanup();
+  mediaEditor!.cleanup();
 
   if (mode === 'cursor') {
     // Cursor/select mode: show dimension handles only (no mini panel)
@@ -959,6 +978,19 @@ function activateToolForElement(el: Element, mode: EditMode): void {
   } else if (mode === 'insert') {
     insertEditor!.enter(el as HTMLElement, makeInsertCommit(el));
     toolbar!.setActiveMode('insert');
+  } else if (mode === 'media') {
+    const pos = toolbar!.getButtonPosition('media');
+    const controls = mediaEditor!.render(el, pos, (changes) => {
+      const info = buildElementInfo(el);
+      const diff = diffBuilder!.build(info, changes);
+      commitEdit(el, changes, diff);
+    }, (attrChanges) => {
+      const info = buildElementInfo(el);
+      const diff = diffBuilder!.buildAttribute(info, attrChanges);
+      commitAttributeEdit(el, attrChanges, diff);
+    });
+    shadow!.appendChild(controls);
+    toolbar!.setActiveMode('media');
   } else {
     handles!.showHandles(el, mode);
     toolbar!.setActiveMode(mode);
@@ -1000,6 +1032,23 @@ function commitEdit(
       });
     }
   }
+  badge!.update();
+  reviewPanel!.refresh();
+  devtoolsPanel?.refreshProperties();
+}
+
+function commitAttributeEdit(
+  element: Element,
+  attrChanges: readonly AttributeChange[],
+  diff: VisualDiff,
+): void {
+  queue!.add(diff);
+  editHistory!.push({
+    type: 'attribute',
+    element: element as HTMLElement,
+    attributeChanges: attrChanges,
+    diff,
+  });
   badge!.update();
   reviewPanel!.refresh();
   devtoolsPanel?.refreshProperties();
@@ -1228,6 +1277,53 @@ function deleteSelectedElement(): void {
 
   commitEdit(el, changes, diff, { parent, nextSibling });
   selection?.deselect();
+}
+
+// ---------------------------------------------------------------------------
+// Paste element helper — clones clipboard HTML and inserts after selection
+// ---------------------------------------------------------------------------
+
+function pasteElement(): void {
+  if (!elementClipboard) return;
+
+  const selectedEl = selection?.getSelectedElement();
+  const container = selectedEl?.parentElement ?? document.body;
+  const insertIndex = selectedEl
+    ? Array.from(container.children).indexOf(selectedEl) + 1
+    : container.children.length;
+
+  // Parse clipboard HTML into a live element
+  const template = document.createElement('template');
+  template.innerHTML = elementClipboard.html;
+  const clone = template.content.firstElementChild as HTMLElement;
+  if (!clone) return;
+
+  // Build diff before DOM insertion (sibling bracket reads pre-insert state)
+  const containerInfo = buildElementInfo(container);
+  const insertChange = buildInsertChange(
+    container, insertIndex, clone.tagName.toLowerCase(), [],
+  );
+  const diff = diffBuilder!.buildInsert(containerInfo, insertChange);
+
+  // Insert into DOM
+  const refNode = container.children[insertIndex] ?? null;
+  container.insertBefore(clone, refNode);
+
+  // Track in history + queue
+  queue!.add(diff);
+  editHistory!.push({
+    type: 'insertion',
+    element: clone,
+    container,
+    insertIndex,
+    diff,
+  });
+  badge!.update();
+  reviewPanel!.refresh();
+  devtoolsPanel?.log(`Pasted <${clone.tagName.toLowerCase()}>`);
+
+  // Select the pasted element
+  queueMicrotask(() => selection?.select(clone));
 }
 
 // ---------------------------------------------------------------------------
@@ -1467,6 +1563,166 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
       }
     }
     return;
+  }
+
+  // Cmd+N — toggle Notes panel
+  if (e.key === 'n' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (notesEditor!.isOpen()) {
+      notesEditor!.cleanup();
+      toolbar!.setNotesOpen(false);
+    } else {
+      const selectedEl = selection?.getSelectedElement();
+      const isMulti = multiSelect?.isActive();
+      if (selectedEl && !isMulti) {
+        const info = buildElementInfo(selectedEl);
+        notesEditor!.setAnchoredElement(selectedEl, {
+          selector: info.selector,
+          tagName: info.tagName,
+          textContent: info.textContent,
+          sourceFile: info.sourceFile,
+          sourceLine: info.sourceLine,
+          instanceIndex: info.instanceIndex,
+        });
+      } else {
+        notesEditor!.clearAnchoredElement();
+      }
+      const pos = toolbar!.getButtonPosition('notes');
+      const notePanel = notesEditor!.render(pos);
+      shadow!.appendChild(notePanel);
+      toolbar!.setNotesOpen(true);
+    }
+    return;
+  }
+
+  // Cmd+R — toggle Ruler overlay
+  if (e.key === 'r' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
+    e.preventDefault();
+    e.stopPropagation();
+    const enabled = !rulerOverlay!.isVisible();
+    if (enabled) {
+      rulerOverlay!.show();
+    } else {
+      rulerOverlay!.hide();
+    }
+    toolbar!.setRulersEnabled(enabled);
+    return;
+  }
+
+  // Cmd+S — submit (apply) pending changes
+  if (e.key === 's' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!reviewPanel!.isOpen()) {
+      reviewPanel!.show(toolbar!.getButtonPosition('review'));
+      toolbar!.setReviewPanelOpen(true);
+    }
+    reviewPanel!.triggerSend();
+    return;
+  }
+
+  // Cmd+C — copy selected element
+  if (e.key === 'c' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
+    const el = selection?.getSelectedElement();
+    if (el) {
+      e.preventDefault();
+      e.stopPropagation();
+      elementClipboard = { html: el.outerHTML, tagName: el.tagName.toLowerCase() };
+      devtoolsPanel?.log(`Copied <${elementClipboard.tagName}>`);
+    }
+    return;
+  }
+
+  // Cmd+P — paste copied element after selection
+  if (e.key === 'p' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (elementClipboard) {
+      pasteElement();
+    }
+    return;
+  }
+
+  // v — collapse/expand toolbar (no modifiers)
+  if (e.key === 'v' && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+    e.preventDefault();
+    e.stopPropagation();
+    toolbar!.toggle();
+    return;
+  }
+
+  // Delete / Backspace — delete selected element
+  if ((e.key === 'Delete' || e.key === 'Backspace') && !e.metaKey && !e.ctrlKey) {
+    const el = selection?.getSelectedElement();
+    if (el) {
+      e.preventDefault();
+      e.stopPropagation();
+      deleteSelectedElement();
+    }
+    return;
+  }
+
+  // Number keys 1–0 — quick tool switching (no modifiers)
+  if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+    const TOOL_KEYS: Record<string, EditMode> = {
+      '1': 'cursor',
+      '2': 'spacing',
+      '3': 'dimensions',
+      '4': 'typography',
+      '5': 'colors',
+      '6': 'border-radius',
+      '7': 'position',
+      '8': 'reorder',
+      '9': 'insert',
+      '0': 'media',
+    };
+    const toolMode = TOOL_KEYS[e.key];
+    if (toolMode) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!multiSelect?.isActive()) {
+        const el = selection?.getSelectedElement();
+        if (el) {
+          activateToolForElement(el, toolMode);
+        } else {
+          toolbar!.setActiveMode(toolMode);
+        }
+      }
+      return;
+    }
+
+    // g — toggle grid overlay (no modifiers)
+    if (e.key === 'g') {
+      e.preventDefault();
+      e.stopPropagation();
+      const enabled = !gridOverlay!.isVisible();
+      if (enabled) {
+        gridOverlay!.show();
+      } else {
+        gridOverlay!.hide();
+      }
+      toolbar!.setGridEnabled(enabled);
+      return;
+    }
+
+    // d — toggle DevTools panel (no modifiers)
+    if (e.key === 'd') {
+      e.preventDefault();
+      e.stopPropagation();
+      if (devtoolsPanel!.isOpen()) {
+        devtoolsPanel!.hide();
+        toolbar!.setInspectorOpen('devtools', false);
+        devtoolsUserClosed = true;
+      } else {
+        const el = selection?.getSelectedElement() ?? undefined;
+        const info = el ? buildElementInfo(el) : undefined;
+        devtoolsPanel!.show(el, info);
+        toolbar!.setInspectorOpen('devtools', true);
+        devtoolsUserClosed = false;
+      }
+      return;
+    }
   }
 
   // Escape ladder: cancel edit → close review → dismiss panel → deactivate

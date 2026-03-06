@@ -38,6 +38,61 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 -->
 
+## Session 23 — 2026-03-05 — Keyboard Shortcuts
+
+**Status:** complete
+**Commits:** 6567c22 — feat(editor): add keyboard shortcuts for tools, copy/paste, and actions
+
+### Goal
+- Add comprehensive keyboard shortcuts to the visual editor for faster workflow
+
+### Changes Made
+- `packages/chrome-extension/src/content/index.ts` — Added `elementClipboard` state, `pasteElement()` helper, 13 shortcut handlers in `handleGlobalKeydown` (Cmd+N/R/S/C/P, V, Delete/Backspace, 1-0 tool keys, G, D)
+- `packages/chrome-extension/src/content/toolbar.ts` — Added public `toggle()` and `isCollapsed()` methods
+- `packages/chrome-extension/src/content/batching/review-panel.ts` — Added public `triggerSend()` method
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass, A2 pass, A3 pass (typecheck + build clean), A4 pass (no secrets)
+
+### Follow-ups
+- Consider visual shortcut hints on toolbar button tooltips (e.g. "Notes (⌘N)")
+- Consider shortcut help overlay (e.g. "?" key shows all shortcuts)
+
+---
+
+## Session 22 — 2026-03-05 — Media Tool + Attribute Change Pipeline + Asset Extraction
+
+**Status:** complete
+**Commits:** c10b978 — feat(media): add media editing tool with attribute change tracking, 2e9a708 — feat(mcp-server): extract data URL images to files before queuing diffs
+
+### Goal
+- Add a media editing tool to the floating toolbar for image/video properties
+- Track HTML attribute changes (src, alt) through the full diff pipeline
+- Implement server-side data URL extraction so agents receive file paths instead of base64
+
+### Changes Made
+- `packages/shared/src/diff.ts` — Added `AttributeChange` interface, `attributeChanges?` on `VisualDiff`
+- `packages/shared/src/index.ts` — Re-exported `AttributeChange`
+- `packages/chrome-extension/src/content/editing/media.ts` — **New**: `MediaEditor` class with src/alt/object-fit/object-position/aspect-ratio/background controls, File System Access API picker with IndexedDB directory persistence
+- `packages/chrome-extension/src/content/toolbar.ts` — Media icon, label, tool order
+- `packages/chrome-extension/src/shared/types.ts` — Added `'media'` to `EditMode`
+- `packages/chrome-extension/src/content/index.ts` — Media editor wiring, `commitAttributeEdit()`, `MediaEditor.restoreHandle()`
+- `packages/chrome-extension/src/content/batching/diff-builder.ts` — `buildAttribute()` method
+- `packages/chrome-extension/src/content/batching/queue.ts` — Attribute change dedup in `collapseExisting()`
+- `packages/chrome-extension/src/content/batching/review-panel.ts` — Attribute change rendering (amber "attr" badge), `truncateValue()` for data URLs
+- `packages/chrome-extension/src/content/history.ts` — `AttributeHistoryEntry` with undo/redo
+- `packages/mcp-server/src/bridge.ts` — `extractDataUrls()`: decodes data URL attribute changes, saves as files, replaces with project-relative paths; `resolveAssetDir()` infers save directory from original src
+- `packages/mcp-server/src/server.ts` — Updated tool description for `attributeChanges` and asset extraction behavior
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass, A2 pass, A3 pass (typecheck + build clean for shared + chrome-extension + mcp-server), A4 pass (no secrets)
+
+### Follow-ups
+- End-to-end test: pick image via Browse, verify file saved to project, verify agent sees path in diff
+- Consider configurable asset directory (currently inferred from fromValue or fallback to public/images/)
+
+---
+
 ## Session 21 — 2026-02-23 — Group Elements Phase 2 (UI, Shortcut, Wiring, Server, Boundary)
 
 **Status:** complete

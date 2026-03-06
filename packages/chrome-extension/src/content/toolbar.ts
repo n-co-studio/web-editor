@@ -112,6 +112,13 @@ const ICONS: Record<string, string> = {
     <line x1="5" y1="8" x2="11" y2="8"/>
   </svg>`,
 
+  media: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2" y="3" width="12" height="10" rx="1.5"/>
+    <circle cx="5.5" cy="6.5" r="1.25" fill="currentColor" stroke="none"/>
+    <polyline points="14,10 10.5,7 7,10"/>
+    <polyline points="9,11 6.5,9 2,13"/>
+  </svg>`,
+
   delete: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
     <path d="M3 4.5h10"/>
     <path d="M6.5 2.5h3"/>
@@ -141,6 +148,7 @@ const TOOL_LABELS: Record<EditMode, string> = {
   position: 'Position',
   reorder: 'Reorder',
   insert: 'Insert',
+  media: 'Media',
 };
 
 const TOOLBAR_STORAGE_KEY = 'frontend-editor-toolbar-position';
@@ -155,6 +163,7 @@ const TOOL_ORDER: EditMode[] = [
   'position',
   'reorder',
   'insert',
+  'media',
 ];
 
 // ---------------------------------------------------------------------------
@@ -857,6 +866,15 @@ export class FloatingToolbar {
   // -----------------------------------------------------------------------
   // Collapse / expand toolbar
   // -----------------------------------------------------------------------
+
+  /** Toggle collapse state programmatically (e.g., from keyboard shortcut). */
+  toggle(): void {
+    this.toggleCollapse();
+  }
+
+  isCollapsed(): boolean {
+    return this.collapsed;
+  }
 
   private toggleCollapse(): void {
     if (!this.collapsed) {

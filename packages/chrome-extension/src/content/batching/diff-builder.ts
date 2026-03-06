@@ -2,6 +2,7 @@ import type {
   VisualDiff,
   ElementInfo,
   PropertyChange,
+  AttributeChange,
   ReorderChange,
   InsertChange,
   GroupChange,
@@ -55,6 +56,24 @@ export class DiffBuilder {
       element: elementInfo,
       changes: [],
       insertChanges: [insertChange],
+      context: this.buildPageContext(),
+      status: 'pending',
+      sourceVerified: Boolean(elementInfo.sourceFile),
+    };
+  }
+
+  /** Build a VisualDiff for attribute changes (src, alt, etc.) with optional CSS changes. */
+  buildAttribute(
+    elementInfo: ElementInfo,
+    attributeChanges: AttributeChange[],
+    cssChanges?: PropertyChange[],
+  ): VisualDiff {
+    return {
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      element: elementInfo,
+      changes: cssChanges ? cssChanges.map((c) => this.resolveTokens(c)) : [],
+      attributeChanges,
       context: this.buildPageContext(),
       status: 'pending',
       sourceVerified: Boolean(elementInfo.sourceFile),

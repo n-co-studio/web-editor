@@ -1,12 +1,13 @@
 import { WebSocketServer, type WebSocket } from 'ws';
-import { readFile, writeFile, unlink, mkdir, rename } from 'node:fs/promises';
-import { join, dirname, resolve, relative } from 'node:path';
+import { readFile, writeFile, unlink, mkdir, rename, stat } from 'node:fs/promises';
+import { join, dirname, resolve, relative, extname } from 'node:path';
 import {
   PROTOCOL_VERSION,
   MessageType,
 } from '@frontend-editor/shared';
 import type {
   VisualDiff,
+  AttributeChange,
   VisualDiffBatchPayload,
   DesignToken,
   TokenSourceStatus,
@@ -417,15 +418,33 @@ export class Bridge {
     ws: WebSocket,
     payload: VisualDiffBatchPayload,
   ): void {
+    // Acknowledge immediately so the extension doesn't wait on file I/O
+    const diffIds = payload.diffs.map((d) => d.id);
+    this.send(ws, {
+      type: MessageType.DIFF_ACK,
+      version: PROTOCOL_VERSION,
+      payload: { diffIds },
+    });
+
+    // Process asynchronously (data URL extraction may involve disk writes)
+    this.processDiffBatch(payload).catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[frontend-editor] Error processing diff batch: ${msg}`);
+    });
+  }
+
+  private async processDiffBatch(payload: VisualDiffBatchPayload): Promise<void> {
     const { diffs, batchNote } = payload;
     const existingIds = new Set(this.pendingQueue.map((d) => d.id));
     const newDiffs: VisualDiff[] = [];
 
-    for (const diff of diffs) {
+    for (const rawDiff of diffs) {
       // Skip diffs that are already pending or were previously processed
-      if (existingIds.has(diff.id) || this.processedIds.has(diff.id)) {
+      if (existingIds.has(rawDiff.id) || this.processedIds.has(rawDiff.id)) {
         continue;
       }
+      // Extract data URLs in attribute changes → save as files
+      const diff = await this.extractDataUrls(rawDiff);
       this.pendingQueue.push(diff);
       newDiffs.push(diff);
     }
@@ -443,14 +462,6 @@ export class Bridge {
         this.safeWriteStatusFile('active');
       }
     }
-
-    // Acknowledge all diff IDs from the batch
-    const diffIds = diffs.map((d) => d.id);
-    this.send(ws, {
-      type: MessageType.DIFF_ACK,
-      version: PROTOCOL_VERSION,
-      payload: { diffIds },
-    });
 
     console.error(
       `[frontend-editor] Received ${diffs.length} diffs (${newDiffs.length} new, ${diffs.length - newDiffs.length} already known)`,
@@ -638,6 +649,139 @@ export class Bridge {
 
   // -----------------------------------------------------------------------
   // Helpers
+  // -----------------------------------------------------------------------
+
+  // -----------------------------------------------------------------------
+  // Data URL → file extraction (for attribute changes like src)
+  // -----------------------------------------------------------------------
+
+  private static readonly ASSET_DIR_FALLBACK = 'public/images';
+  private static readonly MIME_EXT: Record<string, string> = {
+    'image/png': '.png',
+    'image/jpeg': '.jpg',
+    'image/gif': '.gif',
+    'image/webp': '.webp',
+    'image/avif': '.avif',
+    'image/svg+xml': '.svg',
+    'image/x-icon': '.ico',
+    'video/mp4': '.mp4',
+    'video/webm': '.webm',
+    'video/ogg': '.ogg',
+  };
+
+  /**
+   * Process a diff's attribute changes — if any `toValue` is a data URL,
+   * decode it, save it as a file, and replace the data URL with the file path.
+   * Returns a new diff with the updated attribute changes (or the original if unchanged).
+   */
+  private async extractDataUrls(diff: VisualDiff): Promise<VisualDiff> {
+    if (!diff.attributeChanges || diff.attributeChanges.length === 0) return diff;
+
+    let changed = false;
+    const updated: AttributeChange[] = [];
+
+    for (const ac of diff.attributeChanges) {
+      if (ac.toValue.startsWith('data:')) {
+        try {
+          const savedPath = await this.saveDataUrl(ac.toValue, ac.fromValue);
+          updated.push({ ...ac, toValue: savedPath });
+          changed = true;
+          console.error(`[frontend-editor] Saved data URL as ${savedPath}`);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(`[frontend-editor] Failed to save data URL: ${msg}`);
+          updated.push(ac); // keep original data URL as fallback
+        }
+      } else {
+        updated.push(ac);
+      }
+    }
+
+    return changed ? { ...diff, attributeChanges: updated } : diff;
+  }
+
+  /**
+   * Decode a data URL, save the binary to the project, return a project-relative path.
+   * Infers the target directory from the original src path (fromValue).
+   */
+  private async saveDataUrl(dataUrl: string, fromValue: string): Promise<string> {
+    // Parse data URL: data:[<mime>][;base64],<data>
+    const match = dataUrl.match(/^data:([^;,]+)(?:;base64)?,(.+)$/s);
+    if (!match) throw new Error('Invalid data URL format');
+
+    const mime = match[1];
+    const base64Data = match[2];
+    const buffer = Buffer.from(base64Data, 'base64');
+
+    // Determine file extension from MIME type
+    const ext = Bridge.MIME_EXT[mime] || this.guessExtFromMime(mime);
+
+    // Determine target directory from the original src path
+    const targetDir = await this.resolveAssetDir(fromValue);
+
+    // Generate unique filename
+    const timestamp = Date.now().toString(36);
+    const rand = Math.random().toString(36).slice(2, 6);
+    const filename = `uploaded-${timestamp}-${rand}${ext}`;
+
+    // Write file
+    const absDir = resolve(this.cwd, targetDir);
+    await mkdir(absDir, { recursive: true });
+    const absPath = join(absDir, filename);
+    await writeFile(absPath, buffer);
+
+    // Return project-relative path with leading slash (web-style)
+    return '/' + relative(this.cwd, absPath).replace(/\\/g, '/');
+  }
+
+  /**
+   * Infer the asset directory from the original src URL.
+   * e.g. "/images/hero.jpg" → "public/images" (or "images" if it exists directly)
+   * Falls back to "public/images" if nothing can be inferred.
+   */
+  private async resolveAssetDir(fromValue: string): Promise<string> {
+    if (!fromValue) return Bridge.ASSET_DIR_FALLBACK;
+
+    // Strip origin and query string, get the directory part
+    let urlPath = fromValue;
+    try {
+      const parsed = new URL(fromValue, 'http://localhost');
+      urlPath = parsed.pathname;
+    } catch {
+      // already a path
+    }
+
+    const dirPart = dirname(urlPath).replace(/^\//, ''); // e.g. "images" or "assets/img"
+    if (!dirPart || dirPart === '.') return Bridge.ASSET_DIR_FALLBACK;
+
+    // Check common project structures: try "public/<dir>", "src/<dir>", then "<dir>" directly
+    const candidates = [
+      join('public', dirPart),
+      dirPart,
+      join('src', dirPart),
+      join('src', 'assets', dirPart),
+    ];
+
+    for (const candidate of candidates) {
+      const abs = resolve(this.cwd, candidate);
+      try {
+        const s = await stat(abs);
+        if (s.isDirectory()) return candidate;
+      } catch {
+        // doesn't exist, try next
+      }
+    }
+
+    // None exist — use the first candidate (public/<dir>) and create it
+    return candidates[0];
+  }
+
+  private guessExtFromMime(mime: string): string {
+    const sub = mime.split('/')[1];
+    if (sub) return '.' + sub.replace(/\+.*$/, '');
+    return '.bin';
+  }
+
   // -----------------------------------------------------------------------
 
   /** Resolve a path and ensure it stays within the project directory. */

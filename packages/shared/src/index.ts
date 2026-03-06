@@ -10,6 +10,7 @@ export type {
   ChildSnapshotEntry,
   InsertChange,
   CompoundChildDescriptor,
+  AttributeChange,
   PageContext,
   DiffStatus,
   VisualDiff,

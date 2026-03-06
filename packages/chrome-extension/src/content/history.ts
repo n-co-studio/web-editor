@@ -1,4 +1,4 @@
-import type { VisualDiff } from '@frontend-editor/shared';
+import type { VisualDiff, AttributeChange } from '@frontend-editor/shared';
 
 /**
  * Tracks committed edits for undo/redo/reset.
@@ -52,7 +52,14 @@ interface GroupHistoryEntry {
   readonly diff: VisualDiff;
 }
 
-export type HistoryEntry = CssHistoryEntry | RemovalHistoryEntry | ReorderHistoryEntry | InsertionHistoryEntry | GroupHistoryEntry;
+interface AttributeHistoryEntry {
+  readonly type: 'attribute';
+  readonly element: HTMLElement;
+  readonly attributeChanges: readonly AttributeChange[];
+  readonly diff: VisualDiff;
+}
+
+export type HistoryEntry = CssHistoryEntry | RemovalHistoryEntry | ReorderHistoryEntry | InsertionHistoryEntry | GroupHistoryEntry | AttributeHistoryEntry;
 
 type HistoryCallback = () => void;
 
@@ -108,6 +115,15 @@ export class EditHistory {
         }
         entry.wrapper.remove();
         break;
+      case 'attribute':
+        for (const ac of entry.attributeChanges) {
+          if (ac.fromValue) {
+            entry.element.setAttribute(ac.attribute, ac.fromValue);
+          } else {
+            entry.element.removeAttribute(ac.attribute);
+          }
+        }
+        break;
     }
 
     this.redoStack.push(entry);
@@ -155,6 +171,11 @@ export class EditHistory {
         }
         break;
       }
+      case 'attribute':
+        for (const ac of entry.attributeChanges) {
+          entry.element.setAttribute(ac.attribute, ac.toValue);
+        }
+        break;
     }
 
     this.undoStack.push(entry);
