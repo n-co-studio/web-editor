@@ -38,6 +38,48 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 -->
 
+## Session 29 — 2026-03-07 — CSS Visual Effects Build
+
+**Status:** complete
+**Commits:** ad85955 — feat(editing): add CSS visual effects editing
+
+### Goal
+- Implement CSS visual effects editing: filter sliders, named presets, blend mode dropdown, basic clip-path shapes (circle, inset)
+- Add RelatedChange type to shared types for multi-element dependencies (parent isolation)
+
+### Plan Summary
+- Added RelatedChange interface and relatedChanges field to VisualDiff in shared types
+- Created EffectsEditor component (772 lines) with three sections: Filters, Blend Mode, Clip Path
+- Wired into toolbar and content orchestrator following MediaEditor pattern
+- Three cohesion review cycles to fix: closeCb double-invocation, parent isolation revert semantics, fromValue read-after-commit ordering, orphaned preview session draining
+
+### Changes Made
+- `packages/shared/src/diff.ts` — Added RelatedChange interface, relatedChanges field on VisualDiff
+- `packages/shared/src/index.ts` — Exported RelatedChange
+- `packages/chrome-extension/src/content/batching/diff-builder.ts` — Added buildWithRelatedChanges method
+- `packages/chrome-extension/src/shared/types.ts` — Added 'effects' to EditMode union
+- `packages/chrome-extension/src/content/toolbar.ts` — Added effects icon, label, tool order
+- `packages/chrome-extension/src/content/editing/effects.ts` — **New**: EffectsEditor with filter sliders (8 functions), 7 presets, blend mode dropdown with parent isolation, clip-path circle/inset editors
+- `packages/chrome-extension/src/content/index.ts` — Wired EffectsEditor (import, construct, cleanup, activate, reposition, onClose)
+
+### Verification (Gates Evidence)
+- Commit gates: A1 pass, A2 pass (large-scope: true), A3 pass (typecheck + build), A4 pass, A5 pass (cohesion approved cycle 3)
+- Push gates: B1 pass (feature/css-visual-effects-editing)
+
+### Failed Attempts (Brief)
+- Cohesion cycle 1: closeCb double-invocation, parent isolation bypassing PreviewManager, stale fromValue capture
+- Cohesion cycle 2: fromValue read-after-commit ordering (preview.commit() applied value before fromValue read), parent isolation committed/reverted semantic conflict
+- Cohesion cycle 3: orphaned preview sessions when preset/shape buttons clicked during active slider drags
+
+### Known Issues Logged
+- None
+
+### Follow-ups
+- Drop-shadow control (x, y, blur, color) deferred — spec includes it but not in build brief scope
+- Undo for relatedChanges (parent isolation) not integrated into EditHistory — undo reverts primary element only
+
+---
+
 ## Session 28 — 2026-03-07 — CSS Visual Effects Spec
 
 **Status:** complete
@@ -87,32 +129,5 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 ### Follow-ups
 - Auto-focus text editing on newly inserted text-bearing elements (insert → text mode transition)
-
----
-
-## Session 26 — 2026-03-05 — Draggable Mini Panels
-
-**Status:** complete
-**Commits:** (pending)
-
-### Goal
-- Make all toolbar mini-panels draggable by their header, defaulting to toolbar edge
-
-### Changes Made
-- `packages/chrome-extension/src/content/editing/typography.ts` — Added draggable header via `makeDraggable`, `userDragged` flag guards `reposition()`
-- `packages/chrome-extension/src/content/editing/colors.ts` — Same pattern
-- `packages/chrome-extension/src/content/editing/dimensions.ts` — Same pattern
-- `packages/chrome-extension/src/content/editing/spacing.ts` — Same pattern
-- `packages/chrome-extension/src/content/editing/position.ts` — Same pattern
-- `packages/chrome-extension/src/content/editing/media.ts` — Same pattern
-- `packages/chrome-extension/src/content/grid-settings.ts` — Same pattern; also preserved `userDragged` across `updateDefaults()` re-render
-- `packages/chrome-extension/src/content/batching/review-panel.ts` — Same pattern; `userDragged` resets in `hide()` to persist across refreshes
-
-### Verification (Gates Evidence)
-- Commit gates: A1 pass, A2 pass (48 lines, 8 files), A3 pass (build + typecheck clean), A4 pass (no secrets), A5 pass (cohesion review — GridSettingsPanel fix applied)
-- Push gates: B1 pass (feature/draggable-mini-panels)
-
-### Follow-ups
-- None
 
 ---
