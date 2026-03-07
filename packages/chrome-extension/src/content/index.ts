@@ -30,6 +30,7 @@ import type { ReorderCommitCallback } from './editing/reorder';
 import { InsertEditor, getInsertBlockReason } from './editing/insert';
 import { TextEditor, getTextBlockReason } from './editing/text';
 import { MediaEditor } from './editing/media';
+import { captureFullPage } from './screenshot';
 import type { InsertCommitCallback } from './editing/insert';
 import { buildInsertChange } from './editing/insert-source';
 import { groupElements, getGroupBlockReason } from './editing/group';
@@ -681,6 +682,18 @@ async function activate(): Promise<void> {
       rulerOverlay!.show();
     } else {
       rulerOverlay!.hide();
+    }
+  });
+
+  toolbar.onScreenshot(async () => {
+    if (!host) return;
+    toolbar!.setScreenshotBusy(true);
+    try {
+      await captureFullPage(host);
+    } catch (err) {
+      console.error('[frontend-editor] Screenshot failed:', err);
+    } finally {
+      toolbar!.setScreenshotBusy(false);
     }
   });
 

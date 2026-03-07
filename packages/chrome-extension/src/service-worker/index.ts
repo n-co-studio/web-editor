@@ -6,6 +6,7 @@
  * Responsibilities:
  * 1. Toolbar icon click → send TOGGLE_EXTENSION to content script
  * 2. Badge text updates from content script
+ * 3. Viewport capture for full-page screenshots
  */
 
 // ---------------------------------------------------------------------------
@@ -37,6 +38,18 @@ chrome.action.onClicked.addListener(async (tab) => {
 
 chrome.runtime.onMessage.addListener(
   (msg: { type: string; payload?: { count?: number } }, sender, sendResponse) => {
+    if (msg.type === 'CAPTURE_VIEWPORT') {
+      const windowId = sender.tab?.windowId;
+      if (windowId == null) {
+        sendResponse({ error: 'No window ID' });
+        return true;
+      }
+      chrome.tabs.captureVisibleTab(windowId, { format: 'png' })
+        .then((dataUrl) => sendResponse({ dataUrl }))
+        .catch((err) => sendResponse({ error: String(err) }));
+      return true;
+    }
+
     if (msg.type === 'UPDATE_BADGE') {
       const count = msg.payload?.count ?? 0;
       const text = count > 0 ? String(count) : '';

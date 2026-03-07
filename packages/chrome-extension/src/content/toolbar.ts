@@ -132,6 +132,12 @@ const ICONS: Record<string, string> = {
     <line x1="9.5" y1="7" x2="9.5" y2="11.5"/>
   </svg>`,
 
+  camera: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2" y="4.5" width="12" height="9" rx="1.5"/>
+    <path d="M5.5 4.5L6.5 2.5h3l1 2"/>
+    <circle cx="8" cy="9" r="2.5"/>
+  </svg>`,
+
   ruler: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round">
     <rect x="1" y="1" width="14" height="5" rx="1"/>
     <line x1="4" y1="1" x2="4" y2="4"/>
@@ -217,6 +223,9 @@ export class FloatingToolbar {
   private rulersToggleCb: ((enabled: boolean) => void) | null = null;
   private rulersBtn: HTMLButtonElement | null = null;
   private rulersEnabled = false;
+  private screenshotCb: VoidCallback | null = null;
+  private screenshotBtn: HTMLButtonElement | null = null;
+  private screenshotBusy = false;
   private reviewBadge: HTMLSpanElement | null = null;
   private confirmOverlay: HTMLDivElement | null = null;
 
@@ -269,6 +278,17 @@ export class FloatingToolbar {
 
   onRulersToggle(cb: (enabled: boolean) => void): void {
     this.rulersToggleCb = cb;
+  }
+
+  onScreenshot(cb: VoidCallback): void {
+    this.screenshotCb = cb;
+  }
+
+  setScreenshotBusy(busy: boolean): void {
+    this.screenshotBusy = busy;
+    if (!this.screenshotBtn) return;
+    this.screenshotBtn.style.opacity = busy ? '0.5' : '1';
+    this.screenshotBtn.style.cursor = busy ? 'wait' : 'pointer';
   }
 
   /** Sync rulers button active state. */
@@ -480,6 +500,8 @@ export class FloatingToolbar {
     this.gridEnabled = false;
     this.rulersBtn = null;
     this.rulersEnabled = false;
+    this.screenshotBtn = null;
+    this.screenshotBusy = false;
     this.deleteBtn = null;
     this.visible = false;
     this.activeMode = null;
@@ -501,6 +523,7 @@ export class FloatingToolbar {
     this.gridToggleCb = null;
     this.gridSettingsToggleCb = null;
     this.rulersToggleCb = null;
+    this.screenshotCb = null;
     this.deleteCb = null;
   }
 
@@ -623,6 +646,13 @@ export class FloatingToolbar {
       this.rulersToggleCb?.(this.rulersEnabled);
     });
     toolsSection.appendChild(this.rulersBtn);
+
+    // Screenshot button
+    this.screenshotBtn = this.buildIconButton('camera', 'Capture full-page screenshot', () => {
+      if (this.screenshotBusy) return;
+      this.screenshotCb?.();
+    });
+    toolsSection.appendChild(this.screenshotBtn);
 
     // DevTools panel button (DOM inspector + properties + console)
     const devtoolsBtn = this.buildIconButton('devtools', 'DevTools panel', () => {
