@@ -124,6 +124,12 @@ const ICONS: Record<string, string> = {
     <polyline points="9,11 6.5,9 2,13"/>
   </svg>`,
 
+  effects: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8 1.5l1.2 3.3 3.3.3-2.6 2.2.8 3.4L8 8.8l-2.7 1.9.8-3.4-2.6-2.2 3.3-.3z" fill="currentColor" stroke="none"/>
+    <circle cx="12.5" cy="12" r="2"/>
+    <line x1="3" y1="13" x2="5" y2="11"/>
+  </svg>`,
+
   delete: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
     <path d="M3 4.5h10"/>
     <path d="M6.5 2.5h3"/>
@@ -161,6 +167,7 @@ const TOOL_LABELS: Record<EditMode, string> = {
   insert: 'Insert',
   text: 'Text',
   media: 'Media',
+  effects: 'Effects',
 };
 
 const TOOLBAR_STORAGE_KEY = 'frontend-editor-toolbar-position';
@@ -177,6 +184,7 @@ const TOOL_ORDER: EditMode[] = [
   'insert',
   'text',
   'media',
+  'effects',
 ];
 
 // ---------------------------------------------------------------------------

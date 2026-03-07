@@ -166,6 +166,16 @@ export interface PageContext {
 export type DiffStatus = 'pending' | 'applied' | 'rejected';
 
 /**
+ * A property change on a related element required by the primary edit.
+ * E.g., adding `isolation: isolate` to a parent when blend mode is applied.
+ */
+export interface RelatedChange {
+  readonly element: ElementInfo;
+  readonly changes: readonly PropertyChange[];
+  readonly reason: string;
+}
+
+/**
  * A complete visual diff — the primary data unit flowing from
  * Chrome extension → MCP server → Claude Code.
  */
@@ -179,6 +189,7 @@ export interface VisualDiff {
   readonly groupChanges?: readonly GroupChange[];
   readonly attributeChanges?: readonly AttributeChange[];
   readonly textChanges?: readonly TextChange[];
+  readonly relatedChanges?: readonly RelatedChange[];
   readonly context: PageContext;
   readonly status: DiffStatus;
   readonly sourceVerified: boolean;

@@ -7,6 +7,7 @@ import type {
   ReorderChange,
   InsertChange,
   GroupChange,
+  RelatedChange,
   PageContext,
 } from '@frontend-editor/shared';
 import type { TokenStore } from '../tokens/store';
@@ -103,6 +104,24 @@ export class DiffBuilder {
       element: elementInfo,
       changes: [],
       textChanges: [textChange],
+      context: this.buildPageContext(),
+      status: 'pending',
+      sourceVerified: Boolean(elementInfo.sourceFile),
+    };
+  }
+
+  /** Build a VisualDiff with related changes on other elements (e.g., parent isolation for blend mode). */
+  buildWithRelatedChanges(
+    elementInfo: ElementInfo,
+    changes: PropertyChange[],
+    relatedChanges: RelatedChange[],
+  ): VisualDiff {
+    return {
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      element: elementInfo,
+      changes: changes.map((c) => this.resolveTokens(c)),
+      relatedChanges,
       context: this.buildPageContext(),
       status: 'pending',
       sourceVerified: Boolean(elementInfo.sourceFile),

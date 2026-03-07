@@ -30,6 +30,7 @@ import type { ReorderCommitCallback } from './editing/reorder';
 import { InsertEditor, getInsertBlockReason } from './editing/insert';
 import { TextEditor, getTextBlockReason } from './editing/text';
 import { MediaEditor } from './editing/media';
+import { EffectsEditor } from './editing/effects';
 import { captureFullPage } from './screenshot';
 import type { InsertCommitCallback } from './editing/insert';
 import { buildInsertChange } from './editing/insert-source';
@@ -79,6 +80,7 @@ let reorderEditor: ReorderEditor | null = null;
 let insertEditor: InsertEditor | null = null;
 let textEditor: TextEditor | null = null;
 let mediaEditor: MediaEditor | null = null;
+let effectsEditor: EffectsEditor | null = null;
 let gridSettingsPanel: GridSettingsPanel | null = null;
 let measureOverlay: MeasureOverlay | null = null;
 let measureRafId: number | null = null;
@@ -204,6 +206,7 @@ async function activate(): Promise<void> {
   textEditor = new TextEditor();
   mediaEditor = new MediaEditor(preview);
   MediaEditor.restoreHandle();
+  effectsEditor = new EffectsEditor(preview);
   gridSettingsPanel = new GridSettingsPanel(gridOverlay.getEffectiveSettings());
   measureOverlay = new MeasureOverlay(shadow, host);
   multiSelect = new MultiSelectManager(shadow, host);
@@ -313,6 +316,7 @@ async function activate(): Promise<void> {
     insertEditor!.cleanup();
     textEditor!.cleanup();
     mediaEditor!.cleanup();
+    effectsEditor!.cleanup();
     staleDetector!.watch(element, () => {
       selection!.markStale();
       handles!.hideHandles();
@@ -364,6 +368,7 @@ async function activate(): Promise<void> {
     insertEditor!.cleanup();
     textEditor!.cleanup();
     mediaEditor!.cleanup();
+    effectsEditor!.cleanup();
     measureOverlay!.disable();
     measureOverlay!.clear();
     staleDetector!.cleanup();
@@ -441,6 +446,7 @@ async function activate(): Promise<void> {
       insertEditor!.cleanup();
       textEditor!.cleanup();
       mediaEditor!.cleanup();
+      effectsEditor!.cleanup();
       notesEditor!.cleanup();
       gridSettingsPanel!.cleanup();
       multiSelectToolbar!.cleanup();
@@ -495,6 +501,7 @@ async function activate(): Promise<void> {
     }
     reorderEditor!.reposition(toolbar!.getButtonPosition('reorder'));
     mediaEditor!.reposition(toolbar!.getButtonPosition('media'));
+    effectsEditor!.reposition(toolbar!.getButtonPosition('effects'));
     gridSettingsPanel!.reposition(toolbar!.getButtonPosition('grid'));
     multiSelectToolbar!.reposition(toolbar!.getPosition());
     reviewPanel!.reposition(toolbar!.getButtonPosition('review'));
@@ -529,6 +536,11 @@ async function activate(): Promise<void> {
     else { toolbar!.setActiveMode('cursor'); }
   });
   mediaEditor.onClose(() => {
+    const el = selection?.getSelectedElement();
+    if (el) { activateToolForElement(el, 'cursor'); }
+    else { toolbar!.setActiveMode('cursor'); }
+  });
+  effectsEditor.onClose(() => {
     const el = selection?.getSelectedElement();
     if (el) { activateToolForElement(el, 'cursor'); }
     else { toolbar!.setActiveMode('cursor'); }
@@ -848,6 +860,7 @@ function deactivate(): void {
   insertEditor?.cleanup();
   textEditor?.cleanup();
   mediaEditor?.cleanup();
+  effectsEditor?.cleanup();
   notesEditor?.cleanup();
   gridOverlay?.hide();
   rulerOverlay?.hide();
@@ -907,6 +920,7 @@ function deactivate(): void {
   insertEditor = null;
   textEditor = null;
   mediaEditor = null;
+  effectsEditor = null;
   gridSettingsPanel = null;
   measureOverlay = null;
   measureRafId = null;
@@ -943,6 +957,7 @@ function activateToolForElement(el: Element, mode: EditMode): void {
   insertEditor!.cleanup();
   textEditor!.cleanup();
   mediaEditor!.cleanup();
+  effectsEditor!.cleanup();
 
   if (mode === 'cursor') {
     // Cursor/select mode: show dimension handles only (no mini panel)
@@ -1029,6 +1044,19 @@ function activateToolForElement(el: Element, mode: EditMode): void {
     });
     shadow!.appendChild(controls);
     toolbar!.setActiveMode('media');
+  } else if (mode === 'effects') {
+    const pos = toolbar!.getButtonPosition('effects');
+    const controls = effectsEditor!.render(el, pos, (changes) => {
+      const info = buildElementInfo(el);
+      const diff = diffBuilder!.build(info, changes);
+      commitEdit(el, changes, diff);
+    }, (changes, relatedChanges) => {
+      const info = buildElementInfo(el);
+      const diff = diffBuilder!.buildWithRelatedChanges(info, changes, relatedChanges);
+      commitEdit(el, changes, diff);
+    });
+    shadow!.appendChild(controls);
+    toolbar!.setActiveMode('effects');
   } else {
     handles!.showHandles(el, mode);
     toolbar!.setActiveMode(mode);

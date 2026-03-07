@@ -12,6 +12,7 @@ export type {
   CompoundChildDescriptor,
   AttributeChange,
   TextChange,
+  RelatedChange,
   PageContext,
   DiffStatus,
   VisualDiff,
