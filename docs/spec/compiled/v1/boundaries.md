@@ -20,6 +20,12 @@ These expand specific boundary restrictions for well-scoped operations:
 - **DOM element removal for delete**: `element.remove()` is permitted for delete operations on existing elements. Already implemented in the content script.
 - **DOM element reparenting for group**: `document.createElement` + `insertBefore` + `moveBefore`/`appendChild` is permitted for group operations that wrap sibling elements within the same parent into a new container element.
 
+## Scope Clarifications
+
+- **CSS visual effects editing is in scope**: Editing CSS `filter`, `mix-blend-mode`, and basic `clip-path` shapes (`circle()`, `inset()`) via the extension overlay is supported. These produce standard `PropertyChange` objects in the diff pipeline.
+- **Asset-level image processing is out of scope**: Pixel-level manipulation (crop, resize, color correction on image files) is deferred to the desktop app. The extension edits CSS properties applied to elements, not the underlying asset data.
+- **Complex clip-path shapes are out of scope for v1**: `polygon()` and SVG-based `clip-path` editing require vertex manipulation UI unsuitable for an overlay. Deferred to desktop app.
+
 ## Future Considerations
 
 These are out of scope for v1 but may be revisited in later versions:

@@ -13,8 +13,9 @@
 | context | PageContext | yes | Page URL, viewport, breakpoint, tab identity |
 | status | "pending" \| "applied" \| "rejected" | yes | Processing state |
 | sourceVerified | boolean | yes | True when data-source-* attributes are present on the element, false when missing |
+| relatedChanges | RelatedChange[] | no | Property changes on other elements required by this edit (e.g., parent `isolation: isolate` for blend mode). Each entry identifies the affected element and the changes to apply. |
 
-**Relationships:** Contains ElementInfo, PropertyChange[], PageContext
+**Relationships:** Contains ElementInfo, PropertyChange[], PageContext, RelatedChange[]
 
 **Assembly note:** The content script assembles the full VisualDiff — it generates the uuid, captures the timestamp, populates PageContext, sets sourceVerified, and sets the initial status to "pending". Feature-001 provides ElementInfo; feature-002 provides PropertyChange.
 
@@ -41,6 +42,14 @@
 | fromToken | string | no | Resolved token name for original value — populated by extension using locally cached token data |
 | toToken | string | no | Resolved token name for new value — populated by extension using locally cached token data |
 | unit | string | no | px, rem, em, %, etc. Null/absent for unitless values (line-height, opacity, z-index) and non-numeric properties (colors). |
+
+### RelatedChange
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| element | ElementInfo | yes | Identifies the related element (e.g., parent for blend mode isolation) |
+| changes | PropertyChange[] | yes | Property changes to apply on the related element |
+| reason | string | yes | Why the related change is needed (e.g., "blend-mode-isolation") |
 
 ### PageContext
 

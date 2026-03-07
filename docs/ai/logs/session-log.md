@@ -38,6 +38,30 @@ Each session adds one entry. Keep entries high-signal and readable.
 
 -->
 
+## Session 28 — 2026-03-07 — CSS Visual Effects Spec
+
+**Status:** complete
+
+### Goal
+- Write feature-007 spec for CSS visual effects editing (filter chains, named presets, blend modes, basic clip-path shapes)
+- Update data-contracts with `relatedChanges` field for multi-element CSS dependencies
+- Update boundaries with visual effects scope clarification
+
+### Changes Made
+- `docs/spec/compiled/v1/features/feature-007-css-visual-effects.md` — **New**: feature spec covering filter editing (8 slider functions + drop-shadow), 7 named presets, mix-blend-mode with parent isolation, clip-path basics (circle/inset), edge cases, acceptance criteria
+- `docs/spec/compiled/v1/data-contracts.md` — Added optional `relatedChanges: RelatedChange[]` field on `VisualDiff`; added `RelatedChange` entity (element, changes, reason)
+- `docs/spec/compiled/v1/boundaries.md` — Added "Scope Clarifications" section: CSS visual effects in scope, asset-level image processing and polygon() clip-path out of scope
+- `docs/spec/compiled/manifest.json` — Added feature-007 to `featureFiles`
+
+### Verification (Gates Evidence)
+- Commit gates: A1 n-a (spec only), A2 pass (4 files), A3 n-a (no code), A4 pass (no secrets), A5 n-a (spec only)
+- Push gates: B1 pass (feature/css-visual-effects-spec)
+
+### Follow-ups
+- Build brief (brief 2 of 2) to implement the EffectsEditor component
+
+---
+
 ## Session 27 — 2026-03-05 — Live Text Editing
 
 **Status:** complete
@@ -87,26 +111,6 @@ Each session adds one entry. Keep entries high-signal and readable.
 ### Verification (Gates Evidence)
 - Commit gates: A1 pass, A2 pass (48 lines, 8 files), A3 pass (build + typecheck clean), A4 pass (no secrets), A5 pass (cohesion review — GridSettingsPanel fix applied)
 - Push gates: B1 pass (feature/draggable-mini-panels)
-
-### Follow-ups
-- None
-
----
-
-## Session 25 — 2026-03-05 — Typography Shortcut + Shadow DOM Input Guard Fix
-
-**Status:** complete
-**Commits:** 7088ac3 — feat(shortcuts): add 't' key shortcut for typography tool, 0bb3372 — fix(shortcuts): use composedPath() to detect inputs inside Shadow DOM
-
-### Goal
-- Add plain 't' key shortcut for typography tool
-- Fix shortcuts firing while typing in extension UI inputs (notes, etc.)
-
-### Changes Made
-- `packages/chrome-extension/src/content/index.ts` — Added 't' key handler in no-modifiers block; replaced `e.target` with `e.composedPath()[0]` in text field guard to pierce Shadow DOM boundary
-
-### Verification (Gates Evidence)
-- Commit gates: A1 pass, A2 pass, A3 pass (build clean), A4 pass (no secrets)
 
 ### Follow-ups
 - None
