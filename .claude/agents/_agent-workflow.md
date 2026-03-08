@@ -8,11 +8,11 @@ Runs after Prompt 0, before build begins. Orchestrated by Prompt A Phase 1. Tier
 
 ## Task Definition Flow (Prompt T — Brief Mode)
 
-Lightweight spec-mode dispatch of Architect + Exploration + Critic for task scoping. No file output. Canonical definition: `docs/ai/prompts/prompt-t-task-definition.md`. See also `docs/ai/workflow.md` § Task Definition Sessions.
+Lightweight spec-mode dispatch of Architect + Exploration + Critic + Pragmatist for task scoping. No file output. Canonical definition: `docs/ai/prompts/prompt-t-task-definition.md`. See also `docs/ai/workflow.md` § Task Definition Sessions.
 
 ### Handoff Chain
 1. **Operator → Orchestrator**: Task description (what/why/constraints)
-2. **Orchestrator → Architect + Exploration + Critic**: Parallel dispatch with task context + specs
+2. **Orchestrator → Architect + Exploration + Critic + Pragmatist**: Parallel dispatch with task context + specs
 3. **Specialists → Orchestrator**: Lightweight briefs (same format as advisory board)
 4. **Orchestrator → Operator**: Synthesized draft task brief for review
 5. **Operator → Orchestrator**: Approve / revise / narrow / abandon
@@ -74,6 +74,19 @@ Phase labels correspond to Decision 0014 phase sequences. Auto/review mode set a
                       ORCHESTRATOR
                plans → gets approval → delegates
           (reads/creates task group contract if applicable)
+                            │
+                   PRAGMATIST (plan-gating mode)
+              reviews plan for over-engineering
+                            │
+                  ┌─────────┴─────────┐
+            APPROVED            BLOCKED
+                  │                   │
+                  │          operator sees finding +
+                  │          "wrong if:" condition
+                  │          can override or re-plan
+                  │          (auto: degrade to advisory)
+                  │                   │
+                  └─────────┬─────────┘
                             │
                    [approval phase]
               operator approves plan (auto/review)
@@ -193,6 +206,8 @@ Phase labels correspond to Decision 0014 `taskgroup-merge` phase sequence. Runs 
 
 ### Build Phase
 1. **Operator → Orchestrator**: Task request
+1b. **Orchestrator → Pragmatist (plan-gating)**: Draft plan text for over-engineering review
+1c. **Pragmatist → Orchestrator**: Plan review verdict (APPROVED/BLOCKED) with findings
 2. **Orchestrator → Builder**: Approved plan, instructions, decisions, scope
 3. **Builder → Orchestrator**: Completion signal, changes made, local check results
 4. **Orchestrator → Critic (cohesion)**: Diff context, changed files, review request
@@ -209,8 +224,9 @@ Phase labels correspond to Decision 0014 `taskgroup-merge` phase sequence. Runs 
 
 | Agent | Tier | Invoke When | Blocks Commit? |
 |-------|------|------------|----------------|
-| **Architect** | Lite+ | Core pair — always when board runs | No (advisory) |
-| **Critic** (spec mode) | Lite+ | Core pair — always when board runs | No (advisory) |
+| **Architect** | Lite+ | Core group — always when board runs | No (advisory) |
+| **Critic** (spec mode) | Lite+ | Core group — always when board runs | No (advisory) |
+| **Pragmatist** (brief-advisory mode) | Lite+ | Core group — always when board runs | No (advisory) |
 | **Exploration** | Standard+ | Standard tier and above | No (advisory) |
 | **Security Analyst** | Full | Signal-triggered at Full tier | No (advisory) |
 | **UX Strategist** | Full | Signal-triggered at Full tier | No (advisory) |
@@ -221,6 +237,7 @@ Phase labels correspond to Decision 0014 `taskgroup-merge` phase sequence. Runs 
 
 | Agent | Invoke When | Blocks Commit? |
 |-------|------------|----------------|
+| **Pragmatist (plan-gating)** | Plan drafted, before presenting to operator | No (Orchestrator handles BLOCKED — auto mode degrades to advisory) |
 | **Builder** | Plan approved, ready to implement | No |
 | **Critic (cohesion)** | Builder signals done, before QA | No (Orchestrator resolves findings before QA) |
 | **QA/Verifier** | Cohesion review clean, before any commit | **Yes** — always |

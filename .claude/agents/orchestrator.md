@@ -88,7 +88,8 @@ Before session close:
 ## On-Demand Procedures
 
 - **When running Prompt A Phase 1** (advisory board review): Read `.claude/agents/_advisory-board.md` → Orchestration Procedure section
-- **When running Prompt T Brief mode** (task definition): Dispatch Architect + Exploration + Critic + conditional PM for task-scoped analysis. See `docs/ai/prompts/prompt-t-task-definition.md`
+- **When running Prompt T Brief mode** (task definition): Dispatch Architect + Exploration + Critic + Pragmatist + conditional PM for task-scoped analysis. Pragmatist runs in Brief-Advisory mode. See `docs/ai/prompts/prompt-t-task-definition.md`
+- **When plan is drafted during Prompt B** (plan-gating review): Dispatch Pragmatist in Plan-Gating mode before presenting plan to operator. Pass the draft plan text inline in Task prompt. If GATE_RESULT is APPROVED: present plan and Pragmatist findings (if any) to operator for approval. If GATE_RESULT is BLOCKED: present plan with the FUNDAMENTAL-MISMATCH finding and its "This finding is wrong if:" condition — operator can override or request re-plan. Auto mode degradation: if session is auto and verdict is BLOCKED, degrade to advisory-with-warning (log finding, proceed, notify operator in post-session summary). Triage: if a concern was addressed at Prompt T, reference the prior resolution rather than re-flagging. See Decision 0025
 - **When HVST debugging stalls (2+ consecutive failures) or operator requests debug review**: Read `.claude/agents/_hvst-review.md`
 - **When running Prompt C** (project audit): Read `docs/ai/prompts/prompt-c-project-audit.md`. Select tier, dispatch dimensions (Auditor per mode + Security/Performance if selected), mediate specialist collaboration (escalation tags, co-audit, workshop loops), synthesize Audit Report
 - **When operator defers findings** (Prompt C audit or Prompt A Phase 2 review): Write `.claude/.deferrals-pending` (timestamp as content). Then write each deferred finding to the Known Limitations table in `known-issues.md` (template mode: `.claude/local/known-issues.md`; product mode: `docs/ai/logs/known-issues.md`). For Prompt C sessions, these are the only permitted file modifications — the session is no longer zero-change, so follow normal session close procedures (session log, commit)
@@ -105,11 +106,12 @@ Before session close:
 
 ## Handoffs
 
-**Receives:** Task requests and approvals (Operator), escalations (Builder), cohesion briefs (Critic), gate results (QA), verdicts (Reviewer/Security), specialist briefs (Advisory Board), PM assessments and spec-edit proposals (PM Advisory), audit dimension briefs (Auditor)
+**Receives:** Task requests and approvals (Operator), escalations (Builder), cohesion briefs (Critic), plan-review verdicts (Pragmatist), gate results (QA), verdicts (Reviewer/Security), specialist briefs (Advisory Board), PM assessments and spec-edit proposals (PM Advisory), audit dimension briefs (Auditor)
 
 **Sends to:**
 - **Advisory Board**: Compiled specs or feature briefs for review (Prompt A Phase 1)
 - **Operator**: Synthesized refinement report for review (Prompt A Phase 2)
+- **Pragmatist (plan-gating mode)**: Draft plan text for over-engineering review — during plan phase, before presenting to operator
 - **Builder**: Plan, instructions, applicable decisions, scope boundaries
 - **HVST Review Board (Architect + Exploration + Critic hypothesis mode)**: Error context, attempted hypotheses, files touched — when debugging stalls or operator requests review
 - **Auditor**: Dimension mode + scope for project audit (Prompt C) — one dispatch per dimension

@@ -54,7 +54,7 @@ Hooks (`.claude/hooks/`) enforce governance automatically via phase-aware flow m
 | `session-close-check.sh` | stop | Session log, solo merge safety net (Decision 0015), completion marker validation (taskgroup-merge), branch sealing (Decision 0013), session registry cleanup, state file cleanup, override audit, governance evidence (task groups), next-brief reminder | BLOCK (audit/governance/reminder: advisory) |
 | `agent-git-guard.sh` | Bash PreToolUse (subagents) | Blocks Builder/QA/Security from `git commit`/`git push` | BLOCK |
 | `hvst-failure-tracker.sh` | Bash PostToolUse | Tracks consecutive Bash failures, prompts HVST protocol | advisory |
-| `state-writer.sh` | Bash PostToolUse | Captures `cohesion-reviewed`, `qa-verified`, `reviewer-signed`, `security-signed` | — (state writer) |
+| `state-writer.sh` | Bash PostToolUse | Captures `cohesion-reviewed`, `qa-verified`, `reviewer-signed`, `security-signed`, `pragmatist-signed` | — (state writer) |
 
 Experiment branches: A4 only (all state checks skipped). Emergency recovery: `REPO_OS_RECOVER=1` skips all state-dependent checks and bash-guard/branch-guard gates.
 

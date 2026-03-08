@@ -93,6 +93,7 @@ Session-scoped governance evidence in `.claude/.state/`. Written by hooks via sh
 | `qa-verified` | `state-writer.sh` (qa-verifier) | State verification |
 | `reviewer-signed` | `state-writer.sh` (reviewer) | High-risk detection |
 | `security-signed` | `state-writer.sh` (security-privacy) | High-risk detection |
+| `pragmatist-signed` | `state-writer.sh` (pragmatist) | Plan-review verification |
 | `high-risk-detected` | `pre-commit-gates.sh` | Audit trail |
 | `governance-checked` | `bash-guard.sh` (Gate 3, Bash) or `pre-commit-gates.sh` (Gate 3, commit) | First-fire marker (inter-session governance) |
 | `phase-state` | `_phase-helper.sh` (via hooks) | Phase-aware flow tracking (session type, current phase, cycle) |

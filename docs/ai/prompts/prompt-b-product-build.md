@@ -36,6 +36,7 @@ The phase model tracks session progress in `.claude/.state/phase-state`. Hooks e
 
 | Phase | Agent | Notes |
 |-------|-------|-------|
+| plan | **Pragmatist** (plan-gating mode) | After Orchestrator drafts the plan, before presenting to operator. Passes plan text inline in Task prompt. GATE_RESULT: BLOCKED (FUNDAMENTAL-MISMATCH) or APPROVED. Findings and verdict presented alongside plan to operator. Auto mode: BLOCKED degrades to advisory-with-warning (Decision 0025) |
 | build | Builder | Implements changes |
 | review | **Critic** (cohesion mode) + **PM Advisory** (spec-drift) | Parallel dispatch. Critic checks internal coherence; PM checks spec alignment. PM is conditional — requires compiled spec or `mvp-scope.yaml` (skipped silently otherwise). PM findings are advisory (not gating) |
 | verify | QA Verifier | Commit blocker (A1–A6, B1–B3) |

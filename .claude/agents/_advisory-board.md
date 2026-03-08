@@ -8,7 +8,7 @@ Shared context for all advisory board specialists. Read this before producing yo
 
 Review compiled specs or feature briefs before build begins. Identify gaps, risks, contradictions, and opportunities. All findings are advisory — the operator decides what to act on.
 
-**Also used by Prompt T (Brief mode):** Architect, Exploration, and Critic are dispatched for task-scoped analysis (feasibility, alternatives, risks). Same agents and brief format, lighter scope — see `docs/ai/prompts/prompt-t-task-definition.md`.
+**Also used by Prompt T (Brief mode):** Architect, Exploration, Critic, and Pragmatist are dispatched for task-scoped analysis (feasibility, alternatives, risks, proportionality). Same agents and brief format, lighter scope — see `docs/ai/prompts/prompt-t-task-definition.md`.
 
 ---
 
@@ -19,8 +19,8 @@ The Orchestrator selects a tier based on scope before dispatching any agents. Th
 | Tier | When | Agents | Est. Cost |
 |---|---|---|---|
 | **Skip** | Single-file fix, docs-only, typo | None | 0 |
-| **Lite** | Small feature, 1-3 files, bounded scope | Architect + Critic | Low |
-| **Standard** | Multi-file feature, new endpoints, moderate complexity | Architect + Critic + Exploration | Medium |
+| **Lite** | Small feature, 1-3 files, bounded scope | Architect + Critic + Pragmatist | Low |
+| **Standard** | Multi-file feature, new endpoints, moderate complexity | Architect + Critic + Pragmatist + Exploration | Medium |
 | **Full** | New subsystem, architectural change, full spec review | Standard + conditional specialists | High |
 
 **Defaults:**
@@ -45,7 +45,7 @@ The Orchestrator scans compiled specs (or the feature brief's "What It Touches" 
 | real-time, websockets, video, streaming, large-data, media, CDN | Performance Engineer |
 | database, data-contracts, migrations, schema, GDPR, data-lifecycle | Data Strategist |
 
-**Core pair (Lite+):** Architect, Critic — always active when advisory board runs.
+**Core group (Lite+):** Architect, Critic, Pragmatist — always active when advisory board runs.
 **Extended (Standard+):** Exploration, PM Advisory — active at Standard tier and above. PM requires compiled spec or `mvp-scope.yaml` (skipped silently when neither exists).
 **Conditional (Full only):** Security Analyst, UX Strategist, Performance Engineer, Data Strategist — signal-triggered, Full tier only.
 
@@ -91,6 +91,7 @@ The Orchestrator synthesizes all specialist briefs into a single report:
 |---|---|---|
 | Architect | Ran | Core (Lite+) |
 | Critic | Ran | Core (Lite+) |
+| Pragmatist | Ran | Core (Lite+) |
 | Exploration | Ran / Skipped | Standard+ |
 | PM Advisory | Ran / Skipped | Standard+ (requires compiled spec or mvp-scope.yaml) |
 | Security Analyst | Ran / Skipped | [trigger or "no signal"] |
@@ -158,8 +159,8 @@ When running Prompt A Phase 1 (advisory board review), the Orchestrator follows 
 1. **Select tier** — Apply defaults from Review Tiers table (feature brief → Lite, full spec → Standard). If the operator specified a tier, use that instead. If Skip, stop here
 2. **Scan** compiled specs for activation signals (see Activation Logic above) — only relevant at Full tier
 3. **Activate** agents for the selected tier:
-   - Lite: Architect + Critic
-   - Standard: Architect + Critic + Exploration + PM Advisory (if compiled spec or mvp-scope.yaml exists)
+   - Lite: Architect + Critic + Pragmatist
+   - Standard: Architect + Critic + Pragmatist + Exploration + PM Advisory (if compiled spec or mvp-scope.yaml exists)
    - Full: Standard set + any signal-triggered conditional specialists
 4. **Dispatch** all activated specialists in parallel — each receives the compiled spec files
 5. **Collect** individual briefs from each specialist

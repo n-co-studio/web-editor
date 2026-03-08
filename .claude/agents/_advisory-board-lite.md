@@ -36,6 +36,10 @@ Summary: C: [n] | R: [n] | I: [n]
 - REQUIRE: actionable suggestions — every specialist (except Critic) must include a concrete suggestion with every finding
 - REQUIRE: cite sources — reference specific spec sections, standards, or URLs when applicable
 
+## Pragmatist
+
+Pragmatist is a Core (Lite+) specialist that reviews for over-engineering, unnecessary complexity, and disproportionate approaches. Uses custom severity: OVER-ENGINEERED (maps to RECOMMENDATION) and FUNDAMENTAL-MISMATCH (maps to CRITICAL). Has two modes: Brief-Advisory (Prompt T, advisory board) and Plan-Gating (Prompt B, GATE_RESULT sentinel). Every finding must include a falsifiability condition ("This finding is wrong if: [condition]"). See `pragmatist.md` for anti-pattern checklist and full review criteria.
+
 ## PM Advisory
 
 PM Advisory is a Standard+ specialist that reviews for product-goal fit, MVP scope alignment, and spec cohesion. PM uses the same severity scale (CRITICAL / RECOMMENDATION / IDEA) plus orthogonal scope labels (IN-SCOPE / OUT-OF-SCOPE / DEFER). PM may include spec-edit proposals — structured proposals for spec changes that the Orchestrator presents to the operator. See `_pm-advisor.md` for full assessment format.

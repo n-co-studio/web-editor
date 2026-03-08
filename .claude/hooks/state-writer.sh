@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # State writer — captures governance agent verdicts as state files.
 # Wired to SubagentStop (all agents) via .claude/settings.json.
-# Only processes governance agents: critic, qa-verifier, reviewer, security-privacy.
+# Only processes governance agents: critic, qa-verifier, reviewer, security-privacy, pragmatist.
 # Extracts GATE_RESULT: sentinel from last non-empty line of agent output.
 # Writes state files via shell I/O — never the Write tool.
 # Never blocks (always exit 0) — enforcement happens at commit time.
@@ -21,7 +21,7 @@ AGENT_TYPE=$(echo "$INPUT" | jq -r '.agent_type // empty')
 # 96% of fires are non-governance agents. Exit immediately without sourcing
 # libraries (~14ms saved per fire). No analytics for this path (unchanged).
 case "$AGENT_TYPE" in
-  critic|qa-verifier|reviewer|security-privacy) ;; # governance — continue below
+  critic|qa-verifier|reviewer|security-privacy|pragmatist) ;; # governance — continue below
   *) exit 0 ;;
 esac
 
@@ -37,6 +37,7 @@ case "$AGENT_TYPE" in
   qa-verifier)      STATE_FILE="qa-verified" ;;
   reviewer)         STATE_FILE="reviewer-signed" ;;
   security-privacy) STATE_FILE="security-signed" ;;
+  pragmatist)       STATE_FILE="pragmatist-signed" ;;
 esac
 
 # --- Extract last assistant message ---

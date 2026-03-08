@@ -89,6 +89,7 @@ Pre-commit gates verify governance steps completed by checking state files in `.
 | `qa-verified` | `state-writer.sh` (qa-verifier) | State verification |
 | `reviewer-signed` | `state-writer.sh` (reviewer) | High-risk detection |
 | `security-signed` | `state-writer.sh` (security-privacy) | High-risk detection |
+| `pragmatist-signed` | `state-writer.sh` (pragmatist) | Plan-review verification |
 | `high-risk-detected` | `pre-commit-gates.sh` | Audit trail (written when risk patterns match) |
 | `governance-checked` | `pre-commit-gates.sh` (Gate 3, commit) | First-fire marker (inter-session governance advisory) |
 | `phase-state` | `_phase-helper.sh` (via hooks) | Phase-aware flow tracking (read by hooks for phase assertions) |
@@ -127,5 +128,7 @@ Which gates apply varies by session type. Enforced at `verify`/`commit` phases. 
 | `taskdef-query`, `taskdef-brief` | No gates (fully ephemeral) |
 
 **Merge brief gate ordering:** The `taskgroup-merge` session type replaces the `review` phase with `cohesion` (cross-session cohesion review using `git diff main...HEAD`). Gate A5 (cohesion) is satisfied by the `cohesion` phase rather than a separate `review` phase. Gate A6 always applies to merge briefs (task group contract must be updated). The `verify` phase runs all remaining gates (A1–A4, A6, B1–B3) after cohesion completes.
+
+**Plan Review (advisory/gating):** The Pragmatist agent reviews implementation plans during the `plan` phase (Prompt B) before presenting to the operator. FUNDAMENTAL-MISMATCH findings produce `GATE_RESULT: BLOCKED`; OVER-ENGINEERED findings alone produce `GATE_RESULT: APPROVED`. The `pragmatist-signed` state file records the verdict. In auto mode, BLOCKED degrades to advisory-with-warning (operator notified post-session). No gate number is assigned — enforcement is via Orchestrator dispatch, not pre-commit hooks. See Decision 0025.
 
 **User Review (advisory):** The `user-review` phase runs after `verify` and before `commit` in standard and taskgroup sequences. User Review findings are advisory-only — they follow the Prompt C audit pattern (presented to operator but no state file written, no gate blocked). No gate number is assigned. The phase is skippable: sessions without a User Review section in the task brief forward-jump from `verify` directly to `commit`. See Decision 0021.
