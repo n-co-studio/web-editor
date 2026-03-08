@@ -33,6 +33,7 @@ dist/
 **/.claude/.state/*
 !**/.claude/.state/.gitkeep
 .claude/phase-state
+editor-queue-status.yaml
 
 # Local-only template development files (not shipped to products)
 .claude/local/
