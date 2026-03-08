@@ -73,32 +73,6 @@ function composeShadow(v: ShadowValues): string {
 }
 
 // ---------------------------------------------------------------------------
-// Border radius parsing
-// ---------------------------------------------------------------------------
-
-interface RadiusValues {
-  tl: number;
-  tr: number;
-  br: number;
-  bl: number;
-}
-
-function parseRadius(value: string): RadiusValues {
-  const nums = value.match(/\d+(\.\d+)?/g);
-  if (!nums || nums.length === 0) return { tl: 0, tr: 0, br: 0, bl: 0 };
-  const vals = nums.map(Number);
-  if (vals.length === 1) return { tl: vals[0], tr: vals[0], br: vals[0], bl: vals[0] };
-  if (vals.length === 2) return { tl: vals[0], tr: vals[1], br: vals[0], bl: vals[1] };
-  if (vals.length === 3) return { tl: vals[0], tr: vals[1], br: vals[2], bl: vals[1] };
-  return { tl: vals[0], tr: vals[1], br: vals[2], bl: vals[3] };
-}
-
-function composeRadius(r: RadiusValues): string {
-  if (r.tl === r.tr && r.tr === r.br && r.br === r.bl) return `${r.tl}px`;
-  return `${r.tl}px ${r.tr}px ${r.br}px ${r.bl}px`;
-}
-
-// ---------------------------------------------------------------------------
 // Outline style options
 // ---------------------------------------------------------------------------
 
@@ -197,8 +171,8 @@ export class AppearanceEditor {
     // --- Box Shadow ---
     body.appendChild(this.buildBoxShadowSection(element, onCommit));
 
-    // --- Border Radius ---
-    body.appendChild(this.buildBorderRadiusSection(element, onCommit));
+    // Border radius is intentionally omitted — owned by the dedicated
+    // 'border-radius' EditMode with drag handles.
 
     // --- Outline ---
     body.appendChild(this.buildOutlineSection(element, onCommit));
@@ -545,128 +519,6 @@ export class AppearanceEditor {
     insetRow.appendChild(resetBtn);
 
     section.appendChild(insetRow);
-    return section;
-  }
-
-  // ---------------------------------------------------------------------------
-  // Border Radius
-  // ---------------------------------------------------------------------------
-
-  private buildBorderRadiusSection(element: Element, onCommit: ChangeCallback): HTMLDivElement {
-    const section = createElement('div', {}, { display: 'flex', flexDirection: 'column', gap: '4px' });
-
-    const sectionLabel = createText('div', 'Border Radius', 'heading');
-    sectionLabel.style.fontSize = '11px';
-    sectionLabel.style.color = OVERLAY.text;
-    section.appendChild(sectionLabel);
-
-    const currentValue = getComputedProperty(element, 'border-radius');
-    const radius = parseRadius(currentValue);
-
-    let linked = radius.tl === radius.tr && radius.tr === radius.br && radius.br === radius.bl;
-
-    const applyPreview = () => {
-      this.preview.begin(element as HTMLElement);
-      this.preview.apply('border-radius', composeRadius(radius));
-    };
-
-    const commitRadius = () => {
-      const originals = this.preview.commit();
-      const fromValue = originals.get('border-radius') || currentValue;
-      onCommit([{ property: 'border-radius', fromValue, toValue: composeRadius(radius) }]);
-    };
-
-    // Link toggle
-    const linkRow = createElement('div', {}, {
-      display: 'flex',
-      gap: '6px',
-      alignItems: 'center',
-      marginBottom: '2px',
-    });
-    const linkBtn = createButton(linked ? 'Linked' : 'Individual', 'ghost', () => {
-      linked = !linked;
-      linkBtn.textContent = linked ? 'Linked' : 'Individual';
-      linkBtn.style.borderColor = linked ? OVERLAY.primary : OVERLAY.border;
-      linkBtn.style.color = linked ? OVERLAY.primary : OVERLAY.textMuted;
-    });
-    linkBtn.style.fontSize = '9px';
-    linkBtn.style.padding = '2px 6px';
-    linkBtn.style.borderColor = linked ? OVERLAY.primary : OVERLAY.border;
-    linkBtn.style.color = linked ? OVERLAY.primary : OVERLAY.textMuted;
-    linkRow.appendChild(linkBtn);
-    section.appendChild(linkRow);
-
-    const corners: Array<{ key: keyof RadiusValues; label: string }> = [
-      { key: 'tl', label: 'Top Left' },
-      { key: 'tr', label: 'Top Right' },
-      { key: 'br', label: 'Bottom Right' },
-      { key: 'bl', label: 'Bottom Left' },
-    ];
-
-    const valueLabels = new Map<keyof RadiusValues, HTMLSpanElement>();
-    const sliderInputs = new Map<keyof RadiusValues, HTMLInputElement>();
-
-    for (const corner of corners) {
-      const row = createElement('div', {}, {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '2px',
-      });
-
-      const labelRow = createElement('div', {}, {
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-      });
-      const label = createText('span', corner.label, 'mono');
-      label.style.color = OVERLAY.textMuted;
-      label.style.fontSize = '9px';
-      labelRow.appendChild(label);
-
-      const valLabel = createText('span', `${radius[corner.key]}px`, 'mono');
-      valLabel.style.color = OVERLAY.text;
-      valLabel.style.fontSize = '9px';
-      labelRow.appendChild(valLabel);
-      valueLabels.set(corner.key, valLabel);
-      row.appendChild(labelRow);
-
-      const slider = createElement('input', {
-        type: 'range',
-        min: '0',
-        max: '100',
-        step: '1',
-        value: String(radius[corner.key]),
-      }, {
-        width: '100%',
-        height: '4px',
-        cursor: 'pointer',
-        accentColor: OVERLAY.primary,
-      }) as HTMLInputElement;
-      sliderInputs.set(corner.key, slider);
-
-      slider.addEventListener('input', () => {
-        const val = parseFloat(slider.value);
-        if (linked) {
-          for (const c of corners) {
-            radius[c.key] = val;
-            sliderInputs.get(c.key)!.value = String(val);
-            valueLabels.get(c.key)!.textContent = `${val}px`;
-          }
-        } else {
-          radius[corner.key] = val;
-          valLabel.textContent = `${val}px`;
-        }
-        applyPreview();
-      });
-
-      slider.addEventListener('change', () => {
-        commitRadius();
-      });
-
-      row.appendChild(slider);
-      section.appendChild(row);
-    }
-
     return section;
   }
 
