@@ -130,6 +130,12 @@ const ICONS: Record<string, string> = {
     <line x1="3" y1="13" x2="5" y2="11"/>
   </svg>`,
 
+  appearance: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2" y="2" width="12" height="12" rx="3" fill="none"/>
+    <circle cx="8" cy="8" r="3" fill="currentColor" stroke="none" opacity="0.6"/>
+    <path d="M12 4l1.5-1.5" stroke-width="1.5"/>
+  </svg>`,
+
   delete: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
     <path d="M3 4.5h10"/>
     <path d="M6.5 2.5h3"/>
@@ -168,6 +174,7 @@ const TOOL_LABELS: Record<EditMode, string> = {
   text: 'Text',
   media: 'Media',
   effects: 'Effects',
+  appearance: 'Appearance',
 };
 
 const TOOLBAR_STORAGE_KEY = 'frontend-editor-toolbar-position';
@@ -185,6 +192,7 @@ const TOOL_ORDER: EditMode[] = [
   'text',
   'media',
   'effects',
+  'appearance',
 ];
 
 // ---------------------------------------------------------------------------

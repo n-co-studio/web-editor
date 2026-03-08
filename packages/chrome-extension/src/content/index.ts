@@ -31,6 +31,7 @@ import { InsertEditor, getInsertBlockReason } from './editing/insert';
 import { TextEditor, getTextBlockReason } from './editing/text';
 import { MediaEditor } from './editing/media';
 import { EffectsEditor } from './editing/effects';
+import { AppearanceEditor } from './editing/appearance';
 import { captureFullPage } from './screenshot';
 import type { InsertCommitCallback } from './editing/insert';
 import { buildInsertChange } from './editing/insert-source';
@@ -81,6 +82,7 @@ let insertEditor: InsertEditor | null = null;
 let textEditor: TextEditor | null = null;
 let mediaEditor: MediaEditor | null = null;
 let effectsEditor: EffectsEditor | null = null;
+let appearanceEditor: AppearanceEditor | null = null;
 let gridSettingsPanel: GridSettingsPanel | null = null;
 let measureOverlay: MeasureOverlay | null = null;
 let measureRafId: number | null = null;
@@ -207,6 +209,7 @@ async function activate(): Promise<void> {
   mediaEditor = new MediaEditor(preview);
   MediaEditor.restoreHandle();
   effectsEditor = new EffectsEditor(preview);
+  appearanceEditor = new AppearanceEditor(preview);
   gridSettingsPanel = new GridSettingsPanel(gridOverlay.getEffectiveSettings());
   measureOverlay = new MeasureOverlay(shadow, host);
   multiSelect = new MultiSelectManager(shadow, host);
@@ -502,6 +505,7 @@ async function activate(): Promise<void> {
     reorderEditor!.reposition(toolbar!.getButtonPosition('reorder'));
     mediaEditor!.reposition(toolbar!.getButtonPosition('media'));
     effectsEditor!.reposition(toolbar!.getButtonPosition('effects'));
+    appearanceEditor!.reposition(toolbar!.getButtonPosition('appearance'));
     gridSettingsPanel!.reposition(toolbar!.getButtonPosition('grid'));
     multiSelectToolbar!.reposition(toolbar!.getPosition());
     reviewPanel!.reposition(toolbar!.getButtonPosition('review'));
@@ -541,6 +545,11 @@ async function activate(): Promise<void> {
     else { toolbar!.setActiveMode('cursor'); }
   });
   effectsEditor.onClose(() => {
+    const el = selection?.getSelectedElement();
+    if (el) { activateToolForElement(el, 'cursor'); }
+    else { toolbar!.setActiveMode('cursor'); }
+  });
+  appearanceEditor.onClose(() => {
     const el = selection?.getSelectedElement();
     if (el) { activateToolForElement(el, 'cursor'); }
     else { toolbar!.setActiveMode('cursor'); }
@@ -861,6 +870,7 @@ function deactivate(): void {
   textEditor?.cleanup();
   mediaEditor?.cleanup();
   effectsEditor?.cleanup();
+  appearanceEditor?.cleanup();
   notesEditor?.cleanup();
   gridOverlay?.hide();
   rulerOverlay?.hide();
@@ -921,6 +931,7 @@ function deactivate(): void {
   textEditor = null;
   mediaEditor = null;
   effectsEditor = null;
+  appearanceEditor = null;
   gridSettingsPanel = null;
   measureOverlay = null;
   measureRafId = null;
@@ -958,6 +969,7 @@ function activateToolForElement(el: Element, mode: EditMode): void {
   textEditor!.cleanup();
   mediaEditor!.cleanup();
   effectsEditor!.cleanup();
+  appearanceEditor!.cleanup();
 
   if (mode === 'cursor') {
     // Cursor/select mode: show dimension handles only (no mini panel)
@@ -1057,6 +1069,15 @@ function activateToolForElement(el: Element, mode: EditMode): void {
     });
     shadow!.appendChild(controls);
     toolbar!.setActiveMode('effects');
+  } else if (mode === 'appearance') {
+    const pos = toolbar!.getButtonPosition('appearance');
+    const controls = appearanceEditor!.render(el, pos, (changes) => {
+      const info = buildElementInfo(el);
+      const diff = diffBuilder!.build(info, changes);
+      commitEdit(el, changes, diff);
+    });
+    shadow!.appendChild(controls);
+    toolbar!.setActiveMode('appearance');
   } else {
     handles!.showHandles(el, mode);
     toolbar!.setActiveMode(mode);

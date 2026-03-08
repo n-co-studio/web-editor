@@ -22,16 +22,21 @@ type MultiPropertyChangeCb = (changes: Array<{ element: Element; property: strin
 type ScrollToRuleCb = (selectorText: string) => void;
 
 const PROPERTY_GROUPS: Array<{ label: string; props: string[] }> = [
-  { label: 'Dimensions', props: ['width', 'height'] },
+  { label: 'Dimensions', props: ['width', 'height', 'min-width', 'min-height', 'max-width', 'max-height'] },
   { label: 'Spacing', props: ['padding-top', 'padding-right', 'padding-bottom', 'padding-left', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left'] },
-  { label: 'Typography', props: ['font-family', 'font-size', 'font-weight', 'line-height', 'color'] },
-  { label: 'Background', props: ['background-color'] },
-  { label: 'Position', props: ['position', 'top', 'right', 'bottom', 'left'] },
-  { label: 'Border', props: ['border-radius', 'border-color', 'border-width'] },
+  { label: 'Typography', props: ['font-family', 'font-size', 'font-weight', 'font-style', 'line-height', 'letter-spacing', 'text-align', 'text-decoration', 'text-transform', 'white-space', 'word-break', 'color'] },
+  { label: 'Background', props: ['background-color', 'background-image', 'background-size', 'background-position', 'background-repeat'] },
+  { label: 'Position', props: ['position', 'top', 'right', 'bottom', 'left', 'z-index'] },
+  { label: 'Border', props: ['border-radius', 'border-width', 'border-style', 'border-color', 'border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width'] },
+  { label: 'Appearance', props: ['opacity', 'box-shadow', 'outline-style', 'outline-width', 'outline-color', 'outline-offset', 'cursor', 'visibility'] },
+  { label: 'Effects', props: ['filter', 'backdrop-filter', 'mix-blend-mode', 'clip-path'] },
+  { label: 'Display & Overflow', props: ['display', 'overflow', 'overflow-x', 'overflow-y'] },
+  { label: 'Transform', props: ['transform', 'transform-origin'] },
+  { label: 'Transition', props: ['transition-property', 'transition-duration', 'transition-timing-function', 'transition-delay'] },
 ];
 
 /**
- * CSS groups section — renders the 6 property groups for the Edit tab.
+ * CSS groups section — renders property groups for the Edit tab.
  * Supports both single-select (snapshot-based) and multi-select (per-element) modes.
  * Uses enriched property row structure with indicator, badge, and annotation slots.
  * Enrichments: color swatches, inactive CSS indicators, pending-change dots, contrast badges.
