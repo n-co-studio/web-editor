@@ -43,3 +43,5 @@
 0024|\.templatesyncignore|repo-mode, get_mode, IS_TEMPLATE, child, template, REPO_OS_MODE
 0024|\.claude/hooks/(session-close-check|pre-commit-gates|_automation-bridge)\.sh|repo-mode, get_mode, IS_TEMPLATE, child, template, REPO_OS_MODE
 0025|\.claude/agents/pragmatist\.md|pragmatist, over-engineer, yagni, plan-review
+0026|\.claude/hooks/(bash-guard|write-guard|_phase-helper)\.sh|taskgroup_brief_mismatch, brief-has-taskgroup, check_taskgroup_brief_mismatch, write_taskgroup_brief_signal, REPO_OS_SKIP_TASKGROUP_CHECK
+0026|\.claude/\.state/brief-has-taskgroup|taskgroup_brief_mismatch, brief-has-taskgroup, check_taskgroup_brief_mismatch, write_taskgroup_brief_signal, REPO_OS_SKIP_TASKGROUP_CHECK

@@ -485,6 +485,10 @@ if [ "$ALLOW_REASON" = "pass" ]; then
   fi
 fi
 
+# --- Gate 2b: Taskgroup brief mismatch check (Decision 0026) ---
+# Blocks if brief contains ### Task Group but session type is not taskgroup/taskgroup-merge.
+check_taskgroup_brief_mismatch "$START_MS"
+
 # --- Gate 6: Session overlap check (Decision 0013) ---
 if ! check_session_overlap; then
   log_hook_event "branch-guard" "PreToolUse" "Bash" "block" "$START_MS" "session_overlap"

@@ -731,6 +731,61 @@ upgrade_session_type() {
   log_hook_event "phase-helper" "upgrade" "" "allow" "0" "ephemeral_to_standard" "" "" || true
 }
 
+# --- Write taskgroup brief signal ---
+# Records that the active brief contains a ### Task Group marker.
+# Shell I/O — bypasses write-guard.sh (same pattern as write_merge_signal).
+# Called by the orchestrator when it detects ### Task Group in the brief text,
+# before or immediately after init_phase. The hook layer reads this file to
+# validate that the session type matches the brief type (Decision 0026).
+# Usage: write_taskgroup_brief_signal
+write_taskgroup_brief_signal() {
+  local repo_root="$_REPO_OS_ROOT"
+  local state_dir="$repo_root/.claude/.state"
+  mkdir -p "$state_dir" 2>/dev/null || true
+  printf 'true\n' > "$state_dir/brief-has-taskgroup" 2>/dev/null || true
+}
+
+# --- Taskgroup brief mismatch check (Decision 0026) ---
+# Reads .claude/.state/brief-has-taskgroup fingerprint file.
+# If it exists and the current session type is NOT taskgroup or taskgroup-merge,
+# emits a BLOCK and exits 2. No-ops when: fingerprint absent, phase-state
+# absent, session type is correct, or REPO_OS_SKIP_TASKGROUP_CHECK=1.
+# Usage: check_taskgroup_brief_mismatch "$START_MS"  (exits on mismatch)
+check_taskgroup_brief_mismatch() {
+  local start_ms="${1:-0}"
+  local repo_root="$_REPO_OS_ROOT"
+  local fingerprint="$repo_root/.claude/.state/brief-has-taskgroup"
+
+  # Override: REPO_OS_SKIP_TASKGROUP_CHECK=1
+  if [ "${REPO_OS_SKIP_TASKGROUP_CHECK:-0}" = "1" ]; then
+    log_override "taskgroup-check" "REPO_OS_SKIP_TASKGROUP_CHECK"
+    log_hook_event "taskgroup-check" "PreToolUse" "" "allow" "$start_ms" "skip_override"
+    return 0
+  fi
+
+  # No fingerprint → brief has no ### Task Group marker → no mismatch
+  [ -f "$fingerprint" ] || return 0
+
+  # No phase-state → session type unknown → skip check
+  local state_file="$repo_root/.claude/.state/phase-state"
+  [ -f "$state_file" ] || return 0
+
+  local stype
+  stype=$(_read_phase_field "session_type" "$state_file")
+
+  case "$stype" in
+    taskgroup|taskgroup-merge)
+      # Correct session type — allow
+      return 0
+      ;;
+    *)
+      log_hook_event "taskgroup-check" "PreToolUse" "" "block" "$start_ms" "taskgroup_brief_mismatch" "session_type:$stype"
+      echo "BLOCKED: Brief contains ### Task Group but session type is '$stype' — expected 'taskgroup'. Re-initialize with init_phase(\"taskgroup\")." >&2
+      exit 2
+      ;;
+  esac
+}
+
 # --- Write merge source signal ---
 # Records the branch name in .claude/.state/merge-source-branch so the stop
 # hook can detect that the agent completed the merge in the close phase.
