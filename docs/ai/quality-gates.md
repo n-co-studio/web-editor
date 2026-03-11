@@ -80,22 +80,12 @@ Apply to `release/*` branches before merge to `main`:
 
 ## State File Dependencies
 
-Pre-commit gates verify governance steps completed by checking state files in `.claude/.state/`. State files are written by hooks (shell I/O only — never model tools).
+See: `.claude/agents/_agent-glossary.md` § State Files for the full state file schema, writers, and lifecycle.
 
-| State File | Writer | Required By |
-|------------|--------|-------------|
-| `plan-approved` | `plan-approval.sh` | State verification, A2 scope (large-scope flag) |
-| `cohesion-reviewed` | `state-writer.sh` (critic) | State verification (skipped on `hotfix/*`) |
-| `qa-verified` | `state-writer.sh` (qa-verifier) | State verification |
-| `reviewer-signed` | `state-writer.sh` (reviewer) | High-risk detection |
-| `security-signed` | `state-writer.sh` (security-privacy) | High-risk detection |
-| `pragmatist-signed` | `state-writer.sh` (pragmatist) | Plan-review verification |
-| `high-risk-detected` | `pre-commit-gates.sh` | Audit trail (written when risk patterns match) |
-| `governance-checked` | `pre-commit-gates.sh` (Gate 3, commit) | First-fire marker (inter-session governance advisory) |
-| `phase-state` | `_phase-helper.sh` (via hooks) | Phase-aware flow tracking (read by hooks for phase assertions) |
-| `overrides.log` | `_analytics-helper.sh` (`log_override`) | Override audit summary (session-close-check) |
-
-Note: Gate 5 (session isolation, Decision 0013) uses `.claude/local/closed-branches` — a persistent ledger, not a session-scoped state file. It is not listed in the table above because it is not cleaned at session close. Gate 5 is enforced by `write-guard.sh` (Section 3) on Edit/Write and `bash-guard.sh` on Bash.
+Gate-specific notes:
+- `plan-approved`: required by state verification and A2 scope (reads `large-scope: true` flag)
+- `cohesion-reviewed`: required by state verification (skipped on `hotfix/*`)
+- Gate 5 (session isolation, Decision 0013) uses `.claude/local/closed-branches` — a persistent ledger, not a session-scoped state file. Enforced by `write-guard.sh` (Section 3) on Edit/Write and `bash-guard.sh` on Bash.
 
 **Recovery override:** Set `REPO_OS_RECOVER=1` to skip all state-dependent checks in pre-commit, pre-push, and bash-guard gates. Emergency path for hook crashes or debugging sessions.
 

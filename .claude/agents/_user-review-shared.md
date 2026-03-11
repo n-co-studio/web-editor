@@ -68,4 +68,4 @@ REQUIRE: include this caveat verbatim at the top of every output:
 
 - **Decision:** `docs/ai/decisions/t-0021-user-review-system.md`
 - **Glossary:** `.claude/agents/_agent-glossary.md` (User Review section)
-- **Canonical definition:** `docs/ai/workflow.md` § User Review
+- **Canonical definition:** `.claude/agents/_agent-glossary.md` § User Review

@@ -6,16 +6,14 @@ REQUIRE: every pastable block for a new session must start with a plain-text sho
 
 ## Phase Model
 
-Sessions progress through an ordered sequence of phases tracked in `.claude/.state/phase-state`. Hooks enforce phase-appropriate actions automatically — agents do not need to read the phase-state file directly.
+See: `.claude/agents/_agent-glossary.md` § Phase Model for phase definitions, automation tags, and session type variants.
 
-- **Phase sequences** are defined per session type in Decision 0014. Each prompt documents its own sequence.
-- **Automation tags** (`agent`, `operator`, `both`) indicate who acts at each phase.
-- **Auto/review mode**: Set at plan approval. Auto skips the `op-review` phase; review (default) pauses for operator acceptance before close.
+Session-specific behavioral rules:
 - **Plan-approval hook**: Only `AskUserQuestion` triggers the `plan-approval.sh` hook that writes the `plan-approved` state file and unblocks Edit/Write. Conversational plan approval does not trigger the hook (see `orchestrator.md` § Constraints).
 - **Transition rules**: Forward-only, except defined loops (`review→build`, `verify→build`). Each loop increments the cycle counter.
 - **Session ID binding**: Phase-state is invalidated when the session ID changes, preventing stale state from prior sessions.
 
-See Decision 0014 for the canonical phase sequence definitions and Decision 0015 for solo mode merge semantics.
+See Decision 0014 for the canonical phase sequence definitions.
 
 ## Execution Loop
 
@@ -42,31 +40,11 @@ See `.claude/agents/_advisory-board.md` for tier definitions, activation logic, 
 
 ## HVST Protocol (debugging/instability)
 
-Use when: fixing bugs, failing tests, unstable behavior. Not required for simple feature work.
-
-Loop: **Hypothesis** → **Validate** (smallest experiment) → **Solve** (minimal fix) → **Test** (rerun checks) → **Record**
-
-**Record** (after 2+ failed cycles): When resolved, add entry to `docs/ai/logs/known-issues.md` (template mode: `.claude/local/known-issues.md`) if not already present. At 2 consecutive failures, check `known-issues.md` for matches before continuing. REQUIRE: known-issues documentation at session close (advisory reminder by session-close-check.sh when 2+ HVST failures occurred and `known-issues.md` was not updated — downgraded from blocking in Phase 2b). Override: `SKIP_KNOWN_ISSUES_CHECK=1` (use when failures were transient — network, timing).
-
-**Review Board** (optional): At 2+ consecutive failures or on operator request, Orchestrator dispatches Architect + Exploration + Critic (hypothesis mode) to review failure context and produce ranked hypotheses before further fix attempts. See `.claude/agents/_hvst-review.md`.
+See: `.claude/agents/_agent-glossary.md` § HVST for the full protocol definition, record step, and review board procedure.
 
 ## User Review
 
-Decision 0021. Optional LLM persona simulation providing synthetic user perspective on implementation output. Advisory-only — no gate, no state file, no mechanical enforcement.
-
-**Phase position:** `user-review` phase in the standard and taskgroup build sequences, after `verify` and before `commit`. Skippable — when the task brief has no User Review section, the phase is forward-jumped (verify → commit directly).
-
-**Opt-in mechanism:** User Review is never default-on. Two activation paths:
-- **Task brief opt-in**: Prompt T includes a `### User Review` section specifying tiers, mode, and JTBD scenario definitions. The contract's `user_review:` block carries this into the Prompt B session.
-- **Operator request**: The operator requests user review during the session (e.g., "run tier-2 review on the signup flow"). The Orchestrator constructs scenarios from the operator's description.
-
-**Dispatch and synthesis:** When the `user-review` phase is active, the Orchestrator dispatches persona agents (`.claude/agents/_user-review-tier-{1,2,3}.md`) in parallel via the Task tool. Each agent walks through scenario steps by reading implementation files and narrating the simulated user experience. Results are synthesized: deduplicated across tiers, severity-escalated to the highest level when multiple tiers flag the same issue. The synthesized User Review Report is presented to the operator during `op-review`.
-
-**Operator disposition:** Findings require operator disposition (accept / note / dismiss) — same pattern as advisory board findings (Decision 0007). Not a silent report. Deferred findings are noted in the closing summary.
-
-**Operating mode exclusions:** User Review is available in child mode only. Excluded from template mode (no product code), autonomous mode (no operator), headless/automation mode (no operator interaction), and experiment sessions (lightweight lifecycle, no `user-review` phase).
-
-**Token cost:** Three persona agents reading code and producing reports may consume 20,000–50,000 tokens per run. The opt-in mechanism mitigates cost — User Review only runs when explicitly requested.
+See: `.claude/agents/_agent-glossary.md` § User Review for the full system definition, tiers, dispatch procedure, and operator disposition.
 
 ## Branch Categories
 
@@ -94,7 +72,7 @@ Zero-change sessions (no commits, no working tree changes) are exempt from the s
 
 ### Solo Mode
 
-Decision 0015. Branches merge to main directly at session close. Applies to `feature/*`, `fix/*`, `hotfix/*` branches only — `experiment/*` and `release/*` are excluded. In auto mode, merge happens autonomously after all gates pass. In review mode, the agent pauses at `op-review` for operator acceptance before merging. Merge failure triggers `git merge --abort` and operator notification — the agent does not attempt automatic conflict resolution on main.
+See: `.claude/agents/_agent-glossary.md` § Solo Mode for full semantics (branch types, auto/review behavior, conflict handling).
 
 ### Session Branch Isolation
 

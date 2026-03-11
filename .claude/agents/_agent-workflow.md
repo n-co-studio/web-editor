@@ -26,7 +26,7 @@ No file artifacts. No session log entry. No handoff to Build Flow — the operat
 
 ## HVST Review Flow (Debug Stall)
 
-Runs when HVST debugging stalls (2+ consecutive failures) or when the operator proactively requests a debug review. Canonical definition: `docs/ai/workflow.md` § HVST Protocol. Procedure: `.claude/agents/_hvst-review.md`.
+Runs when HVST debugging stalls (2+ consecutive failures) or when the operator proactively requests a debug review. Canonical definition: `.claude/agents/_agent-glossary.md` § HVST. Procedure: `.claude/agents/_hvst-review.md`.
 
 ### Handoff Chain
 1. **Builder stalls** — 2+ consecutive HVST failures, or operator observes unproductive debugging

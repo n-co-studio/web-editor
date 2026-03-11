@@ -41,7 +41,15 @@ Docs, tests, formatting, comments, dev tooling
 ## Protocols
 
 ### HVST (Hypothesis → Validate → Solve → Test → Record)
-5-step debugging protocol for non-trivial failures. Prevents random-fix loops by requiring a hypothesis before any code change. Tracked by `hvst-failure-tracker.sh` hook. At 2+ consecutive failures or on operator request, Orchestrator may dispatch HVST Review Board (Architect + Exploration + Critic (hypothesis mode)) for multi-agent hypothesis review. See `.claude/agents/_hvst-review.md` for review board procedure and `docs/ai/workflow.md` for full protocol definition.
+5-step debugging protocol for non-trivial failures. Prevents random-fix loops by requiring a hypothesis before any code change. Tracked by `hvst-failure-tracker.sh` hook.
+
+Use when: fixing bugs, failing tests, unstable behavior. Not required for simple feature work.
+
+Loop: **Hypothesis** → **Validate** (smallest experiment) → **Solve** (minimal fix) → **Test** (rerun checks) → **Record**
+
+**Record** (after 2+ failed cycles): When resolved, add entry to `docs/ai/logs/known-issues.md` (template mode: `.claude/local/known-issues.md`) if not already present. At 2 consecutive failures, check `known-issues.md` for matches before continuing. REQUIRE: known-issues documentation at session close (advisory reminder by session-close-check.sh when 2+ HVST failures occurred and `known-issues.md` was not updated — downgraded from blocking in Phase 2b). Override: `SKIP_KNOWN_ISSUES_CHECK=1` (use when failures were transient — network, timing).
+
+**Review Board** (optional): At 2+ consecutive failures or on operator request, Orchestrator dispatches Architect + Exploration + Critic (hypothesis mode) to review failure context and produce ranked hypotheses before further fix attempts. See `.claude/agents/_hvst-review.md`.
 
 ### Cohesion Review
 Post-build review by the Critic agent (cohesion mode) checking the diff and surrounding code for internal codebase coherence: broken cross-references, dangling imports, inconsistent naming, half-finished integrations, and contradictory patterns. Verified by QA as gate A5. Not the same as spec review (advisory board) — cohesion operates on code, not specs.
@@ -204,7 +212,7 @@ Lightweight session type for Q&A and exploration: `init → conversation → clo
 
 ### Solo Mode (Decision 0015)
 
-Branches merge to main directly at session close. See `docs/ai/workflow.md` § Solo Mode for full semantics (branch types, merge behavior, conflict handling).
+Branches merge to main directly at session close. Applies to `feature/*`, `fix/*`, `hotfix/*` branches only — `experiment/*` and `release/*` are excluded. In auto mode, merge happens autonomously after all gates pass. In review mode, the agent pauses at `op-review` for operator acceptance before merging. Merge failure triggers `git merge --abort` and operator notification — the agent does not attempt automatic conflict resolution on main.
 
 ---
 
@@ -244,7 +252,21 @@ Template decisions use the `t-` prefix (`t-0001-*.md` through `t-NNNN-*.md`) and
 
 ## User Review
 
-LLM persona simulation providing synthetic user perspective on implementation output. Advisory only — no gate, no state file, no mechanical enforcement. Dispatched in the `user-review` phase (after `verify`, before `commit`). Skipped when no User Review is defined (forward-jump to `commit`). Available in child mode only. See `docs/ai/workflow.md` § User Review for full system definition and Decision 0021 for scenario schema.
+Decision 0021. LLM persona simulation providing synthetic user perspective on implementation output. Advisory only — no gate, no state file, no mechanical enforcement.
+
+**Phase position:** `user-review` phase in the standard and taskgroup build sequences, after `verify` and before `commit`. Skippable — when the task brief has no User Review section, the phase is forward-jumped (verify → commit directly).
+
+**Opt-in mechanism:** User Review is never default-on. Two activation paths:
+- **Task brief opt-in**: Prompt T includes a `### User Review` section specifying tiers, mode, and JTBD scenario definitions. The contract's `user_review:` block carries this into the Prompt B session.
+- **Operator request**: The operator requests user review during the session (e.g., "run tier-2 review on the signup flow"). The Orchestrator constructs scenarios from the operator's description.
+
+**Dispatch and synthesis:** When the `user-review` phase is active, the Orchestrator dispatches persona agents (`.claude/agents/_user-review-tier-{1,2,3}.md`) in parallel via the Task tool. Each agent walks through scenario steps by reading implementation files and narrating the simulated user experience. Results are synthesized: deduplicated across tiers, severity-escalated to the highest level when multiple tiers flag the same issue. The synthesized User Review Report is presented to the operator during `op-review`.
+
+**Operator disposition:** Findings require operator disposition (accept / note / dismiss) — same pattern as advisory board findings (Decision 0007). Not a silent report. Deferred findings are noted in the closing summary.
+
+**Operating mode exclusions:** User Review is available in child mode only. Excluded from template mode (no product code), autonomous mode (no operator), headless/automation mode (no operator interaction), and experiment sessions (lightweight lifecycle, no `user-review` phase).
+
+**Token cost:** Three persona agents reading code and producing reports may consume 20,000–50,000 tokens per run. The opt-in mechanism mitigates cost — User Review only runs when explicitly requested.
 
 | Tier | Persona | Mental Model | Error Recovery | Confusion Threshold |
 |------|---------|-------------|----------------|---------------------|

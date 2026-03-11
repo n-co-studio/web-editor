@@ -55,7 +55,7 @@ The mode is set at plan approval and recorded in phase-state.
 
 ### Solo Mode (Decision 0015)
 
-Branches merge to main directly at session close. See `docs/ai/workflow.md` § Solo Mode and § Task Group Sessions for full merge semantics, branch type applicability, and task group branch strategy.
+Branches merge to main directly at session close. See `.claude/agents/_agent-glossary.md` § Solo Mode for full merge semantics and branch type applicability, and `docs/ai/workflow.md` § Task Group Sessions for task group branch strategy.
 
 ## Task Contract (Decision 0020)
 
@@ -72,7 +72,7 @@ The task contract serves as the cohesion review reference — Critic uses its `v
 After the `verify` phase, check whether the task brief or task contract contains a `user_review` section:
 
 - **No User Review defined:** Skip directly from `verify` to `commit` (forward-jump — Decision 0014 permits this).
-- **User Review defined:** Advance to `user-review` phase and dispatch per `docs/ai/workflow.md` § User Review.
+- **User Review defined:** Advance to `user-review` phase and dispatch per `.claude/agents/_agent-glossary.md` § User Review.
 
 ### Dispatch Procedure
 
@@ -81,13 +81,13 @@ After the `verify` phase, check whether the task brief or task contract contains
 3. Collect results, deduplicate across tiers, escalate severity to highest when tiers conflict.
 4. Produce a single User Review Report, advance to `commit`. Present during `op-review` (auto mode: logged in closing summary). Operator dispositions each finding (accept / note / dismiss).
 
-See `docs/ai/workflow.md` § User Review for full system definition and Decision 0021 for scenario schema.
+See `.claude/agents/_agent-glossary.md` § User Review for full system definition and Decision 0021 for scenario schema.
 
 ## Operating Rules
 - REQUIRE: at session start, create a branch from main: `git checkout -b <category>/<description>` (standard: `feature/<description>`, hotfix: `hotfix/<description>`)
 - REQUIRE: extract and write task contract at session init when present in the brief (Decision 0020). Contract serves as cohesion review reference
 - REQUIRE: after Builder signals done, Orchestrator runs a cohesion review (Critic in cohesion mode) before invoking QA. Critical cohesion findings must be resolved before commit. See `quality-gates.md` gate A5.
-- GUIDE: use HVST (see `workflow.md`) when debugging or instability appears. When HVST debugging stalls (2+ consecutive failures), Orchestrator dispatches HVST Review Board for multi-agent hypothesis review before further fix attempts. See `_hvst-review.md`
+- GUIDE: use HVST (see `_agent-glossary.md` § HVST) when debugging or instability appears. When HVST debugging stalls (2+ consecutive failures), Orchestrator dispatches HVST Review Board for multi-agent hypothesis review before further fix attempts. See `_hvst-review.md`
 - REQUIRE: **Task Group Contract** — if the task brief contains a `### Task Group` section, this session is part of a multi-brief group. Read and follow the contract lifecycle in `docs/ai/workflow.md` § Task Group Sessions. See `docs/ai/quality-gates.md` gate A6 for verification requirements
 - BLOCK: **Session Branch Isolation** (Decision 0013) — each session uses a dedicated branch — enforced by bash-guard.sh / write-guard.sh (Section 3). After session close, the branch is sealed and must not be reused. Start a new branch for new work. Task group sessions are exempt (multi-brief groups share one branch)
 - REQUIRE: include git trailers on commits per the convention in `docs/ai/workflow.md` (Session Lifecycle → Git Trailer Convention)
