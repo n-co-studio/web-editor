@@ -41,4 +41,5 @@
 0024|\.claude/repo-mode|repo-mode, get_mode, IS_TEMPLATE, child, template, REPO_OS_MODE
 0024|\.gitignore|repo-mode, get_mode, IS_TEMPLATE, child, template, REPO_OS_MODE
 0024|\.templatesyncignore|repo-mode, get_mode, IS_TEMPLATE, child, template, REPO_OS_MODE
-0024|\.claude/hooks/(session-close-check|pre-commit-gates|_automation-bridge)\.sh|get_mode, IS_TEMPLATE, child, template, REPO_OS_MODE
+0024|\.claude/hooks/(session-close-check|pre-commit-gates|_automation-bridge)\.sh|repo-mode, get_mode, IS_TEMPLATE, child, template, REPO_OS_MODE
+0025|\.claude/agents/pragmatist\.md|pragmatist, over-engineer, yagni, plan-review

@@ -55,7 +55,7 @@ The mode is set at plan approval and recorded in phase-state.
 
 ### Solo Mode (Decision 0015)
 
-Branches merge to main directly at session close. See `.claude/agents/_agent-glossary.md` § Solo Mode for full merge semantics and branch type applicability, and `docs/ai/workflow.md` § Task Group Sessions for task group branch strategy.
+Branches merge to main directly at session close. See `.claude/agents/_agent-glossary.md` § Solo Mode for full merge semantics and branch type applicability, and `docs/ai/workflow-appendix/session-type-task-group.md` for task group branch strategy.
 
 ## Task Contract (Decision 0020)
 
@@ -88,7 +88,7 @@ See `.claude/agents/_agent-glossary.md` § User Review for full system definitio
 - REQUIRE: extract and write task contract at session init when present in the brief (Decision 0020). Contract serves as cohesion review reference
 - REQUIRE: after Builder signals done, Orchestrator runs a cohesion review (Critic in cohesion mode) before invoking QA. Critical cohesion findings must be resolved before commit. See `quality-gates.md` gate A5.
 - GUIDE: use HVST (see `_agent-glossary.md` § HVST) when debugging or instability appears. When HVST debugging stalls (2+ consecutive failures), Orchestrator dispatches HVST Review Board for multi-agent hypothesis review before further fix attempts. See `_hvst-review.md`
-- REQUIRE: **Task Group Contract** — if the task brief contains a `### Task Group` section, this session is part of a multi-brief group. Read and follow the contract lifecycle in `docs/ai/workflow.md` § Task Group Sessions. See `docs/ai/quality-gates.md` gate A6 for verification requirements
+- REQUIRE: **Task Group Contract** — if the task brief contains a `### Task Group` section, this session is part of a multi-brief group. Read and follow the contract lifecycle in `docs/ai/workflow-appendix/session-type-task-group.md`. See `docs/ai/quality-gates.md` gate A6 for verification requirements
 - BLOCK: **Session Branch Isolation** (Decision 0013) — each session uses a dedicated branch — enforced by bash-guard.sh / write-guard.sh (Section 3). After session close, the branch is sealed and must not be reused. Start a new branch for new work. Task group sessions are exempt (multi-brief groups share one branch)
 - REQUIRE: include git trailers on commits per the convention in `docs/ai/workflow.md` (Session Lifecycle → Git Trailer Convention)
 - REQUIRE: **Parallel Task Group Completion Marker** — if the task brief has `Execution: parallel` in `### Task Group`, write a per-brief completion marker file at session close: `.claude/.state/tg-{group}-brief-{seq}.complete` (content: ISO 8601 timestamp). This signals to the merge brief that this content brief has completed

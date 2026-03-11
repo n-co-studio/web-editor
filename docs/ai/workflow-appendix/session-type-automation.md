@@ -1,0 +1,43 @@
+# Session Type: Automation
+
+Decision 0017. Optional headless runner infrastructure in `.claude/.automation/`. Disabled by default (`config.yaml` → `runner.enabled: false`). When enabled, runners process queued task briefs via `claude -p` with full governance parity.
+
+**Runner lifecycle:**
+
+1. **Dequeue** — pick oldest `approved` queue entry, acquire flock-based queue lock, transition to `running`, release lock
+2. **Pre-launch** — create branch (or check out existing for task groups), register session, write `plan-approved` state file, pre-seed `.claude/.session-id`. Phase-state is agent-initiated: the agent calls `init_phase()` as its first Bash action (fast-exits bash-guard.sh — no redirect/tee). With fail-closed enforcement (Decision 0019), edits before `init_phase()` are blocked when the sentinel is present. Custom runners MUST ensure `init_phase()` is called before any Edit/Write tool use
+3. **Launch** — invoke `claude -p` with `--disallowedTools` permission profile and assembled prompt (template-based or inline fallback). Decision cache entries (max 10) are prepended to the prompt. The brief text contains the task contract inline as a `### Task Contract` section (Decision 0020); the runner includes the full brief in the assembled prompt and the agent extracts and writes the contract during init
+4. **Post-session** — detect outcome (completed/failed/review), perform external cleanup (solo merge, session registry, branch sealing — Stop hook does not fire in headless mode), transition queue entry
+
+**Toggle semantics:**
+
+| Method | Effect |
+|--------|--------|
+| `config.yaml` → `runner.enabled: false` | Daemon sleeps 30s between checks. Queued entries preserved |
+| `config.yaml` → `runner.enabled: true` | Daemon processes queue normally |
+| Create `.claude/.automation/HALT` file | Daemon exits immediately. Use for emergency stop |
+| Remove `HALT` file | Daemon resumes on next start |
+
+**Escalation:** When a headless session exits at an `operator`-tagged phase, the runner writes an escalation file (`.claude/.automation/escalations/`) and transitions the queue entry to `review` status. Nine escalation types: `gate-failure`, `governance-block`, `phase-tag-escalation`, `ambiguity`, `scope-exceeded`, `dependency-missing`, `security-risk`, `structural-change`, `scope-deviation`. The `scope-deviation` type includes `scope_classification` (briefed/unbriefed-in-scope/out-of-scope) and `risk_gain` context for operator review.
+
+**Queue validation:** Before dequeue, entries are validated: required fields (id, session_type, status), session type against Decision 0014 enum (`get_phases_for_type` must return non-empty), brief content non-empty and max 50KB, branch name sanitized to `[a-zA-Z0-9/_-]` max 100 chars. External-source entries may require HMAC-SHA256 signature verification (opt-in via `hmac_secret` in runner config).
+
+**Decision cache:** Two-level merge — project-level (`.claude/.automation/decision-cache.yaml`) and local-level (`.claude/.automation/local-decision-cache.yaml`). Local can extend or narrow enforcement, never elevate (cannot change REQUIRE to GUIDE). Merged output: max 10 entries, each formatted as `Decision NNNN: summary (MECHANISM)`, prepended to the assembled prompt.
+
+**File locking:** `flock`-based exclusive lock on `.claude/.automation/.queue-lock`. 5-second timeout, fails with error. Lock scope: single queue state transition (not entire session). Callers wrap individual `_transition()` calls.
+
+**Dev orchestrator:** Cross-brief health reports between task group briefs. Runner invokes after content brief completes and before merge brief starts. Uses the `audit` session type. Reports go to `.claude/.automation/reports/` (gitignored). See `.claude/agents/dev-orchestrator.md`.
+
+**Auto mode activation:** When the operator selects auto mode during plan approval for a task group session, the `plan-approval.sh` hook automatically queues remaining pending briefs from the task group contract, enables the runner (`config.yaml` → `runner.enabled: true`), and starts the daemon. Daemon output is logged to `.claude/.automation/logs/runner.log` (gitignored). Briefs are queued with `auto_mode: true` and `solo_mode: true` (final brief only). The current session continues interactively; subsequent briefs execute headlessly via the runner. Idempotent: briefs already in the queue (pending-review, approved, or running) are skipped. Brief content convention: `.claude/.automation/briefs/{group-name}/brief-{N}.md` — if pre-populated by the operator, the prompt assembler reads them; otherwise sessions receive governance context and contract metadata via the taskgroup-brief template. Activation requires the automation layer to be installed (config.yaml must exist). Standalone (non-task-group) auto mode sessions are unaffected.
+
+**Circuit breaker:** 3 consecutive global failures pause the daemon (60s sleep between checks). Reset on first success.
+
+**Intake CLI:** Standalone entry point for queue entry creation without the interactive bridge (`plan-approval.sh`). Usage: `.claude/.automation/lib/intake.sh --brief <path> [--auto-approve] [--session-type <type>] [--solo] [--push]`. Auto-enables the runner (`config.yaml` → `runner.enabled: true`) when entries are added. Accepts brief path, session type (Decision 0014 enum), auto-approve (place directly in `approved/`), solo mode, and push-on-complete flags.
+
+**push_on_complete:** Per-entry opt-in flag for branch push after session completion. When `push_on_complete: true` in the queue entry: solo sessions push main after merge, non-solo sessions push the feature branch. Push is advisory — failure warns but does not block. Enabled via `--push` flag in intake CLI or `push_on_complete` field in queue entry YAML.
+
+**Scope classification:** The pre-commit gate (`pre-commit-gates.sh`) classifies staged files against the task contract's `scope_files` list at commit time. Three categories: **briefed** (exact match — no action), **unbriefed-in-scope** (parent directory matches a scope file's parent — advisory escalation with risk/gain context), **out-of-scope** (no match — blocking, commit denied). The agent populates risk/gain context via `.claude/.state/scope-risk-gain` state file before commit. Escalation files are written to `.claude/.automation/escalations/` for runner integration. Classification is path-based (deterministic, no LLM). See Decision 0017 § Scope Classification Model.
+
+**PermissionRequest hook:** The `permission-request.sh` hook (wired to the `PermissionRequest` event in `settings.json`) auto-approves curated tools and Bash commands, denies dangerous patterns, and falls through to the VS Code dialog for unknown commands. Every request is logged to `.claude/.automation/logs/permission-audit.log` (gitignored, append-only). Deny list has priority over allow list (fail-safe). Does not fire in `claude -p` mode — headless sessions use `--disallowedTools` profiles instead. See Decision 0017 § PermissionRequest Hook.
+
+**AskUserQuestion deny hook:** The `ask-user-deny.sh` PreToolUse hook blocks `AskUserQuestion` in headless automation mode when `CLAUDE_HEADLESS=1` is set (by `runner.sh`). Defense-in-depth alongside `--disallowedTools`. Interactive sessions pass through unaffected. Blocked sessions are instructed to write escalation files instead.

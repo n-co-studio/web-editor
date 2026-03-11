@@ -28,8 +28,8 @@ for f in "$DECISIONS_DIR"/t-*.md "$DECISIONS_DIR"/0*.md; do
   grep -q '^## Triggers' "$f" || continue
   id=$(basename "$f" | sed -E 's/^(t-)?([0-9]+)-.*/\2/')
   block=$(sed -n '/^## Triggers/,/^## /{ /^## Triggers/d; /^## /d; p; }' "$f")
-  paths=$(echo "$block" | grep -oE 'paths?:\s*`[^`]*`' | sed -E 's/^paths?:[[:space:]]*`//' | sed 's/`$//')
-  keywords=$(echo "$block" | grep -oE 'keywords?:\s*`[^`]*`' | sed -E 's/^keywords?:[[:space:]]*`//' | sed 's/`$//')
+  paths=$(echo "$block" | grep -oE 'paths?:\s*`[^`]*`' | sed -E 's/^paths?:[[:space:]]*`//' | sed 's/`$//' || true)
+  keywords=$(echo "$block" | grep -oE 'keywords?:\s*`[^`]*`' | sed -E 's/^keywords?:[[:space:]]*`//' | sed 's/`$//' || true)
   [ -z "$paths" ] && continue
   while IFS= read -r p; do
     p=$(echo "$p" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')

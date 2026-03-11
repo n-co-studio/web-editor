@@ -9,6 +9,7 @@ Accepted
 - path: `\.claude/repo-mode`
 - path: `\.gitignore`
 - path: `\.templatesyncignore`
+- path: `\.claude/hooks/(session-close-check|pre-commit-gates|_automation-bridge)\.sh`
 - keywords: `repo-mode, get_mode, IS_TEMPLATE, child, template, REPO_OS_MODE`
 
 ## Context

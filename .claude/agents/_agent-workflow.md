@@ -8,7 +8,7 @@ Runs after Prompt 0, before build begins. Orchestrated by Prompt A Phase 1. Tier
 
 ## Task Definition Flow (Prompt T — Brief Mode)
 
-Lightweight spec-mode dispatch of Architect + Exploration + Critic + Pragmatist for task scoping. No file output. Canonical definition: `docs/ai/prompts/prompt-t-task-definition.md`. See also `docs/ai/workflow.md` § Task Definition Sessions.
+Lightweight spec-mode dispatch of Architect + Exploration + Critic + Pragmatist for task scoping. No file output. Canonical definition: `docs/ai/prompts/prompt-t-task-definition.md`. See also `docs/ai/workflow-appendix/session-type-task-definition.md`.
 
 ### Handoff Chain
 1. **Operator → Orchestrator**: Task description (what/why/constraints)
@@ -20,7 +20,7 @@ Lightweight spec-mode dispatch of Architect + Exploration + Critic + Pragmatist 
 
 No file artifacts. No session log entry. No handoff to Build Flow — the operator manually carries the brief to a new Prompt B session.
 
-**Narrow path (multi-brief):** When the operator narrows a task, each sub-brief includes a `### Task Group` section with group name, sequence, and integration notes. If sub-briefs have non-overlapping file scope, Prompt T offers parallel execution — parallel groups include `Execution: parallel`, per-brief `Boundaries:`, and an auto-generated merge brief (Brief M) that runs as `taskgroup-merge` session type. See `docs/ai/workflow.md` § Task Group Sessions for contract lifecycle and `docs/ai/task-groups/_contract-template.yaml` for the contract structure.
+**Narrow path (multi-brief):** When the operator narrows a task, each sub-brief includes a `### Task Group` section with group name, sequence, and integration notes. If sub-briefs have non-overlapping file scope, Prompt T offers parallel execution — parallel groups include `Execution: parallel`, per-brief `Boundaries:`, and an auto-generated merge brief (Brief M) that runs as `taskgroup-merge` session type. See `docs/ai/workflow-appendix/session-type-task-group.md` for contract lifecycle and `docs/ai/task-groups/_contract-template.yaml` for the contract structure.
 
 ---
 
@@ -63,86 +63,26 @@ Runs on-demand when the operator invokes Prompt C. Read-only — no file modific
 
 Phase labels correspond to Decision 0014 phase sequences. Auto/review mode set at approval phase.
 
-```
-                        OPERATOR
-              (owns architecture, approves plans)
-                            │
-                     [init phase]
-              create branch from main
-                            │
-                     [plan phase]
-                      ORCHESTRATOR
-               plans → gets approval → delegates
-          (reads/creates task group contract if applicable)
-                            │
-                   PRAGMATIST (plan-gating mode)
-              reviews plan for over-engineering
-                            │
-                  ┌─────────┴─────────┐
-            APPROVED            BLOCKED
-                  │                   │
-                  │          operator sees finding +
-                  │          "wrong if:" condition
-                  │          can override or re-plan
-                  │          (auto: degrade to advisory)
-                  │                   │
-                  └─────────┬─────────┘
-                            │
-                   [approval phase]
-              operator approves plan (auto/review)
-                            │
-                     [build phase]
-                        BUILDER
-            implements → runs local checks → signals done
-                            │
-                    [review phase]
-               CRITIC (cohesion mode)
-            reviews diff for internal coherence
-                            │
-                  ┌─────────┴─────────┐
-               CLEAN              FINDINGS
-                  │                   │
-                  │          Orchestrator reviews
-                  │          clear fixes → Builder
-                  │          ambiguity → Operator
-                  │          re-run Critic if fixes
-                  │                   │
-                  └─────────┬─────────┘
-                            │
-                    [verify phase]
-                    QA / VERIFIER ⚠️ COMMIT BLOCKER
-              verifies all gates (A1–A6, B1–B3) → BLOCK or APPROVE
-                            │
-                  ┌─────────┴─────────┐
-               PASS                 FAIL → back to Builder
-                  │
-            high-risk?
-                  │
-          ┌───────┴───────┐
-         YES              NO
-          │               │
-   REVIEWER + SECURITY    │
-     both sign off        │
-          │               │
-          └───────┴───────┘
-                  │
-         [user-review phase]
-       (optional — skipped when no
-        User Review in task brief)
-       dispatch persona agents → synthesize
-                  │
-                  ▼
-            [commit phase]
-           ✓ COMMIT ALLOWED
-                  │
-           [op-review phase]
-         (review mode: pause for operator)
-         (auto mode: skip to close)
-                  │
-            [close phase]
-         merge branch to main (solo mode)
-         seal branch (Decision 0013)
-```
+| Phase | Actor | Condition | Action | Next Phase |
+|-------|-------|-----------|--------|------------|
+| init | Operator | — | Create branch from main | plan |
+| plan | Orchestrator | — | Draft plan; read/create task group contract if applicable | plan-gate |
+| plan-gate | Pragmatist | APPROVED | — | approval |
+| plan-gate | Pragmatist | BLOCKED | Surface finding + "wrong if:" to operator; operator can override or re-plan; auto mode degrades to advisory | approval |
+| approval | Operator | — | Approve plan (sets auto/review mode) | build |
+| build | Builder | — | Implement; run local checks; signal done | review |
+| review | Critic (cohesion) | CLEAN | — | verify |
+| review | Critic (cohesion) | FINDINGS — clear fixes | Orchestrator sends fixes to Builder; re-run Critic | review |
+| review | Critic (cohesion) | FINDINGS — ambiguity | Orchestrator escalates to Operator | review |
+| verify | QA/Verifier | FAIL | Return to Builder | build |
+| verify | QA/Verifier | PASS — not high-risk | — | user-review |
+| verify | QA/Verifier + Reviewer + Security | PASS — high-risk | Reviewer + Security both sign off | user-review |
+| user-review | Persona agents | User Review declared in task brief | Dispatch persona agents; synthesize findings | commit |
+| user-review | — | No User Review in task brief | Skip | commit |
+| commit | Orchestrator | — | ✓ Commit allowed | op-review |
+| op-review | Operator | review mode | Pause for operator review | close |
+| op-review | — | auto mode | Skip | close |
+| close | Orchestrator | solo mode | Merge branch to main; seal branch (Decision 0013) | — |
 
 ---
 
@@ -150,49 +90,18 @@ Phase labels correspond to Decision 0014 phase sequences. Auto/review mode set a
 
 Phase labels correspond to Decision 0014 `taskgroup-merge` phase sequence. Runs after all parallel content briefs complete.
 
-```
-                     OPERATOR
-           (approves merged output)
-                         │
-                  [init phase]
-           check out task group branch
-                         │
-              [contract-init phase]
-         sync from contract
-         verify all completion markers exist
-         (.claude/.state/tg-{group}-brief-{seq}.complete)
-                         │
-               ┌─────────┤
-               │  [cohesion phase]
-               │  CRITIC (cohesion mode)
-               │  git diff main...HEAD (full branch diff)
-               │  reviews all parallel briefs' combined output
-               │         │
-               │   ┌─────┴─────┐
-               │ CLEAN      FINDINGS
-               │   │           │
-               │   │     fix directly (merge brief)
-               │   │     ambiguity → Operator
-               │   │           │
-               │   │    ┌──────┘
-               │   │    │ (self-loop: cohesion→cohesion)
-               └───┴────┘
-                         │
-                  [verify phase]
-                  QA / VERIFIER
-           verifies all gates (A1–A6, B1–B3)
-                         │
-                  [commit phase]
-                 ✓ COMMIT ALLOWED
-                         │
-                [op-review phase]
-          (review mode: pause for operator)
-          (auto mode: skip to close)
-                         │
-                  [close phase]
-          merge branch to main + seal branch
-          clean completion markers
-```
+| Phase | Actor | Condition | Action | Next Phase |
+|-------|-------|-----------|--------|------------|
+| init | Operator | — | Check out task group branch | contract-init |
+| contract-init | Orchestrator | — | Sync from contract; verify all completion markers exist (`.claude/.state/tg-{group}-brief-{seq}.complete`) | cohesion |
+| cohesion | Critic (cohesion) | CLEAN | — | verify |
+| cohesion | Critic (cohesion) | FINDINGS — clear fixes | Fix directly in merge brief | cohesion |
+| cohesion | Critic (cohesion) | FINDINGS — ambiguity | Escalate to Operator | cohesion |
+| verify | QA/Verifier | — | Verify all gates (A1–A6, B1–B3) | commit |
+| commit | Orchestrator | — | ✓ Commit allowed | op-review |
+| op-review | Operator | review mode | Pause for operator review | close |
+| op-review | — | auto mode | Skip | close |
+| close | Orchestrator | — | Merge branch to main; seal branch; clean completion markers | — |
 
 ---
 

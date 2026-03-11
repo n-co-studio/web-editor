@@ -93,128 +93,23 @@ Gates-B: B1-pass B2-n/a B3-n/a
 
 Query session history: `git log --format="%(trailers:key=Session)"` or `git log --format="%(trailers)"` for all trailers.
 
-### Prototype Sessions
+### Prototype Sessions — See: `docs/ai/workflow-appendix/session-type-prototype.md`
 
-Prototype sessions on `experiment/*` branches follow a lighter lifecycle. See `docs/ai/prompts/prompt-0.5-prototype.md` for full details. Key differences:
-- **No plan-before-code requirement** — the experiment brief (Spike/PoC) or verbal direction (Napkin) is the plan
-- **A4 safety only** — no process, quality, or review gates
-- **Simplified session log** — one-line entry referencing the prototype brief
-- **Agent chain** — Orchestrator + Builder only (no QA/Reviewer/Security unless requested)
-- **At close** — update the Learnings and Disposition sections of the brief before deleting the branch
-
-### Task Definition Sessions
-
-Prompt T facilitates exploration and task planning without producing file artifacts. Two modes:
-- **Query**: Conversational Q&A grounded in specs and codebase. No agent dispatch.
-- **Brief**: 3-agent team (Architect, Exploration, Critic) produces a structured task brief for Prompt B.
-
-Task definition sessions are fully ephemeral — no files written, no session log entries, no gates apply. The output is a terminal-displayed task brief the operator copy-pastes into a new Prompt B session. See `docs/ai/prompts/prompt-t-task-definition.md` for full details.
+### Task Definition Sessions — See: `docs/ai/workflow-appendix/session-type-task-definition.md`
 
 ### Ephemeral Sessions
 
 Lightweight session type for Q&A and exploration (Phase 3b). Phase sequence: `init → conversation → close`. Skips mode-guard, bash-guard branch gates, and close checks (no session log, no commit check). Does not trigger solo merge or branch seal. Use `init_phase "ephemeral"` when the user's intent is Q&A or exploration with no code changes expected. If the user later requests code changes, call `upgrade_session_type` to convert to standard (resets phase to `plan`).
 
-### Editor Live Sessions
+### Editor Live Sessions — See: `docs/ai/workflow-appendix/session-type-editor-live.md`
 
-Continuous visual-development session type for operator-driven editing workflows (Decision 0023). The operator edits files in an external editor and the agent responds to each saved change. Child mode only.
+### Task Group Sessions — See: `docs/ai/workflow-appendix/session-type-task-group.md`
 
-- **Phase sequence**: `init → build → commit → review → verify → op-review → close`
-- **Loops**: `commit→build` (next change iteration), `verify→build` (QA failure)
-- **No plan gate**: The operator's live edits are the plan. `has_plan_gate("editor-live")` returns false
-- **Gate profile**: A4 safety per-loop commit; full gates (minus `plan-approved`) at close when `review` is in `phases_completed`
-- **Signal mechanism**: Tracked status file + filesystem watcher (`.claude/hooks/editor-watch.sh`). The MCP server writes change records when the operator saves. The agent polls via `get_pending_visual_changes` MCP tool
-- **Watcher**: `fswatch` (preferred, macOS + Linux) or `inotifywait` (Linux fallback). 5-minute timeout per watch cycle. When neither is available, falls back to operator message trigger
-- **Close signal**: Structural keyword "close session" (Decision 0004 mechanical enforcement). When detected, agent advances through review → verify → op-review → close
-- **MCP tools**: `get_pending_visual_changes`, `acknowledge_visual_change`, optionally `get_design_tokens` and `resolve_to_token`
-- **Commit convention**: `feat: <description> (editor-live cycle N)` — each commit carries the cycle number
-- **Cycle advisory**: At 50 iterations, agent emits advisory suggesting close. Advisory only — operator may continue
-- **Cross-platform**: `fswatch` available via Homebrew (macOS) or package manager (Linux). `inotifywait` from `inotify-tools` (Linux). Pre-flight check at init warns when neither is installed
+Includes: Parallel Execution, Merge brief lifecycle, Task Contract Lifecycle (Decision 0020).
 
-See `docs/ai/prompts/prompt-e-editor-live.md` for the full prompt definition.
+### Automation Sessions — See: `docs/ai/workflow-appendix/session-type-automation.md`
 
-### Task Group Sessions
-
-When Prompt T splits a task into multiple briefs (Narrow path), each brief includes a `### Task Group` section. The briefs share a task group contract that coordinates naming, patterns, decisions, and integration points across sessions. Contract path depends on repo mode (template mode: `.claude/local/task-groups/{group-name}.yaml`; product mode: `docs/ai/task-groups/{group-name}.yaml`).
-
-- **One branch per group**: Brief 1 creates the branch. Briefs 2 through N-1 commit and close without merge. Brief N (final) merges to main and seals the branch. Non-final briefs do not seal the branch (Decision 0013)
-- **Contract lifecycle**: First Prompt B session creates the contract from brief metadata, following `docs/ai/task-groups/_contract-template.yaml`. Subsequent sessions read the contract at session start — conventions are binding constraints. At session close, update the contract: mark this brief's status as `complete`, set session number and branch, append any new session decisions. Append a `governance:` entry for the current brief recording gate results (A1–A6, B1–B3), any overrides used, and a timestamp. Prompt T never writes files
-- **Conventions are REQUIRE-level**: All sessions must follow the naming patterns, architectural patterns, decisions, and module boundaries established in the contract
-- **Sequential execution (default)**: Briefs are numbered and should be executed in order. The contract tracks `next_brief` for sequencing
-- **Pre-approval mode**: Operator may set auto mode for the entire group at Prompt T time. Individual briefs inherit the mode without re-prompting. The `approval` phase auto-passes for pre-approved groups
-- **Standalone sessions**: When the task brief has no `### Task Group` section, skip all contract-related behavior entirely
-- **Gate A6**: Verifies contract compliance when a task group is present. Skipped automatically for standalone briefs. Override: `SKIP_CONTRACT_CHECK=1`
-
-See `docs/ai/task-groups/_contract-template.yaml` for the contract structure and `docs/ai/quality-gates.md` for gate A6 details.
-
-#### Parallel Execution
-
-When Prompt T detects non-overlapping file scope across briefs, it offers parallel execution. The contract's `execution` field is set to `parallel`:
-
-- **Boundaries**: Each brief declares file paths/globs it owns exclusively. Parallel briefs MUST restrict edits to their declared boundaries. Shared files (index files, config) are owned by the merge brief. Edits outside boundaries require explicit operator approval
-- **Completion markers**: Each content brief writes `.claude/.state/tg-{group}-brief-{seq}.complete` at session close. The merge brief checks all markers before proceeding
-- **Merge brief (Brief M)**: Auto-generated by Prompt T, appended as the last brief. Uses the `taskgroup-merge` session type (Decision 0014). Runs after all content briefs complete. Phase sequence: `init → contract-init → cohesion → verify → commit → op-review → close`. The `cohesion` phase performs cross-session cohesion review across the combined diff from all parallel briefs. Integration issues are resolved in the `cohesion` phase (self-loop: `cohesion→cohesion`). Close always merges to main and seals the branch
-- **Branch strategy**: Same as sequential — one branch per group. Brief 1 creates the branch. Content briefs close without merge. Merge brief merges to main and seals
-
-**Merge brief lifecycle:**
-
-1. **`contract-init` phase**: Sync conventions from contract. Verify all content brief completion markers exist (glob: `.claude/.state/tg-*-brief-*.complete`). If any markers are missing, the agent blocks at this phase and reports which briefs have not completed. The operator restarts the failed brief or manually creates the marker file (`date -u +%Y-%m-%dT%H:%M:%SZ > .claude/.state/tg-{group}-brief-{seq}.complete`)
-2. **`cohesion` phase**: Run `git diff main...HEAD` to produce the combined diff from all parallel content briefs. Dispatch Critic in cohesion mode against this diff. Resolve findings directly (self-loop: `cohesion→cohesion`, capped at 2 rounds). See `.claude/agents/_cohesion-review.md` Cross-Session Cohesion Mode
-3. **`verify` phase**: QA verifies all gates (A1–A6, B1–B3). A6 applies (task group contract compliance)
-4. **`close` phase**: Merge to main, seal branch, clean completion markers (hook removes all `tg-*-brief-*.complete` files from `.claude/.state/`)
-
-### Task Contract Lifecycle
-
-Decision 0020. Task contracts persist the brief's intent as a lightweight YAML artifact for cohesion review reference. Two lifecycle scopes:
-
-- **Task-scoped** (singular builds): Prompt B extracts the YAML block from the `### Task Contract` section in the brief and writes it to `.claude/.state/task-contract.yaml` at session init. Cleaned at session close by `cleanup_session()` (same as other session-scoped state files). If `task-contract.yaml` already exists at session start (orphan from crashed session), delete it before writing the new one.
-
-- **Group-scoped** (task groups): The `intent:` block lives in the task group contract YAML. Written by each brief at `contract-init` phase from Prompt T output. The `intent:` block persists in the contract as part of the group's governance record — it is not deleted at close. Each brief updates its own `intent:` fields during `contract-init`; the final contract captures the last brief's intent alongside accumulated governance evidence.
-
-At cohesion review, the Orchestrator reads the task contract and passes its `verification:` criteria to Critic alongside the diff. Critic evaluates each criterion as VERIFIED, UNVERIFIED, or INCONCLUSIVE (advisory — feeds into the cohesion brief, not a separate gate). Sessions without task contracts skip contract verification silently.
-
-### Automation Sessions
-
-Decision 0017. Optional headless runner infrastructure in `.claude/.automation/`. Disabled by default (`config.yaml` → `runner.enabled: false`). When enabled, runners process queued task briefs via `claude -p` with full governance parity.
-
-**Runner lifecycle:**
-
-1. **Dequeue** — pick oldest `approved` queue entry, acquire flock-based queue lock, transition to `running`, release lock
-2. **Pre-launch** — create branch (or check out existing for task groups), register session, write `plan-approved` state file, pre-seed `.claude/.session-id`. Phase-state is agent-initiated: the agent calls `init_phase()` as its first Bash action (fast-exits bash-guard.sh — no redirect/tee). With fail-closed enforcement (Decision 0019), edits before `init_phase()` are blocked when the sentinel is present. Custom runners MUST ensure `init_phase()` is called before any Edit/Write tool use
-3. **Launch** — invoke `claude -p` with `--disallowedTools` permission profile and assembled prompt (template-based or inline fallback). Decision cache entries (max 10) are prepended to the prompt. The brief text contains the task contract inline as a `### Task Contract` section (Decision 0020); the runner includes the full brief in the assembled prompt and the agent extracts and writes the contract during init
-4. **Post-session** — detect outcome (completed/failed/review), perform external cleanup (solo merge, session registry, branch sealing — Stop hook does not fire in headless mode), transition queue entry
-
-**Toggle semantics:**
-
-| Method | Effect |
-|--------|--------|
-| `config.yaml` → `runner.enabled: false` | Daemon sleeps 30s between checks. Queued entries preserved |
-| `config.yaml` → `runner.enabled: true` | Daemon processes queue normally |
-| Create `.claude/.automation/HALT` file | Daemon exits immediately. Use for emergency stop |
-| Remove `HALT` file | Daemon resumes on next start |
-
-**Escalation:** When a headless session exits at an `operator`-tagged phase, the runner writes an escalation file (`.claude/.automation/escalations/`) and transitions the queue entry to `review` status. Nine escalation types: `gate-failure`, `governance-block`, `phase-tag-escalation`, `ambiguity`, `scope-exceeded`, `dependency-missing`, `security-risk`, `structural-change`, `scope-deviation`. The `scope-deviation` type includes `scope_classification` (briefed/unbriefed-in-scope/out-of-scope) and `risk_gain` context for operator review.
-
-**Queue validation:** Before dequeue, entries are validated: required fields (id, session_type, status), session type against Decision 0014 enum (`get_phases_for_type` must return non-empty), brief content non-empty and max 50KB, branch name sanitized to `[a-zA-Z0-9/_-]` max 100 chars. External-source entries may require HMAC-SHA256 signature verification (opt-in via `hmac_secret` in runner config).
-
-**Decision cache:** Two-level merge — project-level (`.claude/.automation/decision-cache.yaml`) and local-level (`.claude/.automation/local-decision-cache.yaml`). Local can extend or narrow enforcement, never elevate (cannot change REQUIRE to GUIDE). Merged output: max 10 entries, each formatted as `Decision NNNN: summary (MECHANISM)`, prepended to the assembled prompt.
-
-**File locking:** `flock`-based exclusive lock on `.claude/.automation/.queue-lock`. 5-second timeout, fails with error. Lock scope: single queue state transition (not entire session). Callers wrap individual `_transition()` calls.
-
-**Dev orchestrator:** Cross-brief health reports between task group briefs. Runner invokes after content brief completes and before merge brief starts. Uses the `audit` session type. Reports go to `.claude/.automation/reports/` (gitignored). See `.claude/agents/dev-orchestrator.md`.
-
-**Auto mode activation:** When the operator selects auto mode during plan approval for a task group session, the `plan-approval.sh` hook automatically queues remaining pending briefs from the task group contract, enables the runner (`config.yaml` → `runner.enabled: true`), and starts the daemon. Daemon output is logged to `.claude/.automation/logs/runner.log` (gitignored). Briefs are queued with `auto_mode: true` and `solo_mode: true` (final brief only). The current session continues interactively; subsequent briefs execute headlessly via the runner. Idempotent: briefs already in the queue (pending-review, approved, or running) are skipped. Brief content convention: `.claude/.automation/briefs/{group-name}/brief-{N}.md` — if pre-populated by the operator, the prompt assembler reads them; otherwise sessions receive governance context and contract metadata via the taskgroup-brief template. Activation requires the automation layer to be installed (config.yaml must exist). Standalone (non-task-group) auto mode sessions are unaffected.
-
-**Circuit breaker:** 3 consecutive global failures pause the daemon (60s sleep between checks). Reset on first success.
-
-**Intake CLI:** Standalone entry point for queue entry creation without the interactive bridge (`plan-approval.sh`). Usage: `.claude/.automation/lib/intake.sh --brief <path> [--auto-approve] [--session-type <type>] [--solo] [--push]`. Auto-enables the runner (`config.yaml` → `runner.enabled: true`) when entries are added. Accepts brief path, session type (Decision 0014 enum), auto-approve (place directly in `approved/`), solo mode, and push-on-complete flags.
-
-**push_on_complete:** Per-entry opt-in flag for branch push after session completion. When `push_on_complete: true` in the queue entry: solo sessions push main after merge, non-solo sessions push the feature branch. Push is advisory — failure warns but does not block. Enabled via `--push` flag in intake CLI or `push_on_complete` field in queue entry YAML.
-
-**Scope classification:** The pre-commit gate (`pre-commit-gates.sh`) classifies staged files against the task contract's `scope_files` list at commit time. Three categories: **briefed** (exact match — no action), **unbriefed-in-scope** (parent directory matches a scope file's parent — advisory escalation with risk/gain context), **out-of-scope** (no match — blocking, commit denied). The agent populates risk/gain context via `.claude/.state/scope-risk-gain` state file before commit. Escalation files are written to `.claude/.automation/escalations/` for runner integration. Classification is path-based (deterministic, no LLM). See Decision 0017 § Scope Classification Model.
-
-**PermissionRequest hook:** The `permission-request.sh` hook (wired to the `PermissionRequest` event in `settings.json`) auto-approves curated tools and Bash commands, denies dangerous patterns, and falls through to the VS Code dialog for unknown commands. Every request is logged to `.claude/.automation/logs/permission-audit.log` (gitignored, append-only). Deny list has priority over allow list (fail-safe). Does not fire in `claude -p` mode — headless sessions use `--disallowedTools` profiles instead. See Decision 0017 § PermissionRequest Hook.
-
-**AskUserQuestion deny hook:** The `ask-user-deny.sh` PreToolUse hook blocks `AskUserQuestion` in headless automation mode when `CLAUDE_HEADLESS=1` is set (by `runner.sh`). Defense-in-depth alongside `--disallowedTools`. Interactive sessions pass through unaffected. Blocked sessions are instructed to write escalation files instead.
+Includes: Runner lifecycle, toggle semantics, escalation, queue validation, decision cache, file locking, dev orchestrator, auto mode activation, circuit breaker, intake CLI, push_on_complete, scope classification, PermissionRequest hook, AskUserQuestion deny hook.
 
 ### Governance Layers
 

@@ -38,7 +38,7 @@ This is a headless automation session (runner-invoked via `claude -p`).
 6. Read the task group contract:
    - Template mode: `.claude/local/task-groups/{group_name}.yaml`
    - Product mode: `docs/ai/task-groups/{group_name}.yaml`
-   - If contract does not exist (brief 1): create from task brief metadata following the contract schema in `docs/ai/workflow.md` § Task Group Sessions
+   - If contract does not exist (brief 1): create from task brief metadata following the contract schema in `docs/ai/workflow-appendix/session-type-task-group.md`
    - If contract exists (briefs 2+): sync conventions (REQUIRE-level binding), read prior session decisions, check brief boundaries
 7. Read the project specification: check `docs/spec/compiled/manifest.json` for the active version, then read all files in `docs/spec/compiled/{active}/`
 8. Check `docs/ai/governance/` for inter-session governance evidence (advisory)
