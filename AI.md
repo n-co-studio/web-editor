@@ -20,8 +20,8 @@ Agent-allowed:
 ## Source of Truth
 - docs/spec/compiled/ (active version per manifest.json)
 - docs/spec/prototypes/ (experiment briefs and prototype learnings)
-- docs/ai/workflow.md
-- docs/ai/quality-gates.md
+- docs/ai/workflow.md (skip for ephemeral session type; load at init for all other session types)
+- docs/ai/quality-gates-summary.md
 - docs/ai/decisions/ (all files except t-0001 through t-0004, which are on-demand below; includes DIGEST.md as compressed foundational reference)
 - docs/ai/logs/session-log.md (template mode: `.claude/local/session-log.md`)
 - docs/ai/logs/known-issues.md (template mode: `.claude/local/known-issues.md`)
@@ -44,6 +44,8 @@ On-demand (loaded by orchestrator.md triggers, not at session start):
 - docs/ai/workflow-appendix/session-type-editor-live.md (read when session type is editor-live — detected at init from brief or operator signal)
 - docs/ai/workflow-appendix/session-type-task-group.md (read when session type is task-group or taskgroup-merge — detected at init from `### Task Group` in brief)
 - docs/ai/workflow-appendix/session-type-automation.md (read when session type is automation — detected at init from runner context or operator signal)
+- docs/ai/quality-gates.md (read in full when in verify or commit phase, or when QA agent is dispatched)
+- docs/ai/workflow.md (read when `upgrade_session_type` is called on an ephemeral session)
 
 Hooks (`.claude/hooks/`) enforce governance automatically via phase-aware flow management (Decision 0014). Neither hooks nor settings (`.claude/settings.json`, auto-loaded by Claude Code) need to be read into context.
 

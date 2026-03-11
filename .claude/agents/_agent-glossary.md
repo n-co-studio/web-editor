@@ -205,6 +205,8 @@ Continuous visual-development session type for operator-driven editing workflows
 
 Lightweight session type for Q&A and exploration: `init → conversation → close`. Skips mode-guard, bash-guard branch gates, and close checks. Does not trigger solo merge or branch seal. Use `upgrade_session_type` to convert to standard mid-session when code changes are needed (resets phase to `plan`).
 
+REQUIRE: when `upgrade_session_type` is called, before continuing post-upgrade read `docs/ai/workflow.md` and `docs/ai/quality-gates.md` (full file) if not already in context — these are skipped at init for ephemeral sessions and must be loaded before standard-session work proceeds.
+
 ### Auto/Review Mode
 
 - **Auto**: Agent completes through merge autonomously. `op-review` phase skipped.

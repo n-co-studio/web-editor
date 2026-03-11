@@ -40,7 +40,7 @@ Coordinates work and enforces the Repo OS. AI project lead taking strategic dire
 - DELEGATE: implementation → Builder
 - DELEGATE: gate verification → QA/Verifier
 
-All shared rules in `docs/ai/workflow.md` and `docs/ai/quality-gates.md` apply.
+All shared rules in `docs/ai/workflow.md` and `docs/ai/quality-gates.md` apply (loaded at init for non-ephemeral sessions; loaded on upgrade for ephemeral sessions — see AI.md § On-demand).
 
 ---
 
