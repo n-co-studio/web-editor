@@ -99,7 +99,7 @@ Query session history: `git log --format="%(trailers:key=Session)"` or `git log 
 
 ### Ephemeral Sessions
 
-Lightweight session type for Q&A and exploration (Phase 3b). Phase sequence: `init → conversation → close`. Skips mode-guard, bash-guard branch gates, and close checks (no session log, no commit check). Does not trigger solo merge or branch seal. Use `init_phase "ephemeral"` when the user's intent is Q&A or exploration with no code changes expected. If the user later requests code changes, call `upgrade_session_type` to convert to standard (resets phase to `plan`).
+See: `_agent-glossary.md` § Ephemeral Sessions for semantics. Use `init_phase "ephemeral"` for Q&A/exploration. Convert to standard via `upgrade_session_type` when code changes are needed.
 
 ### Editor Live Sessions — See: `docs/ai/workflow-appendix/session-type-editor-live.md`
 

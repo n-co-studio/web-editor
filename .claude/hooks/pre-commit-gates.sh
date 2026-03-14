@@ -33,8 +33,8 @@ START_MS=$(now_ms)
 # A1, high-risk) cannot inspect the commit command, so we block rather than
 # silently skipping checks. Install jq: https://jqlang.github.io/jq/download/
 if ! command -v jq &>/dev/null; then
-  echo "GATE BLOCKED: jq is required for pre-commit gate checks but was not found." >&2
-  echo "  Install jq (https://jqlang.github.io/jq/download/) and retry." >&2
+  echo "GATE-FINAL: jq is required for pre-commit gate checks but was not found." >&2
+  echo "  Install jq (https://jqlang.github.io/jq/download/) and retry. (no override)" >&2
   exit 2
 fi
 
@@ -107,7 +107,7 @@ if [ -n "$STAGED_FILES" ]; then
   A4_MATCHES=$(echo "$A4_ADDED_LINES" | grep -iE "$SECRET_PATTERN" 2>/dev/null || true)
   if [ -n "$A4_MATCHES" ]; then
     A4_FIRST_FILE=$(echo "$A4_MATCHES" | head -1 | sed 's/^b\///' | sed 's/: .*//')
-    echo "GATE A4 FAILED: Possible secret in staged diff (added lines): $A4_FIRST_FILE" >&2
+    echo "GATE-RECOVERABLE: A4 — possible secret in staged diff: $A4_FIRST_FILE. NEXT: Remove the secret from staged files before committing." >&2
     block "A4_secret_detected"
     log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A4_secret_detected" "" "$A4_FIRST_FILE"
   fi
@@ -166,7 +166,7 @@ if [ "$SKIP_STATE" = false ]; then
   if [ -n "$CURRENT_PHASE" ]; then
     # Phase-state active — use phase model as primary check
     if ! assert_phase "commit"; then
-      echo "GATE PHASE FAILED: Session is in '$CURRENT_PHASE' phase — must reach 'commit' phase before committing. Complete QA verification to advance." >&2
+      echo "GATE-RECOVERABLE: Session in '$CURRENT_PHASE' phase — must reach 'commit' phase. NEXT: Complete QA verification (qa-verifier agent) to advance to commit phase." >&2
       block "phase_gate_not_commit"
       log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "phase_gate_not_commit" "phase:$CURRENT_PHASE"
     fi
@@ -187,21 +187,21 @@ if [ "$SKIP_STATE" = false ]; then
   elif [ "${REPO_OS_SKIP_PLAN_GATE:-0}" = "1" ]; then
     log_override "pre-commit-gates" "REPO_OS_SKIP_PLAN_GATE"
   elif [ ! -f "$STATE_DIR/plan-approved" ]; then
-    echo "GATE STATE FAILED: .claude/.state/plan-approved not found — run plan approval first (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
+    echo "GATE-RECOVERABLE: plan-approved state file missing. NEXT: Use AskUserQuestion to present plan for operator approval (triggers plan-approval hook). (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
     block "state_plan_missing"
     log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_plan_missing"
   fi
 
   # cohesion-reviewed: required except on hotfix/* (A5 skipped per gate profile)
   if [ "$IS_HOTFIX" = false ] && [ ! -f "$STATE_DIR/cohesion-reviewed" ]; then
-    echo "GATE STATE FAILED: .claude/.state/cohesion-reviewed not found — run Critic cohesion review first" >&2
+    echo "GATE-RECOVERABLE: cohesion-reviewed state file missing. NEXT: Dispatch Critic agent in cohesion mode (after Builder completes, before QA). (override: REPO_OS_RECOVER=1)" >&2
     block "state_cohesion_missing"
     log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_cohesion_missing"
   fi
 
   # qa-verified: required on all non-experiment branches
   if [ ! -f "$STATE_DIR/qa-verified" ]; then
-    echo "GATE STATE FAILED: .claude/.state/qa-verified not found — run QA verification first" >&2
+    echo "GATE-RECOVERABLE: qa-verified state file missing. NEXT: Dispatch QA verification agent (after Critic cohesion review passes). (override: REPO_OS_RECOVER=1)" >&2
     block "state_qa_missing"
     log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_qa_missing"
   fi
@@ -261,7 +261,7 @@ if [ "$SKIP_STATE" = false ] && [ "$IS_HOTFIX" = false ] && [ -n "$STAGED_FILES"
       LARGE_SCOPE=true
     fi
     if [ "$LARGE_SCOPE" = false ]; then
-      echo "GATE A2 FAILED: $LINES_CHANGED lines changed — exceeds 100-line threshold without large-scope approval" >&2
+      echo "GATE-RECOVERABLE: A2 — $LINES_CHANGED lines changed, exceeds 100-line threshold. NEXT: Get large-scope approval (include 'large-scope: true' in plan-approved state file via AskUserQuestion)." >&2
       block "A2_scope_exceeded"
       log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A2_scope_exceeded" "lines:$LINES_CHANGED"
     fi
@@ -307,7 +307,7 @@ if [ "$SKIP_STATE" = false ] && [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
       done
     fi
     if [ "$CONTRACT_FOUND" = false ]; then
-      echo "GATE A6 FAILED: Task group session ($A6_SESSION_TYPE) but no contract with 'status: in_progress' found — create the contract during contract-init phase (override: SKIP_CONTRACT_CHECK=1)" >&2
+      echo "GATE-RECOVERABLE: A6 — task group session ($A6_SESSION_TYPE) but no contract with 'status: in_progress'. NEXT: Create the contract during contract-init phase. (override: SKIP_CONTRACT_CHECK=1)" >&2
       block "A6_contract_missing"
       log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A6_contract_missing" "session_type:$A6_SESSION_TYPE"
     fi
@@ -325,7 +325,7 @@ if [ "$SKIP_STATE" = false ] && [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
         fi
       done <<< "$UNSTAGED_CONTRACTS"
       if [ -n "$NOT_STAGED" ]; then
-        echo "GATE A6 FAILED: Task group contract modified but not staged: $NOT_STAGED" >&2
+        echo "GATE-RECOVERABLE: A6 — task group contract modified but not staged: $NOT_STAGED. NEXT: Stage the contract with git add." >&2
         block "A6_contract_unstaged"
         log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A6_contract_unstaged" "" "$NOT_STAGED"
       fi
@@ -429,7 +429,7 @@ $_sp_parent
       if [ -n "$OUT_OF_SCOPE_FILES" ]; then
         _oos_first=$(echo "$OUT_OF_SCOPE_FILES" | head -1)
         _oos_count=$(echo "$OUT_OF_SCOPE_FILES" | wc -l | tr -d ' ')
-        echo "GATE SCOPE FAILED: $_oos_count file(s) out of scope — not in task contract scope_files or related directories: $_oos_first" >&2
+        echo "GATE-RECOVERABLE: Scope — $_oos_count file(s) out of scope: $_oos_first. NEXT: Add files to task contract scope_files or remove from staging." >&2
         block "scope_out_of_scope"
         log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "scope_out_of_scope" "count:$_oos_count" "$_oos_first"
 
@@ -555,7 +555,7 @@ if [ "$SKIP_STATE" = false ] && [ -n "$STAGED_FILES" ]; then
     fi
 
     if [ -n "$MISSING_SIGNOFFS" ]; then
-      echo "GATE HIGH-RISK FAILED: High-risk patterns detected — missing sign-offs: $MISSING_SIGNOFFS" >&2
+      echo "GATE-RECOVERABLE: High-risk patterns detected — missing sign-offs: $MISSING_SIGNOFFS. NEXT: Dispatch Reviewer and Security agents for sign-off." >&2
       # Build detail with risk source (path or content match)
       RISK_DETAIL=""
       if [ -n "$RISK_PATH_MATCHES" ]; then
@@ -723,7 +723,7 @@ if [ -n "$STAGED_FILES" ] && [ -d "$DECISIONS_DIR" ]; then
     # --- A1 structural check (fallback path only) ---
     if [ "$MISSING_TRIGGERS" -gt 0 ]; then
       if [ "$A1_BLOCKING" = true ]; then
-        echo "GATE A1 FAILED: $MISSING_TRIGGERS of $TOTAL_DECISIONS decision files lack ## Triggers section" >&2
+        echo "GATE-RECOVERABLE: A1 — $MISSING_TRIGGERS of $TOTAL_DECISIONS decision files lack ## Triggers section. NEXT: Add ## Triggers section to decision files." >&2
         block "A1_missing_triggers"
       else
         echo "GATE A1 WARNING: $MISSING_TRIGGERS of $TOTAL_DECISIONS decision files lack ## Triggers section" >&2
@@ -749,7 +749,7 @@ if [ -n "$STAGED_FILES" ] && [ -d "$DECISIONS_DIR" ]; then
     if [ -n "$MISSING_DECISION_IDS" ]; then
       A1_DETAIL="triggered:${TRIGGERED_DECISIONS// /} missing:${MISSING_DECISION_IDS// /}"
       if [ "$A1_BLOCKING" = true ]; then
-        echo "GATE A1 FAILED: Decisions triggered but not declared in trailer: $MISSING_DECISION_IDS" >&2
+        echo "GATE-RECOVERABLE: A1 — decisions triggered but not in trailer: $MISSING_DECISION_IDS. NEXT: Add Decisions: trailer to commit message." >&2
         block "A1_decisions_missing"
         log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A1_decisions_missing" "$A1_DETAIL"
       else

@@ -114,19 +114,6 @@ Before session close:
 
 ## Handoffs
 
-**Receives:** Task requests and approvals (Operator), escalations (Builder), cohesion briefs (Critic), plan-review verdicts (Pragmatist), gate results (QA), verdicts (Reviewer/Security), specialist briefs (Advisory Board), PM assessments and spec-edit proposals (PM Advisory), audit dimension briefs (Auditor)
+**Receives:** Task requests/approvals (Operator), escalations (Builder), cohesion briefs (Critic), plan-review verdicts (Pragmatist), gate results (QA), verdicts (Reviewer/Security), specialist briefs (Advisory Board), PM assessments (PM Advisory), audit briefs (Auditor)
 
-**Sends to:**
-- **Advisory Board**: Compiled specs or feature briefs for review (Prompt A Phase 1)
-- **Operator**: Synthesized refinement report for review (Prompt A Phase 2)
-- **Pragmatist (plan-gating mode)**: Draft plan text for over-engineering review — during plan phase, before presenting to operator
-- **Builder**: Plan, instructions, applicable decisions, scope boundaries
-- **HVST Review Board (Architect + Exploration + Critic hypothesis mode)**: Error context, attempted hypotheses, files touched — when debugging stalls or operator requests review
-- **Auditor**: Dimension mode + scope for project audit (Prompt C) — one dispatch per dimension
-- **Specialist (audit escalation)**: Finding context from Auditor escalation tags — one-shot focused review
-- **Critic (cohesion mode)**: Diff summary, changed files list, context for coherence review — after Builder completes, before QA
-- **PM Advisory**: Compiled specs, mvp-scope.yaml, task description or diff — for scope/spec advisory (Prompt T/A/B review phase, on-demand)
-- **QA**: Verification request after cohesion review clean
-- **Reviewer/Security**: Code for review (when high-risk), or full-codebase audit scope (Prompt C)
-- **Accessibility**: UI code with context (when applicable)
-- **Operator**: Questions, session summaries, completion reports, Audit Reports
+**Sends to:** Advisory Board (specs, Prompt A), Pragmatist (draft plan, plan-gating), Builder (plan + decisions + scope), HVST Review Board (error context, when debugging stalls), Auditor (dimension + scope, Prompt C), Critic (diff + files, post-build), PM Advisory (specs + diff, on-demand), QA (verification request), Reviewer/Security (code for high-risk review), Accessibility (UI code), Operator (reports, questions, summaries)

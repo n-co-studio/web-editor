@@ -1,6 +1,6 @@
 # Agent Glossary
 
-Shared definitions for scope, risk, and enforcement. All agents interpret these terms consistently.
+Shared definitions for scope, risk, and enforcement.
 
 ---
 
@@ -41,42 +41,25 @@ Docs, tests, formatting, comments, dev tooling
 ## Protocols
 
 ### HVST (Hypothesis → Validate → Solve → Test → Record)
-5-step debugging protocol for non-trivial failures. Prevents random-fix loops by requiring a hypothesis before any code change. Tracked by `hvst-failure-tracker.sh` hook.
+5-step debugging protocol for non-trivial failures. Requires hypothesis before code change. Tracked by `hvst-failure-tracker.sh`. Use when: bugs, failing tests, unstable behavior. Loop: **Hypothesis** → **Validate** (smallest experiment) → **Solve** (minimal fix) → **Test** (rerun) → **Record** (after 2+ failed cycles: add to `known-issues.md`; template mode: `.claude/local/known-issues.md`). At 2 consecutive failures, check `known-issues.md` for matches. REQUIRE: known-issues documentation at session close (advisory, downgraded from blocking). Override: `SKIP_KNOWN_ISSUES_CHECK=1`.
 
-Use when: fixing bugs, failing tests, unstable behavior. Not required for simple feature work.
-
-Loop: **Hypothesis** → **Validate** (smallest experiment) → **Solve** (minimal fix) → **Test** (rerun checks) → **Record**
-
-**Record** (after 2+ failed cycles): When resolved, add entry to `docs/ai/logs/known-issues.md` (template mode: `.claude/local/known-issues.md`) if not already present. At 2 consecutive failures, check `known-issues.md` for matches before continuing. REQUIRE: known-issues documentation at session close (advisory reminder by session-close-check.sh when 2+ HVST failures occurred and `known-issues.md` was not updated — downgraded from blocking in Phase 2b). Override: `SKIP_KNOWN_ISSUES_CHECK=1` (use when failures were transient — network, timing).
-
-**Review Board** (optional): At 2+ consecutive failures or on operator request, Orchestrator dispatches Architect + Exploration + Critic (hypothesis mode) to review failure context and produce ranked hypotheses before further fix attempts. See `.claude/agents/_hvst-review.md`.
+**Review Board** (optional): At 2+ failures or operator request → Architect + Exploration + Critic (hypothesis mode). See `.claude/agents/_hvst-review.md`.
 
 ### Cohesion Review
-Post-build review by the Critic agent (cohesion mode) checking the diff and surrounding code for internal codebase coherence: broken cross-references, dangling imports, inconsistent naming, half-finished integrations, and contradictory patterns. Verified by QA as gate A5. Not the same as spec review (advisory board) — cohesion operates on code, not specs.
+Post-build Critic review (cohesion mode): checks diff + surrounding code for broken cross-references, dangling imports, inconsistent naming, contradictory patterns. Gate A5. Operates on code, not specs.
 
 ### PM Scope Labels
-PM-specific labels orthogonal to advisory board severity levels. Applied by the PM Advisory agent alongside standard severity (CRITICAL / RECOMMENDATION / IDEA):
-
-| Label | Meaning |
-|-------|---------|
-| IN-SCOPE | Finding relates to work within the defined MVP scope |
-| OUT-OF-SCOPE | Finding relates to work outside the defined MVP scope |
-| DEFER | Finding relates to work that should be deferred to a later phase |
-
-Scope labels do not affect Refinement Report routing — findings route by severity as normal. Labels are informational context preserved inline.
+PM-specific labels (orthogonal to severity): **IN-SCOPE**, **OUT-OF-SCOPE**, **DEFER**. Applied by PM Advisory alongside standard severity. Informational — do not affect Refinement Report routing.
 
 ---
 
 ## Reserved Directories
 
-### `~/.local/share/repo-os-analytics/`
-Active centralized analytics store. Contains hook telemetry data (NDJSON event files) organized by repo name (`<repo-name>/events/<date>.ndjson`). Reserved for the Analytics specialist agent — all other agents MUST NOT read this directory. Data lives outside the repo tree, so broad repo-scoped Grep/Glob patterns never hit it. The Analytics agent is invoked on-demand by the operator only.
-
-### `.claude/analytics/` (legacy)
-May contain historical event data from before centralized storage migration. Read-only legacy data — the Analytics agent may still read this for historical analysis. No new events are written here.
-
-### `.claude/.automation/`
-Automation layer runtime directory (Decision 0017). Contains schemas (`schemas/`, tracked), config (`config.yaml`, tracked), decision cache (`decision-cache.yaml`, tracked), brief templates (`templates/`, tracked), runner libraries (`lib/`, tracked), and runtime artifacts (`queue/`, `reports/`, `escalations/`, `briefs/`, `logs/` — gitignored). Reserved for the runner process. The Dev Orchestrator agent writes health reports to `reports/` via Bash redirect. All other agents MUST NOT write to this directory.
+| Directory | Purpose | Access |
+|-----------|---------|--------|
+| `~/.local/share/repo-os-analytics/` | Centralized hook telemetry (NDJSON by repo/date). Outside repo tree | Analytics agent only — all others MUST NOT read |
+| `.claude/analytics/` (legacy) | Historical event data (pre-migration). Read-only | Analytics agent (historical reads only) |
+| `.claude/.automation/` | Automation layer (Decision 0017). Tracked: schemas, config, decision cache, templates, lib. Gitignored: queue, reports, escalations, briefs, logs | Runner process + Dev Orchestrator (reports only). All others MUST NOT write |
 
 ---
 
@@ -88,11 +71,21 @@ Automated script at lifecycle events (pre-commit, session stop). Runs regardless
 ### Subagent
 Agent invoked via Task tool with isolated context and tool restrictions from YAML frontmatter. Frontmatter hooks (e.g., `agent-git-guard.sh` on Bash PreToolUse) run inside the subagent's context — they block actions like `git commit`/`git push` within the subagent without affecting the orchestrator.
 
+### Hook Message Prefixes
+All blocking hook messages use semantic prefixes for agent recovery:
+
+| Prefix | Meaning | Format |
+|--------|---------|--------|
+| **GATE-RECOVERABLE** | Blocked but agent can fix and retry | `GATE-RECOVERABLE: <condition>. NEXT: <recovery action>. (override: <var>)` |
+| **GATE-FINAL** | Blocked, no agent recovery path (immune paths, secrets) | `GATE-FINAL: <condition>. (override: <var>)` or `(no override)` |
+
+Hook authors: use `GATE-RECOVERABLE` when the agent has a concrete next step. Use `GATE-FINAL` when only a human or env var can unblock.
+
 ### Settings
 `.claude/settings.json` (team, committed) and `.claude/settings.local.json` (personal, gitignored).
 
 ### State Files
-Session-scoped governance evidence in `.claude/.state/`. Written by hooks via shell I/O (never model tools). Read by pre-commit gates to verify governance steps completed.
+Governance evidence in `.claude/.state/`. Written by hooks via shell I/O (never model tools). Read by pre-commit gates.
 
 | File | Writer | Gate |
 |------|--------|------|
@@ -111,55 +104,29 @@ Session-scoped governance evidence in `.claude/.state/`. Written by hooks via sh
 | `merge-source-branch` | `_phase-helper.sh` (`write_merge_signal`) | Agent-to-hook merge signal — indicates agent completed merge in close phase (session-close-check.sh skips redundant merge) |
 | `scope-risk-gain` | Orchestrator (model) | Risk/gain context for unbriefed-in-scope files — read by `pre-commit-gates.sh` scope classification gate, included in advisory escalation (Decision 0017) |
 
-**Operational files** (`.claude/`, outside `.state/`):
+**Operational files** (`.claude/`, outside `.state/`): `.session-log-hash` (log content hash), `.session-baseline-sha` (commit baseline), `.session-id` (analytics correlation), `.session-type` (session classification), `.hvst-fail-count` (HVST counter), `.deferrals-pending` (deferred findings signal).
 
-| File | Writer | Purpose |
-|------|--------|---------|
-| `.session-log-hash` | `session-close-check.sh` (`update_baseline`) | Session log content hash — baseline for next session's modification check |
-| `.session-baseline-sha` | `session-close-check.sh` (`update_baseline`) | Commit SHA — baseline for zero-change session detection |
-| `.session-id` | `_analytics-helper.sh` (`get_session_id`) | Session identifier for analytics event correlation |
-| `.session-type` | Operator/model (manual) or `session-close-check.sh` (inferred) | Session classification (build/qa/audit/explore) for analytics |
-| `.hvst-fail-count` | `hvst-failure-tracker.sh` | Consecutive Bash failure counter for HVST reminders |
-| `.deferrals-pending` | Orchestrator (model) | Signals deferred audit/advisory findings — consumed by session-close-check |
+**Session registry** (`.claude/.state/sessions/*.yaml`): Active session tracking (branch, PID, timestamp). Cleaned by `unregister_session()` at close and stale-entry cleanup (dead PIDs, >24h age).
 
-**Session registry** (`.claude/.state/sessions/`):
-
-| File | Writer | Purpose |
-|------|--------|---------|
-| `sessions/*.yaml` | `_analytics-helper.sh` (`register_session`) | Active session tracking — branch, PID, timestamp. Cleaned by `unregister_session()` at close and stale-entry cleanup (dead PIDs, >24h age) |
-
-Note: `.stop-attempt-count` moved to `.claude/.state/` (see State Files table above) for state-guard protection.
-
-**Lifecycle:** `.state/` files (including `phase-state`, `.stop-attempt-count`), `.session-id`, `.session-type`, `.hvst-fail-count`, and `.deferrals-pending` are session-scoped — cleaned at close by `cleanup_session()`. `.session-log-hash` and `.session-baseline-sha` are persistent — survive across sessions, updated by `update_baseline()`.
+**Lifecycle:** `.state/` files, `.session-id`, `.session-type`, `.hvst-fail-count`, `.deferrals-pending` are session-scoped (cleaned at close). `.session-log-hash` and `.session-baseline-sha` are persistent (survive across sessions).
 
 ---
 
 ## Constraint Severity Prefixes
 
-Three severity levels classify behavioral constraints in governance files.
-
 | Prefix | Meaning | Enforcement |
 |--------|---------|-------------|
-| **BLOCK** | Mechanically enforced. A hook or settings restriction prevents the action (exits non-zero or disallows the tool call). | Hook script, subagent `disallowedTools`, or `settings.json` wiring |
-| **REQUIRE** | Process obligation. No mechanical enforcement — the model must comply. Violation is a process failure. | Agent prose, workflow rules, prompt instructions |
-| **GUIDE** | Best practice. Deviation is acceptable with reason. | Advisory only |
+| **BLOCK** | Mechanically enforced (hook/settings prevents action) | Hook script, `disallowedTools`, `settings.json` |
+| **REQUIRE** | Process obligation (model must comply, no mechanical enforcement) | Agent prose, workflow rules |
+| **GUIDE** | Best practice (deviation acceptable with reason) | Advisory only |
 
-**DELEGATE** is an orchestrator-specific routing prefix (not a severity level). Retained as-is in `orchestrator.md`.
-
-### Classification Rules
-
-1. A constraint is BLOCK only when a hook script or `disallowedTools` mechanically prevents the action. Reference the specific hook or setting.
-2. When an agent (e.g., QA, Reviewer) issues a "block" verdict, the agent's own obligation to do so is REQUIRE — the agent is exercising judgment, not mechanical enforcement.
-3. Structural content (tables, phase sequences, diagrams, definition lists) does not receive a prefix.
-4. Tag at the bullet level, not per-clause.
+**DELEGATE**: orchestrator routing prefix (not severity). Classification: BLOCK only when mechanically enforced (reference the hook/setting). Agent "block" verdicts are REQUIRE. Structural content (tables, sequences) has no prefix. Tag at bullet level.
 
 ---
 
 ## Phase Model
 
-Sessions progress through ordered phases tracked in `.claude/.state/phase-state` (Decision 0014). Hooks manage phase transitions automatically.
-
-### Phase Definitions
+Ordered phases tracked in `.claude/.state/phase-state` (Decision 0014). Hooks manage transitions automatically.
 
 | Phase | Description |
 |-------|-------------|
@@ -199,97 +166,69 @@ Sessions progress through ordered phases tracked in `.claude/.state/phase-state`
 
 ### Editor-Live Sessions
 
-Continuous visual-development session type for operator-driven editing workflows. Phase sequence: `init → build → commit → review → verify → op-review → close`. No plan gate — the operator's live edits are the plan. Loops: `commit→build` (next change iteration), `verify→build` (QA failure). A4 safety per-loop commit; full gates at final review/verify. Child mode only. Cycle advisory at 50 iterations. See Decision 0023.
+Operator-driven editing. Phases: `init → build → commit → review → verify → op-review → close`. No plan gate. Loops: `commit→build`, `verify→build`. A4 per-loop; full gates at close. Child mode only. Cycle advisory at 50. See Decision 0023.
 
 ### Ephemeral Sessions (Phase 3b)
 
-Lightweight session type for Q&A and exploration: `init → conversation → close`. Skips mode-guard, bash-guard branch gates, and close checks. Does not trigger solo merge or branch seal. Use `upgrade_session_type` to convert to standard mid-session when code changes are needed (resets phase to `plan`).
-
-REQUIRE: when `upgrade_session_type` is called, before continuing post-upgrade read `docs/ai/workflow.md` and `docs/ai/quality-gates.md` (full file) if not already in context — these are skipped at init for ephemeral sessions and must be loaded before standard-session work proceeds.
+Lightweight Q&A/exploration: `init → conversation → close`. Skips mode-guard, branch gates, close checks. No solo merge or branch seal. Convert to standard via `upgrade_session_type` (resets phase to `plan`). REQUIRE: on upgrade, read `workflow.md` and `quality-gates.md` (full) if not in context.
 
 ### Auto/Review Mode
-
-- **Auto**: Agent completes through merge autonomously. `op-review` phase skipped.
-- **Review**: Agent pauses at `op-review` for operator acceptance. Default.
+**Auto**: completes through merge autonomously (`op-review` skipped). **Review** (default): pauses at `op-review` for operator acceptance.
 
 ### Solo Mode (Decision 0015)
 
-Branches merge to main directly at session close. Applies to `feature/*`, `fix/*`, `hotfix/*` branches only — `experiment/*` and `release/*` are excluded. In auto mode, merge happens autonomously after all gates pass. In review mode, the agent pauses at `op-review` for operator acceptance before merging. Merge failure triggers `git merge --abort` and operator notification — the agent does not attempt automatic conflict resolution on main.
+Merge to main at session close. Applies to `feature/*`, `fix/*`, `hotfix/*` only (`experiment/*`, `release/*` excluded). Auto mode: autonomous after gates pass. Review mode: pauses at `op-review`. Merge failure: `git merge --abort` + operator notification (no auto conflict resolution on main).
 
 ---
 
 ## Operating Modes
 
-Three modes control which files an agent can modify. Enforced by `write-guard.sh` (Decision 0012).
+Three modes control file-edit permissions. Enforced by `write-guard.sh` (Decision 0012).
 
-### Template Mode
-Governance-only access. The agent can create and modify governance files (`.claude/agents/`, `.claude/hooks/`, `.claude/settings.json`, `.claude/settings.local.json`, `.claude/local/session-log.md`, `.claude/local/known-issues.md`, `.claude/local/task-groups/*`, `docs/ai/prompts/`, `docs/ai/decisions/`, `docs/ai/logs/`, `docs/ai/workflow.md`, `docs/ai/quality-gates.md`, `docs/ai/task-groups/_contract-template.yaml`, `docs/spec/_templates/`, `AI.md`, `CLAUDE.md`, `repo-os-explainer.html`, `.github/`) but cannot touch product code. Task group contracts live at `.claude/local/task-groups/` (not `docs/ai/task-groups/`). Used in the upstream template repository. Set in `.claude/repo-mode` as `template`.
+| Mode | Scope | Governance Carve-outs |
+|------|-------|-----------------------|
+| **template** | Governance only (no product code) | Full governance access (`.claude/`, `docs/ai/`, `docs/spec/_templates/`, `.github/`, `AI.md`, `CLAUDE.md`, `repo-os-explainer.html`). Contracts at `.claude/local/task-groups/` |
+| **child** (default) | Product code + limited governance | `docs/ai/decisions/0100+`, `docs/ai/logs/`, `docs/ai/governance/`, `docs/ai/task-groups/*.yaml` (non `_`-prefixed), `docs/spec/compiled/`, `docs/spec/prototypes/`, `.claude/settings.local.json`. Template `t-*` files protected |
+| **autonomous** | Product code + minimal governance | `docs/ai/logs/`, `docs/ai/task-groups/*.yaml` (non `_`-prefixed) only |
 
-### Child Mode
-Product code plus limited governance carve-outs. The agent can modify product code and: `docs/ai/decisions/0100+` (project-specific decisions), `docs/ai/logs/`, `docs/ai/governance/`, `docs/ai/task-groups/*.yaml` (non-underscore-prefixed), `docs/spec/compiled/`, `docs/spec/prototypes/`, `.claude/settings.local.json`. Template-owned governance files (`t-*` decisions, hooks, prompts, workflows) are protected. Default mode when `.claude/repo-mode` is missing. Set as `child`.
-
-### Autonomous Mode
-Product code plus minimal governance carve-outs: `docs/ai/logs/`, `docs/ai/task-groups/*.yaml` (non-underscore-prefixed). All other governance paths locked. Intended for headless operation with maximum governance protection. Set as `autonomous`.
-
-### Mode Resolution
-Priority: `REPO_OS_MODE` env var > `.claude/repo-mode` file > default `child`. Override: `REPO_OS_SKIP_MODE_GUARD=1` (skip entirely), `REPO_OS_UNLOCK_PATH=<path>` (single-file unlock, immune paths excluded).
+**Resolution:** `REPO_OS_MODE` env var > `.claude/repo-mode` file > default `child`. Override: `REPO_OS_SKIP_MODE_GUARD=1` (skip entirely), `REPO_OS_UNLOCK_PATH=<path>` (single-file unlock, immune paths excluded).
 
 ### Session Close Overrides
 
-The stop hook (`session-close-check.sh`) enforces gates at session close. Blocking checks: session log, uncommitted changes. Advisory checks (downgraded from blocking in Phase 2b): HVST known-issues, deferrals known-issues.
+Stop hook (`session-close-check.sh`) gates. All overrides logged via `log_override()`.
 
-| Override | Gate | Blocking? | Effect |
-|----------|------|-----------|--------|
-| `SKIP_SESSION_LOG=1` | Session log modification | Blocking | Bypasses session log check |
-| `SKIP_UNCOMMITTED_CHECK=1` | Uncommitted changes | Blocking | Allows close with dirty working tree |
-| `SKIP_KNOWN_ISSUES_CHECK=1` | Known-issues documentation (HVST + deferrals) | Advisory | Suppresses known-issues reminder |
-| `SKIP_CONTRACT_CHECK=1` | Task group contract check | Blocking | Bypasses A6 contract staging and governance evidence checks |
-
-All overrides are logged via `log_override()` and summarized in the override audit.
+| Override | Gate | Effect |
+|----------|------|--------|
+| `SKIP_SESSION_LOG=1` | Session log (blocking) | Bypasses session log check |
+| `SKIP_UNCOMMITTED_CHECK=1` | Uncommitted changes (blocking) | Allows close with dirty tree |
+| `SKIP_KNOWN_ISSUES_CHECK=1` | Known-issues (advisory) | Suppresses known-issues reminder |
+| `SKIP_CONTRACT_CHECK=1` | Task group contract (blocking) | Bypasses A6 contract + governance checks |
 
 ### Decision Naming Convention
-Template decisions use the `t-` prefix (`t-0001-*.md` through `t-NNNN-*.md`) and are synced from upstream, locked in child/autonomous modes. Child decisions use plain numeric names (`0100-*.md`+) and are editable in child mode. Mode-guard enforces via the `t-` prefix check (Decision 0022). The `t-manifest.txt` file lists all template decisions for orphan cleanup in child repos.
+`t-NNNN-*.md` = template decisions (synced from upstream, locked in child/autonomous). `0100-*.md`+ = child decisions (editable in child mode). Enforced by mode-guard `t-` prefix check (Decision 0022). `t-manifest.txt` lists template decisions for orphan cleanup.
 
 ---
 
 ## User Review
 
-Decision 0021. LLM persona simulation providing synthetic user perspective on implementation output. Advisory only — no gate, no state file, no mechanical enforcement.
+Decision 0021. LLM persona simulation — synthetic user perspective on implementation. Advisory only (no gate, no state file). Phase: `user-review` (after `verify`, before `commit`). Skipped when brief has no `### User Review` section.
 
-**Phase position:** `user-review` phase in the standard and taskgroup build sequences, after `verify` and before `commit`. Skippable — when the task brief has no User Review section, the phase is forward-jumped (verify → commit directly).
+**Activation** (never default-on): task brief opt-in (`### User Review` section with tiers/scenarios, carried via contract `user_review:` block) or operator request mid-session.
 
-**Opt-in mechanism:** User Review is never default-on. Two activation paths:
-- **Task brief opt-in**: Prompt T includes a `### User Review` section specifying tiers, mode, and JTBD scenario definitions. The contract's `user_review:` block carries this into the Prompt B session.
-- **Operator request**: The operator requests user review during the session (e.g., "run tier-2 review on the signup flow"). The Orchestrator constructs scenarios from the operator's description.
+**Dispatch:** Orchestrator dispatches persona agents (`_user-review-tier-{1,2,3}.md`) in parallel. Results deduplicated across tiers, severity-escalated to highest. Report presented at `op-review`. Operator dispositions each finding (accept / note / dismiss). Deferred findings noted in closing summary.
 
-**Dispatch and synthesis:** When the `user-review` phase is active, the Orchestrator dispatches persona agents (`.claude/agents/_user-review-tier-{1,2,3}.md`) in parallel via the Task tool. Each agent walks through scenario steps by reading implementation files and narrating the simulated user experience. Results are synthesized: deduplicated across tiers, severity-escalated to the highest level when multiple tiers flag the same issue. The synthesized User Review Report is presented to the operator during `op-review`.
-
-**Operator disposition:** Findings require operator disposition (accept / note / dismiss) — same pattern as advisory board findings (Decision 0007). Not a silent report. Deferred findings are noted in the closing summary.
-
-**Operating mode exclusions:** User Review is available in child mode only. Excluded from template mode (no product code), autonomous mode (no operator), headless/automation mode (no operator interaction), and experiment sessions (lightweight lifecycle, no `user-review` phase).
-
-**Token cost:** Three persona agents reading code and producing reports may consume 20,000–50,000 tokens per run. The opt-in mechanism mitigates cost — User Review only runs when explicitly requested.
+**Exclusions:** Child mode only. Excluded from template, autonomous, headless/automation, and experiment sessions. Token cost: 20k–50k per run (mitigated by opt-in).
 
 | Tier | Persona | Mental Model | Error Recovery | Confusion Threshold |
 |------|---------|-------------|----------------|---------------------|
-| **Tier 1** | Power User | Strong — infers from experience | Tries 2–3 alternatives | Low — comfortable with ambiguity |
-| **Tier 2** | Everyday User | Partial — knows common patterns | Tries once, then seeks help | Moderate — needs visible guidance |
-| **Tier 3** | Novice User | None — every interaction is new | Stops immediately | High — abandons at first friction |
+| **1** | Power User | Strong | 2–3 alternatives | Low |
+| **2** | Everyday User | Partial | Once, then help | Moderate |
+| **3** | Novice User | None | Stops immediately | High |
 
 ---
 
 ## Governance Prefixes
 
-Protected path prefixes enforced by `write-guard.sh`. Files under these prefixes are governance-scoped and subject to mode-based restrictions:
+Protected path prefixes enforced by `write-guard.sh`, subject to mode-based restrictions: `.claude/`, `docs/ai/`, `docs/spec/_templates/`, `.github/`, `AI.md`, `CLAUDE.md`, `repo-os-explainer.html`.
 
-| Prefix | Scope |
-|--------|-------|
-| `.claude/` | Hooks, settings, agents, state |
-| `docs/ai/` | Decisions, logs, governance, prompts, workflows, task groups |
-| `docs/spec/_templates/` | Spec templates (synced from upstream) |
-| `.github/` | Workflows, CI/CD configuration |
-| `AI.md` | Root governance document |
-| `CLAUDE.md` | Claude configuration document |
-| `repo-os-explainer.html` | Repo OS explainer page (template artifact) |
-
-Immune paths (never modifiable, no override): `.claude/hooks/write-guard.sh`, `.claude/repo-mode`. To maintain immune paths, set `REPO_OS_SKIP_MODE_GUARD=1` (disables guard entirely, logged in `overrides.log`). As a last resort, Python file I/O bypasses Bash command scanning.
+Immune paths (never modifiable, no override): `.claude/hooks/write-guard.sh`, `.claude/repo-mode`. To maintain: `REPO_OS_SKIP_MODE_GUARD=1` (disables guard entirely, logged).

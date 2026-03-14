@@ -22,6 +22,7 @@ Agent-allowed:
 - docs/spec/prototypes/ (experiment briefs and prototype learnings)
 - docs/ai/workflow.md (skip for ephemeral session type; load at init for all other session types)
 - docs/ai/quality-gates-summary.md
+- docs/ai/hook-rules-summary.md
 - docs/ai/decisions/ (all files except t-0001 through t-0004, which are on-demand below; includes DIGEST.md as compressed foundational reference)
 - docs/ai/logs/session-log.md (template mode: `.claude/local/session-log.md`)
 - docs/ai/logs/known-issues.md (template mode: `.claude/local/known-issues.md`)
