@@ -11,8 +11,7 @@ INPUT=$(cat)
 
 # --- jq presence guard (fail-closed) ---
 if [ "$_REPO_OS_HAS_JQ" = false ]; then
-  echo "GATE BLOCKED: jq is required for agent-git-guard but was not found." >&2
-  echo "  Install jq (https://jqlang.github.io/jq/download/) and retry." >&2
+  echo "GATE-FINAL: jq is required for agent-git-guard but was not found. Install jq (https://jqlang.github.io/jq/download/) and retry. (no override)" >&2
   exit 2
 fi
 
@@ -24,7 +23,7 @@ fi
 
 if [[ "$COMMAND" =~ ^[[:space:]]*git[[:space:]]+(commit|push) ]]; then
   log_hook_event "agent-git-guard" "PreToolUse" "Bash" "block" "$START_MS" "subagent_git_blocked"
-  echo "BLOCKED: This agent cannot git commit/push — return to Orchestrator." >&2
+  echo "GATE-FINAL: Subagent cannot git commit/push — return to Orchestrator. (no override)" >&2
   exit 2
 fi
 

@@ -73,8 +73,7 @@ INPUT=$(cat)
 
 # --- jq presence guard (fail-closed) ---
 if [ "$_REPO_OS_HAS_JQ" = false ]; then
-  echo "GATE BLOCKED: jq is required for write-guard but was not found." >&2
-  echo "  Install jq (https://jqlang.github.io/jq/download/) and retry." >&2
+  echo "GATE-FINAL: jq is required for write-guard but was not found. Install jq (https://jqlang.github.io/jq/download/) and retry. (no override)" >&2
   exit 2
 fi
 
@@ -120,7 +119,7 @@ if [ "$SKIP_STATE_GUARD" = false ]; then
   if [ "$TARGETS_STATE" = true ]; then
     STATE_FILE_NAME="${STATE_TARGET_PATH##*.claude/.state/}"
     log_hook_event "state-guard" "PreToolUse" "" "block" "$START_MS" "state_path_protected" "" "$STATE_FILE_NAME"
-    echo "BLOCKED: .claude/.state/ is write-protected — state files are managed by governance hooks only (override: REPO_OS_RECOVER=1)" >&2
+    echo "GATE-FINAL: .claude/.state/ is write-protected — state files are managed by governance hooks only. (override: REPO_OS_RECOVER=1)" >&2
     exit 2
   fi
 fi
@@ -227,7 +226,7 @@ is_carved_out() {
         docs/ai/decisions/*) return 0 ;;
         docs/ai/logs/*) return 0 ;;
         docs/ai/workflow.md) return 0 ;;
-        docs/ai/quality-gates.md) return 0 ;;
+        docs/ai/quality-gates.md|docs/ai/hook-rules-summary.md) return 0 ;;
         docs/ai/task-groups/_contract-template.yaml) return 0 ;;
         docs/spec/_templates/*) return 0 ;;
         AI.md) return 0 ;;
@@ -276,7 +275,7 @@ if [ "$MODE" != "template" ]; then
       REL_PATH_FE=$(make_relative "$FILE_PATH")
       if is_immune "$REL_PATH_FE"; then
         log_hook_event "mode-guard" "PreToolUse" "" "block" "$START_MS" "file_immune_path" "" "$REL_PATH_FE"
-        echo "BLOCKED: $REL_PATH_FE is an immune path — cannot be modified in any mode (no override)" >&2
+        echo "GATE-FINAL: $REL_PATH_FE is an immune path — cannot be modified in any mode. (no override)" >&2
         exit 2
       fi
       # Template decision protection — t-*.md files are immutable in child/autonomous modes (Decision 0022)
@@ -292,7 +291,7 @@ if [ "$MODE" != "template" ]; then
             fi
           fi
           log_hook_event "mode-guard" "PreToolUse" "" "block" "$START_MS" "file_template_decision" "" "$REL_PATH_FE"
-          echo "BLOCKED: $REL_PATH_FE is a template decision (t-* prefix) — immutable in '$MODE' mode (override: REPO_OS_UNLOCK_PATH=$REL_PATH_FE or REPO_OS_SKIP_MODE_GUARD=1)" >&2
+          echo "GATE-FINAL: $REL_PATH_FE is a template decision (t-* prefix) — immutable in '$MODE' mode (override: REPO_OS_UNLOCK_PATH=$REL_PATH_FE or REPO_OS_SKIP_MODE_GUARD=1)" >&2
           exit 2
           ;;
       esac
@@ -308,14 +307,14 @@ if [ "$MODE" != "template" ]; then
         FE_WT_REL=$(make_relative "$FE_WT")
         if is_immune "$FE_WT_REL"; then
           log_hook_event "mode-guard" "PreToolUse" "" "block" "$START_MS" "bash_immune_path" "" "$FE_WT_REL"
-          echo "BLOCKED: $FE_WT_REL is an immune path — cannot be modified in any mode (no override)" >&2
+          echo "GATE-FINAL: $FE_WT_REL is an immune path — cannot be modified in any mode. (no override)" >&2
           exit 2
         fi
         # Template decision protection — t-*.md files are immutable in child/autonomous modes (Decision 0022)
         case "$FE_WT_REL" in
           docs/ai/decisions/t-*.md)
             log_hook_event "mode-guard" "PreToolUse" "" "block" "$START_MS" "bash_template_decision" "" "$FE_WT_REL"
-            echo "BLOCKED: $FE_WT_REL is a template decision (t-* prefix) — immutable in '$MODE' mode (override: REPO_OS_UNLOCK_PATH=$FE_WT_REL or REPO_OS_SKIP_MODE_GUARD=1)" >&2
+            echo "GATE-FINAL: $FE_WT_REL is a template decision (t-* prefix) — immutable in '$MODE' mode (override: REPO_OS_UNLOCK_PATH=$FE_WT_REL or REPO_OS_SKIP_MODE_GUARD=1)" >&2
             exit 2
             ;;
         esac
@@ -334,7 +333,7 @@ check_path() {
   # Immune paths — block unconditionally, no override
   if is_immune "$rel"; then
     log_hook_event "mode-guard" "PreToolUse" "" "block" "$START_MS" "${context}_immune_path" "" "$rel"
-    echo "BLOCKED: $rel is an immune path — cannot be modified in any mode (no override)" >&2
+    echo "GATE-FINAL: $rel is an immune path — cannot be modified in any mode. (no override)" >&2
     exit 2
   fi
 
@@ -352,14 +351,14 @@ check_path() {
   if is_governance "$rel"; then
     if ! is_carved_out "$MODE" "$rel"; then
       log_hook_event "mode-guard" "PreToolUse" "" "block" "$START_MS" "${context}_governance_${MODE}" "" "$rel"
-      echo "BLOCKED: $rel is a governance path — not editable in '$MODE' mode (override: REPO_OS_UNLOCK_PATH=$rel or REPO_OS_SKIP_MODE_GUARD=1)" >&2
+      echo "GATE-RECOVERABLE: $rel is a governance path — not editable in '$MODE' mode (override: REPO_OS_UNLOCK_PATH=$rel or REPO_OS_SKIP_MODE_GUARD=1)" >&2
       exit 2
     fi
   else
     # Product code
     if [ "$MODE" = "template" ]; then
       log_hook_event "mode-guard" "PreToolUse" "" "block" "$START_MS" "${context}_product_in_template" "" "$rel"
-      echo "BLOCKED: $rel is a product path — not editable in 'template' mode (override: REPO_OS_SKIP_MODE_GUARD=1)" >&2
+      echo "GATE-RECOVERABLE: $rel is a product path — not editable in 'template' mode. NEXT: Use child or autonomous mode for product code. (override: REPO_OS_SKIP_MODE_GUARD=1)" >&2
       exit 2
     fi
   fi
@@ -424,7 +423,7 @@ if [ -n "$FILE_PATH" ]; then
     # --- Gate 1: Main branch protection ---
     if [ "$CURRENT_BRANCH" = "main" ] && [ "${REPO_OS_ALLOW_MAIN:-0}" != "1" ]; then
       log_hook_event "write-guard" "PreToolUse" "" "block" "$START_MS" "main_branch"
-      echo "BLOCKED: On main — run: git checkout -b feature/<description> (override: REPO_OS_ALLOW_MAIN=1)" >&2
+      echo "GATE-RECOVERABLE: On main branch. NEXT: git checkout -b feature/<description>. (override: REPO_OS_ALLOW_MAIN=1)" >&2
       exit 2
     fi
     if [ "$CURRENT_BRANCH" = "main" ] && [ "${REPO_OS_ALLOW_MAIN:-0}" = "1" ]; then
@@ -466,7 +465,7 @@ if [ -n "$FILE_PATH" ]; then
               BG_ALLOW_REASON="phase_exempt"
             else
               log_hook_event "write-guard" "PreToolUse" "" "block" "$START_MS" "phase_gate" "phase:$CURRENT_PHASE"
-              echo "BLOCKED: Session is in '$CURRENT_PHASE' phase — get plan approval before editing files." >&2
+              echo "GATE-RECOVERABLE: Session in '$CURRENT_PHASE' phase — plan not yet approved. NEXT: Use AskUserQuestion to present your plan for operator approval (triggers plan-approval hook). (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
               exit 2
             fi
             ;;
@@ -490,7 +489,7 @@ if [ -n "$FILE_PATH" ]; then
           BG_ALLOW_REASON="plan_gate_override"
         elif [ -f "$REPO_ROOT/docs/ai/decisions/.fail-closed-enforced" ]; then
           log_hook_event "write-guard" "PreToolUse" "" "block" "$START_MS" "phase_gate_no_state"
-          echo "BLOCKED: No phase-state — session not initialized. Call init_phase() via the orchestrator before editing files. (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
+          echo "GATE-RECOVERABLE: No phase-state — session not initialized. NEXT: Call init_phase() via the orchestrator. (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
           exit 2
         else
           log_hook_event "write-guard" "PreToolUse" "" "warn" "$START_MS" "phase_gate_no_state_advisory"
@@ -517,7 +516,7 @@ if [ -n "$FILE_PATH" ]; then
         BG_ALLOW_REASON="branch_reuse_override"
       else
         log_hook_event "write-guard" "PreToolUse" "" "block" "$START_MS" "branch_reused"
-        echo "BLOCKED: Branch '$CURRENT_BRANCH' was used by a previous session — create a new branch: git checkout -b <category>/<description> (override: REPO_OS_SKIP_BRANCH_REUSE=1)" >&2
+        echo "GATE-RECOVERABLE: Branch '$CURRENT_BRANCH' was sealed by a previous session. NEXT: git checkout -b <category>/<description>. (override: REPO_OS_SKIP_BRANCH_REUSE=1)" >&2
         exit 2
       fi
     fi

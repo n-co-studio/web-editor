@@ -99,7 +99,7 @@ if [ "$_TG_MERGE_BLOCK" = true ]; then
       log_hook_event "branch-guard" "PreToolUse" "Bash" "allow" "$START_MS" "tg_merge_close_phase" "$_TG_MERGE_REASON"
     else
       log_hook_event "branch-guard" "PreToolUse" "Bash" "block" "$START_MS" "tg_merge_blocked" "$_TG_MERGE_REASON"
-      echo "BLOCKED: Task group sessions must not manually merge to main — merge happens in the close phase (override: REPO_OS_SKIP_MERGE_GUARD=1)" >&2
+      echo "GATE-RECOVERABLE: Task group merge blocked outside close phase. NEXT: Wait for close phase to merge. (override: REPO_OS_SKIP_MERGE_GUARD=1)" >&2
       exit 2
     fi
   fi
@@ -117,8 +117,7 @@ fi
 
 # --- jq presence guard (fail-closed) ---
 if [ "$_REPO_OS_HAS_JQ" = false ]; then
-  echo "GATE BLOCKED: jq is required for branch-guard but was not found." >&2
-  echo "  Install jq (https://jqlang.github.io/jq/download/) and retry." >&2
+  echo "GATE-FINAL: jq is required for branch-guard but was not found. Install jq (https://jqlang.github.io/jq/download/) and retry. (no override)" >&2
   exit 2
 fi
 
@@ -162,7 +161,7 @@ fi
 # --- Gate 1: Main branch protection ---
 if [ "$CURRENT_BRANCH" = "main" ] && [ "${REPO_OS_ALLOW_MAIN:-0}" != "1" ]; then
   log_hook_event "branch-guard" "PreToolUse" "" "block" "$START_MS" "main_branch"
-  echo "BLOCKED: On main — run: git checkout -b feature/<description> (override: REPO_OS_ALLOW_MAIN=1)" >&2
+  echo "GATE-RECOVERABLE: On main branch. NEXT: git checkout -b feature/<description>. (override: REPO_OS_ALLOW_MAIN=1)" >&2
   exit 2
 fi
 if [ "$CURRENT_BRANCH" = "main" ] && [ "${REPO_OS_ALLOW_MAIN:-0}" = "1" ]; then
@@ -203,7 +202,7 @@ else
         ALLOW_REASON="phase_gate_pass"
       else
         log_hook_event "branch-guard" "PreToolUse" "" "block" "$START_MS" "phase_gate" "phase:$CURRENT_PHASE"
-        echo "BLOCKED: Session is in '$CURRENT_PHASE' phase — get plan approval before editing files. (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
+        echo "GATE-RECOVERABLE: Session in '$CURRENT_PHASE' phase — plan not yet approved. NEXT: Use AskUserQuestion to present your plan for operator approval (triggers plan-approval hook). (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
         exit 2
       fi
     else
@@ -213,7 +212,7 @@ else
     # Phase-state absent/stale — sentinel controls fail-closed vs advisory (Decision 0019).
     if [ -f "$REPO_ROOT/docs/ai/decisions/.fail-closed-enforced" ]; then
       log_hook_event "branch-guard" "PreToolUse" "" "block" "$START_MS" "phase_gate_no_state"
-      echo "BLOCKED: No phase-state — session not initialized. Call init_phase() via the orchestrator before editing files. (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
+      echo "GATE-RECOVERABLE: No phase-state — session not initialized. NEXT: Call init_phase() via the orchestrator. (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
       exit 2
     else
       log_hook_event "branch-guard" "PreToolUse" "" "warn" "$START_MS" "phase_gate_no_state_advisory"
@@ -244,7 +243,7 @@ if [ -f "$CLOSED_BRANCHES_FILE" ] && grep -qxF "$CURRENT_BRANCH" "$CLOSED_BRANCH
     log_override "branch-guard" "REPO_OS_SKIP_BRANCH_REUSE"
   else
     log_hook_event "branch-guard" "PreToolUse" "" "block" "$START_MS" "branch_reused"
-    echo "BLOCKED: Branch '$CURRENT_BRANCH' was used by a previous session — create a new branch: git checkout -b <category>/<description> (override: REPO_OS_SKIP_BRANCH_REUSE=1)" >&2
+    echo "GATE-RECOVERABLE: Branch '$CURRENT_BRANCH' was sealed by a previous session. NEXT: git checkout -b <category>/<description>. (override: REPO_OS_SKIP_BRANCH_REUSE=1)" >&2
     exit 2
   fi
 fi
