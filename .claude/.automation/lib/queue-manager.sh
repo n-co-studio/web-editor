@@ -621,3 +621,117 @@ queue_block() {
   rm -f "$src_file"
   _rebuild_queue_index
 }
+
+# --- Edit a queue entry field ---
+# Updates a single field on a non-running entry.
+# Requires: _find_entry_file (from work-order-manager.sh)
+# Arguments:
+#   $1 — entry_id
+#   $2 — field name (from whitelist)
+#   $3 — new value
+# Returns: 0 on success, 1 on error
+# Caller holds queue lock.
+# Set _QE_FORCE_EDIT=true to suppress review/blocked warnings.
+queue_edit() {
+  local entry_id="$1"
+  local field="$2"
+  local value="$3"
+
+  if ! type _find_entry_file > /dev/null 2>&1; then
+    echo "ERROR: queue_edit requires work-order-manager.sh to be sourced (_find_entry_file)" >&2
+    return 1
+  fi
+
+  # Editable fields whitelist
+  case "$field" in
+    brief_path|session_type|branch|auto_mode|solo_mode|push_on_complete|max_retries) ;;
+    *)
+      echo "ERROR: Field '$field' is not editable (allowed: brief_path, session_type, branch, auto_mode, solo_mode, push_on_complete, max_retries)" >&2
+      return 1
+      ;;
+  esac
+
+  local entry_file
+  entry_file=$(_find_entry_file "$entry_id")
+  if [ -z "$entry_file" ]; then
+    echo "ERROR: Entry $entry_id not found" >&2
+    return 1
+  fi
+
+  _load_queue_entry "$entry_file"
+
+  # Running entries are immutable
+  if [ "$_QE_STATUS" = "running" ]; then
+    echo "ERROR: Cannot edit running entry $entry_id" >&2
+    return 1
+  fi
+
+  # Warn on review/blocked unless force-edit
+  if [ "${_QE_FORCE_EDIT:-}" != "true" ]; then
+    case "$_QE_STATUS" in
+      review|blocked)
+        echo "WARNING: Entry $entry_id is in '$_QE_STATUS' status — editing may discard operator context. Set _QE_FORCE_EDIT=true to suppress." >&2
+        ;;
+    esac
+  fi
+
+  # Update the field
+  case "$field" in
+    brief_path)        _QE_BRIEF_PATH="$value" ;;
+    session_type)      _QE_SESSION_TYPE="$value" ;;
+    branch)            _QE_BRANCH="$value" ;;
+    auto_mode)         _QE_AUTO_MODE="$value" ;;
+    solo_mode)         _QE_SOLO_MODE="$value" ;;
+    push_on_complete)  _QE_PUSH_ON_COMPLETE="$value" ;;
+    max_retries)       _QE_MAX_RETRIES="$value" ;;
+  esac
+
+  _QE_UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  _write_queue_entry "$entry_file"
+  _rebuild_queue_index
+}
+
+# --- Remove a queue entry ---
+# Deletes an entry and detaches it from its work order.
+# If the work order has no remaining children, removes the work order too.
+# Requires: _find_entry_file (from work-order-manager.sh)
+# Arguments:
+#   $1 — entry_id
+# Returns: 0 on success, 1 on error
+# Caller holds queue lock.
+queue_remove() {
+  local entry_id="$1"
+
+  if ! type _find_entry_file > /dev/null 2>&1; then
+    echo "ERROR: queue_remove requires work-order-manager.sh to be sourced (_find_entry_file)" >&2
+    return 1
+  fi
+
+  local entry_file
+  entry_file=$(_find_entry_file "$entry_id")
+  if [ -z "$entry_file" ]; then
+    echo "ERROR: Entry $entry_id not found" >&2
+    return 1
+  fi
+
+  _load_queue_entry "$entry_file"
+
+  # Running entries are immutable
+  if [ "$_QE_STATUS" = "running" ]; then
+    echo "ERROR: Cannot remove running entry $entry_id" >&2
+    return 1
+  fi
+
+  # Capture work_order_id before deletion
+  local wo_id="$_QE_WORK_ORDER_ID"
+
+  # Remove entry file
+  rm -f "$entry_file"
+
+  # Detach from work order
+  if [ -n "$wo_id" ] && type wo_remove_child > /dev/null 2>&1; then
+    wo_remove_child "$wo_id" "$entry_id" 2>/dev/null || true
+  fi
+
+  _rebuild_queue_index
+}

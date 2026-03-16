@@ -10,8 +10,11 @@
 #   --brief PATH          Path to task brief (required)
 #   --auto-approve        Place entry directly in approved/ (default: pending-review/)
 #   --session-type TYPE   Session type per Decision 0014 (default: standard)
+#   --branch NAME         Branch name for task group entries
 #   --solo                Enable solo mode (merge to main at close)
 #   --push                Enable push_on_complete (push branch after session)
+#
+# For full lifecycle management (status, edit, remove, review), use queue-cli.sh.
 #
 # When entries are added, auto-enables the runner in config.yaml.
 # Prints entry ID and status to stdout.
@@ -55,6 +58,7 @@ source "$LIB_DIR/file-lock.sh"
 BRIEF_PATH=""
 AUTO_APPROVE=false
 SESSION_TYPE="standard"
+BRANCH_NAME=""
 SOLO_MODE=false
 PUSH_ON_COMPLETE=false
 
@@ -72,6 +76,10 @@ while [ $# -gt 0 ]; do
       SESSION_TYPE="$2"
       shift 2
       ;;
+    --branch)
+      BRANCH_NAME="$2"
+      shift 2
+      ;;
     --solo)
       SOLO_MODE=true
       shift
@@ -82,7 +90,7 @@ while [ $# -gt 0 ]; do
       ;;
     *)
       echo "ERROR: Unknown argument: $1" >&2
-      echo "Usage: intake.sh --brief <path> [--auto-approve] [--session-type <type>] [--solo] [--push]" >&2
+      echo "Usage: intake.sh --brief <path> [--auto-approve] [--session-type <type>] [--branch <name>] [--solo] [--push]" >&2
       exit 1
       ;;
   esac
@@ -91,7 +99,7 @@ done
 # --- Validate required arguments ---
 if [ -z "$BRIEF_PATH" ]; then
   echo "ERROR: --brief is required" >&2
-  echo "Usage: intake.sh --brief <path> [--auto-approve] [--session-type <type>] [--solo] [--push]" >&2
+  echo "Usage: intake.sh --brief <path> [--auto-approve] [--session-type <type>] [--branch <name>] [--solo] [--push]" >&2
   exit 1
 fi
 
@@ -127,6 +135,16 @@ if [ ! -f "$CONFIG_FILE" ]; then
   exit 1
 fi
 
+# --- Warn if --branch used with non-taskgroup session type ---
+if [ -n "$BRANCH_NAME" ]; then
+  case "$SESSION_TYPE" in
+    taskgroup|taskgroup-merge) ;;
+    *)
+      echo "WARNING: --branch is intended for taskgroup/taskgroup-merge sessions (got: $SESSION_TYPE) — branch value will be stored but may be ignored by the runner" >&2
+      ;;
+  esac
+fi
+
 # --- Create queue entry ---
 _ensure_queue_dirs
 
@@ -149,7 +167,7 @@ PUSH_STR="false"
 [ "$PUSH_ON_COMPLETE" = true ] && PUSH_STR="true"
 
 # Enqueue (queue_enqueue returns entry_id on stdout)
-ENTRY_ID=$(queue_enqueue "$BRIEF_PATH" "$SESSION_TYPE" "$AUTO_MODE" "$SOLO_STR" "" "" "$PUSH_STR")
+ENTRY_ID=$(queue_enqueue "$BRIEF_PATH" "$SESSION_TYPE" "$AUTO_MODE" "$SOLO_STR" "$BRANCH_NAME" "" "$PUSH_STR")
 
 if [ -z "$ENTRY_ID" ]; then
   release_queue_lock

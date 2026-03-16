@@ -226,6 +226,54 @@ wo_add_child() {
   fi
 }
 
+# --- Remove a child entry from a work order ---
+# Removes entry_id from the work order's entry list.
+# If the entry list becomes empty, removes the work order file entirely.
+# Arguments:
+#   $1 — wo_id (work order identifier)
+#   $2 — entry_id (queue entry identifier to remove)
+# Returns: 0 on success, 1 if work order not found
+wo_remove_child() {
+  local wo_id="$1"
+  local entry_id="$2"
+  local wo_file="$(_wo_dir)/${wo_id}.yaml"
+
+  _load_work_order "$wo_file" || {
+    echo "ERROR: Work order $wo_id not found" >&2
+    return 1
+  }
+
+  # Rebuild entry list without the target entry_id
+  if [ -z "$_WO_ENTRY_IDS" ]; then
+    return 0
+  fi
+  local new_ids=""
+  local old_ifs="$IFS"
+  IFS=','
+  set -- $_WO_ENTRY_IDS
+  IFS="$old_ifs"
+  local _eid
+  for _eid in "$@"; do
+    if [ "$_eid" != "$entry_id" ]; then
+      if [ -n "$new_ids" ]; then
+        new_ids="${new_ids},${_eid}"
+      else
+        new_ids="$_eid"
+      fi
+    fi
+  done
+
+  _WO_ENTRY_IDS="$new_ids"
+
+  if [ -z "$_WO_ENTRY_IDS" ]; then
+    # No remaining children — remove work order file
+    rm -f "$wo_file"
+  else
+    _WO_UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    _write_work_order "$wo_file"
+  fi
+}
+
 # --- Check work order completion status ---
 # Scans child entry statuses and transitions work order accordingly.
 # All completed → completed. Any failed/review/blocked → escalated. Otherwise open.
