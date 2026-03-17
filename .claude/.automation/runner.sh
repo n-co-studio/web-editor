@@ -261,9 +261,15 @@ _check_stale_locks() {
   done
 }
 
-# ============================================================
 # Core execution — run a single entry (used by both modes)
 # ============================================================
+
+# --- Global return variables (eliminates subshell stdout loss) ---
+# Set by _run_single_entry, read by caller. No subshell = no lost output.
+_RESULT_OUTCOME=""
+_RESULT_BASELINE=""
+_RESULT_SOLO_MODE=""
+_RESULT_BRANCH=""
 
 # Arguments:
 #   $1 — brief_id (for branch naming)
@@ -272,7 +278,7 @@ _check_stale_locks() {
 #   $4 — existing_branch (optional, for task group)
 #   $5 — permission_profile (optional, default: "build")
 #   $6 — push_on_complete (optional, default: "false")
-# Output: "outcome:detail" on stdout
+# Sets globals: _RESULT_OUTCOME, _RESULT_BASELINE, _RESULT_SOLO_MODE, _RESULT_BRANCH
 _run_single_entry() {
   local brief_id="$1"
   local prompt="$2"
@@ -281,6 +287,12 @@ _run_single_entry() {
   local permission_profile="${5:-build}"
   local push_on_complete="${6:-false}"
 
+  # Reset globals
+  _RESULT_OUTCOME=""
+  _RESULT_BASELINE=""
+  _RESULT_SOLO_MODE=""
+  _RESULT_BRANCH=""
+
   # Pre-launch setup
   state_manager_setup "$REPO_ROOT" "$session_type"
 
@@ -288,8 +300,7 @@ _run_single_entry() {
   branch_manager_setup "$brief_id" "$existing_branch"
 
   # Record baseline SHA
-  local baseline_sha
-  baseline_sha=$(git rev-parse HEAD)
+  _RESULT_BASELINE=$(git rev-parse HEAD)
 
   # Set automation context for analytics hooks (inherited by claude -p child)
   export REPO_OS_AUTOMATION_ENTRY="$brief_id"
@@ -326,23 +337,50 @@ _run_single_entry() {
   unset CLAUDE_HEADLESS
 
   # Outcome detection (with entry_id and stderr for enriched blocker reports)
-  local outcome_raw
-  outcome_raw=$(detect_outcome "$exit_code" "$baseline_sha" "$REPO_ROOT" "$brief_id" "$stderr_file")
+  _RESULT_OUTCOME=$(detect_outcome "$exit_code" "$_RESULT_BASELINE" "$REPO_ROOT" "$brief_id" "$stderr_file")
 
   # Capture solo mode and branch BEFORE cleanup deletes phase-state (audit C1)
-  local entry_solo_mode=""
-  entry_solo_mode=$(get_solo 2>/dev/null || echo "false")
-  local entry_current_branch=""
-  entry_current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+  _RESULT_SOLO_MODE=$(get_solo 2>/dev/null || echo "false")
+  _RESULT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
 
   # External cleanup (Stop hook doesn't fire in headless mode)
   if [ -f "$REPO_ROOT/.claude/.session-id" ]; then
     runner_external_cleanup "$REPO_ROOT"
   fi
 
-  # Solo merge + branch seal (audit C1: Decision 0017 requires runners to handle externally)
-  local _outcome_type="${outcome_raw%%:*}"
-  if [ "$_outcome_type" = "completed" ] && [ "$entry_solo_mode" = "true" ] && [ -n "$entry_current_branch" ]; then
+  # Clean up stderr temp file
+  [ -n "$stderr_file" ] && rm -f "$stderr_file" 2>/dev/null || true
+
+  # Output result summary to stderr (informational only — outcome is in globals)
+  local outcome="${_RESULT_OUTCOME%%:*}"
+  local outcome_detail="${_RESULT_OUTCOME#*:}"
+  echo "outcome: $outcome" >&2
+  echo "outcome_detail: $outcome_detail" >&2
+  echo "exit_code: $exit_code" >&2
+  echo "baseline_sha: $_RESULT_BASELINE" >&2
+  echo "branch: $_RESULT_BRANCH" >&2
+}
+
+# ============================================================
+# Solo merge + branch seal (extracted from _run_single_entry)
+# ============================================================
+# Called from daemon loop and single-shot mode AFTER _run_single_entry returns.
+# Operates on _RESULT_* globals. Runs in the main shell — no subshell loss risk.
+#
+# Arguments:
+#   $1 — entry_current_branch
+#   $2 — push_on_complete ("true"/"false")
+#   $3 — brief_id (for escalation context)
+# Reads: _RESULT_OUTCOME, _RESULT_SOLO_MODE
+# May modify: _RESULT_OUTCOME (on merge conflict → review:merge-conflict)
+_solo_merge_if_needed() {
+  local entry_current_branch="$1"
+  local push_on_complete="${2:-false}"
+  local brief_id="${3:-}"
+
+  local _outcome_type="${_RESULT_OUTCOME%%:*}"
+
+  if [ "$_outcome_type" = "completed" ] && [ "$_RESULT_SOLO_MODE" = "true" ] && [ -n "$entry_current_branch" ]; then
     case "$entry_current_branch" in
       feature/*|fix/*|hotfix/*)
         local _merge_ok=false
@@ -406,7 +444,7 @@ _run_single_entry() {
             printf '  resolution: ""\n'
           } > "$_esc_dir/${_esc_id}.yaml" 2>/dev/null || true
           # Override outcome to review so daemon transitions entry correctly
-          outcome_raw="review:merge-conflict"
+          _RESULT_OUTCOME="review:merge-conflict"
           echo "Solo merge conflict: $entry_current_branch — escalation $_esc_id written, entry → review" >&2
         else
           # Non-conflict failure (e.g., checkout failed)
@@ -432,21 +470,6 @@ _run_single_entry() {
     # Non-solo or failed outcome — still seal the branch
     record_closed_branch "$entry_current_branch"
   fi
-
-  # Clean up stderr temp file
-  [ -n "$stderr_file" ] && rm -f "$stderr_file" 2>/dev/null || true
-
-  # Output result summary to stderr (stdout reserved for outcome)
-  local outcome="${outcome_raw%%:*}"
-  local outcome_detail="${outcome_raw#*:}"
-  echo "outcome: $outcome" >&2
-  echo "outcome_detail: $outcome_detail" >&2
-  echo "exit_code: $exit_code" >&2
-  echo "baseline_sha: $baseline_sha" >&2
-  echo "branch: $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)" >&2
-
-  # Return outcome and baseline on stdout for caller (pipe-delimited)
-  printf '%s|%s' "$outcome_raw" "$baseline_sha"
 }
 
 # ============================================================
@@ -481,10 +504,19 @@ if [ "$DAEMON_MODE" = false ]; then
   # Build prompt (single-shot uses a minimal prompt)
   PROMPT="You are working on brief: $BRIEF_ID. Read the task brief and execute it."
 
-  # Execute
-  RESULT_RAW=$(_run_single_entry "$BRIEF_ID" "$PROMPT" "$SESSION_TYPE" "$EXISTING_BRANCH" "build" "false")
-  OUTCOME_RAW="${RESULT_RAW%%|*}"
-  OUTCOME="${OUTCOME_RAW%%:*}"
+  # Execute (direct call — no subshell, outcome in globals)
+  _run_single_entry "$BRIEF_ID" "$PROMPT" "$SESSION_TYPE" "$EXISTING_BRANCH" "build" "false"
+
+  # Solo merge + branch seal (Phase 2: extracted from _run_single_entry)
+  _solo_merge_if_needed "$_RESULT_BRANCH" "false" "$BRIEF_ID"
+
+  # Belt-and-suspenders: check globals are populated
+  if [ -z "$_RESULT_OUTCOME" ]; then
+    echo "WARNING: Empty outcome from _run_single_entry — treating as failure" >&2
+    exit 1
+  fi
+
+  OUTCOME="${_RESULT_OUTCOME%%:*}"
 
   case "$OUTCOME" in
     completed) exit 0 ;;
@@ -575,11 +607,13 @@ while true; do
     _IDLE_CYCLE_COUNT=$((_IDLE_CYCLE_COUNT + 1))
     if [ "$_IDLE_CYCLE_COUNT" -ge "$_CLEANUP_INTERVAL" ]; then
       run_cleanup
-      # Stale-running recovery: scan for entries with no heartbeat, stranded > 2× interval
+      # Stale-running recovery: scan for entries with no heartbeat, stranded > 1 hour
+      # Previous threshold (interval * 2 = 60s) caused false-positive recovery —
+      # Claude sessions routinely run 10–20 minutes.
       _sr_qdir=$(_queue_dir)
       _sr_interval=$(_parse_config_field "runner" "heartbeat_interval")
       _sr_interval="${_sr_interval:-30}"
-      _sr_threshold=$((_sr_interval * 2))
+      _sr_threshold=$((_sr_interval * 120))
       _sr_now=$(date +%s)
       for _sr_entry_file in "$_sr_qdir/running"/*.yaml; do
         [ -f "$_sr_entry_file" ] || continue
@@ -638,6 +672,46 @@ while true; do
 
   echo "Processing entry: $ENTRY_ID (type: $ENTRY_SESSION_TYPE)" >&2
 
+  # --- Merge-idempotency check (Phase 4: skip re-execution if already merged) ---
+  _retry_count="${_QE_RETRY_COUNT:-0}"
+  if [ "$_retry_count" -gt 0 ] && [ -n "$ENTRY_BRANCH" ]; then
+    # Prior attempt created a branch — check if it was already merged to main
+    if git merge-base --is-ancestor "$ENTRY_BRANCH" main 2>/dev/null; then
+      echo "Entry $ENTRY_ID: branch $ENTRY_BRANCH already merged to main — skipping re-execution" >&2
+      # Transition directly to completed (locked)
+      _skip_lock_attempts=0
+      while ! acquire_queue_lock; do
+        _skip_lock_attempts=$((_skip_lock_attempts + 1))
+        if [ "$_skip_lock_attempts" -ge 3 ]; then
+          echo "ERROR: Lock unavailable for idempotent completion ($ENTRY_ID)" >&2
+          continue 2
+        fi
+        sleep 1
+      done
+      queue_complete "$ENTRY_ID"
+      release_queue_lock
+      _circuit_breaker_reset
+      # Review log + work order lifecycle
+      if [ -n "$ENTRY_WORK_ORDER_ID" ]; then
+        review_log_append "entry-completed" "$ENTRY_WORK_ORDER_ID" "$ENTRY_ID" \
+          "Entry $ENTRY_ID completed (idempotent — already merged)" 2>/dev/null || true
+        _wo_new_status=$(wo_check_completion "$ENTRY_WORK_ORDER_ID" 2>/dev/null) || true
+        case "$_wo_new_status" in
+          completed)
+            review_log_append "work-order-completed" "$ENTRY_WORK_ORDER_ID" "" \
+              "Work order $ENTRY_WORK_ORDER_ID completed — all children done" 2>/dev/null || true
+            ;;
+          escalated)
+            review_log_append "work-order-escalated" "$ENTRY_WORK_ORDER_ID" "" \
+              "Work order $ENTRY_WORK_ORDER_ID escalated — child failure detected" 2>/dev/null || true
+            ;;
+        esac
+      fi
+      sleep 2
+      continue
+    fi
+  fi
+
   # Validate session type
   if [ -z "$(get_phases_for_type "$ENTRY_SESSION_TYPE" 2>/dev/null)" ]; then
     echo "ERROR: Invalid session type '$ENTRY_SESSION_TYPE' for entry $ENTRY_ID" >&2
@@ -655,29 +729,52 @@ while true; do
     continue
   fi
 
+  # --- Dirty-tree guard (Phase 3: clean working tree between entries) ---
+  # Prevents cascading dirty state from a prior failed entry.
+  _dirty_check=$(git status --porcelain 2>/dev/null || true)
+  if [ -n "$_dirty_check" ]; then
+    echo "WARNING: Dirty working tree detected before entry $ENTRY_ID — cleaning" >&2
+    git checkout -- . 2>/dev/null || true
+    git clean -fd 2>/dev/null || true
+  fi
+
   # --- Assemble prompt (lazy generation at dequeue time) ---
   PROMPT=$(assemble_prompt "$ENTRY_FILE")
 
   # --- Start heartbeat ---
   _start_heartbeat "$ENTRY_ID"
 
-  # --- Execute ---
-  RESULT_RAW=""
-  RESULT_RAW=$(_run_single_entry "$ENTRY_ID" "$PROMPT" "$ENTRY_SESSION_TYPE" "$ENTRY_BRANCH" "build" "$ENTRY_PUSH") || true
+  # --- Execute (direct call — no subshell, outcome in globals) ---
+  _run_single_entry "$ENTRY_ID" "$PROMPT" "$ENTRY_SESSION_TYPE" "$ENTRY_BRANCH" "build" "$ENTRY_PUSH"
 
   # --- Stop heartbeat ---
   _stop_heartbeat
   # Clean up heartbeat file
   rm -f "$(_queue_dir)/running/${ENTRY_ID}.heartbeat" 2>/dev/null || true
 
-  # --- Handle empty RESULT_RAW (subshell abort, e.g., during solo merge checkout) ---
-  if [ -z "$RESULT_RAW" ]; then
-    echo "WARNING: Empty result from _run_single_entry for $ENTRY_ID — treating as infrastructure failure" >&2
+  # --- Write branch name back to entry YAML (Phase 4: enables merge-idempotency on retry) ---
+  if [ -n "$_RESULT_BRANCH" ] && [ "$_RESULT_BRANCH" != "main" ]; then
+    _running_entry="$(_queue_dir)/running/${ENTRY_ID}.yaml"
+    if [ -f "$_running_entry" ]; then
+      _load_queue_entry "$_running_entry"
+      if [ "$_QE_BRANCH" != "$_RESULT_BRANCH" ]; then
+        _QE_BRANCH="$_RESULT_BRANCH"
+        _write_queue_entry "$_running_entry"
+      fi
+    fi
+  fi
+
+  # --- Solo merge + branch seal (Phase 2: runs in main shell, not subshell) ---
+  _solo_merge_if_needed "$_RESULT_BRANCH" "$ENTRY_PUSH" "$ENTRY_ID"
+
+  # --- Handle empty outcome (belt-and-suspenders guard on globals) ---
+  if [ -z "$_RESULT_OUTCOME" ]; then
+    echo "WARNING: Empty outcome from _run_single_entry for $ENTRY_ID — treating as infrastructure failure" >&2
     OUTCOME_RAW="failed:empty-result"
     BASELINE_SHA=""
   else
-    OUTCOME_RAW="${RESULT_RAW%%|*}"
-    BASELINE_SHA="${RESULT_RAW#*|}"
+    OUTCOME_RAW="$_RESULT_OUTCOME"
+    BASELINE_SHA="$_RESULT_BASELINE"
   fi
 
   # --- Parse outcome ---
@@ -754,7 +851,10 @@ while true; do
   if [ "$_transition_ok" = false ]; then
     echo "WARNING: State transition failed for $ENTRY_ID — entry may be orphaned in running/" >&2
   fi
-  release_queue_lock
+  # Only release lock if we actually acquired it (Phase 6: prevents releasing another section's lock)
+  if [ "$_lock_acquired" = true ]; then
+    release_queue_lock
+  fi
 
   # --- Post-transition actions (outside lock scope) ---
   # Reset work order status tracker (top-level code — no `local`)
