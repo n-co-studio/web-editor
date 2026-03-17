@@ -79,5 +79,5 @@ Activated when spec contains:
 - Audit logging needs
 - Privacy policy implications
 
-**Handoff boundary:** This agent reviews security at the spec/design level (before code exists). For code-level security review during builds, see `security-privacy.md`.
+**Handoff boundary:** This agent reviews security at the spec/design level (before code exists). For code-level security review during builds, see `security-privacy.md`. For on-demand adversarial analysis (attacker mindset, exploit chains), see `security-hacker.md`.
 

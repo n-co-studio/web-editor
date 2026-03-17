@@ -109,4 +109,4 @@ Activates when the diff or commit trailers include `Automation: runner` (headles
 | **Medium** | Unrecognized outbound network call, new dependency without brief justification | Request changes |
 | **Low** | Non-standard URL fetch to public docs site | Note for improvement |
 
-**Handoff boundary:** This agent reviews security at the code level during builds. For spec-level security review (before code exists), see `security-analyst.md`.
+**Handoff boundary:** This agent reviews security at the code level during builds. For spec-level security review (before code exists), see `security-analyst.md`. For on-demand adversarial analysis (attacker mindset, exploit chains), see `security-hacker.md`.

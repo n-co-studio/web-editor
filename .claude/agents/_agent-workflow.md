@@ -175,6 +175,7 @@ Audit agents are dispatched by the Orchestrator during Prompt C. Security/Privac
 | Agent | Invoke When | Blocks Commit? |
 |-------|------------|----------------|
 | **Analytics** | Operator requests hook telemetry analysis or cross-repo reporting | No (standalone) |
+| **Security Hacker** | Operator requests adversarial security analysis of a scoped attack surface | No (advisory) |
 
 Operations and Audit agents are invoked directly by the operator, not as part of the plan→build→verify chain. They do not participate in handoffs.
 
