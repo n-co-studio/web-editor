@@ -76,6 +76,11 @@ Follow all conventions from AI.md, the compiled spec, and applicable decisions.
    Gates-B: B1-pass B2-<result> B3-<result>
    Automation: runner
    ```
+   **IMPORTANT:** Every commit MUST include `Gates-A:` and `Gates-B:` trailers — including docs-only or session-log-only commits. For commits where gates were not exercised (no code changes), use `n/a`:
+   ```
+   Gates-A: A1-pass A2-n/a A3-n/a A4-n/a A5-n/a A6-n/a
+   Gates-B: B1-n/a B2-n/a B3-n/a
+   ```
 3. The `pre-commit-gates.sh` hook will run gates A1–A6 automatically. Resolve any failures before retrying.
 
 ## Phase 6 — Close

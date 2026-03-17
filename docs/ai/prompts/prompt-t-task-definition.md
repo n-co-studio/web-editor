@@ -234,10 +234,38 @@ lifecycle: task-scoped
 
 After displaying the brief, instruct: "Copy the block above and paste it into a new session to begin implementation." For phased briefs, instruct: "Copy each block into its own new session. Run them in order." For parallel briefs, instruct: "Copy each block into its own new session. Briefs 1–N can run in parallel. Run the merge brief (Brief M) after all others complete."
 
+#### Step 6 — Queue Intake (opt-in)
+
+After displaying the brief in Step 5, offer: **"Add to automation queue?"**
+
+If the operator declines or does not respond, close the session normally — this step is opt-in.
+
+If the operator accepts:
+
+1. **Ask for queue flags** with sensible defaults:
+   - Auto-approve: yes/no (default: yes)
+   - Solo mode: yes/no (default: yes)
+   - Push on complete: yes/no (default: no)
+
+2. **Write the brief to disk**:
+   - Path: `.claude/.automation/briefs/<YYYYMMDD-HHMMSS>-<slug>.md`
+   - Slug: derived from the brief title, kebab-case, truncated to 50 chars
+   - For task groups: write each brief as a separate file using the same naming convention
+
+3. **Add to queue**:
+   - Run: `queue-cli.sh add --brief <path> [--auto-approve] [--solo] [--push]` with the operator-selected flags
+   - For task groups: add all briefs and create a work order. If the group has sequential execution, add entries in order. If parallel, add all content briefs then the merge brief. Use `--branch` for shared task group branches
+
+4. **Check daemon status and start if needed**:
+   - Run: `queue-cli.sh start-daemon`
+   - This checks the PID file and starts the daemon if not running
+
+5. **Confirm**: "Brief queued. Daemon is running." (or "Briefs queued. Work order created. Daemon is running." for task groups)
+
 ## Rules
 
-- REQUIRE: **never write files.** Prompt T is fully ephemeral. All output goes to the terminal.
-- REQUIRE: **never make code changes.** This is an exploration and planning session only.
+- REQUIRE: **never write files** except during Step 6 (Queue Intake), where writing brief files to `.claude/.automation/briefs/` and calling `queue-cli.sh` are permitted. All other output goes to the terminal.
+- REQUIRE: **never make code changes.** This is an exploration and planning session only. The Step 6 exception is narrow: only brief files in `.claude/.automation/briefs/` and queue CLI invocations. No product code changes.
 - REQUIRE: **never create session log entries.** Prompt T sessions produce no artifacts and are exempt via the zero-change rule.
 - REQUIRE: **never dispatch specialists in Query mode.** Query mode is conversational — the Orchestrator answers directly.
 - REQUIRE: **always dispatch the 4 core specialists in Brief mode** (Architect, Exploration, Critic, Pragmatist). Additionally dispatch PM Advisory when a compiled spec (`manifest.json` `active` ≠ null) or `mvp-scope.yaml` exists. No tier selection — the core team is fixed, PM is conditional.

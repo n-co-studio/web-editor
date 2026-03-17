@@ -65,8 +65,9 @@ source "$LIB_DIR/cache-builder.sh"
 # shellcheck source=lib/file-lock.sh
 source "$LIB_DIR/file-lock.sh"
 
-# --- Config file ---
+# --- Config files ---
 CONFIG_FILE="$AUTOMATION_DIR/config.yaml"
+CONFIG_LOCAL_FILE="$AUTOMATION_DIR/config.local.yaml"
 
 # --- Heartbeat state ---
 _HEARTBEAT_PID=""
@@ -497,6 +498,29 @@ fi
 # Daemon mode — queue-driven loop
 # ============================================================
 
+# --- PID file guard ---
+PID_FILE="$AUTOMATION_DIR/runner.pid"
+
+_cleanup_pid_file() {
+  rm -f "$PID_FILE" 2>/dev/null || true
+}
+
+# Check for existing daemon
+if [ -f "$PID_FILE" ]; then
+  EXISTING_PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
+  if [ -n "$EXISTING_PID" ] && kill -0 "$EXISTING_PID" 2>/dev/null; then
+    echo "Daemon already running (pid $EXISTING_PID)" >&2
+    exit 0
+  else
+    echo "Removing stale PID file (pid $EXISTING_PID not running)" >&2
+    rm -f "$PID_FILE" 2>/dev/null || true
+  fi
+fi
+
+# Write PID file and trap cleanup
+printf '%s' "$$" > "$PID_FILE"
+trap '_stop_heartbeat; _cleanup_pid_file' EXIT
+
 echo "Runner daemon starting (pid $$)..." >&2
 
 _ensure_queue_dirs
@@ -547,10 +571,53 @@ while true; do
     continue
   fi
   if [ -z "$ENTRY_FILE" ]; then
-    # Idle cycle — periodic cleanup
+    # Idle cycle — periodic cleanup + stale-running recovery
     _IDLE_CYCLE_COUNT=$((_IDLE_CYCLE_COUNT + 1))
     if [ "$_IDLE_CYCLE_COUNT" -ge "$_CLEANUP_INTERVAL" ]; then
       run_cleanup
+      # Stale-running recovery: scan for entries with no heartbeat, stranded > 2× interval
+      _sr_qdir=$(_queue_dir)
+      _sr_interval=$(_parse_config_field "runner" "heartbeat_interval")
+      _sr_interval="${_sr_interval:-30}"
+      _sr_threshold=$((_sr_interval * 2))
+      _sr_now=$(date +%s)
+      for _sr_entry_file in "$_sr_qdir/running"/*.yaml; do
+        [ -f "$_sr_entry_file" ] || continue
+        _sr_entry_id=$(basename "$_sr_entry_file" .yaml)
+        _sr_hb_file="$_sr_qdir/running/${_sr_entry_id}.heartbeat"
+        # Skip entries that have an active heartbeat (another runner is processing)
+        if [ -f "$_sr_hb_file" ]; then
+          _sr_hb_ts=$(cat "$_sr_hb_file" 2>/dev/null || true)
+          if [ -n "$_sr_hb_ts" ]; then
+            _sr_hb_epoch=$(_iso_to_epoch "$_sr_hb_ts" 2>/dev/null || echo "0")
+            _sr_age=$((_sr_now - _sr_hb_epoch))
+            if [ "$_sr_age" -lt "$_sr_threshold" ]; then
+              continue  # Heartbeat is fresh — entry is legitimately running
+            fi
+          fi
+          # Heartbeat exists but is stale — fall through to recovery
+        fi
+        # No heartbeat or stale heartbeat — check entry age via updated_at
+        _load_queue_entry "$_sr_entry_file"
+        _sr_entry_epoch=$(_iso_to_epoch "$_QE_UPDATED_AT" 2>/dev/null || echo "0")
+        _sr_entry_age=$((_sr_now - _sr_entry_epoch))
+        if [ "$_sr_entry_age" -gt "$_sr_threshold" ]; then
+          echo "WARNING: Recovering stale entry $_sr_entry_id (no active heartbeat, age ${_sr_entry_age}s > ${_sr_threshold}s)" >&2
+          if acquire_queue_lock; then
+            _QE_STATUS="failed"
+            _QE_ERROR_LOG="stranded entry — no heartbeat (recovered by daemon idle scan)"
+            _QE_COMPLETED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            _QE_UPDATED_AT="$_QE_COMPLETED_AT"
+            _write_queue_entry "$_sr_qdir/failed/${_sr_entry_id}.yaml"
+            rm -f "$_sr_entry_file"
+            rm -f "$_sr_hb_file" 2>/dev/null || true
+            _rebuild_queue_index
+            release_queue_lock
+          else
+            echo "WARNING: Could not acquire lock for stale entry recovery ($_sr_entry_id)" >&2
+          fi
+        fi
+      done
       _IDLE_CYCLE_COUNT=0
     fi
     sleep 10
@@ -574,7 +641,15 @@ while true; do
   # Validate session type
   if [ -z "$(get_phases_for_type "$ENTRY_SESSION_TYPE" 2>/dev/null)" ]; then
     echo "ERROR: Invalid session type '$ENTRY_SESSION_TYPE' for entry $ENTRY_ID" >&2
-    acquire_queue_lock || true
+    _block_lock_attempts=0
+    while ! acquire_queue_lock; do
+      _block_lock_attempts=$((_block_lock_attempts + 1))
+      if [ "$_block_lock_attempts" -ge 3 ]; then
+        echo "ERROR: Lock unavailable for queue_block — skipping transition" >&2
+        continue 2  # skip to next daemon cycle
+      fi
+      sleep 1
+    done
     queue_block "$ENTRY_ID" "Invalid session type: $ENTRY_SESSION_TYPE"
     release_queue_lock
     continue
@@ -595,30 +670,90 @@ while true; do
   # Clean up heartbeat file
   rm -f "$(_queue_dir)/running/${ENTRY_ID}.heartbeat" 2>/dev/null || true
 
-  # --- Parse outcome and baseline SHA ---
-  OUTCOME_RAW="${RESULT_RAW%%|*}"
-  BASELINE_SHA="${RESULT_RAW#*|}"
+  # --- Handle empty RESULT_RAW (subshell abort, e.g., during solo merge checkout) ---
+  if [ -z "$RESULT_RAW" ]; then
+    echo "WARNING: Empty result from _run_single_entry for $ENTRY_ID — treating as infrastructure failure" >&2
+    OUTCOME_RAW="failed:empty-result"
+    BASELINE_SHA=""
+  else
+    OUTCOME_RAW="${RESULT_RAW%%|*}"
+    BASELINE_SHA="${RESULT_RAW#*|}"
+  fi
+
+  # --- Parse outcome ---
   OUTCOME="${OUTCOME_RAW%%:*}"
   echo "Entry $ENTRY_ID outcome: $OUTCOME_RAW" >&2
 
   # --- Queue state transition based on outcome ---
-  # Lock is best-effort here: entry must transition out of running/ regardless,
-  # so a lock failure degrades to unlocked transition (better than orphan entry).
-  acquire_queue_lock || echo "WARNING: Lock unavailable for outcome transition" >&2
+  # Lock with retry (3 attempts, 1s backoff). Entry must transition out of running/.
+  _lock_acquired=false
+  _lock_attempt=0
+  while [ "$_lock_attempt" -lt 3 ]; do
+    if acquire_queue_lock; then
+      _lock_acquired=true
+      break
+    fi
+    _lock_attempt=$((_lock_attempt + 1))
+    echo "WARNING: Lock attempt $_lock_attempt/3 failed for outcome transition ($ENTRY_ID)" >&2
+    sleep 1
+  done
+  if [ "$_lock_acquired" = false ]; then
+    # Escalation is written, but transitions proceed unlocked below (intentional).
+    # Unlike the dequeue path (which skips via `continue`), outcome transitions must
+    # complete to avoid orphaning the entry in running/. Stale-running scanner is the
+    # secondary safety net if even unlocked transition fails.
+    echo "ERROR: Lock acquisition failed after 3 attempts for $ENTRY_ID — writing escalation" >&2
+    _esc_dir="$REPO_ROOT/.claude/.automation/escalations"
+    mkdir -p "$_esc_dir" 2>/dev/null || true
+    _esc_id="esc-lock-$(date +%Y%m%d-%H%M%S)"
+    {
+      printf 'escalation:\n'
+      printf '  id: "%s"\n' "$_esc_id"
+      printf '  queue_entry_id: "%s"\n' "$ENTRY_ID"
+      printf '  type: "gate-failure"\n'
+      printf '  severity: "blocking"\n'
+      printf '  phase_at_exit: "close"\n'
+      printf '  tag_at_exit: "agent"\n'
+      printf '  message: "Lock acquisition failed after 3 attempts during outcome transition"\n'
+      printf '  context: "outcome: %s, entry: %s"\n' "$OUTCOME_RAW" "$ENTRY_ID"
+      printf '  created_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      printf '  resolved: false\n'
+      printf '  resolution: ""\n'
+    } > "$_esc_dir/${_esc_id}.yaml" 2>/dev/null || true
+  fi
+
+  # Transition call with return-code checks
+  _transition_ok=true
   case "$OUTCOME" in
     completed)
-      queue_complete "$ENTRY_ID"
+      if ! queue_complete "$ENTRY_ID"; then
+        echo "ERROR: queue_complete failed for $ENTRY_ID" >&2
+        _transition_ok=false
+      fi
       ;;
     review)
-      queue_escalate "$ENTRY_ID"
+      if ! queue_escalate "$ENTRY_ID"; then
+        echo "ERROR: queue_escalate failed for $ENTRY_ID" >&2
+        _transition_ok=false
+      fi
       ;;
     failed)
-      queue_fail "$ENTRY_ID"
+      if ! queue_fail "$ENTRY_ID"; then
+        echo "ERROR: queue_fail failed for $ENTRY_ID" >&2
+        _transition_ok=false
+      fi
       ;;
     *)
-      queue_fail "$ENTRY_ID"
+      if ! queue_fail "$ENTRY_ID"; then
+        echo "ERROR: queue_fail failed for $ENTRY_ID (wildcard outcome: $OUTCOME_RAW)" >&2
+        _transition_ok=false
+      fi
       ;;
   esac
+
+  if [ "$_transition_ok" = false ]; then
+    echo "WARNING: State transition failed for $ENTRY_ID — entry may be orphaned in running/" >&2
+  fi
   release_queue_lock
 
   # --- Post-transition actions (outside lock scope) ---

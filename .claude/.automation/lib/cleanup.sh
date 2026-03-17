@@ -5,6 +5,7 @@
 #
 # Cleanup targets:
 #   - Completed queue entries older than queue_days config
+#   - Brief files referenced by deleted queue entries (in .automation/briefs/ only)
 #   - Failed/blocked/review queue entries older than 2x queue_days
 #   - Blocker reports older than report_days config
 #   - Resolved escalations older than escalation_days config
@@ -13,7 +14,8 @@
 #
 # Depends on (sourced by runner.sh before this file):
 #   runner.sh sets REPO_ROOT, AUTOMATION_DIR, CONFIG_FILE
-#   queue-manager.sh — _parse_config_field, _queue_dir, _rebuild_queue_index
+#   queue-manager.sh — _parse_config_field, _queue_dir, _rebuild_queue_index,
+#                       _load_queue_entry
 
 set -euo pipefail
 
@@ -67,6 +69,60 @@ _file_age_hours() {
   fi
 }
 
+# --- Check if a brief path is inside the runtime briefs directory ---
+# Arguments:
+#   $1 — brief_path (absolute or relative to REPO_ROOT)
+# Output: resolved absolute path on stdout if safe, empty if not
+_brief_in_safe_zone() {
+  local brief_path="$1"
+  local briefs_dir="${AUTOMATION_DIR:-$REPO_ROOT/.claude/.automation}/briefs"
+
+  [ -n "$brief_path" ] || return 0
+
+  # Resolve to absolute path if relative
+  local abs_brief="$brief_path"
+  if [ "${brief_path#/}" = "$brief_path" ]; then
+    abs_brief="$REPO_ROOT/$brief_path"
+  fi
+
+  # Resolve briefs_dir to absolute for comparison
+  local abs_briefs_dir
+  abs_briefs_dir=$(cd "$briefs_dir" 2>/dev/null && pwd) || return 0
+
+  # Get real directory of the brief file
+  local brief_parent
+  brief_parent=$(cd "$(dirname "$abs_brief")" 2>/dev/null && pwd) || return 0
+
+  # Only safe if the brief is inside the runtime briefs directory
+  case "$brief_parent" in
+    "$abs_briefs_dir"|"$abs_briefs_dir"/*)
+      printf '%s' "$abs_brief"
+      ;;
+  esac
+}
+
+# --- Delete brief file for a queue entry (if in runtime briefs directory) ---
+# Only deletes briefs under .claude/.automation/briefs/ — never outside.
+# Arguments:
+#   $1 — queue entry YAML file path
+# Output: 1 if a brief was deleted, 0 otherwise
+_delete_brief_for_entry() {
+  local entry_file="$1"
+
+  # Load entry to read brief_path field
+  _load_queue_entry "$entry_file" || { echo "0"; return; }
+
+  local safe_path
+  safe_path=$(_brief_in_safe_zone "$_QE_BRIEF_PATH")
+
+  if [ -n "$safe_path" ] && [ -f "$safe_path" ]; then
+    rm -f "$safe_path"
+    echo "1"
+  else
+    echo "0"
+  fi
+}
+
 # --- Clean queue entries by status and retention ---
 # Arguments:
 #   $1 — status directory name (completed, failed, review, blocked)
@@ -88,6 +144,8 @@ _clean_queue_status() {
     local age
     age=$(_file_age_days "$f")
     if [ "$age" -ge "$max_days" ]; then
+      # Delete referenced brief file before removing entry
+      _delete_brief_for_entry "$f" > /dev/null
       rm -f "$f"
       deleted=$((deleted + 1))
     fi
@@ -250,6 +308,174 @@ _clean_work_orders() {
   echo "$deleted"
 }
 
+# --- Clean brief files for completed entries without deleting entries ---
+# Only scans completed/ status. Briefs for failed/blocked/review entries
+# are cleaned when those entries age out via run_cleanup → _clean_queue_status.
+# Arguments:
+#   $1 — max age in days (entries older than this have briefs cleaned)
+# Output: count of deleted briefs on stdout
+_clean_briefs_only() {
+  local max_days="$1"
+  local qdir
+  qdir=$(_queue_dir)
+  local dir="$qdir/completed"
+  local deleted=0
+
+  [ -d "$dir" ] || { echo "0"; return; }
+
+  local f
+  for f in "$dir"/*.yaml; do
+    [ -f "$f" ] || continue
+    local age
+    age=$(_file_age_days "$f")
+    if [ "$age" -ge "$max_days" ]; then
+      local brief_deleted
+      brief_deleted=$(_delete_brief_for_entry "$f")
+      deleted=$((deleted + brief_deleted))
+    fi
+  done
+
+  echo "$deleted"
+}
+
+# --- Dry-run cleanup scan ---
+# Shows what would be deleted without acting.
+# Note: output is a point-in-time snapshot — concurrent runner activity
+# may change results between dry-run and actual prune.
+# Output: planned deletions to stdout
+_dry_run_cleanup() {
+  local queue_days report_days escalation_days
+  queue_days=$(_parse_config_field "retention" "queue_days" 2>/dev/null || true)
+  queue_days="${queue_days:-30}"
+  report_days=$(_parse_config_field "retention" "report_days" 2>/dev/null || true)
+  report_days="${report_days:-90}"
+  escalation_days=$(_parse_config_field "retention" "escalation_days" 2>/dev/null || true)
+  escalation_days="${escalation_days:-90}"
+
+  local failed_days=$((queue_days * 2))
+  local qdir
+  qdir=$(_queue_dir)
+  local total=0
+
+  # Queue entries + their briefs
+  local status max_d
+  for status in completed; do
+    max_d="$queue_days"
+    local dir="$qdir/$status"
+    [ -d "$dir" ] || continue
+    local f
+    for f in "$dir"/*.yaml; do
+      [ -f "$f" ] || continue
+      local age
+      age=$(_file_age_days "$f")
+      if [ "$age" -ge "$max_d" ]; then
+        echo "would delete: $f (${age}d old, >${max_d}d)"
+        total=$((total + 1))
+        # Check for brief file in safe zone
+        _load_queue_entry "$f" 2>/dev/null || continue
+        local safe_path
+        safe_path=$(_brief_in_safe_zone "$_QE_BRIEF_PATH")
+        if [ -n "$safe_path" ] && [ -f "$safe_path" ]; then
+          echo "would delete: $safe_path (brief for $(basename "$f" .yaml))"
+          total=$((total + 1))
+        fi
+      fi
+    done
+  done
+
+  for status in failed blocked review; do
+    max_d="$failed_days"
+    local dir="$qdir/$status"
+    [ -d "$dir" ] || continue
+    local f
+    for f in "$dir"/*.yaml; do
+      [ -f "$f" ] || continue
+      local age
+      age=$(_file_age_days "$f")
+      if [ "$age" -ge "$max_d" ]; then
+        echo "would delete: $f (${age}d old, >${max_d}d)"
+        total=$((total + 1))
+        # Check for brief file in safe zone
+        _load_queue_entry "$f" 2>/dev/null || continue
+        local safe_path
+        safe_path=$(_brief_in_safe_zone "$_QE_BRIEF_PATH")
+        if [ -n "$safe_path" ] && [ -f "$safe_path" ]; then
+          echo "would delete: $safe_path (brief for $(basename "$f" .yaml))"
+          total=$((total + 1))
+        fi
+      fi
+    done
+  done
+
+  # Reports
+  local reports_dir="${AUTOMATION_DIR:-$REPO_ROOT/.claude/.automation}/reports"
+  if [ -d "$reports_dir" ]; then
+    local f
+    for f in "$reports_dir"/*.yaml; do
+      [ -f "$f" ] || continue
+      local age
+      age=$(_file_age_days "$f")
+      if [ "$age" -ge "$report_days" ]; then
+        echo "would delete: $f (${age}d old, >${report_days}d)"
+        total=$((total + 1))
+      fi
+    done
+  fi
+
+  # Escalations (resolved only)
+  local esc_dir="${AUTOMATION_DIR:-$REPO_ROOT/.claude/.automation}/escalations"
+  if [ -d "$esc_dir" ]; then
+    local f
+    for f in "$esc_dir"/*.yaml; do
+      [ -f "$f" ] || continue
+      if grep -q 'resolved: true' "$f" 2>/dev/null; then
+        local age
+        age=$(_file_age_days "$f")
+        if [ "$age" -ge "$escalation_days" ]; then
+          echo "would delete: $f (${age}d old, >${escalation_days}d)"
+          total=$((total + 1))
+        fi
+      fi
+    done
+  fi
+
+  # Work orders (terminal)
+  local wo_dir="$qdir/work-orders"
+  if [ -d "$wo_dir" ]; then
+    local f
+    for f in "$wo_dir"/*.yaml; do
+      [ -f "$f" ] || continue
+      if grep -q 'status: completed' "$f" 2>/dev/null || \
+         grep -q 'status: escalated' "$f" 2>/dev/null; then
+        local age
+        age=$(_file_age_days "$f")
+        if [ "$age" -ge "$queue_days" ]; then
+          echo "would delete: $f (${age}d old, >${queue_days}d)"
+          total=$((total + 1))
+        fi
+      fi
+    done
+  fi
+
+  # Stale heartbeats
+  local hb_dir="$qdir/running"
+  if [ -d "$hb_dir" ]; then
+    local f
+    for f in "$hb_dir"/*.heartbeat; do
+      [ -f "$f" ] || continue
+      local age
+      age=$(_file_age_hours "$f")
+      if [ "$age" -ge 24 ]; then
+        echo "would delete: $f (${age}h old, >24h)"
+        total=$((total + 1))
+      fi
+    done
+  fi
+
+  echo "---"
+  echo "dry-run: $total artifacts would be deleted"
+}
+
 # ============================================================
 # Public API
 # ============================================================
@@ -271,7 +497,7 @@ run_cleanup() {
 
   local total_deleted=0 count
 
-  # Queue entries
+  # Queue entries (brief files deleted as side effect via _delete_brief_for_entry)
   count=$(_clean_queue_status "completed" "$queue_days")
   total_deleted=$((total_deleted + count))
   [ "$count" -gt 0 ] && echo "cleanup: removed $count completed entries (>${queue_days}d)" >&2

@@ -1,0 +1,5 @@
+# Local config override (operator runtime state — untracked)
+config.local.yaml
+
+# PID file (daemon runtime artifact)
+runner.pid

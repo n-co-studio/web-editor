@@ -96,7 +96,7 @@ queue_status() {
         key="${key%%\"*}"
         # Extract value after the key
         local after_key="${remaining#*\"${key}\":}"
-        local val="${after_key%%[,}]*}"
+        local val="${after_key%%,*}"
         # Normalize key (replace _ with -)
         local display_key="${key//_/-}"
 

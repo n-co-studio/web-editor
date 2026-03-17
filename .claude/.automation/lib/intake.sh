@@ -31,6 +31,7 @@ AUTOMATION_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$AUTOMATION_DIR/../.." && pwd)"
 LIB_DIR="$SCRIPT_DIR"
 CONFIG_FILE="$AUTOMATION_DIR/config.yaml"
+CONFIG_LOCAL_FILE="$AUTOMATION_DIR/config.local.yaml"
 
 # --- Source shared helpers ---
 # shellcheck source=../../../.claude/hooks/_analytics-helper.sh
@@ -182,14 +183,21 @@ fi
 
 release_queue_lock
 
-# --- Auto-enable runner ---
-if grep -q 'enabled: false' "$CONFIG_FILE" 2>/dev/null; then
-  if [[ "${OSTYPE:-}" == darwin* ]]; then
-    sed -i '' 's/enabled: false/enabled: true/' "$CONFIG_FILE"
-  else
-    sed -i 's/enabled: false/enabled: true/' "$CONFIG_FILE"
+# --- Auto-enable runner via local config override (merge-safe) ---
+if [ -f "$CONFIG_LOCAL_FILE" ]; then
+  if ! grep -q 'enabled: true' "$CONFIG_LOCAL_FILE" 2>/dev/null; then
+    if grep -q '^runner:' "$CONFIG_LOCAL_FILE" 2>/dev/null; then
+      # runner: block exists — flip enabled: false to true
+      sed -i '' '/^runner:/,/^[a-z]/{s/enabled: false/enabled: true/;}' "$CONFIG_LOCAL_FILE"
+    else
+      # No runner: block — append one
+      printf '\nrunner:\n  enabled: true\n' >> "$CONFIG_LOCAL_FILE"
+    fi
+    echo "Runner auto-enabled in config.local.yaml" >&2
   fi
-  echo "Runner auto-enabled in config.yaml" >&2
+else
+  printf 'runner:\n  enabled: true\n' > "$CONFIG_LOCAL_FILE"
+  echo "Runner auto-enabled in config.local.yaml" >&2
 fi
 
 # --- Output ---

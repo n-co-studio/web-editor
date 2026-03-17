@@ -16,6 +16,8 @@
 #   show <id>
 #   review
 #   log [--lines N]
+#   prune [--briefs-only] [--dry-run]
+#   start-daemon
 #   halt
 #   resume
 #
@@ -35,6 +37,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 AUTOMATION_DIR="$SCRIPT_DIR"
 LIB_DIR="$AUTOMATION_DIR/lib"
 CONFIG_FILE="$AUTOMATION_DIR/config.yaml"
+CONFIG_LOCAL_FILE="$AUTOMATION_DIR/config.local.yaml"
 
 # --- Source shared helpers ---
 # shellcheck source=../../.claude/hooks/_analytics-helper.sh
@@ -59,6 +62,8 @@ source "$LIB_DIR/file-lock.sh"
 source "$LIB_DIR/queue-validator.sh"
 # shellcheck source=lib/branch-manager.sh
 source "$LIB_DIR/branch-manager.sh"
+# shellcheck source=lib/cleanup.sh
+source "$LIB_DIR/cleanup.sh"
 
 # --- Global flags ---
 JSON_OUTPUT=false
@@ -78,6 +83,8 @@ Subcommands:
   show <id>
   review
   log [--lines N]
+  prune [--briefs-only] [--dry-run]
+  start-daemon
   halt
   resume
 EOF
@@ -419,6 +426,132 @@ case "$SUBCOMMAND" in
     review_log_tail "$LOG_LINES"
     ;;
 
+  # --- prune: manual cleanup of stale artifacts ---
+  prune)
+    PRUNE_BRIEFS_ONLY=false
+    PRUNE_DRY_RUN=false
+
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --briefs-only) PRUNE_BRIEFS_ONLY=true; shift ;;
+        --dry-run)     PRUNE_DRY_RUN=true; shift ;;
+        *) echo "ERROR: Unknown prune option: $1" >&2; exit 1 ;;
+      esac
+    done
+
+    if [ "$PRUNE_DRY_RUN" = true ]; then
+      # Dry-run is read-only — no lock needed
+      _dry_run_cleanup
+    elif [ "$PRUNE_BRIEFS_ONLY" = true ]; then
+      # Mutating — acquire lock
+      if ! acquire_queue_lock; then
+        echo "ERROR: Queue lock unavailable" >&2
+        exit 1
+      fi
+
+      PRUNE_QUEUE_DAYS=$(_parse_config_field "retention" "queue_days" 2>/dev/null || true)
+      PRUNE_QUEUE_DAYS="${PRUNE_QUEUE_DAYS:-30}"
+
+      PRUNE_COUNT=$(_clean_briefs_only "$PRUNE_QUEUE_DAYS")
+      release_queue_lock
+
+      if [ "$JSON_OUTPUT" = true ]; then
+        printf '{%s,%s}\n' \
+          "$(_json_kv "action" "prune-briefs")" \
+          "$(_json_kv_raw "deleted" "$PRUNE_COUNT")"
+      else
+        echo "Pruned $PRUNE_COUNT brief file(s)."
+      fi
+    else
+      # Full cleanup — acquire lock
+      if ! acquire_queue_lock; then
+        echo "ERROR: Queue lock unavailable" >&2
+        exit 1
+      fi
+
+      run_cleanup
+      release_queue_lock
+
+      if [ "$JSON_OUTPUT" = true ]; then
+        printf '{%s}\n' "$(_json_kv "action" "prune-complete")"
+      else
+        echo "Prune complete."
+      fi
+    fi
+    ;;
+
+  # --- start-daemon: launch daemon if not already running ---
+  start-daemon)
+    PID_FILE="$AUTOMATION_DIR/runner.pid"
+
+    # Check if daemon is already running
+    if [ -f "$PID_FILE" ]; then
+      EXISTING_PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
+      if [ -n "$EXISTING_PID" ] && kill -0 "$EXISTING_PID" 2>/dev/null; then
+        if [ "$JSON_OUTPUT" = true ]; then
+          printf '{%s,%s}\n' \
+            "$(_json_kv "action" "already-running")" \
+            "$(_json_kv "pid" "$EXISTING_PID")"
+        else
+          printf 'Daemon already running (pid %s)\n' "$EXISTING_PID"
+        fi
+        exit 0
+      else
+        # Stale PID file — clean up
+        rm -f "$PID_FILE" 2>/dev/null || true
+      fi
+    fi
+
+    # Check for HALT file
+    if [ -f "$AUTOMATION_DIR/HALT" ]; then
+      if [ "$JSON_OUTPUT" = true ]; then
+        printf '{%s}\n' "$(_json_kv "error" "HALT file present — remove with: queue-cli.sh resume")"
+      else
+        echo "ERROR: HALT file present — remove with: queue-cli.sh resume" >&2
+      fi
+      exit 1
+    fi
+
+    # Ensure local config override enables the runner (merge-safe — preserves existing fields)
+    if [ -f "$CONFIG_LOCAL_FILE" ]; then
+      if ! grep -q 'enabled: true' "$CONFIG_LOCAL_FILE" 2>/dev/null; then
+        if grep -q '^runner:' "$CONFIG_LOCAL_FILE" 2>/dev/null; then
+          sed -i '' '/^runner:/,/^[a-z]/{s/enabled: false/enabled: true/;}' "$CONFIG_LOCAL_FILE"
+        else
+          printf '\nrunner:\n  enabled: true\n' >> "$CONFIG_LOCAL_FILE"
+        fi
+      fi
+    else
+      printf 'runner:\n  enabled: true\n' > "$CONFIG_LOCAL_FILE"
+    fi
+
+    # Ensure logs directory exists (gitignored — may not exist on fresh clone)
+    mkdir -p "$AUTOMATION_DIR/logs" 2>/dev/null || true
+
+    # Launch daemon in background
+    nohup "$AUTOMATION_DIR/runner.sh" --daemon >> "$AUTOMATION_DIR/logs/daemon.log" 2>&1 &
+    DAEMON_PID=$!
+
+    # Brief wait to verify startup
+    sleep 1
+    if kill -0 "$DAEMON_PID" 2>/dev/null; then
+      if [ "$JSON_OUTPUT" = true ]; then
+        printf '{%s,%s}\n' \
+          "$(_json_kv "action" "started")" \
+          "$(_json_kv "pid" "$DAEMON_PID")"
+      else
+        printf 'Daemon started (pid %s)\n' "$DAEMON_PID"
+      fi
+    else
+      if [ "$JSON_OUTPUT" = true ]; then
+        printf '{%s}\n' "$(_json_kv "error" "Daemon failed to start — check logs/daemon.log")"
+      else
+        echo "ERROR: Daemon failed to start — check logs/daemon.log" >&2
+      fi
+      exit 1
+    fi
+    ;;
+
   # --- halt: stop daemon loop ---
   halt)
     touch "$AUTOMATION_DIR/HALT"
@@ -435,7 +568,7 @@ case "$SUBCOMMAND" in
     if [ "$JSON_OUTPUT" = true ]; then
       printf '{%s}\n' "$(_json_kv "action" "resumed")"
     else
-      echo "HALT file removed — restart daemon with: runner.sh --daemon &"
+      echo "HALT file removed — restart daemon with: queue-cli.sh start-daemon"
     fi
     ;;
 

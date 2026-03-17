@@ -37,6 +37,16 @@ _QE_PROMPT="" _QE_AUTO_MODE="" _QE_SOLO_MODE="" _QE_PUSH_ON_COMPLETE="" _QE_RETR
 _QE_MAX_RETRIES="" _QE_ERROR_LOG="" _QE_WORK_ORDER_ID="" _QE_CREATED_AT=""
 _QE_UPDATED_AT="" _QE_COMPLETED_AT=""
 
+# --- Strip surrounding double quotes from a YAML scalar value ---
+# Handles both quoted ("value") and unquoted (value) formats for backward compat.
+_strip_quotes() {
+  local val="$1"
+  case "$val" in
+    \"*\") val="${val#\"}"; val="${val%\"}" ;;
+  esac
+  printf '%s' "$val"
+}
+
 # --- Bulk-read queue entry YAML into _QE_* variables (zero-fork) ---
 # Queue entry format: `entry:` header followed by `  key: value` lines.
 # Prompt field uses block scalar (`prompt: |`) — multi-line content follows indented.
@@ -90,6 +100,25 @@ ${_line#    }"
       "  completed_at: "*) _QE_COMPLETED_AT="${_line#  completed_at: }" ;;
     esac
   done < "$entry_file"
+
+  # Strip surrounding double quotes from all scalar fields (backward compat
+  # with both quoted and unquoted YAML formats). Zero-fork: pure parameter expansion.
+  case "$_QE_ID"               in \"*\") _QE_ID="${_QE_ID#\"}"; _QE_ID="${_QE_ID%\"}" ;; esac
+  case "$_QE_STATUS"           in \"*\") _QE_STATUS="${_QE_STATUS#\"}"; _QE_STATUS="${_QE_STATUS%\"}" ;; esac
+  case "$_QE_SESSION_TYPE"     in \"*\") _QE_SESSION_TYPE="${_QE_SESSION_TYPE#\"}"; _QE_SESSION_TYPE="${_QE_SESSION_TYPE%\"}" ;; esac
+  case "$_QE_BRANCH"           in \"*\") _QE_BRANCH="${_QE_BRANCH#\"}"; _QE_BRANCH="${_QE_BRANCH%\"}" ;; esac
+  case "$_QE_BRIEF_PATH"       in \"*\") _QE_BRIEF_PATH="${_QE_BRIEF_PATH#\"}"; _QE_BRIEF_PATH="${_QE_BRIEF_PATH%\"}" ;; esac
+  case "$_QE_PROMPT"           in \"*\") _QE_PROMPT="${_QE_PROMPT#\"}"; _QE_PROMPT="${_QE_PROMPT%\"}" ;; esac
+  case "$_QE_AUTO_MODE"        in \"*\") _QE_AUTO_MODE="${_QE_AUTO_MODE#\"}"; _QE_AUTO_MODE="${_QE_AUTO_MODE%\"}" ;; esac
+  case "$_QE_SOLO_MODE"        in \"*\") _QE_SOLO_MODE="${_QE_SOLO_MODE#\"}"; _QE_SOLO_MODE="${_QE_SOLO_MODE%\"}" ;; esac
+  case "$_QE_PUSH_ON_COMPLETE" in \"*\") _QE_PUSH_ON_COMPLETE="${_QE_PUSH_ON_COMPLETE#\"}"; _QE_PUSH_ON_COMPLETE="${_QE_PUSH_ON_COMPLETE%\"}" ;; esac
+  case "$_QE_RETRY_COUNT"      in \"*\") _QE_RETRY_COUNT="${_QE_RETRY_COUNT#\"}"; _QE_RETRY_COUNT="${_QE_RETRY_COUNT%\"}" ;; esac
+  case "$_QE_MAX_RETRIES"      in \"*\") _QE_MAX_RETRIES="${_QE_MAX_RETRIES#\"}"; _QE_MAX_RETRIES="${_QE_MAX_RETRIES%\"}" ;; esac
+  case "$_QE_ERROR_LOG"        in \"*\") _QE_ERROR_LOG="${_QE_ERROR_LOG#\"}"; _QE_ERROR_LOG="${_QE_ERROR_LOG%\"}" ;; esac
+  case "$_QE_WORK_ORDER_ID"    in \"*\") _QE_WORK_ORDER_ID="${_QE_WORK_ORDER_ID#\"}"; _QE_WORK_ORDER_ID="${_QE_WORK_ORDER_ID%\"}" ;; esac
+  case "$_QE_CREATED_AT"       in \"*\") _QE_CREATED_AT="${_QE_CREATED_AT#\"}"; _QE_CREATED_AT="${_QE_CREATED_AT%\"}" ;; esac
+  case "$_QE_UPDATED_AT"       in \"*\") _QE_UPDATED_AT="${_QE_UPDATED_AT#\"}"; _QE_UPDATED_AT="${_QE_UPDATED_AT%\"}" ;; esac
+  case "$_QE_COMPLETED_AT"     in \"*\") _QE_COMPLETED_AT="${_QE_COMPLETED_AT#\"}"; _QE_COMPLETED_AT="${_QE_COMPLETED_AT%\"}" ;; esac
 }
 
 # --- Write queue entry YAML from _QE_* variables (atomic) ---
@@ -101,34 +130,35 @@ _write_queue_entry() {
 
   {
     printf 'entry:\n'
-    printf '  id: %s\n' "$_QE_ID"
-    printf '  status: %s\n' "$_QE_STATUS"
-    printf '  session_type: %s\n' "$_QE_SESSION_TYPE"
-    printf '  branch: %s\n' "$_QE_BRANCH"
-    printf '  brief_path: %s\n' "$_QE_BRIEF_PATH"
-    # Prompt: use block scalar if multi-line, plain if empty/single-line
+    printf '  id: "%s"\n' "$_QE_ID"
+    printf '  status: "%s"\n' "$_QE_STATUS"
+    printf '  session_type: "%s"\n' "$_QE_SESSION_TYPE"
+    printf '  branch: "%s"\n' "$_QE_BRANCH"
+    printf '  brief_path: "%s"\n' "$_QE_BRIEF_PATH"
+    # Prompt: use block scalar if multi-line, quoted if single-line, empty-string if empty
     if [ -z "$_QE_PROMPT" ]; then
       printf '  prompt: ""\n'
-    elif [[ "$_QE_PROMPT" == *$'\n'* ]]; then
+    elif case "$_QE_PROMPT" in *"
+"*) true ;; *) false ;; esac; then
       printf '  prompt: |\n'
       # Indent each line by 4 spaces for YAML block scalar
       local _pline
-      while IFS= read -r _pline || [ -n "$_pline" ]; do
+      printf '%s\n' "$_QE_PROMPT" | while IFS= read -r _pline || [ -n "$_pline" ]; do
         printf '    %s\n' "$_pline"
-      done <<< "$_QE_PROMPT"
+      done
     else
-      printf '  prompt: %s\n' "$_QE_PROMPT"
+      printf '  prompt: "%s"\n' "$_QE_PROMPT"
     fi
-    printf '  auto_mode: %s\n' "$_QE_AUTO_MODE"
-    printf '  solo_mode: %s\n' "$_QE_SOLO_MODE"
-    printf '  push_on_complete: %s\n' "$_QE_PUSH_ON_COMPLETE"
-    printf '  retry_count: %s\n' "$_QE_RETRY_COUNT"
-    printf '  max_retries: %s\n' "$_QE_MAX_RETRIES"
-    printf '  error_log: %s\n' "$_QE_ERROR_LOG"
-    printf '  work_order_id: %s\n' "$_QE_WORK_ORDER_ID"
-    printf '  created_at: %s\n' "$_QE_CREATED_AT"
-    printf '  updated_at: %s\n' "$_QE_UPDATED_AT"
-    printf '  completed_at: %s\n' "$_QE_COMPLETED_AT"
+    printf '  auto_mode: "%s"\n' "$_QE_AUTO_MODE"
+    printf '  solo_mode: "%s"\n' "$_QE_SOLO_MODE"
+    printf '  push_on_complete: "%s"\n' "$_QE_PUSH_ON_COMPLETE"
+    printf '  retry_count: "%s"\n' "$_QE_RETRY_COUNT"
+    printf '  max_retries: "%s"\n' "$_QE_MAX_RETRIES"
+    printf '  error_log: "%s"\n' "$_QE_ERROR_LOG"
+    printf '  work_order_id: "%s"\n' "$_QE_WORK_ORDER_ID"
+    printf '  created_at: "%s"\n' "$_QE_CREATED_AT"
+    printf '  updated_at: "%s"\n' "$_QE_UPDATED_AT"
+    printf '  completed_at: "%s"\n' "$_QE_COMPLETED_AT"
   } > "$tmp_file"
   mv "$tmp_file" "$entry_file"
 }
@@ -207,8 +237,11 @@ _rebuild_queue_index() {
         local child_count=0 completed_count=0
         if [ -n "$_wo_snap_ids" ]; then
           local _wid
-          IFS=',' read -ra _wids <<< "$_wo_snap_ids"
-          for _wid in "${_wids[@]}"; do
+          local _old_ifs="$IFS"
+          IFS=','
+          # shellcheck disable=SC2086 — intentional word splitting on comma-delimited list
+          for _wid in $_wo_snap_ids; do
+            IFS="$_old_ifs"
             child_count=$((child_count + 1))
             local _wef
             _wef=$(_find_entry_file "$_wid")
@@ -219,6 +252,7 @@ _rebuild_queue_index() {
               fi
             fi
           done
+          IFS="$_old_ifs"
         fi
 
         if [ "$first_wo" = true ]; then
@@ -264,10 +298,20 @@ _transition() {
   local dst_file="$qdir/$to_status/${entry_id}.yaml"
   _write_queue_entry "$dst_file"
   rm -f "$src_file"
+  # Post-removal verification: confirm source file is actually gone
+  if [ -f "$src_file" ]; then
+    echo "WARNING: Source file persisted after rm — retrying removal: $src_file" >&2
+    rm -f "$src_file"
+    if [ -f "$src_file" ]; then
+      echo "ERROR: Unable to remove source file after retry: $src_file" >&2
+      # Destination was already written — proceed with index rebuild
+    fi
+  fi
   _rebuild_queue_index
 }
 
-# --- Parse a config field from config.yaml ---
+# --- Parse a config field with local override support ---
+# Checks config.local.yaml first (if it exists), then falls back to config.yaml.
 # Arguments:
 #   $1 — block name (e.g., "runner")
 #   $2 — field name (e.g., "enabled")
@@ -275,8 +319,18 @@ _transition() {
 _parse_config_field() {
   local block="$1"
   local field="$2"
-  sed -n "/^${block}:/,/^[a-z]/{ /${field}:/p; }" "$CONFIG_FILE" \
-    | sed "s/.*${field}: *//" | tr -d '[:space:]' | head -1
+  local value=""
+  # Check local override file first
+  if [ -n "${CONFIG_LOCAL_FILE:-}" ] && [ -f "$CONFIG_LOCAL_FILE" ]; then
+    value=$(sed -n "/^${block}:/,/^[a-z]/{ /${field}:/p; }" "$CONFIG_LOCAL_FILE" \
+      | sed "s/.*${field}: *//" | tr -d '[:space:]' | head -1)
+  fi
+  # Fall back to tracked config
+  if [ -z "$value" ]; then
+    value=$(sed -n "/^${block}:/,/^[a-z]/{ /${field}:/p; }" "$CONFIG_FILE" \
+      | sed "s/.*${field}: *//" | tr -d '[:space:]' | head -1)
+  fi
+  printf '%s' "$value"
 }
 
 # ============================================================
@@ -492,7 +546,8 @@ queue_dequeue() {
     _load_queue_entry "$f"
     local ts="$_QE_CREATED_AT"
     # ISO 8601 timestamps are lexicographically sortable
-    if [ -z "$oldest_ts" ] || [[ "$ts" < "$oldest_ts" ]]; then
+    # POSIX-safe string comparison for ISO 8601 timestamps (lexicographic sort)
+    if [ -z "$oldest_ts" ] || expr "$ts" \< "$oldest_ts" > /dev/null 2>&1; then
       oldest_ts="$ts"
       oldest_file="$f"
     fi
@@ -519,6 +574,11 @@ queue_complete() {
   local src_file="$qdir/running/${entry_id}.yaml"
 
   if [ ! -f "$src_file" ]; then
+    # Idempotency guard: if already in completed/, treat as success
+    if [ -f "$qdir/completed/${entry_id}.yaml" ]; then
+      echo "WARNING: Entry $entry_id already in completed/ — idempotent no-op" >&2
+      return 0
+    fi
     echo "ERROR: Entry $entry_id not found in running/" >&2
     return 1
   fi
@@ -545,6 +605,16 @@ queue_fail() {
   local src_file="$qdir/running/${entry_id}.yaml"
 
   if [ ! -f "$src_file" ]; then
+    # Idempotency guard: if already in failed/ or completed/, treat as success
+    if [ -f "$qdir/failed/${entry_id}.yaml" ] || [ -f "$qdir/completed/${entry_id}.yaml" ]; then
+      echo "WARNING: Entry $entry_id already transitioned (failed/ or completed/) — idempotent no-op" >&2
+      return 0
+    fi
+    # Also check approved/ (retry path) — entry was already re-queued
+    if [ -f "$qdir/approved/${entry_id}.yaml" ]; then
+      echo "WARNING: Entry $entry_id already in approved/ (retry) — idempotent no-op" >&2
+      return 0
+    fi
     echo "ERROR: Entry $entry_id not found in running/" >&2
     return 1
   fi
@@ -580,6 +650,11 @@ queue_escalate() {
   local src_file="$qdir/running/${entry_id}.yaml"
 
   if [ ! -f "$src_file" ]; then
+    # Idempotency guard: if already in review/, treat as success
+    if [ -f "$qdir/review/${entry_id}.yaml" ]; then
+      echo "WARNING: Entry $entry_id already in review/ — idempotent no-op" >&2
+      return 0
+    fi
     echo "ERROR: Entry $entry_id not found in running/" >&2
     return 1
   fi
@@ -607,6 +682,11 @@ queue_block() {
   local src_file="$qdir/running/${entry_id}.yaml"
 
   if [ ! -f "$src_file" ]; then
+    # Idempotency guard: if already in blocked/, treat as success
+    if [ -f "$qdir/blocked/${entry_id}.yaml" ]; then
+      echo "WARNING: Entry $entry_id already in blocked/ — idempotent no-op" >&2
+      return 0
+    fi
     echo "ERROR: Entry $entry_id not found in running/" >&2
     return 1
   fi
