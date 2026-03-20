@@ -87,17 +87,28 @@ REPO_ROOT="$_REPO_OS_ROOT"
 
 # ============================================================
 # Section 1: State-Guard (blocks writes to .claude/.state/)
+#             + Queue-Guard (blocks writes to .claude/.automation/queue/)
 # ============================================================
 
 if [ "$SKIP_STATE_GUARD" = false ]; then
   TARGETS_STATE=false
   STATE_TARGET_PATH=""
+  TARGETS_QUEUE=false
+  QUEUE_TARGET_PATH=""
 
-  if [ -n "$FILE_PATH" ] && [[ "$FILE_PATH" == *".claude/.state/"* ]]; then
-    _fp_abs=$(resolve_path "$FILE_PATH")
-    if is_in_repo "$_fp_abs" "$REPO_ROOT"; then
-      TARGETS_STATE=true
-      STATE_TARGET_PATH="$FILE_PATH"
+  if [ -n "$FILE_PATH" ]; then
+    if [[ "$FILE_PATH" == *".claude/.state/"* ]]; then
+      _fp_abs=$(resolve_path "$FILE_PATH")
+      if is_in_repo "$_fp_abs" "$REPO_ROOT"; then
+        TARGETS_STATE=true
+        STATE_TARGET_PATH="$FILE_PATH"
+      fi
+    elif [[ "$FILE_PATH" == *".claude/.automation/queue/"* ]]; then
+      _fp_abs=$(resolve_path "$FILE_PATH")
+      if is_in_repo "$_fp_abs" "$REPO_ROOT"; then
+        TARGETS_QUEUE=true
+        QUEUE_TARGET_PATH="$FILE_PATH"
+      fi
     fi
   fi
 
@@ -110,7 +121,12 @@ if [ "$SKIP_STATE_GUARD" = false ]; then
         if is_in_repo "$_wt_abs" "$REPO_ROOT"; then
           TARGETS_STATE=true
           STATE_TARGET_PATH="$WT"
-          break
+        fi
+      elif [[ "$WT" == *".claude/.automation/queue/"* ]]; then
+        _wt_abs=$(resolve_path "$WT")
+        if is_in_repo "$_wt_abs" "$REPO_ROOT"; then
+          TARGETS_QUEUE=true
+          QUEUE_TARGET_PATH="$WT"
         fi
       fi
     done <<< "$TARGETS"
@@ -120,6 +136,13 @@ if [ "$SKIP_STATE_GUARD" = false ]; then
     STATE_FILE_NAME="${STATE_TARGET_PATH##*.claude/.state/}"
     log_hook_event "state-guard" "PreToolUse" "" "block" "$START_MS" "state_path_protected" "" "$STATE_FILE_NAME"
     echo "GATE-FINAL: .claude/.state/ is write-protected — state files are managed by governance hooks only. (override: REPO_OS_RECOVER=1)" >&2
+    exit 2
+  fi
+
+  if [ "$TARGETS_QUEUE" = true ]; then
+    QUEUE_FILE_NAME="${QUEUE_TARGET_PATH##*.claude/.automation/queue/}"
+    log_hook_event "write-guard" "PreToolUse" "" "block" "$START_MS" "queue_path_protected" "" "$QUEUE_FILE_NAME"
+    echo "GATE-FINAL: .claude/.automation/queue/ is write-protected — queue entries are managed by intake.sh and the runner only. (override: REPO_OS_RECOVER=1)" >&2
     exit 2
   fi
 fi

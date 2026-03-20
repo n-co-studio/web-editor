@@ -56,8 +56,17 @@ INPUT=$(cat)
 # --- Zero-change fast exit (before library sourcing — builtins + git only) ---
 # Compute repo root using same logic as _analytics-helper.sh (including test seam).
 # Avoids ~14ms sourcing cost for zero-change sessions with no pending state.
+# Path prefix guard: _REPO_OS_TEST_ROOT must start with /tmp/ or /private/tmp/.
 if [ "${REPO_OS_TEST_MODE:-0}" = "1" ] && [ -n "${_REPO_OS_TEST_ROOT:-}" ]; then
-  _EARLY_ROOT="$_REPO_OS_TEST_ROOT"
+  case "$_REPO_OS_TEST_ROOT" in
+    /tmp/*|/private/tmp/*)
+      _EARLY_ROOT="$_REPO_OS_TEST_ROOT"
+      ;;
+    *)
+      echo "WARNING: _REPO_OS_TEST_ROOT rejected — must start with /tmp/ or /private/tmp/ (got: $_REPO_OS_TEST_ROOT)" >&2
+      _EARLY_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+      ;;
+  esac
 else
   _EARLY_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 fi

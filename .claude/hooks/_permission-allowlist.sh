@@ -74,8 +74,6 @@ _PERMISSION_ALLOW_BASH=(
   # File operations (write — safe within sandbox)
   'mkdir '
   'touch '
-  'cp '
-  'mv '
 
   # Git read operations
   'git status'
@@ -103,9 +101,17 @@ _PERMISSION_ALLOW_BASH=(
   'git switch'
   'git stash'
 
-  # Source helper scripts (common in Repo OS hooks)
-  'source '
-  '\. '
+  # Source helper scripts (scoped to Repo OS hooks — arbitrary source falls through to dialog)
+  'source .claude/hooks/'
+  'source "\$SCRIPT_DIR'
+  'source "\$\{SCRIPT_DIR'
+  'source "\$_BRIDGE_AUTOMATION_DIR'
+  'source .claude/.automation/'
+  '\. .claude/hooks/'
+  '\. "\$SCRIPT_DIR'
+  '\. "\$\{SCRIPT_DIR'
+  '\. "\$_BRIDGE_AUTOMATION_DIR'
+  '\. .claude/.automation/'
 
   # File watching (read-only passive tools — editor-live session type)
   'fswatch '

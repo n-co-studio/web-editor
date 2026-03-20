@@ -20,6 +20,13 @@
 
 set -euo pipefail
 
+# --- Escape sed replacement strings (POSIX special characters) ---
+# Neutralizes |, &, \, and / in replacement values to prevent injection
+# when used in sed "s|pattern|replacement|g" substitutions.
+sed_escape() {
+  printf '%s' "$1" | sed 's/[\/&|\\]/\\&/g'
+}
+
 # --- Template lookup for session type ---
 # Returns path to template file if one exists for the session type.
 # Returns empty string for types without templates (fallback to inline).
@@ -133,12 +140,13 @@ assemble_prompt() {
     template_content=$(cat "$template_file")
 
     # Single-line placeholder substitutions (sed with | delimiter)
-    template_content=$(printf '%s' "$template_content" | sed "s|{session_type}|${session_type}|g")
-    template_content=$(printf '%s' "$template_content" | sed "s|{entry_id}|${_QE_ID}|g")
-    template_content=$(printf '%s' "$template_content" | sed "s|{branch_name}|${_QE_BRANCH}|g")
-    template_content=$(printf '%s' "$template_content" | sed "s|{auto_mode}|${_QE_AUTO_MODE:-false}|g")
-    template_content=$(printf '%s' "$template_content" | sed "s|{solo_mode}|${_QE_SOLO_MODE:-false}|g")
-    template_content=$(printf '%s' "$template_content" | sed "s|{decision_list}|${decisions}|g")
+    # All replacement values are escaped to prevent injection via |, &, \, /
+    template_content=$(printf '%s' "$template_content" | sed "s|{session_type}|$(sed_escape "$session_type")|g")
+    template_content=$(printf '%s' "$template_content" | sed "s|{entry_id}|$(sed_escape "$_QE_ID")|g")
+    template_content=$(printf '%s' "$template_content" | sed "s|{branch_name}|$(sed_escape "$_QE_BRANCH")|g")
+    template_content=$(printf '%s' "$template_content" | sed "s|{auto_mode}|$(sed_escape "${_QE_AUTO_MODE:-false}")|g")
+    template_content=$(printf '%s' "$template_content" | sed "s|{solo_mode}|$(sed_escape "${_QE_SOLO_MODE:-false}")|g")
+    template_content=$(printf '%s' "$template_content" | sed "s|{decision_list}|$(sed_escape "$decisions")|g")
 
     # Task group placeholders (empty for non-taskgroup types)
     local group_name="" brief_seq="" is_final=""
@@ -154,9 +162,9 @@ assemble_prompt() {
         is_final="false"
       fi
     fi
-    template_content=$(printf '%s' "$template_content" | sed "s|{group_name}|${group_name}|g")
-    template_content=$(printf '%s' "$template_content" | sed "s|{brief_seq}|${brief_seq}|g")
-    template_content=$(printf '%s' "$template_content" | sed "s|{is_final}|${is_final}|g")
+    template_content=$(printf '%s' "$template_content" | sed "s|{group_name}|$(sed_escape "$group_name")|g")
+    template_content=$(printf '%s' "$template_content" | sed "s|{brief_seq}|$(sed_escape "$brief_seq")|g")
+    template_content=$(printf '%s' "$template_content" | sed "s|{is_final}|$(sed_escape "$is_final")|g")
 
     # Multi-line {brief_text} substitution: split template at marker and concatenate
     # This avoids sed escaping issues with complex brief content

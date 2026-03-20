@@ -71,8 +71,18 @@ portable_hash() {
 # Eliminates: CWD dependency, git dependency, stale PID-based /tmp/ cache.
 # Test seam: _REPO_OS_TEST_ROOT overrides repo root, but ONLY when
 # REPO_OS_TEST_MODE=1 is also set (dual guard prevents accidental env leaks).
+# Path prefix guard: _REPO_OS_TEST_ROOT must start with /tmp/ or /private/tmp/
+# to bound the redirect surface to temp directories only.
 if [ "${REPO_OS_TEST_MODE:-0}" = "1" ] && [ -n "${_REPO_OS_TEST_ROOT:-}" ]; then
-  _REPO_OS_ROOT="$_REPO_OS_TEST_ROOT"
+  case "$_REPO_OS_TEST_ROOT" in
+    /tmp/*|/private/tmp/*)
+      _REPO_OS_ROOT="$_REPO_OS_TEST_ROOT"
+      ;;
+    *)
+      echo "WARNING: _REPO_OS_TEST_ROOT rejected — must start with /tmp/ or /private/tmp/ (got: $_REPO_OS_TEST_ROOT)" >&2
+      _REPO_OS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+      ;;
+  esac
 else
   _REPO_OS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 fi
@@ -406,6 +416,9 @@ cleanup_old_analytics() {
 
 # --- Auto-register repo in global analytics registry ---
 register_repo() {
+  # Test-mode guard: prevent test harness from polluting the real registry
+  [ "${REPO_OS_TEST_MODE:-0}" = "1" ] && return 0
+
   local repo_root="$1"
   local registry_dir="$HOME/.local/share/repo-os-analytics"
   local registry="$registry_dir/registry.json"

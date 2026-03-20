@@ -104,6 +104,14 @@ if [ -z "$BRIEF_PATH" ]; then
   exit 1
 fi
 
+# --- Reject shell metacharacters in BRIEF_PATH (injection defense) ---
+case "$BRIEF_PATH" in
+  *'$'*|*'`'*|*'|'*|*';'*|*'&'*|*'('*|*')'*)
+    echo "ERROR: BRIEF_PATH contains shell metacharacters: $BRIEF_PATH" >&2
+    exit 1
+    ;;
+esac
+
 # --- Resolve brief path ---
 RESOLVED_BRIEF=""
 if [ -f "$BRIEF_PATH" ]; then

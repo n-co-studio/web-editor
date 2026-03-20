@@ -95,7 +95,7 @@ _get_staged_diff() {
 # Scans added lines in staged diff (not working-tree files) to catch
 # only what's being committed. Pre-existing secrets are not flagged.
 # ============================================================
-SECRET_PATTERN='sk_live_|sk_test_|sk-ant-api[0-9]+-[A-Za-z0-9_-]+|ghp_[A-Za-z0-9]|AKIA[A-Z0-9]|AIza[A-Za-z0-9]|-----BEGIN.*PRIVATE KEY-----|://[^/:@[:space:]]+:[^/@[:space:]]+@[^[:space:]]+|password[[:space:]]*=[[:space:]]*["\x27][^"\x27]|secret[[:space:]]*=[[:space:]]*["\x27][^"\x27]|token[[:space:]]*=[[:space:]]*["\x27][^"\x27]'
+SECRET_PATTERN='sk_live_|sk_test_|sk-ant-api[0-9]+-[A-Za-z0-9_-]+|ghp_[A-Za-z0-9]|github_pat_[A-Za-z0-9]|glpat-[A-Za-z0-9]|npm_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9]|sk-proj-[A-Za-z0-9]|pypi-[A-Za-z0-9]|AKIA[A-Z0-9]|AIza[A-Za-z0-9]|-----BEGIN.*PRIVATE KEY-----|://[^/:@[:space:]]+:[^/@[:space:]]+@[^[:space:]]+|password[[:space:]]*=[[:space:]]*["\x27][^"\x27]|secret[[:space:]]*=[[:space:]]*["\x27][^"\x27]|token[[:space:]]*=[[:space:]]*["\x27][^"\x27]'
 
 if [ -n "$STAGED_FILES" ]; then
   # Scan added lines only (^+ prefix) from staged diff — catches what's being
