@@ -492,10 +492,14 @@ if [ ! -f "$REPO_ROOT/.claude/.state/phase-state" ]; then
   exit 0
 fi
 
-# --- Ephemeral session types — no blocking checks (Decision 0014) ---
-# taskdef-query, taskdef-brief, and audit sessions have no gates per the
-# phase-aware gate profile. Allow close unconditionally after cleanup.
+# --- Session types exempt from blocking close checks (Decision 0014) ---
+# Ephemeral types (taskdef-query, taskdef-brief, audit, ephemeral) have no
+# gates — allow close unconditionally after cleanup.
+# Spec/prototype types produce documents, not implementation code — the session
+# log check does not apply, but all other checks (uncommitted changes,
+# governance evidence, solo merge, branch seal) still run.
 EPHEMERAL_STYPE=$(get_session_type)
+SESSION_LOG_EXEMPT=false
 case "$EPHEMERAL_STYPE" in
   taskdef-query|taskdef-brief|audit|ephemeral)
     # Ephemeral sessions (Phase 3b) have no blocking close checks.
@@ -503,6 +507,13 @@ case "$EPHEMERAL_STYPE" in
     log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "ephemeral_exempt" "$EPHEMERAL_STYPE" || true
     cleanup_session
     exit 0
+    ;;
+  spec-fresh|spec-update|prototype-napkin|prototype-spike|prototype-poc)
+    # Spec/prototype sessions produce spec or prototype documents, not
+    # implementation code. Session log enforcement does not apply.
+    # All other close checks (uncommitted, governance, seal, merge) still run.
+    SESSION_LOG_EXEMPT=true
+    log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "session_log_exempt" "$EPHEMERAL_STYPE" || true
     ;;
 esac
 
@@ -622,8 +633,8 @@ add_failure() {
   FAILURES="${FAILURES}${FAILURE_COUNT}. $1\n"
 }
 
-# 1. Session log check
-if [ "$SESSION_LOG_MODIFIED" = false ]; then
+# 1. Session log check (exempt for spec/prototype session types)
+if [ "$SESSION_LOG_MODIFIED" = false ] && [ "$SESSION_LOG_EXEMPT" = false ]; then
   SESSION_LOG_REL="${SESSION_LOG#"$REPO_ROOT/"}"
   add_failure "Session log not updated — update $SESSION_LOG_REL (override: SKIP_SESSION_LOG=1)"
 fi
@@ -689,7 +700,7 @@ if [ "$FAILURE_COUNT" -gt 0 ]; then
 
   # Build concise reason for Claude (15-25 tokens)
   _REASON_PARTS=""
-  if [ "$SESSION_LOG_MODIFIED" = false ]; then
+  if [ "$SESSION_LOG_MODIFIED" = false ] && [ "$SESSION_LOG_EXEMPT" = false ]; then
     _REASON_PARTS="session log not updated"
   fi
   if [ "${SKIP_UNCOMMITTED_CHECK:-0}" != "1" ] && { [ -n "$UNCOMMITTED" ] || [ -n "$STAGED" ]; }; then

@@ -1447,6 +1447,76 @@ else
 fi
 
 # ============================================================
+# L3.10d — session-close-check.sh spec/prototype session log exemption
+# ============================================================
+tap_section "L3.10d: session-close-check.sh — spec/prototype session log exemption"
+
+# Ensure we're on a feature branch
+switch_sandbox_branch "feature/test"
+
+# --- Test 1: spec-fresh with commits closes without session-log block ---
+_reinit_close_sandbox
+# Hash matches current (not modified) — would normally block
+_compute_log_hash > "$SB/.claude/.session-log-hash"
+# Invalid baseline → non-zero session
+echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
+reset_phase "spec-fresh"
+advance_phase "interview" 2>/dev/null
+advance_phase "write" 2>/dev/null
+run_hook_rc "session-close-check.sh" "$(fixture_stop)" > "$_L3_OUT"
+assert_ok "$_LAST_RC" "session-close-check allows spec-fresh without session log update"
+# Verify it did NOT emit a block decision
+if grep -q '"block"' "$_L3_OUT" 2>/dev/null; then
+  _tap_fail "spec-fresh does not block on session log" "got block decision"
+else
+  _tap_pass "spec-fresh does not block on session log"
+fi
+
+# --- Test 2: prototype-poc with commits closes without session-log block ---
+_reinit_close_sandbox
+_compute_log_hash > "$SB/.claude/.session-log-hash"
+echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
+reset_phase "prototype-poc"
+advance_phase "build" 2>/dev/null
+run_hook_rc "session-close-check.sh" "$(fixture_stop)" > "$_L3_OUT"
+assert_ok "$_LAST_RC" "session-close-check allows prototype-poc without session log update"
+if grep -q '"block"' "$_L3_OUT" 2>/dev/null; then
+  _tap_fail "prototype-poc does not block on session log" "got block decision"
+else
+  _tap_pass "prototype-poc does not block on session log"
+fi
+
+# --- Test 3: standard session still blocks on missing session log ---
+_reinit_close_sandbox
+_compute_log_hash > "$SB/.claude/.session-log-hash"
+echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
+reset_phase "standard"
+advance_phase "plan" 2>/dev/null
+advance_phase "approval" 2>/dev/null
+advance_phase "build" 2>/dev/null
+run_hook_rc "session-close-check.sh" "$(fixture_stop)" > "$_L3_OUT"
+assert_ok "$_LAST_RC" "session-close-check blocks standard session (JSON exit 0)"
+assert_contains "$(cat "$_L3_OUT")" "block" "standard session emits block for missing session log"
+
+# --- Test 4: spec-fresh with uncommitted changes still blocks ---
+_reinit_close_sandbox
+# Session log is "modified" (stale hash) so log check passes
+echo "stale-hash-value" > "$SB/.claude/.session-log-hash"
+echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
+reset_phase "spec-fresh"
+advance_phase "interview" 2>/dev/null
+advance_phase "write" 2>/dev/null
+# Create uncommitted changes (use repo root — src/ may not exist in sandbox)
+echo "uncommitted content" > "$SB/uncommitted-file.txt"
+(cd "$SB" && git add uncommitted-file.txt 2>/dev/null)
+run_hook_rc "session-close-check.sh" "$(fixture_stop)" > "$_L3_OUT"
+assert_ok "$_LAST_RC" "spec-fresh with uncommitted changes returns (JSON exit 0)"
+assert_contains "$(cat "$_L3_OUT")" "block" "spec-fresh blocks on uncommitted changes"
+assert_contains "$(cat "$_L3_OUT")" "Uncommitted" "spec-fresh reports uncommitted issue"
+# Clean up staged file
+(cd "$SB" && git reset HEAD uncommitted-file.txt 2>/dev/null; rm -f uncommitted-file.txt)
+
+# ============================================================
 # L3.15 — Parallel task group: merge brief mechanics
 # ============================================================
 tap_section "L3.15: Parallel task group — merge brief mechanics"
