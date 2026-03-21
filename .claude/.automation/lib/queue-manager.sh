@@ -330,6 +330,14 @@ _parse_config_field() {
     value=$(sed -n "/^${block}:/,/^[a-z]/{ /${field}:/p; }" "$CONFIG_FILE" \
       | sed "s/.*${field}: *//" | tr -d '[:space:]' | head -1)
   fi
+  # Config value sanitization (adversarial M2): reject shell metacharacters
+  case "$value" in
+    *[\;\|\&\`\$\(\)]*)
+      echo "WARNING: Config value for ${block}.${field} contains shell metacharacters — rejected" >&2
+      printf ''
+      return
+      ;;
+  esac
   printf '%s' "$value"
 }
 

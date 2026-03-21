@@ -120,10 +120,11 @@ CURRENT_PHASE=$(get_phase)
 SESSION_TYPE=$(get_session_type)
 if [ -n "$CURRENT_PHASE" ]; then
   set_phase_mode "$DETECTED_MODE" 2>/dev/null || true
-  advance_phase "approval" 2>/dev/null || true
+  # Audit 2.3: log errors instead of swallowing (fail-silent double advance)
+  advance_phase "approval" 2>/dev/null || echo "WARNING: plan-approval — failed to advance to approval phase" >&2
   NEXT_PHASE=$(get_post_approval_phase "$SESSION_TYPE")
   if [ -n "$NEXT_PHASE" ]; then
-    advance_phase "$NEXT_PHASE" 2>/dev/null || true
+    advance_phase "$NEXT_PHASE" 2>/dev/null || echo "WARNING: plan-approval — failed to advance to $NEXT_PHASE phase" >&2
   fi
 fi
 

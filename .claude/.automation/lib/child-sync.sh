@@ -128,7 +128,8 @@ pull_locals() {
       continue
     fi
 
-    if cd "$local_path" && git pull --ff-only 2>/dev/null; then
+    # Subshell prevents persistent cd from corrupting loop iterations (audit 6.2)
+    if (cd "$local_path" && git pull --ff-only) 2>/dev/null; then
       log "  Pulled: $repo_name → $local_path"
       _PULL_SUCCESS=$((_PULL_SUCCESS + 1))
     else

@@ -3,3 +3,7 @@ config.local.yaml
 
 # PID file (daemon runtime artifact)
 runner.pid
+
+# Health check file (daemon runtime artifact)
+.health
+.health.tmp

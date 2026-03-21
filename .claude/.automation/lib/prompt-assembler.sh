@@ -66,6 +66,26 @@ assemble_prompt() {
   local brief_path="$_QE_BRIEF_PATH"
   local session_type="$_QE_SESSION_TYPE"
 
+  # --- Path traversal guard (audit 6.3) ---
+  # Reject brief_path containing .. or absolute paths outside REPO_ROOT.
+  if [ -n "$brief_path" ]; then
+    case "$brief_path" in
+      *..*)
+        echo "ERROR: brief_path contains '..' — path traversal rejected: $brief_path" >&2
+        brief_path=""
+        ;;
+      /*)
+        case "$brief_path" in
+          "$REPO_ROOT"/*) ;; # absolute but within repo — OK
+          *)
+            echo "ERROR: brief_path is absolute but outside REPO_ROOT — rejected: $brief_path" >&2
+            brief_path=""
+            ;;
+        esac
+        ;;
+    esac
+  fi
+
   # --- Read brief content ---
   if [ -n "$brief_path" ] && [ -f "$REPO_ROOT/$brief_path" ]; then
     brief_content=$(cat "$REPO_ROOT/$brief_path" 2>/dev/null || true)

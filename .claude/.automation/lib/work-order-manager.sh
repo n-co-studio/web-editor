@@ -92,9 +92,12 @@ _write_work_order() {
       printf '  entry_ids: []\n'
     else
       printf '  entry_ids:\n'
-      local _eid
-      IFS=',' read -ra _ids <<< "$_WO_ENTRY_IDS"
-      for _eid in "${_ids[@]}"; do
+      # Bash 3.2 compatible (audit 5.1: read -ra not available)
+      local _eid _old_ifs="$IFS"
+      IFS=','
+      set -- $_WO_ENTRY_IDS
+      IFS="$_old_ifs"
+      for _eid in "$@"; do
         printf '  - %s\n' "$_eid"
       done
     fi
@@ -108,8 +111,38 @@ _write_work_order() {
 
 # --- Transition work order status ---
 # Updates status, updated_at, and completed_at for terminal states.
+# Validates legal transitions (adversarial H5/H6/M4): rejects illegal
+# state changes to prevent forgery of work order completion.
 _transition_work_order() {
   local new_status="$1"
+
+  # Legal transition validation
+  local _current="$_WO_STATUS"
+  local _legal=false
+  case "$_current" in
+    open)
+      case "$new_status" in
+        in_progress|completed|escalated) _legal=true ;;
+      esac
+      ;;
+    in_progress)
+      case "$new_status" in
+        completed|escalated|open) _legal=true ;;
+      esac
+      ;;
+    escalated)
+      case "$new_status" in
+        in_progress|open) _legal=true ;; # retry after escalation review
+      esac
+      ;;
+    completed)
+      ;; # terminal — no further transitions allowed
+  esac
+  if [ "$_legal" = false ]; then
+    echo "ERROR: Illegal work order transition '$_current' → '$new_status'" >&2
+    return 1
+  fi
+
   local timestamp
   timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   _WO_STATUS="$new_status"
@@ -298,8 +331,12 @@ wo_check_completion() {
   local has_terminal_failure=false
   local _eid
 
-  IFS=',' read -ra _ids <<< "$_WO_ENTRY_IDS"
-  for _eid in "${_ids[@]}"; do
+  # Bash 3.2 compatible (audit 5.1: read -ra not available)
+  local _old_ifs="$IFS"
+  IFS=','
+  set -- $_WO_ENTRY_IDS
+  IFS="$_old_ifs"
+  for _eid in "$@"; do
     local entry_file
     entry_file=$(_find_entry_file "$_eid")
     if [ -z "$entry_file" ]; then

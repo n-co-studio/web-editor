@@ -74,8 +74,14 @@ _deny() {
 }
 
 # --- Decision: fall through (show dialog) ---
+# In headless mode (CLAUDE_HEADLESS=1), no VS Code dialog exists —
+# fail-closed by denying instead of falling through (adversarial 4.4).
 _fall_through() {
   local reason="$1"
+  if [ "${CLAUDE_HEADLESS:-0}" = "1" ]; then
+    _deny "headless_fall_through:$reason"
+    return
+  fi
   _log_audit "dialog" "$reason"
   log_hook_event "permission-request" "PermissionRequest" "$TOOL_NAME" "dialog" "$START_MS" "fall_through:$reason"
   exit 0

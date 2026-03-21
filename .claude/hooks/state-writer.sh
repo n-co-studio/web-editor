@@ -64,8 +64,42 @@ REPO_ROOT="$(get_repo_root)"
 STATE_DIR="$REPO_ROOT/.claude/.state"
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 
+# --- Phase validation (adversarial C6/H3): verify current phase matches agent type ---
+# Prevents spoofed agent_type from writing state files during wrong phase.
+# Never blocks (exit 0) — enforcement at commit time via pre-commit-gates.sh.
+CURRENT_PHASE=$(get_phase)
+PHASE_OK=true
+if [ -n "$CURRENT_PHASE" ]; then
+  case "$AGENT_TYPE" in
+    critic)
+      # critic writes cohesion-reviewed during review phase
+      [ "$CURRENT_PHASE" != "review" ] && PHASE_OK=false
+      ;;
+    qa-verifier)
+      # qa-verifier writes qa-verified during verify phase
+      [ "$CURRENT_PHASE" != "verify" ] && PHASE_OK=false
+      ;;
+    reviewer|security-privacy)
+      # reviewer/security-privacy write during verify phase
+      [ "$CURRENT_PHASE" != "verify" ] && PHASE_OK=false
+      ;;
+    pragmatist)
+      # pragmatist writes during plan or review phase
+      [ "$CURRENT_PHASE" != "plan" ] && [ "$CURRENT_PHASE" != "review" ] && PHASE_OK=false
+      ;;
+  esac
+fi
+if [ "$PHASE_OK" = false ]; then
+  echo "WARNING: $AGENT_TYPE fired during '$CURRENT_PHASE' phase (expected different phase) — state file not written" >&2
+  log_hook_event "state-writer" "SubagentStop" "$AGENT_TYPE" "skip" "$START_MS" "phase_mismatch:$CURRENT_PHASE"
+  exit 0
+fi
+
 TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-printf 'timestamp: %s\nagent: %s\n%s\n' "$TIMESTAMP" "$AGENT_TYPE" "$LAST_LINE" \
+# Session-bind state file (adversarial C1/C4/H4): embed session_id so
+# pre-commit-gates.sh can reject forged/stale files from other sessions.
+STATE_SID=$(cat "$REPO_ROOT/.claude/.session-id" 2>/dev/null || echo "")
+printf 'timestamp: %s\nagent: %s\nsession_id: %s\n%s\n' "$TIMESTAMP" "$AGENT_TYPE" "$STATE_SID" "$LAST_LINE" \
   > "$STATE_DIR/$STATE_FILE" 2>/dev/null || true
 
 # --- Phase advancement based on agent verdict ---

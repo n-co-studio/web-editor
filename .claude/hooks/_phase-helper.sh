@@ -360,6 +360,19 @@ init_phase() {
   local repo_root="$_REPO_OS_ROOT"
   local state_dir="$repo_root/.claude/.state"
 
+  # Double-init guard (adversarial M1): refuse re-init if phase-state exists
+  # for the current session. Prevents progress reset via second init_phase call.
+  if [ -f "$state_dir/phase-state" ]; then
+    local _existing_sid
+    _existing_sid=$(grep '^session_id:' "$state_dir/phase-state" 2>/dev/null | sed 's/^session_id: *//' | tr -d '[:space:]' | head -1)
+    local _current_sid
+    _current_sid=$(cat "$repo_root/.claude/.session-id" 2>/dev/null || echo "")
+    if [ -n "$_existing_sid" ] && [ "$_existing_sid" = "$_current_sid" ]; then
+      echo "WARNING: Phase state already exists for this session — skipping re-init" >&2
+      return 0
+    fi
+  fi
+
   # Validate session type
   local phases
   phases=$(get_phases_for_type "$stype")
@@ -446,7 +459,9 @@ advance_phase() {
   fi
 
   if [ "$is_loop" = false ]; then
-    # Forward-only validation
+    # Forward-only validation with strict sequential enforcement (adversarial C2/C3/H1).
+    # Non-adjacent forward jumps only allowed when every skipped phase is in the
+    # skippable set: user-review (Decision 0021), op-review (auto mode skip).
     local current_idx new_idx
     current_idx=$(get_phase_index "$stype" "$current_phase")
     new_idx=$(get_phase_index "$stype" "$new_phase")
@@ -459,6 +474,29 @@ advance_phase() {
     if [ "$new_idx" -le "$current_idx" ]; then
       echo "ERROR: Cannot move backward from '$current_phase' to '$new_phase'" >&2
       return 1
+    fi
+
+    # Strict adjacency check: if jumping more than 1 step, verify all
+    # intermediate phases are skippable (user-review, op-review).
+    if [ "$new_idx" -gt $((current_idx + 1)) ]; then
+      local phases_list skip_ok
+      phases_list=$(get_phases_for_type "$stype")
+      skip_ok=true
+      local _idx=0
+      for _p in $phases_list; do
+        _idx=$((_idx + 1))
+        # Check phases strictly between current and target
+        if [ "$_idx" -gt "$current_idx" ] && [ "$_idx" -lt "$new_idx" ]; then
+          case "$_p" in
+            user-review|op-review) ;; # skippable
+            *) skip_ok=false; break ;;
+          esac
+        fi
+      done
+      if [ "$skip_ok" = false ]; then
+        echo "ERROR: Non-adjacent phase transition from '$current_phase' to '$new_phase' — intermediate phase '$_p' is not skippable" >&2
+        return 1
+      fi
     fi
   fi
 

@@ -462,6 +462,30 @@ if [ "$STOP_ATTEMPT" -ge 3 ]; then
   if [ -z "$UNCOMMITTED" ] && [ -z "$STAGED" ]; then
     update_baseline
   fi
+  # A4 secret scan preserved in safety valve (adversarial C5/H2): even on
+  # forced exit, check staged diff for secrets. Valve still exits (no loop),
+  # but writes an escalation so the operator is alerted.
+  _SV_STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || true)
+  if [ -n "$_SV_STAGED_FILES" ]; then
+    _SV_SECRET_PATTERN='sk_live_|sk_test_|sk-ant-api[0-9]+-[A-Za-z0-9_-]+|ghp_[A-Za-z0-9]|github_pat_[A-Za-z0-9]|glpat-[A-Za-z0-9]|npm_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9]|sk-proj-[A-Za-z0-9]|pypi-[A-Za-z0-9]|AKIA[A-Z0-9]|AIza[A-Za-z0-9]|-----BEGIN.*PRIVATE KEY-----|://[^/:@[:space:]]+:[^/@[:space:]]+@[^[:space:]]+'
+    _SV_DIFF=$(git diff --cached -U0 2>/dev/null || true)
+    _SV_ADDED=$(printf '%s\n' "$_SV_DIFF" | awk '/^\+/ && !/^\+\+\+/ { print substr($0,2) }')
+    _SV_MATCHES=$(printf '%s\n' "$_SV_ADDED" | grep -iE "$_SV_SECRET_PATTERN" 2>/dev/null || true)
+    if [ -n "$_SV_MATCHES" ]; then
+      echo "WARNING: A4 secret scan detected possible secrets in staged diff during safety valve exit" >&2
+      _SV_ESC_DIR="$REPO_ROOT/.claude/.automation/escalations"
+      mkdir -p "$_SV_ESC_DIR" 2>/dev/null || true
+      {
+        printf 'escalation:\n'
+        printf '  type: "security-risk"\n'
+        printf '  severity: "blocking"\n'
+        printf '  message: "A4 secret scan found possible secrets in staged diff during safety valve exit"\n'
+        printf '  created_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        printf '  resolved: false\n'
+      } > "$_SV_ESC_DIR/esc-a4-valve-$(date +%Y%m%d-%H%M%S).yaml" 2>/dev/null || true
+      log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "valve_a4_secret" || true
+    fi
+  fi
   log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "attempt_limit" "$STOP_ATTEMPT" || true
   _emit_kpi_summary 0 "$STOP_ATTEMPT" "" "$(infer_session_type)"
   # Guard: if solo merge was expected but never completed (still on feature

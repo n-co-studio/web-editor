@@ -224,7 +224,13 @@ _check_taskgroup_completion() {
     fi
 
     echo "cohesion-trigger: all $content_briefs content briefs complete for group '$group_name' — enqueueing merge" >&2
-    queue_enqueue "" "taskgroup-merge" "" "" "$branch" "$work_order_id" > /dev/null
+    # Acquire lock before enqueue (audit 6.1: race with concurrent daemon dequeue)
+    if acquire_queue_lock; then
+      queue_enqueue "" "taskgroup-merge" "" "" "$branch" "$work_order_id" > /dev/null
+      release_queue_lock
+    else
+      echo "cohesion-trigger: WARNING — failed to acquire queue lock for merge enqueue" >&2
+    fi
   fi
 }
 
@@ -254,7 +260,13 @@ _check_line_threshold() {
 
   if [ "$new_count" -ge "$threshold" ]; then
     echo "cohesion-trigger: cumulative lines ($new_count) >= threshold ($threshold) — enqueueing audit" >&2
-    queue_enqueue "" "audit" > /dev/null
+    # Acquire lock before enqueue (audit 6.1: race with concurrent daemon dequeue)
+    if acquire_queue_lock; then
+      queue_enqueue "" "audit" > /dev/null
+      release_queue_lock
+    else
+      echo "cohesion-trigger: WARNING — failed to acquire queue lock for audit enqueue" >&2
+    fi
     # Reset counter
     _write_line_counter "0"
   else

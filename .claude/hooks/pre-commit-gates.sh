@@ -177,7 +177,30 @@ fi
 # State File Verification (always blocking — defense-in-depth)
 # Individual state files are checked regardless of phase gate status.
 # Defense-in-depth: even if phase gate passes, missing state files block.
+# Session-binding (adversarial C1/C4/H4): state files must contain a
+# session_id that matches the current .session-id — rejects forged/stale files.
 # ============================================================
+
+# --- Headless mode detection (adversarial 4.2) ---
+IS_HEADLESS=false
+[ "${CLAUDE_HEADLESS:-0}" = "1" ] && IS_HEADLESS=true
+
+# --- Session-id validation helper (adversarial C1/C4/H4) ---
+# Returns 0 if state file contains matching session_id, 1 otherwise.
+_validate_state_session_id() {
+  local state_file="$1"
+  [ -f "$state_file" ] || return 1
+  local file_sid
+  file_sid=$(grep '^session_id:' "$state_file" 2>/dev/null | sed 's/^session_id: *//' | tr -d '[:space:]' | head -1)
+  local current_sid
+  current_sid=$(cat "$REPO_ROOT/.claude/.session-id" 2>/dev/null || echo "")
+  # No current session → skip validation (pre-session context)
+  [ -z "$current_sid" ] && return 0
+  # State file missing session_id but session exists → forged/stale (reject)
+  [ -z "$file_sid" ] && return 1
+  [ "$file_sid" = "$current_sid" ]
+}
+
 if [ "$SKIP_STATE" = false ]; then
   # plan-approved: required on all non-experiment branches
   # Override: REPO_OS_SKIP_PLAN_GATE=1 (parity with branch-guard plan gate)
@@ -187,9 +210,17 @@ if [ "$SKIP_STATE" = false ]; then
   elif [ "${REPO_OS_SKIP_PLAN_GATE:-0}" = "1" ]; then
     log_override "pre-commit-gates" "REPO_OS_SKIP_PLAN_GATE"
   elif [ ! -f "$STATE_DIR/plan-approved" ]; then
-    echo "GATE-RECOVERABLE: plan-approved state file missing. NEXT: Use AskUserQuestion to present plan for operator approval (triggers plan-approval hook). (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
+    if [ "$IS_HEADLESS" = true ]; then
+      echo "GATE-RECOVERABLE: plan-approved state file missing. NEXT: Write escalation file to .claude/.automation/escalations/ with type 'governance-block'. (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
+    else
+      echo "GATE-RECOVERABLE: plan-approved state file missing. NEXT: Use AskUserQuestion to present plan for operator approval (triggers plan-approval hook). (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
+    fi
     block "state_plan_missing"
     log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_plan_missing"
+  elif ! _validate_state_session_id "$STATE_DIR/plan-approved"; then
+    echo "GATE-RECOVERABLE: plan-approved state file has stale session_id (from a different session). NEXT: Re-approve plan in this session. (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
+    block "state_plan_stale_session"
+    log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_plan_stale_session"
   fi
 
   # cohesion-reviewed: required except on hotfix/* (A5 skipped per gate profile)
@@ -197,6 +228,10 @@ if [ "$SKIP_STATE" = false ]; then
     echo "GATE-RECOVERABLE: cohesion-reviewed state file missing. NEXT: Dispatch Critic agent in cohesion mode (after Builder completes, before QA). (override: REPO_OS_RECOVER=1)" >&2
     block "state_cohesion_missing"
     log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_cohesion_missing"
+  elif [ "$IS_HOTFIX" = false ] && [ -f "$STATE_DIR/cohesion-reviewed" ] && ! _validate_state_session_id "$STATE_DIR/cohesion-reviewed"; then
+    echo "GATE-RECOVERABLE: cohesion-reviewed state file has stale session_id. NEXT: Re-run Critic cohesion review in this session. (override: REPO_OS_RECOVER=1)" >&2
+    block "state_cohesion_stale_session"
+    log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_cohesion_stale_session"
   fi
 
   # qa-verified: required on all non-experiment branches
@@ -204,6 +239,10 @@ if [ "$SKIP_STATE" = false ]; then
     echo "GATE-RECOVERABLE: qa-verified state file missing. NEXT: Dispatch QA verification agent (after Critic cohesion review passes). (override: REPO_OS_RECOVER=1)" >&2
     block "state_qa_missing"
     log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_qa_missing"
+  elif [ -f "$STATE_DIR/qa-verified" ] && ! _validate_state_session_id "$STATE_DIR/qa-verified"; then
+    echo "GATE-RECOVERABLE: qa-verified state file has stale session_id. NEXT: Re-run QA verification in this session. (override: REPO_OS_RECOVER=1)" >&2
+    block "state_qa_stale_session"
+    log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_qa_stale_session"
   fi
 fi
 
@@ -603,6 +642,20 @@ if [ -n "$STAGED_FILES" ] && [ -d "$DECISIONS_DIR" ]; then
   if [ "$A1_BLOCKING" = false ]; then
     warn "A1_advisory_mode"
     echo "Advisory: docs/ai/decisions/.a1-triggers-enforced not found — A1 decision triggers running in advisory mode (not blocking)" >&2
+    # In headless mode, stderr advisories are invisible to operators.
+    # Write escalation file for visibility (audit 4.3).
+    if [ "$IS_HEADLESS" = true ]; then
+      _A1_ESC_DIR="$REPO_ROOT/.claude/.automation/escalations"
+      mkdir -p "$_A1_ESC_DIR" 2>/dev/null || true
+      {
+        printf 'escalation:\n'
+        printf '  type: "governance-block"\n'
+        printf '  severity: "advisory"\n'
+        printf '  message: "A1 triggers running in advisory mode — .a1-triggers-enforced sentinel absent"\n'
+        printf '  created_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        printf '  resolved: false\n'
+      } > "$_A1_ESC_DIR/esc-a1-advisory-$(date +%Y%m%d-%H%M%S).yaml" 2>/dev/null || true
+    fi
   fi
 
   TRIGGERED_DECISIONS=""

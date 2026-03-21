@@ -64,6 +64,8 @@ source "$LIB_DIR/queue-validator.sh"
 source "$LIB_DIR/cache-builder.sh"
 # shellcheck source=lib/file-lock.sh
 source "$LIB_DIR/file-lock.sh"
+# shellcheck source=lib/health-check.sh
+source "$LIB_DIR/health-check.sh"
 
 # --- Config files ---
 CONFIG_FILE="$AUTOMATION_DIR/config.yaml"
@@ -71,6 +73,15 @@ CONFIG_LOCAL_FILE="$AUTOMATION_DIR/config.local.yaml"
 
 # --- Heartbeat state ---
 _HEARTBEAT_PID=""
+
+# --- Daemon lifecycle state ---
+_SHUTDOWN_REQUESTED=false
+_DAEMON_START_EPOCH=""
+_SESSIONS_COMPLETED=0
+_SESSIONS_FAILED=0
+_LAST_SESSION_AT="never"
+_CURRENT_ENTRY_ID=""
+_CONSECUTIVE_SESSION_COUNT=0
 
 # --- Parse arguments ---
 BRIEF_ID=""
@@ -154,8 +165,25 @@ _stop_heartbeat() {
   fi
 }
 
-# Clean up heartbeat on exit
-trap '_stop_heartbeat' EXIT
+# --- Crash cleanup handler (audit 2.2/3.1/3.3) ---
+# On any exit (success, failure, SIGTERM), clean up session state, heartbeat
+# files, and the session registry. Without this, runner crashes leave orphaned
+# state files that block new sessions.
+_runner_crash_cleanup() {
+  # Clean heartbeat files (3.3: survive EXIT trap)
+  local _qdir
+  _qdir=$(_queue_dir 2>/dev/null) || true
+  if [ -n "$_qdir" ] && [ -d "$_qdir/running" ]; then
+    rm -f "$_qdir/running/"*.heartbeat 2>/dev/null || true
+  fi
+  # Clean session state (3.1: runner_external_cleanup on crash)
+  if [ -n "${REPO_ROOT:-}" ] && [ -f "$REPO_ROOT/.claude/.session-id" ]; then
+    runner_external_cleanup "$REPO_ROOT" 2>/dev/null || true
+  fi
+}
+
+# Clean up on exit
+trap '_stop_heartbeat; _runner_crash_cleanup' EXIT
 
 # ============================================================
 # Circuit breaker — 3 consecutive global failures pauses daemon
@@ -201,6 +229,154 @@ _circuit_breaker_reset() {
   local cb_file
   cb_file=$(_cb_file)
   rm -f "$cb_file" 2>/dev/null || true
+}
+
+# Health check functions sourced from lib/health-check.sh above.
+# Provides: _health_file, _write_health, _remove_health, health_status, health_is_alive
+
+# ============================================================
+# Startup crash recovery — detect and clean orphaned state
+# ============================================================
+
+_startup_crash_recovery() {
+  local recovered=0
+
+  # 1. Stale health file — prior daemon crashed without cleanup
+  local hf
+  hf=$(_health_file)
+  if [ -f "$hf" ]; then
+    local old_pid
+    old_pid=$(grep '^pid:' "$hf" 2>/dev/null | sed 's/.*: *//' | tr -d '[:space:]' | head -1)
+    if [ -n "$old_pid" ] && ! kill -0 "$old_pid" 2>/dev/null; then
+      echo "Startup recovery: stale health file from dead pid $old_pid — removing" >&2
+      rm -f "$hf" 2>/dev/null || true
+      recovered=$((recovered + 1))
+    elif [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
+      # Another daemon is still running — this shouldn't happen (PID guard catches it)
+      echo "WARNING: Health file shows pid $old_pid is still running — aborting startup recovery" >&2
+      return 0
+    fi
+  fi
+
+  # 2. Orphaned running/ entries — no heartbeat or stale heartbeat with dead PID
+  local qdir
+  qdir=$(_queue_dir)
+  if [ -d "$qdir/running" ]; then
+    local entry_file
+    for entry_file in "$qdir/running"/*.yaml; do
+      [ -f "$entry_file" ] || continue
+      local entry_id
+      entry_id=$(basename "$entry_file" .yaml)
+      local hb_file="$qdir/running/${entry_id}.heartbeat"
+
+      # Determine if entry is truly orphaned or legitimately running
+      local should_recover=false
+      if [ ! -f "$hb_file" ]; then
+        # No heartbeat at all — definitely orphaned
+        should_recover=true
+      else
+        # Heartbeat exists — check if the writing process is still alive.
+        # At startup, no heartbeat writer from THIS daemon exists yet,
+        # so a fresh heartbeat implies another process wrote it.
+        local hb_ts_raw
+        hb_ts_raw=$(cat "$hb_file" 2>/dev/null || true)
+        if [ -z "$hb_ts_raw" ]; then
+          should_recover=true
+        else
+          local hb_epoch_sr now_epoch_sr hb_age_sr
+          hb_epoch_sr=$(_iso_to_epoch "$hb_ts_raw" 2>/dev/null || echo "0")
+          now_epoch_sr=$(date +%s)
+          hb_age_sr=$((now_epoch_sr - hb_epoch_sr))
+          # If heartbeat is older than 1 hour, the writer is dead
+          if [ "$hb_age_sr" -gt 3600 ]; then
+            should_recover=true
+          else
+            # Recent heartbeat with no live daemon — fail-closed: write escalation
+            echo "WARNING: Running entry $entry_id has recent heartbeat (${hb_age_sr}s old) — writing escalation instead of recovering" >&2
+            local esc_dir_ambig="$REPO_ROOT/.claude/.automation/escalations"
+            mkdir -p "$esc_dir_ambig" 2>/dev/null || true
+            local esc_id_ambig="esc-ambiguous-$(date +%Y%m%d-%H%M%S)"
+            {
+              printf 'escalation:\n'
+              printf '  id: "%s"\n' "$esc_id_ambig"
+              printf '  queue_entry_id: "%s"\n' "$entry_id"
+              printf '  type: "gate-failure"\n'
+              printf '  severity: "blocking"\n'
+              printf '  phase_at_exit: "init"\n'
+              printf '  tag_at_exit: "agent"\n'
+              printf '  message: "Ambiguous state: running entry has recent heartbeat (%ss) but no live daemon PID"\n' "$hb_age_sr"
+              printf '  context: "entry_id: %s, heartbeat_age: %ss"\n' "$entry_id" "$hb_age_sr"
+              printf '  created_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              printf '  resolved: false\n'
+              printf '  resolution: ""\n'
+            } > "$esc_dir_ambig/${esc_id_ambig}.yaml" 2>/dev/null || true
+            should_recover=false
+          fi
+        fi
+      fi
+
+      if [ "$should_recover" = true ]; then
+        echo "Startup recovery: orphaned running entry $entry_id — transitioning to failed" >&2
+        if acquire_queue_lock; then
+          _load_queue_entry "$entry_file"
+          _QE_STATUS="failed"
+          _QE_ERROR_LOG="orphaned entry — recovered at daemon startup"
+          _QE_COMPLETED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          _QE_UPDATED_AT="$_QE_COMPLETED_AT"
+          _write_queue_entry "$qdir/failed/${entry_id}.yaml"
+          rm -f "$entry_file"
+          rm -f "$hb_file" 2>/dev/null || true
+          _rebuild_queue_index
+          release_queue_lock
+          recovered=$((recovered + 1))
+        else
+          echo "WARNING: Could not acquire lock for startup recovery of $entry_id — writing escalation" >&2
+          local esc_dir="$REPO_ROOT/.claude/.automation/escalations"
+          mkdir -p "$esc_dir" 2>/dev/null || true
+          local esc_id="esc-startup-$(date +%Y%m%d-%H%M%S)"
+          {
+            printf 'escalation:\n'
+            printf '  id: "%s"\n' "$esc_id"
+            printf '  queue_entry_id: "%s"\n' "$entry_id"
+            printf '  type: "gate-failure"\n'
+            printf '  severity: "blocking"\n'
+            printf '  phase_at_exit: "init"\n'
+            printf '  tag_at_exit: "agent"\n'
+            printf '  message: "Startup crash recovery could not acquire queue lock for orphaned entry"\n'
+            printf '  context: "entry_id: %s, lock_file: %s"\n' "$entry_id" "$qdir/.queue-lock"
+            printf '  created_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            printf '  resolved: false\n'
+            printf '  resolution: ""\n'
+          } > "$esc_dir/${esc_id}.yaml" 2>/dev/null || true
+        fi
+      fi
+    done
+  fi
+
+  # 3. Stale lock file — queue lock with no holder
+  local lock_file="$qdir/.queue-lock"
+  if [ -f "$lock_file" ]; then
+    # flock-based locks are released on process death, but the file may remain
+    # Try to acquire and immediately release to verify it's not stuck
+    if acquire_queue_lock 2>/dev/null; then
+      release_queue_lock
+    else
+      echo "WARNING: Stale queue lock detected at startup — cannot acquire" >&2
+      echo "Investigate $lock_file before proceeding" >&2
+    fi
+  fi
+
+  # 4. Orphaned session state
+  local session_id_file="$REPO_ROOT/.claude/.session-id"
+  if [ -f "$session_id_file" ]; then
+    echo "Startup recovery: orphaned session-id file — running external cleanup" >&2
+    runner_external_cleanup "$REPO_ROOT" 2>/dev/null || true
+    recovered=$((recovered + 1))
+  fi
+
+  if [ "$recovered" -gt 0 ]; then
+    echo "Startup recovery complete: $recovered item(s) recovered" >&2
+  fi
 }
 
 # ============================================================
@@ -304,7 +480,10 @@ _run_single_entry() {
 
   # Set automation context for analytics hooks (inherited by claude -p child)
   export REPO_OS_AUTOMATION_ENTRY="$brief_id"
-  # Set headless flag for hooks (ask-user-deny.sh blocks AskUserQuestion)
+  # Set headless flag for hooks. Consumed by:
+  #   ask-user-deny.sh — blocks AskUserQuestion
+  #   pre-commit-gates.sh — adjusts GATE-RECOVERABLE messages, writes A1 escalation
+  #   permission-request.sh — denies fall-through (fail-closed)
   export CLAUDE_HEADLESS=1
 
   # Resolve permission profile to --disallowedTools string
@@ -551,7 +730,12 @@ fi
 
 # Write PID file and trap cleanup
 printf '%s' "$$" > "$PID_FILE"
-trap '_stop_heartbeat; _cleanup_pid_file' EXIT
+_graceful_shutdown() {
+  _SHUTDOWN_REQUESTED=true
+  echo "Shutdown requested — finishing current session if active..." >&2
+}
+trap '_graceful_shutdown' TERM INT
+trap '_stop_heartbeat; _runner_crash_cleanup; _write_health "stopped"; _cleanup_pid_file' EXIT
 
 echo "Runner daemon starting (pid $$)..." >&2
 
@@ -560,20 +744,32 @@ _ensure_queue_dirs
 # Pre-flight: same-filesystem check (one-time at startup)
 _check_same_filesystem
 
+_DAEMON_START_EPOCH=$(date +%s)
+
+# --- Startup crash recovery ---
+_startup_crash_recovery
+
 # Cleanup tracking — run cleanup every N idle cycles
 _IDLE_CYCLE_COUNT=0
 _CLEANUP_INTERVAL=10  # Run cleanup every 10 idle cycles
 
 while true; do
+  # --- Shutdown check ---
+  if [ "$_SHUTDOWN_REQUESTED" = true ]; then
+    echo "Shutdown: exiting daemon loop (graceful)" >&2
+    break
+  fi
+
   # --- HALT file check ---
   if [ -f "$AUTOMATION_DIR/HALT" ]; then
     echo "HALT file present. Runner stopped." >&2
-    exit 0
+    break
   fi
 
   # --- Config reload (live toggle support) ---
   RUNNER_ENABLED=$(_parse_config_field "runner" "enabled")
   if [ "$RUNNER_ENABLED" != "true" ]; then
+    _write_health "disabled"
     echo "Runner disabled. Sleeping 30s..." >&2
     sleep 30
     continue
@@ -587,6 +783,7 @@ while true; do
 
   # --- Circuit breaker check ---
   if _circuit_breaker_tripped; then
+    _write_health "circuit-breaker"
     echo "Circuit breaker tripped (3 consecutive failures). Sleeping 60s..." >&2
     sleep 60
     continue
@@ -654,7 +851,11 @@ while true; do
       done
       _IDLE_CYCLE_COUNT=0
     fi
-    sleep 10
+    _CONSECUTIVE_SESSION_COUNT=0
+    _write_health "idle"
+    _poll_interval=$(_parse_config_field "runner" "poll_interval")
+    _poll_interval="${_poll_interval:-60}"
+    sleep "$_poll_interval"
     continue
   fi
 
@@ -745,12 +946,15 @@ while true; do
   _start_heartbeat "$ENTRY_ID"
 
   # --- Execute (direct call — no subshell, outcome in globals) ---
+  _CURRENT_ENTRY_ID="$ENTRY_ID"
+  _write_health "running"
   _run_single_entry "$ENTRY_ID" "$PROMPT" "$ENTRY_SESSION_TYPE" "$ENTRY_BRANCH" "build" "$ENTRY_PUSH"
 
   # --- Stop heartbeat ---
   _stop_heartbeat
   # Clean up heartbeat file
   rm -f "$(_queue_dir)/running/${ENTRY_ID}.heartbeat" 2>/dev/null || true
+  _CURRENT_ENTRY_ID=""
 
   # --- Write branch name back to entry YAML (Phase 4: enables merge-idempotency on retry) ---
   if [ -n "$_RESULT_BRANCH" ] && [ "$_RESULT_BRANCH" != "main" ]; then
@@ -863,6 +1067,9 @@ while true; do
   case "$OUTCOME" in
     completed)
       _circuit_breaker_reset
+      _SESSIONS_COMPLETED=$((_SESSIONS_COMPLETED + 1))
+      _LAST_SESSION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+      _CONSECUTIVE_SESSION_COUNT=$((_CONSECUTIVE_SESSION_COUNT + 1))
 
       # Review log + work order lifecycle
       if [ -n "$ENTRY_WORK_ORDER_ID" ]; then
@@ -897,6 +1104,8 @@ while true; do
       ;;
     review)
       # Escalations are operator-directed — do not count as failures
+      _LAST_SESSION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+      _CONSECUTIVE_SESSION_COUNT=$((_CONSECUTIVE_SESSION_COUNT + 1))
       # Review log + work order lifecycle
       if [ -n "$ENTRY_WORK_ORDER_ID" ]; then
         review_log_append "entry-escalated" "$ENTRY_WORK_ORDER_ID" "$ENTRY_ID" \
@@ -912,6 +1121,9 @@ while true; do
       ;;
     failed|*)
       _circuit_breaker_increment
+      _SESSIONS_FAILED=$((_SESSIONS_FAILED + 1))
+      _LAST_SESSION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+      _CONSECUTIVE_SESSION_COUNT=$((_CONSECUTIVE_SESSION_COUNT + 1))
 
       # Review log + work order lifecycle (only on terminal failure — retries exhausted)
       # Detect terminal failure by checking if queue_fail moved the entry to failed/
@@ -931,6 +1143,20 @@ while true; do
       ;;
   esac
 
-  # Brief pause between entries
-  sleep 5
+  # Configurable cooldown between sessions
+  _cooldown=$(_parse_config_field "runner" "cooldown_between_sessions")
+  _cooldown="${_cooldown:-5}"
+  sleep "$_cooldown"
+
+  # Max consecutive sessions check
+  _max_sessions=$(_parse_config_field "runner" "max_consecutive_sessions")
+  _max_sessions="${_max_sessions:-0}"
+  if [ "$_max_sessions" -gt 0 ] && [ "$_CONSECUTIVE_SESSION_COUNT" -ge "$_max_sessions" ]; then
+    echo "Max consecutive sessions reached ($_max_sessions). Exiting daemon." >&2
+    break
+  fi
 done
+
+# Post-loop: daemon exiting
+echo "Runner daemon stopped (pid $$)." >&2
+exit 0

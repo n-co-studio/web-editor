@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Repo OS Runner — macOS launchd plist template.
+  Decision 0017 — Operator Automation Layer.
+
+  SETUP:
+    1. Replace ALL occurrences of REPO_ROOT with your actual repo path
+       (e.g., /Users/you/projects/my-app)
+    2. Copy to ~/Library/LaunchAgents/com.repo-os.runner.plist
+    3. Load:   launchctl load ~/Library/LaunchAgents/com.repo-os.runner.plist
+    4. Unload: launchctl unload ~/Library/LaunchAgents/com.repo-os.runner.plist
+
+  BEHAVIOR:
+    - Starts on login (RunAtLoad)
+    - Restarts on crash (KeepAlive/SuccessfulExit: false)
+    - Does NOT restart on clean exit (HALT file, max_consecutive_sessions, SIGTERM)
+    - Logs to REPO_ROOT/.claude/.automation/logs/runner.{log,err}
+
+  PREREQUISITES:
+    - claude CLI in PATH (adjust PATH below if needed)
+    - runner.enabled: true in config.yaml
+    - At least one approved queue entry (or runner idles on poll_interval)
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.repo-os.runner</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>REPO_ROOT/.claude/.automation/runner.sh</string>
+    <string>--daemon</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>REPO_ROOT</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <dict>
+    <!-- Restart only on non-zero exit (crash). Clean exit (0) stays stopped. -->
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>REPO_ROOT/.claude/.automation/logs/runner.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>REPO_ROOT/.claude/.automation/logs/runner.err</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <!-- Throttle restarts: wait 10s between crash restarts -->
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+</dict>
+</plist>

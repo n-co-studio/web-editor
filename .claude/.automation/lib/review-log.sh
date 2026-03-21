@@ -150,15 +150,18 @@ review_log_tail() {
 
   [ -d "$qdir" ] || return 0
 
-  # List log files sorted by name (date-based names sort chronologically)
-  local files
-  files=$(ls -1 "$qdir"/review-log-*.jsonl 2>/dev/null | sort || true)
+  # Collect log files sorted by name (date-based names sort chronologically).
+  # Use while-read loop to handle paths with spaces (audit 6.7).
+  local _combined=""
+  local _f
+  while IFS= read -r _f; do
+    [ -f "$_f" ] || continue
+    _combined="${_combined}$(tail -n "$n" "$_f" 2>/dev/null)"$'\n'
+  done <<< "$(ls -1 "$qdir"/review-log-*.jsonl 2>/dev/null | sort || true)"
 
-  if [ -z "$files" ]; then
+  if [ -z "$_combined" ]; then
     return 0
   fi
 
-  # Tail across all files, take last N lines
-  # shellcheck disable=SC2086 — intentional word splitting on file list
-  tail -n "$n" $files 2>/dev/null | tail -n "$n"
+  printf '%s\n' "$_combined" | grep -v '^$' | tail -n "$n"
 }

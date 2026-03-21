@@ -31,6 +31,8 @@ cleanup_session_files() {
     rm -f "$state_dir/qa-verified"
     rm -f "$state_dir/reviewer-signed"
     rm -f "$state_dir/security-signed"
+    rm -f "$state_dir/pragmatist-signed"
+    rm -f "$state_dir/scope-risk-gain"
     rm -f "$state_dir/high-risk-detected"
     rm -f "$state_dir/governance-checked"
     rm -f "$state_dir/phase-state"

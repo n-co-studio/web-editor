@@ -59,13 +59,17 @@ detect_outcome() {
   fi
 
   # Check for escalation files (includes scope-deviation escalations from
-  # pre-commit-gates.sh scope classification gate)
+  # pre-commit-gates.sh scope classification gate).
+  # Adversarial H5/M3: log warning if escalation dir exists but is empty
+  # (possible deletion to suppress escalation detection).
   local escalation_dir="$repo_root/.claude/.automation/escalations"
   local has_scope_deviation=false
+  local _esc_count=0
   if [ -d "$escalation_dir" ]; then
     local esc_file
     for esc_file in "$escalation_dir"/*.yaml; do
       if [ -f "$esc_file" ]; then
+        _esc_count=$((_esc_count + 1))
         has_escalation=true
         # Detect scope-deviation type for enriched outcome detail
         if grep -q 'type: "scope-deviation"' "$esc_file" 2>/dev/null || \
@@ -74,6 +78,17 @@ detect_outcome() {
         fi
       fi
     done
+    # Integrity check: dir exists but no files — possible deletion suppression
+    if [ "$_esc_count" -eq 0 ] && [ -d "$escalation_dir" ]; then
+      local _dir_mtime
+      _dir_mtime=$(stat -f %m "$escalation_dir" 2>/dev/null || stat -c %Y "$escalation_dir" 2>/dev/null || echo "0")
+      local _now
+      _now=$(date +%s)
+      # If dir was modified recently (within 5 min), suspicious
+      if [ $((_now - _dir_mtime)) -lt 300 ] 2>/dev/null; then
+        echo "WARNING: Escalation directory exists but is empty (recently modified) — possible deletion" >&2
+      fi
+    fi
   fi
 
   # Check phase-state for operator tag (with session ID validation)

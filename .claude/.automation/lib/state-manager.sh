@@ -41,8 +41,11 @@ state_manager_setup() {
   # Write plan-approved state (runner pre-writes this so hooks don't block)
   local timestamp
   timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  printf 'timestamp: %s\nquestion_hash: runner-auto\nlarge-scope: true\nmode: auto\nsource: runner\n' \
-    "$timestamp" \
+  # Session-bind (adversarial C1/C4/H4): embed session_id for commit-gate validation
+  local sid
+  sid=$(cat "$repo_root/.claude/.session-id" 2>/dev/null || echo "")
+  printf 'timestamp: %s\nquestion_hash: runner-auto\nlarge-scope: true\nmode: auto\nsource: runner\nsession_id: %s\n' \
+    "$timestamp" "$sid" \
     > "$state_dir/plan-approved" 2>/dev/null || true
 
   # Register session in the session registry (Decision 0013 overlap awareness).
@@ -62,12 +65,35 @@ runner_external_cleanup() {
   local close_stype
   close_stype=$(get_session_type)
 
+  # Dirty-tree check (audit 4.1): stop hook blocks on uncommitted changes,
+  # but it doesn't fire in headless mode. Write escalation for operator.
+  local _dirty_tree _dirty_staged
+  _dirty_tree=$(git diff --name-only 2>/dev/null || echo "")
+  _dirty_staged=$(git diff --cached --name-only 2>/dev/null || echo "")
+  if [ -n "$_dirty_tree" ] || [ -n "$_dirty_staged" ]; then
+    echo "WARNING: Dirty tree at headless session close (uncommitted changes present)" >&2
+    local _esc_dir="$repo_root/.claude/.automation/escalations"
+    mkdir -p "$_esc_dir" 2>/dev/null || true
+    {
+      printf 'escalation:\n'
+      printf '  type: "governance-block"\n'
+      printf '  severity: "advisory"\n'
+      printf '  message: "Dirty working tree at headless session close — uncommitted changes present"\n'
+      printf '  created_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      printf '  resolved: false\n'
+    } > "$_esc_dir/esc-dirty-tree-$(date +%Y%m%d-%H%M%S).yaml" 2>/dev/null || true
+  fi
+
   # Unregister from session registry (before .session-id removal — needs ID)
   unregister_session || true
 
   # Delegate to shared cleanup
   cleanup_session_files "$repo_root" "$close_stype"
 
-  # Update baseline for next session
-  git rev-parse HEAD > "$repo_root/.claude/.session-baseline-sha" 2>/dev/null || true
+  # Update baseline for next session (adversarial H8: validate SHA is real)
+  local _new_sha
+  _new_sha=$(git rev-parse HEAD 2>/dev/null || echo "")
+  if [ -n "$_new_sha" ] && git cat-file -e "$_new_sha" 2>/dev/null; then
+    printf '%s' "$_new_sha" > "$repo_root/.claude/.session-baseline-sha" 2>/dev/null || true
+  fi
 }

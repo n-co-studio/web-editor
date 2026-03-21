@@ -11,6 +11,9 @@ runner:
   heartbeat_interval: 30
   stderr_tail_lines: 50
   cohesion_trigger: 100
+  poll_interval: 60
+  cooldown_between_sessions: 5
+  max_consecutive_sessions: 0
 
 retention:
   queue_days: 30

@@ -480,6 +480,62 @@ _dry_run_cleanup() {
 # Public API
 # ============================================================
 
+# --- Recover orphaned running entries (audit 3.4) ---
+# Scans running/ for entries with no heartbeat or stale heartbeat (>1h).
+# Transitions them to failed/. Standalone equivalent of daemon idle-cycle scanner.
+# Output: count of recovered entries on stdout
+recover_orphaned_running() {
+  local qdir
+  qdir=$(_queue_dir)
+  local running_dir="$qdir/running"
+  local recovered=0
+
+  [ -d "$running_dir" ] || { echo "0"; return; }
+
+  local hb_interval
+  hb_interval=$(_parse_config_field "runner" "heartbeat_interval" 2>/dev/null || true)
+  hb_interval="${hb_interval:-30}"
+  local threshold=$((hb_interval * 120))
+  local now
+  now=$(date +%s)
+
+  local entry_file
+  for entry_file in "$running_dir"/*.yaml; do
+    [ -f "$entry_file" ] || continue
+    local entry_id
+    entry_id=$(basename "$entry_file" .yaml)
+    local hb_file="$running_dir/${entry_id}.heartbeat"
+
+    # Skip entries with fresh heartbeat
+    if [ -f "$hb_file" ]; then
+      local hb_ts
+      hb_ts=$(cat "$hb_file" 2>/dev/null || true)
+      if [ -n "$hb_ts" ]; then
+        local hb_epoch
+        hb_epoch=$(_iso_to_epoch "$hb_ts" 2>/dev/null || echo "0")
+        local age=$((now - hb_epoch))
+        if [ "$age" -lt "$threshold" ]; then
+          continue
+        fi
+      fi
+    fi
+
+    # No heartbeat or stale — recover
+    _load_queue_entry "$entry_file"
+    _QE_STATUS="failed"
+    _QE_ERROR_LOG="orphaned entry — recovered by standalone cleanup"
+    _QE_COMPLETED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    _QE_UPDATED_AT="$_QE_COMPLETED_AT"
+    mkdir -p "$qdir/failed" 2>/dev/null || true
+    _write_queue_entry "$qdir/failed/${entry_id}.yaml"
+    rm -f "$entry_file"
+    rm -f "$hb_file" 2>/dev/null || true
+    recovered=$((recovered + 1))
+  done
+
+  echo "$recovered"
+}
+
 # --- Run full cleanup pass ---
 # Reads retention config and cleans all stale artifacts.
 # Output: summary to stderr
@@ -534,6 +590,11 @@ run_cleanup() {
   count=$(_clean_work_orders "$queue_days")
   total_deleted=$((total_deleted + count))
   [ "$count" -gt 0 ] && echo "cleanup: removed $count terminal work orders (>${queue_days}d)" >&2
+
+  # Orphaned running entries (audit 3.4: standalone recovery)
+  count=$(recover_orphaned_running)
+  total_deleted=$((total_deleted + count))
+  [ "$count" -gt 0 ] && echo "cleanup: recovered $count orphaned running entries" >&2
 
   # Stale heartbeats
   count=$(_clean_stale_heartbeats)

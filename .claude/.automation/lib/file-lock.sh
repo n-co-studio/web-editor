@@ -65,11 +65,16 @@ acquire_queue_lock() {
   else
     # mkdir-based: atomic directory creation as lock
     # Retry loop with 5-second timeout (0.5s intervals, 10 attempts)
+    # Audit 6.5: increment attempts at top to prevent infinite spin on
+    # stale lock detection (rm + continue was skipping the counter).
     local attempts=0 max_attempts=10
+    local _lock_acquired_mkdir=false
     while [ "$attempts" -lt "$max_attempts" ]; do
+      attempts=$((attempts + 1))
       if mkdir "$lock_path" 2>/dev/null; then
         # Write PID for stale lock detection
         echo "$$" > "$lock_path/pid" 2>/dev/null || true
+        _lock_acquired_mkdir=true
         break
       fi
 
@@ -78,17 +83,16 @@ acquire_queue_lock() {
         local lock_pid
         lock_pid=$(cat "$lock_path/pid" 2>/dev/null || echo "")
         if [ -n "$lock_pid" ] && ! kill -0 "$lock_pid" 2>/dev/null; then
-          # Stale lock — remove and retry
+          # Stale lock — remove and retry (counted against max_attempts)
           rm -rf "$lock_path" 2>/dev/null || true
           continue
         fi
       fi
 
-      attempts=$((attempts + 1))
       sleep 0.5
     done
 
-    if [ "$attempts" -ge "$max_attempts" ]; then
+    if [ "$_lock_acquired_mkdir" = false ]; then
       echo "ERROR: Queue lock timeout (5s) — another process holds the lock" >&2
       return 1
     fi
