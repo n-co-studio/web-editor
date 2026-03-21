@@ -1748,17 +1748,17 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
     return;
   }
 
-  // Cmd+G / Ctrl+G — group selected elements (multi-select only)
+  // Cmd+G / Ctrl+G — group/wrap selected elements
   if (e.key === 'g' && (e.metaKey || e.ctrlKey)) {
-    if (multiSelect?.isActive()) {
-      e.preventDefault();
-      e.stopPropagation();
-      const primary = selection?.getSelectedElement();
-      if (primary) {
-        const allElements = multiSelect.getAllElements(primary);
-        if (!getGroupBlockReason(allElements)) {
-          makeGroupCommit(allElements);
-        }
+    e.preventDefault();
+    e.stopPropagation();
+    const primary = selection?.getSelectedElement();
+    if (primary) {
+      const allElements = multiSelect?.isActive()
+        ? multiSelect.getAllElements(primary)
+        : [primary];
+      if (!getGroupBlockReason(allElements)) {
+        makeGroupCommit(allElements);
       }
     }
     return;
