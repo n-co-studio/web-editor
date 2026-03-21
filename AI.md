@@ -82,6 +82,7 @@ Automation layer (Decision 0017): optional headless runner infrastructure in `.c
 - docs/ai/prompts/prompt-a-repo-os.md
 - docs/ai/prompts/prompt-b-product-build.md
 - docs/ai/prompts/prompt-c-project-audit.md
+- docs/ai/prompts/prompt-d-daemon-toggle.md
 - docs/ai/prompts/prompt-e-editor-live.md
 - docs/ai/prompts/prompt-t-task-definition.md
 
