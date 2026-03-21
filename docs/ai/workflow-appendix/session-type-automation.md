@@ -32,6 +32,8 @@ Decision 0017. Optional headless runner infrastructure in `.claude/.automation/`
 
 **Circuit breaker:** 3 consecutive global failures pause the daemon (60s sleep between checks). Reset on first success.
 
+**Work-order deferral:** When the runner dequeues an entry that belongs to an escalated work order (a sibling entry is in review/failed/blocked), the entry is moved back to `approved/` without incrementing its retry count. This prevents sequential briefs from executing while a dependency is unresolved. When the operator resolves the blocking sibling and reopens the work order (`wo_reopen`), the deferred entries resume automatically on the next poll cycle — they are already in `approved/` and eligible for dequeue. The deferral is logged as an `entry-deferred` event in the review log.
+
 **Intake CLI:** Standalone entry point for queue entry creation without the interactive bridge (`plan-approval.sh`). Usage: `.claude/.automation/lib/intake.sh --brief <path> [--auto-approve] [--session-type <type>] [--solo] [--push]`. Auto-enables the runner (`config.yaml` → `runner.enabled: true`) when entries are added. Accepts brief path, session type (Decision 0014 enum), auto-approve (place directly in `approved/`), solo mode, and push-on-complete flags.
 
 **push_on_complete:** Per-entry opt-in flag for branch push after session completion. When `push_on_complete: true` in the queue entry: solo sessions push main after merge, non-solo sessions push the feature branch. Push is advisory — failure warns but does not block. Enabled via `--push` flag in intake CLI or `push_on_complete` field in queue entry YAML.

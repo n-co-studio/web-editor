@@ -10,6 +10,23 @@ Breaking changes (field removal, type change, required field addition) increment
 
 ---
 
+## v1.1.1 — Work-Order Deferral
+
+**Date:** 2026-03-20
+**Decision:** 0017 (Operator Automation Layer)
+
+### Changes
+
+**review-log-entry.yaml**: Added `entry-deferred` to event enum. Emitted when an entry is deferred because its parent work order is escalated (sibling in review/failed/blocked).
+
+**queue-manager.sh**: Added `queue_defer()` — moves running entry back to approved without retry increment.
+
+**work-order-manager.sh**: Added `wo_is_escalated()` — lightweight status check for work order escalation.
+
+**runner.sh**: Added work-order deferral guard in daemon loop — defers entries belonging to escalated work orders.
+
+---
+
 ## v1.1.0 — Work Order & Review Log
 
 **Date:** 2026-02-28

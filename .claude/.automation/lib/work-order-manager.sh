@@ -393,6 +393,25 @@ wo_reopen() {
   _write_work_order "$wo_file"
 }
 
+# --- Check if a work order is escalated ---
+# Lightweight read-only check. Returns 0 if the work order status is "escalated"
+# (a sibling entry is in review/failed/blocked), 1 otherwise.
+# Only touches _WO_* variables (no _QE_* collision).
+# Arguments:
+#   $1 — wo_id (work order identifier)
+# Returns: 0 if escalated, 1 otherwise
+wo_is_escalated() {
+  local wo_id="$1"
+  local wo_file="$(_wo_dir)/${wo_id}.yaml"
+
+  _load_work_order "$wo_file" || return 1
+
+  if [ "$_WO_STATUS" = "escalated" ]; then
+    return 0
+  fi
+  return 1
+}
+
 # --- List work orders ---
 # Lists work orders, optionally filtered by status.
 # Arguments:

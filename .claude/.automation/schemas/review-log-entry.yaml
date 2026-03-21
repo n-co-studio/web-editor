@@ -4,7 +4,7 @@
 review_log_entry:
   seq: 0                    # monotonic sequence number within daily file
   timestamp: ""             # ISO 8601 timestamp
-  event: ""                 # entry-completed | entry-escalated | entry-failed | work-order-opened | work-order-completed | work-order-escalated
+  event: ""                 # entry-completed | entry-escalated | entry-failed | entry-deferred | work-order-opened | work-order-completed | work-order-escalated
   work_order_id: ""         # parent work order identifier
   entry_id: ""              # queue entry identifier (absent for work-order-level events)
   summary: ""               # human-readable event description

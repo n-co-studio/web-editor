@@ -913,6 +913,31 @@ while true; do
     fi
   fi
 
+  # --- Work-order deferral guard (skip entry if sibling is in review/failed/blocked) ---
+  # When an entry belongs to an escalated work order, defer it back to approved/
+  # without incrementing retry_count. The entry resumes when the work order is reopened.
+  if [ -n "$ENTRY_WORK_ORDER_ID" ]; then
+    if wo_is_escalated "$ENTRY_WORK_ORDER_ID"; then
+      echo "Entry $ENTRY_ID: work order $ENTRY_WORK_ORDER_ID is escalated — deferring" >&2
+      _wo_lock_attempts=0
+      while ! acquire_queue_lock; do
+        _wo_lock_attempts=$((_wo_lock_attempts + 1))
+        if [ "$_wo_lock_attempts" -ge 3 ]; then
+          echo "ERROR: Lock unavailable for work-order defer ($ENTRY_ID)" >&2
+          continue 2
+        fi
+        sleep 1
+      done
+      queue_defer "$ENTRY_ID" "work-order-escalated"
+      release_queue_lock
+      # Review log
+      review_log_append "entry-deferred" "$ENTRY_WORK_ORDER_ID" "$ENTRY_ID" \
+        "Entry $ENTRY_ID deferred — work order $ENTRY_WORK_ORDER_ID escalated (sibling in review/failed/blocked)" 2>/dev/null || true
+      sleep 2
+      continue
+    fi
+  fi
+
   # Validate session type
   if [ -z "$(get_phases_for_type "$ENTRY_SESSION_TYPE" 2>/dev/null)" ]; then
     echo "ERROR: Invalid session type '$ENTRY_SESSION_TYPE' for entry $ENTRY_ID" >&2

@@ -79,6 +79,7 @@ These apply identically in both modes (same hooks fire during `claude -p`):
 | 36 | Configurable cooldown | N/A | `cooldown_between_sessions` config field (default 5s) replaces hardcoded inter-session pause | Live-reloaded each cycle |
 | 37 | Max consecutive sessions | N/A | `max_consecutive_sessions` config field (default 0 = unlimited); daemon exits cleanly when limit reached | Counter resets on idle cycle |
 | 38 | Deployment artifacts | N/A | `repo-os-runner.plist` (macOS launchd template), `Dockerfile` (container template) | Templates with placeholder paths |
+| 39 | Work-order deferral guard | N/A | Post-dequeue: if entry's work order is escalated (`wo_is_escalated`), `queue_defer()` moves entry back to `approved/` without retry increment | Prevents sibling execution during dependency resolution; deferred entries resume when work order is reopened |
 
 ## Shared Code
 

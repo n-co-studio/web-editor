@@ -710,6 +710,45 @@ queue_block() {
   _rebuild_queue_index
 }
 
+# --- Defer a running entry (work-order pause) ---
+# Moves from running back to approved/ WITHOUT incrementing retry_count.
+# Used when a sibling entry in the same work order is in review/failed/blocked.
+# The entry resumes automatically when the work order is reopened.
+# Arguments:
+#   $1 — entry_id
+#   $2 — reason (optional, stored in error_log field)
+queue_defer() {
+  local entry_id="$1"
+  local reason="${2:-}"
+  local qdir
+  qdir=$(_queue_dir)
+  local src_file="$qdir/running/${entry_id}.yaml"
+
+  if [ ! -f "$src_file" ]; then
+    # Idempotency guard: if already in approved/, treat as success
+    if [ -f "$qdir/approved/${entry_id}.yaml" ]; then
+      echo "WARNING: Entry $entry_id already in approved/ — idempotent no-op" >&2
+      return 0
+    fi
+    echo "ERROR: Entry $entry_id not found in running/" >&2
+    return 1
+  fi
+
+  _load_queue_entry "$src_file"
+  _QE_STATUS="approved"
+  _QE_UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  _QE_COMPLETED_AT=""  # Clear terminal timestamp — entry is returning to non-terminal state
+  _QE_PROMPT=""  # Clear assembled prompt — regenerated on next dequeue
+  if [ -n "$reason" ]; then
+    # Reuses error_log (only free-text field in schema) for deferral reason
+    _QE_ERROR_LOG="$reason"
+  fi
+
+  _write_queue_entry "$qdir/approved/${entry_id}.yaml"
+  rm -f "$src_file"
+  _rebuild_queue_index
+}
+
 # --- Edit a queue entry field ---
 # Updates a single field on a non-running entry.
 # Requires: _find_entry_file (from work-order-manager.sh)
