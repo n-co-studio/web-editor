@@ -275,6 +275,17 @@ export class EditHistory {
           }
           entry.wrapper.remove();
           break;
+        case 'reparent': {
+          const srcChildren = Array.from(entry.sourceContainer.children)
+            .filter((c): c is HTMLElement => c instanceof HTMLElement);
+          const refNode = entry.sourceIndex < srcChildren.length ? srcChildren[entry.sourceIndex] : null;
+          if ('moveBefore' in entry.sourceContainer && typeof (entry.sourceContainer as any).moveBefore === 'function') {
+            (entry.sourceContainer as any).moveBefore(entry.element, refNode);
+          } else {
+            entry.sourceContainer.insertBefore(entry.element, refNode);
+          }
+          break;
+        }
         case 'attribute':
           for (const ac of entry.attributeChanges) {
             if (ac.fromValue) {

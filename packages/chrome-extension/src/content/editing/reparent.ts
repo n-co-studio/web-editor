@@ -68,6 +68,7 @@ export function getReparentBlockReason(element: Element): string | null {
  */
 function discoverTargetContainers(
   sourceContainer: HTMLElement,
+  draggedElement: HTMLElement,
   shadowHost: Element | null,
 ): TargetCandidate[] {
   const candidates: TargetCandidate[] = [];
@@ -82,7 +83,9 @@ function discoverTargetContainers(
     const display = cs.display;
     if (!display.includes('flex') && !display.includes('grid')) continue;
 
-    // Skip if the element is inside the dragged element (would be circular)
+    // Skip if the container is the dragged element or a descendant of it (would be circular)
+    if (el === draggedElement || draggedElement.contains(el)) continue;
+
     const layout = detectContainerLayout(el);
     const children = Array.from(el.children)
       .filter((c): c is HTMLElement => c instanceof HTMLElement);
@@ -245,7 +248,7 @@ export class ReparentEditor {
 
     // Discover target containers
     const shadowHost = this.shadow.host;
-    this.targets = discoverTargetContainers(this.sourceContainer!, shadowHost);
+    this.targets = discoverTargetContainers(this.sourceContainer!, this.currentElement!, shadowHost);
 
     // Also include source container as a valid drop target (for same-container reorder)
     const sourceLayout = detectContainerLayout(this.sourceContainer!);
@@ -344,7 +347,7 @@ export class ReparentEditor {
       );
 
       if (!isSamePosition) {
-        this.commitReparent(target.container, targetIndex);
+        // Fire callback BEFORE DOM move so it can capture pre-move sibling state
         this.onCommitCb?.(
           this.currentElement,
           sourceContainer,
@@ -352,6 +355,7 @@ export class ReparentEditor {
           target.container,
           targetIndex,
         );
+        this.commitReparent(target.container, targetIndex);
       }
     }
 

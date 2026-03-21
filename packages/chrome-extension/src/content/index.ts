@@ -1222,12 +1222,12 @@ function makeReparentCommit(el: Element): ReparentCommitCallback {
   return (element, sourceContainer, sourceIndex, targetContainer, targetIndex) => {
     const info = buildElementInfo(element);
 
-    // Build sibling selectors from target container's children (post-move)
+    // Build sibling selectors from target container's children (pre-move — element not yet in target)
     const targetChildren = Array.from(targetContainer.children)
-      .filter((c): c is HTMLElement => c instanceof HTMLElement);
+      .filter((c): c is HTMLElement => c instanceof HTMLElement && c !== element);
     const siblingSelectors = targetChildren.map((c) => generateSelector(c));
 
-    // Build sibling anchors at the insert position
+    // Build sibling anchors at the insert position (pre-move state)
     const prevEl = targetIndex > 0 ? targetChildren[targetIndex - 1] : null;
     const nextEl = targetIndex < targetChildren.length ? targetChildren[targetIndex] : null;
 
