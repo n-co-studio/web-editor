@@ -116,6 +116,22 @@ export interface GroupChange {
 }
 
 /**
+ * A reparent operation — moves an element from one container to another.
+ * Stored as a parallel array on VisualDiff (separate from PropertyChange[]).
+ * Natural inverse is reparent back to the source container at the original index.
+ */
+export interface ReparentChange {
+  readonly type: 'reparent';
+  readonly sourceContainerSelector: string;
+  readonly sourceIndex: number;
+  readonly targetContainerSelector: string;
+  readonly targetIndex: number;
+  readonly siblingSelectors: readonly string[];
+  readonly prevSibling: SiblingAnchor | null;
+  readonly nextSibling: SiblingAnchor | null;
+}
+
+/**
  * An insert operation — creates a new element within a container.
  * Stored as a parallel array on VisualDiff (separate from PropertyChange[]).
  */
@@ -187,6 +203,7 @@ export interface VisualDiff {
   readonly reorderChanges?: readonly ReorderChange[];
   readonly insertChanges?: readonly InsertChange[];
   readonly groupChanges?: readonly GroupChange[];
+  readonly reparentChanges?: readonly ReparentChange[];
   readonly attributeChanges?: readonly AttributeChange[];
   readonly textChanges?: readonly TextChange[];
   readonly relatedChanges?: readonly RelatedChange[];

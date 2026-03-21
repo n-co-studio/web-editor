@@ -19,6 +19,7 @@ These expand specific boundary restrictions for well-scoped operations:
 - **DOM element creation for insert**: `document.createElement` + `insertBefore`/`appendChild` is permitted for insert operations within a scoped parent container. The new element is empty and styled via the standard visual diff pipeline.
 - **DOM element removal for delete**: `element.remove()` is permitted for delete operations on existing elements. Already implemented in the content script.
 - **DOM element reparenting for group**: `document.createElement` + `insertBefore` + `moveBefore`/`appendChild` is permitted for group operations that wrap sibling elements within the same parent into a new container element.
+- **DOM node relocation for reparent**: `moveBefore`/`insertBefore` is permitted for reparent operations that move an element from one flex/grid container to a different flex/grid container. This relocates an existing element without creating or deleting nodes. Non-layout containers are not valid drop targets.
 
 ## Scope Clarifications
 

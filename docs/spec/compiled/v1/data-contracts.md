@@ -14,6 +14,7 @@
 | status | "pending" \| "applied" \| "rejected" | yes | Processing state |
 | sourceVerified | boolean | yes | True when data-source-* attributes are present on the element, false when missing |
 | relatedChanges | RelatedChange[] | no | Property changes on other elements required by this edit (e.g., parent `isolation: isolate` for blend mode). Each entry identifies the affected element and the changes to apply. |
+| reparentChanges | ReparentChange[] | no | Cross-container move operation applied as part of this edit. Populated only for reparent mode edits; empty for property-change-only diffs. |
 
 **Relationships:** Contains ElementInfo, PropertyChange[], PageContext, RelatedChange[]
 
@@ -60,6 +61,19 @@
 | breakpoint | string | no | Matched breakpoint name from the target project's tokens (not the overlay's own breakpoints). Only populated when project tokens are loaded. |
 | breakpointValue | string | no | Actual media query width (e.g., '768px') for the matched breakpoint |
 | tabId | string | yes | Unique tab session identifier — UUID generated per tab on extension activation, stable for the tab's lifetime |
+
+### ReparentChange
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| type | "reparent" | yes | Discriminant literal |
+| sourceContainerSelector | string | yes | CSS selector for the container the element moved from |
+| sourceIndex | number | yes | Child index within the source container before the move |
+| targetContainerSelector | string | yes | CSS selector for the container the element moved into |
+| targetIndex | number | yes | Child index within the target container after the move |
+| siblingSelectors | string[] | yes | Selectors for all siblings in the target container at commit time |
+| prevSibling | SiblingAnchor \| null | yes | Element immediately before the inserted position, or null if inserted at index 0 |
+| nextSibling | SiblingAnchor \| null | yes | Element immediately after the inserted position, or null if inserted at end |
 
 ### DesignToken
 
