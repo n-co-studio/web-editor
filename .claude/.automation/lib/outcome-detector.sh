@@ -158,7 +158,8 @@ _write_blocker_report() {
 
   # Delegate to blocker-reporter if available (enriched reports)
   if type write_blocker_report > /dev/null 2>&1; then
-    write_blocker_report "$exit_code" "$repo_root" "$entry_id" "$stderr_file"
+    # Pass last prompt from queue entry globals (still loaded at this point)
+    write_blocker_report "$exit_code" "$repo_root" "$entry_id" "$stderr_file" "${_QE_PROMPT:-}"
     return
   fi
 

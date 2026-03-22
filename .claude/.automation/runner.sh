@@ -74,6 +74,9 @@ CONFIG_LOCAL_FILE="$AUTOMATION_DIR/config.local.yaml"
 # --- Heartbeat state ---
 _HEARTBEAT_PID=""
 
+# --- Child process tracking (for FORCE-HALT) ---
+_CLAUDE_CHILD_PID=""
+
 # --- Daemon lifecycle state ---
 _SHUTDOWN_REQUESTED=false
 _DAEMON_START_EPOCH=""
@@ -151,6 +154,8 @@ _start_heartbeat() {
     while true; do
       date -u +%Y-%m-%dT%H:%M:%SZ > "${hb_file}.tmp" 2>/dev/null \
         && mv "${hb_file}.tmp" "$hb_file" 2>/dev/null || true
+      # Also update the health file to keep it current during long sessions
+      _write_health "running" 2>/dev/null || true
       sleep "$interval"
     done
   ) &
@@ -178,7 +183,7 @@ _runner_crash_cleanup() {
   fi
   # Clean session state (3.1: runner_external_cleanup on crash)
   if [ -n "${REPO_ROOT:-}" ] && [ -f "$REPO_ROOT/.claude/.session-id" ]; then
-    runner_external_cleanup "$REPO_ROOT" 2>/dev/null || true
+    runner_external_cleanup "$REPO_ROOT" "${_CURRENT_ENTRY_ID:-}" "crash" 2>/dev/null || true
   fi
 }
 
@@ -370,7 +375,7 @@ _startup_crash_recovery() {
   local session_id_file="$REPO_ROOT/.claude/.session-id"
   if [ -f "$session_id_file" ]; then
     echo "Startup recovery: orphaned session-id file — running external cleanup" >&2
-    runner_external_cleanup "$REPO_ROOT" 2>/dev/null || true
+    runner_external_cleanup "$REPO_ROOT" "" "startup-recovery" 2>/dev/null || true
     recovered=$((recovered + 1))
   fi
 
@@ -437,6 +442,62 @@ _check_stale_locks() {
   done
 }
 
+# ============================================================
+# Task group branch seal guard (Decision 0013)
+# ============================================================
+# Determines whether an entry is the final entry in a task group work order.
+# Non-final entries must NOT have their branch sealed (recorded in closed-branches).
+# Fail-open: on error, returns 0 (seal the branch — safe default).
+#
+# Arguments:
+#   $1 — brief_id (queue entry ID)
+#   $2 — work_order_id (empty for non-task-group entries)
+# Returns: 0 if this is the final entry (seal OK), 1 if siblings remain (don't seal)
+_is_final_taskgroup_entry() {
+  local brief_id="$1"
+  local work_order_id="${2:-}"
+
+  # No work order → not a task group entry → seal normally
+  if [ -z "$work_order_id" ]; then
+    return 0
+  fi
+
+  # Load work order — fail-open on error
+  local wo_file="$(_queue_dir)/work-orders/${work_order_id}.yaml"
+  _load_work_order "$wo_file" 2>/dev/null || return 0
+
+  # Check if any sibling entries remain in pending/approved status
+  if [ -z "$_WO_ENTRY_IDS" ]; then
+    return 0
+  fi
+
+  local _eid _old_ifs="$IFS"
+  IFS=','
+  # shellcheck disable=SC2086 — intentional word splitting on comma-delimited list
+  set -- $_WO_ENTRY_IDS
+  IFS="$_old_ifs"
+  for _eid in "$@"; do
+    # Skip self
+    [ "$_eid" = "$brief_id" ] && continue
+    local entry_file
+    entry_file=$(_find_entry_file "$_eid") || true
+    if [ -z "$entry_file" ]; then
+      continue
+    fi
+    _load_queue_entry "$entry_file" 2>/dev/null || continue
+    case "$_QE_STATUS" in
+      pending-review|approved)
+        # Sibling still pending — don't seal
+        return 1
+        ;;
+    esac
+  done
+
+  # No pending/approved siblings remain — this is the final entry
+  return 0
+}
+
+# ============================================================
 # Core execution — run a single entry (used by both modes)
 # ============================================================
 
@@ -495,21 +556,33 @@ _run_single_entry() {
   stderr_file=$(mktemp "${TMPDIR:-/tmp}/runner-stderr-XXXXXX" 2>/dev/null || echo "")
 
   # Launch headless session
+  # Trust model for headless execution:
+  #   --permission-mode bypassPermissions — no interactive permission prompts
+  #   --disallowedTools — deny list is the primary CLI-level safety gate
+  #   PreToolUse hooks (pretooluse-permission.sh) — belt-and-suspenders deny
+  #   Note: PermissionRequest hooks do NOT fire in -p mode (Anthropic documented
+  #   limitation). Headless permission logic lives in pretooluse-permission.sh.
+  # Launch headless session in background to enable FORCE-HALT child kill
   local exit_code=0
   if [ -n "$stderr_file" ]; then
     claude -p \
+      --permission-mode bypassPermissions \
       --disallowedTools "$disallowed" \
       --max-turns 200 \
       <<< "$prompt" \
-      2> >(tee "$stderr_file" >&2) \
-      || exit_code=$?
+      2> >(tee "$stderr_file" >&2) &
+    _CLAUDE_CHILD_PID=$!
+    wait "$_CLAUDE_CHILD_PID" || exit_code=$?
   else
     claude -p \
+      --permission-mode bypassPermissions \
       --disallowedTools "$disallowed" \
       --max-turns 200 \
-      <<< "$prompt" \
-      || exit_code=$?
+      <<< "$prompt" &
+    _CLAUDE_CHILD_PID=$!
+    wait "$_CLAUDE_CHILD_PID" || exit_code=$?
   fi
+  _CLAUDE_CHILD_PID=""
 
   # Clear automation context
   unset REPO_OS_AUTOMATION_ENTRY
@@ -524,7 +597,7 @@ _run_single_entry() {
 
   # External cleanup (Stop hook doesn't fire in headless mode)
   if [ -f "$REPO_ROOT/.claude/.session-id" ]; then
-    runner_external_cleanup "$REPO_ROOT"
+    runner_external_cleanup "$REPO_ROOT" "$brief_id" "close"
   fi
 
   # Clean up stderr temp file
@@ -550,12 +623,14 @@ _run_single_entry() {
 #   $1 — entry_current_branch
 #   $2 — push_on_complete ("true"/"false")
 #   $3 — brief_id (for escalation context)
+#   $4 — work_order_id (optional, for task group seal guard — Decision 0013)
 # Reads: _RESULT_OUTCOME, _RESULT_SOLO_MODE
 # May modify: _RESULT_OUTCOME (on merge conflict → review:merge-conflict)
 _solo_merge_if_needed() {
   local entry_current_branch="$1"
   local push_on_complete="${2:-false}"
   local brief_id="${3:-}"
+  local work_order_id="${4:-}"
 
   local _outcome_type="${_RESULT_OUTCOME%%:*}"
 
@@ -581,7 +656,9 @@ _solo_merge_if_needed() {
           fi
         fi
         if [ "$_merge_ok" = true ]; then
-          record_closed_branch "$entry_current_branch"
+          if _is_final_taskgroup_entry "$brief_id" "$work_order_id"; then
+            record_closed_branch "$entry_current_branch"
+          fi
           echo "Solo merge: $entry_current_branch → main (success)" >&2
           # Push to remote — push_on_complete or advisory fallback
           local _repo_mode_file="$REPO_ROOT/.claude/repo-mode"
@@ -634,7 +711,9 @@ _solo_merge_if_needed() {
         ;;
       *)
         # Not a solo-mergeable branch type — seal only
-        record_closed_branch "$entry_current_branch"
+        if _is_final_taskgroup_entry "$brief_id" "$work_order_id"; then
+          record_closed_branch "$entry_current_branch"
+        fi
         ;;
     esac
   elif [ "$_outcome_type" = "completed" ] && [ "$push_on_complete" = "true" ] && [ -n "$entry_current_branch" ] && [ "$entry_current_branch" != "main" ]; then
@@ -644,10 +723,14 @@ _solo_merge_if_needed() {
         echo "WARNING: push_on_complete failed for $entry_current_branch — push manually" >&2
       fi
     fi
-    record_closed_branch "$entry_current_branch"
+    if _is_final_taskgroup_entry "$brief_id" "$work_order_id"; then
+      record_closed_branch "$entry_current_branch"
+    fi
   elif [ -n "$entry_current_branch" ] && [ "$entry_current_branch" != "main" ]; then
     # Non-solo or failed outcome — still seal the branch
-    record_closed_branch "$entry_current_branch"
+    if _is_final_taskgroup_entry "$brief_id" "$work_order_id"; then
+      record_closed_branch "$entry_current_branch"
+    fi
   fi
 }
 
@@ -687,7 +770,7 @@ if [ "$DAEMON_MODE" = false ]; then
   _run_single_entry "$BRIEF_ID" "$PROMPT" "$SESSION_TYPE" "$EXISTING_BRANCH" "build" "false"
 
   # Solo merge + branch seal (Phase 2: extracted from _run_single_entry)
-  _solo_merge_if_needed "$_RESULT_BRANCH" "false" "$BRIEF_ID"
+  _solo_merge_if_needed "$_RESULT_BRANCH" "false" "$BRIEF_ID" ""
 
   # Belt-and-suspenders: check globals are populated
   if [ -z "$_RESULT_OUTCOME" ]; then
@@ -709,33 +792,64 @@ fi
 # Daemon mode — queue-driven loop
 # ============================================================
 
-# --- PID file guard ---
+# --- PID file guard (flock-based atomic guard) ---
 PID_FILE="$AUTOMATION_DIR/runner.pid"
+DAEMON_LOCK_FILE="$AUTOMATION_DIR/.daemon-lock"
 
 _cleanup_pid_file() {
   rm -f "$PID_FILE" 2>/dev/null || true
 }
 
-# Check for existing daemon
-if [ -f "$PID_FILE" ]; then
-  EXISTING_PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
-  if [ -n "$EXISTING_PID" ] && kill -0 "$EXISTING_PID" 2>/dev/null; then
-    echo "Daemon already running (pid $EXISTING_PID)" >&2
+# Acquire exclusive daemon lock (flock on macOS/Linux, mkdir fallback)
+_DAEMON_LOCK_FD=""
+if command -v flock > /dev/null 2>&1; then
+  # flock available — use file descriptor lock (held for daemon lifetime)
+  exec 9>"$DAEMON_LOCK_FILE"
+  if ! flock -n 9; then
+    # Another daemon holds the lock — check PID file for diagnostics
+    EXISTING_PID=$(cat "$PID_FILE" 2>/dev/null || echo "unknown")
+    echo "Daemon already running (pid $EXISTING_PID, lock held)" >&2
     exit 0
-  else
-    echo "Removing stale PID file (pid $EXISTING_PID not running)" >&2
-    rm -f "$PID_FILE" 2>/dev/null || true
+  fi
+  _DAEMON_LOCK_FD=9
+else
+  # flock unavailable (some macOS) — fall back to mkdir-based atomic lock
+  if ! mkdir "$DAEMON_LOCK_FILE.d" 2>/dev/null; then
+    # Lock dir exists — check if holder is still alive via PID file
+    EXISTING_PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
+    if [ -n "$EXISTING_PID" ] && kill -0 "$EXISTING_PID" 2>/dev/null; then
+      echo "Daemon already running (pid $EXISTING_PID)" >&2
+      exit 0
+    else
+      # Stale lock — reclaim
+      echo "Removing stale daemon lock (pid $EXISTING_PID not running)" >&2
+      rmdir "$DAEMON_LOCK_FILE.d" 2>/dev/null || true
+      if ! mkdir "$DAEMON_LOCK_FILE.d" 2>/dev/null; then
+        echo "ERROR: Cannot acquire daemon lock" >&2
+        exit 1
+      fi
+    fi
   fi
 fi
 
-# Write PID file and trap cleanup
+# Write PID file (under lock — no race)
 printf '%s' "$$" > "$PID_FILE"
+
+_cleanup_daemon_lock() {
+  rm -f "$PID_FILE" 2>/dev/null || true
+  if [ -n "$_DAEMON_LOCK_FD" ]; then
+    # flock released automatically on fd close
+    eval "exec ${_DAEMON_LOCK_FD}>&-" 2>/dev/null || true
+  else
+    rmdir "$DAEMON_LOCK_FILE.d" 2>/dev/null || true
+  fi
+}
 _graceful_shutdown() {
   _SHUTDOWN_REQUESTED=true
   echo "Shutdown requested — finishing current session if active..." >&2
 }
 trap '_graceful_shutdown' TERM INT
-trap '_stop_heartbeat; _runner_crash_cleanup; _write_health "stopped"; _cleanup_pid_file' EXIT
+trap '_stop_heartbeat; _runner_crash_cleanup; _write_health "stopped"; _cleanup_daemon_lock' EXIT
 
 echo "Runner daemon starting (pid $$)..." >&2
 
@@ -763,6 +877,29 @@ while true; do
   # --- HALT file check ---
   if [ -f "$AUTOMATION_DIR/HALT" ]; then
     echo "HALT file present. Runner stopped." >&2
+    break
+  fi
+
+  # --- FORCE-HALT file check (immediate — kill active session) ---
+  if [ -f "$AUTOMATION_DIR/FORCE-HALT" ]; then
+    echo "FORCE-HALT file present. Killing active session if any..." >&2
+    if [ -n "$_CLAUDE_CHILD_PID" ] && kill -0 "$_CLAUDE_CHILD_PID" 2>/dev/null; then
+      kill -TERM "$_CLAUDE_CHILD_PID" 2>/dev/null || true
+      # Wait up to 10 seconds for graceful exit
+      _fh_wait=0
+      while [ "$_fh_wait" -lt 10 ] && kill -0 "$_CLAUDE_CHILD_PID" 2>/dev/null; do
+        sleep 1
+        _fh_wait=$((_fh_wait + 1))
+      done
+      # SIGKILL if still alive
+      if kill -0 "$_CLAUDE_CHILD_PID" 2>/dev/null; then
+        echo "FORCE-HALT: child still alive after 10s — sending SIGKILL" >&2
+        kill -KILL "$_CLAUDE_CHILD_PID" 2>/dev/null || true
+        wait "$_CLAUDE_CHILD_PID" 2>/dev/null || true
+      fi
+    fi
+    rm -f "$AUTOMATION_DIR/FORCE-HALT" 2>/dev/null || true
+    echo "FORCE-HALT: daemon exiting." >&2
     break
   fi
 
@@ -904,7 +1041,7 @@ while true; do
             ;;
           escalated)
             review_log_append "work-order-escalated" "$ENTRY_WORK_ORDER_ID" "" \
-              "Work order $ENTRY_WORK_ORDER_ID escalated — child failure detected" 2>/dev/null || true
+              "Work order $ENTRY_WORK_ORDER_ID escalated — child failure detected. Recovery: queue-cli.sh reopen-wo $ENTRY_WORK_ORDER_ID" 2>/dev/null || true
             ;;
         esac
       fi
@@ -928,11 +1065,29 @@ while true; do
         fi
         sleep 1
       done
-      queue_defer "$ENTRY_ID" "work-order-escalated"
-      release_queue_lock
-      # Review log
-      review_log_append "entry-deferred" "$ENTRY_WORK_ORDER_ID" "$ENTRY_ID" \
-        "Entry $ENTRY_ID deferred — work order $ENTRY_WORK_ORDER_ID escalated (sibling in review/failed/blocked)" 2>/dev/null || true
+      _defer_count=$(queue_defer "$ENTRY_ID" "work-order-escalated")
+      # Check deferral cap — transition to blocked if exceeded
+      _max_deferrals=$(_parse_config_field "runner" "max_deferral_cycles")
+      _max_deferrals="${_max_deferrals:-3}"
+      if [ "$_defer_count" -ge "$_max_deferrals" ] 2>/dev/null; then
+        queue_block "$ENTRY_ID" "max_deferral_cycles exceeded ($_defer_count/$_max_deferrals)"
+        release_queue_lock
+        review_log_append "entry-blocked" "$ENTRY_WORK_ORDER_ID" "$ENTRY_ID" \
+          "Entry $ENTRY_ID blocked — max deferral cycles exceeded ($_defer_count/$_max_deferrals)" 2>/dev/null || true
+        # Check if this triggers work order escalation
+        _wo_new_status=$(wo_check_completion "$ENTRY_WORK_ORDER_ID" 2>/dev/null) || true
+        case "$_wo_new_status" in
+          escalated)
+            review_log_append "work-order-escalated" "$ENTRY_WORK_ORDER_ID" "" \
+              "Work order $ENTRY_WORK_ORDER_ID escalated — entry blocked (deferral cap). Recovery: queue-cli.sh reopen-wo $ENTRY_WORK_ORDER_ID" 2>/dev/null || true
+            ;;
+        esac
+      else
+        release_queue_lock
+        # Review log
+        review_log_append "entry-deferred" "$ENTRY_WORK_ORDER_ID" "$ENTRY_ID" \
+          "Entry $ENTRY_ID deferred — work order $ENTRY_WORK_ORDER_ID escalated (sibling in review/failed/blocked) [cycle $_defer_count/$_max_deferrals]" 2>/dev/null || true
+      fi
       sleep 2
       continue
     fi
@@ -994,7 +1149,7 @@ while true; do
   fi
 
   # --- Solo merge + branch seal (Phase 2: runs in main shell, not subshell) ---
-  _solo_merge_if_needed "$_RESULT_BRANCH" "$ENTRY_PUSH" "$ENTRY_ID"
+  _solo_merge_if_needed "$_RESULT_BRANCH" "$ENTRY_PUSH" "$ENTRY_ID" "$ENTRY_WORK_ORDER_ID"
 
   # --- Handle empty outcome (belt-and-suspenders guard on globals) ---
   if [ -z "$_RESULT_OUTCOME" ]; then
@@ -1108,7 +1263,7 @@ while true; do
             ;;
           escalated)
             review_log_append "work-order-escalated" "$ENTRY_WORK_ORDER_ID" "" \
-              "Work order $ENTRY_WORK_ORDER_ID escalated — child failure detected" 2>/dev/null || true
+              "Work order $ENTRY_WORK_ORDER_ID escalated — child failure detected. Recovery: queue-cli.sh reopen-wo $ENTRY_WORK_ORDER_ID" 2>/dev/null || true
             ;;
         esac
       fi

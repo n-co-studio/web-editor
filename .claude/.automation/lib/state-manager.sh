@@ -58,8 +58,12 @@ state_manager_setup() {
 # Audit C5: shared cleanup eliminates divergence risk with session-close-check.sh.
 # Arguments:
 #   $1 — repo_root (absolute path)
+#   $2 — entry_id (queue entry ID, optional — for escalation context)
+#   $3 — phase_at_exit (phase when session ended, optional — for escalation context)
 runner_external_cleanup() {
   local repo_root="$1"
+  local _cleanup_entry_id="${2:-}"
+  local _cleanup_phase="${3:-unknown}"
 
   # Capture session type before cleaning state files (phase-state deleted below)
   local close_stype
@@ -74,14 +78,23 @@ runner_external_cleanup() {
     echo "WARNING: Dirty tree at headless session close (uncommitted changes present)" >&2
     local _esc_dir="$repo_root/.claude/.automation/escalations"
     mkdir -p "$_esc_dir" 2>/dev/null || true
+    local _dt_esc_id="esc-dirty-tree-$(date +%Y%m%d-%H%M%S)"
+    local _dt_files=""
+    _dt_files=$(printf '%s\n%s' "$_dirty_tree" "$_dirty_staged" | sort -u | tr '\n' ',' | sed 's/,$//')
     {
       printf 'escalation:\n'
+      printf '  id: "%s"\n' "$_dt_esc_id"
+      printf '  queue_entry_id: "%s"\n' "$_cleanup_entry_id"
       printf '  type: "governance-block"\n'
       printf '  severity: "advisory"\n'
+      printf '  phase_at_exit: "%s"\n' "$_cleanup_phase"
+      printf '  tag_at_exit: "agent"\n'
       printf '  message: "Dirty working tree at headless session close — uncommitted changes present"\n'
+      printf '  context: "uncommitted_files: %s"\n' "$_dt_files"
       printf '  created_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
       printf '  resolved: false\n'
-    } > "$_esc_dir/esc-dirty-tree-$(date +%Y%m%d-%H%M%S).yaml" 2>/dev/null || true
+      printf '  resolution: ""\n'
+    } > "$_esc_dir/${_dt_esc_id}.yaml" 2>/dev/null || true
   fi
 
   # Unregister from session registry (before .session-id removal — needs ID)

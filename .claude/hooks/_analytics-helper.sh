@@ -91,6 +91,27 @@ get_repo_root() {
   echo "$_REPO_OS_ROOT"
 }
 
+# --- Worktree detection (Decision 0028) ---
+# Returns 0 if the current process is running inside a git worktree.
+# Uses git rev-parse --git-common-dir vs --git-dir (available since git 2.5).
+# NOTE: This detects whether the CWD is in a worktree, not whether the hook
+# file is in a worktree. Hooks always live in the main repo. When a worktree
+# subagent fires a hook, its CWD is the worktree path.
+_CACHED_IS_WORKTREE=""
+is_worktree() {
+  if [ -z "$_CACHED_IS_WORKTREE" ]; then
+    local git_dir common_dir
+    git_dir=$(git rev-parse --git-dir 2>/dev/null || echo "")
+    common_dir=$(git rev-parse --git-common-dir 2>/dev/null || echo "")
+    if [ -n "$git_dir" ] && [ -n "$common_dir" ] && [ "$git_dir" != "$common_dir" ]; then
+      _CACHED_IS_WORKTREE="true"
+    else
+      _CACHED_IS_WORKTREE="false"
+    fi
+  fi
+  [ "$_CACHED_IS_WORKTREE" = "true" ]
+}
+
 # --- Portable path normalization (macOS-safe) ---
 # Collapses .., ., and duplicate slashes without resolving symlinks.
 # Fast-path: if no special components, return as-is (zero forks).

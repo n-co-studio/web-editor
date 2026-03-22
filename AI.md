@@ -53,6 +53,8 @@ Hooks (`.claude/hooks/`) enforce governance automatically via phase-aware flow m
 | Hook | Event | Gates / Checks | Blocking? |
 |------|-------|---------------|-----------|
 | `write-guard.sh` | Edit, Write | Mode guard (template/child/autonomous per `.claude/repo-mode`), main branch protection (§3), phase-aware edit gate (§3, blocks init/plan), session overlap (Decision 0013), session branch isolation (§3, Decision 0013) | BLOCK (overlap: advisory for task groups; isolation: task groups exempt) |
+| `pretooluse-permission.sh` | Agent PreToolUse | Session-type-aware agent allowlist — blocks write-capable subagents in no-write sessions, fail-closed on missing phase-state, `claude` Bash deny pattern (Decision 0027) | BLOCK (GATE-FINAL) |
+| `pretooluse-permission.sh` | Bash PreToolUse | Deny list blocks dangerous Bash commands (including `claude` subprocess — Decision 0027), allow list passes safe ones (`_permission-allowlist.sh`). Headless (`CLAUDE_HEADLESS=1`): fail-closed for unknown commands, exempt from `claude` deny. Interactive: pass-through. Audit log: `.claude/.automation/logs/permission-audit.log` (Decision 0017) | BLOCK (deny/headless-unknown) / allow / pass-through |
 | `bash-guard.sh` | Bash | Consolidated Bash PreToolUse (Phase 3a): state-guard, mode guard, plan-approval gate, fail-closed phase enforcement (Decision 0019), task group merge protection (Decision 0018), session overlap, session branch isolation. Ephemeral session fast-exit (Phase 3b) | BLOCK (phase enforcement: advisory when sentinel absent; ephemeral: pass-through) |
 | `branch-guard.sh` | _(deprecated)_ | Retained for rollback. Bash calls now handled by `bash-guard.sh` | — |
 | `plan-approval.sh` | AskUserQuestion | Writes `plan-approved` state file when operator confirms plan | — (state writer) |
@@ -63,7 +65,7 @@ Hooks (`.claude/hooks/`) enforce governance automatically via phase-aware flow m
 | `session-close-check.sh` | stop | Session log, solo merge safety net (Decision 0015), completion marker validation (taskgroup-merge), branch sealing (Decision 0013), session registry cleanup, state file cleanup, override audit, governance evidence (task groups), next-brief reminder | BLOCK (audit/governance/reminder: advisory) |
 | `agent-git-guard.sh` | Bash PreToolUse (subagents) | Blocks Builder/QA/Security from `git commit`/`git push` | BLOCK |
 | `hvst-failure-tracker.sh` | Bash PostToolUse | Tracks consecutive Bash failures, prompts HVST protocol | advisory |
-| `state-writer.sh` | Bash PostToolUse | Captures `cohesion-reviewed`, `qa-verified`, `reviewer-signed`, `security-signed`, `pragmatist-signed` | — (state writer) |
+| `state-writer.sh` | SubagentStop | Captures `cohesion-reviewed`, `qa-verified`, `reviewer-signed`, `security-signed`, `pragmatist-signed` (worktree: skip — Decision 0028) | — (state writer) |
 
 Experiment branches: A4 only (all state checks skipped). Emergency recovery: `REPO_OS_RECOVER=1` skips all state-dependent checks and bash-guard/branch-guard gates.
 

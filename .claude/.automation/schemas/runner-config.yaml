@@ -13,6 +13,7 @@ runner:
   poll_interval: 60                # Daemon idle poll interval in seconds (default: 60)
   cooldown_between_sessions: 5     # Pause between sessions in seconds (default: 5)
   max_consecutive_sessions: 0      # Max sessions before daemon exits; 0 = unlimited
+  max_deferral_cycles: 3           # Max work-order deferral cycles before entry transitions to blocked
 
 retention:
   queue_days: 30            # days to retain completed queue entries

@@ -3,6 +3,10 @@
 # Wired to PermissionRequest event via .claude/settings.json.
 # Decision 0017 — Operator Automation Layer.
 #
+# Note: This hook fires for interactive sessions only. PermissionRequest does
+# not fire in claude -p mode. Headless permission logic lives in
+# pretooluse-permission.sh (PreToolUse event).
+#
 # Fires when Claude Code is about to show a permission dialog. This hook
 # answers on behalf of the user for known-safe and known-dangerous patterns.
 # Unknown commands fall through to the normal permission dialog.

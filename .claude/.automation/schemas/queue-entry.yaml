@@ -8,6 +8,7 @@ entry:
   branch: ""                # target branch name
   brief_path: ""            # path to task brief (if applicable)
   prompt: ""                # assembled prompt for claude -p (written at dequeue, not creation)
+  last_prompt: ""           # preserved prompt from previous attempt (diagnostic — written on retry/failure)
   auto_mode: false          # true = skip op-review phase
   solo_mode: false          # true = merge to main at close (Decision 0015)
   retry_count: 0            # number of retry attempts so far

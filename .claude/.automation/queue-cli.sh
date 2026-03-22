@@ -17,8 +17,10 @@
 #   review
 #   log [--lines N]
 #   prune [--briefs-only] [--dry-run]
+#   reopen-wo <work-order-id>
 #   start-daemon
 #   halt
+#   force-halt
 #   resume
 #
 # Global flags:
@@ -84,8 +86,10 @@ Subcommands:
   review
   log [--lines N]
   prune [--briefs-only] [--dry-run]
+  reopen-wo <work-order-id>
   start-daemon
   halt
+  force-halt
   resume
 EOF
   exit 1
@@ -160,6 +164,25 @@ case "$SUBCOMMAND" in
       exit 1
     fi
 
+    # Reject empty brief files (consistent with intake.sh)
+    if [ ! -s "$ADD_BRIEF" ]; then
+      echo "ERROR: Brief file is empty. Cannot queue an empty brief." >&2
+      exit 1
+    fi
+
+    # Validate brief path is inside REPO_ROOT (catches silent prompt-assembler failure)
+    _ADD_BRIEF_REAL=$(cd "$(dirname "$ADD_BRIEF")" && pwd)/$(basename "$ADD_BRIEF")
+    case "$_ADD_BRIEF_REAL" in
+      "$REPO_ROOT"/*)
+        ;; # inside repo — OK
+      *)
+        echo "ERROR: Brief path must be inside the repo. Copy the file to .claude/.automation/briefs/ first." >&2
+        echo "  Resolved path: $_ADD_BRIEF_REAL" >&2
+        echo "  Repo root:     $REPO_ROOT" >&2
+        exit 1
+        ;;
+    esac
+
     # Validate session type
     VALID_PHASES=$(get_phases_for_type "$ADD_SESSION_TYPE" 2>/dev/null || true)
     if [ -z "$VALID_PHASES" ]; then
@@ -195,6 +218,17 @@ case "$SUBCOMMAND" in
     if [ -z "$ENTRY_ID" ]; then
       release_queue_lock
       echo "ERROR: Failed to create queue entry" >&2
+      exit 1
+    fi
+
+    # Validate entry against schema (Fix 1: wire validator at intake)
+    _ADD_ENTRY_FILE="$(_queue_dir)/pending-review/${ENTRY_ID}.yaml"
+    if ! validate_queue_entry "$_ADD_ENTRY_FILE"; then
+      # Validation failed — remove the entry and abort
+      rm -f "$_ADD_ENTRY_FILE" 2>/dev/null || true
+      _rebuild_queue_index
+      release_queue_lock
+      echo "ERROR: Queue entry validation failed — entry removed" >&2
       exit 1
     fi
 
@@ -362,7 +396,9 @@ case "$SUBCOMMAND" in
         exit 1
       fi
       _load_queue_entry "$ENTRY_FILE"
-      printf '{%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s}\n' \
+      # Truncate last_prompt for JSON output (first 500 chars)
+      _SHOW_LP="${_QE_LAST_PROMPT:0:500}"
+      printf '{%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s}\n' \
         "$(_json_kv "id" "$_QE_ID")" \
         "$(_json_kv "status" "$_QE_STATUS")" \
         "$(_json_kv "session_type" "$_QE_SESSION_TYPE")" \
@@ -374,6 +410,7 @@ case "$SUBCOMMAND" in
         "$(_json_kv "retry_count" "$_QE_RETRY_COUNT")" \
         "$(_json_kv "max_retries" "$_QE_MAX_RETRIES")" \
         "$(_json_kv "error_log" "$_QE_ERROR_LOG")" \
+        "$(_json_kv "last_prompt" "$_SHOW_LP")" \
         "$(_json_kv "work_order_id" "$_QE_WORK_ORDER_ID")" \
         "$(_json_kv "created_at" "$_QE_CREATED_AT")" \
         "$(_json_kv "updated_at" "$_QE_UPDATED_AT")" \
@@ -483,8 +520,9 @@ case "$SUBCOMMAND" in
   # --- start-daemon: launch daemon if not already running ---
   start-daemon)
     PID_FILE="$AUTOMATION_DIR/runner.pid"
+    DAEMON_LOCK_FILE="$AUTOMATION_DIR/.daemon-lock"
 
-    # Check if daemon is already running
+    # Check if daemon is already running (PID file + lock test)
     if [ -f "$PID_FILE" ]; then
       EXISTING_PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
       if [ -n "$EXISTING_PID" ] && kill -0 "$EXISTING_PID" 2>/dev/null; then
@@ -497,8 +535,9 @@ case "$SUBCOMMAND" in
         fi
         exit 0
       else
-        # Stale PID file — clean up
+        # Stale PID file — clean up (lock will be reclaimed by runner.sh)
         rm -f "$PID_FILE" 2>/dev/null || true
+        rmdir "$DAEMON_LOCK_FILE.d" 2>/dev/null || true
       fi
     fi
 
@@ -562,13 +601,96 @@ case "$SUBCOMMAND" in
     fi
     ;;
 
+  # --- force-halt: immediate stop — kill active session ---
+  force-halt)
+    touch "$AUTOMATION_DIR/FORCE-HALT"
+    if [ "$JSON_OUTPUT" = true ]; then
+      printf '{%s}\n' "$(_json_kv "action" "force-halted")"
+    else
+      echo "FORCE-HALT file created — daemon will kill active session and stop immediately."
+    fi
+    ;;
+
   # --- resume: clear halt ---
   resume)
-    rm -f "$AUTOMATION_DIR/HALT"
+    rm -f "$AUTOMATION_DIR/HALT" "$AUTOMATION_DIR/FORCE-HALT"
     if [ "$JSON_OUTPUT" = true ]; then
       printf '{%s}\n' "$(_json_kv "action" "resumed")"
     else
       echo "HALT file removed — restart daemon with: queue-cli.sh start-daemon"
+    fi
+    ;;
+
+  # --- reopen-wo: reopen an escalated work order and reset blocked siblings ---
+  reopen-wo)
+    if [ $# -lt 1 ]; then
+      echo "ERROR: reopen-wo requires <work-order-id>" >&2
+      exit 1
+    fi
+    REOPEN_WO_ID="$1"
+
+    if ! acquire_queue_lock; then
+      echo "ERROR: Queue lock unavailable" >&2
+      exit 1
+    fi
+
+    # Reopen the work order (escalated → open)
+    if ! wo_reopen "$REOPEN_WO_ID"; then
+      release_queue_lock
+      exit 1
+    fi
+
+    # Find and reset blocked/failed siblings back to approved
+    _REOPEN_RESET_COUNT=0
+    _WO_FILE="$(_queue_dir)/work-orders/${REOPEN_WO_ID}.yaml"
+    if [ -f "$_WO_FILE" ]; then
+      _load_work_order "$_WO_FILE"
+      if [ -n "$_WO_ENTRY_IDS" ]; then
+        _old_ifs="$IFS"
+        IFS=','
+        # shellcheck disable=SC2086 — intentional word splitting
+        set -- $_WO_ENTRY_IDS
+        IFS="$_old_ifs"
+        for _eid in "$@"; do
+          _ef=$(_find_entry_file "$_eid") || true
+          [ -z "$_ef" ] && continue
+          _load_queue_entry "$_ef"
+          case "$_QE_STATUS" in
+            blocked|failed)
+              # Transition back to approved
+              _QE_STATUS="approved"
+              _QE_UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+              _QE_COMPLETED_AT=""
+              _QE_ERROR_LOG=""
+              _QE_PROMPT=""
+              local _qdir
+              _qdir=$(_queue_dir)
+              _write_queue_entry "$_qdir/approved/${_eid}.yaml"
+              rm -f "$_ef"
+              _REOPEN_RESET_COUNT=$((_REOPEN_RESET_COUNT + 1))
+              ;;
+          esac
+          # Clean up defer-count files
+          rm -f "$(_queue_dir)/.defer-count-${_eid}" 2>/dev/null || true
+        done
+      fi
+    fi
+    _rebuild_queue_index
+
+    release_queue_lock
+
+    # Review log
+    review_log_append "work-order-reopened" "$REOPEN_WO_ID" "" \
+      "Work order $REOPEN_WO_ID reopened — $_REOPEN_RESET_COUNT sibling(s) reset to approved" 2>/dev/null || true
+
+    if [ "$JSON_OUTPUT" = true ]; then
+      printf '{%s,%s,%s}\n' \
+        "$(_json_kv "work_order_id" "$REOPEN_WO_ID")" \
+        "$(_json_kv "action" "reopened")" \
+        "$(_json_kv_raw "siblings_reset" "$_REOPEN_RESET_COUNT")"
+    else
+      printf 'Work order %s reopened. %s sibling(s) reset to approved.\n' \
+        "$REOPEN_WO_ID" "$_REOPEN_RESET_COUNT"
     fi
     ;;
 

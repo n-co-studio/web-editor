@@ -14,6 +14,7 @@ runner:
   poll_interval: 60
   cooldown_between_sessions: 5
   max_consecutive_sessions: 0
+  max_deferral_cycles: 3
 
 retention:
   queue_days: 30

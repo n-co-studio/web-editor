@@ -127,6 +127,7 @@ No auto-remediation — audit is read-only. The operator decides what action to 
 
 ## Rules
 
+- REQUIRE: **never use the Agent tool with write-capable subagent types** (builder, qa-verifier, security-privacy, general-purpose, reviewer) or request worktree isolation. Only read-only advisory agents are permitted.
 - REQUIRE: **never write files.** Prompt C is read-only. All output goes to the terminal. **Exception:** Sessions that produce operator deferrals write to `known-issues.md` (Known Limitations table) and `.claude/.deferrals-pending` only — no other file modifications. The session is no longer zero-change, so follow the Close Sequence in `docs/ai/workflow.md` (update session log, commit deferral files and session log, present closing summary).
 - REQUIRE: **never create session log entries.** Zero-change rule — no commits, no artifacts. Audit sessions are exempt. Does not apply when the deferral exception above is active.
 - BLOCK: **specialist collaboration is Orchestrator-mediated** — enforced by disallowedTools (Task) on the Auditor. The Orchestrator detects escalation tags and handles all specialist dispatch.

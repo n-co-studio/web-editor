@@ -92,6 +92,10 @@ status: complete
 
 This file is committed and read by subsequent Prompt B sessions as inter-session governance proof.
 
+## Rules
+
+- REQUIRE: **never use the Agent tool with write-capable subagent types** (builder, qa-verifier, security-privacy, general-purpose, reviewer) or request worktree isolation. Only read-only advisory agents are permitted.
+
 ## Close Sequence
 
 At close: update session log, commit all changes (including governance evidence), present closing summary. See `docs/ai/workflow.md` Close Sequence.

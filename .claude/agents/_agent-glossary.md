@@ -110,6 +110,16 @@ Governance evidence in `.claude/.state/`. Written by hooks via shell I/O (never 
 
 **Lifecycle:** `.state/` files, `.session-id`, `.session-type`, `.hvst-fail-count`, `.deferrals-pending` are session-scoped (cleaned at close). `.session-log-hash` and `.session-baseline-sha` are persistent (survive across sessions).
 
+### Worktree State Isolation (Decision 0028)
+
+Worktree-isolated subagents (`isolation: "worktree"` in Agent tool) run in a separate git worktree but share the main repo's hook infrastructure. Hooks resolve `_REPO_OS_ROOT` from their own file path (main repo), so all state reads/writes target the main session's `.claude/.state/`.
+
+**Contract:**
+- **State writes blocked**: `state-writer.sh` refuses to write governance state files when `is_worktree()` detects a worktree CWD. Worktree subagent verdicts are silently skipped (audit-logged, reason: `worktree_blocked`).
+- **State reads pass through**: Phase-state reads in worktree hooks reflect the main session's phase. This is intentional — worktree subagents operate under the parent session's governance.
+- **Implication**: Governance agents (critic, qa-verifier, reviewer, security-privacy, pragmatist) dispatched with `isolation: "worktree"` will not produce state files. The parent session must re-dispatch in-tree if governance evidence is needed.
+- **Detection**: `is_worktree()` in `_analytics-helper.sh` compares `git rev-parse --git-dir` vs `--git-common-dir`. Cached per-process.
+
 ---
 
 ## Constraint Severity Prefixes

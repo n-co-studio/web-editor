@@ -605,6 +605,20 @@ run_cleanup() {
   count=$(_compact_closed_branches)
   [ "$count" -gt 0 ] && echo "cleanup: compacted $count stale closed-branch entries" >&2
 
+  # Orphaned defer-count files (entry no longer in approved/ or running/)
+  local _defer_cleaned=0
+  local _qdir
+  _qdir=$(_queue_dir)
+  for _dcf in "$_qdir"/.defer-count-*; do
+    [ -f "$_dcf" ] || continue
+    local _dc_id="${_dcf##*/.defer-count-}"
+    if [ ! -f "$_qdir/approved/${_dc_id}.yaml" ] && [ ! -f "$_qdir/running/${_dc_id}.yaml" ]; then
+      rm -f "$_dcf"
+      _defer_cleaned=$((_defer_cleaned + 1))
+    fi
+  done
+  [ "$_defer_cleaned" -gt 0 ] && echo "cleanup: removed $_defer_cleaned orphaned defer-count files" >&2
+
   # Rebuild queue index if any queue entries were deleted
   if [ "$total_deleted" -gt 0 ]; then
     _rebuild_queue_index

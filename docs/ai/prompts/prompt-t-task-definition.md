@@ -271,4 +271,5 @@ If the operator accepts:
 - REQUIRE: **always dispatch the 4 core specialists in Brief mode** (Architect, Exploration, Critic, Pragmatist). Additionally dispatch PM Advisory when a compiled spec (`manifest.json` `active` ≠ null) or `mvp-scope.yaml` exists. No tier selection — the core team is fixed, PM is conditional.
 - REQUIRE: **never finalize a brief without operator approval.** Always present the draft for review first.
 - REQUIRE: **if specs don't exist, say so.** Note in the brief's Spec References section that specs were unavailable and the brief was grounded in codebase analysis alone.
+- REQUIRE: **never use the Agent tool with write-capable subagent types** (builder, qa-verifier, security-privacy, general-purpose, reviewer) or request worktree isolation. Only read-only advisory agents are permitted.
 - GUIDE: **if the task is too large for a single brief**, proactively suggest splitting. A brief that maps to more than one Prompt B session should be broken into sequential briefs.

@@ -24,6 +24,7 @@ Toggle the automation daemon runner on or off. Running this prompt flips the cur
 
 ## Rules
 
+- REQUIRE: **never use the Agent tool with write-capable subagent types** (builder, qa-verifier, security-privacy, general-purpose, reviewer) or request worktree isolation. Only read-only advisory agents are permitted.
 - REQUIRE: this is an ephemeral session. No branch, no session log, no commit.
 - REQUIRE: only modify `config.yaml` and the `HALT` file. Do not touch any other files.
 - REQUIRE: do not start or stop launchd/systemd services. The operator manages service lifecycle separately.

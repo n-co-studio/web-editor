@@ -144,11 +144,13 @@ _capture_analytics_events() {
 #   $2 — repo_root
 #   $3 — entry_id (queue entry that failed; empty for single-shot)
 #   $4 — stderr_file (path to captured stderr; empty if not captured)
+#   $5 — last_prompt (last assembled prompt text; optional — truncated to 500 chars)
 write_blocker_report() {
   local exit_code="$1"
   local repo_root="$2"
   local entry_id="${3:-}"
   local stderr_file="${4:-}"
+  local last_prompt="${5:-}"
 
   local reports_dir="$repo_root/.claude/.automation/reports"
   mkdir -p "$reports_dir" 2>/dev/null || true
@@ -225,10 +227,19 @@ write_blocker_report() {
     printf '  stderr_tail: "%s"\n' "$stderr_tail"
     printf '  git_status: "%s"\n' "$git_status_output"
     printf '  analytics_events: %s\n' "$analytics_events"
+    # Truncated prompt context for diagnostic review (first 500 chars)
+    local prompt_context=""
+    if [ -n "$last_prompt" ]; then
+      prompt_context="${last_prompt:0:500}"
+      prompt_context="${prompt_context//\"/\\\"}"
+      prompt_context="${prompt_context//$'\n'/\\n}"
+    fi
+    printf '  prompt_context: "%s"\n' "$prompt_context"
     printf '  resolution:\n'
     printf '    status: "unresolved"\n'
     printf '    notes: ""\n'
     printf '    resolved_at: ""\n'
+    printf '  playbook: ".claude/.automation/docs/blocker-playbook.md"\n'
   } > "$tmp_file"
   mv "$tmp_file" "$report_file"
 

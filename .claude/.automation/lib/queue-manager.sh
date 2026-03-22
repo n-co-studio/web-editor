@@ -33,7 +33,7 @@ _ensure_queue_dirs() {
 
 # --- Module variables (mirrors queue-entry.yaml fields) ---
 _QE_ID="" _QE_STATUS="" _QE_SESSION_TYPE="" _QE_BRANCH="" _QE_BRIEF_PATH=""
-_QE_PROMPT="" _QE_AUTO_MODE="" _QE_SOLO_MODE="" _QE_PUSH_ON_COMPLETE="" _QE_RETRY_COUNT=""
+_QE_PROMPT="" _QE_LAST_PROMPT="" _QE_AUTO_MODE="" _QE_SOLO_MODE="" _QE_PUSH_ON_COMPLETE="" _QE_RETRY_COUNT=""
 _QE_MAX_RETRIES="" _QE_ERROR_LOG="" _QE_WORK_ORDER_ID="" _QE_CREATED_AT=""
 _QE_UPDATED_AT="" _QE_COMPLETED_AT=""
 
@@ -54,7 +54,7 @@ _strip_quotes() {
 _load_queue_entry() {
   local entry_file="$1"
   _QE_ID="" _QE_STATUS="" _QE_SESSION_TYPE="" _QE_BRANCH="" _QE_BRIEF_PATH=""
-  _QE_PROMPT="" _QE_AUTO_MODE="" _QE_SOLO_MODE="" _QE_PUSH_ON_COMPLETE="" _QE_RETRY_COUNT=""
+  _QE_PROMPT="" _QE_LAST_PROMPT="" _QE_AUTO_MODE="" _QE_SOLO_MODE="" _QE_PUSH_ON_COMPLETE="" _QE_RETRY_COUNT=""
   _QE_MAX_RETRIES="" _QE_ERROR_LOG="" _QE_WORK_ORDER_ID="" _QE_CREATED_AT=""
   _QE_UPDATED_AT="" _QE_COMPLETED_AT=""
   [ -f "$entry_file" ] || return 1
@@ -88,6 +88,7 @@ ${_line#    }"
       "  brief_path: "*)   _QE_BRIEF_PATH="${_line#  brief_path: }" ;;
       "  prompt: |")       _in_prompt=true ;;
       "  prompt: "*)       _QE_PROMPT="${_line#  prompt: }" ;;
+      "  last_prompt: "*)  _QE_LAST_PROMPT="${_line#  last_prompt: }" ;;
       "  auto_mode: "*)    _QE_AUTO_MODE="${_line#  auto_mode: }" ;;
       "  solo_mode: "*)    _QE_SOLO_MODE="${_line#  solo_mode: }" ;;
       "  push_on_complete: "*) _QE_PUSH_ON_COMPLETE="${_line#  push_on_complete: }" ;;
@@ -109,6 +110,7 @@ ${_line#    }"
   case "$_QE_BRANCH"           in \"*\") _QE_BRANCH="${_QE_BRANCH#\"}"; _QE_BRANCH="${_QE_BRANCH%\"}" ;; esac
   case "$_QE_BRIEF_PATH"       in \"*\") _QE_BRIEF_PATH="${_QE_BRIEF_PATH#\"}"; _QE_BRIEF_PATH="${_QE_BRIEF_PATH%\"}" ;; esac
   case "$_QE_PROMPT"           in \"*\") _QE_PROMPT="${_QE_PROMPT#\"}"; _QE_PROMPT="${_QE_PROMPT%\"}" ;; esac
+  case "$_QE_LAST_PROMPT"      in \"*\") _QE_LAST_PROMPT="${_QE_LAST_PROMPT#\"}"; _QE_LAST_PROMPT="${_QE_LAST_PROMPT%\"}" ;; esac
   case "$_QE_AUTO_MODE"        in \"*\") _QE_AUTO_MODE="${_QE_AUTO_MODE#\"}"; _QE_AUTO_MODE="${_QE_AUTO_MODE%\"}" ;; esac
   case "$_QE_SOLO_MODE"        in \"*\") _QE_SOLO_MODE="${_QE_SOLO_MODE#\"}"; _QE_SOLO_MODE="${_QE_SOLO_MODE%\"}" ;; esac
   case "$_QE_PUSH_ON_COMPLETE" in \"*\") _QE_PUSH_ON_COMPLETE="${_QE_PUSH_ON_COMPLETE#\"}"; _QE_PUSH_ON_COMPLETE="${_QE_PUSH_ON_COMPLETE%\"}" ;; esac
@@ -149,6 +151,7 @@ _write_queue_entry() {
     else
       printf '  prompt: "%s"\n' "$_QE_PROMPT"
     fi
+    printf '  last_prompt: "%s"\n' "$_QE_LAST_PROMPT"
     printf '  auto_mode: "%s"\n' "$_QE_AUTO_MODE"
     printf '  solo_mode: "%s"\n' "$_QE_SOLO_MODE"
     printf '  push_on_complete: "%s"\n' "$_QE_PUSH_ON_COMPLETE"
@@ -462,6 +465,7 @@ queue_enqueue() {
   _QE_BRANCH="$branch"
   _QE_BRIEF_PATH="$brief_path"
   _QE_PROMPT=""
+  _QE_LAST_PROMPT=""
   _QE_AUTO_MODE="$auto_mode"
   _QE_SOLO_MODE="$solo_mode"
   _QE_PUSH_ON_COMPLETE="$push_on_complete"
@@ -635,10 +639,18 @@ queue_fail() {
     # Retries exhausted — move to failed
     _QE_STATUS="failed"
     _QE_COMPLETED_AT="$_QE_UPDATED_AT"
+    # Preserve last prompt for diagnostic review
+    if [ -n "$_QE_PROMPT" ]; then
+      _QE_LAST_PROMPT="$_QE_PROMPT"
+    fi
     _write_queue_entry "$qdir/failed/${entry_id}.yaml"
   else
     # Retry — move back to approved
     _QE_STATUS="approved"
+    # Preserve last prompt for diagnostic review before clearing active prompt
+    if [ -n "$_QE_PROMPT" ]; then
+      _QE_LAST_PROMPT="$_QE_PROMPT"
+    fi
     _QE_PROMPT=""
     _write_queue_entry "$qdir/approved/${entry_id}.yaml"
   fi
@@ -714,9 +726,11 @@ queue_block() {
 # Moves from running back to approved/ WITHOUT incrementing retry_count.
 # Used when a sibling entry in the same work order is in review/failed/blocked.
 # The entry resumes automatically when the work order is reopened.
+# Writes/increments a file-based defer count that survives daemon restarts.
 # Arguments:
 #   $1 — entry_id
 #   $2 — reason (optional, stored in error_log field)
+# Output: new defer count on stdout
 queue_defer() {
   local entry_id="$1"
   local reason="${2:-}"
@@ -728,6 +742,7 @@ queue_defer() {
     # Idempotency guard: if already in approved/, treat as success
     if [ -f "$qdir/approved/${entry_id}.yaml" ]; then
       echo "WARNING: Entry $entry_id already in approved/ — idempotent no-op" >&2
+      printf '0'
       return 0
     fi
     echo "ERROR: Entry $entry_id not found in running/" >&2
@@ -747,6 +762,20 @@ queue_defer() {
   _write_queue_entry "$qdir/approved/${entry_id}.yaml"
   rm -f "$src_file"
   _rebuild_queue_index
+
+  # Increment file-based defer count (survives daemon restarts)
+  local defer_count_file="$qdir/.defer-count-${entry_id}"
+  local current_count=0
+  if [ -f "$defer_count_file" ]; then
+    current_count=$(cat "$defer_count_file" 2>/dev/null || echo "0")
+    # Sanitize: ensure numeric
+    case "$current_count" in
+      *[!0-9]*) current_count=0 ;;
+    esac
+  fi
+  current_count=$((current_count + 1))
+  printf '%s' "$current_count" > "$defer_count_file"
+  printf '%s' "$current_count"
 }
 
 # --- Edit a queue entry field ---

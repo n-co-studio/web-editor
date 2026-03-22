@@ -68,22 +68,46 @@ assemble_prompt() {
 
   # --- Path traversal guard (audit 6.3) ---
   # Reject brief_path containing .. or absolute paths outside REPO_ROOT.
+  # Writes an escalation on rejection for diagnostic visibility (previously silent).
   if [ -n "$brief_path" ]; then
+    local _path_rejected=false _path_reject_reason=""
     case "$brief_path" in
       *..*)
-        echo "ERROR: brief_path contains '..' — path traversal rejected: $brief_path" >&2
-        brief_path=""
+        _path_rejected=true
+        _path_reject_reason="brief_path contains '..' — path traversal rejected: $brief_path"
         ;;
       /*)
         case "$brief_path" in
           "$REPO_ROOT"/*) ;; # absolute but within repo — OK
           *)
-            echo "ERROR: brief_path is absolute but outside REPO_ROOT — rejected: $brief_path" >&2
-            brief_path=""
+            _path_rejected=true
+            _path_reject_reason="brief_path is absolute but outside REPO_ROOT — rejected: $brief_path"
             ;;
         esac
         ;;
     esac
+    if [ "$_path_rejected" = true ]; then
+      echo "ERROR: $_path_reject_reason" >&2
+      # Write escalation for operator visibility
+      local _esc_dir="$REPO_ROOT/.claude/.automation/escalations"
+      mkdir -p "$_esc_dir" 2>/dev/null || true
+      local _esc_id="esc-path-$(date +%Y%m%d-%H%M%S)"
+      {
+        printf 'escalation:\n'
+        printf '  id: "%s"\n' "$_esc_id"
+        printf '  queue_entry_id: "%s"\n' "$_QE_ID"
+        printf '  type: "gate-failure"\n'
+        printf '  severity: "blocking"\n'
+        printf '  phase_at_exit: "init"\n'
+        printf '  tag_at_exit: "runner"\n'
+        printf '  message: "%s"\n' "$_path_reject_reason"
+        printf '  context: "brief_path: %s, entry_id: %s"\n' "$brief_path" "$_QE_ID"
+        printf '  created_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        printf '  resolved: false\n'
+        printf '  resolution: ""\n'
+      } > "$_esc_dir/${_esc_id}.yaml" 2>/dev/null || true
+      brief_path=""
+    fi
   fi
 
   # --- Read brief content ---

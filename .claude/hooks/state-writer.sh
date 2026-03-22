@@ -30,6 +30,14 @@ source "$SCRIPT_DIR/_analytics-helper.sh"
 source "$SCRIPT_DIR/_phase-helper.sh"
 START_MS=$(now_ms)
 
+# --- Worktree isolation guard (Decision 0028) ---
+# Worktree-isolated subagents must not write governance state files.
+# Their verdicts would reflect worktree content, not the main working tree.
+if is_worktree; then
+  log_hook_event "state-writer" "SubagentStop" "$AGENT_TYPE" "skip" "$START_MS" "worktree_blocked"
+  exit 0
+fi
+
 # --- Map agent type to state file (Bash 3 compatible) ---
 STATE_FILE=""
 case "$AGENT_TYPE" in

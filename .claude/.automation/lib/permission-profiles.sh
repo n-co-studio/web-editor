@@ -26,7 +26,7 @@ get_disallowed_tools() {
       echo "Bash(git push:*),Bash(git reset --hard:*),Bash(git push --force:*),Bash(curl:*),Bash(wget:*),Bash(nc:*),Bash(ncat:*),Bash(netcat:*),AskUserQuestion"
       ;;
     audit)
-      echo "Edit,Write,Bash(git commit:*),Bash(git push:*),WebSearch,WebFetch,AskUserQuestion"
+      echo "Edit,Write,Bash(git commit:*),Bash(git push:*),Bash(curl:*),Bash(wget:*),WebSearch,WebFetch,AskUserQuestion"
       ;;
     strict)
       # Maximum lockdown — blocks all outbound network, package installs, web tools.

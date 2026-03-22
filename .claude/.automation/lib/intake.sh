@@ -184,6 +184,16 @@ if [ -z "$ENTRY_ID" ]; then
   exit 1
 fi
 
+# Validate entry against schema (Fix 1: wire validator at intake)
+_INTAKE_ENTRY_FILE="$AUTOMATION_DIR/queue/pending-review/${ENTRY_ID}.yaml"
+if ! validate_queue_entry "$_INTAKE_ENTRY_FILE"; then
+  # Validation failed — remove the entry and abort
+  rm -f "$_INTAKE_ENTRY_FILE" 2>/dev/null || true
+  release_queue_lock
+  echo "ERROR: Queue entry validation failed — entry removed" >&2
+  exit 1
+fi
+
 # Auto-approve if requested
 if [ "$AUTO_APPROVE" = true ]; then
   queue_approve "$ENTRY_ID"
