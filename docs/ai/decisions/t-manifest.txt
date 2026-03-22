@@ -36,3 +36,4 @@ t-0025-pragmatist-agent.md
 t-0026-session-type-validation.md
 t-0027-agent-tool-governance-gate.md
 t-0028-worktree-state-isolation.md
+t-0029-operator-ack-enforcement.md

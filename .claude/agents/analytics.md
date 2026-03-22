@@ -69,7 +69,7 @@ When analyzing multiple repos, compare hook fire rates and patterns across repos
 Operator invokes directly. Never auto-triggered by other agents. Examples:
 - "Run analytics on the last 7 days of hook data"
 - "Which hooks fire most often across my repos?"
-- "Show me the causation breakdown for branch-guard"
+- "Show me the causation breakdown for bash-guard"
 - "Compare hook overhead between project-alpha and project-beta"
 
 ---

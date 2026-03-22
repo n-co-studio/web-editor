@@ -35,7 +35,7 @@ Runners must handle post-session tasks externally.
 |---|---------------|-----------|--------|-------|
 | 18 | Zero-change fast exit | Exits before library sourcing when no uncommitted/staged/recent changes and no pending state files | N/A — runner always runs full cleanup after `claude -p` | Performance optimization for interactive mode |
 | 19 | No-init fast exit | If `phase-state` absent, exits after honoring merge signals and sealing branch | N/A — runner always calls `state_manager_setup()` which ensures state exists | Safety net for interactive sessions that exit before init |
-| 20 | Ephemeral session exemption | Types `taskdef-query`, `taskdef-brief`, `audit`, `ephemeral` skip all blocking close checks | Runner runs same `runner_external_cleanup()` for all types | Ephemeral sessions uncommon in automation |
+| 20 | Ephemeral session exemption | Types `taskdef-query`, `taskdef-brief`, `audit`, `ephemeral`, `queue-triage` skip all blocking close checks | Runner runs same `runner_external_cleanup()` for all types | Ephemeral sessions uncommon in automation |
 | 21 | Spec/prototype session log exemption | Types `spec-fresh`, `spec-update`, `prototype-*` set `SESSION_LOG_EXEMPT=true` | N/A — runner does not enforce session log check (item 1) | Added in hardening |
 | 22 | KPI summary emission | `_emit_kpi_summary` with stop attempt count and session type | N/A — runner logs outcome to stderr but no KPI summary | Telemetry for interactive observability |
 | 23 | `register_repo()` call | Calls `register_repo "$REPO_ROOT"` for global analytics registry | N/A — runner does not call `register_repo()` | Runner sessions not in global analytics registry |

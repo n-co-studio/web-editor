@@ -24,6 +24,11 @@ _MAX_BRIEF_SIZE=50000
 # --- Validate HMAC-SHA256 signature (opt-in) ---
 # If runner-config has hmac_secret configured, verifies the entry
 # signature. Skips silently if hmac_secret is not set.
+#
+# SECURITY: hmac_secret MUST only be configured in config.local.yaml
+# (gitignored), never in config.yaml (tracked). Committing secrets to
+# config.yaml exposes them in git history.
+#
 # Arguments:
 #   $1 — entry_file path
 #   $2 — signature (from entry metadata or external header)
@@ -115,6 +120,9 @@ validate_queue_entry() {
   brief_path=$(printf '%s' "$brief_path" | tr -d '"'"'")
   brief_path="${brief_path#"${brief_path%%[![:space:]]*}"}"
   brief_path="${brief_path%"${brief_path##*[![:space:]]}"}"
+  if [ -n "$brief_path" ] && [[ "$brief_path" == *'..'* ]]; then
+    errors="${errors}Brief path contains traversal sequence: $brief_path\n"
+  fi
   if [ -n "$brief_path" ]; then
     local resolved_path=""
     if [ -f "$REPO_ROOT/$brief_path" ]; then

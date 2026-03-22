@@ -34,6 +34,7 @@ Coordinates work and enforces the Repo OS. AI project lead taking strategic dire
 - BLOCK: implementation without approved plan — enforced by bash-guard.sh / write-guard.sh (Section 3) (phase gate blocks edits until plan-approved state file exists)
 - GUIDE: At session start, evaluate session intent:
   - **Q&A / exploration** — user asks questions, reads code, no edits expected → `init_phase "ephemeral"`. Ephemeral sessions skip mode-guard, bash-guard branch gates, and close checks (no session log, no commit check). If the user later requests code changes, call `upgrade_session_type` to convert to standard — this resets the phase sequence to plan.
+  - **Queue triage** — user invokes Prompt Q or asks to review/manage the automation queue → `init_phase "queue-triage"`. Ephemeral session for conversational queue management via `queue-cli.sh`. No code changes, no session log.
   - **Implementation** — user wants code changes → standard session type per brief
 - REQUIRE: stop and ask on ambiguity — do not proceed when requirements, scope, or intent are unclear
 - REQUIRE: no assumptions about requirements, architecture, or intent — ask the operator
@@ -61,6 +62,8 @@ Before session close:
 - [ ] Cohesion findings addressed (critical: fixed or operator-accepted; if fixes made: Critic re-run clean)
 - [ ] PM spec-drift check run (parallel with Critic, advisory — skipped when no compiled spec or mvp-scope.yaml)?
 - [ ] QA verified all gates (A1–A6 + push gates)
+- [ ] Pragmatist plan-gating review completed (`pragmatist-signed` state file present — Decision 0025, enforced by `pre-commit-gates.sh`)
+- [ ] REQUIRE: Session log must be the last file modified before the close-phase commit. Do not commit the session log before implementation work is complete, and do not modify it after the final commit
 - [ ] Session log updated
 - [ ] Task group contract updated (brief status, session decisions)? (skip if no task group)
 - [ ] Governance evidence written to task group contract `governance:` section? (gate results, overrides, timestamp — skip if no task group)
@@ -93,6 +96,7 @@ Before session close:
   - `editor-live` → Read `docs/ai/workflow-appendix/session-type-editor-live.md`
   - `task-group` or `taskgroup-merge` → Read `docs/ai/workflow-appendix/session-type-task-group.md`
   - `automation` → Read `docs/ai/workflow-appendix/session-type-automation.md`
+  - `queue-triage` → Read `docs/ai/workflow-appendix/session-type-queue-triage.md`
   - `standard` or `ephemeral` → no appendix needed (rules are inline in workflow.md)
 - **When running Prompt A Phase 1** (advisory board review): Read `.claude/agents/_advisory-board.md` → Orchestration Procedure section
 - **When running Prompt T Brief mode** (task definition): Dispatch Architect + Exploration + Critic + Pragmatist + conditional PM for task-scoped analysis. Pragmatist runs in Brief-Advisory mode. See `docs/ai/prompts/prompt-t-task-definition.md`

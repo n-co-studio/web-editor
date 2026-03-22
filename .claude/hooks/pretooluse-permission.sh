@@ -31,8 +31,12 @@ INPUT=$(cat)
 
 # --- jq presence guard ---
 if [ "$_REPO_OS_HAS_JQ" = false ]; then
-  # Without jq, pass through (fail-open for usability in interactive, fail-open
-  # is acceptable here because --disallowedTools is the primary headless gate)
+  if [ "${CLAUDE_HEADLESS:-0}" = "1" ]; then
+    # Headless: fail-closed — no dialog fallback, jq required for payload parsing
+    echo "GATE-FINAL: jq not found — required for PreToolUse permission parsing in headless mode." >&2
+    exit 2
+  fi
+  # Interactive: fail-open (dialog is a safe fallback)
   exit 0
 fi
 
@@ -83,7 +87,7 @@ if [ "$TOOL_NAME" = "Agent" ]; then
 
   # No-write session types: only read-only agents permitted
   case "$AGENT_SESSION_TYPE" in
-    taskdef-query|taskdef-brief|audit|ephemeral|advisory-init|advisory-reinit|spec-fresh|spec-update)
+    taskdef-query|taskdef-brief|audit|ephemeral|queue-triage|advisory-init|advisory-reinit|spec-fresh|spec-update)
       AGENT_SUBTYPE=$(echo "$INPUT" | jq -r '.tool_input.subagent_type // empty' 2>/dev/null || true)
       if [ -z "$AGENT_SUBTYPE" ]; then
         _ptl_block "GATE-FINAL: Agent tool blocked — no subagent_type specified in $AGENT_SESSION_TYPE session. Only named read-only agents are permitted. (override: REPO_OS_ALLOW_AGENT=1)"

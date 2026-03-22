@@ -6,7 +6,7 @@
 # Gates enforced:
 #   Phase — assert_phase commit (blocking, primary check when phase-state active)
 #   A4  Safety — secret scanning (always, blocking)
-#   State verification — plan-approved, cohesion-reviewed, qa-verified (always blocking)
+#   State verification — plan-approved, cohesion-reviewed, qa-verified, pragmatist-signed (always blocking)
 #   A2  Process — scope check >100 lines (blocking with large-scope override)
 #   A6  Task Group — contract staging (blocking)
 #   High-risk — pattern detection + sign-off enforcement (blocking)
@@ -203,7 +203,7 @@ _validate_state_session_id() {
 
 if [ "$SKIP_STATE" = false ]; then
   # plan-approved: required on all non-experiment branches
-  # Override: REPO_OS_SKIP_PLAN_GATE=1 (parity with branch-guard plan gate)
+  # Override: REPO_OS_SKIP_PLAN_GATE=1 (parity with bash-guard plan gate)
   # editor-live: skip (never has plan gate — no approval phase)
   if [ "$IS_EDITOR_LIVE_CLOSE" = true ]; then
     : # editor-live never has plan-approved — skip silently
@@ -244,11 +244,43 @@ if [ "$SKIP_STATE" = false ]; then
     block "state_qa_stale_session"
     log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_qa_stale_session"
   fi
+
+  # pragmatist-signed: required on session types with an approval phase (Decision 0025)
+  # Sentinel: .pragmatist-enforced — persistent marker (lives in .claude/local/, not
+  # .claude/.state/) indicating the gate has been deployed. Sessions started before
+  # this gate was deployed will not have a pragmatist-signed state file. The sentinel
+  # is written on first enforcement, preventing false positives on legacy sessions.
+  # Lifecycle: persistent across sessions (not cleaned by session cleanup).
+  # editor-live: skip (no approval phase)
+  PRAGMATIST_SENTINEL="$REPO_ROOT/.claude/local/.pragmatist-enforced"
+  if [ "$IS_EDITOR_LIVE_CLOSE" = true ]; then
+    : # editor-live never has pragmatist-signed — skip silently
+  elif [ "${REPO_OS_SKIP_PRAGMATIST_GATE:-0}" = "1" ]; then
+    log_override "pre-commit-gates" "REPO_OS_SKIP_PRAGMATIST_GATE"
+  else
+    # Only enforce on session types that have an approval phase
+    _PCG_STYPE=$(get_session_type)
+    if has_plan_gate "$_PCG_STYPE"; then
+      if [ ! -f "$PRAGMATIST_SENTINEL" ]; then
+        # First enforcement: write sentinel and skip check (backward compat)
+        printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$PRAGMATIST_SENTINEL" 2>/dev/null || true
+        log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "pragmatist_sentinel_created"
+      elif [ ! -f "$STATE_DIR/pragmatist-signed" ]; then
+        echo "GATE-RECOVERABLE: pragmatist-signed state file missing. NEXT: Dispatch Pragmatist agent in plan-gating mode before presenting plan to operator (Decision 0025). (override: REPO_OS_SKIP_PRAGMATIST_GATE=1)" >&2
+        block "state_pragmatist_missing"
+        log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_pragmatist_missing"
+      elif ! _validate_state_session_id "$STATE_DIR/pragmatist-signed"; then
+        echo "GATE-RECOVERABLE: pragmatist-signed state file has stale session_id. NEXT: Re-dispatch Pragmatist in this session. (override: REPO_OS_SKIP_PRAGMATIST_GATE=1)" >&2
+        block "state_pragmatist_stale_session"
+        log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_pragmatist_stale_session"
+      fi
+    fi
+  fi
 fi
 
 # ============================================================
 # Gate 3: Inter-session governance (advisory, first-fire)
-# Moved from branch-guard Edit/Write to commit-time.
+# Moved from former branch-guard Edit/Write to commit-time.
 # Checks that Prompt 0 (spec-compiled) and Prompt A (advisory-reviewed)
 # governance files exist before committing Prompt B work.
 # Non-blocking: prints warnings, does not block commit.

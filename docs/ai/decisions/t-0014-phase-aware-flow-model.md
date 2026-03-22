@@ -15,7 +15,7 @@ Accepted
 Add a phase-aware flow management system that tracks session progress through an ordered sequence of phases. Replaces implicit phase detection with an explicit state machine:
 
 1. **Phase-state file**: `.claude/.state/phase-state` (session-scoped, key-value format). Fields:
-   - `session_type` — one of the 17 session type enum values
+   - `session_type` — one of the 18 session type enum values
    - `session_id` — bound to `.claude/.session-id` for staleness protection
    - `mode` — `auto` or `review` (default: `review`)
    - `current_phase` — the phase the session is currently in
@@ -25,12 +25,13 @@ Add a phase-aware flow management system that tracks session progress through an
    - `tag` — automation tag for the current phase (`agent`, `operator`, or `both`)
    - `timestamp` — ISO 8601 UTC timestamp of last phase transition
 
-2. **Session type enum** (17 types):
+2. **Session type enum** (18 types):
    - Prompt B: `standard`, `taskgroup`, `taskgroup-merge`, `hotfix`, `experiment`, `editor-live`
    - Prompt 0: `spec-fresh`, `spec-update`
    - Prompt 0.5: `prototype-napkin`, `prototype-spike`, `prototype-poc`
    - Prompt A: `advisory-init`, `advisory-reinit`
    - Prompt C: `audit`
+   - Prompt Q: `queue-triage`
    - Prompt T: `taskdef-query`, `taskdef-brief`
    - Ephemeral: `ephemeral`
 
@@ -90,11 +91,14 @@ Add a phase-aware flow management system that tracks session progress through an
    **Prompt C — Project Audit:**
    `init[agent] → scope[both] → dispatch[agent] → synthesize[agent] → op-review[operator] → close[agent]`
 
+   **Prompt Q — Queue Triage:**
+   `init[agent] → conversation[both] → close[agent]`
+
    **Prompt T — Task Definition (Query):**
    `init[agent] → conversation[both] → close[agent]`
 
    **Prompt T — Task Definition (Brief):**
-   `init[agent] → dispatch[agent] → synthesize[agent] → op-review[operator] → output[agent] → close[agent]`
+   `init[agent] → dispatch[agent] → synthesize[agent] → approval[operator] → output[agent] → close[agent]`
 
 4. **Phase-to-gate-profile mapping** — which gates apply varies by session type and is enforced at `verify`/`commit` phases:
    - `standard`, `taskgroup`, `taskgroup-merge`: Full gates (A1–A6, B1–B3). A6 applies only to taskgroup/taskgroup-merge
@@ -104,7 +108,9 @@ Add a phase-aware flow management system that tracks session progress through an
    - `spec-fresh`, `spec-update`: Advisory only (governance evidence at close)
    - `advisory-init`, `advisory-reinit`: Advisory only (governance evidence at close)
    - `audit`: Read-only (no gates unless deferrals create file changes)
-   - `taskdef-query`, `taskdef-brief`: No gates (fully ephemeral)
+   - `queue-triage`: No gates (fully ephemeral)
+   - `taskdef-query`: No gates (fully ephemeral)
+   - `taskdef-brief`: Plan-approved gate only (Decision 0029 — `approval` phase requires `plan-approved` state file)
 
 5. **Session ID binding** — `init_phase` reads the session ID from `.claude/.session-id` (guaranteed to exist via `get_session_id()` in `_analytics-helper.sh`). Every `assert_phase`, `get_phase`, and `advance_phase` call validates that the `session_id` in phase-state matches the current `.session-id`. Mismatch means the phase-state is stale (leftover from a crashed or prior session) and is treated as absent.
 

@@ -81,6 +81,18 @@ The `PermissionRequest` hook (`permission-request.sh`) auto-approves curated too
 
 **Headless mode:** PermissionRequest hooks do not fire in `claude -p` mode. Headless sessions use `--disallowedTools` profiles instead.
 
+## Decision Cache
+
+The automation layer includes a two-level decision cache system that prepends frequently referenced decisions to assembled prompts:
+
+1. **Project-level cache** (`.claude/.automation/decision-cache.yaml`, tracked): Shared across all automation sessions. Contains entries with `number`, `summary`, and `enforcement` (BLOCK/REQUIRE/GUIDE) fields. Ships with empty `entries: []` — operators populate per-repo.
+
+2. **Local-level cache** (`.claude/.automation/local-decision-cache.yaml`, tracked): Per-repo overrides. Can extend the project cache with new entries or narrow enforcement (e.g., REQUIRE→BLOCK). **Never-elevate rule**: local entries cannot lower enforcement severity (e.g., REQUIRE→GUIDE is rejected; the project-level enforcement is preserved).
+
+3. **Cache builder** (`.claude/.automation/lib/cache-builder.sh`, sourced by runner): `build_decision_cache()` merges both levels at prompt assembly time. Merge algorithm: start with all project entries, then apply local overrides (replace matching decision numbers, append new entries). Output: max 10 entries formatted as `Decision NNNN: summary (MECHANISM)`, prepended to the assembled prompt.
+
+The never-elevate rule ensures that team-level governance floors cannot be weakened by local configuration. The 10-entry cap prevents prompt bloat.
+
 ## Consequences
 - `.claude/.automation/schemas/` added with four schema files (tracked in git)
 - `.claude/.automation/config.yaml` added with `enabled: false` default (tracked in git)

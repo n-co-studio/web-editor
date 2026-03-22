@@ -27,9 +27,10 @@ _fixtures_self_test
 # Shorthand for sandbox paths
 SB="$(get_sandbox)"
 STATE_DIR="$SB/.claude/.state"
+TEST_SID="$(get_test_session_id)"
 
 # ============================================================
-# L3.1 — write-guard.sh Section 3 (PreToolUse Edit/Write branch-guard gates)
+# L3.1 — write-guard.sh Section 3 (PreToolUse Edit/Write bash-guard gates)
 # ============================================================
 tap_section "L3.1: write-guard.sh Section 3 — phase gate and branch protection"
 
@@ -137,43 +138,43 @@ assert_ok "$_LAST_RC" "write-guard allows edit on closed branch with REPO_OS_SKI
 rm -f "$SB/.claude/local/closed-branches"
 
 # ============================================================
-# L3.2 — branch-guard.sh (PreToolUse Bash)
+# L3.2 — bash-guard.sh (PreToolUse Bash)
 # ============================================================
-tap_section "L3.2: branch-guard.sh — bash write-target gate"
+tap_section "L3.2: bash-guard.sh — bash write-target gate"
 
 # --- Fast-exit for non-write Bash commands ---
 reset_phase "standard"
 # No redirect/tee, no file_path → fast-exit allow
-run_hook_rc "branch-guard.sh" "$(fixture_pretooluse_bash "git status")"
-assert_ok "$_LAST_RC" "branch-guard allows bash without write target (git status)"
+run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "git status")"
+assert_ok "$_LAST_RC" "bash-guard allows bash without write target (git status)"
 
-run_hook_rc "branch-guard.sh" "$(fixture_pretooluse_bash "npm test")"
-assert_ok "$_LAST_RC" "branch-guard allows bash without write target (npm test)"
+run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "npm test")"
+assert_ok "$_LAST_RC" "bash-guard allows bash without write target (npm test)"
 
 # --- Gate 2: Bash with in-repo write target in init phase → blocks ---
 reset_phase "standard"
-run_hook_rc "branch-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
-assert_fail "$_LAST_RC" "branch-guard blocks bash redirect in init phase"
+run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
+assert_fail "$_LAST_RC" "bash-guard blocks bash redirect in init phase"
 
 # --- Gate 2: Bash with write target in build phase → allows ---
 reset_phase "standard"
 advance_phase "plan" 2>/dev/null
 advance_phase "approval" 2>/dev/null
 advance_phase "build" 2>/dev/null
-run_hook_rc "branch-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
-assert_ok "$_LAST_RC" "branch-guard allows bash redirect in build phase"
+run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
+assert_ok "$_LAST_RC" "bash-guard allows bash redirect in build phase"
 
 # --- experiment/* branch exemption ---
 reset_phase "standard"
 switch_sandbox_branch "experiment/test"
-run_hook_rc "branch-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
-assert_ok "$_LAST_RC" "branch-guard allows bash redirect on experiment/* branch"
+run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
+assert_ok "$_LAST_RC" "bash-guard allows bash redirect on experiment/* branch"
 switch_sandbox_branch "feature/test"
 
 # --- Session type without plan gate → allows ---
 reset_phase "advisory-init"
-run_hook_rc "branch-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
-assert_ok "$_LAST_RC" "branch-guard allows bash redirect for advisory-init (no plan gate)"
+run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
+assert_ok "$_LAST_RC" "bash-guard allows bash redirect for advisory-init (no plan gate)"
 
 # --- Gate 1: Main branch protection ---
 reset_phase "standard"
@@ -181,24 +182,24 @@ advance_phase "plan" 2>/dev/null
 advance_phase "approval" 2>/dev/null
 advance_phase "build" 2>/dev/null
 switch_sandbox_branch "main"
-run_hook_rc "branch-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
-assert_fail "$_LAST_RC" "branch-guard blocks bash redirect on main branch"
+run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
+assert_fail "$_LAST_RC" "bash-guard blocks bash redirect on main branch"
 switch_sandbox_branch "feature/test"
 
 # --- REPO_OS_SKIP_PLAN_GATE=1 override ---
 reset_phase "standard"
-REPO_OS_SKIP_PLAN_GATE=1 run_hook_rc "branch-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
-assert_ok "$_LAST_RC" "branch-guard allows bash redirect with REPO_OS_SKIP_PLAN_GATE=1"
+REPO_OS_SKIP_PLAN_GATE=1 run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
+assert_ok "$_LAST_RC" "bash-guard allows bash redirect with REPO_OS_SKIP_PLAN_GATE=1"
 
 # --- REPO_OS_RECOVER=1 override ---
 reset_phase "standard"
-REPO_OS_RECOVER=1 run_hook_rc "branch-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
-assert_ok "$_LAST_RC" "branch-guard allows bash redirect with REPO_OS_RECOVER=1"
+REPO_OS_RECOVER=1 run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
+assert_ok "$_LAST_RC" "bash-guard allows bash redirect with REPO_OS_RECOVER=1"
 
 # --- Out-of-repo write target → allows ---
 reset_phase "standard"
-run_hook_rc "branch-guard.sh" "$(fixture_pretooluse_bash "echo test > /tmp/outside.txt")"
-assert_ok "$_LAST_RC" "branch-guard allows bash redirect to out-of-repo path"
+run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > /tmp/outside.txt")"
+assert_ok "$_LAST_RC" "bash-guard allows bash redirect to out-of-repo path"
 
 # ============================================================
 # L3.3 — plan-approval.sh (PostToolUse AskUserQuestion)
@@ -388,9 +389,9 @@ advance_phase "review" 2>/dev/null
 advance_phase "verify" 2>/dev/null
 advance_phase "commit" 2>/dev/null
 # Create all required state files
-echo "timestamp: test" > "$STATE_DIR/plan-approved"
-echo "timestamp: test" > "$STATE_DIR/cohesion-reviewed"
-echo "timestamp: test" > "$STATE_DIR/qa-verified"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/cohesion-reviewed"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/qa-verified"
 # Stage a clean file (no secrets)
 stage_sandbox_file "src/clean.ts" "export const x = 1;"
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
@@ -401,9 +402,9 @@ reset_phase "standard"
 advance_phase "plan" 2>/dev/null
 advance_phase "approval" 2>/dev/null
 advance_phase "build" 2>/dev/null
-echo "timestamp: test" > "$STATE_DIR/plan-approved"
-echo "timestamp: test" > "$STATE_DIR/cohesion-reviewed"
-echo "timestamp: test" > "$STATE_DIR/qa-verified"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/cohesion-reviewed"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/qa-verified"
 stage_sandbox_file "src/clean2.ts" "export const y = 2;"
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
 assert_fail "$_LAST_RC" "pre-commit-gates blocks commit when phase is build (not commit)"
@@ -425,9 +426,9 @@ assert_fail "$_LAST_RC" "pre-commit-gates blocks when no phase-state and state f
 
 # --- No phase-state + all state files → allows ---
 rm -f "$STATE_DIR/phase-state"
-echo "timestamp: test" > "$STATE_DIR/plan-approved"
-echo "timestamp: test" > "$STATE_DIR/cohesion-reviewed"
-echo "timestamp: test" > "$STATE_DIR/qa-verified"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/cohesion-reviewed"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/qa-verified"
 stage_sandbox_file "src/withstate.ts" "export const v = 5;"
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
 assert_ok "$_LAST_RC" "pre-commit-gates allows when no phase-state but all state files present"
@@ -440,9 +441,9 @@ advance_phase "build" 2>/dev/null
 advance_phase "verify" 2>/dev/null
 advance_phase "commit" 2>/dev/null
 switch_sandbox_branch "hotfix/test"
-echo "timestamp: test" > "$STATE_DIR/plan-approved"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
 rm -f "$STATE_DIR/cohesion-reviewed"
-echo "timestamp: test" > "$STATE_DIR/qa-verified"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/qa-verified"
 stage_sandbox_file "src/hotfix.ts" "export const h = 6;"
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "hotfix commit")"
 assert_ok "$_LAST_RC" "pre-commit-gates allows hotfix commit without cohesion-reviewed"
@@ -475,9 +476,9 @@ advance_phase "build" 2>/dev/null
 advance_phase "review" 2>/dev/null
 advance_phase "verify" 2>/dev/null
 advance_phase "commit" 2>/dev/null
-echo "timestamp: test" > "$STATE_DIR/plan-approved"
-echo "timestamp: test" > "$STATE_DIR/cohesion-reviewed"
-echo "timestamp: test" > "$STATE_DIR/qa-verified"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/cohesion-reviewed"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/qa-verified"
 stage_sandbox_file "src/secrets.ts" "const key = 'sk_live_abc123def456';"
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
 assert_fail "$_LAST_RC" "pre-commit-gates blocks commit with secret pattern in staged file"
@@ -723,8 +724,8 @@ advance_phase "close" 2>/dev/null
 # pre-commit-gates checks phases_completed for review
 # Provide cohesion-reviewed + qa-verified but NO plan-approved
 rm -f "$STATE_DIR/plan-approved"
-echo "timestamp: test" > "$STATE_DIR/cohesion-reviewed"
-echo "timestamp: test" > "$STATE_DIR/qa-verified"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/cohesion-reviewed"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/qa-verified"
 stage_sandbox_file "src/el-close.ts" "export const close = 1;"
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "editor-live close commit")"
 assert_ok "$_LAST_RC" "editor-live close commit allows without plan-approved (with cohesion + qa)"
@@ -738,7 +739,7 @@ advance_phase "verify" 2>/dev/null
 advance_phase "op-review" 2>/dev/null
 advance_phase "close" 2>/dev/null
 rm -f "$STATE_DIR/plan-approved" "$STATE_DIR/cohesion-reviewed"
-echo "timestamp: test" > "$STATE_DIR/qa-verified"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/qa-verified"
 stage_sandbox_file "src/el-close2.ts" "export const close2 = 2;"
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "editor-live close commit")"
 assert_fail "$_LAST_RC" "editor-live close commit blocks without cohesion-reviewed"
@@ -752,7 +753,7 @@ advance_phase "verify" 2>/dev/null
 advance_phase "op-review" 2>/dev/null
 advance_phase "close" 2>/dev/null
 rm -f "$STATE_DIR/plan-approved" "$STATE_DIR/qa-verified"
-echo "timestamp: test" > "$STATE_DIR/cohesion-reviewed"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/cohesion-reviewed"
 stage_sandbox_file "src/el-close3.ts" "export const close3 = 3;"
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "editor-live close commit")"
 assert_fail "$_LAST_RC" "editor-live close commit blocks without qa-verified"
@@ -769,8 +770,8 @@ advance_phase "verify" 2>/dev/null
 advance_phase "build" 2>/dev/null   # loop
 advance_phase "commit" 2>/dev/null  # now at commit with review in phases_completed
 rm -f "$STATE_DIR/plan-approved"
-echo "timestamp: test" > "$STATE_DIR/cohesion-reviewed"
-echo "timestamp: test" > "$STATE_DIR/qa-verified"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/cohesion-reviewed"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/qa-verified"
 stage_sandbox_file "src/el-close-realistic.ts" "export const closeR = 1;"
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "editor-live close commit at commit phase")"
 assert_ok "$_LAST_RC" "editor-live close commit at commit phase (after verify:build loop)"
@@ -808,9 +809,9 @@ set_test_session_id "different-session-id"
 REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
 assert_ok "$_LAST_RC" "write-guard fails open on session-ID mismatch"
 
-# Also test branch-guard
-run_hook_rc "branch-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
-assert_ok "$_LAST_RC" "branch-guard fails open on session-ID mismatch"
+# Also test bash-guard
+run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
+assert_ok "$_LAST_RC" "bash-guard fails open on session-ID mismatch"
 
 # Restore session ID
 set_test_session_id "test-session-$(date +%s)"
@@ -820,14 +821,14 @@ rm -f "$STATE_DIR/phase-state"
 REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
 assert_ok "$_LAST_RC" "write-guard fails open when phase-state missing"
 
-run_hook_rc "branch-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
-assert_ok "$_LAST_RC" "branch-guard fails open when phase-state missing"
+run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
+assert_ok "$_LAST_RC" "bash-guard fails open when phase-state missing"
 
 # Pre-commit-gates without phase-state falls back to state file checks
 rm -f "$STATE_DIR/phase-state"
-echo "timestamp: test" > "$STATE_DIR/plan-approved"
-echo "timestamp: test" > "$STATE_DIR/cohesion-reviewed"
-echo "timestamp: test" > "$STATE_DIR/qa-verified"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/cohesion-reviewed"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/qa-verified"
 stage_sandbox_file "src/nophase.ts" "export const np = 1;"
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
 assert_ok "$_LAST_RC" "pre-commit-gates falls back to state files when phase-state missing"
@@ -1285,7 +1286,7 @@ assert_ok "$_LAST_RC" "write-guard allows taskgroup-merge + taskgroup-merge over
 assert_contains "$(cat "$_L3_OUT")" "Advisory" "taskgroup-merge + taskgroup-merge overlap emits Advisory"
 rm -f "$SESSIONS_DIR/overlap-tgm2-l314.yaml"
 
-# --- L3.14.6 (was .4): branch-guard blocks on session overlap (bash redirect) ---
+# --- L3.14.6 (was .4): bash-guard blocks on session overlap (bash redirect) ---
 _reinit_close_sandbox
 rm -rf "$SESSIONS_DIR"
 _CACHED_BRANCH=""
@@ -1295,8 +1296,8 @@ advance_phase "approval" 2>/dev/null
 advance_phase "build" 2>/dev/null
 SID_L314="$(cat "$SB/.claude/.session-id")"
 create_fake_session "overlap-bg-l314" "standard" "feature/test" "$$"
-run_hook_rc "branch-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/foo.ts")" > "$_L3_OUT" 2>&1
-assert_fail "$_LAST_RC" "branch-guard blocks on session overlap (bash redirect)"
+run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/foo.ts")" > "$_L3_OUT" 2>&1
+assert_fail "$_LAST_RC" "bash-guard blocks on session overlap (bash redirect)"
 rm -f "$SESSIONS_DIR/overlap-bg-l314.yaml"
 
 # --- L3.14.7 (was .5): REPO_OS_SKIP_OVERLAP_CHECK=1 bypasses in write-guard ---
@@ -1358,7 +1359,7 @@ assert_ok "$_LAST_RC" "bash-guard allows bash without write target (git status)"
 run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "npm test")"
 assert_ok "$_LAST_RC" "bash-guard allows bash without write target (npm test)"
 
-# NOTE: REPO_OS_SKIP_MODE_GUARD=1 is used below to isolate branch-guard behavior
+# NOTE: REPO_OS_SKIP_MODE_GUARD=1 is used below to isolate bash-guard behavior
 # from mode-guard. Mode-guard tests are covered in L3.7 (write-guard.sh).
 
 # --- Gate 2: Bash with in-repo write target in init phase → blocks ---

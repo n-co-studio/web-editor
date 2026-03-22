@@ -14,7 +14,7 @@ Close the Agent tool governance bypass that allows write-capable subagents to be
 
 1. **PreToolUse hook gate on Agent tool**: `pretooluse-permission.sh` handles `Agent` tool calls via a new `Agent` matcher in `settings.json`. When `TOOL_NAME == "Agent"`:
    - If phase-state is missing or empty → GATE-FINAL block (fail-closed). Override: `REPO_OS_ALLOW_AGENT=1`.
-   - If session type is in the no-write list (`taskdef-query`, `taskdef-brief`, `audit`, `ephemeral`, `advisory-init`, `advisory-reinit`, `spec-fresh`, `spec-update`), extract `subagent_type` from `tool_input` and check against the read-only allowlist. Block if not in allowlist. Note: Prompt D (daemon-toggle) uses session type `ephemeral`, so it is covered by this list.
+   - If session type is in the no-write list (`taskdef-query`, `taskdef-brief`, `audit`, `ephemeral`, `queue-triage`, `advisory-init`, `advisory-reinit`, `spec-fresh`, `spec-update`), extract `subagent_type` from `tool_input` and check against the read-only allowlist. Block if not in allowlist. Note: Prompt D (daemon-toggle) uses session type `ephemeral`, so it is covered by this list. Prompt Q (queue-triage) has its own session type and is explicitly included.
    - If session type is a write-capable type (`standard`, `taskgroup`, etc.), allow all agent types.
 
 2. **Read-only agent allowlist**: Defined in `_permission-allowlist.sh` as `_PERMISSION_READONLY_AGENTS` array with `is_readonly_agent()` helper function. Contains: `architect`, `critic`, `exploration`, `pragmatist`, `pm-advisor`, `analytics`, `ux-strategist`, `accessibility`, `performance-engineer`, `data-strategist`, `security-analyst`, `user-review-tier-1/2/3`, `Explore`, `Plan`, `dev-orchestrator`, `auditor`, `claude-code-guide`, `security-hacker`.

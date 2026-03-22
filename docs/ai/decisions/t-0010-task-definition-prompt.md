@@ -19,7 +19,7 @@ Add Prompt T (Task Definition) as a lightweight exploration and task planning pr
 6. **Spec-aware but spec-optional**: Reads compiled specs when available for grounding. Works from codebase analysis alone when specs do not exist
 7. **Prompt B compatibility**: Task brief format is structured to map directly to Prompt B's plan-before-code workflow (goal, scope, files, approach, verification)
 8. **Significant feature path**: When the operator describes a feature requiring spec-level definition (new user-facing capability, new data model, new integration), Brief mode produces a two-brief task group: Brief 1 writes the feature spec (runs as Prompt B, writes to `compiled/{active}/features/brief-{name}.md`), Brief 2 builds the feature (standard Prompt B). Detection: operator describes something touching data contracts, integrations, or boundaries — or explicitly requests a feature spec. This absorbs Prompt 0 Feature mode, which is removed
-9. **Phase sequences** (Decision 0014): Query `init→conversation→close`, Brief `init→dispatch→synthesize→op-review→output→close`. Session types: `taskdef-query`, `taskdef-brief`
+9. **Phase sequences** (Decision 0014): Query `init→conversation→close`, Brief `init→dispatch→synthesize→approval→output→close` (Decision 0029 renamed `op-review` → `approval` for mechanical enforcement). Session types: `taskdef-query`, `taskdef-brief`
 10. **Task group auto-approval**: When producing a task group (Narrow path), Prompt T asks whether to pre-approve all briefs (auto mode) or review each individually. The contract carries this setting
 
 ## Consequences

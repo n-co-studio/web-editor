@@ -36,7 +36,9 @@
 | `experiment`, `prototype-*` | A4 safety only. |
 | `spec-fresh`, `spec-update`, `advisory-*` | Advisory only. |
 | `audit` | Read-only (no gates unless deferrals create file changes). |
-| `taskdef-query`, `taskdef-brief` | No gates (fully ephemeral). |
+| `queue-triage` | No gates (fully ephemeral). |
+| `taskdef-query` | No gates (fully ephemeral). |
+| `taskdef-brief` | Plan-approved gate only (Decision 0029). |
 
 ## State File Summary
 

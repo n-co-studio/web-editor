@@ -5,7 +5,7 @@
 # Never blocks (PostToolUse always exit 0).
 #
 # Discrimination logic:
-#   1. Question text contains "plan" (word boundary)
+#   1. Question text contains "plan", "brief", or "task" (word boundary)
 #   2. Question or option labels contain confirmation language
 #   3. Operator's answer is affirmative
 # All three must match for the state file to be written.
@@ -14,7 +14,7 @@
 #   - Non-plan AskUserQuestion calls (e.g., "Which library?") → no match, exit 0
 #   - Plan questions with negative answers (e.g., "No, revise") → no match, exit 0
 #   - Conversational plan approval (without AskUserQuestion) → hook never fires;
-#     branch-guard blocks Edit/Write until a proper AskUserQuestion approval occurs
+#     bash-guard/write-guard block Edit/Write until a proper AskUserQuestion approval occurs
 
 set -euo pipefail
 
@@ -42,8 +42,8 @@ QUESTIONS_TEXT=$(echo "$INPUT" | jq -r '[.tool_input.questions[]?.question // em
 QUESTION_PREVIEW=$(printf '%.64s' "$QUESTIONS_TEXT")
 log_hook_event "plan-approval" "PostToolUse" "AskUserQuestion" "allow" "$START_MS" "ask_user_question" "$QUESTION_PREVIEW"
 
-# Gate 1: Question must mention "plan" — non-plan questions exit after universal event
-if ! echo "$QUESTIONS_TEXT" | grep -iqE '\bplan\b'; then
+# Gate 1: Question must mention "plan", "brief", or "task" — non-approval questions exit after universal event
+if ! echo "$QUESTIONS_TEXT" | grep -iqE '\b(plan|brief|task)\b'; then
   exit 0
 fi
 
@@ -62,11 +62,20 @@ if [ "$IS_CONFIRMATION" = false ]; then
 fi
 
 # --- Check if answer is affirmative ---
-# PostToolUse provides answers in tool_response.answers (object: question->answer)
-# Fallback to tool_output for CLI compatibility
-TOOL_OUTPUT=$(echo "$INPUT" | jq -r '(.tool_response.answers // {}) | to_entries[].value' 2>/dev/null || true)
+# AskUserQuestion schema: answers are in tool_input.answers (object: question->answer),
+# populated by the permission component. Fallback chain for compatibility:
+#   1. tool_input.answers (primary — matches AskUserQuestion tool schema)
+#   2. tool_response.answers (legacy — kept for backward compatibility)
+#   3. tool_output (CLI fallback)
+TOOL_OUTPUT=$(echo "$INPUT" | jq -r '(.tool_input.answers // {}) | to_entries[].value' 2>/dev/null || true)
+if [ -z "$TOOL_OUTPUT" ]; then
+  TOOL_OUTPUT=$(echo "$INPUT" | jq -r '(.tool_response.answers // {}) | to_entries[].value' 2>/dev/null || true)
+fi
 if [ -z "$TOOL_OUTPUT" ]; then
   TOOL_OUTPUT=$(echo "$INPUT" | jq -r '.tool_output // empty' 2>/dev/null)
+fi
+if [ -z "$TOOL_OUTPUT" ]; then
+  echo "WARNING: plan-approval — could not extract answer from AskUserQuestion payload" >&2
 fi
 APPROVED=false
 
@@ -98,6 +107,7 @@ fi
 
 # --- Write plan-approved state file ---
 REPO_ROOT="$(get_repo_root)"
+SID=$(get_session_id "$REPO_ROOT")
 STATE_DIR="$REPO_ROOT/.claude/.state"
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 
@@ -109,6 +119,7 @@ QUESTION_HASH=$(printf '%s' "$QUESTIONS_TEXT" | portable_hash | cut -c1-12)
   printf 'question_hash: %s\n' "$QUESTION_HASH"
   printf 'large-scope: %s\n' "$LARGE_SCOPE"
   printf 'mode: %s\n' "$DETECTED_MODE"
+  printf 'session_id: %s\n' "$SID"
 } > "$STATE_DIR/plan-approved" 2>/dev/null || true
 
 # --- Phase: set mode and advance through approval → next phase ---
@@ -136,7 +147,7 @@ fi
 if [ "$DETECTED_MODE" = "auto" ] && [ "$SESSION_TYPE" = "taskgroup" ]; then
   if [ -f "$REPO_ROOT/.claude/.automation/config.yaml" ]; then
     (
-      source "$SCRIPT_DIR/_automation-bridge.sh" 2>/dev/null || exit 0
+      source "$SCRIPT_DIR/_automation-bridge.sh" 2>/dev/null || { echo "WARNING: _automation-bridge.sh failed to load — automation features disabled" >&2; exit 0; }
       automation_activate_taskgroup 2>/dev/null || true
     ) &
   fi

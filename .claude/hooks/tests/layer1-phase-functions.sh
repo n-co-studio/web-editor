@@ -90,7 +90,7 @@ assert_eq "$(get_phases_for_type taskdef-query)" \
   "taskdef-query phase sequence"
 
 assert_eq "$(get_phases_for_type taskdef-brief)" \
-  "init dispatch synthesize op-review output close" \
+  "init dispatch synthesize approval output close" \
   "taskdef-brief phase sequence"
 
 assert_eq "$(get_phases_for_type editor-live)" \
@@ -140,7 +140,7 @@ assert_eq "$(get_tag_for_phase taskgroup op-review)" "operator" "taskgroup op-re
 assert_eq "$(get_tag_for_phase hotfix approval)" "operator" "hotfix approval = operator"
 assert_eq "$(get_tag_for_phase advisory-init op-review)" "operator" "advisory-init op-review = operator"
 assert_eq "$(get_tag_for_phase audit op-review)" "operator" "audit op-review = operator"
-assert_eq "$(get_tag_for_phase taskdef-brief op-review)" "operator" "taskdef-brief op-review = operator"
+assert_eq "$(get_tag_for_phase taskdef-brief approval)" "operator" "taskdef-brief approval = operator"
 assert_eq "$(get_tag_for_phase taskgroup-merge op-review)" "operator" "taskgroup-merge op-review = operator"
 assert_eq "$(get_tag_for_phase taskgroup-merge cohesion)" "agent" "taskgroup-merge cohesion = agent"
 assert_eq "$(get_tag_for_phase editor-live op-review)" "operator" "editor-live op-review = operator"
@@ -163,14 +163,14 @@ assert_eq "$(get_tag_for_phase ephemeral conversation)" "both" "ephemeral conver
 tap_section "L1.5: has_plan_gate — correct boolean per type"
 
 # Types WITH plan gate (have approval phase)
-for stype in standard taskgroup hotfix spec-fresh spec-update; do
+for stype in standard taskgroup hotfix spec-fresh spec-update taskdef-brief; do
   has_plan_gate "$stype"
   rc=$?
   assert_ok "$rc" "has_plan_gate '$stype' = true (has approval)"
 done
 
 # Types WITHOUT plan gate (no approval phase)
-for stype in taskgroup-merge experiment editor-live prototype-napkin prototype-spike prototype-poc advisory-init advisory-reinit audit taskdef-query taskdef-brief ephemeral; do
+for stype in taskgroup-merge experiment editor-live prototype-napkin prototype-spike prototype-poc advisory-init advisory-reinit audit taskdef-query ephemeral; do
   has_plan_gate "$stype" && rc=0 || rc=$?
   assert_fail "$rc" "has_plan_gate '$stype' = false (no approval)"
 done
@@ -185,9 +185,10 @@ assert_eq "$(get_post_approval_phase taskgroup)" "build" "taskgroup post-approva
 assert_eq "$(get_post_approval_phase hotfix)" "build" "hotfix post-approval = build"
 assert_eq "$(get_post_approval_phase spec-fresh)" "governance" "spec-fresh post-approval = governance"
 assert_eq "$(get_post_approval_phase spec-update)" "governance" "spec-update post-approval = governance"
+assert_eq "$(get_post_approval_phase taskdef-brief)" "output" "taskdef-brief post-approval = output"
 
 # Types without approval return empty
-for stype in taskgroup-merge experiment editor-live prototype-napkin prototype-spike prototype-poc advisory-init advisory-reinit audit taskdef-query taskdef-brief ephemeral; do
+for stype in taskgroup-merge experiment editor-live prototype-napkin prototype-spike prototype-poc advisory-init advisory-reinit audit taskdef-query ephemeral; do
   result=$(get_post_approval_phase "$stype")
   assert_eq "$result" "" "get_post_approval_phase '$stype' = empty (no approval)"
 done

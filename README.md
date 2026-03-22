@@ -44,7 +44,6 @@ All hooks live in `.claude/hooks/` and are wired via `.claude/settings.json`.
 |------|-----------|------|
 | `write-guard.sh` | PreToolUse (Edit/Write/Bash) | Blocks `.state/` writes, enforces mode-based file restrictions; Section 3 blocks main edits, enforces plan gate, session branch isolation |
 | `bash-guard.sh` | PreToolUse (Bash) | Consolidated Bash guard (Phase 3a): state-guard, mode-guard, plan gate, main protection, session branch isolation, task group merge protection, ephemeral fast-exit |
-| `branch-guard.sh` | _(deprecated)_ | Retained for rollback. Bash calls now handled by `bash-guard.sh` |
 | `plan-approval.sh` | PostToolUse (AskUserQuestion) | Captures plan approvals as state |
 | `hvst-failure-tracker.sh` | PostToolUse (Bash) | Tracks consecutive failures for HVST escalation |
 | `agent-git-guard.sh` | PreToolUse (git commit/push) | Blocks subagent commits and pushes |

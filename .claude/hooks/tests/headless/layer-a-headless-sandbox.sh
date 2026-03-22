@@ -78,10 +78,9 @@ advance_phase "plan" 2>/dev/null
 
 # Simulate headless runner pre-writing plan-approved state file
 # (written by shell I/O, same as plan-approval.sh would)
-echo "timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-question_hash: headless-runner
-large-scope: false
-mode: auto" > "$STATE_DIR/plan-approved"
+_ha1_sid=$(cat "$SB/.claude/.session-id")
+printf 'timestamp: %s\nquestion_hash: headless-runner\nlarge-scope: false\nmode: auto\nsession_id: %s\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_ha1_sid" > "$STATE_DIR/plan-approved"
 
 # Set mode to auto (headless sessions should always be auto)
 set_phase_mode "auto"
@@ -100,16 +99,16 @@ assert_eq "$mode_after" "auto" "phase mode is auto after pre-write"
 REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
 assert_ok "$_LAST_RC" "write-guard allows edit after pre-write plan-approved bypass"
 
-# --- branch-guard allows bash write after pre-write bypass ---
-run_hook_rc "branch-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
-assert_ok "$_LAST_RC" "branch-guard allows bash redirect after pre-write plan-approved bypass"
+# --- bash-guard allows bash write after pre-write bypass ---
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
+assert_ok "$_LAST_RC" "bash-guard allows bash redirect after pre-write plan-approved bypass"
 
 # --- pre-commit-gates accepts pre-written plan-approved ---
 advance_phase "review" 2>/dev/null
 advance_phase "verify" 2>/dev/null
 advance_phase "commit" 2>/dev/null
-echo "timestamp: test" > "$STATE_DIR/cohesion-reviewed"
-echo "timestamp: test" > "$STATE_DIR/qa-verified"
+printf 'timestamp: test\nsession_id: %s\n' "$(cat "$SB/.claude/.session-id")" > "$STATE_DIR/cohesion-reviewed"
+printf 'timestamp: test\nsession_id: %s\n' "$(cat "$SB/.claude/.session-id")" > "$STATE_DIR/qa-verified"
 stage_sandbox_file "src/prewrite.ts" "export const pw = 1;"
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "headless commit")"
 assert_ok "$_LAST_RC" "pre-commit-gates accepts pre-written plan-approved at commit phase"
@@ -118,10 +117,9 @@ assert_ok "$_LAST_RC" "pre-commit-gates accepts pre-written plan-approved at com
 _reinit_sandbox
 reset_phase "standard"
 advance_phase "plan" 2>/dev/null
-echo "timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-question_hash: headless-runner
-large-scope: true
-mode: auto" > "$STATE_DIR/plan-approved"
+_ha1_sid=$(cat "$SB/.claude/.session-id")
+printf 'timestamp: %s\nquestion_hash: headless-runner\nlarge-scope: true\nmode: auto\nsession_id: %s\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_ha1_sid" > "$STATE_DIR/plan-approved"
 set_phase_mode "auto"
 advance_phase "approval" 2>/dev/null
 advance_phase "build" 2>/dev/null
@@ -164,7 +162,7 @@ reset_phase "standard"
 _compute_log_hash > "$SB/.claude/.session-log-hash"
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 run_hook_rc "session-close-check.sh" "$(fixture_stop)" > "$_L3_OUT"
-assert_fail "$_LAST_RC" "session-close-check blocks standard session with unchanged log"
+assert_blocked "session-close-check blocks standard session with unchanged log"
 
 # ============================================================
 # HA.3 — Solo mode merge at session close
@@ -244,8 +242,8 @@ reset_phase "standard"
 # --- Attempt 1: blocks (log not modified) ---
 _compute_log_hash > "$SB/.claude/.session-log-hash"
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
-run_hook_rc "session-close-check.sh" "$(fixture_stop)" > /dev/null 2>&1
-assert_fail "$_LAST_RC" "attempt 1: stop blocked"
+run_hook_rc "session-close-check.sh" "$(fixture_stop)" > "$_L3_OUT"
+assert_blocked "attempt 1: stop blocked"
 count=$(cat "$SB/.claude/.state/.stop-attempt-count" 2>/dev/null || echo "0")
 assert_eq "$count" "1" "attempt counter is 1 after first attempt"
 
@@ -253,8 +251,8 @@ assert_eq "$count" "1" "attempt counter is 1 after first attempt"
 # Re-create session-id and phase-state (cleanup_session doesn't run on block)
 # Actually, on block (exit 2), cleanup doesn't run. But we need to verify
 # the session files are still present for the next attempt.
-run_hook_rc "session-close-check.sh" "$(fixture_stop)" > /dev/null 2>&1
-assert_fail "$_LAST_RC" "attempt 2: stop still blocked"
+run_hook_rc "session-close-check.sh" "$(fixture_stop)" > "$_L3_OUT"
+assert_blocked "attempt 2: stop still blocked"
 count=$(cat "$SB/.claude/.state/.stop-attempt-count" 2>/dev/null || echo "0")
 assert_eq "$count" "2" "attempt counter is 2 after second attempt"
 
@@ -295,10 +293,9 @@ phase=$(get_phase)
 assert_eq "$phase" "plan" "headless lifecycle: init → plan"
 
 # Pre-write plan-approved (headless bypass)
-echo "timestamp: test
-question_hash: headless
-large-scope: false
-mode: auto" > "$STATE_DIR/plan-approved"
+_ha5_sid=$(cat "$SB/.claude/.session-id")
+printf 'timestamp: test\nquestion_hash: headless\nlarge-scope: false\nmode: auto\nsession_id: %s\n' \
+  "$_ha5_sid" > "$STATE_DIR/plan-approved"
 set_phase_mode "auto"
 advance_phase "approval" 2>/dev/null
 advance_phase "build" 2>/dev/null
@@ -444,10 +441,15 @@ phase=$(get_phase)
 assert_eq "$phase" "plan" "runner pattern: advance to plan"
 
 # Step 4: Runner pre-writes plan-approved (no AskUserQuestion possible)
-echo "timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-question_hash: headless-runner-e2e
-large-scope: true
-mode: auto" > "$STATE_DIR/plan-approved"
+_ha7_sid=$(cat "$SB/.claude/.session-id")
+printf 'timestamp: %s\nquestion_hash: headless-runner-e2e\nlarge-scope: true\nmode: auto\nsession_id: %s\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_ha7_sid" > "$STATE_DIR/plan-approved"
+
+# Step 4b: Runner simulates pragmatist sign-off (Decision 0025)
+# The pragmatist-enforced sentinel may already exist from HA.1, so
+# pre-commit-gates will require pragmatist-signed on this session.
+printf 'timestamp: %s\nagent: pragmatist\nsession_id: %s\nGATE_RESULT: APPROVED\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_ha7_sid" > "$STATE_DIR/pragmatist-signed"
 
 # Step 5: Runner sets mode to auto and forward-jumps
 set_phase_mode "auto"

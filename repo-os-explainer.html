@@ -463,6 +463,8 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
       <tr><td><span class="tag t-cyn">Explore / investigate</span></td><td>Prompt T</td><td>Feasibility check, task planning, or quick Q&amp;A &mdash; produces a task brief for Prompt B</td></tr>
       <tr><td><span class="tag t-pnk">Project audit</span></td><td>Prompt C</td><td>On-demand health check &mdash; cohesion, governance, security, performance</td></tr>
       <tr><td><span class="tag t-cyn">Visual editing</span></td><td>Prompt E</td><td>Editor-live session &mdash; agent responds to file saves, no plan gate (child mode only)</td></tr>
+      <tr><td><span class="tag t-cyn">Queue triage</span></td><td>Prompt Q</td><td>Review escalations, approve queue entries, manage work orders conversationally</td></tr>
+      <tr><td><span class="tag t-cyn">Daemon toggle</span></td><td>Prompt D</td><td>Quick on/off toggle for the automation runner (ephemeral session)</td></tr>
     </tbody>
   </table>
 </section>
@@ -1231,7 +1233,6 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
     <tbody>
       <tr><td><code>write-guard.sh Section 3</code></td><td>Before every <code>Edit</code> or <code>Write</code></td><td>Slim edit guard. Gate 1: Blocks file modifications on <code>main</code>. Gate 5: Blocks edits on branches closed by a previous session (Decision 0013; task groups exempt). Override: <code>REPO_OS_ALLOW_MAIN=1</code> (Gate 1), <code>REPO_OS_SKIP_BRANCH_REUSE=1</code> (Gate 5), <code>REPO_OS_RECOVER=1</code> (bypass all).</td><td><span class="tag t-red">yes</span> (exit 2)</td></tr>
       <tr><td><code>bash-guard.sh</code></td><td>Before every <code>Bash</code></td><td>Consolidated Bash PreToolUse guard (Phase 3a). State-guard, mode guard, plan-approval gate, fail-closed phase enforcement (Decision 0019), task group merge protection (Decision 0018), session overlap, session branch isolation. Ephemeral session fast-exit (Phase 3b). Override: <code>REPO_OS_ALLOW_MAIN=1</code>, <code>REPO_OS_SKIP_PLAN_GATE=1</code>, <code>REPO_OS_SKIP_BRANCH_REUSE=1</code>, <code>REPO_OS_RECOVER=1</code>.</td><td><span class="tag t-red">yes</span> (exit 2; ephemeral: pass-through)</td></tr>
-      <tr><td><code>branch-guard.sh</code> <span class="tag t-orn">deprecated</span></td><td>&mdash;</td><td>Retained for rollback. Bash calls now handled by <code>bash-guard.sh</code>.</td><td><span class="tag t-grn">no</span> (inactive)</td></tr>
       <tr><td><code>write-guard.sh</code></td><td>Before every <code>Edit</code>, <code>Write</code>, or <code>Bash</code></td><td>Unified state + mode enforcement. Section 1: blocks model writes to <code>.claude/.state/</code> (override: <code>REPO_OS_SKIP_STATE_GUARD=1</code>, <code>REPO_OS_RECOVER=1</code>). Section 2: restricts file modifications based on operating mode (template/child/autonomous). Child/autonomous fast-exit after immune path check. Override: <code>REPO_OS_SKIP_MODE_GUARD=1</code>, <code>REPO_OS_UNLOCK_PATH=&lt;path&gt;</code>, <code>REPO_OS_MODE=&lt;mode&gt;</code>.</td><td><span class="tag t-red">yes</span> (exit 2)</td></tr>
       <tr><td><code>pre-commit-gates.sh</code></td><td>Before every <code>git commit</code></td><td>A4: Secret scanning (blocks). State file verification (blocks &mdash; requires <code>plan-approved</code>, <code>cohesion-reviewed</code>, <code>qa-verified</code>). Gate 3: Inter-session governance check (advisory, first-fire). A2: Scope &gt;100 lines (blocks unless large-scope approved). A6: Task group contract staging (blocks). High-risk pattern detection (blocks &mdash; requires <code>reviewer-signed</code> + <code>security-signed</code>). A1: Decision trigger parser (blocking). Override: <code>REPO_OS_SKIP_PLAN_GATE=1</code>, <code>SKIP_CONTRACT_CHECK=1</code>, <code>REPO_OS_RECOVER=1</code>.</td><td><span class="tag t-red">yes</span> (exit 1)</td></tr>
       <tr><td><code>pre-push-gates.sh</code></td><td>Before every <code>git push</code></td><td>B1: Branch naming convention (blocks). Stubs for B2 tests/typecheck and B3 dependency audit &mdash; activate per project. Override: <code>REPO_OS_RECOVER=1</code>.</td><td><span class="tag t-red">yes</span> (exit 1)</td></tr>
@@ -1265,7 +1266,6 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
 <span class="p">│   │   ├── </span><span class="f">_analytics-helper.sh</span> <span class="n">&mdash; shared helper (log_hook_event, log_override)</span>
 
 <span class="p">│   │   ├── </span><span class="f">bash-guard.sh</span> <span class="n">&mdash; consolidated Bash PreToolUse guard (state, mode, plan, phase enforcement, task group, overlap, isolation)</span>
-<span class="p">│   │   ├── </span><span class="f">branch-guard.sh</span> <span class="n">&mdash; deprecated (retained for rollback; Bash calls now handled by bash-guard.sh)</span>
 <span class="p">│   │   ├── </span><span class="f">write-guard.sh</span> <span class="n">&mdash; unified state + mode enforcement (blocks .state/ writes + mode restrictions)</span>
 <span class="p">│   │   ├── </span><span class="f">state-writer.sh</span> <span class="n">&mdash; captures agent verdicts as state files</span>
 <span class="p">│   │   ├── </span><span class="f">plan-approval.sh</span> <span class="n">&mdash; captures operator plan approvals as state</span>
@@ -1868,6 +1868,7 @@ experiment/new-caching-strategy</div>
       <tr><td>Remove <code>HALT</code> file</td><td>Daemon resumes on next start</td></tr>
     </tbody>
   </table>
+  <p><strong>Prompt D</strong> provides a conversational alternative to manual config edits. It runs as a single-purpose ephemeral session that toggles <code>runner.enabled</code> in config.yaml and manages the HALT file &mdash; two files only, then closes automatically. Use the <a href="#navigator">Navigator</a> to find it, or paste the Prompt D starter directly.</p>
 
   <h3>Phase model integration</h3>
   <p>Automated sessions use the same phase sequences as interactive sessions (Decision 0014). The runner pre-writes the <code>plan-approved</code> state file and initializes the phase model with <code>auto</code> mode. All hooks fire normally except the Stop hook &mdash; the runner replicates Stop hook cleanup (solo merge, registry cleanup, branch sealing) as part of the post-session phase.</p>
@@ -2040,7 +2041,9 @@ const TERMS={
   'Cohesion review':'Post-build review by the Critic checking your diff for broken references, dangling imports, and naming inconsistencies. Gate A5.',
   'Quality gates':'Verification checkpoints that must pass before commits (A-gates) or pushes (B-gates). Failures block the action.',
   'Decision record':'A version-controlled constraint in docs/ai/decisions/. Decisions are laws \u2014 violations block commits.',
-  'Feature brief':'Lightweight spec for individual feature additions, created by Prompt 0 Feature mode. Drives advisory board activation.'
+  'Feature brief':'Lightweight spec for individual feature additions, created by Prompt 0 Feature mode. Drives advisory board activation.',
+  'Prompt Q':'Queue triage session. Review escalations, approve or reject queue entries, manage work orders. Conversational interface over the automation queue.',
+  'Prompt D':'Single-purpose ephemeral session to toggle the automation runner on or off. Touches two files only: config.yaml and HALT.'
 };
 
 function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
@@ -2378,6 +2381,48 @@ const DT = {
             'Paste the '+term('Prompt A')+' starter below and choose <strong>Re-initialize</strong> mode'
           ],cmds:[{label:'Re-initialize after resolving conflict',value:'Follow docs/ai/prompts/prompt-a-repo-os.md.'}],
           goTo:{lbl:'Next: Start Development',path:[1,0]},nxt:{href:'#decisions',lbl:'See Decision Records'}}}
+      ]}},
+    {ico:'\u2261',lbl:'Manage automation queue',dsc:'Queue triage, daemon toggle, work orders',
+      next:{q:'What do you need?',opts:[
+        {ico:'\u2630',lbl:'Full triage session',dsc:'Review escalations, approve entries, manage work orders',
+          res:{act:'Run Prompt Q',title:'Queue Triage Session',
+            why:term('Prompt Q')+' starts a conversational queue-triage session. You review escalations, approve or reject pending entries, and manage work orders \u2014 all with full governance context loaded.',
+            outcome:'Queue is triaged: escalations resolved, entries approved/rejected, work orders updated. Session log records actions taken.',
+            steps:[
+            'Start a new Claude Code session',
+            'Paste the '+term('Prompt Q')+' starter below',
+            'Review pending escalations and queue entries',
+            'Approve, reject, or defer each item',
+            'Manage work orders \u2014 create, update, or close',
+            'Session ends with queue state updated and actions logged'
+          ],cmds:[{label:'Start queue triage',value:'Follow docs/ai/prompts/prompt-q-queue-triage.md.'}],
+          nxt:{href:'#automation',lbl:'See Automation Layer'}}},
+        {ico:'\u25B6',lbl:'Quick check or action',dsc:'Inline status, approve, or halt from any session',
+          res:{act:'Use /queue skill',title:'Inline Queue Action',
+            why:'The /queue skill lets you check queue status, approve entries, or halt the runner without leaving your current session. No dedicated triage session needed.',
+            outcome:'Queue action completed inline. Your current session continues uninterrupted.',
+            steps:[
+            'From any active Claude Code session, type the /queue command below',
+            'Check status: see pending, running, and completed entries',
+            'Approve or reject specific entries by ID',
+            'Halt the runner immediately if needed'
+          ],cmds:[
+            {label:'Check queue status',value:'/queue status'},
+            {label:'Approve an entry',value:'/queue approve <entry-id>'},
+            {label:'Halt the runner',value:'/queue halt'}
+          ]}},
+        {ico:'\u23FB',lbl:'Toggle daemon on/off',dsc:'Enable or disable the automation runner',
+          res:{act:'Run Prompt D',title:'Toggle Automation Daemon',
+            why:term('Prompt D')+' is a single-purpose ephemeral session that flips the runner on or off. It touches exactly two files: config.yaml (runner.enabled) and optionally the HALT file.',
+            outcome:'Runner is toggled. Config updated. Session closes automatically.',
+            steps:[
+            'Start a new Claude Code session',
+            'Paste the '+term('Prompt D')+' starter below',
+            'Tell the agent to enable or disable the runner',
+            'Agent updates config.yaml and manages the HALT file as needed',
+            'Session closes automatically after the toggle'
+          ],cmds:[{label:'Toggle the daemon',value:'Follow docs/ai/prompts/prompt-d-daemon-toggle.md.'}],
+          nxt:{href:'#automation',lbl:'See Automation Layer'}}}
       ]}}
   ]
 };
@@ -2390,7 +2435,9 @@ const DT_ALTS=[
   {id:'feat', ico:'\u002B',       lbl:'Add Feature',   dsc:'Feature brief + advisory review',        path:[2]},
   {id:'task', ico:'\uD83D\uDD0D',lbl:'Task Brief',    dsc:'Prompt T \u2014 explore or define a task',path:[3]},
   {id:'proto',ico:'\u26A1',       lbl:'Prototype',     dsc:'Prompt 0.5 \u2014 spike or experiment',  path:[4]},
-  {id:'audit',ico:'\uD83D\uDCCB',lbl:'Audit Health',  dsc:'Prompt C \u2014 project health check',   path:[7]}
+  {id:'audit',ico:'\uD83D\uDCCB',lbl:'Audit Health',  dsc:'Prompt C \u2014 project health check',   path:[7]},
+  {id:'queue',ico:'\u2261',       lbl:'Queue Triage', dsc:'Prompt Q \u2014 review automation queue', path:[13]},
+  {id:'daemon',ico:'\u23FB',      lbl:'Toggle Daemon',dsc:'Prompt D \u2014 enable/disable runner',  path:[13,2]}
 ];
 function renderAlts(act){
   const a=act.toLowerCase(),ex=[];
@@ -2401,6 +2448,8 @@ function renderAlts(act){
   if(a.includes('prompt t')) ex.push('task');
   if(a.includes('prompt 0.5')||a.includes('napkin')||a.includes('spike')||a.includes('proof of concept')) ex.push('proto');
   if(a.includes('feature')) ex.push('feat');
+  if(a.includes('prompt q')||a.includes('queue triage')||a.includes('/queue')) ex.push('queue');
+  if(a.includes('prompt d')||a.includes('daemon')) ex.push('daemon');
   const tiles=DT_ALTS.filter(t=>!ex.includes(t.id));
   if(!tiles.length) return '';
   return '<div class="dt-alts-hdr">Alternatives</div><div class="dt-alts">'+

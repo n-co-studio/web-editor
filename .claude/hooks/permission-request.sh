@@ -34,7 +34,12 @@ INPUT=$(cat)
 
 # --- jq presence guard ---
 if [ "$_REPO_OS_HAS_JQ" = false ]; then
-  # Without jq, fall through to dialog (fail-open for usability)
+  if [ "${CLAUDE_HEADLESS:-0}" = "1" ]; then
+    # Headless: fail-closed — no dialog fallback, jq required for payload parsing
+    echo "GATE-FINAL: jq not found — required for PermissionRequest parsing in headless mode." >&2
+    exit 2
+  fi
+  # Interactive: fail-open (dialog is a safe fallback)
   exit 0
 fi
 

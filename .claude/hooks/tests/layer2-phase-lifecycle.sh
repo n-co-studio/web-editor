@@ -353,15 +353,22 @@ advance_phase "close" 2>/dev/null
 rc=$?
 assert_ok "$rc" "audit: synthesize→close (skipping op-review) succeeds"
 
-# taskdef-brief: synthesize→output (skipping op-review)
+# taskdef-brief: synthesize→approval→output (approval is now a gated phase, Decision 0029)
 rm -f "$(get_sandbox)/.claude/.state/phase-state"
 init_phase "taskdef-brief"
 advance_phase "dispatch" 2>/dev/null
 advance_phase "synthesize" 2>/dev/null
 
+# approval phase requires plan-approved state file (substance check)
+advance_phase "approval" 2>/dev/null
+rc=$?
+assert_ok "$rc" "taskdef-brief: synthesize→approval succeeds"
+
+# output requires plan-approved (post-approval gate)
+printf 'timestamp: test\nsession_id: %s\n' "$(get_test_session_id)" > "$(get_sandbox)/.claude/.state/plan-approved"
 advance_phase "output" 2>/dev/null
 rc=$?
-assert_ok "$rc" "taskdef-brief: synthesize→output (skipping op-review) succeeds"
+assert_ok "$rc" "taskdef-brief: approval→output succeeds (with plan-approved)"
 
 # ============================================================
 # L2.8 — Error paths

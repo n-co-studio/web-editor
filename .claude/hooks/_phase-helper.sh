@@ -16,7 +16,7 @@
 # Decision 0014 — Phase-Aware Flow Model
 #
 # ## Consumers (auto-generated — run .claude/tools/hook-dep-map.sh for live data)
-#   Hooks: bash-guard, branch-guard, plan-approval, pre-commit-gates,
+#   Hooks: bash-guard, plan-approval, pre-commit-gates,
 #          pretooluse-permission [conditional], session-close-check,
 #          state-writer, write-guard
 #   Automation: runner.sh, queue-cli.sh, intake.sh
@@ -52,10 +52,10 @@ get_phases_for_type() {
       echo "init scope dispatch synthesize op-review close" ;;
     ephemeral)
       echo "init conversation close" ;;
-    taskdef-query)
+    taskdef-query|queue-triage)
       echo "init conversation close" ;;
     taskdef-brief)
-      echo "init dispatch synthesize op-review output close" ;;
+      echo "init dispatch synthesize approval output close" ;;
     taskgroup-merge)
       echo "init contract-init cohesion verify commit op-review close" ;;
     editor-live)
@@ -176,7 +176,7 @@ get_tag_for_phase() {
         *)            echo "agent" ;;
       esac
       ;;
-    taskdef-query)
+    taskdef-query|queue-triage)
       case "$phase" in
         conversation) echo "both" ;;
         *)            echo "agent" ;;
@@ -186,7 +186,7 @@ get_tag_for_phase() {
       case "$phase" in
         dispatch)   echo "agent" ;;
         synthesize) echo "agent" ;;
-        op-review)  echo "operator" ;;
+        approval)   echo "operator" ;;
         output)     echo "agent" ;;
         *)          echo "agent" ;;
       esac
@@ -249,6 +249,19 @@ get_post_approval_phase() {
     fi
   done
   echo ""
+}
+
+# --- Operator gate check ---
+# Returns 0 if the given phase in the given session type has an "operator" tag.
+# Forward-looking helper: any session type that uses the "approval" phase name
+# gets enforcement via has_plan_gate; this helper generalizes to any operator-tagged phase.
+# No current consumers — added as structural scaffolding for future operator gate enforcement.
+has_operator_gate() {
+  local stype="$1"
+  local phase="$2"
+  local tag
+  tag=$(get_tag_for_phase "$stype" "$phase")
+  [ "$tag" = "operator" ]
 }
 
 # --- Phase index lookup ---
@@ -368,14 +381,19 @@ init_phase() {
 
   # Double-init guard (adversarial M1): refuse re-init if phase-state exists
   # for the current session. Prevents progress reset via second init_phase call.
+  # Override: REPO_OS_ALLOW_REINIT=1 for legitimate crash recovery scenarios.
   if [ -f "$state_dir/phase-state" ]; then
     local _existing_sid
     _existing_sid=$(grep '^session_id:' "$state_dir/phase-state" 2>/dev/null | sed 's/^session_id: *//' | tr -d '[:space:]' | head -1)
     local _current_sid
     _current_sid=$(cat "$repo_root/.claude/.session-id" 2>/dev/null || echo "")
     if [ -n "$_existing_sid" ] && [ "$_existing_sid" = "$_current_sid" ]; then
-      echo "WARNING: Phase state already exists for this session — skipping re-init" >&2
-      return 0
+      if [ "${REPO_OS_ALLOW_REINIT:-0}" = "1" ]; then
+        echo "WARNING: Re-initializing phase state (REPO_OS_ALLOW_REINIT=1 override)" >&2
+      else
+        echo "GATE-RECOVERABLE: Phase state already exists for this session — re-initialization blocked. NEXT: If crash recovery is needed, set REPO_OS_ALLOW_REINIT=1 and retry. (override: REPO_OS_ALLOW_REINIT=1)" >&2
+        return 1
+      fi
     fi
   fi
 
@@ -503,6 +521,29 @@ advance_phase() {
         echo "ERROR: Non-adjacent phase transition from '$current_phase' to '$new_phase' — intermediate phase '$_p' is not skippable" >&2
         return 1
       fi
+    fi
+  fi
+
+  # --- Substance check: plan-approved required before post-approval phase ---
+  # When the session type has a plan gate and we're advancing to the post-approval
+  # phase (e.g., build for standard, governance for spec-*), verify that the
+  # plan-approved state file exists and its session ID matches the current session.
+  # This prevents force-advancing through approval without actual operator approval.
+  # Ordering note (Critic C5): plan-approval.sh writes plan-approved (line 112)
+  # BEFORE calling the double-advance (lines 124/127), so no deadlock occurs.
+  if has_plan_gate "$stype"; then
+    local post_approval
+    post_approval=$(get_post_approval_phase "$stype")
+    if [ -n "$post_approval" ] && [ "$new_phase" = "$post_approval" ]; then
+      local pa_file="$repo_root/.claude/.state/plan-approved"
+      if [ ! -f "$pa_file" ]; then
+        echo "GATE-RECOVERABLE: plan-approved state file missing — cannot advance to '$new_phase' without operator plan approval. NEXT: Use AskUserQuestion to present plan for operator approval." >&2
+        return 1
+      fi
+      # Session-bind note: both plan-approval.sh (interactive) and state-manager.sh
+      # (runner) now write session_id into plan-approved. The existence check here
+      # remains sufficient — session binding is double-enforced at commit time by
+      # pre-commit-gates.sh _validate_state_session_id.
     fi
   fi
 

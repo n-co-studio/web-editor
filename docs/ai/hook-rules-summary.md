@@ -10,7 +10,8 @@
 | Mode violation (template/child/autonomous) | bash-guard / write-guard (mode-guard) | Switch mode or use `REPO_OS_UNLOCK_PATH=<path>` |
 | Sealed branch reuse | bash-guard / write-guard (Gate 5) | `git checkout -b <category>/<description>` (new branch) |
 | Task group merge outside close phase | bash-guard (Gate 7) | Wait for close phase (`REPO_OS_SKIP_MERGE_GUARD=1`) |
-| State files missing (plan/cohesion/qa) | pre-commit-gates | Dispatch agents in order: plan approval → Critic cohesion → QA verify |
+| State files missing (plan/cohesion/qa/pragmatist) | pre-commit-gates | Dispatch agents in order: Pragmatist plan-gating → plan approval → Critic cohesion → QA verify |
+| Phase re-init blocked | _phase-helper (init_phase) | Set `REPO_OS_ALLOW_REINIT=1` for crash recovery |
 | High-risk without sign-off | pre-commit-gates | Dispatch Reviewer + Security agents |
 | Secret detected (A4) | pre-commit-gates | Remove secret from staged files |
 

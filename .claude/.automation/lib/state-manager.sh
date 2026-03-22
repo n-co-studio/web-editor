@@ -9,7 +9,7 @@
 #   agent's init_phase() call binds to the correct session. Phase-state
 #   itself is NOT pre-seeded — the agent calls init_phase() via Bash as
 #   its first action (instructed by the orchestrator), which fast-exits
-#   branch-guard.sh (no redirect/tee — Decision 0019 §5). Edits before
+#   bash-guard.sh (no redirect/tee — Decision 0019 §5). Edits before
 #   init_phase() are blocked when the .fail-closed-enforced sentinel is
 #   present. Custom runner implementations MUST ensure init_phase() is
 #   called before any Edit/Write tool use; the canonical runner achieves
@@ -97,11 +97,15 @@ runner_external_cleanup() {
     } > "$_esc_dir/${_dt_esc_id}.yaml" 2>/dev/null || true
   fi
 
+  # Capture session ID before cleanup (needed for session-bind guard)
+  local close_sid
+  close_sid=$(get_session_id "$repo_root")
+
   # Unregister from session registry (before .session-id removal — needs ID)
   unregister_session || true
 
-  # Delegate to shared cleanup
-  cleanup_session_files "$repo_root" "$close_stype"
+  # Delegate to shared cleanup with session-bind
+  cleanup_session_files "$repo_root" "$close_stype" "$close_sid"
 
   # Update baseline for next session (adversarial H8: validate SHA is real)
   local _new_sha

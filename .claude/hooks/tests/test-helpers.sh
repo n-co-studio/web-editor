@@ -24,6 +24,12 @@ SESSION_TYPES="standard taskgroup taskgroup-merge hotfix experiment editor-live 
 _SANDBOX_DIR=""
 
 setup_sandbox() {
+  # Ensure sandbox paths pass the /tmp/ or /private/tmp/ prefix guard in hooks.
+  # macOS sets TMPDIR=/var/folders/... which is rejected by the guard.
+  case "${TMPDIR:-/tmp}" in
+    /tmp/*|/private/tmp/*|/tmp|/private/tmp) ;;
+    *) export TMPDIR=/private/tmp ;;
+  esac
   _SANDBOX_DIR=$(mktemp -d "${TMPDIR:-/tmp}/phase-test.XXXXXX")
   # Normalize path to canonical form (TMPDIR often has trailing slash,
   # producing //. resolve_path in hooks normalizes via python3 abspath,
@@ -267,11 +273,28 @@ run_hook() {
 # Sets _LAST_RC to the hook's exit code.
 # Usage: output=$(run_hook_rc "write-guard.sh" "$fixture_json"); echo "$_LAST_RC"
 _LAST_RC=0
+_LAST_OUTPUT=""
 run_hook_rc() {
   local hook="$1"
   local fixture="${2:-\{\}}"
   _LAST_RC=0
-  (cd "$_SANDBOX_DIR" && printf '%s' "$fixture" | bash "$_HOOKS_DIR/$hook" 2>&1) || _LAST_RC=$?
+  _LAST_OUTPUT=""
+  _LAST_OUTPUT=$( (cd "$_SANDBOX_DIR" && printf '%s' "$fixture" | bash "$_HOOKS_DIR/$hook" 2>&1) ) || _LAST_RC=$?
+  printf '%s' "$_LAST_OUTPUT"
+}
+
+# assert_blocked <description>
+# Pass if _LAST_RC is non-zero OR _LAST_OUTPUT contains JSON decision:block.
+# Handles both legacy exit-2 blocks and Phase 2a JSON blocks (exit 0 + JSON).
+assert_blocked() {
+  local desc="$1"
+  if [ "$_LAST_RC" -ne 0 ]; then
+    _tap_pass "$desc"
+  elif printf '%s' "$_LAST_OUTPUT" | grep -q '"decision".*"block"' 2>/dev/null; then
+    _tap_pass "$desc"
+  else
+    _tap_fail "$desc" "expected block (exit!=0 or decision:block), got exit $_LAST_RC"
+  fi
 }
 
 # --- Switch sandbox to a specific branch ---

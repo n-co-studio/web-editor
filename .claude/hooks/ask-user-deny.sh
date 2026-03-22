@@ -18,5 +18,6 @@ fi
 # Headless mode — consume stdin (required by hook protocol) and deny
 cat > /dev/null
 
+printf '{"decision": "deny", "reason": "AskUserQuestion blocked in headless mode (CLAUDE_HEADLESS=1)"}\n'
 echo "BLOCKED: AskUserQuestion is not available in headless automation mode. Proceed with best judgment per the task brief. If genuinely blocked, write an escalation file to .claude/.automation/escalations/." >&2
 exit 2

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Bash guard — unified Bash PreToolUse hook.
-# Consolidates write-guard.sh (Sections 1-2) and branch-guard.sh into a
-# single hook for Bash calls. Eliminates duplicate stdin reads, JSON parses,
-# and library sourcing that occurred when both hooks fired on every Bash call.
+# Replaced the former branch-guard.sh — consolidates write-guard.sh (Sections
+# 1-2) and branch-guard gates into a single hook for Bash calls. Eliminates
+# duplicate stdin reads, JSON parses, and library sourcing that occurred when
+# both hooks fired on every Bash call.
 #
 # Phase 3a of stop-hook optimization (exec-summary.md).
 #
@@ -103,6 +104,7 @@ fi
 
 source "$SCRIPT_DIR/_analytics-helper.sh"
 source "$SCRIPT_DIR/_phase-helper.sh"
+source "$SCRIPT_DIR/_mode-guard-helper.sh"
 START_MS=$(now_ms)
 
 REPO_ROOT="$_REPO_OS_ROOT"
@@ -267,23 +269,7 @@ if [ "$SKIP_MODE_GUARD" = false ]; then
         ;;
     esac
 
-    # --- Path helpers ---
-    make_relative() {
-      local p="$1"
-      p=$(normalize_path "$p")
-      p="${p#$REPO_ROOT/}"
-      p="${p#./}"
-      echo "$p"
-    }
-
-    is_immune() {
-      local p="$1"
-      case "$p" in
-        .claude/hooks/write-guard.sh) return 0 ;;
-        .claude/repo-mode) return 0 ;;
-        *) return 1 ;;
-      esac
-    }
+    # --- Path helpers (make_relative, is_immune sourced from _mode-guard-helper.sh) ---
 
     # --- Fast-exit for non-template modes ---
     if [ "$MODE" != "template" ]; then
@@ -314,54 +300,7 @@ if [ "$SKIP_MODE_GUARD" = false ]; then
       log_hook_event "mode-guard" "PreToolUse" "Bash" "allow" "$START_MS" "fast_exit_${MODE}"
     else
       # Template mode — full path classification
-
-      is_governance() {
-        local p="$1"
-        case "$p" in
-          .claude/*) return 0 ;; docs/ai/*) return 0 ;; docs/spec/_templates/*) return 0 ;;
-          .github/*) return 0 ;; AI.md) return 0 ;; CLAUDE.md) return 0 ;;
-          repo-os-explainer.html) return 0 ;; *) return 1 ;;
-        esac
-      }
-
-      is_carved_out() {
-        local mode="$1" p="$2"
-        case "$mode" in
-          template)
-            case "$p" in
-              .claude/agents/*|.claude/hooks/*|.claude/settings.json|.claude/settings.local.json) return 0 ;;
-              .claude/local/session-log.md|.claude/local/known-issues.md|.claude/local/task-groups/*|.claude/local/task-contract.yaml) return 0 ;;
-              docs/ai/prompts/*|docs/ai/decisions/*|docs/ai/logs/*) return 0 ;;
-              docs/ai/workflow.md|docs/ai/quality-gates.md|docs/ai/hook-rules-summary.md|docs/ai/quality-gates-summary.md|docs/ai/task-groups/_contract-template.yaml) return 0 ;;
-              docs/ai/workflow-appendix/*|docs/ai/governance/*) return 0 ;;
-              docs/spec/_templates/*|AI.md|CLAUDE.md|repo-os-explainer.html|.github/*) return 0 ;;
-              .claude/.automation/*) return 0 ;;
-              *) return 1 ;;
-            esac
-            ;;
-          child)
-            case "$p" in
-              .claude/settings.local.json|docs/ai/governance/*|docs/ai/logs/*) return 0 ;;
-              docs/ai/task-groups/_*) return 1 ;;
-              docs/ai/task-groups/*.yaml) return 0 ;;
-              docs/ai/decisions/t-*.md) return 1 ;;
-              docs/ai/decisions/0[1-9][0-9][0-9]-*.md) return 0 ;;
-              docs/spec/compiled/*|docs/spec/prototypes/*) return 0 ;;
-              *) return 1 ;;
-            esac
-            ;;
-          autonomous)
-            case "$p" in
-              docs/ai/logs/*) return 0 ;;
-              docs/ai/task-groups/_*) return 1 ;;
-              docs/ai/task-groups/*.yaml) return 0 ;;
-              *) return 1 ;;
-            esac
-            ;;
-        esac
-        return 1
-      }
-
+      # (is_governance, is_carved_out sourced from _mode-guard-helper.sh)
 
       check_path() {
         local rel="$1" context="$2"

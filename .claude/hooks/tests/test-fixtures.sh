@@ -46,9 +46,9 @@ fixture_pretooluse_write() {
 }
 
 # --- PreToolUse: Bash ---
-# Consumers: branch-guard.sh, write-guard.sh
+# Consumers: bash-guard.sh, write-guard.sh
 # Fields parsed:
-#   .tool_input.command    (branch-guard write-target extraction)
+#   .tool_input.command    (bash-guard write-target extraction)
 #   .tool_input.command    (write-guard write-target detection)
 #   .tool_input.file_path  (absent — distinguishes Bash from Edit/Write)
 fixture_pretooluse_bash() {
@@ -75,8 +75,9 @@ fixture_pretooluse_commit() {
 #   .tool_name                                          (must be "AskUserQuestion")
 #   .tool_input.questions[].question                    (plan keyword detection)
 #   .tool_input.questions[].options[].label              (confirmation language)
-#   .tool_response.answers | to_entries[].value          (affirmative detection)
-#   .tool_output                                         (fallback answer field)
+#   .tool_input.answers | to_entries[].value             (primary: affirmative detection)
+#   .tool_response.answers | to_entries[].value          (legacy fallback)
+#   .tool_output                                         (CLI fallback)
 fixture_posttooluse_ask() {
   local question="$1"
   local option_labels_csv="$2"   # comma-separated: "Yes approve,No revise"
@@ -107,7 +108,7 @@ fixture_posttooluse_ask() {
   IFS="$IFS_OLD"
   options_json="${options_json}]"
 
-  printf '{"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"%s","options":%s}]},"tool_response":{"answers":{"%s":"%s"}},"tool_output":"%s"}' \
+  printf '{"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"%s","options":%s}],"answers":{"%s":"%s"}},"tool_output":"%s"}' \
     "$q" "$options_json" "$q" "$a" "$a"
 }
 
@@ -176,6 +177,7 @@ _fixtures_self_test() {
   json=$(fixture_posttooluse_ask "Do you approve this plan?" "Yes approve,No revise" "Yes approve")
   echo "$json" | jq -e '.tool_name == "AskUserQuestion"' >/dev/null 2>&1 || { echo "FAIL: fixture_posttooluse_ask tool_name"; failures=$((failures + 1)); }
   echo "$json" | jq -e '.tool_input.questions[0].question | contains("plan")' >/dev/null 2>&1 || { echo "FAIL: fixture_posttooluse_ask question"; failures=$((failures + 1)); }
+  echo "$json" | jq -e '(.tool_input.answers // {}) | to_entries[0].value == "Yes approve"' >/dev/null 2>&1 || { echo "FAIL: fixture_posttooluse_ask answers in tool_input"; failures=$((failures + 1)); }
 
   json=$(fixture_subagentstop "critic" "Review complete.\nGATE_RESULT: APPROVED")
   echo "$json" | jq -e '.agent_type == "critic"' >/dev/null 2>&1 || { echo "FAIL: fixture_subagentstop"; failures=$((failures + 1)); }

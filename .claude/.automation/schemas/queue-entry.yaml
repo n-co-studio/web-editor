@@ -4,7 +4,7 @@
 entry:
   id: ""                    # unique entry identifier (UUID or timestamp-based)
   status: pending-review    # pending-review | approved | running | completed | failed | review | blocked
-  session_type: ""          # Decision 0014 enum (15 types, not extended)
+  session_type: ""          # Decision 0014 enum (18 types, not extended)
   branch: ""                # target branch name
   brief_path: ""            # path to task brief (if applicable)
   prompt: ""                # assembled prompt for claude -p (written at dequeue, not creation)

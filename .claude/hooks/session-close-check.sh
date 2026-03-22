@@ -218,7 +218,17 @@ advisory_push_to_remote() {
 # Used by safety valve, skip-override, and normal close paths.
 # When session type is empty (stale/missing phase-state), checks whether the
 # current branch belongs to an active task group contract before sealing.
+# Session-bind guard (Decision 0013): skips seal if another session is active
+# on the current branch (is_session_active check).
 seal_branch_if_applicable() {
+  # Guard: skip seal if another session is active on this branch
+  local seal_branch
+  seal_branch=$(get_branch)
+  if [ -n "$seal_branch" ] && [ "$seal_branch" != "main" ] && is_session_active "$seal_branch"; then
+    log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "seal_skipped_active_session" "" "$seal_branch" || true
+    return 0
+  fi
+
   local stype
   stype=$(get_session_type)
   if [ "$stype" = "taskgroup" ]; then
@@ -375,15 +385,19 @@ infer_session_type() {
 
 # --- Session cleanup (delegates to shared cleanup_session_files from _cleanup-helper.sh) ---
 # Unregisters session, then removes all session-scoped state files.
+# Session-bind (Decision 0013): passes closing session ID so cleanup only
+# deletes files owned by this session.
 # Audit C5: shared cleanup eliminates divergence risk with state-manager.sh.
 cleanup_session() {
-  # Capture session type before cleaning state files (phase-state is deleted below)
+  # Capture session type and ID before cleaning state files (phase-state is deleted below)
   local close_stype
   close_stype=$(get_session_type)
+  local close_sid
+  close_sid=$(get_session_id "$REPO_ROOT")
   # Unregister from session registry (before .session-id removal — needs session ID)
   unregister_session || true
-  # Delegate to shared cleanup
-  cleanup_session_files "$REPO_ROOT" "$close_stype"
+  # Delegate to shared cleanup with session-bind
+  cleanup_session_files "$REPO_ROOT" "$close_stype" "$close_sid"
 }
 
 # --- Advisory accumulator (Phase 2a/2b) ---
@@ -467,7 +481,7 @@ if [ "$STOP_ATTEMPT" -ge 3 ]; then
   # but writes an escalation so the operator is alerted.
   _SV_STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || true)
   if [ -n "$_SV_STAGED_FILES" ]; then
-    _SV_SECRET_PATTERN='sk_live_|sk_test_|sk-ant-api[0-9]+-[A-Za-z0-9_-]+|ghp_[A-Za-z0-9]|github_pat_[A-Za-z0-9]|glpat-[A-Za-z0-9]|npm_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9]|sk-proj-[A-Za-z0-9]|pypi-[A-Za-z0-9]|AKIA[A-Z0-9]|AIza[A-Za-z0-9]|-----BEGIN.*PRIVATE KEY-----|://[^/:@[:space:]]+:[^/@[:space:]]+@[^[:space:]]+'
+    _SV_SECRET_PATTERN='sk_live_|sk_test_|sk-ant-api[0-9]+-[A-Za-z0-9_-]+|ghp_[A-Za-z0-9]|github_pat_[A-Za-z0-9]|glpat-[A-Za-z0-9]|npm_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9]|sk-proj-[A-Za-z0-9]|pypi-[A-Za-z0-9]|AKIA[A-Z0-9]|AIza[A-Za-z0-9]|-----BEGIN.*PRIVATE KEY-----|://[^/:@[:space:]]+:[^/@[:space:]]+@[^[:space:]]+|password[[:space:]]*=[[:space:]]*["\x27][^"\x27]|secret[[:space:]]*=[[:space:]]*["\x27][^"\x27]|token[[:space:]]*=[[:space:]]*["\x27][^"\x27]'
     _SV_DIFF=$(git diff --cached -U0 2>/dev/null || true)
     _SV_ADDED=$(printf '%s\n' "$_SV_DIFF" | awk '/^\+/ && !/^\+\+\+/ { print substr($0,2) }')
     _SV_MATCHES=$(printf '%s\n' "$_SV_ADDED" | grep -iE "$_SV_SECRET_PATTERN" 2>/dev/null || true)
@@ -525,16 +539,43 @@ if [ ! -f "$REPO_ROOT/.claude/.state/phase-state" ]; then
   exit 0
 fi
 
+# --- Fallback: no session type + no commits from this session (belt-and-suspenders) ---
+# When get_session_type() returns empty (e.g., phase-state exists from a
+# concurrent session but session ID doesn't match, or init_phase was never
+# called), AND this session produced no commits since baseline, treat as
+# zero-change ephemeral. This prevents concurrent sessions' uncommitted
+# changes from causing false blocks on sessions that never wrote anything.
+EPHEMERAL_STYPE=$(get_session_type)
+if [ -z "$EPHEMERAL_STYPE" ]; then
+  _FB_RECENT=""
+  if [ -f "$BASELINE_SHA_FILE" ]; then
+    _FB_BASELINE=$(cat "$BASELINE_SHA_FILE" 2>/dev/null || true)
+    if [ -n "$_FB_BASELINE" ] && git cat-file -e "$_FB_BASELINE" 2>/dev/null; then
+      _FB_RECENT=$(git log --oneline "$_FB_BASELINE..HEAD" 2>/dev/null || echo "")
+    fi
+  fi
+  _FB_STAGED=$(git diff --cached --name-only 2>/dev/null || echo "")
+  # Filter unstaged changes to only files owned by this session (exclude
+  # .claude/.state/ which may be written by concurrent sessions' hooks).
+  _FB_UNSTAGED=$(git diff --name-only 2>/dev/null | grep -v '^\.claude/\.state/' || echo "")
+  if [ -z "$_FB_RECENT" ] && [ -z "$_FB_STAGED" ] && [ -z "$_FB_UNSTAGED" ]; then
+    # No seal needed — matches ephemeral exit pattern (line 562): ephemeral
+    # sessions must NOT trigger solo merge or branch seal.
+    log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "no_session_type_zero_change" || true
+    cleanup_session
+    exit 0
+  fi
+fi
+
 # --- Session types exempt from blocking close checks (Decision 0014) ---
-# Ephemeral types (taskdef-query, taskdef-brief, audit, ephemeral) have no
+# Ephemeral types (taskdef-query, taskdef-brief, audit, ephemeral, queue-triage) have no
 # gates — allow close unconditionally after cleanup.
 # Spec/prototype types produce documents, not implementation code — the session
 # log check does not apply, but all other checks (uncommitted changes,
 # governance evidence, solo merge, branch seal) still run.
-EPHEMERAL_STYPE=$(get_session_type)
 SESSION_LOG_EXEMPT=false
 case "$EPHEMERAL_STYPE" in
-  taskdef-query|taskdef-brief|audit|ephemeral)
+  taskdef-query|taskdef-brief|audit|ephemeral|queue-triage)
     # Ephemeral sessions (Phase 3b) have no blocking close checks.
     # They must NOT trigger solo merge (Decision 0015) or branch seal.
     log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "ephemeral_exempt" "$EPHEMERAL_STYPE" || true
@@ -895,6 +936,57 @@ if [ "$IS_RETRY" = false ] && [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
         fi
       fi
     done
+  fi
+fi
+
+# --- Phases-completed forensic check (advisory — first attempt only) ---
+# Verifies that completed phases have corresponding governance evidence.
+# Catches force-advance chains retroactively: if phases_completed shows
+# "approval" but no plan-approved file exists, the agent skipped the gate.
+# Advisory only — emits warning, does not block close.
+if [ "$IS_RETRY" = false ]; then
+  _FC_STATE_FILE="$REPO_ROOT/.claude/.state/phase-state"
+  if [ -f "$_FC_STATE_FILE" ]; then
+    _FC_STYPE=$(get_session_type)
+    _FC_COMPLETED=$(_read_phase_field "phases_completed" "$_FC_STATE_FILE")
+    # Map phases to expected state files (only phases with governance evidence)
+    # approval → plan-approved, review → cohesion-reviewed, verify → qa-verified,
+    # plan → pragmatist-signed (when plan gate exists)
+    _FC_WARNINGS=""
+    if has_plan_gate "$_FC_STYPE"; then
+      case ",$_FC_COMPLETED," in
+        *",approval,"*|*",approval")
+          [ ! -f "$REPO_ROOT/.claude/.state/plan-approved" ] && \
+            _FC_WARNINGS="${_FC_WARNINGS}approval phase completed but plan-approved state file missing; "
+          ;;
+      esac
+      case ",$_FC_COMPLETED," in
+        *",plan,"*|*",plan")
+          # pragmatist-signed check only when sentinel exists (backward compat)
+          if [ -f "$REPO_ROOT/.claude/local/.pragmatist-enforced" ] && [ ! -f "$REPO_ROOT/.claude/.state/pragmatist-signed" ]; then
+            _FC_WARNINGS="${_FC_WARNINGS}plan phase completed but pragmatist-signed state file missing; "
+          fi
+          ;;
+      esac
+    fi
+    case ",$_FC_COMPLETED," in
+      *",review,"*|*",review")
+        # cohesion-reviewed not expected on hotfix
+        if [ "$_FC_STYPE" != "hotfix" ] && [ ! -f "$REPO_ROOT/.claude/.state/cohesion-reviewed" ]; then
+          _FC_WARNINGS="${_FC_WARNINGS}review phase completed but cohesion-reviewed state file missing; "
+        fi
+        ;;
+    esac
+    case ",$_FC_COMPLETED," in
+      *",verify,"*|*",verify")
+        [ ! -f "$REPO_ROOT/.claude/.state/qa-verified" ] && \
+          _FC_WARNINGS="${_FC_WARNINGS}verify phase completed but qa-verified state file missing; "
+        ;;
+    esac
+    if [ -n "$_FC_WARNINGS" ]; then
+      _add_advisory "Advisory (forensic): Phase evidence gaps detected — ${_FC_WARNINGS%%; }. This may indicate phases were force-advanced without completing required governance steps."
+      log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "forensic_phase_gaps" "$_FC_WARNINGS" || true
+    fi
   fi
 fi
 

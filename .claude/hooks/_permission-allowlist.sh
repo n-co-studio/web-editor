@@ -184,6 +184,21 @@ _PERMISSION_DENY_BASH=(
   '(^|[;&|] *)mkswap'
   '(^|[;&|] *)eval '
 
+  # --- CLAUDE_HEADLESS unset bypass (targeted — does not match unset of other vars) ---
+  '(^|[;&|] *)unset .*CLAUDE_HEADLESS'
+
+  # --- Inline interpreter execution (equivalent to eval) ---
+  '(^|[;&|] *)node -e '
+  '(^|[;&|] *)node --eval '
+  '(^|[;&|] *)python -c '
+  '(^|[;&|] *)python3 -c '
+
+  # --- State directory write protection (cp/mv bypass) ---
+  '(^|[;&|] *)cp .* \.claude/\.state/'
+  '(^|[;&|] *)cp .* \.claude/\.state$'
+  '(^|[;&|] *)mv .* \.claude/\.state/'
+  '(^|[;&|] *)mv .* \.claude/\.state$'
+
   # --- Supplementary: context-specific anchors ---
   '(^|[;&|] *)xargs .*kill -9'
 )

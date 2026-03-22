@@ -19,7 +19,7 @@ Build a minimal shell test harness (`tests/headless/`) that:
 
 | # | Mechanic | Test | Critical? | Layer |
 |---|---|---|---|---|
-| 1 | PreToolUse hooks | Edit/Write/Bash trigger write-guard Section 3, branch-guard | Yes | A |
+| 1 | PreToolUse hooks | Edit/Write/Bash trigger write-guard Section 3, bash-guard | Yes | A |
 | 2 | PostToolUse hooks | Bash triggers hvst-failure-tracker | Yes | A |
 | 3 | SubagentStop hook | state-writer captures GATE_RESULT sentinels from subagents | Yes | A |
 | 4 | Stop hook natural exit | session-close-check fires on `claude -p` completing normally | Yes | B |
@@ -30,7 +30,7 @@ Build a minimal shell test harness (`tests/headless/`) that:
 | 9 | Phase advancement | Agent calls `advance_phase("plan")`, `advance_phase("build")` — transitions work | Yes | A |
 | 10 | Auto mode | `set_phase_mode("auto")` — op-review phase skipped | Yes | A |
 | 11 | Solo mode merge | `set_solo("true")` — session-close-check merges branch to main | Yes | A+B |
-| 12 | Plan-approved bypass | Runner pre-writes `plan-approved`; agent forward-jumps plan→build; branch-guard Gate 2 passes | Yes | A |
+| 12 | Plan-approved bypass | Runner pre-writes `plan-approved`; agent forward-jumps plan→build; bash-guard Gate 2 passes | Yes | A |
 | 13 | Session registry | `register_session()` writes entry; `unregister_session()` cleans it | Medium | A |
 | 14 | AskUserQuestion headless | Confirm: dead (no operator). Agent skips gracefully, no hang | Yes | B |
 | 15 | --disallowedTools | Permission profile blocks `git push` in headless session | Yes | B |
@@ -112,7 +112,7 @@ The Stop event is not part of the `claude -p` lifecycle. This is the single most
 
 ### What Works in Headless Mode
 
-1. **PreToolUse hooks** — Write-guard (including Section 3 branch-guard gates), branch-guard all fire and enforce protection correctly.
+1. **PreToolUse hooks** — Write-guard (including Section 3 branch-guard gates), bash-guard all fire and enforce protection correctly.
 2. **PostToolUse hooks** — hvst-failure-tracker fires on Bash tool completion.
 3. **SubagentStop hooks** — state-writer captures GATE_RESULT sentinels from subagents.
 4. **Phase model** — init_phase(), advance_phase(), set_phase_mode() all work (they're pure shell functions writing state files).

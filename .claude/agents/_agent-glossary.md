@@ -89,7 +89,7 @@ Governance evidence in `.claude/.state/`. Written by hooks via shell I/O (never 
 
 | File | Writer | Gate |
 |------|--------|------|
-| `plan-approved` | `plan-approval.sh` | Branch guard, A2 scope |
+| `plan-approved` | `plan-approval.sh` | Branch guard, A2 scope (covers both plan approval and brief approval — Decision 0029) |
 | `cohesion-reviewed` | `state-writer.sh` (critic) | State verification |
 | `qa-verified` | `state-writer.sh` (qa-verifier) | State verification |
 | `reviewer-signed` | `state-writer.sh` (reviewer) | High-risk detection |
@@ -103,6 +103,9 @@ Governance evidence in `.claude/.state/`. Written by hooks via shell I/O (never 
 | `.stop-attempt-count` | `session-close-check.sh` | Stop hook attempt counter — safety valve at 3 attempts |
 | `merge-source-branch` | `_phase-helper.sh` (`write_merge_signal`) | Agent-to-hook merge signal — indicates agent completed merge in close phase (session-close-check.sh skips redundant merge) |
 | `scope-risk-gain` | Orchestrator (model) | Risk/gain context for unbriefed-in-scope files — read by `pre-commit-gates.sh` scope classification gate, included in advisory escalation (Decision 0017) |
+| `brief-has-taskgroup` | `_phase-helper.sh` (`write_taskgroup_brief_signal`) | Session-type validation (`check_taskgroup_brief_mismatch` in `bash-guard.sh`, Decision 0026). Cleaned by `cleanup_session_files` |
+
+**Sentinel files** (`.claude/local/`, persistent across sessions, gitignored): `.pragmatist-enforced` (backward-compatible gate deployment marker — written on first `pragmatist-signed` enforcement in `pre-commit-gates.sh`, prevents false positives on sessions started before the gate was deployed).
 
 **Operational files** (`.claude/`, outside `.state/`): `.session-log-hash` (log content hash), `.session-baseline-sha` (commit baseline), `.session-id` (analytics correlation), `.session-type` (session classification), `.hvst-fail-count` (HVST counter), `.deferrals-pending` (deferred findings signal).
 
@@ -159,7 +162,7 @@ Ordered phases tracked in `.claude/.state/phase-state` (Decision 0014). Hooks ma
 | dispatch | Dispatch specialist agents |
 | synthesize | Merge specialist findings |
 | output | Display final output |
-| conversation | Prompt T query: conversational Q&A |
+| conversation | Prompt T query / Prompt Q: conversational Q&A |
 | evaluate | Prompt 0.5: evaluate prototype results |
 | document | Prompt 0.5 PoC: document learnings |
 | scope | Prompt C: select audit dimensions |
@@ -177,6 +180,14 @@ Ordered phases tracked in `.claude/.state/phase-state` (Decision 0014). Hooks ma
 ### Editor-Live Sessions
 
 Operator-driven editing. Phases: `init → build → commit → review → verify → op-review → close`. No plan gate. Loops: `commit→build`, `verify→build`. A4 per-loop; full gates at close. Child mode only. Cycle advisory at 50. See Decision 0023.
+
+### Advisory Sessions
+
+Prompt A review sessions. Two session types:
+- **advisory-init**: Full advisory review — `init → tier-select → dispatch → synthesize → op-review → validate → governance → close`. Dispatches specialist agents for multi-tier review.
+- **advisory-reinit**: Lightweight re-review — `init → validate → governance → close`. Validates prior advisory configuration without full re-dispatch.
+
+Both are advisory-only (governance evidence at close, no implementation gates).
 
 ### Ephemeral Sessions (Phase 3b)
 
@@ -213,6 +224,24 @@ Stop hook (`session-close-check.sh`) gates. All overrides logged via `log_overri
 | `SKIP_UNCOMMITTED_CHECK=1` | Uncommitted changes (blocking) | Allows close with dirty tree |
 | `SKIP_KNOWN_ISSUES_CHECK=1` | Known-issues (advisory) | Suppresses known-issues reminder |
 | `SKIP_CONTRACT_CHECK=1` | Task group contract (blocking) | Bypasses A6 contract + governance checks |
+
+### Pre-Commit Overrides
+
+Commit hook (`pre-commit-gates.sh`) gates. All overrides logged via `log_override()`.
+
+| Override | Gate | Effect |
+|----------|------|--------|
+| `REPO_OS_RECOVER=1` | All state-dependent checks | Emergency recovery — skips plan-approved, cohesion-reviewed, qa-verified, pragmatist-signed |
+| `REPO_OS_SKIP_PLAN_GATE=1` | plan-approved (blocking) | Bypasses plan-approved state file check |
+| `REPO_OS_SKIP_PRAGMATIST_GATE=1` | pragmatist-signed (blocking) | Bypasses pragmatist-signed state file check (Decision 0025) |
+
+### Phase Helper Overrides
+
+Phase management (`_phase-helper.sh`) gates.
+
+| Override | Gate | Effect |
+|----------|------|--------|
+| `REPO_OS_ALLOW_REINIT=1` | init_phase double-init guard | Allows re-initialization of phase state for the same session (crash recovery) |
 
 ### Decision Naming Convention
 `t-NNNN-*.md` = template decisions (synced from upstream, locked in child/autonomous). `0100-*.md`+ = child decisions (editable in child mode). Enforced by mode-guard `t-` prefix check (Decision 0022). `t-manifest.txt` lists template decisions for orphan cleanup.

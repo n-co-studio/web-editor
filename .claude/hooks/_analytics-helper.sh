@@ -10,7 +10,7 @@
 #   log_hook_event "hook-name" "PreToolUse" "Edit" "allow" "$START_MS" "reason_code"
 #
 # ## Consumers (auto-generated — run .claude/tools/hook-dep-map.sh for live data)
-#   Hooks: agent-git-guard, bash-guard, branch-guard, hvst-failure-tracker,
+#   Hooks: agent-git-guard, bash-guard, hvst-failure-tracker,
 #          permission-request, plan-approval, pre-commit-gates, pre-push-gates,
 #          pretooluse-permission (unconditional), session-close-check,
 #          state-writer, write-guard
@@ -33,7 +33,7 @@ case "${OSTYPE:-}" in
 esac
 
 # --- jq availability (probed once at source-time) ---
-# Security-critical hooks (agent-git-guard, branch-guard, write-guard) fail-closed
+# Security-critical hooks (agent-git-guard, bash-guard, write-guard) fail-closed
 # when jq is absent. Analytics and HVST tracking degrade gracefully.
 _REPO_OS_HAS_JQ=false
 command -v jq &>/dev/null && _REPO_OS_HAS_JQ=true
@@ -135,7 +135,11 @@ normalize_path() {
       if command -v python3 &>/dev/null; then
         python3 -c "import os.path,sys; print(os.path.normpath(sys.argv[1]))" "$raw" 2>/dev/null || echo "$raw"
       else
+        # Output raw path so callers under set -e get usable output,
+        # but return 1 and emit warning so fail-closed callers can detect degradation
         echo "$raw"
+        echo "GATE-FINAL: normalize_path requires python3 for paths with .. or . components — python3 not found. Path normalization skipped (fail-closed)." >&2
+        return 1
       fi
       ;;
     *)
@@ -151,13 +155,15 @@ normalize_path() {
 # paths with special components.
 resolve_path() {
   local raw="$1"
+  local result
   if [[ "$raw" == /* ]]; then
     # Absolute — normalize only if it has special components
-    normalize_path "$raw"
+    result=$(normalize_path "$raw") || result="$raw"
   else
     # Relative — prepend PWD then normalize
-    normalize_path "$PWD/$raw"
+    result=$(normalize_path "$PWD/$raw") || result="$PWD/$raw"
   fi
+  echo "$result"
 }
 
 # --- Check if a resolved absolute path is within the repo tree ---
@@ -189,13 +195,13 @@ extract_write_targets() {
   redir=$(echo "$cmd" | grep -oE '[0-9]?[>]{1,2}\s*[^ |;&]+' | sed 's/^[0-9]//' | sed 's/[>]*//' | sed 's/^[[:space:]]*//' || true)
   tee_targets=$(echo "$cmd" | grep -oE 'tee\s+(-a\s+)?[^ |;&]+' | sed 's/tee\s*//' | sed 's/-a\s*//' || true)
   local wt
-  for wt in $redir $tee_targets; do
+  while IFS= read -r wt; do
     [ -z "$wt" ] && continue
     [[ "$wt" == /dev/* ]] && continue
     [[ "$wt" == *"<"* || "$wt" == *">"* || "$wt" == *"="* ]] && continue
     [[ "$wt" != *"/"* && "$wt" != *"."* ]] && continue
     echo "$wt"
-  done
+  done < <(printf '%s\n%s\n' "$redir" "$tee_targets")
 }
 
 # --- Centralized analytics directory for this repo ---
@@ -352,13 +358,17 @@ log_hook_event() {
   branch="$(get_branch)"
 
   # Sanitize all string values interpolated into JSON (escape \ and ", strip control chars)
-  local _sanitize_var
-  for _sanitize_var in sid hook event tool outcome reason mode branch detail path; do
-    eval "local _v=\"\$$_sanitize_var\""
-    _v="${_v//\\/\\\\}"; _v="${_v//\"/\\\"}"
-    _v="${_v//$'\n'/}"; _v="${_v//$'\r'/}"; _v="${_v//$'\t'/}"
-    eval "$_sanitize_var=\"\$_v\""
-  done
+  local _v
+  _v="$sid";      _v="${_v//\\/\\\\}"; _v="${_v//\"/\\\"}"; _v="${_v//$'\n'/}"; _v="${_v//$'\r'/}"; _v="${_v//$'\t'/}"; sid="$_v"
+  _v="$hook";     _v="${_v//\\/\\\\}"; _v="${_v//\"/\\\"}"; _v="${_v//$'\n'/}"; _v="${_v//$'\r'/}"; _v="${_v//$'\t'/}"; hook="$_v"
+  _v="$event";    _v="${_v//\\/\\\\}"; _v="${_v//\"/\\\"}"; _v="${_v//$'\n'/}"; _v="${_v//$'\r'/}"; _v="${_v//$'\t'/}"; event="$_v"
+  _v="$tool";     _v="${_v//\\/\\\\}"; _v="${_v//\"/\\\"}"; _v="${_v//$'\n'/}"; _v="${_v//$'\r'/}"; _v="${_v//$'\t'/}"; tool="$_v"
+  _v="$outcome";  _v="${_v//\\/\\\\}"; _v="${_v//\"/\\\"}"; _v="${_v//$'\n'/}"; _v="${_v//$'\r'/}"; _v="${_v//$'\t'/}"; outcome="$_v"
+  _v="$reason";   _v="${_v//\\/\\\\}"; _v="${_v//\"/\\\"}"; _v="${_v//$'\n'/}"; _v="${_v//$'\r'/}"; _v="${_v//$'\t'/}"; reason="$_v"
+  _v="$mode";     _v="${_v//\\/\\\\}"; _v="${_v//\"/\\\"}"; _v="${_v//$'\n'/}"; _v="${_v//$'\r'/}"; _v="${_v//$'\t'/}"; mode="$_v"
+  _v="$branch";   _v="${_v//\\/\\\\}"; _v="${_v//\"/\\\"}"; _v="${_v//$'\n'/}"; _v="${_v//$'\r'/}"; _v="${_v//$'\t'/}"; branch="$_v"
+  _v="$detail";   _v="${_v//\\/\\\\}"; _v="${_v//\"/\\\"}"; _v="${_v//$'\n'/}"; _v="${_v//$'\r'/}"; _v="${_v//$'\t'/}"; detail="$_v"
+  _v="$path";     _v="${_v//\\/\\\\}"; _v="${_v//\"/\\\"}"; _v="${_v//$'\n'/}"; _v="${_v//$'\r'/}"; _v="${_v//$'\t'/}"; path="$_v"
 
   # Build v2 event with optional fields (omit empty fields to keep events compact)
   local json
@@ -586,8 +596,54 @@ unregister_session() {
   done
 }
 
+# --- Check if another session is active on a given branch ---
+# Query helper for session-bind guards (cleanup, seal).
+# Returns 0 if any session OTHER than the current one is active on the
+# given branch with a live PID. Returns 1 otherwise.
+# Dead-PID entries are cleaned up opportunistically.
+# Arguments:
+#   $1 — branch name to check
+is_session_active() {
+  local target_branch="$1"
+  [ -z "$target_branch" ] && return 1
+
+  local repo_root
+  repo_root="$_REPO_OS_ROOT"
+  local sessions_dir="$repo_root/.claude/.state/sessions"
+  [ -d "$sessions_dir" ] || return 1
+
+  local sid
+  sid="$(get_session_id "$repo_root")"
+
+  local check_file
+  for check_file in "$sessions_dir"/*.yaml; do
+    [ -f "$check_file" ] || continue
+    local other_sid
+    other_sid=$(basename "$check_file" .yaml)
+    [ "$other_sid" = "$sid" ] && continue
+
+    local other_branch
+    other_branch=$(grep '^branch: ' "$check_file" 2>/dev/null | sed 's/^branch: *//')
+    [ "$other_branch" = "$target_branch" ] || continue
+
+    # Same branch — check PID liveness
+    local other_pid
+    other_pid=$(grep '^pid: ' "$check_file" 2>/dev/null | sed 's/^pid: *//')
+    if [ -n "$other_pid" ] && ! kill -0 "$other_pid" 2>/dev/null; then
+      # Dead PID — clean up opportunistically
+      rm -f "$check_file" 2>/dev/null || true
+      continue
+    fi
+
+    # Live session found on this branch
+    return 0
+  done
+
+  return 1
+}
+
 # --- Check for concurrent session overlap on the same branch ---
-# Called by write-guard.sh (Section 3) and branch-guard.sh on each Edit/Write/Bash.
+# Called by write-guard.sh (Section 3) and bash-guard.sh on each Edit/Write/Bash.
 # Returns: 0 = no overlap or advisory only, 2 = blocking overlap.
 # Advisory for task group sharing; BLOCKING for non-task-group overlap.
 # Override: REPO_OS_SKIP_OVERLAP_CHECK=1

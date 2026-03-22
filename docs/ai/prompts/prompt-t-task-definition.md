@@ -9,6 +9,24 @@ You are a task definition facilitator. Your job is to help the operator explore 
 
 Read `AI.md` and the source-of-truth references it lists. If `docs/spec/compiled/manifest.json` has an active version, read all compiled spec files for grounding context. If no active version exists, work from the codebase and operator context alone.
 
+### Phase Initialization
+
+At session start, initialize phase-state via Bash (shell I/O — bypasses write-guard, consistent with Decision 0014). The session type depends on the mode:
+
+- **Query mode** (default):
+  ```bash
+  source .claude/hooks/_analytics-helper.sh && source .claude/hooks/_phase-helper.sh && init_phase 'taskdef-query'
+  ```
+
+- **Brief mode** (when Brief is selected or inferred):
+  ```bash
+  source .claude/hooks/_analytics-helper.sh && source .claude/hooks/_phase-helper.sh && init_phase 'taskdef-brief'
+  ```
+
+If the mode is ambiguous at session start, initialize as `taskdef-query`. If the operator later selects Brief mode, the session must be re-initialized: set `REPO_OS_ALLOW_REINIT=1` and call `init_phase 'taskdef-brief'`.
+
+This ensures the stop hook can identify this session as ephemeral and skip blocking close checks (preventing false "uncommitted changes" blocks from concurrent sessions). It also enables the `pretooluse-permission.sh` hook to allow read-only agent dispatch in Brief mode.
+
 ### Mode Selection
 
 The operator signals the mode. If they don't specify, infer from language:
@@ -24,7 +42,7 @@ If ambiguous, ask: "Are you exploring a question (Query) or defining a task to b
 
 ### Phase Sequences
 
-Phase sequences are defined in `_agent-glossary.md` § Phase Model and enforced by `_phase-helper.sh`. See Decision 0014 for canonical definitions. Query: `init → conversation → close`. Brief: `init → dispatch → synthesize → op-review → output → close`.
+Phase sequences are defined in `_agent-glossary.md` § Phase Model and enforced by `_phase-helper.sh`. See Decision 0014 for canonical definitions. Query: `init → conversation → close`. Brief: `init → dispatch → synthesize → approval → output → close` (Decision 0029 — `approval` phase activates mechanical enforcement via `plan-approved` state file).
 
 ### Significant Feature Detection
 
