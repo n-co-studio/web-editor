@@ -245,6 +245,7 @@ is_carved_out() {
         .claude/local/session-log.md) return 0 ;;
         .claude/local/known-issues.md) return 0 ;;
         .claude/local/task-groups/*) return 0 ;;
+        .claude/local/task-contract.yaml) return 0 ;;
         docs/ai/prompts/*) return 0 ;;
         docs/ai/decisions/*) return 0 ;;
         docs/ai/logs/*) return 0 ;;
