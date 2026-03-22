@@ -14,6 +14,12 @@
 #   assert_phase "build" || echo "not yet in build phase"
 #
 # Decision 0014 — Phase-Aware Flow Model
+#
+# ## Consumers (auto-generated — run .claude/tools/hook-dep-map.sh for live data)
+#   Hooks: bash-guard, branch-guard, plan-approval, pre-commit-gates,
+#          pretooluse-permission [conditional], session-close-check,
+#          state-writer, write-guard
+#   Automation: runner.sh, queue-cli.sh, intake.sh
 
 # --- Phase sequence lookup (Bash 3 compatible — no associative arrays) ---
 # Returns space-delimited ordered phase list for a session type.

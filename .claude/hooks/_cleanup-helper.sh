@@ -6,6 +6,10 @@
 # Depends on (must be sourced before this file):
 #   _analytics-helper.sh — get_repo_root, get_session_type, get_branch,
 #                           unregister_session, cleanup_old_analytics
+#
+# ## Consumers (auto-generated — run .claude/tools/hook-dep-map.sh for live data)
+#   Hooks: session-close-check
+#   Automation: runner.sh, queue-cli.sh, intake.sh
 
 # --- Clean all session-scoped state files ---
 # Removes governance state, phase state, and session markers.

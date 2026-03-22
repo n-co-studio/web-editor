@@ -9,6 +9,9 @@
 #   DENY_BASH_PATTERNS — dangerous Bash commands always denied
 #
 # Priority: deny > allow > fall-through (dialog).
+#
+# ## Consumers (auto-generated — run .claude/tools/hook-dep-map.sh for live data)
+#   Hooks: permission-request, pretooluse-permission
 
 # --- Non-Bash tools that are always safe to auto-approve ---
 # These tools operate within Claude Code's sandbox and cannot cause harm.

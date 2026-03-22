@@ -8,6 +8,13 @@
 #   START_MS=$(now_ms)
 #   ... hook logic ...
 #   log_hook_event "hook-name" "PreToolUse" "Edit" "allow" "$START_MS" "reason_code"
+#
+# ## Consumers (auto-generated — run .claude/tools/hook-dep-map.sh for live data)
+#   Hooks: agent-git-guard, bash-guard, branch-guard, hvst-failure-tracker,
+#          permission-request, plan-approval, pre-commit-gates, pre-push-gates,
+#          pretooluse-permission (unconditional), session-close-check,
+#          state-writer, write-guard
+#   Automation: runner.sh, queue-cli.sh, intake.sh
 
 # --- Portable millisecond timestamp ---
 # GNU date supports %N (nanoseconds); macOS date does not — it outputs literal "N".
