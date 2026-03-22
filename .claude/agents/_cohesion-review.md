@@ -6,7 +6,7 @@ Read by the Orchestrator after Builder signals completion, before invoking QA.
 
 ## Procedure
 
-1. **Gather context** — Run `git diff` to capture the changes. Identify files touched and their immediate neighbors (files that import from or are imported by the changed files). Read `.claude/.state/task-contract.yaml` (singular builds) or the `intent:` block from the task group contract (groups) if present.
+1. **Gather context** — Run `git diff` to capture the changes. Identify files touched and their immediate neighbors (files that import from or are imported by the changed files). Read `.claude/local/task-contract.yaml` (singular builds) or the `intent:` block from the task group contract (groups) if present.
 2. **Invoke Critic** — Dispatch Critic as subagent via Task with mode=cohesion. Pass the diff output and list of files to review in the Task prompt. If a task contract is present, also pass the contract's `verification:` criteria and instruct Critic to evaluate each criterion (see Contract Verification in `critic.md`).
 3. **Review findings** — Read the Cohesion Brief. Categorize each finding:
    - **Clear fix**: Unambiguous broken reference or inconsistency → delegate to Builder

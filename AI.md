@@ -39,7 +39,7 @@ On-demand (loaded by orchestrator.md triggers, not at session start):
 - .claude/agents/_cohesion-review.md (read after Builder signals completion)
 - .claude/agents/_hvst-review.md (read when HVST debugging stalls or operator requests debug review)
 - docs/ai/task-groups/ (loaded when task brief contains `### Task Group`; template mode uses `.claude/local/task-groups/` for contracts)
-- .claude/.state/task-contract.yaml (task contract — written at session init from brief text, read at cohesion review; Decision 0020)
+- .claude/local/task-contract.yaml (task contract — written at session init from brief text, read at cohesion review; Decision 0020)
 - docs/ai/workflow-appendix/session-type-prototype.md (read when session type is prototype — detected at init from brief or experiment/* branch)
 - docs/ai/workflow-appendix/session-type-task-definition.md (read when session type is task-definition — detected at init from Prompt T invocation)
 - docs/ai/workflow-appendix/session-type-editor-live.md (read when session type is editor-live — detected at init from brief or operator signal)

@@ -42,6 +42,7 @@ cleanup_session_files() {
     rm -f "$state_dir/phase-state"
     rm -f "$state_dir/overrides.log"
     rm -f "$state_dir/task-contract.yaml"
+    rm -f "$repo_root/.claude/local/task-contract.yaml"
     rm -f "$state_dir/merge-source-branch"
     rm -f "$state_dir/.stop-attempt-count"
     # Clean completion markers when merge brief closes (parallel groups)

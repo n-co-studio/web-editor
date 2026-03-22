@@ -6,7 +6,7 @@ Accepted
 ## Triggers
 
 - type: file
-- path: `\.claude/\.state/task-contract\.yaml`
+- path: `\.claude/local/task-contract\.yaml`
 - path: `docs/ai/task-groups/.*\.yaml`
 - path: `\.claude/local/task-groups/.*\.yaml`
 - path: `\.claude/agents/_cohesion-review\.md`
@@ -20,24 +20,24 @@ Introduce persistent task contracts that capture task-level intent (verification
 
 2. **Prompt T output**: Prompt T embeds the task contract as a `### Task Contract` section inside the single brief template (after `### Spec References`), so operators copy one block instead of two. For task groups, the contract content is embedded in each brief's `### Task Group` section as a `Contract:` field. Prompt T remains fully ephemeral — no file writes.
 
-3. **Prompt B consumption**: At session init, Prompt B extracts the task contract from the brief text and writes it to `.claude/.state/task-contract.yaml`. For task groups, the `intent:` block is written into the group contract YAML during the `contract-init` phase. Stale contract detection: if `task-contract.yaml` already exists at session start, delete it before writing the new one.
+3. **Prompt B consumption**: At session init, Prompt B extracts the task contract from the brief text and writes it to `.claude/local/task-contract.yaml`. The contract lives in `.claude/local/` (outside the hook-managed `.state/` perimeter) because it is model-written — `state-guard` blocks model writes to `.state/` (Decision 0004). For task groups, the `intent:` block is written into the group contract YAML during the `contract-init` phase. Stale contract detection: if `task-contract.yaml` already exists at session start, delete it before writing the new one.
 
 4. **Cohesion review integration**: The cohesion review procedure reads the task contract and passes its `verification:` criteria to Critic alongside the diff. Critic evaluates each criterion as VERIFIED, UNVERIFIED, or INCONCLUSIVE. These findings are advisory — they feed into the cohesion brief but do not produce a separate gate result.
 
 5. **Two lifecycle scopes**:
-   - **Task-scoped** (singular builds): `.claude/.state/task-contract.yaml`. Cleaned at session close by `cleanup_session()`.
+   - **Task-scoped** (singular builds): `.claude/local/task-contract.yaml`. Cleaned at session close by `cleanup_session()`.
    - **Group-scoped** (task groups): `intent:` block in the group contract YAML. The `intent:` block persists in the contract as part of the group's governance record — it is not deleted at close. Each brief updates its own `intent:` fields during `contract-init`; the final contract captures the last brief's intent alongside accumulated governance evidence. Governance evidence (gate results, overrides) continues to use the existing `governance:` section in group contracts — no additional lifecycle management needed.
 
 6. **No new gate**: Contract verification extends gate A5 (cohesion review) as advisory criteria. It does not introduce a new blocking gate. Intent adherence via verification criteria is model judgment (VERIFIED/UNVERIFIED/INCONCLUSIVE), not a mechanical binary check. Making it blocking would risk false positives that erode gate trust.
 
 7. **Backward compatibility**: Sessions without task contracts (legacy sessions, hotfixes, experiment branches) skip contract verification silently. The `intent:` block in group contracts is optional — existing groups without it continue to work.
 
-8. **Automation layer**: Headless runners (Decision 0017) include the full brief text (which contains the `### Task Contract` section inline) in the assembled prompt. The agent extracts the contract YAML and writes it to `.claude/.state/task-contract.yaml` during init. No separate parsing step is needed — the contract is part of the brief.
+8. **Automation layer**: Headless runners (Decision 0017) include the full brief text (which contains the `### Task Contract` section inline) in the assembled prompt. The agent extracts the contract YAML and writes it to `.claude/local/task-contract.yaml` during init. No separate parsing step is needed — the contract is part of the brief.
 
 ## Contract Schema
 
 ```yaml
-# Task Contract — written to .claude/.state/task-contract.yaml (singular)
+# Task Contract — written to .claude/local/task-contract.yaml (singular)
 # or embedded as intent: block in task group contract (groups)
 goal: ""                    # what this task accomplishes (1-2 sentences)
 scope_files:                # files likely affected

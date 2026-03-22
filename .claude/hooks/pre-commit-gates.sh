@@ -378,7 +378,7 @@ fi
 # Skip: no contract, no scope_files, experiment, REPO_OS_RECOVER.
 # ============================================================
 if [ "$SKIP_STATE" = false ] && [ -n "$STAGED_FILES" ]; then
-  CONTRACT_FILE="$STATE_DIR/task-contract.yaml"
+  CONTRACT_FILE="$REPO_ROOT/.claude/local/task-contract.yaml"
   if [ -f "$CONTRACT_FILE" ]; then
     # Extract scope_files list from contract (YAML list items after scope_files:)
     SCOPE_FILES=""

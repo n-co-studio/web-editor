@@ -36,10 +36,10 @@ The phase model tracks session progress in `.claude/.state/phase-state`. Hooks e
 
 | Phase | Agent | Notes |
 |-------|-------|-------|
-| plan | **Pragmatist** (plan-gating mode) | After Orchestrator drafts the plan, before presenting to operator. Passes plan text inline in Task prompt. GATE_RESULT: BLOCKED (FUNDAMENTAL-MISMATCH) or APPROVED. Findings and verdict presented alongside plan to operator. Auto mode: BLOCKED degrades to advisory-with-warning (Decision 0025) |
+| plan | **Pragmatist** (plan-gating mode) | REQUIRE dispatch before presenting plan to operator. Foreground preferred (ensures verdict available before plan presentation; background supported but may complete during build). Passes plan text inline in Task prompt. GATE_RESULT: BLOCKED (FUNDAMENTAL-MISMATCH) or APPROVED. Findings and verdict presented alongside plan to operator. Auto mode: BLOCKED degrades to advisory-with-warning (Decision 0025) |
 | build | Builder | Implements changes |
-| review | **Critic** (cohesion mode) + **PM Advisory** (spec-drift) | Parallel dispatch. Critic checks internal coherence; PM checks spec alignment. PM is conditional — requires compiled spec or `mvp-scope.yaml` (skipped silently otherwise). PM findings are advisory (not gating) |
-| verify | QA Verifier | Commit blocker (A1–A6, B1–B3) |
+| review | **Critic** (cohesion mode) + **PM Advisory** (spec-drift) | REQUIRE: dispatch Critic before advancing to verify phase. Parallel dispatch. Critic checks internal coherence; PM checks spec alignment. PM is conditional — requires compiled spec or `mvp-scope.yaml` (skipped silently otherwise). PM findings are advisory (not gating) |
+| verify | QA Verifier | REQUIRE: dispatch before advancing to commit phase. Commit blocker (A1–A6, B1–B3) |
 | user-review | User Review Tier agents | Optional — skipped when no User Review in brief |
 | commit | Orchestrator | Commit with trailers |
 
@@ -61,7 +61,7 @@ Branches merge to main directly at session close. See `.claude/agents/_agent-glo
 
 At session init, after branch creation and spec loading, extract the task contract from the brief text:
 
-- **Singular builds**: If the brief contains a `### Task Contract` section with a YAML code block, extract the YAML content and write it to `.claude/.state/task-contract.yaml`. The task contract is embedded inside the brief template (not a separate block). If `.claude/.state/task-contract.yaml` already exists (orphan from a crashed session), delete it before writing the new one and log: "Cleaned stale task contract from previous session."
+- **Singular builds**: If the brief contains a `### Task Contract` section with a YAML code block, extract the YAML content and write it to `.claude/local/task-contract.yaml`. The task contract is embedded inside the brief template (not a separate block). If `.claude/local/task-contract.yaml` already exists (orphan from a crashed session), delete it before writing the new one and log: "Cleaned stale task contract from previous session."
 - **Task groups**: If the brief's `### Task Group` section contains a `Contract:` field, extract the contract content and write it as the `intent:` block in the task group contract YAML during the `contract-init` phase. Use the fields: `goal`, `verification`, `scope_files`, `spec_references`.
 - **No contract present**: If the brief contains neither a `### Task Contract` section nor a `Contract:` field in `### Task Group`, skip contract extraction silently (backward compatibility with legacy briefs, hotfixes, etc.).
 

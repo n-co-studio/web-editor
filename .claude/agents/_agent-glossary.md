@@ -99,7 +99,7 @@ Governance evidence in `.claude/.state/`. Written by hooks via shell I/O (never 
 | `governance-checked` | `bash-guard.sh` (Gate 3, Bash) or `pre-commit-gates.sh` (Gate 3, commit) | First-fire marker (inter-session governance) |
 | `phase-state` | `_phase-helper.sh` (via hooks) | Phase-aware flow tracking (session type, current phase, cycle) |
 | `overrides.log` | `_analytics-helper.sh` (`log_override`) | Override audit (session-close-check) |
-| `task-contract.yaml` | Orchestrator (model) | Task contract — intent reference for cohesion review (Decision 0020) |
+| `task-contract.yaml` | Orchestrator (model) | Task contract — intent reference for cohesion review (Decision 0020). Lives in `.claude/local/` (not `.state/`) because it is model-written; state-guard blocks model writes to `.state/` |
 | `.stop-attempt-count` | `session-close-check.sh` | Stop hook attempt counter — safety valve at 3 attempts |
 | `merge-source-branch` | `_phase-helper.sh` (`write_merge_signal`) | Agent-to-hook merge signal — indicates agent completed merge in close phase (session-close-check.sh skips redundant merge) |
 | `scope-risk-gain` | Orchestrator (model) | Risk/gain context for unbriefed-in-scope files — read by `pre-commit-gates.sh` scope classification gate, included in advisory escalation (Decision 0017) |

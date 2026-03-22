@@ -32,7 +32,7 @@ When Prompt T detects non-overlapping file scope across briefs, it offers parall
 
 Decision 0020. Task contracts persist the brief's intent as a lightweight YAML artifact for cohesion review reference. Two lifecycle scopes:
 
-- **Task-scoped** (singular builds): Prompt B extracts the YAML block from the `### Task Contract` section in the brief and writes it to `.claude/.state/task-contract.yaml` at session init. Cleaned at session close by `cleanup_session()` (same as other session-scoped state files). If `task-contract.yaml` already exists at session start (orphan from crashed session), delete it before writing the new one.
+- **Task-scoped** (singular builds): Prompt B extracts the YAML block from the `### Task Contract` section in the brief and writes it to `.claude/local/task-contract.yaml` at session init. The contract lives in `.claude/local/` (not `.state/`) because it is model-written — `state-guard` blocks model writes to `.state/`. Cleaned at session close by `cleanup_session()`. If `task-contract.yaml` already exists at session start (orphan from crashed session), delete it before writing the new one.
 
 - **Group-scoped** (task groups): The `intent:` block lives in the task group contract YAML. Written by each brief at `contract-init` phase from Prompt T output. The `intent:` block persists in the contract as part of the group's governance record — it is not deleted at close. Each brief updates its own `intent:` fields during `contract-init`; the final contract captures the last brief's intent alongside accumulated governance evidence.
 

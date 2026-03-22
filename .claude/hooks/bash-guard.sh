@@ -330,7 +330,7 @@ if [ "$SKIP_MODE_GUARD" = false ]; then
           template)
             case "$p" in
               .claude/agents/*|.claude/hooks/*|.claude/settings.json|.claude/settings.local.json) return 0 ;;
-              .claude/local/session-log.md|.claude/local/known-issues.md|.claude/local/task-groups/*) return 0 ;;
+              .claude/local/session-log.md|.claude/local/known-issues.md|.claude/local/task-groups/*|.claude/local/task-contract.yaml) return 0 ;;
               docs/ai/prompts/*|docs/ai/decisions/*|docs/ai/logs/*) return 0 ;;
               docs/ai/workflow.md|docs/ai/quality-gates.md|docs/ai/hook-rules-summary.md|docs/ai/quality-gates-summary.md|docs/ai/task-groups/_contract-template.yaml) return 0 ;;
               docs/ai/workflow-appendix/*|docs/ai/governance/*) return 0 ;;
