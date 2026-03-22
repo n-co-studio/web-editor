@@ -93,7 +93,7 @@ The Orchestrator synthesizes specialist findings into a draft task brief:
 
 #### Step 4 — Operator Review
 
-Present the draft task brief to the operator. The operator reviews and may:
+Present the draft task brief to the operator. Use `AskUserQuestion` (not conversational text) to request approval — this ensures the operator gets a structured dialog. Use options: **"Approve"**, **"Revise"**, **"Narrow"**, **"Abandon"**. The operator reviews and may:
 - **Approve** — Brief is final. Displayed in copy-paste format.
 - **Revise** — Operator requests changes. Update and re-present.
 - **Narrow** — Operator says "too big." Split into multiple smaller briefs. Each sub-brief gets a `### Task Group` section with a shared group name, sequence number (N of M), and integration notes (produces/consumes). The first brief in the group creates the task group contract during its Prompt B session; subsequent briefs read and update it. See `docs/ai/task-groups/_contract-template.yaml` for the contract structure. When producing a task group, ask the operator whether to pre-approve all briefs (**auto** mode — agent completes each brief through merge autonomously) or review each brief individually (**review** mode — agent pauses for operator review before commit). The contract carries this setting.
@@ -236,7 +236,7 @@ After displaying the brief, instruct: "Copy the block above and paste it into a 
 
 #### Step 6 — Queue Intake (opt-in)
 
-After displaying the brief in Step 5, offer: **"Add to automation queue?"**
+After displaying the brief in Step 5, use `AskUserQuestion` to offer: **"Add to automation queue?"** with options **"Yes"** and **"No"**. This ensures consistent use of structured dialogs for operator decisions.
 
 If the operator declines or does not respond, close the session normally — this step is opt-in.
 
@@ -270,6 +270,7 @@ If the operator accepts:
 - REQUIRE: **never dispatch specialists in Query mode.** Query mode is conversational — the Orchestrator answers directly.
 - REQUIRE: **always dispatch the 4 core specialists in Brief mode** (Architect, Exploration, Critic, Pragmatist). Additionally dispatch PM Advisory when a compiled spec (`manifest.json` `active` ≠ null) or `mvp-scope.yaml` exists. No tier selection — the core team is fixed, PM is conditional.
 - REQUIRE: **never finalize a brief without operator approval.** Always present the draft for review first.
+- REQUIRE: **use AskUserQuestion (not conversational acknowledgment) for operator approval** — consistent with orchestrator.md constraint. Applies to Step 4 (brief approval) and Step 6 (queue intake offer).
 - REQUIRE: **if specs don't exist, say so.** Note in the brief's Spec References section that specs were unavailable and the brief was grounded in codebase analysis alone.
 - REQUIRE: **never use the Agent tool with write-capable subagent types** (builder, qa-verifier, security-privacy, general-purpose, reviewer) or request worktree isolation. Only read-only advisory agents are permitted.
 - GUIDE: **if the task is too large for a single brief**, proactively suggest splitting. A brief that maps to more than one Prompt B session should be broken into sequential briefs.

@@ -249,7 +249,9 @@ is_carved_out() {
         docs/ai/decisions/*) return 0 ;;
         docs/ai/logs/*) return 0 ;;
         docs/ai/workflow.md) return 0 ;;
-        docs/ai/quality-gates.md|docs/ai/hook-rules-summary.md) return 0 ;;
+        docs/ai/quality-gates.md|docs/ai/hook-rules-summary.md|docs/ai/quality-gates-summary.md) return 0 ;;
+        docs/ai/workflow-appendix/*) return 0 ;;
+        docs/ai/governance/*) return 0 ;;
         docs/ai/task-groups/_contract-template.yaml) return 0 ;;
         docs/spec/_templates/*) return 0 ;;
         AI.md) return 0 ;;
@@ -285,6 +287,7 @@ is_carved_out() {
   esac
   return 1
 }
+
 
 # --- Fast-exit for non-template modes ---
 # In child/autonomous modes, product code always passes and governance path

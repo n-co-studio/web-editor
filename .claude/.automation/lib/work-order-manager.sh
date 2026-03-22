@@ -5,7 +5,7 @@
 #
 # Work orders group related queue entries (e.g., all briefs in a task group)
 # into a single operator-visible unit with aggregate status tracking.
-# Status: open → completed | escalated. Reopen: escalated → open.
+# Status: open → completed | escalated | failed. Reopen: escalated|failed → open.
 #
 # Depends on (sourced by runner.sh before this file):
 #   runner.sh sets AUTOMATION_DIR, REPO_ROOT, CONFIG_FILE
@@ -30,7 +30,7 @@ _ensure_wo_dirs() {
 
 # --- Module variables (mirrors work-order.yaml fields) ---
 _WO_ID="" _WO_TYPE="" _WO_LABEL="" _WO_ENTRY_IDS="" _WO_STATUS=""
-_WO_CREATED_AT="" _WO_UPDATED_AT="" _WO_COMPLETED_AT=""
+_WO_CREATED_AT="" _WO_UPDATED_AT="" _WO_COMPLETED_AT="" _WO_FAILURE_ENTRY_ID=""
 
 # --- Bulk-read work order YAML into _WO_* variables (zero-fork) ---
 # Work order format: `work_order:` header followed by `  key: value` lines.
@@ -39,7 +39,7 @@ _WO_CREATED_AT="" _WO_UPDATED_AT="" _WO_COMPLETED_AT=""
 _load_work_order() {
   local wo_file="$1"
   _WO_ID="" _WO_TYPE="" _WO_LABEL="" _WO_ENTRY_IDS="" _WO_STATUS=""
-  _WO_CREATED_AT="" _WO_UPDATED_AT="" _WO_COMPLETED_AT=""
+  _WO_CREATED_AT="" _WO_UPDATED_AT="" _WO_COMPLETED_AT="" _WO_FAILURE_ENTRY_ID=""
   [ -f "$wo_file" ] || return 1
 
   local _line _in_list=false
@@ -72,6 +72,7 @@ _load_work_order() {
       "  created_at: "*)   _WO_CREATED_AT="${_line#  created_at: }" ;;
       "  updated_at: "*)   _WO_UPDATED_AT="${_line#  updated_at: }" ;;
       "  completed_at: "*) _WO_COMPLETED_AT="${_line#  completed_at: }" ;;
+      "  failure_entry_id: "*) _WO_FAILURE_ENTRY_ID="${_line#  failure_entry_id: }" ;;
     esac
   done < "$wo_file"
 }
@@ -105,6 +106,7 @@ _write_work_order() {
     printf '  created_at: %s\n' "$_WO_CREATED_AT"
     printf '  updated_at: %s\n' "$_WO_UPDATED_AT"
     printf '  completed_at: %s\n' "$_WO_COMPLETED_AT"
+    printf '  failure_entry_id: %s\n' "$_WO_FAILURE_ENTRY_ID"
   } > "$tmp_file"
   mv "$tmp_file" "$wo_file"
 }
@@ -122,17 +124,22 @@ _transition_work_order() {
   case "$_current" in
     open)
       case "$new_status" in
-        in_progress|completed|escalated) _legal=true ;;
+        in_progress|completed|escalated|failed) _legal=true ;;
       esac
       ;;
     in_progress)
       case "$new_status" in
-        completed|escalated|open) _legal=true ;;
+        completed|escalated|failed|open) _legal=true ;;
       esac
       ;;
     escalated)
       case "$new_status" in
         in_progress|open) _legal=true ;; # retry after escalation review
+      esac
+      ;;
+    failed)
+      case "$new_status" in
+        in_progress|open) _legal=true ;; # retry after failure review
       esac
       ;;
     completed)
@@ -148,7 +155,7 @@ _transition_work_order() {
   _WO_STATUS="$new_status"
   _WO_UPDATED_AT="$timestamp"
   case "$new_status" in
-    completed|escalated) _WO_COMPLETED_AT="$timestamp" ;;
+    completed|escalated|failed) _WO_COMPLETED_AT="$timestamp" ;;
   esac
 }
 
@@ -219,6 +226,7 @@ wo_create() {
   _WO_CREATED_AT="$timestamp"
   _WO_UPDATED_AT="$timestamp"
   _WO_COMPLETED_AT=""
+  _WO_FAILURE_ENTRY_ID=""
 
   _write_work_order "$(_wo_dir)/${wo_id}.yaml"
 
@@ -328,7 +336,9 @@ wo_check_completion() {
   fi
 
   local all_completed=true
-  local has_terminal_failure=false
+  local has_failed_entry=false
+  local has_escalation=false
+  local first_failed_eid=""
   local _eid
 
   # Bash 3.2 compatible (audit 5.1: read -ra not available)
@@ -347,7 +357,14 @@ wo_check_completion() {
     _load_queue_entry "$entry_file"
     case "$_QE_STATUS" in
       completed) ;;
-      failed|review|blocked) has_terminal_failure=true; all_completed=false ;;
+      failed)
+        has_failed_entry=true
+        all_completed=false
+        if [ -z "$first_failed_eid" ]; then
+          first_failed_eid="$_eid"
+        fi
+        ;;
+      review|blocked) has_escalation=true; all_completed=false ;;
       *) all_completed=false ;;
     esac
   done
@@ -360,7 +377,13 @@ wo_check_completion() {
     _transition_work_order "completed"
     _write_work_order "$wo_file"
     printf '%s' "completed"
-  elif [ "$has_terminal_failure" = true ]; then
+  elif [ "$has_failed_entry" = true ]; then
+    # Failed entry takes priority — block siblings from running
+    _transition_work_order "failed"
+    _WO_FAILURE_ENTRY_ID="$first_failed_eid"
+    _write_work_order "$wo_file"
+    printf '%s' "failed"
+  elif [ "$has_escalation" = true ]; then
     _transition_work_order "escalated"
     _write_work_order "$wo_file"
     printf '%s' "escalated"
@@ -369,8 +392,8 @@ wo_check_completion() {
   fi
 }
 
-# --- Reopen an escalated work order ---
-# Transitions escalated back to open (clears completed_at).
+# --- Reopen an escalated or failed work order ---
+# Transitions escalated/failed back to open (clears completed_at, failure_entry_id).
 # Arguments:
 #   $1 — wo_id (work order identifier)
 wo_reopen() {
@@ -382,20 +405,21 @@ wo_reopen() {
     return 1
   }
 
-  if [ "$_WO_STATUS" != "escalated" ]; then
-    echo "ERROR: Work order $wo_id is not escalated (status: $_WO_STATUS)" >&2
+  if [ "$_WO_STATUS" != "escalated" ] && [ "$_WO_STATUS" != "failed" ]; then
+    echo "ERROR: Work order $wo_id is not escalated or failed (status: $_WO_STATUS)" >&2
     return 1
   fi
 
   _WO_STATUS="open"
   _WO_UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   _WO_COMPLETED_AT=""
+  _WO_FAILURE_ENTRY_ID=""
   _write_work_order "$wo_file"
 }
 
 # --- Check if a work order is escalated ---
 # Lightweight read-only check. Returns 0 if the work order status is "escalated"
-# (a sibling entry is in review/failed/blocked), 1 otherwise.
+# (a sibling entry is in review/blocked), 1 otherwise.
 # Only touches _WO_* variables (no _QE_* collision).
 # Arguments:
 #   $1 — wo_id (work order identifier)
@@ -412,11 +436,30 @@ wo_is_escalated() {
   return 1
 }
 
+# --- Check if a work order has a failed entry ---
+# Lightweight read-only check. Returns 0 if the work order status is "failed"
+# (a sibling entry failed), 1 otherwise.
+# Only touches _WO_* variables (no _QE_* collision).
+# Arguments:
+#   $1 — wo_id (work order identifier)
+# Returns: 0 if failed, 1 otherwise
+wo_is_failed() {
+  local wo_id="$1"
+  local wo_file="$(_wo_dir)/${wo_id}.yaml"
+
+  _load_work_order "$wo_file" || return 1
+
+  if [ "$_WO_STATUS" = "failed" ]; then
+    return 0
+  fi
+  return 1
+}
+
 # --- List work orders ---
 # Lists work orders, optionally filtered by status.
 # Arguments:
-#   $1 — status filter (optional: open | completed | escalated)
-# Output: one line per work order: id|status|type|label
+#   $1 — status filter (optional: open | completed | escalated | failed)
+# Output: one line per work order: id|status|type|label|failure_entry_id
 wo_list() {
   local filter="${1:-}"
   local wo_dir
@@ -431,6 +474,6 @@ wo_list() {
     if [ -n "$filter" ] && [ "$_WO_STATUS" != "$filter" ]; then
       continue
     fi
-    printf '%s|%s|%s|%s\n' "$_WO_ID" "$_WO_STATUS" "$_WO_TYPE" "$_WO_LABEL"
+    printf '%s|%s|%s|%s|%s\n' "$_WO_ID" "$_WO_STATUS" "$_WO_TYPE" "$_WO_LABEL" "$_WO_FAILURE_ENTRY_ID"
   done
 }

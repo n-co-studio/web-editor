@@ -621,7 +621,7 @@ case "$SUBCOMMAND" in
     fi
     ;;
 
-  # --- reopen-wo: reopen an escalated work order and reset blocked siblings ---
+  # --- reopen-wo: reopen an escalated or failed work order and reset blocked/failed siblings ---
   reopen-wo)
     if [ $# -lt 1 ]; then
       echo "ERROR: reopen-wo requires <work-order-id>" >&2

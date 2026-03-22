@@ -189,7 +189,7 @@ review_items() {
   qdir=$(_queue_dir)
 
   local status
-  for status in review blocked; do
+  for status in review blocked failed; do
     local dir="$qdir/$status"
     [ -d "$dir" ] || continue
     local f
@@ -200,4 +200,19 @@ review_items() {
         "$_QE_ID" "$_QE_STATUS" "$_QE_SESSION_TYPE" "$_QE_ERROR_LOG" "$_QE_WORK_ORDER_ID"
     done
   done
+
+  # Surface failed work orders (entries may already appear above, but
+  # the work order itself carries the failure_entry_id for diagnostics)
+  local wo_dir="$qdir/work-orders"
+  if [ -d "$wo_dir" ]; then
+    local wf
+    for wf in "$wo_dir"/*.yaml; do
+      [ -f "$wf" ] || continue
+      _load_work_order "$wf"
+      if [ "$_WO_STATUS" = "failed" ]; then
+        printf 'wo:%s|%s|work-order|failure_entry: %s|%s\n' \
+          "$_WO_ID" "$_WO_STATUS" "$_WO_FAILURE_ENTRY_ID" "$_WO_LABEL"
+      fi
+    done
+  fi
 }

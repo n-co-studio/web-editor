@@ -331,6 +331,20 @@ _startup_crash_recovery() {
           _write_queue_entry "$qdir/failed/${entry_id}.yaml"
           rm -f "$entry_file"
           rm -f "$hb_file" 2>/dev/null || true
+          # Propagate failure to work order if entry belongs to one
+          if [ -n "$_QE_WORK_ORDER_ID" ]; then
+            _sr_wo_status=$(wo_check_completion "$_QE_WORK_ORDER_ID" 2>/dev/null) || true
+            case "$_sr_wo_status" in
+              failed)
+                review_log_append "work-order-failed" "$_QE_WORK_ORDER_ID" "" \
+                  "Work order $_QE_WORK_ORDER_ID failed — orphaned entry $entry_id recovered at startup. Recovery: queue-cli.sh reopen-wo $_QE_WORK_ORDER_ID" 2>/dev/null || true
+                ;;
+              escalated)
+                review_log_append "work-order-escalated" "$_QE_WORK_ORDER_ID" "" \
+                  "Work order $_QE_WORK_ORDER_ID escalated — orphaned entry $entry_id recovered at startup. Recovery: queue-cli.sh reopen-wo $_QE_WORK_ORDER_ID" 2>/dev/null || true
+                ;;
+            esac
+          fi
           _rebuild_queue_index
           release_queue_lock
           recovered=$((recovered + 1))
@@ -979,6 +993,20 @@ while true; do
             _write_queue_entry "$_sr_qdir/failed/${_sr_entry_id}.yaml"
             rm -f "$_sr_entry_file"
             rm -f "$_sr_hb_file" 2>/dev/null || true
+            # Propagate failure to work order if entry belongs to one
+            if [ -n "$_QE_WORK_ORDER_ID" ]; then
+              _sr_wo_status=$(wo_check_completion "$_QE_WORK_ORDER_ID" 2>/dev/null) || true
+              case "$_sr_wo_status" in
+                failed)
+                  review_log_append "work-order-failed" "$_QE_WORK_ORDER_ID" "" \
+                    "Work order $_QE_WORK_ORDER_ID failed — stranded entry $_sr_entry_id recovered by idle scan. Recovery: queue-cli.sh reopen-wo $_QE_WORK_ORDER_ID" 2>/dev/null || true
+                  ;;
+                escalated)
+                  review_log_append "work-order-escalated" "$_QE_WORK_ORDER_ID" "" \
+                    "Work order $_QE_WORK_ORDER_ID escalated — stranded entry $_sr_entry_id recovered by idle scan. Recovery: queue-cli.sh reopen-wo $_QE_WORK_ORDER_ID" 2>/dev/null || true
+                  ;;
+              esac
+            fi
             _rebuild_queue_index
             release_queue_lock
           else
@@ -1039,6 +1067,10 @@ while true; do
             review_log_append "work-order-completed" "$ENTRY_WORK_ORDER_ID" "" \
               "Work order $ENTRY_WORK_ORDER_ID completed — all children done" 2>/dev/null || true
             ;;
+          failed)
+            review_log_append "work-order-failed" "$ENTRY_WORK_ORDER_ID" "" \
+              "Work order $ENTRY_WORK_ORDER_ID failed — sibling entry failed. Recovery: queue-cli.sh reopen-wo $ENTRY_WORK_ORDER_ID" 2>/dev/null || true
+            ;;
           escalated)
             review_log_append "work-order-escalated" "$ENTRY_WORK_ORDER_ID" "" \
               "Work order $ENTRY_WORK_ORDER_ID escalated — child failure detected. Recovery: queue-cli.sh reopen-wo $ENTRY_WORK_ORDER_ID" 2>/dev/null || true
@@ -1050,12 +1082,19 @@ while true; do
     fi
   fi
 
-  # --- Work-order deferral guard (skip entry if sibling is in review/failed/blocked) ---
-  # When an entry belongs to an escalated work order, defer it back to approved/
-  # without incrementing retry_count. The entry resumes when the work order is reopened.
+  # --- Work-order deferral guard (skip entry if sibling is escalated or failed) ---
+  # When an entry belongs to an escalated or failed work order, defer it back to
+  # approved/ without incrementing retry_count. The entry resumes when the work
+  # order is reopened. Failed work orders block siblings just like escalated ones.
   if [ -n "$ENTRY_WORK_ORDER_ID" ]; then
+    _wo_defer_reason=""
     if wo_is_escalated "$ENTRY_WORK_ORDER_ID"; then
-      echo "Entry $ENTRY_ID: work order $ENTRY_WORK_ORDER_ID is escalated — deferring" >&2
+      _wo_defer_reason="escalated"
+    elif wo_is_failed "$ENTRY_WORK_ORDER_ID"; then
+      _wo_defer_reason="failed"
+    fi
+    if [ -n "$_wo_defer_reason" ]; then
+      echo "Entry $ENTRY_ID: work order $ENTRY_WORK_ORDER_ID is $_wo_defer_reason — deferring" >&2
       _wo_lock_attempts=0
       while ! acquire_queue_lock; do
         _wo_lock_attempts=$((_wo_lock_attempts + 1))
@@ -1065,7 +1104,7 @@ while true; do
         fi
         sleep 1
       done
-      _defer_count=$(queue_defer "$ENTRY_ID" "work-order-escalated")
+      _defer_count=$(queue_defer "$ENTRY_ID" "work-order-${_wo_defer_reason}")
       # Check deferral cap — transition to blocked if exceeded
       _max_deferrals=$(_parse_config_field "runner" "max_deferral_cycles")
       _max_deferrals="${_max_deferrals:-3}"
@@ -1077,16 +1116,16 @@ while true; do
         # Check if this triggers work order escalation
         _wo_new_status=$(wo_check_completion "$ENTRY_WORK_ORDER_ID" 2>/dev/null) || true
         case "$_wo_new_status" in
-          escalated)
-            review_log_append "work-order-escalated" "$ENTRY_WORK_ORDER_ID" "" \
-              "Work order $ENTRY_WORK_ORDER_ID escalated — entry blocked (deferral cap). Recovery: queue-cli.sh reopen-wo $ENTRY_WORK_ORDER_ID" 2>/dev/null || true
+          escalated|failed)
+            review_log_append "work-order-${_wo_new_status}" "$ENTRY_WORK_ORDER_ID" "" \
+              "Work order $ENTRY_WORK_ORDER_ID ${_wo_new_status} — entry blocked (deferral cap). Recovery: queue-cli.sh reopen-wo $ENTRY_WORK_ORDER_ID" 2>/dev/null || true
             ;;
         esac
       else
         release_queue_lock
         # Review log
         review_log_append "entry-deferred" "$ENTRY_WORK_ORDER_ID" "$ENTRY_ID" \
-          "Entry $ENTRY_ID deferred — work order $ENTRY_WORK_ORDER_ID escalated (sibling in review/failed/blocked) [cycle $_defer_count/$_max_deferrals]" 2>/dev/null || true
+          "Entry $ENTRY_ID deferred — work order $ENTRY_WORK_ORDER_ID $_wo_defer_reason (sibling has failed or needs review) [cycle $_defer_count/$_max_deferrals]" 2>/dev/null || true
       fi
       sleep 2
       continue
@@ -1261,6 +1300,10 @@ while true; do
             review_log_append "work-order-completed" "$ENTRY_WORK_ORDER_ID" "" \
               "Work order $ENTRY_WORK_ORDER_ID completed — all children done" 2>/dev/null || true
             ;;
+          failed)
+            review_log_append "work-order-failed" "$ENTRY_WORK_ORDER_ID" "" \
+              "Work order $ENTRY_WORK_ORDER_ID failed — sibling entry failed. Recovery: queue-cli.sh reopen-wo $ENTRY_WORK_ORDER_ID" 2>/dev/null || true
+            ;;
           escalated)
             review_log_append "work-order-escalated" "$ENTRY_WORK_ORDER_ID" "" \
               "Work order $ENTRY_WORK_ORDER_ID escalated — child failure detected. Recovery: queue-cli.sh reopen-wo $ENTRY_WORK_ORDER_ID" 2>/dev/null || true
@@ -1292,6 +1335,10 @@ while true; do
           "Entry $ENTRY_ID escalated ($ENTRY_SESSION_TYPE)" 2>/dev/null || true
         _wo_new_status=$(wo_check_completion "$ENTRY_WORK_ORDER_ID" 2>/dev/null) || true
         case "$_wo_new_status" in
+          failed)
+            review_log_append "work-order-failed" "$ENTRY_WORK_ORDER_ID" "" \
+              "Work order $ENTRY_WORK_ORDER_ID failed — sibling entry failed. Recovery: queue-cli.sh reopen-wo $ENTRY_WORK_ORDER_ID" 2>/dev/null || true
+            ;;
           escalated)
             review_log_append "work-order-escalated" "$ENTRY_WORK_ORDER_ID" "" \
               "Work order $ENTRY_WORK_ORDER_ID escalated — entry requires review" 2>/dev/null || true
@@ -1313,6 +1360,10 @@ while true; do
             "Entry $ENTRY_ID failed — retries exhausted ($ENTRY_SESSION_TYPE)" 2>/dev/null || true
           _wo_new_status=$(wo_check_completion "$ENTRY_WORK_ORDER_ID" 2>/dev/null) || true
           case "$_wo_new_status" in
+            failed)
+              review_log_append "work-order-failed" "$ENTRY_WORK_ORDER_ID" "" \
+                "Work order $ENTRY_WORK_ORDER_ID failed — entry $ENTRY_ID failed. Recovery: queue-cli.sh reopen-wo $ENTRY_WORK_ORDER_ID" 2>/dev/null || true
+              ;;
             escalated)
               review_log_append "work-order-escalated" "$ENTRY_WORK_ORDER_ID" "" \
                 "Work order $ENTRY_WORK_ORDER_ID escalated — entry failed" 2>/dev/null || true
