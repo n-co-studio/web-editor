@@ -234,6 +234,7 @@ _PERMISSION_READONLY_AGENTS=(
   pm-advisor
   analytics
   ux-strategist
+  ux-designer
   accessibility
   performance-engineer
   data-strategist

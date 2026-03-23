@@ -52,7 +52,7 @@ Post-build Critic review (cohesion mode): checks diff + surrounding code for bro
 PM-specific labels (orthogonal to severity): **IN-SCOPE**, **OUT-OF-SCOPE**, **DEFER**. Applied by PM Advisory alongside standard severity. Informational — do not affect Refinement Report routing.
 
 ### UX Design Agent
-Three-mode UX agent (`.claude/agents/ux-strategist.md`). Mode selection is context-driven:
+Three-mode UX agent (`.claude/agents/ux-designer.md`). Mode selection is context-driven:
 
 | Mode | Name | Trigger | Output |
 |------|------|---------|--------|

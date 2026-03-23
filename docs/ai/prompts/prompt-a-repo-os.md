@@ -35,7 +35,7 @@ Run after Prompt 0 completes (spec or feature brief is ready). Skip this phase i
    - Single-file fix or docs-only → **Skip**
 5. At Full tier, scan specs for conditional activation signals:
    - Auth/sessions/OAuth/tokens/permissions → Security Analyst
-   - UI/design-system/user-flows/forms/components/responsive/design-tokens → UX Design Agent (Mode 2 — UX Review)
+   - UI/design-system/user-flows/forms/components → UX Strategist
    - Real-time/websockets/large-data/media/streaming → Performance Engineer
    - Database/data-contracts/migrations/schema/GDPR → Data Strategist
    - **Feature brief:** Use "What It Touches" checkboxes as activation signals
