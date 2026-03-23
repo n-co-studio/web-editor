@@ -461,6 +461,10 @@ init_phase() {
   # Sweep stale registry entries (dead PID or age >24h) — two cleanup
   # opportunities per lifecycle: here at init and in unregister_session at close.
   sweep_stale_sessions || true
+
+  # Write resume marker (compression recovery)
+  write_resume_marker "$stype" "$sid" "init" ""
+
 }
 
 # --- Advance to a new phase ---
@@ -571,7 +575,7 @@ advance_phase() {
     if [ -n "$post_approval" ] && [ "$new_phase" = "$post_approval" ]; then
       local pa_file="$state_dir/plan-approved"
       if [ ! -f "$pa_file" ]; then
-        echo "GATE-RECOVERABLE: plan-approved state file missing — cannot advance to '$new_phase' without operator plan approval. NEXT: Use AskUserQuestion to present plan for operator approval." >&2
+        echo "GATE-RECOVERABLE: plan-approved state file missing — cannot advance to '$new_phase' without operator plan approval. NEXT: Call AskUserQuestion with your plan summary. Include options: \"Auto — proceed autonomously\" and \"Review — pause for my review before commit\". Conversational confirmation does NOT trigger the approval hook." >&2
         return 1
       fi
       # Session-bind note: both plan-approval.sh (interactive) and state-manager.sh
@@ -665,6 +669,10 @@ advance_phase() {
   # Invalidate validation cache — file contents changed (audit C8)
   _PS_VALIDATED=false
   _CACHED_CURRENT_SID=""
+
+
+  # Write resume marker (compression recovery)
+  write_resume_marker "$stype" "$sid" "$new_phase" "$phases_completed"
 }
 
 # --- Assert current phase meets requirement ---
@@ -987,4 +995,156 @@ write_merge_signal() {
   state_dir="$(get_session_state_dir)"
   mkdir -p "$state_dir" 2>/dev/null || true
   printf '%s\n' "$branch_name" > "$state_dir/merge-source-branch" 2>/dev/null || true
+}
+
+
+# --- Write session resume marker ---
+# Writes a structured resume marker so the orchestrator can re-orient after
+# context compression without re-dispatching governance agents.
+# Accepts state values as arguments to avoid re-reading phase-state from disk
+# (callers have these values in local variables at the call site).
+# Shell I/O — bypasses write-guard.sh (same pattern as init_phase, set_solo).
+# Called at the end of advance_phase() and init_phase().
+# Usage: write_resume_marker <stype> <sid> <phase> <phases_completed>
+write_resume_marker() {
+  local stype="$1"
+  local sid="$2"
+  local phase="$3"
+  local phases_completed="$4"
+
+  local state_dir
+  state_dir="$(get_session_state_dir)"
+  local resume_file="$state_dir/session-resume.yaml"
+
+  local ts
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+  local branch
+  branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+
+  # Preserve existing agent_verdicts if resume file already exists
+  local existing_verdicts=""
+  if [ -f "$resume_file" ]; then
+    local in_verdicts=false
+    local _line
+    while IFS= read -r _line || [ -n "$_line" ]; do
+      if [ "$_line" = "agent_verdicts:" ]; then
+        in_verdicts=true
+        continue
+      fi
+      if [ "$in_verdicts" = true ]; then
+        case "$_line" in
+          "  "*)
+            existing_verdicts="${existing_verdicts}${_line}
+"
+            ;;
+          *)
+            break
+            ;;
+        esac
+      fi
+    done < "$resume_file"
+  fi
+
+  # Shell I/O — bypasses write-guard.sh
+  {
+    printf 'session_type: %s\n' "$stype"
+    printf 'session_id: %s\n' "$sid"
+    printf 'current_phase: %s\n' "$phase"
+    printf 'phases_completed: %s\n' "$phases_completed"
+    printf 'branch: %s\n' "$branch"
+    printf 'timestamp: %s\n' "$ts"
+    printf 'agent_verdicts:\n'
+    if [ -n "$existing_verdicts" ]; then
+      printf '%s' "$existing_verdicts"
+    fi
+  } > "$resume_file" 2>/dev/null || true
+}
+
+# --- Read session resume marker ---
+# Reads and outputs the resume marker for orchestrator re-orientation after
+# context compression. Returns key-value output to stdout.
+# Usage: read_resume_marker
+read_resume_marker() {
+  local state_dir
+  state_dir="$(get_session_state_dir)"
+  local resume_file="$state_dir/session-resume.yaml"
+
+  if [ ! -f "$resume_file" ]; then
+    echo "ERROR: No resume marker found" >&2
+    return 1
+  fi
+
+  cat "$resume_file"
+}
+
+# --- Record agent verdict in resume marker ---
+# Appends or updates an agent verdict in the resume marker's agent_verdicts
+# section. The orchestrator calls this after receiving each governance agent's
+# result so that compression recovery can skip already-completed agents.
+# Shell I/O — bypasses write-guard.sh (same pattern as write_resume_marker).
+# Usage: record_agent_verdict "critic" "clean"
+#        record_agent_verdict "pragmatist" "approved"
+#        record_agent_verdict "qa" "pass"
+record_agent_verdict() {
+  local agent_name="$1"
+  local verdict="$2"
+
+  if [ -z "$agent_name" ] || [ -z "$verdict" ]; then
+    echo "ERROR: record_agent_verdict requires agent_name and verdict" >&2
+    return 1
+  fi
+
+  local state_dir
+  state_dir="$(get_session_state_dir)"
+  local resume_file="$state_dir/session-resume.yaml"
+
+  if [ ! -f "$resume_file" ]; then
+    echo "ERROR: No resume marker — call write_resume_marker first" >&2
+    return 1
+  fi
+
+  local temp_file="$resume_file.tmp"
+  local in_verdicts=false
+  local verdict_written=false
+  local _line
+
+  {
+    while IFS= read -r _line || [ -n "$_line" ]; do
+      if [ "$_line" = "agent_verdicts:" ]; then
+        in_verdicts=true
+        printf '%s\n' "$_line"
+        continue
+      fi
+      if [ "$in_verdicts" = true ]; then
+        case "$_line" in
+          "  ${agent_name}: "*)
+            printf '  %s: %s\n' "$agent_name" "$verdict"
+            verdict_written=true
+            continue
+            ;;
+          "  "*)
+            printf '%s\n' "$_line"
+            continue
+            ;;
+          *)
+            if [ "$verdict_written" = false ]; then
+              printf '  %s: %s\n' "$agent_name" "$verdict"
+              verdict_written=true
+            fi
+            in_verdicts=false
+            printf '%s\n' "$_line"
+            continue
+            ;;
+        esac
+      fi
+      printf '%s\n' "$_line"
+    done < "$resume_file"
+
+    if [ "$in_verdicts" = true ] && [ "$verdict_written" = false ]; then
+      printf '  %s: %s\n' "$agent_name" "$verdict"
+    fi
+  } > "$temp_file" 2>/dev/null || true
+
+  mv "$temp_file" "$resume_file" 2>/dev/null || true
 }

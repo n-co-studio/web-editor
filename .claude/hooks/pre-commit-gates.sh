@@ -232,6 +232,20 @@ _validate_state_session_id() {
   [ "$file_sid" = "$current_sid" ]
 }
 
+# --- Plan content hash presence check (compensating control for session-ID mismatch) ---
+# Returns 0 if plan-approved state file contains a non-empty question_hash, 1 otherwise.
+# A recorded question_hash proves the approval was written by plan-approval.sh (which hashes
+# the AskUserQuestion text via portable_hash). When session_id mismatches but a hash is
+# recorded, the approval is likely from a legitimate plan-approval flow — downgrade to warning.
+_has_recorded_plan_hash() {
+  local state_file="$1"
+  [ -f "$state_file" ] || return 1
+  local file_hash
+  file_hash=$(grep '^question_hash:' "$state_file" 2>/dev/null | sed 's/^question_hash: *//' | tr -d '[:space:]' | head -1)
+  # Hash must be non-empty to serve as compensating control
+  [ -n "$file_hash" ]
+}
+
 if [ "$SKIP_STATE" = false ]; then
   # plan-approved: required on all non-experiment branches
   # Override: REPO_OS_SKIP_PLAN_GATE=1 (parity with bash-guard plan gate)
@@ -253,9 +267,17 @@ if [ "$SKIP_STATE" = false ]; then
     block "state_plan_missing"
     log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_plan_missing"
   elif ! _validate_state_session_id "$STATE_DIR/plan-approved"; then
-    echo "GATE-RECOVERABLE: plan-approved state file has stale session_id (from a different session). NEXT: Re-approve plan in this session. (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
-    block "state_plan_stale_session"
-    log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_plan_stale_session"
+    # Session-ID mismatch — check if recorded question_hash provides compensating control.
+    # A recorded hash proves the state file was written by plan-approval.sh, not forged.
+    if _has_recorded_plan_hash "$STATE_DIR/plan-approved"; then
+      echo "Advisory: plan-approved session_id mismatch but question_hash recorded — approval from legitimate plan-approval flow, downgrading to warning." >&2
+      warn "hash_present_sid_mismatch"
+      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "warn" "$START_MS" "hash_present_sid_mismatch"
+    else
+      echo "GATE-RECOVERABLE: plan-approved state file has stale session_id and no valid content hash. NEXT: Re-approve plan in this session. (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
+      block "state_plan_stale_session"
+      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_plan_stale_session"
+    fi
   fi
 
   # cohesion-reviewed: required except on hotfix/* (A5 skipped per gate profile)

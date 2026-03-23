@@ -32,18 +32,24 @@ state_manager_setup() {
   local repo_root="$1"
   local session_type="$2"
 
-  local state_dir="$repo_root/.claude/.state"
-  mkdir -p "$state_dir" 2>/dev/null || true
+  # Ensure base state dir exists
+  mkdir -p "$repo_root/.claude/.state" 2>/dev/null || true
 
-  # Ensure session ID exists
+  # Ensure session ID exists (uses REPO_OS_SESSION_ID env var if set)
   get_session_id "$repo_root" > /dev/null
+
+  # Resolve per-session state directory (routes to wt-sessions/{id}/ when
+  # REPO_OS_SESSION_ID is set — daemon and worktree sessions).
+  local state_dir
+  state_dir="$(get_session_state_dir)"
+  mkdir -p "$state_dir" 2>/dev/null || true
 
   # Write plan-approved state (runner pre-writes this so hooks don't block)
   local timestamp
   timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   # Session-bind (adversarial C1/C4/H4): embed session_id for commit-gate validation
   local sid
-  sid=$(cat "$repo_root/.claude/.session-id" 2>/dev/null || echo "")
+  sid=$(get_session_id "$repo_root")
   printf 'timestamp: %s\nquestion_hash: runner-auto\nlarge-scope: true\nmode: auto\nsource: runner\nsession_id: %s\n' \
     "$timestamp" "$sid" \
     > "$state_dir/plan-approved" 2>/dev/null || true
@@ -60,10 +66,12 @@ state_manager_setup() {
 #   $1 — repo_root (absolute path)
 #   $2 — entry_id (queue entry ID, optional — for escalation context)
 #   $3 — phase_at_exit (phase when session ended, optional — for escalation context)
+#   $4 — baseline_sha (pre-session HEAD SHA, optional — scopes dirty-tree check)
 runner_external_cleanup() {
   local repo_root="$1"
   local _cleanup_entry_id="${2:-}"
   local _cleanup_phase="${3:-unknown}"
+  local _cleanup_baseline="${4:-}"
 
   # Capture session type before cleaning state files (phase-state deleted below)
   local close_stype
@@ -71,9 +79,16 @@ runner_external_cleanup() {
 
   # Dirty-tree check (audit 4.1): stop hook blocks on uncommitted changes,
   # but it doesn't fire in headless mode. Write escalation for operator.
+  # When baseline SHA is provided, scope the check to changes made during this
+  # session only — prevents false escalations for changes belonging to other sessions.
   local _dirty_tree _dirty_staged
-  _dirty_tree=$(git diff --name-only 2>/dev/null || echo "")
-  _dirty_staged=$(git diff --cached --name-only 2>/dev/null || echo "")
+  if [ -n "$_cleanup_baseline" ]; then
+    _dirty_tree=$(git diff --name-only "$_cleanup_baseline" 2>/dev/null || echo "")
+    _dirty_staged=$(git diff --cached --name-only "$_cleanup_baseline" 2>/dev/null || echo "")
+  else
+    _dirty_tree=$(git diff --name-only 2>/dev/null || echo "")
+    _dirty_staged=$(git diff --cached --name-only 2>/dev/null || echo "")
+  fi
   if [ -n "$_dirty_tree" ] || [ -n "$_dirty_staged" ]; then
     echo "WARNING: Dirty tree at headless session close (uncommitted changes present)" >&2
     local _esc_dir="$repo_root/.claude/.automation/escalations"

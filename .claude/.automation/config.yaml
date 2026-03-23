@@ -1,6 +1,10 @@
 # Operator Automation Layer — default configuration.
 # Schema: .claude/.automation/schemas/runner-config.yaml
-# Set enabled: true to activate headless runner infrastructure.
+#
+# Runtime toggles (e.g., enabled: true) should be set in config.local.yaml,
+# which is gitignored and survives git checkout. This file is git-tracked;
+# local runtime overrides belong in config.local.yaml to avoid accidental
+# commits. config.local.yaml fields take priority over this file.
 
 runner:
   enabled: false
@@ -10,7 +14,7 @@ runner:
   max_retries: 3
   heartbeat_interval: 30
   stderr_tail_lines: 50
-  cohesion_trigger: 100
+  cohesion_trigger: 0
   poll_interval: 60
   cooldown_between_sessions: 5
   max_consecutive_sessions: 0

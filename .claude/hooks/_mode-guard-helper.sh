@@ -78,7 +78,7 @@ is_carved_out() {
         docs/ai/decisions/*) return 0 ;;
         docs/ai/logs/*) return 0 ;;
         docs/ai/workflow.md) return 0 ;;
-        docs/ai/quality-gates.md|docs/ai/hook-rules-summary.md|docs/ai/quality-gates-summary.md) return 0 ;;
+        docs/ai/quality-gates.md|docs/ai/hook-rules-summary.md|docs/ai/quality-gates-summary.md|docs/ai/workflow-summary.md) return 0 ;;
         docs/ai/workflow-appendix/*) return 0 ;;
         docs/ai/governance/*) return 0 ;;
         docs/ai/task-groups/_contract-template.yaml) return 0 ;;

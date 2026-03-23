@@ -25,6 +25,7 @@ Coordinates work and enforces the Repo OS. AI project lead taking strategic dire
 - REQUIRE: operator approval before implementation begins
 - REQUIRE: use AskUserQuestion (not conversational acknowledgment) for plan confirmation — this triggers the plan-approval hook that unblocks Edit/Write. Exempt: experiment/* branches (Decision 0006) skip the plan gate entirely
 - REQUIRE: include auto/review as options when presenting plan for approval. Use these exact option labels so the hook can match reliably: **"Auto — proceed autonomously"** and **"Review — pause for my review before commit"**. For task group sessions, auto mode also activates the automation runner — remaining pending briefs are queued for headless execution (Decision 0017)
+- GUIDE: plan-phase self-check — before attempting any Edit or Write, verify the `plan-approved` state file exists. If it does not, plan approval has not been received — regardless of what the operator said conversationally. Conversational acknowledgment does not trigger the plan-approval hook and does not write the state file
 - REQUIRE: Critic cohesion review after Builder completes, before QA verification
 - REQUIRE: QA verification before any commit
 - REQUIRE: Reviewer + Security sign-off for high-risk changes
@@ -51,7 +52,7 @@ Before implementation:
 - [ ] Branch created from main (`git checkout -b <category>/<description>`)
 - [ ] Applicable decisions identified and listed
 - [ ] Plan documented (goal, steps, files, verification)
-- [ ] Operator approved plan (with auto/review mode selection)
+- [ ] Operator approved plan via AskUserQuestion (plan-approved state file exists — conversational approval is insufficient)
 - [ ] Scope is small (or explicit approval for larger)
 - [ ] High-risk triggers identified?
 - [ ] Task group contract read (or created if first session)? (skip if no `### Task Group` in brief)
@@ -111,6 +112,7 @@ Before session close:
 - **When running a merge brief** (`taskgroup-merge` session type): Initialize as `taskgroup-merge`. In `contract-init`, sync from contract and verify all content briefs completed (check completion markers). In `cohesion` phase, run cross-session cohesion review (Critic in cohesion mode) across the combined diff from all parallel briefs. Resolve integration issues (loop: `cohesion→cohesion`). In `verify`, run QA gates. At close, merge to main and seal branch
 - **When task brief or contract contains `user_review` and phase is `user-review`** (User Review dispatch): Dispatch `_user-review-tier-{N}.md` agents in parallel per scenario definitions from the task contract. Each agent receives its persona profile, scenario YAML, and list of modified files. Collect results, deduplicate across tiers, escalate to highest severity when multiple tiers flag the same issue. Synthesize into a single User Review Report. Present to operator as advisory — no gate blocked, no state file. Operator dispositions each finding (accept / note / dismiss). See `docs/ai/prompts/prompt-b-product-build.md` § User Review Dispatch and Decision 0021
 - **Before commit (scope classification context)**: When a task contract is active and contains `scope_files`, and staged files include any not listed in `scope_files`, write `.claude/.state/scope-risk-gain` with `risk:` and `gain:` lines explaining why the unbriefed files were touched and what could go wrong. The `pre-commit-gates.sh` hook performs the actual classification mechanically (briefed/unbriefed-in-scope/out-of-scope) and reads this state file for risk/gain context in advisory escalation files. Out-of-scope files block the commit — either add them to the task contract or remove from staging
+- **After context compression** (prior conversation turns summarized/missing): Read `.claude/.state/session-resume.yaml` via Bash (`source .claude/hooks/_analytics-helper.sh && source .claude/hooks/_phase-helper.sh && read_resume_marker`). Resume from the recorded `current_phase` — do not re-initialize or re-dispatch agents whose verdicts are already recorded in `agent_verdicts`. Call `record_agent_verdict "<agent>" "<result>"` via Bash after each governance agent completes to keep the marker current. The heuristic for detecting compression: loss of prior conversation detail (phases, agent results) that should be in context. Re-reading the marker when not needed has zero cost (conservative)
 - **When modifying foundational governance** (hooks, settings, agent structure, prompts, AI.md): Read `docs/ai/decisions/t-0001-repo-os-baseline.md`, `t-0002-decisions-are-mandatory.md`, `t-0003-agent-structure-standard.md`, `t-0004-mechanical-enforcement.md` — full files when DIGEST.md reference is insufficient for the task at hand
 - **At session close (all sessions)**: Verify state will be cleaned. If task group present, ensure governance evidence is recorded in contract `governance:` section before final commit
 

@@ -54,8 +54,8 @@ cleanup_session_files() {
   cleanup_old_analytics "$repo_root"
 
   # Session-bound identity files: only delete if content matches closing session
-  # Full worktree sessions use env var, not file — skip file deletion (Decision 0030)
-  if is_full_worktree_session; then
+  # Sessions with REPO_OS_SESSION_ID (worktree/daemon) use env var, not file (Decision 0030)
+  if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
     : # No .session-id file to delete — identity is via REPO_OS_SESSION_ID env var
   elif [ -n "$closing_sid" ]; then
     local sid_file="$repo_root/.claude/.session-id"
@@ -106,13 +106,14 @@ cleanup_session_files() {
     rm -f "$state_dir/merge-source-branch"
     rm -f "$state_dir/.stop-attempt-count"
     rm -f "$state_dir/brief-has-taskgroup"
+    _delete_if_owned "$state_dir/session-resume.yaml" "$closing_sid"
     # Clean completion markers when merge brief closes (parallel groups)
     if [ "$close_stype" = "taskgroup-merge" ]; then
       rm -f "$state_dir"/tg-*-brief-*.complete
     fi
 
-    # Remove per-session state directory if worktree-scoped and now empty (Decision 0030)
-    if is_full_worktree_session; then
+    # Remove per-session state directory if session-scoped and now empty (Decision 0030)
+    if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
       rmdir "$state_dir" 2>/dev/null || true
     fi
   fi

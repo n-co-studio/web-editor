@@ -17,6 +17,7 @@
 #   review
 #   log [--lines N]
 #   prune [--briefs-only] [--dry-run]
+#   recover-entry <id>
 #   reopen-wo <work-order-id>
 #   start-daemon
 #   halt
@@ -86,6 +87,7 @@ Subcommands:
   review
   log [--lines N]
   prune [--briefs-only] [--dry-run]
+  recover-entry <id>
   reopen-wo <work-order-id>
   start-daemon
   halt
@@ -507,11 +509,20 @@ case "$SUBCOMMAND" in
       fi
 
       run_cleanup
+
+      # Repair directory/status mismatches (lock already held)
+      PRUNE_REPAIRED=$(_repair_status_mismatches)
+
       release_queue_lock
 
       if [ "$JSON_OUTPUT" = true ]; then
-        printf '{%s}\n' "$(_json_kv "action" "prune-complete")"
+        printf '{%s,%s}\n' \
+          "$(_json_kv "action" "prune-complete")" \
+          "$(_json_kv_raw "status_repairs" "$PRUNE_REPAIRED")"
       else
+        if [ "$PRUNE_REPAIRED" -gt 0 ]; then
+          echo "Repaired $PRUNE_REPAIRED status mismatch(es)."
+        fi
         echo "Prune complete."
       fi
     fi
@@ -691,6 +702,105 @@ case "$SUBCOMMAND" in
     else
       printf 'Work order %s reopened. %s sibling(s) reset to approved.\n' \
         "$REOPEN_WO_ID" "$_REOPEN_RESET_COUNT"
+    fi
+    ;;
+
+  # --- recover-entry: operator escape hatch for stale running entries ---
+  recover-entry)
+    if [ $# -lt 1 ]; then
+      echo "ERROR: recover-entry requires <id>" >&2
+      exit 1
+    fi
+    RECOVER_ID="$1"
+
+    # Locate entry and verify it is in running/ status
+    RECOVER_ENTRY_FILE=$(_find_entry_file "$RECOVER_ID")
+    if [ -z "$RECOVER_ENTRY_FILE" ]; then
+      echo "ERROR: Entry $RECOVER_ID not found" >&2
+      exit 1
+    fi
+
+    # Check that entry is in running/ (not any other status)
+    case "$RECOVER_ENTRY_FILE" in
+      */running/*)
+        ;; # expected — proceed
+      *)
+        _load_queue_entry "$RECOVER_ENTRY_FILE"
+        echo "ERROR: Entry $RECOVER_ID is not running (current status: $_QE_STATUS). Only running entries can be recovered." >&2
+        exit 1
+        ;;
+    esac
+
+    # Acquire lock for queue mutation
+    if ! acquire_queue_lock; then
+      echo "ERROR: Queue lock unavailable" >&2
+      exit 1
+    fi
+
+    # Transition running → failed
+    _RECOVER_QDIR=$(_queue_dir)
+    _load_queue_entry "$RECOVER_ENTRY_FILE"
+    _QE_STATUS="failed"
+    _QE_ERROR_LOG="operator-recovery"
+    _QE_COMPLETED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    _QE_UPDATED_AT="$_QE_COMPLETED_AT"
+    _write_queue_entry "$_RECOVER_QDIR/failed/${RECOVER_ID}.yaml"
+    rm -f "$RECOVER_ENTRY_FILE"
+
+    # Remove stale heartbeat and defer-count files
+    rm -f "$_RECOVER_QDIR/running/${RECOVER_ID}.heartbeat" 2>/dev/null || true
+    rm -f "$_RECOVER_QDIR/.defer-count-${RECOVER_ID}" 2>/dev/null || true
+
+    # Rebuild index
+    _rebuild_queue_index
+
+    # Propagate failure to work order if entry belongs to one
+    if [ -n "$_QE_WORK_ORDER_ID" ]; then
+      _RECOVER_WO_STATUS=$(wo_check_completion "$_QE_WORK_ORDER_ID" 2>/dev/null) || true
+      case "$_RECOVER_WO_STATUS" in
+        failed)
+          review_log_append "work-order-failed" "$_QE_WORK_ORDER_ID" "" \
+            "Work order $_QE_WORK_ORDER_ID failed — entry $RECOVER_ID recovered by operator. Recovery: queue-cli.sh reopen-wo $_QE_WORK_ORDER_ID" 2>/dev/null || true
+          ;;
+        escalated)
+          review_log_append "work-order-escalated" "$_QE_WORK_ORDER_ID" "" \
+            "Work order $_QE_WORK_ORDER_ID escalated — entry $RECOVER_ID recovered by operator. Recovery: queue-cli.sh reopen-wo $_QE_WORK_ORDER_ID" 2>/dev/null || true
+          ;;
+      esac
+    fi
+
+    release_queue_lock
+
+    # Write escalation file with recovery context
+    _RECOVER_ESC_DIR="$REPO_ROOT/.claude/.automation/escalations"
+    mkdir -p "$_RECOVER_ESC_DIR" 2>/dev/null || true
+    _RECOVER_ESC_ID="esc-${RECOVER_ID}-$(date +%Y%m%d-%H%M%S)"
+    {
+      printf 'escalation:\n'
+      printf '  id: "%s"\n' "$_RECOVER_ESC_ID"
+      printf '  queue_entry_id: "%s"\n' "$RECOVER_ID"
+      printf '  type: "gate-failure"\n'
+      printf '  severity: "blocking"\n'
+      printf '  phase_at_exit: "unknown"\n'
+      printf '  tag_at_exit: "operator"\n'
+      printf '  message: "Entry recovered by operator — stale running entry transitioned to failed"\n'
+      printf '  context: "Operator used recover-entry CLI to rescue stale entry"\n'
+      printf '  created_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      printf '  resolved: false\n'
+      printf '  resolution: ""\n'
+    } > "$_RECOVER_ESC_DIR/${_RECOVER_ESC_ID}.yaml" 2>/dev/null || true
+
+    # Log to review log
+    review_log_append "entry-recovered" "" "$RECOVER_ID" \
+      "Entry $RECOVER_ID recovered by operator — transitioned from running to failed" 2>/dev/null || true
+
+    if [ "$JSON_OUTPUT" = true ]; then
+      printf '{%s,%s,%s}\n' \
+        "$(_json_kv "entry_id" "$RECOVER_ID")" \
+        "$(_json_kv "action" "recovered")" \
+        "$(_json_kv "escalation_id" "$_RECOVER_ESC_ID")"
+    else
+      printf 'Recovered: %s (moved to failed/, escalation written)\n' "$RECOVER_ID"
     fi
     ;;
 

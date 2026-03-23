@@ -234,8 +234,12 @@ _runner_crash_cleanup() {
     rm -f "$_qdir/running/"*.heartbeat 2>/dev/null || true
   fi
   # Clean session state (3.1: runner_external_cleanup on crash)
-  if [ -n "${REPO_ROOT:-}" ] && [ -f "$REPO_ROOT/.claude/.session-id" ]; then
-    runner_external_cleanup "$REPO_ROOT" "${_CURRENT_ENTRY_ID:-}" "crash" 2>/dev/null || true
+  # With REPO_OS_SESSION_ID set, cleanup targets the per-session state dir.
+  # Without it (legacy), fall back to .session-id file check.
+  if [ -n "${REPO_ROOT:-}" ]; then
+    if [ -n "${REPO_OS_SESSION_ID:-}" ] || [ -f "$REPO_ROOT/.claude/.session-id" ]; then
+      runner_external_cleanup "$REPO_ROOT" "${_CURRENT_ENTRY_ID:-}" "crash" "${_RESULT_BASELINE:-}" 2>/dev/null || true
+    fi
   fi
 }
 
@@ -596,6 +600,16 @@ _run_single_entry() {
   _RESULT_SOLO_MODE=""
   _RESULT_BRANCH=""
 
+  # Generate per-session ID for state directory isolation (prevents daemon
+  # sessions from overwriting interactive session phase-state). Exported so
+  # hooks in the claude -p child process route state to wt-sessions/{id}/.
+  if [ -n "${EPOCHREALTIME:-}" ]; then
+    local _frac="${EPOCHREALTIME#*.}"
+    export REPO_OS_SESSION_ID="daemon-$(date +%Y%m%d-%H%M%S)-${_frac:0:4}"
+  else
+    export REPO_OS_SESSION_ID="daemon-$(date +%Y%m%d-%H%M%S)-$$"
+  fi
+
   # Pre-launch setup
   state_manager_setup "$REPO_ROOT" "$session_type"
 
@@ -660,7 +674,7 @@ _run_single_entry() {
   fi
   _CLAUDE_CHILD_PID=""
 
-  # Clear automation context
+  # Clear automation context (keep REPO_OS_SESSION_ID alive for cleanup)
   unset REPO_OS_AUTOMATION_ENTRY
   unset CLAUDE_HEADLESS
 
@@ -672,9 +686,11 @@ _run_single_entry() {
   _RESULT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
 
   # External cleanup (Stop hook doesn't fire in headless mode)
-  if [ -f "$REPO_ROOT/.claude/.session-id" ]; then
-    runner_external_cleanup "$REPO_ROOT" "$brief_id" "close"
-  fi
+  # With REPO_OS_SESSION_ID set, cleanup routes to the per-session state dir.
+  runner_external_cleanup "$REPO_ROOT" "$brief_id" "close" "$_RESULT_BASELINE"
+
+  # Clear per-session ID after cleanup
+  unset REPO_OS_SESSION_ID
 
   # Clean up stderr temp file
   [ -n "$stderr_file" ] && rm -f "$stderr_file" 2>/dev/null || true
@@ -863,6 +879,10 @@ if [ "$DAEMON_MODE" = false ]; then
   # Build prompt (single-shot uses a minimal prompt)
   PROMPT="You are working on brief: $BRIEF_ID. Read the task brief and execute it."
 
+  # Log entry-started event
+  review_log_append "entry-started" "" "$BRIEF_ID" \
+    "Entry $BRIEF_ID started (single-shot)" 2>/dev/null || true
+
   # Execute (direct call — no subshell, outcome in globals)
   _run_single_entry "$BRIEF_ID" "$PROMPT" "$SESSION_TYPE" "$EXISTING_BRANCH" "build" "false"
 
@@ -994,6 +1014,62 @@ while true; do
         kill -KILL "$_CLAUDE_CHILD_PID" 2>/dev/null || true
         wait "$_CLAUDE_CHILD_PID" 2>/dev/null || true
       fi
+    fi
+    # --- Transition running entry to failed/ ---
+    if [ -n "$_CURRENT_ENTRY_ID" ]; then
+      _fh_qdir=$(_queue_dir)
+      _fh_entry_file="$_fh_qdir/running/${_CURRENT_ENTRY_ID}.yaml"
+      if [ -f "$_fh_entry_file" ]; then
+        if acquire_queue_lock; then
+          _load_queue_entry "$_fh_entry_file"
+          _QE_STATUS="failed"
+          _QE_ERROR_LOG="force-halted"
+          _QE_COMPLETED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          _QE_UPDATED_AT="$_QE_COMPLETED_AT"
+          _write_queue_entry "$_fh_qdir/failed/${_CURRENT_ENTRY_ID}.yaml"
+          rm -f "$_fh_entry_file"
+          rm -f "$_fh_qdir/running/${_CURRENT_ENTRY_ID}.heartbeat" 2>/dev/null || true
+          _rebuild_queue_index
+          # Propagate failure to work order if entry belongs to one
+          if [ -n "$_QE_WORK_ORDER_ID" ]; then
+            _fh_wo_status=$(wo_check_completion "$_QE_WORK_ORDER_ID" 2>/dev/null) || true
+            case "$_fh_wo_status" in
+              failed)
+                review_log_append "work-order-failed" "$_QE_WORK_ORDER_ID" "" \
+                  "Work order $_QE_WORK_ORDER_ID failed — entry $_CURRENT_ENTRY_ID force-halted. Recovery: queue-cli.sh reopen-wo $_QE_WORK_ORDER_ID" 2>/dev/null || true
+                ;;
+              escalated)
+                review_log_append "work-order-escalated" "$_QE_WORK_ORDER_ID" "" \
+                  "Work order $_QE_WORK_ORDER_ID escalated — entry $_CURRENT_ENTRY_ID force-halted. Recovery: queue-cli.sh reopen-wo $_QE_WORK_ORDER_ID" 2>/dev/null || true
+                ;;
+            esac
+          fi
+          release_queue_lock
+          echo "FORCE-HALT: entry $_CURRENT_ENTRY_ID transitioned to failed/" >&2
+        else
+          echo "WARNING: FORCE-HALT could not acquire lock — entry $_CURRENT_ENTRY_ID may be orphaned in running/" >&2
+        fi
+      fi
+      # Write escalation file
+      _fh_esc_dir="$REPO_ROOT/.claude/.automation/escalations"
+      mkdir -p "$_fh_esc_dir" 2>/dev/null || true
+      _fh_esc_id="esc-${_CURRENT_ENTRY_ID}-$(date +%Y%m%d-%H%M%S)"
+      {
+        printf 'escalation:\n'
+        printf '  id: "%s"\n' "$_fh_esc_id"
+        printf '  queue_entry_id: "%s"\n' "$_CURRENT_ENTRY_ID"
+        printf '  type: "gate-failure"\n'
+        printf '  severity: "blocking"\n'
+        printf '  phase_at_exit: "unknown"\n'
+        printf '  tag_at_exit: "agent"\n'
+        printf '  message: "FORCE-HALT — entry terminated by operator"\n'
+        printf '  context: "Daemon received FORCE-HALT file while entry was running"\n'
+        printf '  created_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        printf '  resolved: false\n'
+        printf '  resolution: ""\n'
+      } > "$_fh_esc_dir/${_fh_esc_id}.yaml" 2>/dev/null || true
+      _stop_heartbeat
+      _CURRENT_ENTRY_ID=""
     fi
     rm -f "$AUTOMATION_DIR/FORCE-HALT" 2>/dev/null || true
     echo "FORCE-HALT: daemon exiting." >&2
@@ -1246,6 +1322,10 @@ while true; do
 
   # --- Start heartbeat ---
   _start_heartbeat "$ENTRY_ID"
+
+  # --- Log entry-started event ---
+  review_log_append "entry-started" "$ENTRY_WORK_ORDER_ID" "$ENTRY_ID" \
+    "Entry $ENTRY_ID started — work order $ENTRY_WORK_ORDER_ID" 2>/dev/null || true
 
   # --- Execute (direct call — no subshell, outcome in globals) ---
   _CURRENT_ENTRY_ID="$ENTRY_ID"

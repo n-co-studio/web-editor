@@ -244,6 +244,14 @@ _check_taskgroup_completion() {
 _check_line_threshold() {
   local baseline_sha="$1"
 
+  # Read threshold from config — early return when disabled (0 or unset)
+  local threshold
+  threshold=$(_parse_config_field "runner" "cohesion_trigger" 2>/dev/null || true)
+  threshold="${threshold:-0}"
+  if [ "$threshold" -eq 0 ] 2>/dev/null; then
+    return
+  fi
+
   # Count lines from this session
   local session_lines
   session_lines=$(_count_session_lines "$baseline_sha")
@@ -252,11 +260,6 @@ _check_line_threshold() {
   local current_count
   current_count=$(_read_line_counter)
   local new_count=$((current_count + session_lines))
-
-  # Read threshold from config
-  local threshold
-  threshold=$(_parse_config_field "runner" "cohesion_trigger" 2>/dev/null || true)
-  threshold="${threshold:-100}"
 
   if [ "$new_count" -ge "$threshold" ]; then
     echo "cohesion-trigger: cumulative lines ($new_count) >= threshold ($threshold) — enqueueing audit" >&2

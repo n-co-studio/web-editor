@@ -1,0 +1,60 @@
+# Workflow — Compressed Reference
+
+> Compressed from `docs/ai/workflow.md` — update both when either changes.
+> **Maintenance obligation:** update this file whenever `workflow.md` changes.
+> Full file is authoritative. Load it in verify/commit phase, on ephemeral upgrade, or when detailed close-sequence reference is needed.
+
+## Execution Loop
+
+| Phase | Action |
+|-------|--------|
+| **Plan** | Goal, scope, files, verification steps |
+| **Build** | Small, reviewable increments |
+| **Verify** | Cohesion review (Critic), then gate checks (QA: A1-A6 + B) |
+| **User Review** | Persona simulation dispatch (optional — when brief defines scenarios) |
+| **Commit** | Only after all gates pass |
+
+## Close Sequence
+
+1. Update session log (product: `docs/ai/logs/session-log.md`; template: `.claude/local/session-log.md`)
+2. Commit all remaining changes including session log
+3. Solo merge: `git checkout main && git merge --ff-only <branch>` (fallback `--no-ff`)
+   - On success: `write_merge_signal "<branch>"`
+   - On failure: `git merge --abort && git checkout <branch>`, notify operator
+   - Post-merge push: `git push origin main` (advisory, skip template mode / no remote, never force-push)
+4. Present closing summary — final agent message
+
+Zero-change sessions: exempt from session log (stop hook downgrades to advisory).
+
+## Git Trailer Convention
+```
+Session: N
+Decisions: 0001, 0002
+Gates-A: A1-pass A2-pass A3-n/a A4-pass A5-pass A6-n/a
+Gates-B: B1-pass B2-n/a B3-n/a
+```
+
+## Session Lifecycle
+| Rule | Detail |
+|------|--------|
+| **Init** | Create session branch first, before reading docs or writing files |
+| **Branch isolation** | One session per branch; sealed at close (Decision 0013; task groups exempt) |
+| **Solo mode** | Merge to main at close for `feature/*`, `fix/*`, `hotfix/*`. Non-final task group briefs skip merge |
+| **Overlap** | Registry blocks same-branch overlap (task groups: advisory only) |
+
+## Branch Categories
+| Category | Gate Profile |
+|----------|-------------|
+| `feature/*`, `fix/*` | Standard (A + B) |
+| `hotfix/*` | Expedited: A2 relaxed, A5 skipped |
+| `experiment/*` | A4 only; full gates required before merge to main |
+| `release/*` | All gates + C gates (release checklist, Reviewer + Security sign-off) |
+| `main` | All gates. No direct commits |
+
+## Governance Layers
+
+| Layer | Location | Enforcement |
+|-------|----------|-------------|
+| Inter-session pipeline | `docs/ai/governance/` | bash-guard + pre-commit-gates (advisory, first-fire) |
+| Phase chain (task groups) | Contract `governance:` section | session-close-check (advisory) |
+| Override audit | Per-session state `overrides.log` | session-close-check (summary at close) |

@@ -104,6 +104,7 @@ Governance evidence in `.claude/.state/`. Written by hooks via shell I/O (never 
 | `merge-source-branch` | `_phase-helper.sh` (`write_merge_signal`) | Agent-to-hook merge signal — indicates agent completed merge in close phase (session-close-check.sh skips redundant merge) |
 | `scope-risk-gain` | Orchestrator (model) | Risk/gain context for unbriefed-in-scope files — read by `pre-commit-gates.sh` scope classification gate, included in advisory escalation (Decision 0017) |
 | `brief-has-taskgroup` | `_phase-helper.sh` (`write_taskgroup_brief_signal`) | Session-type validation (`check_taskgroup_brief_mismatch` in `bash-guard.sh`, Decision 0026). Cleaned by `cleanup_session_files` |
+| `session-resume.yaml` | `_phase-helper.sh` (`write_resume_marker`) | Compression recovery — orchestrator reads after context compression to resume without re-dispatching governance agents. Updated at every phase transition. Cleaned by `cleanup_session_files` |
 
 **Sentinel files** (`.claude/local/`, persistent across sessions, gitignored): `.pragmatist-enforced` (backward-compatible gate deployment marker — written on first `pragmatist-signed` enforcement in `pre-commit-gates.sh`, prevents false positives on sessions started before the gate was deployed).
 

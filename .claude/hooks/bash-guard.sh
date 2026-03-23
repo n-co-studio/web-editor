@@ -445,7 +445,7 @@ if [ "$ALLOW_REASON" = "pass" ]; then
              { [ "$CURRENT_PHASE" = "plan" ] || [ "$CURRENT_PHASE" = "approval" ]; }; then
             echo "GATE-RECOVERABLE: Session in '$CURRENT_PHASE' phase and plan-approved state file is missing — plan-approval.sh hook may not have fired after AskUserQuestion (see known-issues.md R13). NEXT: Create recovery signal (touch .claude/.state/.recover-signal) or set REPO_OS_SKIP_PLAN_GATE=1." >&2
           else
-            echo "GATE-RECOVERABLE: Session in '$CURRENT_PHASE' phase — plan not yet approved. NEXT: Use AskUserQuestion to present your plan for operator approval (triggers plan-approval hook). (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
+            echo "GATE-RECOVERABLE: Session in '$CURRENT_PHASE' phase — Bash writes blocked until plan approved. NEXT: Call AskUserQuestion with your plan summary. Include options: \"Auto — proceed autonomously\" and \"Review — pause for my review before commit\". Conversational confirmation does NOT trigger the approval hook. (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
           fi
           exit 2
         fi

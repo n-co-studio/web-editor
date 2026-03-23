@@ -427,7 +427,7 @@ if [ -n "$FILE_PATH" ]; then
               BG_ALLOW_REASON="phase_exempt"
             else
               log_hook_event "write-guard" "PreToolUse" "" "block" "$START_MS" "phase_gate" "phase:$CURRENT_PHASE"
-              echo "GATE-RECOVERABLE: Session in '$CURRENT_PHASE' phase — plan not yet approved. NEXT: Use AskUserQuestion to present your plan for operator approval (triggers plan-approval hook). (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
+              echo "GATE-RECOVERABLE: Session in '$CURRENT_PHASE' phase — Edit/Write blocked until plan approved. NEXT: Call AskUserQuestion with your plan summary. Include options: \"Auto — proceed autonomously\" and \"Review — pause for my review before commit\". Conversational confirmation does NOT trigger the approval hook. (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
               exit 2
             fi
             ;;

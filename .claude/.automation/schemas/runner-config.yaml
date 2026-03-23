@@ -9,7 +9,7 @@ runner:
   max_retries: 3            # default max retries per queue entry
   heartbeat_interval: 30    # seconds between runner heartbeat checks
   stderr_tail_lines: 50     # lines of stderr to capture in blocker reports
-  cohesion_trigger: 100     # line-change threshold triggering cohesion review
+  cohesion_trigger: 0       # line-change threshold triggering cohesion review (0 = disabled)
   poll_interval: 60                # Daemon idle poll interval in seconds (default: 60)
   cooldown_between_sessions: 5     # Pause between sessions in seconds (default: 5)
   max_consecutive_sessions: 0      # Max sessions before daemon exits; 0 = unlimited

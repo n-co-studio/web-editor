@@ -689,6 +689,39 @@ queue_escalate() {
   _rebuild_queue_index
 }
 
+# --- Repair directory/status mismatches ---
+# Scans every status directory. If an entry's YAML `status:` field
+# does not match the directory it lives in, rewrite with the correct status.
+# Arguments: none (operates on _queue_dir)
+# Output: number of repairs on stdout
+_repair_status_mismatches() {
+  local qdir
+  qdir=$(_queue_dir)
+  local repaired=0
+
+  local status
+  for status in pending-review approved running completed failed review blocked; do
+    local dir="$qdir/$status"
+    [ -d "$dir" ] || continue
+    local f
+    for f in "$dir"/*.yaml; do
+      [ -f "$f" ] || continue
+      _load_queue_entry "$f"
+      if [ "$_QE_STATUS" != "$status" ]; then
+        _QE_STATUS="$status"
+        _QE_UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        _write_queue_entry "$f"
+        repaired=$((repaired + 1))
+      fi
+    done
+  done
+
+  if [ "$repaired" -gt 0 ]; then
+    _rebuild_queue_index
+  fi
+  printf '%s' "$repaired"
+}
+
 # --- Block a running entry ---
 # Moves from running to blocked/ with reason.
 # Arguments:

@@ -69,6 +69,15 @@ detect_outcome() {
     local esc_file
     for esc_file in "$escalation_dir"/*.yaml; do
       if [ -f "$esc_file" ]; then
+        # Filter by entry ID: only count escalation files belonging to the
+        # current queue entry (P1 — prevents false positive classification
+        # from stale escalation files left by other entries).
+        if [ -n "$entry_id" ]; then
+          if ! grep -q "queue_entry_id: \"$entry_id\"" "$esc_file" 2>/dev/null && \
+             ! grep -q "queue_entry_id: $entry_id" "$esc_file" 2>/dev/null; then
+            continue
+          fi
+        fi
         _esc_count=$((_esc_count + 1))
         has_escalation=true
         # Detect scope-deviation type for enriched outcome detail

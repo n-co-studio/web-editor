@@ -254,7 +254,7 @@ get_session_id() {
 
 # --- Session-scoped state directory (Decision 0030) ---
 # Routes state file reads/writes to the correct directory:
-#   - Full worktree sessions: .claude/.state/wt-sessions/{sid}/
+#   - REPO_OS_SESSION_ID set (worktree or daemon): .claude/.state/wt-sessions/{sid}/
 #   - All other contexts: .claude/.state/ (flat layout — backward compatible)
 # Cached per-process to avoid repeated function calls.
 _CACHED_SESSION_STATE_DIR=""
@@ -264,7 +264,7 @@ get_session_state_dir() {
     return
   fi
   local repo_root="$_REPO_OS_ROOT"
-  if is_full_worktree_session; then
+  if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
     local sid
     sid=$(get_session_id "$repo_root")
     # Sanitize: strip path components to prevent directory traversal (Decision 0030 security)
