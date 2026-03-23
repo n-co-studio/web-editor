@@ -358,7 +358,11 @@ _validate_phase_session() {
 
   _load_phase_state "$state_file" || return 1
   local current_sid
-  current_sid=$(cat "$_REPO_OS_ROOT/.claude/.session-id" 2>/dev/null)
+  if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
+    current_sid="$REPO_OS_SESSION_ID"
+  else
+    current_sid=$(cat "$_REPO_OS_ROOT/.claude/.session-id" 2>/dev/null)
+  fi
   if [ -n "$_PS_SESSION_ID" ] && [ "$_PS_SESSION_ID" = "$current_sid" ]; then
     _PS_VALIDATED=true
     _CACHED_CURRENT_SID="$current_sid"
@@ -377,7 +381,8 @@ _validate_phase_session() {
 init_phase() {
   local stype="$1"
   local repo_root="$_REPO_OS_ROOT"
-  local state_dir="$repo_root/.claude/.state"
+  local state_dir
+  state_dir="$(get_session_state_dir)"
 
   # Double-init guard (adversarial M1): refuse re-init if phase-state exists
   # for the current session. Prevents progress reset via second init_phase call.
@@ -386,13 +391,36 @@ init_phase() {
     local _existing_sid
     _existing_sid=$(grep '^session_id:' "$state_dir/phase-state" 2>/dev/null | sed 's/^session_id: *//' | tr -d '[:space:]' | head -1)
     local _current_sid
-    _current_sid=$(cat "$repo_root/.claude/.session-id" 2>/dev/null || echo "")
+    if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
+      _current_sid="$REPO_OS_SESSION_ID"
+    else
+      _current_sid=$(cat "$repo_root/.claude/.session-id" 2>/dev/null || echo "")
+    fi
     if [ -n "$_existing_sid" ] && [ "$_existing_sid" = "$_current_sid" ]; then
       if [ "${REPO_OS_ALLOW_REINIT:-0}" = "1" ]; then
         echo "WARNING: Re-initializing phase state (REPO_OS_ALLOW_REINIT=1 override)" >&2
       else
         echo "GATE-RECOVERABLE: Phase state already exists for this session — re-initialization blocked. NEXT: If crash recovery is needed, set REPO_OS_ALLOW_REINIT=1 and retry. (override: REPO_OS_ALLOW_REINIT=1)" >&2
         return 1
+      fi
+    elif [ -n "$_existing_sid" ] && [ "$_existing_sid" != "$_current_sid" ]; then
+      # Stale phase-state from a different session — check if that session is alive
+      local _stale_registry="$repo_root/.claude/.state/sessions/${_existing_sid}.yaml"
+      if [ -f "$_stale_registry" ]; then
+        local _stale_pid
+        _stale_pid=$(grep '^pid: ' "$_stale_registry" 2>/dev/null | sed 's/^pid: *//')
+        if [ -n "$_stale_pid" ] && kill -0 "$_stale_pid" 2>/dev/null; then
+          if [ "${REPO_OS_ALLOW_REINIT:-0}" = "1" ]; then
+            echo "WARNING: Overwriting active session $_existing_sid phase-state (REPO_OS_ALLOW_REINIT=1 override)" >&2
+          else
+            echo "GATE-RECOVERABLE: Another session ($_existing_sid) has active phase-state. NEXT: Wait for the other session to complete, or use REPO_OS_ALLOW_REINIT=1 to force." >&2
+            return 1
+          fi
+        else
+          echo "WARNING: Cleaning stale phase-state from crashed session $_existing_sid" >&2
+        fi
+      else
+        echo "WARNING: Cleaning stale phase-state from crashed session $_existing_sid" >&2
       fi
     fi
   fi
@@ -429,6 +457,10 @@ init_phase() {
 
   # Register session in the session registry (Decision 0013 overlap awareness)
   register_session "$stype" || true
+
+  # Sweep stale registry entries (dead PID or age >24h) — two cleanup
+  # opportunities per lifecycle: here at init and in unregister_session at close.
+  sweep_stale_sessions || true
 }
 
 # --- Advance to a new phase ---
@@ -439,7 +471,9 @@ init_phase() {
 advance_phase() {
   local new_phase="$1"
   local repo_root="$_REPO_OS_ROOT"
-  local state_file="$repo_root/.claude/.state/phase-state"
+  local state_dir
+  state_dir="$(get_session_state_dir)"
+  local state_file="$state_dir/phase-state"
 
   if [ ! -f "$state_file" ]; then
     echo "ERROR: No phase state — call init_phase first" >&2
@@ -535,7 +569,7 @@ advance_phase() {
     local post_approval
     post_approval=$(get_post_approval_phase "$stype")
     if [ -n "$post_approval" ] && [ "$new_phase" = "$post_approval" ]; then
-      local pa_file="$repo_root/.claude/.state/plan-approved"
+      local pa_file="$state_dir/plan-approved"
       if [ ! -f "$pa_file" ]; then
         echo "GATE-RECOVERABLE: plan-approved state file missing — cannot advance to '$new_phase' without operator plan approval. NEXT: Use AskUserQuestion to present plan for operator approval." >&2
         return 1
@@ -544,6 +578,70 @@ advance_phase() {
       # (runner) now write session_id into plan-approved. The existence check here
       # remains sufficient — session binding is double-enforced at commit time by
       # pre-commit-gates.sh _validate_state_session_id.
+    fi
+  fi
+
+  # --- Substance check: pragmatist-signed required before approval ---
+  # When the session type has a plan gate, the Pragmatist agent must have
+  # reviewed the plan before the operator can approve it (Decision 0025).
+  if [ "$new_phase" = "approval" ] && has_plan_gate "$stype"; then
+    case "$stype" in
+      experiment|prototype-*|ephemeral) ;; # exempt — no governance agents
+      *)
+        if [ "${REPO_OS_SKIP_PRAGMATIST_GATE:-0}" != "1" ]; then
+          if [ ! -f "$state_dir/pragmatist-signed" ]; then
+            echo "GATE-RECOVERABLE: pragmatist-signed state file missing — cannot advance to 'approval' without Pragmatist review. NEXT: Dispatch Pragmatist agent in plan-gating mode. (override: REPO_OS_SKIP_PRAGMATIST_GATE=1)" >&2
+            return 1
+          fi
+        fi
+        ;;
+    esac
+  fi
+
+  # --- Substance check: cohesion-reviewed required before verify ---
+  # When the session type has a review or cohesion phase that precedes verify
+  # in the sequence, the Critic cohesion review must have completed.
+  if [ "$new_phase" = "verify" ]; then
+    local _review_idx=0 _verify_idx
+    _verify_idx=$(get_phase_index "$stype" "verify")
+    # Check for either "review" or "cohesion" phase (taskgroup-merge uses "cohesion")
+    _review_idx=$(get_phase_index "$stype" "review")
+    [ "$_review_idx" -eq 0 ] && _review_idx=$(get_phase_index "$stype" "cohesion")
+    if [ "$_review_idx" -gt 0 ] && [ "$_review_idx" -lt "$_verify_idx" ]; then
+      case "$stype" in
+        experiment|prototype-*|ephemeral) ;; # exempt
+        *)
+          if [ "${REPO_OS_SKIP_COHESION_GATE:-0}" != "1" ]; then
+            if [ ! -f "$state_dir/cohesion-reviewed" ]; then
+              echo "GATE-RECOVERABLE: cohesion-reviewed state file missing — cannot advance to 'verify' without Critic cohesion review. NEXT: Dispatch Critic agent in cohesion mode. (override: REPO_OS_SKIP_COHESION_GATE=1)" >&2
+              return 1
+            fi
+          fi
+          ;;
+      esac
+    fi
+  fi
+
+  # --- Substance check: qa-verified required before commit ---
+  # When the session type has a verify phase that precedes commit in the
+  # sequence, QA verification must have completed. Editor-live auto-skips
+  # because its verify phase follows commit (non-standard order).
+  if [ "$new_phase" = "commit" ]; then
+    local _qv_verify_idx _qv_commit_idx
+    _qv_verify_idx=$(get_phase_index "$stype" "verify")
+    _qv_commit_idx=$(get_phase_index "$stype" "commit")
+    if [ "$_qv_verify_idx" -gt 0 ] && [ "$_qv_verify_idx" -lt "$_qv_commit_idx" ]; then
+      case "$stype" in
+        experiment|prototype-*|ephemeral) ;; # exempt
+        *)
+          if [ "${REPO_OS_SKIP_QA_GATE:-0}" != "1" ]; then
+            if [ ! -f "$state_dir/qa-verified" ]; then
+              echo "GATE-RECOVERABLE: qa-verified state file missing — cannot advance to 'commit' without QA verification. NEXT: Dispatch QA verifier agent. (override: REPO_OS_SKIP_QA_GATE=1)" >&2
+              return 1
+            fi
+          fi
+          ;;
+      esac
     fi
   fi
 
@@ -576,7 +674,7 @@ advance_phase() {
 assert_phase() {
   local required="$1"
   local repo_root="$_REPO_OS_ROOT"
-  local state_file="$repo_root/.claude/.state/phase-state"
+  local state_file="$(get_session_state_dir)/phase-state"
 
   if [ ! -f "$state_file" ]; then
     return 1
@@ -607,7 +705,7 @@ assert_phase() {
 # Usage: phase=$(get_phase)
 get_phase() {
   local repo_root="$_REPO_OS_ROOT"
-  local state_file="$repo_root/.claude/.state/phase-state"
+  local state_file="$(get_session_state_dir)/phase-state"
 
   if [ ! -f "$state_file" ]; then
     echo ""
@@ -629,7 +727,7 @@ get_phase() {
 # Usage: mode=$(get_phase_mode)
 get_phase_mode() {
   local repo_root="$_REPO_OS_ROOT"
-  local state_file="$repo_root/.claude/.state/phase-state"
+  local state_file="$(get_session_state_dir)/phase-state"
 
   if [ ! -f "$state_file" ]; then
     echo "review"
@@ -646,7 +744,7 @@ get_phase_mode() {
 # Usage: tag=$(get_tag)
 get_tag() {
   local repo_root="$_REPO_OS_ROOT"
-  local state_file="$repo_root/.claude/.state/phase-state"
+  local state_file="$(get_session_state_dir)/phase-state"
 
   if [ ! -f "$state_file" ]; then
     echo ""
@@ -669,7 +767,7 @@ get_tag() {
 # Usage: solo=$(get_solo)
 get_solo() {
   local repo_root="$_REPO_OS_ROOT"
-  local state_file="$repo_root/.claude/.state/phase-state"
+  local state_file="$(get_session_state_dir)/phase-state"
 
   if [ ! -f "$state_file" ]; then
     echo "false"
@@ -692,7 +790,7 @@ get_solo() {
 set_solo() {
   local new_solo="$1"
   local repo_root="$_REPO_OS_ROOT"
-  local state_file="$repo_root/.claude/.state/phase-state"
+  local state_file="$(get_session_state_dir)/phase-state"
 
   if [ ! -f "$state_file" ]; then
     return 1
@@ -733,7 +831,7 @@ set_solo() {
 set_phase_mode() {
   local new_mode="$1"
   local repo_root="$_REPO_OS_ROOT"
-  local state_file="$repo_root/.claude/.state/phase-state"
+  local state_file="$(get_session_state_dir)/phase-state"
 
   if [ ! -f "$state_file" ]; then
     return 1
@@ -774,7 +872,7 @@ set_phase_mode() {
 # Usage: upgrade_session_type
 upgrade_session_type() {
   local repo_root="$_REPO_OS_ROOT"
-  local state_file="$repo_root/.claude/.state/phase-state"
+  local state_file="$(get_session_state_dir)/phase-state"
 
   if [ ! -f "$state_file" ]; then
     echo "ERROR: upgrade_session_type — no phase-state file" >&2
@@ -825,7 +923,8 @@ upgrade_session_type() {
 # Usage: write_taskgroup_brief_signal
 write_taskgroup_brief_signal() {
   local repo_root="$_REPO_OS_ROOT"
-  local state_dir="$repo_root/.claude/.state"
+  local state_dir
+  state_dir="$(get_session_state_dir)"
   mkdir -p "$state_dir" 2>/dev/null || true
   printf 'true\n' > "$state_dir/brief-has-taskgroup" 2>/dev/null || true
 }
@@ -839,7 +938,7 @@ write_taskgroup_brief_signal() {
 check_taskgroup_brief_mismatch() {
   local start_ms="${1:-0}"
   local repo_root="$_REPO_OS_ROOT"
-  local fingerprint="$repo_root/.claude/.state/brief-has-taskgroup"
+  local fingerprint="$(get_session_state_dir)/brief-has-taskgroup"
 
   # Override: REPO_OS_SKIP_TASKGROUP_CHECK=1
   if [ "${REPO_OS_SKIP_TASKGROUP_CHECK:-0}" = "1" ]; then
@@ -852,7 +951,7 @@ check_taskgroup_brief_mismatch() {
   [ -f "$fingerprint" ] || return 0
 
   # No phase-state → session type unknown → skip check
-  local state_file="$repo_root/.claude/.state/phase-state"
+  local state_file="$(get_session_state_dir)/phase-state"
   [ -f "$state_file" ] || return 0
 
   local stype
@@ -884,7 +983,8 @@ write_merge_signal() {
     return 1
   fi
   local repo_root="$_REPO_OS_ROOT"
-  local state_dir="$repo_root/.claude/.state"
+  local state_dir
+  state_dir="$(get_session_state_dir)"
   mkdir -p "$state_dir" 2>/dev/null || true
   printf '%s\n' "$branch_name" > "$state_dir/merge-source-branch" 2>/dev/null || true
 }

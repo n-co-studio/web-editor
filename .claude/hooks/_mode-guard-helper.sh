@@ -38,6 +38,7 @@ is_immune() {
   case "$p" in
     .claude/hooks/write-guard.sh) return 0 ;;
     .claude/repo-mode) return 0 ;;
+    .claude/.session-id) return 0 ;;
     *) return 1 ;;
   esac
 }

@@ -108,7 +108,7 @@ fi
 # --- Write plan-approved state file ---
 REPO_ROOT="$(get_repo_root)"
 SID=$(get_session_id "$REPO_ROOT")
-STATE_DIR="$REPO_ROOT/.claude/.state"
+STATE_DIR="$(get_session_state_dir)"
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 
 TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)

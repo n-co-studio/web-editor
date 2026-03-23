@@ -29,6 +29,30 @@ SB="$(get_sandbox)"
 STATE_DIR="$SB/.claude/.state"
 TEST_SID="$(get_test_session_id)"
 
+# --- Substance-aware _advance wrapper ---
+# Pre-writes state files required by _advance substance checks (Brief 1).
+# Without these, _advance returns non-zero and set -e kills the script.
+_advance() {
+  local phase="$1"
+  local sd
+  sd="$(get_session_state_dir)"
+  local sid
+  sid=$(cat "$SB/.claude/.session-id")
+  case "$phase" in
+    approval)
+      printf 'timestamp: test\nagent: pragmatist\nsession_id: %s\nGATE_RESULT: APPROVED\n' "$sid" > "$sd/pragmatist-signed"
+      printf 'timestamp: test\nsession_id: %s\nmode: auto\n' "$sid" > "$sd/plan-approved"
+      ;;
+    verify)
+      printf 'timestamp: test\nagent: critic\nsession_id: %s\nGATE_RESULT: APPROVED\n' "$sid" > "$sd/cohesion-reviewed"
+      ;;
+    commit)
+      printf 'timestamp: test\nagent: qa-verifier\nsession_id: %s\nGATE_RESULT: APPROVED\n' "$sid" > "$sd/qa-verified"
+      ;;
+  esac
+  advance_phase "$phase" 2>/dev/null
+}
+
 # ============================================================
 # L3.1 — write-guard.sh Section 3 (PreToolUse Edit/Write bash-guard gates)
 # ============================================================
@@ -41,21 +65,21 @@ REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edi
 assert_fail "$_LAST_RC" "write-guard blocks edit in init phase"
 
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
+_advance "plan" 2>/dev/null
 # Phase is plan — still blocked
 REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
 assert_fail "$_LAST_RC" "write-guard blocks edit in plan phase"
 
 # --- Gate 2: Allows edit in build phase ---
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
-advance_phase "approval" 2>/dev/null
-advance_phase "build" 2>/dev/null
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
 REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
 assert_ok "$_LAST_RC" "write-guard allows edit in build phase"
 
 # --- Gate 2: Allows edit in later phases (review, verify, commit) ---
-advance_phase "review" 2>/dev/null
+_advance "review" 2>/dev/null
 REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
 assert_ok "$_LAST_RC" "write-guard allows edit in review phase"
 
@@ -101,9 +125,9 @@ assert_ok "$_LAST_RC" "write-guard fails open when no phase-state"
 
 # --- Gate 1: Main branch protection ---
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
-advance_phase "approval" 2>/dev/null
-advance_phase "build" 2>/dev/null
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
 switch_sandbox_branch "main"
 REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
 assert_fail "$_LAST_RC" "write-guard blocks edit on main branch"
@@ -122,9 +146,9 @@ assert_ok "$_LAST_RC" "write-guard allows edit with REPO_OS_RECOVER=1"
 
 # --- Gate 5: Closed branch protection ---
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
-advance_phase "approval" 2>/dev/null
-advance_phase "build" 2>/dev/null
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
 mkdir -p "$SB/.claude/local"
 echo "feature/test" > "$SB/.claude/local/closed-branches"
 REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
@@ -153,34 +177,34 @@ assert_ok "$_LAST_RC" "bash-guard allows bash without write target (npm test)"
 
 # --- Gate 2: Bash with in-repo write target in init phase → blocks ---
 reset_phase "standard"
-run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
 assert_fail "$_LAST_RC" "bash-guard blocks bash redirect in init phase"
 
 # --- Gate 2: Bash with write target in build phase → allows ---
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
-advance_phase "approval" 2>/dev/null
-advance_phase "build" 2>/dev/null
-run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
 assert_ok "$_LAST_RC" "bash-guard allows bash redirect in build phase"
 
 # --- experiment/* branch exemption ---
 reset_phase "standard"
 switch_sandbox_branch "experiment/test"
-run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
 assert_ok "$_LAST_RC" "bash-guard allows bash redirect on experiment/* branch"
 switch_sandbox_branch "feature/test"
 
 # --- Session type without plan gate → allows ---
 reset_phase "advisory-init"
-run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
 assert_ok "$_LAST_RC" "bash-guard allows bash redirect for advisory-init (no plan gate)"
 
 # --- Gate 1: Main branch protection ---
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
-advance_phase "approval" 2>/dev/null
-advance_phase "build" 2>/dev/null
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
 switch_sandbox_branch "main"
 run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
 assert_fail "$_LAST_RC" "bash-guard blocks bash redirect on main branch"
@@ -188,7 +212,7 @@ switch_sandbox_branch "feature/test"
 
 # --- REPO_OS_SKIP_PLAN_GATE=1 override ---
 reset_phase "standard"
-REPO_OS_SKIP_PLAN_GATE=1 run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
+REPO_OS_SKIP_PLAN_GATE=1 REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
 assert_ok "$_LAST_RC" "bash-guard allows bash redirect with REPO_OS_SKIP_PLAN_GATE=1"
 
 # --- REPO_OS_RECOVER=1 override ---
@@ -208,7 +232,7 @@ tap_section "L3.3: plan-approval.sh — plan approval detection and phase advanc
 
 # --- Plan question + affirmative → writes state + advances ---
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
+_advance "plan" 2>/dev/null
 rm -f "$STATE_DIR/plan-approved"
 run_hook_rc "plan-approval.sh" \
   "$(fixture_posttooluse_ask "Do you approve this plan?" "Yes approve,No revise" "Yes approve")"
@@ -221,7 +245,7 @@ assert_eq "$phase_after" "build" "plan-approval advances phase to build"
 
 # --- Plan question + negative answer → no state written ---
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
+_advance "plan" 2>/dev/null
 rm -f "$STATE_DIR/plan-approved"
 run_hook_rc "plan-approval.sh" \
   "$(fixture_posttooluse_ask "Do you approve this plan?" "Yes approve,No revise" "No, please revise")"
@@ -234,7 +258,7 @@ assert_eq "$phase_after" "plan" "plan-approval does not advance phase on negativ
 
 # --- Non-plan question → no action ---
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
+_advance "plan" 2>/dev/null
 rm -f "$STATE_DIR/plan-approved"
 run_hook_rc "plan-approval.sh" \
   "$(fixture_posttooluse_ask "Which library should we use?" "React,Vue" "React")"
@@ -243,7 +267,7 @@ assert_file_not_exists "$STATE_DIR/plan-approved" "plan-approval does not write 
 
 # --- Auto mode detection ---
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
+_advance "plan" 2>/dev/null
 rm -f "$STATE_DIR/plan-approved"
 run_hook_rc "plan-approval.sh" \
   "$(fixture_posttooluse_ask "Do you approve this plan?" "Yes auto,No revise" "Yes auto")"
@@ -252,7 +276,7 @@ assert_eq "$mode_after" "auto" "plan-approval sets mode to auto when answer cont
 
 # --- Review mode wins if both present ---
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
+_advance "plan" 2>/dev/null
 rm -f "$STATE_DIR/plan-approved"
 run_hook_rc "plan-approval.sh" \
   "$(fixture_posttooluse_ask "Do you approve this plan?" "Yes auto,Review mode" "Yes approve review")"
@@ -261,8 +285,8 @@ assert_eq "$mode_after" "review" "plan-approval sets mode to review when both au
 
 # --- Spec session: approval advances to governance ---
 reset_phase "spec-fresh"
-advance_phase "interview" 2>/dev/null
-advance_phase "write" 2>/dev/null
+_advance "interview" 2>/dev/null
+_advance "write" 2>/dev/null
 rm -f "$STATE_DIR/plan-approved"
 run_hook_rc "plan-approval.sh" \
   "$(fixture_posttooluse_ask "Do you approve this plan?" "Yes approve,No revise" "Yes approve")"
@@ -276,10 +300,10 @@ tap_section "L3.4: state-writer.sh — governance agent state capture and phase 
 
 # --- critic APPROVED → writes cohesion-reviewed + advances review→verify ---
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
-advance_phase "approval" 2>/dev/null
-advance_phase "build" 2>/dev/null
-advance_phase "review" 2>/dev/null
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "review" 2>/dev/null
 rm -f "$STATE_DIR/cohesion-reviewed"
 run_hook_rc "state-writer.sh" \
   "$(fixture_subagentstop "critic" $'Review complete.\nGATE_RESULT: APPROVED')"
@@ -290,10 +314,10 @@ assert_eq "$phase_after" "verify" "state-writer advances review→verify on crit
 
 # --- critic BLOCKED → writes file but does NOT advance phase ---
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
-advance_phase "approval" 2>/dev/null
-advance_phase "build" 2>/dev/null
-advance_phase "review" 2>/dev/null
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "review" 2>/dev/null
 rm -f "$STATE_DIR/cohesion-reviewed"
 run_hook_rc "state-writer.sh" \
   "$(fixture_subagentstop "critic" $'Issues found.\nGATE_RESULT: BLOCKED - 3 critical findings')"
@@ -303,11 +327,11 @@ assert_eq "$phase_after" "review" "state-writer does NOT advance phase on critic
 
 # --- qa-verifier APPROVED → writes qa-verified + advances verify→commit ---
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
-advance_phase "approval" 2>/dev/null
-advance_phase "build" 2>/dev/null
-advance_phase "review" 2>/dev/null
-advance_phase "verify" 2>/dev/null
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "review" 2>/dev/null
+_advance "verify" 2>/dev/null
 rm -f "$STATE_DIR/qa-verified"
 run_hook_rc "state-writer.sh" \
   "$(fixture_subagentstop "qa-verifier" $'All gates pass.\nGATE_RESULT: APPROVED')"
@@ -317,11 +341,11 @@ assert_eq "$phase_after" "commit" "state-writer advances verify→commit on qa-v
 
 # --- qa-verifier BLOCKED → writes file but does NOT advance ---
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
-advance_phase "approval" 2>/dev/null
-advance_phase "build" 2>/dev/null
-advance_phase "review" 2>/dev/null
-advance_phase "verify" 2>/dev/null
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "review" 2>/dev/null
+_advance "verify" 2>/dev/null
 rm -f "$STATE_DIR/qa-verified"
 run_hook_rc "state-writer.sh" \
   "$(fixture_subagentstop "qa-verifier" $'Gate B2 failed.\nGATE_RESULT: BLOCKED - gate failures')"
@@ -331,11 +355,11 @@ assert_eq "$phase_after" "verify" "state-writer does NOT advance phase on qa-ver
 
 # --- reviewer → writes reviewer-signed, no phase advance ---
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
-advance_phase "approval" 2>/dev/null
-advance_phase "build" 2>/dev/null
-advance_phase "review" 2>/dev/null
-advance_phase "verify" 2>/dev/null
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "review" 2>/dev/null
+_advance "verify" 2>/dev/null
 rm -f "$STATE_DIR/reviewer-signed"
 run_hook_rc "state-writer.sh" \
   "$(fixture_subagentstop "reviewer" $'Code looks good.\nGATE_RESULT: APPROVED')"
@@ -360,10 +384,10 @@ assert_file_not_exists "$STATE_DIR/qa-verified" "state-writer writes nothing for
 
 # --- Empty last_message → skip ---
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
-advance_phase "approval" 2>/dev/null
-advance_phase "build" 2>/dev/null
-advance_phase "review" 2>/dev/null
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "review" 2>/dev/null
 rm -f "$STATE_DIR/cohesion-reviewed"
 run_hook_rc "state-writer.sh" \
   "$(fixture_subagentstop "critic" "")"
@@ -382,12 +406,12 @@ tap_section "L3.5: pre-commit-gates.sh — commit gate verification"
 
 # --- Phase at commit + all state files → allows ---
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
-advance_phase "approval" 2>/dev/null
-advance_phase "build" 2>/dev/null
-advance_phase "review" 2>/dev/null
-advance_phase "verify" 2>/dev/null
-advance_phase "commit" 2>/dev/null
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "review" 2>/dev/null
+_advance "verify" 2>/dev/null
+_advance "commit" 2>/dev/null
 # Create all required state files
 printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
 printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/cohesion-reviewed"
@@ -399,9 +423,9 @@ assert_ok "$_LAST_RC" "pre-commit-gates allows commit at commit phase with all s
 
 # --- Phase before commit → blocks ---
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
-advance_phase "approval" 2>/dev/null
-advance_phase "build" 2>/dev/null
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
 printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
 printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/cohesion-reviewed"
 printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/qa-verified"
@@ -424,22 +448,25 @@ stage_sandbox_file "src/nostate.ts" "export const w = 4;"
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
 assert_fail "$_LAST_RC" "pre-commit-gates blocks when no phase-state and state files missing"
 
-# --- No phase-state + all state files → allows ---
+# --- No phase-state + all state files → blocks (fail-closed, Brief 1) ---
+# Brief 1 made phase-state mandatory for non-exempt session types. State files
+# alone no longer suffice — init_phase() must have been called.
+_cur_sid=$(cat "$SB/.claude/.session-id")
 rm -f "$STATE_DIR/phase-state"
-printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
-printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/cohesion-reviewed"
-printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/qa-verified"
+printf 'timestamp: test\nsession_id: %s\n' "$_cur_sid" > "$STATE_DIR/plan-approved"
+printf 'timestamp: test\nsession_id: %s\n' "$_cur_sid" > "$STATE_DIR/cohesion-reviewed"
+printf 'timestamp: test\nsession_id: %s\n' "$_cur_sid" > "$STATE_DIR/qa-verified"
 stage_sandbox_file "src/withstate.ts" "export const v = 5;"
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
-assert_ok "$_LAST_RC" "pre-commit-gates allows when no phase-state but all state files present"
+assert_fail "$_LAST_RC" "pre-commit-gates blocks when no phase-state even with all state files (fail-closed)"
 
 # --- Hotfix branch: skips cohesion-reviewed check ---
 reset_phase "hotfix"
-advance_phase "plan" 2>/dev/null
-advance_phase "approval" 2>/dev/null
-advance_phase "build" 2>/dev/null
-advance_phase "verify" 2>/dev/null
-advance_phase "commit" 2>/dev/null
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "verify" 2>/dev/null
+_advance "commit" 2>/dev/null
 switch_sandbox_branch "hotfix/test"
 printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
 rm -f "$STATE_DIR/cohesion-reviewed"
@@ -451,12 +478,12 @@ switch_sandbox_branch "feature/test"
 
 # --- Phase passed + missing state files → blocks (defense-in-depth) ---
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
-advance_phase "approval" 2>/dev/null
-advance_phase "build" 2>/dev/null
-advance_phase "review" 2>/dev/null
-advance_phase "verify" 2>/dev/null
-advance_phase "commit" 2>/dev/null
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "review" 2>/dev/null
+_advance "verify" 2>/dev/null
+_advance "commit" 2>/dev/null
 rm -f "$STATE_DIR/plan-approved" "$STATE_DIR/cohesion-reviewed" "$STATE_DIR/qa-verified"
 stage_sandbox_file "src/phasepass.ts" "export const p = 7;"
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
@@ -470,12 +497,12 @@ assert_ok "$_LAST_RC" "pre-commit-gates allows commit with REPO_OS_RECOVER=1"
 
 # --- A4: Secret scanning blocks ---
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
-advance_phase "approval" 2>/dev/null
-advance_phase "build" 2>/dev/null
-advance_phase "review" 2>/dev/null
-advance_phase "verify" 2>/dev/null
-advance_phase "commit" 2>/dev/null
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "review" 2>/dev/null
+_advance "verify" 2>/dev/null
+_advance "commit" 2>/dev/null
 printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
 printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/cohesion-reviewed"
 printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/qa-verified"
@@ -586,7 +613,7 @@ tap_section "L3.8: State chain integration — full standard session lifecycle"
 # commit → (pre-commit-gates passes)
 
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
+_advance "plan" 2>/dev/null
 
 # Plan approval fires (PostToolUse AskUserQuestion)
 rm -f "$STATE_DIR/plan-approved"
@@ -597,7 +624,7 @@ assert_eq "$phase_after" "build" "lifecycle: plan-approval advances to build"
 assert_file_exists "$STATE_DIR/plan-approved" "lifecycle: plan-approved state file written"
 
 # Agent does build work, then advances to review
-advance_phase "review" 2>/dev/null
+_advance "review" 2>/dev/null
 
 # Critic fires (SubagentStop)
 rm -f "$STATE_DIR/cohesion-reviewed"
@@ -622,10 +649,10 @@ assert_ok "$_LAST_RC" "lifecycle: pre-commit-gates passes at commit phase"
 tap_section "L3.8b: State chain — critic BLOCKED loop"
 
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
-advance_phase "approval" 2>/dev/null
-advance_phase "build" 2>/dev/null
-advance_phase "review" 2>/dev/null
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "review" 2>/dev/null
 
 # Critic returns BLOCKED — phase stays at review
 run_hook_rc "state-writer.sh" \
@@ -634,12 +661,12 @@ phase_after=$(get_phase)
 assert_eq "$phase_after" "review" "loop: critic BLOCKED keeps phase at review"
 
 # Orchestrator loops: review→build (defined loop in standard)
-advance_phase "build" 2>/dev/null
+_advance "build" 2>/dev/null
 phase_after=$(get_phase)
 assert_eq "$phase_after" "build" "loop: review→build loop succeeds"
 
 # Agent fixes issues, advances back to review
-advance_phase "review" 2>/dev/null
+_advance "review" 2>/dev/null
 
 # Critic runs again — this time APPROVED
 rm -f "$STATE_DIR/cohesion-reviewed"
@@ -655,16 +682,16 @@ tap_section "L3.8c: Editor-live — loop mechanics, gate profile, write-guard ex
 
 # --- Loop mechanics: init → build → commit → (loop commit→build) → review → verify ---
 reset_phase "editor-live"
-advance_phase "build" 2>/dev/null
+_advance "build" 2>/dev/null
 phase_after=$(get_phase)
 assert_eq "$phase_after" "build" "editor-live: init→build succeeds"
 
-advance_phase "commit" 2>/dev/null
+_advance "commit" 2>/dev/null
 phase_after=$(get_phase)
 assert_eq "$phase_after" "commit" "editor-live: build→commit succeeds"
 
 # commit→build loop (defined in get_loops_for_type)
-advance_phase "build" 2>/dev/null
+_advance "build" 2>/dev/null
 phase_after=$(get_phase)
 assert_eq "$phase_after" "build" "editor-live: commit→build loop succeeds"
 
@@ -673,20 +700,20 @@ _load_phase_state "$STATE_DIR/phase-state"
 assert_eq "$_PS_CYCLE" "2" "editor-live: cycle increments on commit→build loop"
 
 # Second iteration: build → commit → build (cycle 3)
-advance_phase "commit" 2>/dev/null
-advance_phase "build" 2>/dev/null
+_advance "commit" 2>/dev/null
+_advance "build" 2>/dev/null
 _load_phase_state "$STATE_DIR/phase-state"
 assert_eq "$_PS_CYCLE" "3" "editor-live: cycle increments to 3 on second loop"
 
 # Exit loop: build → commit → review → verify
-advance_phase "commit" 2>/dev/null
-advance_phase "review" 2>/dev/null
-advance_phase "verify" 2>/dev/null
+_advance "commit" 2>/dev/null
+_advance "review" 2>/dev/null
+_advance "verify" 2>/dev/null
 phase_after=$(get_phase)
 assert_eq "$phase_after" "verify" "editor-live: commit→review→verify succeeds (exit loop)"
 
 # verify→build loop
-advance_phase "build" 2>/dev/null
+_advance "build" 2>/dev/null
 phase_after=$(get_phase)
 assert_eq "$phase_after" "build" "editor-live: verify→build loop succeeds"
 _load_phase_state "$STATE_DIR/phase-state"
@@ -694,8 +721,8 @@ assert_eq "$_PS_CYCLE" "4" "editor-live: cycle increments on verify→build loop
 
 # --- Per-loop commit (A4 only): no plan-approved/cohesion-reviewed/qa-verified needed ---
 reset_phase "editor-live"
-advance_phase "build" 2>/dev/null
-advance_phase "commit" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "commit" 2>/dev/null
 # No state files — per-loop commit should pass (A4 only)
 rm -f "$STATE_DIR/plan-approved" "$STATE_DIR/cohesion-reviewed" "$STATE_DIR/qa-verified"
 stage_sandbox_file "src/el-loop.ts" "export const loop = 1;"
@@ -704,8 +731,8 @@ assert_ok "$_LAST_RC" "editor-live per-loop commit allows without state files (A
 
 # --- Per-loop commit: A4 still blocks secrets ---
 reset_phase "editor-live"
-advance_phase "build" 2>/dev/null
-advance_phase "commit" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "commit" 2>/dev/null
 stage_sandbox_file "src/el-secret.ts" "const key = 'sk_live_abc123def456';"
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "editor-live secret commit")"
 assert_fail "$_LAST_RC" "editor-live per-loop commit blocks on A4 secret detection"
@@ -714,12 +741,12 @@ assert_fail "$_LAST_RC" "editor-live per-loop commit blocks on A4 secret detecti
 
 # --- Close commit (post-review): requires cohesion-reviewed + qa-verified, no plan-approved ---
 reset_phase "editor-live"
-advance_phase "build" 2>/dev/null
-advance_phase "commit" 2>/dev/null
-advance_phase "review" 2>/dev/null
-advance_phase "verify" 2>/dev/null
-advance_phase "op-review" 2>/dev/null
-advance_phase "close" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "commit" 2>/dev/null
+_advance "review" 2>/dev/null
+_advance "verify" 2>/dev/null
+_advance "op-review" 2>/dev/null
+_advance "close" 2>/dev/null
 # At close phase (review IS in phases_completed)
 # pre-commit-gates checks phases_completed for review
 # Provide cohesion-reviewed + qa-verified but NO plan-approved
@@ -732,12 +759,12 @@ assert_ok "$_LAST_RC" "editor-live close commit allows without plan-approved (wi
 
 # --- Close commit: blocks without cohesion-reviewed ---
 reset_phase "editor-live"
-advance_phase "build" 2>/dev/null
-advance_phase "commit" 2>/dev/null
-advance_phase "review" 2>/dev/null
-advance_phase "verify" 2>/dev/null
-advance_phase "op-review" 2>/dev/null
-advance_phase "close" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "commit" 2>/dev/null
+_advance "review" 2>/dev/null
+_advance "verify" 2>/dev/null
+_advance "op-review" 2>/dev/null
+_advance "close" 2>/dev/null
 rm -f "$STATE_DIR/plan-approved" "$STATE_DIR/cohesion-reviewed"
 printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/qa-verified"
 stage_sandbox_file "src/el-close2.ts" "export const close2 = 2;"
@@ -746,12 +773,12 @@ assert_fail "$_LAST_RC" "editor-live close commit blocks without cohesion-review
 
 # --- Close commit: blocks without qa-verified ---
 reset_phase "editor-live"
-advance_phase "build" 2>/dev/null
-advance_phase "commit" 2>/dev/null
-advance_phase "review" 2>/dev/null
-advance_phase "verify" 2>/dev/null
-advance_phase "op-review" 2>/dev/null
-advance_phase "close" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "commit" 2>/dev/null
+_advance "review" 2>/dev/null
+_advance "verify" 2>/dev/null
+_advance "op-review" 2>/dev/null
+_advance "close" 2>/dev/null
 rm -f "$STATE_DIR/plan-approved" "$STATE_DIR/qa-verified"
 printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/cohesion-reviewed"
 stage_sandbox_file "src/el-close3.ts" "export const close3 = 3;"
@@ -762,13 +789,13 @@ assert_fail "$_LAST_RC" "editor-live close commit blocks without qa-verified"
 # After verify:build loop, current_phase=commit but review IS in phases_completed.
 # This is the realistic close-gate scenario (vs close phase used in tests above).
 reset_phase "editor-live"
-advance_phase "build" 2>/dev/null
-advance_phase "commit" 2>/dev/null
-advance_phase "review" 2>/dev/null
-advance_phase "verify" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "commit" 2>/dev/null
+_advance "review" 2>/dev/null
+_advance "verify" 2>/dev/null
 # verify:build loop — goes back to build, then forward to commit
-advance_phase "build" 2>/dev/null   # loop
-advance_phase "commit" 2>/dev/null  # now at commit with review in phases_completed
+_advance "build" 2>/dev/null   # loop
+_advance "commit" 2>/dev/null  # now at commit with review in phases_completed
 rm -f "$STATE_DIR/plan-approved"
 printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/cohesion-reviewed"
 printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/qa-verified"
@@ -810,7 +837,7 @@ REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edi
 assert_ok "$_LAST_RC" "write-guard fails open on session-ID mismatch"
 
 # Also test bash-guard
-run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
 assert_ok "$_LAST_RC" "bash-guard fails open on session-ID mismatch"
 
 # Restore session ID
@@ -821,17 +848,18 @@ rm -f "$STATE_DIR/phase-state"
 REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
 assert_ok "$_LAST_RC" "write-guard fails open when phase-state missing"
 
-run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
 assert_ok "$_LAST_RC" "bash-guard fails open when phase-state missing"
 
-# Pre-commit-gates without phase-state falls back to state file checks
+# Pre-commit-gates without phase-state → blocks (fail-closed, Brief 1)
+_cur_sid=$(cat "$SB/.claude/.session-id")
 rm -f "$STATE_DIR/phase-state"
-printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
-printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/cohesion-reviewed"
-printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/qa-verified"
+printf 'timestamp: test\nsession_id: %s\n' "$_cur_sid" > "$STATE_DIR/plan-approved"
+printf 'timestamp: test\nsession_id: %s\n' "$_cur_sid" > "$STATE_DIR/cohesion-reviewed"
+printf 'timestamp: test\nsession_id: %s\n' "$_cur_sid" > "$STATE_DIR/qa-verified"
 stage_sandbox_file "src/nophase.ts" "export const np = 1;"
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
-assert_ok "$_LAST_RC" "pre-commit-gates falls back to state files when phase-state missing"
+assert_fail "$_LAST_RC" "pre-commit-gates blocks when no phase-state even with state files (fail-closed)"
 
 # ============================================================
 # L3.10 — session-close-check.sh (Stop)
@@ -932,10 +960,10 @@ echo "stale-hash-value" > "$SB/.claude/.session-log-hash"
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 # Set up as taskgroup session
 reset_phase "taskgroup"
-advance_phase "contract-init" 2>/dev/null
-advance_phase "plan" 2>/dev/null
-advance_phase "approval" 2>/dev/null
-advance_phase "build" 2>/dev/null
+_advance "contract-init" 2>/dev/null
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
 # Create a contract with in_progress brief that has next_brief (= non-final)
 mkdir -p "$SB/.claude/local/task-groups"
 cat > "$SB/.claude/local/task-groups/test-group.yaml" <<'YAML'
@@ -964,10 +992,10 @@ _reinit_close_sandbox
 echo "stale-hash-value" > "$SB/.claude/.session-log-hash"
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 reset_phase "taskgroup"
-advance_phase "contract-init" 2>/dev/null
-advance_phase "plan" 2>/dev/null
-advance_phase "approval" 2>/dev/null
-advance_phase "build" 2>/dev/null
+_advance "contract-init" 2>/dev/null
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
 # Contract with in_progress brief that has empty next_brief (= final brief)
 mkdir -p "$SB/.claude/local/task-groups"
 cat > "$SB/.claude/local/task-groups/test-group.yaml" <<'YAML'
@@ -1231,9 +1259,9 @@ rm -rf "$SESSIONS_DIR"
 _CACHED_BRANCH=""
 reset_phase "standard"
 # Advance to build so Gate 2 (phase gate) doesn't block
-advance_phase "plan" 2>/dev/null
-advance_phase "approval" 2>/dev/null
-advance_phase "build" 2>/dev/null
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
 # Current session is registered by init_phase; create overlapping session
 SID_L314="$(cat "$SB/.claude/.session-id")"
 create_fake_session "overlap-l314" "standard" "feature/test" "$$"
@@ -1247,10 +1275,10 @@ _reinit_close_sandbox
 rm -rf "$SESSIONS_DIR"
 _CACHED_BRANCH=""
 reset_phase "taskgroup"
-advance_phase "contract-init" 2>/dev/null
-advance_phase "plan" 2>/dev/null
-advance_phase "approval" 2>/dev/null
-advance_phase "build" 2>/dev/null
+_advance "contract-init" 2>/dev/null
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
 SID_L314="$(cat "$SB/.claude/.session-id")"
 create_fake_session "overlap-tg-l314" "taskgroup" "feature/test" "$$"
 REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")" > "$_L3_OUT" 2>&1
@@ -1263,8 +1291,8 @@ _reinit_close_sandbox
 rm -rf "$SESSIONS_DIR"
 _CACHED_BRANCH=""
 reset_phase "taskgroup-merge"
-advance_phase "contract-init" 2>/dev/null
-advance_phase "cohesion" 2>/dev/null
+_advance "contract-init" 2>/dev/null
+_advance "cohesion" 2>/dev/null
 SID_L314="$(cat "$SB/.claude/.session-id")"
 create_fake_session "overlap-tgm-l314" "taskgroup" "feature/test" "$$"
 REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")" > "$_L3_OUT" 2>&1
@@ -1277,8 +1305,8 @@ _reinit_close_sandbox
 rm -rf "$SESSIONS_DIR"
 _CACHED_BRANCH=""
 reset_phase "taskgroup-merge"
-advance_phase "contract-init" 2>/dev/null
-advance_phase "cohesion" 2>/dev/null
+_advance "contract-init" 2>/dev/null
+_advance "cohesion" 2>/dev/null
 SID_L314="$(cat "$SB/.claude/.session-id")"
 create_fake_session "overlap-tgm2-l314" "taskgroup-merge" "feature/test" "$$"
 REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")" > "$_L3_OUT" 2>&1
@@ -1291,9 +1319,9 @@ _reinit_close_sandbox
 rm -rf "$SESSIONS_DIR"
 _CACHED_BRANCH=""
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
-advance_phase "approval" 2>/dev/null
-advance_phase "build" 2>/dev/null
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
 SID_L314="$(cat "$SB/.claude/.session-id")"
 create_fake_session "overlap-bg-l314" "standard" "feature/test" "$$"
 run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/foo.ts")" > "$_L3_OUT" 2>&1
@@ -1305,9 +1333,9 @@ _reinit_close_sandbox
 rm -rf "$SESSIONS_DIR"
 _CACHED_BRANCH=""
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
-advance_phase "approval" 2>/dev/null
-advance_phase "build" 2>/dev/null
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
 SID_L314="$(cat "$SB/.claude/.session-id")"
 create_fake_session "overlap-skip-l314" "standard" "feature/test" "$$"
 REPO_OS_SKIP_MODE_GUARD=1 REPO_OS_SKIP_OVERLAP_CHECK=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
@@ -1369,9 +1397,9 @@ assert_fail "$_LAST_RC" "bash-guard blocks bash redirect in init phase"
 
 # --- Gate 2: Bash with write target in build phase → allows ---
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
-advance_phase "approval" 2>/dev/null
-advance_phase "build" 2>/dev/null
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
 REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
 assert_ok "$_LAST_RC" "bash-guard allows bash redirect in build phase"
 
@@ -1389,9 +1417,9 @@ assert_ok "$_LAST_RC" "bash-guard allows bash redirect for advisory-init (no pla
 
 # --- Gate 1: Main branch protection ---
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
-advance_phase "approval" 2>/dev/null
-advance_phase "build" 2>/dev/null
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
 switch_sandbox_branch "main"
 REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
 assert_fail "$_LAST_RC" "bash-guard blocks bash redirect on main branch"
@@ -1413,15 +1441,15 @@ assert_fail "$_LAST_RC" "bash-guard blocks bash redirect to .claude/.state/"
 
 # --- Ephemeral session fast-exit (Phase 3b) ---
 reset_phase "ephemeral"
-advance_phase "conversation" 2>/dev/null
+_advance "conversation" 2>/dev/null
 run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
 assert_ok "$_LAST_RC" "bash-guard allows bash redirect for ephemeral session (fast-exit)"
 
 # --- Closed branch protection (Gate 5) ---
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
-advance_phase "approval" 2>/dev/null
-advance_phase "build" 2>/dev/null
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
 mkdir -p "$SB/.claude/local"
 echo "feature/test" > "$SB/.claude/local/closed-branches"
 REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "echo test > $SB/src/output.txt")"
@@ -1436,7 +1464,7 @@ tap_section "L3.10c: session-close-check.sh — ephemeral session exempt path"
 # --- Ephemeral session → unconditional allow, no branch seal ---
 _reinit_close_sandbox
 reset_phase "ephemeral"
-advance_phase "conversation" 2>/dev/null
+_advance "conversation" 2>/dev/null
 rm -f "$SB/.claude/local/closed-branches"
 run_hook_rc "session-close-check.sh" "$(fixture_stop)"
 assert_ok "$_LAST_RC" "session-close-check allows ephemeral session unconditionally"
@@ -1462,8 +1490,8 @@ _compute_log_hash > "$SB/.claude/.session-log-hash"
 # Invalid baseline → non-zero session
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 reset_phase "spec-fresh"
-advance_phase "interview" 2>/dev/null
-advance_phase "write" 2>/dev/null
+_advance "interview" 2>/dev/null
+_advance "write" 2>/dev/null
 run_hook_rc "session-close-check.sh" "$(fixture_stop)" > "$_L3_OUT"
 assert_ok "$_LAST_RC" "session-close-check allows spec-fresh without session log update"
 # Verify it did NOT emit a block decision
@@ -1478,7 +1506,7 @@ _reinit_close_sandbox
 _compute_log_hash > "$SB/.claude/.session-log-hash"
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 reset_phase "prototype-poc"
-advance_phase "build" 2>/dev/null
+_advance "build" 2>/dev/null
 run_hook_rc "session-close-check.sh" "$(fixture_stop)" > "$_L3_OUT"
 assert_ok "$_LAST_RC" "session-close-check allows prototype-poc without session log update"
 if grep -q '"block"' "$_L3_OUT" 2>/dev/null; then
@@ -1492,9 +1520,9 @@ _reinit_close_sandbox
 _compute_log_hash > "$SB/.claude/.session-log-hash"
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 reset_phase "standard"
-advance_phase "plan" 2>/dev/null
-advance_phase "approval" 2>/dev/null
-advance_phase "build" 2>/dev/null
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
 run_hook_rc "session-close-check.sh" "$(fixture_stop)" > "$_L3_OUT"
 assert_ok "$_LAST_RC" "session-close-check blocks standard session (JSON exit 0)"
 assert_contains "$(cat "$_L3_OUT")" "block" "standard session emits block for missing session log"
@@ -1505,8 +1533,8 @@ _reinit_close_sandbox
 echo "stale-hash-value" > "$SB/.claude/.session-log-hash"
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 reset_phase "spec-fresh"
-advance_phase "interview" 2>/dev/null
-advance_phase "write" 2>/dev/null
+_advance "interview" 2>/dev/null
+_advance "write" 2>/dev/null
 # Create uncommitted changes (use repo root — src/ may not exist in sandbox)
 echo "uncommitted content" > "$SB/uncommitted-file.txt"
 (cd "$SB" && git add uncommitted-file.txt 2>/dev/null)
@@ -1530,10 +1558,10 @@ _reinit_close_sandbox
 echo "stale-hash-value" > "$SB/.claude/.session-log-hash"
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 reset_phase "taskgroup"
-advance_phase "contract-init" 2>/dev/null
-advance_phase "plan" 2>/dev/null
-advance_phase "approval" 2>/dev/null
-advance_phase "build" 2>/dev/null
+_advance "contract-init" 2>/dev/null
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
 # Contract with execution: parallel and in_progress + pending briefs
 mkdir -p "$SB/.claude/local/task-groups"
 cat > "$SB/.claude/local/task-groups/parallel-group.yaml" <<'YAML'
@@ -1566,10 +1594,10 @@ _reinit_close_sandbox
 echo "stale-hash-value" > "$SB/.claude/.session-log-hash"
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 reset_phase "taskgroup-merge"
-advance_phase "contract-init" 2>/dev/null
-advance_phase "cohesion" 2>/dev/null
-advance_phase "verify" 2>/dev/null
-advance_phase "commit" 2>/dev/null
+_advance "contract-init" 2>/dev/null
+_advance "cohesion" 2>/dev/null
+_advance "verify" 2>/dev/null
+_advance "commit" 2>/dev/null
 # Create completion markers
 mkdir -p "$SB/.claude/.state"
 echo "2026-01-01T00:00:00Z" > "$SB/.claude/.state/tg-parallel-group-brief-1.complete"

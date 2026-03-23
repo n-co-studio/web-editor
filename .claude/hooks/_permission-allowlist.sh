@@ -193,6 +193,12 @@ _PERMISSION_DENY_BASH=(
   '(^|[;&|] *)python -c '
   '(^|[;&|] *)python3 -c '
 
+  # --- Interpreter file I/O targeting .claude/.state/ (defense-in-depth) ---
+  '(^|[;&|] *)python3? .*open.*\.claude/\.state/'
+  '(^|[;&|] *)perl .*open.*\.claude/\.state/'
+  '(^|[;&|] *)ruby .*File\..*\.claude/\.state/'
+  '(^|[;&|] *)node .*fs\..*\.claude/\.state/'
+
   # --- State directory write protection (cp/mv bypass) ---
   '(^|[;&|] *)cp .* \.claude/\.state/'
   '(^|[;&|] *)cp .* \.claude/\.state$'

@@ -7,7 +7,8 @@
 #
 # Logical ordering (Decision 0012 point 12): state-guard checks first,
 # then mode-guard checks, then branch-guard gates. State-guard blocks
-# writes to .claude/.state/. Mode-guard enforces operating mode restrictions.
+# writes to .claude/.state/ and .claude/.session-id. Mode-guard enforces
+# operating mode restrictions.
 # Section 3 (Edit/Write only): branch-guard gates. Main protection,
 # phase gate, session overlap, branch isolation. Consolidated from
 # branch-guard-edit.sh (Decision 0012 point 12).
@@ -15,6 +16,7 @@
 # Overrides (state-guard scope):
 #   REPO_OS_SKIP_STATE_GUARD=1  — skip state-guard checks
 #   REPO_OS_RECOVER=1           — allow recovery writes to .state/
+#   .claude/.state/.recover-signal — file-based recovery (autonomous mode)
 #
 # Overrides (mode-guard scope):
 #   REPO_OS_SKIP_MODE_GUARD=1   — skip mode-guard checks entirely
@@ -47,9 +49,18 @@ if [ "${REPO_OS_SKIP_STATE_GUARD:-0}" = "1" ]; then
   SKIP_STATE_GUARD=true
 fi
 
+RECOVER_SIGNAL_FILE="$_REPO_OS_ROOT/.claude/.state/.recover-signal"
+_RECOVER_VIA_SIGNAL=false
 if [ "${REPO_OS_RECOVER:-0}" = "1" ]; then
   log_override "state-guard" "REPO_OS_RECOVER"
   log_hook_event "state-guard" "PreToolUse" "" "allow" "$START_MS" "recovery_bypass"
+  SKIP_STATE_GUARD=true
+elif [ -f "$RECOVER_SIGNAL_FILE" ]; then
+  _RECOVER_VIA_SIGNAL=true
+  log_override "state-guard" "recover-signal-file"
+  log_hook_event "state-guard" "PreToolUse" "" "allow" "$START_MS" "recovery_signal_file"
+  rm -f "$RECOVER_SIGNAL_FILE"
+  echo "Recovery signal consumed — bypassing state-guard and mode-guard" >&2
   SKIP_STATE_GUARD=true
 fi
 
@@ -58,6 +69,9 @@ SKIP_MODE_GUARD=false
 if [ "${REPO_OS_SKIP_MODE_GUARD:-0}" = "1" ]; then
   log_override "mode-guard" "REPO_OS_SKIP_MODE_GUARD"
   log_hook_event "mode-guard" "PreToolUse" "" "allow" "$START_MS" "skip_override"
+  SKIP_MODE_GUARD=true
+fi
+if [ "$_RECOVER_VIA_SIGNAL" = true ]; then
   SKIP_MODE_GUARD=true
 fi
 
@@ -87,7 +101,7 @@ COMMAND="${_jq_out#*${_TAB}}"
 REPO_ROOT="$_REPO_OS_ROOT"
 
 # ============================================================
-# Section 1: State-Guard (blocks writes to .claude/.state/)
+# Section 1: State-Guard (blocks writes to .claude/.state/ and .claude/.session-id)
 #             + Queue-Guard (blocks writes to .claude/.automation/queue/)
 # ============================================================
 
@@ -98,7 +112,7 @@ if [ "$SKIP_STATE_GUARD" = false ]; then
   QUEUE_TARGET_PATH=""
 
   if [ -n "$FILE_PATH" ]; then
-    if [[ "$FILE_PATH" == *".claude/.state/"* ]]; then
+    if [[ "$FILE_PATH" == *".claude/.state/"* ]] || [[ "$FILE_PATH" == *".claude/.session-id"* ]]; then
       _fp_abs=$(resolve_path "$FILE_PATH")
       if is_in_repo "$_fp_abs" "$REPO_ROOT"; then
         TARGETS_STATE=true
@@ -117,7 +131,7 @@ if [ "$SKIP_STATE_GUARD" = false ]; then
     TARGETS=$(extract_write_targets "$COMMAND")
     while IFS= read -r WT; do
       [ -z "$WT" ] && continue
-      if [[ "$WT" == *".claude/.state/"* ]]; then
+      if [[ "$WT" == *".claude/.state/"* ]] || [[ "$WT" == *".claude/.session-id"* ]]; then
         _wt_abs=$(resolve_path "$WT")
         if is_in_repo "$_wt_abs" "$REPO_ROOT"; then
           TARGETS_STATE=true
@@ -135,6 +149,9 @@ if [ "$SKIP_STATE_GUARD" = false ]; then
 
   if [ "$TARGETS_STATE" = true ]; then
     STATE_FILE_NAME="${STATE_TARGET_PATH##*.claude/.state/}"
+    if [[ "$STATE_TARGET_PATH" == *".claude/.session-id"* ]]; then
+      STATE_FILE_NAME=".session-id"
+    fi
     log_hook_event "state-guard" "PreToolUse" "" "block" "$START_MS" "state_path_protected" "" "$STATE_FILE_NAME"
     echo "GATE-FINAL: .claude/.state/ is write-protected — state files are managed by governance hooks only. (override: REPO_OS_RECOVER=1)" >&2
     exit 2
@@ -341,13 +358,13 @@ fi  # end if [ "$SKIP_MODE_GUARD" = false ]
 #   Gate 5: Session branch isolation (Decision 0013)
 #
 # Bash calls are handled by bash-guard.sh separately.
-# Override: REPO_OS_RECOVER=1 (bypass all gates — already checked above)
+# Override: REPO_OS_RECOVER=1 or .recover-signal (bypass all gates)
 # ============================================================
 
 # Branch-guard only applies to Edit/Write (file_path present)
 if [ -n "$FILE_PATH" ]; then
 
-  if [ "${REPO_OS_RECOVER:-0}" != "1" ]; then
+  if [ "${REPO_OS_RECOVER:-0}" != "1" ] && [ "$_RECOVER_VIA_SIGNAL" != true ]; then
 
     CURRENT_BRANCH=$(get_branch)
     BG_ALLOW_REASON="pass"

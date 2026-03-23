@@ -300,7 +300,7 @@ phase_after=$(get_phase)
 assert_eq "$phase_after" "plan" "post-upgrade phase is plan"
 
 # --- Upgrade of non-ephemeral fails ---
-init_phase "standard"
+reset_phase "standard"
 upgrade_out=$(upgrade_session_type 2>&1 || true)
 case "$upgrade_out" in
   *"not 'ephemeral'"*) _tap_pass "upgrade_session_type rejects non-ephemeral" ;;

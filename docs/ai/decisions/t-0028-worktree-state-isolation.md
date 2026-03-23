@@ -43,7 +43,9 @@ Governance agents (critic, qa-verifier, reviewer, security-privacy, pragmatist) 
 Decision 0027 (Agent Tool Governance Gate) is the primary defense — it prevents write-capable subagents from being spawned in no-write sessions. This decision hardens a secondary attack surface: even in write-capable sessions where governance agents are legitimately dispatched, worktree isolation must not produce governance evidence based on divergent code.
 
 ## Override
-None — the worktree guard is unconditional. If a worktree subagent's verdict needs to be recorded, re-dispatch the agent without worktree isolation.
+None — the worktree guard is unconditional for subagent worktrees. If a worktree subagent's verdict needs to be recorded, re-dispatch the agent without worktree isolation.
+
+**Note**: Decision 0030 supersedes this decision **for full worktree sessions** (`claude --worktree` with `REPO_OS_SESSION_ID` set). The subagent worktree block defined here remains in effect.
 
 ## Supersedes
 None. Addresses the deferred concern noted in Decision 0027 § Deferred Concerns.

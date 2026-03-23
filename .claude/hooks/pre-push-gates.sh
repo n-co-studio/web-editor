@@ -17,11 +17,18 @@ START_MS=$(now_ms)
 
 FAILED=0
 
-# --- REPO_OS_RECOVER override ---
+# --- REPO_OS_RECOVER override (env var or file-based signal) ---
+RECOVER_SIGNAL_FILE="$(get_repo_root)/.claude/.state/.recover-signal"
 if [ "${REPO_OS_RECOVER:-0}" = "1" ]; then
   log_override "pre-push-gates" "REPO_OS_RECOVER"
   echo "REPO_OS_RECOVER=1 — skipping all push gate checks" >&2
   log_hook_event "pre-push-gates" "PreToolUse" "Bash" "allow" "$START_MS" "recover_override"
+  exit 0
+elif [ -f "$RECOVER_SIGNAL_FILE" ]; then
+  log_override "pre-push-gates" "recover-signal-file"
+  rm -f "$RECOVER_SIGNAL_FILE"
+  echo "Recovery signal consumed — skipping all push gate checks" >&2
+  log_hook_event "pre-push-gates" "PreToolUse" "Bash" "allow" "$START_MS" "recover_signal_file"
   exit 0
 fi
 

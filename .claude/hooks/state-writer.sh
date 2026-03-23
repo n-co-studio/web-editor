@@ -30,10 +30,10 @@ source "$SCRIPT_DIR/_analytics-helper.sh"
 source "$SCRIPT_DIR/_phase-helper.sh"
 START_MS=$(now_ms)
 
-# --- Worktree isolation guard (Decision 0028) ---
-# Worktree-isolated subagents must not write governance state files.
-# Their verdicts would reflect worktree content, not the main working tree.
-if is_worktree; then
+# --- Worktree isolation guard (Decision 0028, updated by Decision 0030) ---
+# Subagent worktrees: skip (verdicts reflect worktree content, not main working tree).
+# Full worktree sessions (REPO_OS_SESSION_ID set): allow (independent governance lifecycle).
+if is_worktree && ! is_full_worktree_session; then
   log_hook_event "state-writer" "SubagentStop" "$AGENT_TYPE" "skip" "$START_MS" "worktree_blocked"
   exit 0
 fi
@@ -69,7 +69,7 @@ fi
 
 # --- Write state file ---
 REPO_ROOT="$(get_repo_root)"
-STATE_DIR="$REPO_ROOT/.claude/.state"
+STATE_DIR="$(get_session_state_dir)"
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 
 # --- Phase validation (adversarial C6/H3): verify current phase matches agent type ---
@@ -106,7 +106,11 @@ fi
 TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 # Session-bind state file (adversarial C1/C4/H4): embed session_id so
 # pre-commit-gates.sh can reject forged/stale files from other sessions.
-STATE_SID=$(cat "$REPO_ROOT/.claude/.session-id" 2>/dev/null || echo "")
+if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
+  STATE_SID="$REPO_OS_SESSION_ID"
+else
+  STATE_SID=$(cat "$REPO_ROOT/.claude/.session-id" 2>/dev/null || echo "")
+fi
 printf 'timestamp: %s\nagent: %s\nsession_id: %s\n%s\n' "$TIMESTAMP" "$AGENT_TYPE" "$STATE_SID" "$LAST_LINE" \
   > "$STATE_DIR/$STATE_FILE" 2>/dev/null || true
 

@@ -71,8 +71,17 @@ else
   _EARLY_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 fi
 _ZC_BASELINE_FILE="$_EARLY_ROOT/.claude/.session-baseline-sha"
-_ZC_MERGE_FILE="$_EARLY_ROOT/.claude/.state/merge-source-branch"
-_ZC_PHASE_FILE="$_EARLY_ROOT/.claude/.state/phase-state"
+# Session-scoped state dir for zero-change fast exit (Decision 0030)
+if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
+  # Sanitize: strip path components to prevent directory traversal (Decision 0030 security)
+  _ZC_SID="${REPO_OS_SESSION_ID//\//_}"
+  _ZC_SID="${_ZC_SID//\.\./_}"
+  _ZC_STATE_DIR="$_EARLY_ROOT/.claude/.state/wt-sessions/$_ZC_SID"
+else
+  _ZC_STATE_DIR="$_EARLY_ROOT/.claude/.state"
+fi
+_ZC_MERGE_FILE="$_ZC_STATE_DIR/merge-source-branch"
+_ZC_PHASE_FILE="$_ZC_STATE_DIR/phase-state"
 
 _ZC_UNCOMMITTED=$(git diff --name-only 2>/dev/null || echo "")
 _ZC_STAGED=$(git diff --cached --name-only 2>/dev/null || echo "")
@@ -127,11 +136,66 @@ fi
 HASH_FILE="$REPO_ROOT/.claude/.session-log-hash"
 BASELINE_SHA_FILE="$REPO_ROOT/.claude/.session-baseline-sha"
 COUNTER_FILE="$REPO_ROOT/.claude/.hvst-fail-count"
-STOP_ATTEMPT_FILE="$REPO_ROOT/.claude/.state/.stop-attempt-count"
-MERGE_STATE_FILE="$REPO_ROOT/.claude/.state/merge-source-branch"
+_SESSION_STATE_DIR="$(get_session_state_dir)"
+STOP_ATTEMPT_FILE="$_SESSION_STATE_DIR/.stop-attempt-count"
+MERGE_STATE_FILE="$_SESSION_STATE_DIR/merge-source-branch"
 
 # Branch seal tracking — set to true by solo merge path to avoid double-seal.
 BRANCH_SEALED=false
+
+# --- Merge serialization (Decision 0030: concurrent worktree close safety) ---
+# Uses flock on Linux/macOS, mkdir-based lock fallback.
+_MERGE_LOCK_FD=8
+_MERGE_LOCK_HELD=false
+_MERGE_LOCK_PATH=""
+
+_acquire_merge_lock() {
+  local lock_path="$1"
+  _MERGE_LOCK_PATH="$lock_path"
+  mkdir -p "$(dirname "$lock_path")" 2>/dev/null || true
+  if command -v flock > /dev/null 2>&1; then
+    eval "exec ${_MERGE_LOCK_FD}>\"$lock_path\""
+    if ! flock -w 30 -x "$_MERGE_LOCK_FD" 2>/dev/null; then
+      echo "WARNING: Merge lock timeout (30s) — proceeding without lock" >&2
+      return 1
+    fi
+  else
+    # mkdir-based fallback (same pattern as .automation/lib/file-lock.sh)
+    local attempts=0
+    while [ "$attempts" -lt 60 ]; do
+      attempts=$((attempts + 1))
+      if mkdir "${lock_path}.dir" 2>/dev/null; then
+        echo "$$" > "${lock_path}.dir/pid" 2>/dev/null || true
+        break
+      fi
+      if [ -f "${lock_path}.dir/pid" ]; then
+        local lock_pid
+        lock_pid=$(cat "${lock_path}.dir/pid" 2>/dev/null || echo "")
+        if [ -n "$lock_pid" ] && ! kill -0 "$lock_pid" 2>/dev/null; then
+          rm -rf "${lock_path}.dir" 2>/dev/null || true
+          continue
+        fi
+      fi
+      sleep 0.5
+    done
+    if [ "$attempts" -ge 60 ]; then
+      echo "WARNING: Merge lock timeout (30s) — proceeding without lock" >&2
+      return 1
+    fi
+  fi
+  _MERGE_LOCK_HELD=true
+}
+
+_release_merge_lock() {
+  if [ "$_MERGE_LOCK_HELD" = true ] && [ -n "$_MERGE_LOCK_PATH" ]; then
+    if command -v flock > /dev/null 2>&1; then
+      eval "exec ${_MERGE_LOCK_FD}>&-" 2>/dev/null || true
+    else
+      rm -rf "${_MERGE_LOCK_PATH}.dir" 2>/dev/null || true
+    fi
+    _MERGE_LOCK_HELD=false
+  fi
+}
 
 # --- Portable SHA-256 (file-based, delegates to portable_hash from _analytics-helper.sh) ---
 file_hash() {
@@ -205,7 +269,7 @@ advisory_push_to_remote() {
     return 0
   fi
   if ! git push origin main >/dev/null 2>&1; then
-    echo "Advisory: push to origin failed — run 'git push origin main' manually" >&2
+    echo "Advisory: push to origin failed (another session may have pushed first) — run 'git pull --rebase origin main && git push origin main' manually" >&2
     log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "push_failed" "" "" || true
   else
     log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "push_success" "" "" || true
@@ -287,7 +351,7 @@ is_final_brief() {
   # Merge brief: final only when completion markers exist.
   # Precise count validation happens at agent level (contract-init phase).
   if [ "$stype" = "taskgroup-merge" ]; then
-    local state_dir="$REPO_ROOT/.claude/.state"
+    local state_dir="$_SESSION_STATE_DIR"
     local marker_count=0
     local marker
     for marker in "$state_dir"/tg-*-brief-*.complete; do
@@ -521,7 +585,7 @@ fi
 # If phase-state is absent, the session never initialized. Decision 0019
 # fail-closed enforcement blocks all edits without phase-state, so no file
 # changes could have occurred. Safe to exit after cleanup.
-if [ ! -f "$REPO_ROOT/.claude/.state/phase-state" ]; then
+if [ ! -f "$_SESSION_STATE_DIR/phase-state" ]; then
   log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "no_phase_state" || true
   # Seal before cleanup — honour agent-merge signals from prior context windows
   # and seal the current branch (seal_branch_if_applicable uses the
@@ -595,7 +659,7 @@ esac
 if [ "${SKIP_SESSION_LOG:-0}" = "1" ]; then
   log_override "session-close-check" "SKIP_SESSION_LOG"
   # Print override audit before cleanup (overrides.log is deleted by cleanup_session)
-  OVERRIDES_LOG="$REPO_ROOT/.claude/.state/overrides.log"
+  OVERRIDES_LOG="$_SESSION_STATE_DIR/overrides.log"
   if [ -f "$OVERRIDES_LOG" ]; then
     OVERRIDE_COUNT=$(wc -l < "$OVERRIDES_LOG" | tr -d ' ')
     if [ "$OVERRIDE_COUNT" -gt 0 ]; then
@@ -796,7 +860,7 @@ fi
 # Summarize any governance overrides used during this session.
 # Skipped on retry: advisory check, not needed for resolution.
 if [ "$IS_RETRY" = false ]; then
-  OVERRIDES_LOG="$REPO_ROOT/.claude/.state/overrides.log"
+  OVERRIDES_LOG="$_SESSION_STATE_DIR/overrides.log"
   if [ -f "$OVERRIDES_LOG" ]; then
     OVERRIDE_COUNT=$(wc -l < "$OVERRIDES_LOG" | tr -d ' ')
     if [ "$OVERRIDE_COUNT" -gt 0 ]; then
@@ -894,25 +958,59 @@ if [ "$SOLO" = "true" ] && [ "$BRANCH_SEALED" = false ]; then
 
   if [ "$SHOULD_MERGE" = true ]; then
     MERGE_OK=false
-    if git checkout main 2>/dev/null; then
-      if git merge --ff-only "$MERGE_BRANCH" 2>/dev/null; then
-        MERGE_OK=true
-      elif git merge --no-ff -m "Merge $MERGE_BRANCH" "$MERGE_BRANCH" 2>/dev/null; then
-        MERGE_OK=true
+    if is_full_worktree_session; then
+      # Worktree merge path (Decision 0030): use git -C to operate on main repo
+      local _main_repo="$_REPO_OS_ROOT"
+      # Merge lock is intentionally in the shared (flat) .state/ dir, not session-scoped —
+      # it must serialize across all concurrent worktree sessions.
+      local _merge_lock="$_main_repo/.claude/.state/.merge-lock"
+      _acquire_merge_lock "$_merge_lock" || true
+
+      # Verify main repo is on the main branch
+      local _main_branch
+      _main_branch=$(git -C "$_main_repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+      if [ "$_main_branch" = "main" ]; then
+        if git -C "$_main_repo" merge --ff-only "$MERGE_BRANCH" 2>/dev/null; then
+          MERGE_OK=true
+        elif git -C "$_main_repo" merge --no-ff -m "Merge $MERGE_BRANCH" "$MERGE_BRANCH" 2>/dev/null; then
+          MERGE_OK=true
+        fi
+        if [ "$MERGE_OK" = false ]; then
+          git -C "$_main_repo" merge --abort 2>/dev/null || true
+        fi
+      else
+        echo "Advisory: Main repo is on '$_main_branch', not 'main' — cannot merge from worktree. Merge manually." >&2
+        log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "wt_merge_skip_not_main" "" "$MERGE_BRANCH" || true
+      fi
+
+      _release_merge_lock
+    else
+      # Standard (non-worktree) merge path — unchanged
+      if git checkout main 2>/dev/null; then
+        if git merge --ff-only "$MERGE_BRANCH" 2>/dev/null; then
+          MERGE_OK=true
+        elif git merge --no-ff -m "Merge $MERGE_BRANCH" "$MERGE_BRANCH" 2>/dev/null; then
+          MERGE_OK=true
+        fi
       fi
     fi
 
-    if [ "$MERGE_OK" = false ]; then
+    if [ "$MERGE_OK" = false ] && ! is_full_worktree_session; then
       git merge --abort 2>/dev/null || true
       git checkout "$MERGE_BRANCH" 2>/dev/null || true
       log_hook_event "session-close-check" "Stop" "" "block" "$START_MS" "solo_merge_failed" "" "$MERGE_BRANCH" || true
       _output_block "Solo merge failed — resolve conflicts manually" "ERROR: Solo merge of '$MERGE_BRANCH' into main failed.\n  Resolve manually: git checkout main && git merge '$MERGE_BRANCH'"
     fi
 
-    record_closed_branch "$MERGE_BRANCH"
-    BRANCH_SEALED=true
-    advisory_push_to_remote
-    log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "solo_merge_success" "" "$MERGE_BRANCH" || true
+    if [ "$MERGE_OK" = true ]; then
+      record_closed_branch "$MERGE_BRANCH"
+      BRANCH_SEALED=true
+      advisory_push_to_remote
+      log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "solo_merge_success" "" "$MERGE_BRANCH" || true
+    elif is_full_worktree_session; then
+      # Worktree merge failed or skipped — don't block, just warn
+      log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "wt_merge_failed" "" "$MERGE_BRANCH" || true
+    fi
   fi
 fi
 
@@ -945,7 +1043,7 @@ fi
 # "approval" but no plan-approved file exists, the agent skipped the gate.
 # Advisory only — emits warning, does not block close.
 if [ "$IS_RETRY" = false ]; then
-  _FC_STATE_FILE="$REPO_ROOT/.claude/.state/phase-state"
+  _FC_STATE_FILE="$_SESSION_STATE_DIR/phase-state"
   if [ -f "$_FC_STATE_FILE" ]; then
     _FC_STYPE=$(get_session_type)
     _FC_COMPLETED=$(_read_phase_field "phases_completed" "$_FC_STATE_FILE")
@@ -956,14 +1054,14 @@ if [ "$IS_RETRY" = false ]; then
     if has_plan_gate "$_FC_STYPE"; then
       case ",$_FC_COMPLETED," in
         *",approval,"*|*",approval")
-          [ ! -f "$REPO_ROOT/.claude/.state/plan-approved" ] && \
+          [ ! -f "$_SESSION_STATE_DIR/plan-approved" ] && \
             _FC_WARNINGS="${_FC_WARNINGS}approval phase completed but plan-approved state file missing; "
           ;;
       esac
       case ",$_FC_COMPLETED," in
         *",plan,"*|*",plan")
-          # pragmatist-signed check only when sentinel exists (backward compat)
-          if [ -f "$REPO_ROOT/.claude/local/.pragmatist-enforced" ] && [ ! -f "$REPO_ROOT/.claude/.state/pragmatist-signed" ]; then
+          # pragmatist-signed check — phase-state-aware (no sentinel needed)
+          if [ ! -f "$_SESSION_STATE_DIR/pragmatist-signed" ]; then
             _FC_WARNINGS="${_FC_WARNINGS}plan phase completed but pragmatist-signed state file missing; "
           fi
           ;;
@@ -972,14 +1070,14 @@ if [ "$IS_RETRY" = false ]; then
     case ",$_FC_COMPLETED," in
       *",review,"*|*",review")
         # cohesion-reviewed not expected on hotfix
-        if [ "$_FC_STYPE" != "hotfix" ] && [ ! -f "$REPO_ROOT/.claude/.state/cohesion-reviewed" ]; then
+        if [ "$_FC_STYPE" != "hotfix" ] && [ ! -f "$_SESSION_STATE_DIR/cohesion-reviewed" ]; then
           _FC_WARNINGS="${_FC_WARNINGS}review phase completed but cohesion-reviewed state file missing; "
         fi
         ;;
     esac
     case ",$_FC_COMPLETED," in
       *",verify,"*|*",verify")
-        [ ! -f "$REPO_ROOT/.claude/.state/qa-verified" ] && \
+        [ ! -f "$_SESSION_STATE_DIR/qa-verified" ] && \
           _FC_WARNINGS="${_FC_WARNINGS}verify phase completed but qa-verified state file missing; "
         ;;
     esac

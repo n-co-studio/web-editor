@@ -107,7 +107,9 @@ Governance evidence in `.claude/.state/`. Written by hooks via shell I/O (never 
 
 **Sentinel files** (`.claude/local/`, persistent across sessions, gitignored): `.pragmatist-enforced` (backward-compatible gate deployment marker — written on first `pragmatist-signed` enforcement in `pre-commit-gates.sh`, prevents false positives on sessions started before the gate was deployed).
 
-**Operational files** (`.claude/`, outside `.state/`): `.session-log-hash` (log content hash), `.session-baseline-sha` (commit baseline), `.session-id` (analytics correlation), `.session-type` (session classification), `.hvst-fail-count` (HVST counter), `.deferrals-pending` (deferred findings signal).
+**Operational files** (`.claude/`, outside `.state/`): `.session-log-hash` (log content hash), `.session-baseline-sha` (commit baseline), `.session-id` (analytics correlation, immune path), `.session-type` (session classification), `.hvst-fail-count` (HVST counter), `.deferrals-pending` (deferred findings signal).
+
+**Recovery signal** (`.claude/.state/.recover-signal`): File-based alternative to `REPO_OS_RECOVER=1` env var for autonomous mode where env vars cannot be set. Created by the agent via shell I/O (bypasses write-guard). On next gate invocation (bash-guard, write-guard, pre-commit-gates, pre-push-gates), the signal is consumed (read + delete) and triggers recovery mode for that invocation. Auto-deletes after first consumption.
 
 **Session registry** (`.claude/.state/sessions/*.yaml`): Active session tracking (branch, PID, timestamp). Cleaned by `unregister_session()` at close and stale-entry cleanup (dead PIDs, >24h age).
 
@@ -270,4 +272,4 @@ Decision 0021. LLM persona simulation — synthetic user perspective on implemen
 
 Protected path prefixes enforced by `write-guard.sh`, subject to mode-based restrictions: `.claude/`, `docs/ai/`, `docs/spec/_templates/`, `.github/`, `AI.md`, `CLAUDE.md`, `repo-os-explainer.html`.
 
-Immune paths (never modifiable, no override): `.claude/hooks/write-guard.sh`, `.claude/repo-mode`. To maintain: `REPO_OS_SKIP_MODE_GUARD=1` (disables guard entirely, logged).
+Immune paths (never modifiable, no override): `.claude/hooks/write-guard.sh`, `.claude/repo-mode`, `.claude/.session-id`. To maintain: `REPO_OS_SKIP_MODE_GUARD=1` (disables guard entirely, logged).

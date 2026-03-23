@@ -119,6 +119,14 @@ is_worktree() {
   [ "$_CACHED_IS_WORKTREE" = "true" ]
 }
 
+# --- Full worktree session detection (Decision 0030) ---
+# Returns 0 if the current process is a full worktree session (launched via
+# claude --worktree with REPO_OS_SESSION_ID set). Distinguishes from subagent
+# worktrees which have is_worktree()=true but no REPO_OS_SESSION_ID.
+is_full_worktree_session() {
+  is_worktree && [ -n "${REPO_OS_SESSION_ID:-}" ]
+}
+
 # --- Portable path normalization (macOS-safe) ---
 # Collapses .., ., and duplicate slashes without resolving symlinks.
 # Fast-path: if no special components, return as-is (zero forks).
@@ -222,6 +230,12 @@ get_session_id() {
     echo "$_CACHED_SESSION_ID"
     return
   fi
+  # Env var injection (Decision 0030): worktree sessions set REPO_OS_SESSION_ID
+  if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
+    _CACHED_SESSION_ID="$REPO_OS_SESSION_ID"
+    echo "$_CACHED_SESSION_ID"
+    return
+  fi
   local sid_file="$repo_root/.claude/.session-id"
   if [ -f "$sid_file" ]; then
     _CACHED_SESSION_ID=$(cat "$sid_file")
@@ -236,6 +250,31 @@ get_session_id() {
     echo "$_CACHED_SESSION_ID" > "$sid_file" 2>/dev/null || true
   fi
   echo "$_CACHED_SESSION_ID"
+}
+
+# --- Session-scoped state directory (Decision 0030) ---
+# Routes state file reads/writes to the correct directory:
+#   - Full worktree sessions: .claude/.state/wt-sessions/{sid}/
+#   - All other contexts: .claude/.state/ (flat layout — backward compatible)
+# Cached per-process to avoid repeated function calls.
+_CACHED_SESSION_STATE_DIR=""
+get_session_state_dir() {
+  if [ -n "$_CACHED_SESSION_STATE_DIR" ]; then
+    echo "$_CACHED_SESSION_STATE_DIR"
+    return
+  fi
+  local repo_root="$_REPO_OS_ROOT"
+  if is_full_worktree_session; then
+    local sid
+    sid=$(get_session_id "$repo_root")
+    # Sanitize: strip path components to prevent directory traversal (Decision 0030 security)
+    sid="${sid//\//_}"
+    sid="${sid//\.\./_}"
+    _CACHED_SESSION_STATE_DIR="$repo_root/.claude/.state/wt-sessions/$sid"
+  else
+    _CACHED_SESSION_STATE_DIR="$repo_root/.claude/.state"
+  fi
+  echo "$_CACHED_SESSION_STATE_DIR"
 }
 
 # --- Cached branch name (avoid repeated git calls) ---
@@ -285,7 +324,7 @@ get_session_type() {
 
   local repo_root
   repo_root="$_REPO_OS_ROOT"
-  local state_file="$repo_root/.claude/.state/phase-state"
+  local state_file="$(get_session_state_dir)/phase-state"
   local result=""
 
   # Try phase-state first (with session ID validation)
@@ -293,7 +332,11 @@ get_session_type() {
     local sid
     sid=$(grep '^session_id:' "$state_file" 2>/dev/null | sed 's/^session_id: *//')
     local current_sid
-    current_sid=$(cat "$repo_root/.claude/.session-id" 2>/dev/null)
+    if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
+      current_sid="$REPO_OS_SESSION_ID"
+    else
+      current_sid=$(cat "$repo_root/.claude/.session-id" 2>/dev/null)
+    fi
     if [ -n "$sid" ] && [ "$sid" = "$current_sid" ]; then
       result=$(grep '^session_type:' "$state_file" 2>/dev/null | sed 's/^session_type: *//')
     fi
@@ -413,7 +456,8 @@ log_override() {
 
   local repo_root
   repo_root="$_REPO_OS_ROOT"
-  local state_dir="$repo_root/.claude/.state"
+  local state_dir
+  state_dir="$(get_session_state_dir)"
   mkdir -p "$state_dir" 2>/dev/null || true
 
   local ts
@@ -529,10 +573,14 @@ register_session() {
   local sessions_dir="$repo_root/.claude/.state/sessions"
   mkdir -p "$sessions_dir" 2>/dev/null || true
 
-  # Write session file
-  printf 'session_id: %s\nsession_type: %s\nbranch: %s\npid: %s\nstarted_at: %s\n' \
-    "$sid" "$stype" "$branch" "$pid" "$started_at" \
-    > "$sessions_dir/${sid}.yaml" 2>/dev/null || true
+  # Write session file (add worktree_path for full worktree sessions — Decision 0030)
+  {
+    printf 'session_id: %s\nsession_type: %s\nbranch: %s\npid: %s\nstarted_at: %s\n' \
+      "$sid" "$stype" "$branch" "$pid" "$started_at"
+    if is_full_worktree_session; then
+      printf 'worktree_path: %s\n' "$PWD"
+    fi
+  } > "$sessions_dir/${sid}.yaml" 2>/dev/null || true
 
   # Check for same-branch overlap (advisory at registration time)
   local overlap_file
@@ -552,22 +600,16 @@ register_session() {
   done
 }
 
-# --- Unregister session from the session registry ---
-# Removes this session's YAML file and cleans stale entries (dead PID + 24h age).
-# Called by cleanup_session() in session-close-check.sh.
-# Fail-silent: cleanup failures are non-fatal.
-unregister_session() {
+# --- Sweep stale session registry entries ---
+# Removes entries with dead PIDs (kill -0 fails) or age >24h.
+# Called at both session init and close — two cleanup opportunities per lifecycle.
+# Fail-silent: sweep failures never block session operations.
+sweep_stale_sessions() {
   local repo_root
   repo_root="$_REPO_OS_ROOT"
-  local sid
-  sid="$(get_session_id "$repo_root")"
-
   local sessions_dir="$repo_root/.claude/.state/sessions"
+  [ -d "$sessions_dir" ] || return 0
 
-  # Remove this session's file
-  rm -f "$sessions_dir/${sid}.yaml" 2>/dev/null || true
-
-  # Clean stale entries: dead PID or age > 24h
   local stale_file
   for stale_file in "$sessions_dir"/*.yaml; do
     [ -f "$stale_file" ] || continue
@@ -594,6 +636,25 @@ unregister_session() {
       fi
     fi
   done
+}
+
+# --- Unregister session from the session registry ---
+# Removes this session's YAML file and sweeps stale entries.
+# Called by cleanup_session() in session-close-check.sh.
+# Fail-silent: cleanup failures are non-fatal.
+unregister_session() {
+  local repo_root
+  repo_root="$_REPO_OS_ROOT"
+  local sid
+  sid="$(get_session_id "$repo_root")"
+
+  local sessions_dir="$repo_root/.claude/.state/sessions"
+
+  # Remove this session's file
+  rm -f "$sessions_dir/${sid}.yaml" 2>/dev/null || true
+
+  # Sweep remaining stale entries
+  sweep_stale_sessions
 }
 
 # --- Check if another session is active on a given branch ---

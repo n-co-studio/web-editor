@@ -61,6 +61,24 @@ for stype in $SESSION_TYPES; do
       continue
     fi
 
+    # Pre-write substance files required by advance_phase checks
+    _l2_sd="$(get_session_state_dir)"
+    _l2_sid=$(cat "$(get_sandbox)/.claude/.session-id")
+    case "$phase" in
+      approval)
+        if has_plan_gate "$stype"; then
+          printf 'timestamp: test\nagent: pragmatist\nsession_id: %s\nGATE_RESULT: APPROVED\n' "$_l2_sid" > "$_l2_sd/pragmatist-signed"
+        fi
+        printf 'timestamp: test\nsession_id: %s\nmode: auto\n' "$_l2_sid" > "$_l2_sd/plan-approved"
+        ;;
+      verify)
+        printf 'timestamp: test\nagent: critic\nsession_id: %s\nGATE_RESULT: APPROVED\n' "$_l2_sid" > "$_l2_sd/cohesion-reviewed"
+        ;;
+      commit)
+        printf 'timestamp: test\nagent: qa-verifier\nsession_id: %s\nGATE_RESULT: APPROVED\n' "$_l2_sid" > "$_l2_sd/qa-verified"
+        ;;
+    esac
+
     advance_phase "$phase" 2>/dev/null
     rc=$?
     if [ "$rc" -ne 0 ]; then

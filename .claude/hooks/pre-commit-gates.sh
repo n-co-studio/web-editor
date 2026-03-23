@@ -39,7 +39,7 @@ if ! command -v jq &>/dev/null; then
 fi
 
 REPO_ROOT="$(get_repo_root)"
-STATE_DIR="$REPO_ROOT/.claude/.state"
+STATE_DIR="$(get_session_state_dir)"
 DECISIONS_DIR="$REPO_ROOT/docs/ai/decisions"
 
 FAILED=0
@@ -54,10 +54,16 @@ warn()  { WARN_REASONS="${WARN_REASONS:+$WARN_REASONS }$1"; }
 INPUT=$(cat)
 COMMIT_CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null || true)
 
-# --- REPO_OS_RECOVER override ---
+# --- REPO_OS_RECOVER override (env var or file-based signal) ---
+RECOVER_SIGNAL_FILE="$REPO_ROOT/.claude/.state/.recover-signal"
 if [ "${REPO_OS_RECOVER:-0}" = "1" ]; then
   log_override "pre-commit-gates" "REPO_OS_RECOVER"
   echo "REPO_OS_RECOVER=1 — skipping all state-dependent checks" >&2
+  SKIP_STATE=true
+elif [ -f "$RECOVER_SIGNAL_FILE" ]; then
+  log_override "pre-commit-gates" "recover-signal-file"
+  rm -f "$RECOVER_SIGNAL_FILE"
+  echo "Recovery signal consumed — skipping all state-dependent checks" >&2
   SKIP_STATE=true
 else
   SKIP_STATE=false
@@ -132,7 +138,7 @@ IS_EDITOR_LIVE_CLOSE=false
 if [ "$SKIP_STATE" = false ]; then
   _EL_STYPE=$(get_session_type)
   if [ "$_EL_STYPE" = "editor-live" ]; then
-    _EL_STATE_FILE="$REPO_ROOT/.claude/.state/phase-state"
+    _EL_STATE_FILE="$STATE_DIR/phase-state"
     if [ -f "$_EL_STATE_FILE" ] && _validate_phase_session "$_EL_STATE_FILE"; then
       case ",$_PS_PHASES_COMPLETED," in
         *",review,"*) IS_EDITOR_LIVE_CLOSE=true ;;
@@ -170,6 +176,28 @@ if [ "$SKIP_STATE" = false ]; then
       block "phase_gate_not_commit"
       log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "phase_gate_not_commit" "phase:$CURRENT_PHASE"
     fi
+  else
+    # Phase-state absent — fail-closed on non-exempt session types.
+    # Sessions that lack phase-state either never called init_phase (governance
+    # bypass) or are exempt types that don't use the phase model.
+    _FC_STYPE=$(get_session_type)
+    _FC_EXEMPT=false
+    case "$_FC_STYPE" in
+      ephemeral|taskdef-query|taskdef-brief|audit|queue-triage) _FC_EXEMPT=true ;;
+      prototype-*|advisory-*) _FC_EXEMPT=true ;;
+      "")
+        # Cannot determine session type — fail-closed unless experiment branch
+        # (experiment branches already exit early, but belt-and-suspenders)
+        if [[ "$CURRENT_BRANCH" == experiment/* ]]; then
+          _FC_EXEMPT=true
+        fi
+        ;;
+    esac
+    if [ "$_FC_EXEMPT" = false ]; then
+      echo "GATE-FINAL: Phase state not initialized — session must call init_phase before committing. Session type: ${_FC_STYPE:-unknown}. (no override)" >&2
+      block "phase_state_missing"
+      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "phase_state_missing" "stype:${_FC_STYPE:-unknown}"
+    fi
   fi
 fi
 
@@ -193,7 +221,11 @@ _validate_state_session_id() {
   local file_sid
   file_sid=$(grep '^session_id:' "$state_file" 2>/dev/null | sed 's/^session_id: *//' | tr -d '[:space:]' | head -1)
   local current_sid
-  current_sid=$(cat "$REPO_ROOT/.claude/.session-id" 2>/dev/null || echo "")
+  if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
+    current_sid="$REPO_OS_SESSION_ID"
+  else
+    current_sid=$(cat "$REPO_ROOT/.claude/.session-id" 2>/dev/null || echo "")
+  fi
   # No current session → skip validation (pre-session context)
   [ -z "$current_sid" ] && return 0
   # State file missing session_id but session exists → forged/stale (reject)
@@ -246,26 +278,17 @@ if [ "$SKIP_STATE" = false ]; then
   fi
 
   # pragmatist-signed: required on session types with an approval phase (Decision 0025)
-  # Sentinel: .pragmatist-enforced — persistent marker (lives in .claude/local/, not
-  # .claude/.state/) indicating the gate has been deployed. Sessions started before
-  # this gate was deployed will not have a pragmatist-signed state file. The sentinel
-  # is written on first enforcement, preventing false positives on legacy sessions.
-  # Lifecycle: persistent across sessions (not cleaned by session cleanup).
-  # editor-live: skip (no approval phase)
-  PRAGMATIST_SENTINEL="$REPO_ROOT/.claude/local/.pragmatist-enforced"
+  # Phase-state-aware: only enforce when phase-state exists (session initialized).
+  # Sessions from before this gate was deployed won't have phase-state, providing
+  # backward compatibility without a sentinel file.
   if [ "$IS_EDITOR_LIVE_CLOSE" = true ]; then
     : # editor-live never has pragmatist-signed — skip silently
   elif [ "${REPO_OS_SKIP_PRAGMATIST_GATE:-0}" = "1" ]; then
     log_override "pre-commit-gates" "REPO_OS_SKIP_PRAGMATIST_GATE"
   else
-    # Only enforce on session types that have an approval phase
     _PCG_STYPE=$(get_session_type)
-    if has_plan_gate "$_PCG_STYPE"; then
-      if [ ! -f "$PRAGMATIST_SENTINEL" ]; then
-        # First enforcement: write sentinel and skip check (backward compat)
-        printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$PRAGMATIST_SENTINEL" 2>/dev/null || true
-        log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "pragmatist_sentinel_created"
-      elif [ ! -f "$STATE_DIR/pragmatist-signed" ]; then
+    if has_plan_gate "$_PCG_STYPE" && [ -f "$STATE_DIR/phase-state" ]; then
+      if [ ! -f "$STATE_DIR/pragmatist-signed" ]; then
         echo "GATE-RECOVERABLE: pragmatist-signed state file missing. NEXT: Dispatch Pragmatist agent in plan-gating mode before presenting plan to operator (Decision 0025). (override: REPO_OS_SKIP_PRAGMATIST_GATE=1)" >&2
         block "state_pragmatist_missing"
         log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_pragmatist_missing"

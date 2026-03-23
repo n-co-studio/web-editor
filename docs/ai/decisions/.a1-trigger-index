@@ -23,8 +23,8 @@
 0017|\.claude/\.automation/|automation, headless, runner, queue, escalation, blocker, claude -p, enabled, permission-request, allowlist, scope-deviation, scope_classification
 0017|\.claude/hooks/permission-request\.sh|automation, headless, runner, queue, escalation, blocker, claude -p, enabled, permission-request, allowlist, scope-deviation, scope_classification
 0017|\.claude/hooks/_permission-allowlist\.sh|automation, headless, runner, queue, escalation, blocker, claude -p, enabled, permission-request, allowlist, scope-deviation, scope_classification
-0018|\.claude/hooks/(bash-guard|pre-commit-gates)\.sh|taskgroup, task.group, contract, merge, A6_contract_missing, tg_merge_blocked, SKIP_MERGE_GUARD
-0019|\.claude/hooks/(bash-guard|write-guard)\.sh|fail-closed, no_phase_state, phase_gate_no_state, .fail-closed-enforced
+0018|\.claude/hooks/(bash-guard|branch-guard|pre-commit-gates)\.sh|taskgroup, task.group, contract, merge, A6_contract_missing, tg_merge_blocked, SKIP_MERGE_GUARD
+0019|\.claude/hooks/(bash-guard|branch-guard|write-guard)\.sh|fail-closed, no_phase_state, phase_gate_no_state, .fail-closed-enforced
 0019|docs/ai/decisions/\.fail-closed-enforced|fail-closed, no_phase_state, phase_gate_no_state, .fail-closed-enforced
 0020|\.claude/local/task-contract\.yaml|task-contract, task_contract, intent:, verification:
 0020|docs/ai/task-groups/.*\.yaml|task-contract, task_contract, intent:, verification:
@@ -47,3 +47,4 @@
 0027|\.claude/(hooks/(pretooluse-permission|_permission-allowlist)|settings\.json)|is_readonly_agent, _PERMISSION_READONLY_AGENTS, agent_gate, REPO_OS_ALLOW_AGENT, Agent PreToolUse
 0028|\.claude/hooks/(state-writer|_analytics-helper)\.sh|is_worktree, worktree_blocked, _CACHED_IS_WORKTREE, git-common-dir
 0029|\.claude/hooks/(_phase-helper|plan-approval)\.sh|approval, has_operator_gate, taskdef-brief, plan-approved
+0030|\.claude/hooks/(state-writer|_analytics-helper|_phase-helper|session-close-check|_cleanup-helper)\.sh|is_full_worktree_session, get_session_state_dir, REPO_OS_SESSION_ID, wt-sessions, merge-lock

@@ -54,7 +54,10 @@ cleanup_session_files() {
   cleanup_old_analytics "$repo_root"
 
   # Session-bound identity files: only delete if content matches closing session
-  if [ -n "$closing_sid" ]; then
+  # Full worktree sessions use env var, not file — skip file deletion (Decision 0030)
+  if is_full_worktree_session; then
+    : # No .session-id file to delete — identity is via REPO_OS_SESSION_ID env var
+  elif [ -n "$closing_sid" ]; then
     local sid_file="$repo_root/.claude/.session-id"
     local sid_was_ours=false
     if [ -f "$sid_file" ]; then
@@ -78,8 +81,9 @@ cleanup_session_files() {
     rm -f "$repo_root/.claude/.session-type"
   fi
 
-  # Clean governance state files
-  local state_dir="$repo_root/.claude/.state"
+  # Clean governance state files (session-scoped — Decision 0030)
+  local state_dir
+  state_dir="$(get_session_state_dir)"
   if [ -d "$state_dir" ]; then
     # Session-bound files: check session_id before deleting
     _delete_if_owned "$state_dir/plan-approved" "$closing_sid"
@@ -106,6 +110,11 @@ cleanup_session_files() {
     if [ "$close_stype" = "taskgroup-merge" ]; then
       rm -f "$state_dir"/tg-*-brief-*.complete
     fi
+
+    # Remove per-session state directory if worktree-scoped and now empty (Decision 0030)
+    if is_full_worktree_session; then
+      rmdir "$state_dir" 2>/dev/null || true
+    fi
   fi
 }
 
@@ -127,7 +136,21 @@ record_closed_branch() {
   repo_root="$(get_repo_root)"
   local closed_file="$repo_root/.claude/local/closed-branches"
   mkdir -p "$(dirname "$closed_file")" 2>/dev/null || true
-  if ! grep -qxF "$branch" "$closed_file" 2>/dev/null; then
-    echo "$branch" >> "$closed_file"
+
+  # Atomic append under lock (Decision 0030: concurrent worktree close safety)
+  local lock_file="$repo_root/.claude/.state/.closed-branches-lock"
+  mkdir -p "$(dirname "$lock_file")" 2>/dev/null || true
+  if command -v flock > /dev/null 2>&1; then
+    (
+      flock -w 5 9 2>/dev/null || true
+      if ! grep -qxF "$branch" "$closed_file" 2>/dev/null; then
+        echo "$branch" >> "$closed_file"
+      fi
+    ) 9>"$lock_file"
+  else
+    # No flock — best-effort (existing behavior preserved)
+    if ! grep -qxF "$branch" "$closed_file" 2>/dev/null; then
+      echo "$branch" >> "$closed_file"
+    fi
   fi
 }

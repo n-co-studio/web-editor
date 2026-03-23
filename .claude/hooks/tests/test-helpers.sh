@@ -20,6 +20,21 @@ _TAP_FAILURES=""
 # --- All 17 session types (canonical order from Decision 0014 + Phase 3b ephemeral) ---
 SESSION_TYPES="standard taskgroup taskgroup-merge hotfix experiment editor-live spec-fresh spec-update prototype-napkin prototype-spike prototype-poc advisory-init advisory-reinit audit taskdef-query taskdef-brief ephemeral"
 
+# --- Test Seam Contract ---
+# All hooks resolve repo root via _REPO_OS_ROOT (set in _analytics-helper.sh lines 83-92).
+# Test isolation uses a dual-guard:
+#   1. REPO_OS_TEST_MODE=1  — enables the override path
+#   2. _REPO_OS_TEST_ROOT   — redirects _REPO_OS_ROOT to the sandbox
+# Path prefix guard: _REPO_OS_TEST_ROOT must start with /tmp/ or /private/tmp/
+# to bound the redirect surface to temp directories only. Any other prefix is
+# rejected and the real repo root is used instead (warning emitted).
+#
+# Two independent implementations of this guard exist:
+#   - _analytics-helper.sh lines 83-92  (centralized, sourced by all hooks)
+#   - session-close-check.sh lines 60-69 (early-exit guard before library sourcing)
+# Both must accept the same prefix set. If you change the allowed prefixes,
+# update both locations and the TMPDIR normalization below in setup_sandbox().
+
 # --- Sandbox management ---
 _SANDBOX_DIR=""
 
@@ -316,9 +331,12 @@ stage_sandbox_file() {
 }
 
 # --- Reset phase state and reinitialize for a new test ---
+# Cleans phase-state and session registry entries to prevent stale-detection
+# from blocking re-init within the same test process (same PID appears alive).
 reset_phase() {
   local stype="${1:-standard}"
   rm -f "$_SANDBOX_DIR/.claude/.state/phase-state"
+  rm -f "$_SANDBOX_DIR/.claude/.state/sessions"/*.yaml 2>/dev/null || true
   init_phase "$stype"
 }
 

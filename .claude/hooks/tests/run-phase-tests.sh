@@ -104,7 +104,7 @@ source "$real_hooks_dir/_analytics-helper.sh"
 # shellcheck disable=SC1091
 source "$real_hooks_dir/_phase-helper.sh"
 
-SESSION_TYPES="standard taskgroup taskgroup-merge hotfix experiment spec-fresh spec-update prototype-napkin prototype-spike prototype-poc advisory-init advisory-reinit audit taskdef-query taskdef-brief ephemeral"
+SESSION_TYPES="standard taskgroup taskgroup-merge hotfix experiment editor-live spec-fresh spec-update prototype-napkin prototype-spike prototype-poc advisory-init advisory-reinit audit taskdef-query taskdef-brief queue-triage ephemeral"
 
 # Collect all unique phases across all types
 all_phases=""

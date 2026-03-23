@@ -49,6 +49,10 @@ _reinit_sandbox() {
   rm -f "$SB/.claude/.state/.stop-attempt-count"
   rm -f "$SB/.claude/.hvst-fail-count"
   rm -f "$SB/.claude/.deferrals-pending"
+  # Clean phase-state and session registry to prevent stale-detection from
+  # blocking re-init within the same test process (same PID appears alive).
+  rm -f "$SB/.claude/.state/phase-state"
+  rm -f "$SB/.claude/.state/sessions"/*.yaml 2>/dev/null || true
   (cd "$SB" && git reset --hard HEAD 2>/dev/null || true)
   (cd "$SB" && git clean -fd -e .claude/ 2>/dev/null || true)
 }
@@ -76,11 +80,13 @@ _reinit_sandbox
 reset_phase "standard"
 advance_phase "plan" 2>/dev/null
 
-# Simulate headless runner pre-writing plan-approved state file
-# (written by shell I/O, same as plan-approval.sh would)
+# Simulate headless runner pre-writing plan-approved + pragmatist-signed state files
+# (written by shell I/O, same as plan-approval.sh / state-writer.sh would)
 _ha1_sid=$(cat "$SB/.claude/.session-id")
 printf 'timestamp: %s\nquestion_hash: headless-runner\nlarge-scope: false\nmode: auto\nsession_id: %s\n' \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_ha1_sid" > "$STATE_DIR/plan-approved"
+printf 'timestamp: %s\nagent: pragmatist\nsession_id: %s\nGATE_RESULT: APPROVED\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_ha1_sid" > "$STATE_DIR/pragmatist-signed"
 
 # Set mode to auto (headless sessions should always be auto)
 set_phase_mode "auto"
@@ -105,10 +111,10 @@ assert_ok "$_LAST_RC" "bash-guard allows bash redirect after pre-write plan-appr
 
 # --- pre-commit-gates accepts pre-written plan-approved ---
 advance_phase "review" 2>/dev/null
-advance_phase "verify" 2>/dev/null
-advance_phase "commit" 2>/dev/null
 printf 'timestamp: test\nsession_id: %s\n' "$(cat "$SB/.claude/.session-id")" > "$STATE_DIR/cohesion-reviewed"
+advance_phase "verify" 2>/dev/null
 printf 'timestamp: test\nsession_id: %s\n' "$(cat "$SB/.claude/.session-id")" > "$STATE_DIR/qa-verified"
+advance_phase "commit" 2>/dev/null
 stage_sandbox_file "src/prewrite.ts" "export const pw = 1;"
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "headless commit")"
 assert_ok "$_LAST_RC" "pre-commit-gates accepts pre-written plan-approved at commit phase"
@@ -120,6 +126,8 @@ advance_phase "plan" 2>/dev/null
 _ha1_sid=$(cat "$SB/.claude/.session-id")
 printf 'timestamp: %s\nquestion_hash: headless-runner\nlarge-scope: true\nmode: auto\nsession_id: %s\n' \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_ha1_sid" > "$STATE_DIR/plan-approved"
+printf 'timestamp: %s\nagent: pragmatist\nsession_id: %s\nGATE_RESULT: APPROVED\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_ha1_sid" > "$STATE_DIR/pragmatist-signed"
 set_phase_mode "auto"
 advance_phase "approval" 2>/dev/null
 advance_phase "build" 2>/dev/null
@@ -292,10 +300,12 @@ advance_phase "plan" 2>/dev/null
 phase=$(get_phase)
 assert_eq "$phase" "plan" "headless lifecycle: init → plan"
 
-# Pre-write plan-approved (headless bypass)
+# Pre-write plan-approved + pragmatist-signed (headless bypass)
 _ha5_sid=$(cat "$SB/.claude/.session-id")
 printf 'timestamp: test\nquestion_hash: headless\nlarge-scope: false\nmode: auto\nsession_id: %s\n' \
   "$_ha5_sid" > "$STATE_DIR/plan-approved"
+printf 'timestamp: test\nagent: pragmatist\nsession_id: %s\nGATE_RESULT: APPROVED\n' \
+  "$_ha5_sid" > "$STATE_DIR/pragmatist-signed"
 set_phase_mode "auto"
 advance_phase "approval" 2>/dev/null
 advance_phase "build" 2>/dev/null
@@ -306,10 +316,16 @@ advance_phase "review" 2>/dev/null
 phase=$(get_phase)
 assert_eq "$phase" "review" "headless lifecycle: build → review"
 
+# Pre-write cohesion-reviewed before verify (substance check)
+printf 'timestamp: test\nagent: critic\nsession_id: %s\nGATE_RESULT: APPROVED\n' \
+  "$_ha5_sid" > "$STATE_DIR/cohesion-reviewed"
 advance_phase "verify" 2>/dev/null
 phase=$(get_phase)
 assert_eq "$phase" "verify" "headless lifecycle: review → verify"
 
+# Pre-write qa-verified before commit (substance check)
+printf 'timestamp: test\nagent: qa-verifier\nsession_id: %s\nGATE_RESULT: APPROVED\n' \
+  "$_ha5_sid" > "$STATE_DIR/qa-verified"
 advance_phase "commit" 2>/dev/null
 phase=$(get_phase)
 assert_eq "$phase" "commit" "headless lifecycle: verify → commit"
@@ -446,8 +462,7 @@ printf 'timestamp: %s\nquestion_hash: headless-runner-e2e\nlarge-scope: true\nmo
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_ha7_sid" > "$STATE_DIR/plan-approved"
 
 # Step 4b: Runner simulates pragmatist sign-off (Decision 0025)
-# The pragmatist-enforced sentinel may already exist from HA.1, so
-# pre-commit-gates will require pragmatist-signed on this session.
+# advance_phase substance check requires pragmatist-signed before approval.
 printf 'timestamp: %s\nagent: pragmatist\nsession_id: %s\nGATE_RESULT: APPROVED\n' \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_ha7_sid" > "$STATE_DIR/pragmatist-signed"
 

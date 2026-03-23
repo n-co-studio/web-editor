@@ -17,7 +17,7 @@
 #   4. Fast-exit for no-write-target Bash commands
 #   5. JSON parse (single jq invocation for file_path + command)
 #   6. Bash write-target scoping (exit if no in-repo write targets)
-#   7. State-guard (blocks writes to .claude/.state/)
+#   7. State-guard (blocks writes to .claude/.state/ and .claude/.session-id)
 #   8. Mode-guard (enforces operating mode restrictions)
 #   9. Branch-guard gates:
 #      - Gate 1: Main branch protection
@@ -28,6 +28,7 @@
 # Overrides (state-guard scope):
 #   REPO_OS_SKIP_STATE_GUARD=1  — skip state-guard checks
 #   REPO_OS_RECOVER=1           — allow recovery writes to .state/ + bypass branch-guard gates
+#   .claude/.state/.recover-signal — file-based recovery (autonomous mode)
 #
 # Overrides (mode-guard scope):
 #   REPO_OS_SKIP_MODE_GUARD=1   — skip mode-guard checks entirely
@@ -53,15 +54,20 @@ INPUT=$(cat)
 
 # --- Override pre-checks (before sourcing — for potential fast exit) ---
 SKIP_STATE_GUARD=false
+_RECOVER_VIA_SIGNAL=false
+RECOVER_SIGNAL_FILE="$(cd "$(dirname "$0")/../.." && pwd)/.claude/.state/.recover-signal"
 if [ "${REPO_OS_SKIP_STATE_GUARD:-0}" = "1" ]; then
   SKIP_STATE_GUARD=true
 fi
 if [ "${REPO_OS_RECOVER:-0}" = "1" ]; then
   SKIP_STATE_GUARD=true
+elif [ -f "$RECOVER_SIGNAL_FILE" ]; then
+  _RECOVER_VIA_SIGNAL=true
+  SKIP_STATE_GUARD=true
 fi
 
 SKIP_MODE_GUARD=false
-if [ "${REPO_OS_SKIP_MODE_GUARD:-0}" = "1" ] || [ "${REPO_OS_RECOVER:-0}" = "1" ]; then
+if [ "${REPO_OS_SKIP_MODE_GUARD:-0}" = "1" ] || [ "${REPO_OS_RECOVER:-0}" = "1" ] || [ "$_RECOVER_VIA_SIGNAL" = true ]; then
   SKIP_MODE_GUARD=true
 fi
 
@@ -73,7 +79,7 @@ _TG_MERGE_REASON=""
 # Inline branch detection (no sourced deps)
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
 
-if [ "${REPO_OS_RECOVER:-0}" != "1" ] && [ "${REPO_OS_SKIP_MERGE_GUARD:-0}" != "1" ]; then
+if [ "${REPO_OS_RECOVER:-0}" != "1" ] && [ "$_RECOVER_VIA_SIGNAL" != true ] && [ "${REPO_OS_SKIP_MERGE_GUARD:-0}" != "1" ]; then
   if [[ "$INPUT" == *'git checkout main'* ]] || [[ "$INPUT" == *'git switch main'* ]]; then
     if [[ "$INPUT" != *'git checkout main-'* ]] && [[ "$INPUT" != *'git checkout main/'* ]] \
     && [[ "$INPUT" != *'git switch main-'* ]] && [[ "$INPUT" != *'git switch main/'* ]]; then
@@ -117,6 +123,12 @@ fi
 if [ "${REPO_OS_RECOVER:-0}" = "1" ]; then
   log_override "state-guard" "REPO_OS_RECOVER"
   log_hook_event "state-guard" "PreToolUse" "Bash" "allow" "$START_MS" "recovery_bypass"
+fi
+if [ "$_RECOVER_VIA_SIGNAL" = true ]; then
+  log_override "state-guard" "recover-signal-file"
+  log_hook_event "state-guard" "PreToolUse" "Bash" "allow" "$START_MS" "recovery_signal_file"
+  rm -f "$RECOVER_SIGNAL_FILE"
+  echo "Recovery signal consumed — bypassing state-guard and bash-guard gates" >&2
 fi
 if [ "${REPO_OS_SKIP_MODE_GUARD:-0}" = "1" ]; then
   log_override "mode-guard" "REPO_OS_SKIP_MODE_GUARD"
@@ -208,7 +220,7 @@ if [ -z "$FILE_PATH" ] && [ -z "$COMMAND" ]; then
 fi
 
 # ============================================================
-# Phase 8: State-Guard (blocks writes to .claude/.state/)
+# Phase 8: State-Guard (blocks writes to .claude/.state/ and .claude/.session-id)
 # ============================================================
 
 if [ "$SKIP_STATE_GUARD" = false ]; then
@@ -219,7 +231,7 @@ if [ "$SKIP_STATE_GUARD" = false ]; then
     SG_TARGETS=$(extract_write_targets "$COMMAND")
     while IFS= read -r SG_WT; do
       [ -z "$SG_WT" ] && continue
-      if [[ "$SG_WT" == *".claude/.state/"* ]]; then
+      if [[ "$SG_WT" == *".claude/.state/"* ]] || [[ "$SG_WT" == *".claude/.session-id"* ]]; then
         _sg_abs=$(resolve_path "$SG_WT")
         if is_in_repo "$_sg_abs" "$REPO_ROOT"; then
           TARGETS_STATE=true
@@ -230,8 +242,25 @@ if [ "$SKIP_STATE_GUARD" = false ]; then
     done <<< "$SG_TARGETS"
   fi
 
+  # --- Indirect path construction hardening ---
+  # Detect variable assignments that concatenate to form .state or .session-id paths.
+  # Heuristic defense-in-depth — emits GATE-RECOVERABLE, not GATE-FINAL.
+  if [ "$TARGETS_STATE" = false ] && [ -n "$COMMAND" ]; then
+    if [[ "$COMMAND" =~ [A-Za-z_][A-Za-z0-9_]*=.*\.sta.*te.*\.claude ]] \
+    || [[ "$COMMAND" =~ [A-Za-z_][A-Za-z0-9_]*=.*\.claude.*\.sta.*te ]] \
+    || [[ "$COMMAND" =~ [A-Za-z_][A-Za-z0-9_]*=.*\.sess.*ion-id.*\.claude ]] \
+    || [[ "$COMMAND" =~ [A-Za-z_][A-Za-z0-9_]*=.*\.claude.*\.sess.*ion-id ]]; then
+      log_hook_event "state-guard" "PreToolUse" "Bash" "block" "$START_MS" "indirect_path_construction"
+      echo "GATE-RECOVERABLE: Detected possible indirect path construction targeting .state/ or .session-id. NEXT: Use direct file paths instead of variable concatenation. (override: REPO_OS_SKIP_STATE_GUARD=1)" >&2
+      exit 2
+    fi
+  fi
+
   if [ "$TARGETS_STATE" = true ]; then
     STATE_FILE_NAME="${STATE_TARGET_PATH##*.claude/.state/}"
+    if [[ "$STATE_TARGET_PATH" == *".claude/.session-id"* ]]; then
+      STATE_FILE_NAME=".session-id"
+    fi
     log_hook_event "state-guard" "PreToolUse" "Bash" "block" "$START_MS" "state_path_protected" "" "$STATE_FILE_NAME"
     echo "GATE-FINAL: .claude/.state/ is write-protected — state files are managed by governance hooks only. (override: REPO_OS_RECOVER=1)" >&2
     exit 2
@@ -363,10 +392,14 @@ if [ "$_EPHEMERAL_FAST_EXIT" = true ]; then
 fi
 
 # --- REPO_OS_RECOVER override (bypass all branch-guard gates) ---
-if [ "${REPO_OS_RECOVER:-0}" = "1" ]; then
-  log_override "branch-guard" "REPO_OS_RECOVER"
+if [ "${REPO_OS_RECOVER:-0}" = "1" ] || [ "$_RECOVER_VIA_SIGNAL" = true ]; then
+  if [ "${REPO_OS_RECOVER:-0}" = "1" ]; then
+    log_override "branch-guard" "REPO_OS_RECOVER"
+  else
+    log_override "branch-guard" "recover-signal-file"
+  fi
   log_hook_event "branch-guard" "PreToolUse" "Bash" "allow" "$START_MS" "recovery_bypass"
-  echo "REPO_OS_RECOVER=1 — bypassing branch-guard gates" >&2
+  echo "Recovery mode — bypassing bash-guard gates" >&2
   exit 0
 fi
 

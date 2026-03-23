@@ -67,6 +67,58 @@ source "$LIB_DIR/file-lock.sh"
 # shellcheck source=lib/health-check.sh
 source "$LIB_DIR/health-check.sh"
 
+# --- Runner merge lock helpers (Decision 0030 — worktree merge serialization) ---
+_RUNNER_MERGE_LOCK_FD=7
+_RUNNER_MERGE_LOCK_HELD=false
+_RUNNER_MERGE_LOCK_PATH=""
+
+_acquire_runner_merge_lock() {
+  local lock_path="$1"
+  _RUNNER_MERGE_LOCK_PATH="$lock_path"
+  mkdir -p "$(dirname "$lock_path")" 2>/dev/null || true
+  if command -v flock > /dev/null 2>&1; then
+    eval "exec ${_RUNNER_MERGE_LOCK_FD}>\"$lock_path\""
+    if ! flock -w 30 -x "$_RUNNER_MERGE_LOCK_FD" 2>/dev/null; then
+      echo "WARNING: Runner merge lock timeout (30s)" >&2
+      return 1
+    fi
+  else
+    local attempts=0
+    while [ "$attempts" -lt 60 ]; do
+      attempts=$((attempts + 1))
+      if mkdir "${lock_path}.dir" 2>/dev/null; then
+        echo "$$" > "${lock_path}.dir/pid" 2>/dev/null || true
+        break
+      fi
+      if [ -f "${lock_path}.dir/pid" ]; then
+        local lock_pid
+        lock_pid=$(cat "${lock_path}.dir/pid" 2>/dev/null || echo "")
+        if [ -n "$lock_pid" ] && ! kill -0 "$lock_pid" 2>/dev/null; then
+          rm -rf "${lock_path}.dir" 2>/dev/null || true
+          continue
+        fi
+      fi
+      sleep 0.5
+    done
+    if [ "$attempts" -ge 60 ]; then
+      echo "WARNING: Runner merge lock timeout (30s)" >&2
+      return 1
+    fi
+  fi
+  _RUNNER_MERGE_LOCK_HELD=true
+}
+
+_release_runner_merge_lock() {
+  if [ "$_RUNNER_MERGE_LOCK_HELD" = true ] && [ -n "$_RUNNER_MERGE_LOCK_PATH" ]; then
+    if command -v flock > /dev/null 2>&1; then
+      eval "exec ${_RUNNER_MERGE_LOCK_FD}>&-" 2>/dev/null || true
+    else
+      rm -rf "${_RUNNER_MERGE_LOCK_PATH}.dir" 2>/dev/null || true
+    fi
+    _RUNNER_MERGE_LOCK_HELD=false
+  fi
+}
+
 # --- Config files ---
 CONFIG_FILE="$AUTOMATION_DIR/config.yaml"
 CONFIG_LOCAL_FILE="$AUTOMATION_DIR/config.local.yaml"
@@ -654,7 +706,28 @@ _solo_merge_if_needed() {
         local _merge_ok=false
         local _merge_conflict=false
         local _conflict_files=""
-        if git checkout main 2>/dev/null; then
+        if is_full_worktree_session; then
+          # Worktree merge path (Decision 0030)
+          local _main_repo="$REPO_ROOT"
+          local _merge_lock="$_main_repo/.claude/.state/.merge-lock"
+          _acquire_runner_merge_lock "$_merge_lock" || true
+          local _main_br
+          _main_br=$(git -C "$_main_repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+          if [ "$_main_br" = "main" ]; then
+            if git -C "$_main_repo" merge --ff-only "$entry_current_branch" 2>/dev/null; then
+              _merge_ok=true
+            elif git -C "$_main_repo" merge --no-ff -m "Merge $entry_current_branch (auto)" "$entry_current_branch" 2>/dev/null; then
+              _merge_ok=true
+            else
+              _merge_conflict=true
+              _conflict_files=$(git -C "$_main_repo" diff --name-only --diff-filter=U 2>/dev/null || echo "unknown")
+              git -C "$_main_repo" merge --abort 2>/dev/null || true
+            fi
+          else
+            echo "WARNING: Main repo on '$_main_br', not 'main' — skipping worktree merge" >&2
+          fi
+          _release_runner_merge_lock
+        elif git checkout main 2>/dev/null; then
           if git merge --ff-only "$entry_current_branch" 2>/dev/null; then
             _merge_ok=true
           else
