@@ -82,7 +82,7 @@ Phase labels correspond to Decision 0014 phase sequences. Auto/review mode set a
 | commit | Orchestrator | — | ✓ Commit allowed | op-review |
 | op-review | Operator | review mode | Pause for operator review | close |
 | op-review | — | auto mode | Skip | close |
-| close | Orchestrator | solo mode | Merge branch to main; seal branch (Decision 0013) | — |
+| close | Orchestrator | solo mode | Merge branch to main; seal branch (Decision 0013). Parallel content briefs: close without merge or seal — merge brief handles both | — |
 
 ---
 
@@ -93,7 +93,8 @@ Phase labels correspond to Decision 0014 `taskgroup-merge` phase sequence. Runs 
 | Phase | Actor | Condition | Action | Next Phase |
 |-------|-------|-----------|--------|------------|
 | init | Operator | — | Check out task group branch | contract-init |
-| contract-init | Orchestrator | — | Sync from contract; verify all completion markers exist (`.claude/.state/tg-{group}-brief-{seq}.complete`) | cohesion |
+| contract-init | Orchestrator | — | Sync from contract; verify all completion markers exist (`$_REPO_OS_ROOT/.claude/.state/tg-{group}-brief-{seq}.complete`); read source branches from `briefs[].branch` | cohesion |
+| cohesion | Orchestrator | — | Combine per-brief branches into group base branch (merge/cherry-pick each `briefs[].branch`); then `git diff main...HEAD` for combined diff | cohesion (Critic) |
 | cohesion | Critic (cohesion) | CLEAN | — | verify |
 | cohesion | Critic (cohesion) | FINDINGS — clear fixes | Fix directly in merge brief | cohesion |
 | cohesion | Critic (cohesion) | FINDINGS — ambiguity | Escalate to Operator | cohesion |
@@ -101,7 +102,7 @@ Phase labels correspond to Decision 0014 `taskgroup-merge` phase sequence. Runs 
 | commit | Orchestrator | — | ✓ Commit allowed | op-review |
 | op-review | Operator | review mode | Pause for operator review | close |
 | op-review | — | auto mode | Skip | close |
-| close | Orchestrator | — | Merge branch to main; seal branch; clean completion markers | — |
+| close | Orchestrator | — | Merge branch to main; seal all branches (group base + per-brief); clean completion markers | — |
 
 ---
 

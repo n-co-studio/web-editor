@@ -6,7 +6,7 @@ identity:
   group_name: ""          # kebab-case identifier (matches filename)
   created_by_session: 0   # session number that created this contract
   created_date: ""        # YYYY-MM-DD
-  execution: sequential   # sequential | parallel (parallel enables boundaries, completion markers, merge brief)
+  execution: sequential   # sequential | parallel (parallel enables boundaries, completion markers, merge brief, worktree isolation — Decision 0032)
 
 # Brief roster — ordered list of briefs in execution sequence.
 # First session populates all briefs from Prompt T output.
@@ -17,6 +17,9 @@ briefs:
     sequence: 1           # 1-indexed position in the group
     session: null         # session number (set when session starts)
     branch: ""            # branch name (set when session starts)
+                          # parallel groups: each content brief gets its own worktree branch
+                          # (e.g., feature/my-group/brief-1). The merge brief reads all
+                          # briefs[].branch entries to determine which branches to combine.
     status: pending       # pending | in_progress | complete
     next_brief: ""        # title of the next brief (empty for last)
     boundaries: []        # file paths/globs this brief owns (parallel: enforced, sequential: advisory)

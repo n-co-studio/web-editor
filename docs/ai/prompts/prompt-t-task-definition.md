@@ -120,10 +120,11 @@ Present the draft task brief to the operator. Use `AskUserQuestion` (not convers
   1. Set `Execution: parallel` in each brief's `### Task Group` section
   2. Add `Boundaries:` field to each brief — list of file paths/globs the brief owns exclusively
   3. Auto-generate a **merge brief** (Brief M) appended after all content briefs. The merge brief uses the `taskgroup-merge` session type, performs cross-session cohesion review, integration verification, and merges to main. Template:
-     - **Goal:** Cross-session cohesion review, integration verification, and merge to main
-     - **Scope:** All files modified by Briefs 1–N
-     - **Approach:** Read contract, verify all briefs complete (completion markers present), run cohesion review across combined diff, resolve integration issues, merge + seal
+     - **Goal:** Combine per-brief worktree branches, cross-session cohesion review, integration verification, and merge to main
+     - **Scope:** All files modified by Briefs 1–N (source branches read from `briefs[].branch` in the contract roster)
+     - **Approach:** Read contract, verify all briefs complete (completion markers present), combine per-brief branches (merge or cherry-pick each `briefs[].branch`), run cohesion review across combined diff (`git diff main...HEAD`), resolve integration issues and merge conflicts with per-brief attribution, merge + seal all branches
   4. Shared files (e.g., index files, config) that multiple briefs would need to edit should be listed as merge brief boundaries, not individual brief boundaries
+  5. Each content brief runs as a full worktree session (`claude --worktree` with `REPO_OS_SESSION_ID`) and commits to its own branch. The merge brief combines these branches. See `docs/ai/workflow-appendix/session-type-task-group.md` § Parallel Execution and Decision 0032
   When the operator selects **sequential** or parallel is not offered: existing behavior unchanged.
 - **Abandon** — Operator decides not to proceed. No output.
 
@@ -250,7 +251,7 @@ lifecycle: task-scoped
 - **Consumes:** [...]
 ```
 
-After displaying the brief, instruct: "Copy the block above and paste it into a new session to begin implementation." For phased briefs, instruct: "Copy each block into its own new session. Run them in order." For parallel briefs, instruct: "Copy each block into its own new session. Briefs 1–N can run in parallel. Run the merge brief (Brief M) after all others complete."
+After displaying the brief, instruct: "Copy the block above and paste it into a new session to begin implementation." For phased briefs, instruct: "Copy each block into its own new session. Run them in order." For parallel briefs, instruct: "Copy each block into its own new session. Launch Briefs 1–N in parallel using `claude --worktree` with a unique `REPO_OS_SESSION_ID` per brief. Run the merge brief (Brief M) after all others complete — it will combine the per-brief branches."
 
 #### Step 6 — Queue Intake (opt-in)
 
@@ -272,7 +273,7 @@ If the operator accepts:
 
 3. **Add to queue**:
    - Run: `queue-cli.sh add --brief <path> [--auto-approve] [--solo] [--push]` with the operator-selected flags
-   - For task groups: add all briefs and create a work order. If the group has sequential execution, add entries in order. If parallel, add all content briefs then the merge brief. Use `--branch` for shared task group branches
+   - For task groups: add all briefs and create a work order. If the group has sequential execution, add entries in order with `--branch` for the shared group branch. If parallel, add all content briefs then the merge brief — each parallel content brief gets its own per-brief branch (`{group-branch}/brief-{seq}`), so omit `--branch` for content briefs (the worktree session creates the branch); use `--branch` for the merge brief only (targeting the group base branch)
 
 4. **Check daemon status and start if needed**:
    - Run: `queue-cli.sh start-daemon`

@@ -39,3 +39,4 @@ t-0028-worktree-state-isolation.md
 t-0029-operator-ack-enforcement.md
 t-0030-worktree-session-isolation.md
 t-0031-recover-risk-posture.md
+t-0032-parallel-worktree-isolation.md
