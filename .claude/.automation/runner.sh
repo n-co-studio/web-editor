@@ -189,6 +189,13 @@ if [ ! -f "$CONFIG_FILE" ]; then
   exit 1
 fi
 
+# Bootstrap config.local.yaml if absent — ensures the daemon's runtime toggle
+# uses the gitignored override file so the tracked config.yaml is never
+# modified at runtime (Decision 0017).
+if [ ! -f "$CONFIG_LOCAL_FILE" ]; then
+  printf 'runner:\n  enabled: true\n' > "$CONFIG_LOCAL_FILE"
+fi
+
 # ============================================================
 # Heartbeat — background timestamp writer for running entries
 # ============================================================

@@ -129,6 +129,12 @@ QUESTION_HASH=$(printf '%s' "$QUESTIONS_TEXT" | portable_hash | cut -c1-12)
   printf 'session_id: %s\n' "$SID"
 } > "$STATE_DIR/plan-approved" 2>/dev/null || true
 
+# Store plan hash in resume marker for content-addressed comparison at commit time.
+# At commit, pre-commit-gates.sh compares plan-approved.question_hash against
+# session-resume.yaml.plan_hash to verify the approval matches the current plan.
+# Backward compat: sessions without a resume marker skip this check (presence-only).
+record_agent_verdict "plan_hash" "$QUESTION_HASH" 2>/dev/null || true
+
 # --- Phase: set mode and advance through approval → next phase ---
 # If phase-state active, set mode then advance through approval to the
 # post-approval phase (queried dynamically from the phase sequence).

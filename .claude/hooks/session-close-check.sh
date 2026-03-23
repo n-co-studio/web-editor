@@ -608,8 +608,9 @@ if [ -z "$EPHEMERAL_STYPE" ]; then
   fi
   _FB_STAGED=$(git diff --cached --name-only 2>/dev/null || echo "")
   # Filter unstaged changes to only files owned by this session (exclude
-  # .claude/.state/ which may be written by concurrent sessions' hooks).
-  _FB_UNSTAGED=$(git diff --name-only 2>/dev/null | grep -v '^\.claude/\.state/' || echo "")
+  # .claude/.state/ which may be written by concurrent sessions' hooks,
+  # and .claude/.automation/ which may be written by the runner daemon).
+  _FB_UNSTAGED=$(git diff --name-only 2>/dev/null | grep -v '^\.claude/\.state/\|^\.claude/\.automation/' || echo "")
   if [ -z "$_FB_RECENT" ] && [ -z "$_FB_STAGED" ] && [ -z "$_FB_UNSTAGED" ]; then
     # No seal needed — matches ephemeral exit pattern (line 562): ephemeral
     # sessions must NOT trigger solo merge or branch seal.

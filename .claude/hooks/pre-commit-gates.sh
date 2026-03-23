@@ -232,18 +232,50 @@ _validate_state_session_id() {
   [ "$file_sid" = "$current_sid" ]
 }
 
-# --- Plan content hash presence check (compensating control for session-ID mismatch) ---
-# Returns 0 if plan-approved state file contains a non-empty question_hash, 1 otherwise.
-# A recorded question_hash proves the approval was written by plan-approval.sh (which hashes
-# the AskUserQuestion text via portable_hash). When session_id mismatches but a hash is
-# recorded, the approval is likely from a legitimate plan-approval flow — downgrade to warning.
-_has_recorded_plan_hash() {
+# --- Plan content hash validation (compensating control for session-ID mismatch) ---
+# Compares plan-approved.question_hash against session-resume.yaml plan_hash verdict
+# to verify the approval matches the current plan (content-addressed confirmation).
+# Returns 0 (valid) when:
+#   - Both hashes present and match (content-addressed validation), OR
+#   - Resume marker absent / no plan_hash entry (backward-compat: presence-check fallback)
+# Returns 1 (invalid) when:
+#   - Both hashes present but mismatch (plan changed or stale file)
+#
+# Backward-compatibility fallback: Sessions started before this change won't have a
+# plan_hash in the resume marker. In that case, fall back to presence-check (return 0
+# if question_hash is non-empty). This fallback can be removed once all active sessions
+# have the resume marker with plan_hash support.
+_validate_plan_content_hash() {
   local state_file="$1"
   [ -f "$state_file" ] || return 1
+
+  # Read question_hash from plan-approved
   local file_hash
   file_hash=$(grep '^question_hash:' "$state_file" 2>/dev/null | sed 's/^question_hash: *//' | tr -d '[:space:]' | head -1)
   # Hash must be non-empty to serve as compensating control
-  [ -n "$file_hash" ]
+  [ -n "$file_hash" ] || return 1
+
+  # Read plan_hash from session-resume.yaml agent_verdicts section
+  local state_dir
+  state_dir="$(get_session_state_dir)"
+  local resume_file="$state_dir/session-resume.yaml"
+  local resume_hash=""
+
+  if [ -f "$resume_file" ]; then
+    resume_hash=$(grep '^ *plan_hash:' "$resume_file" 2>/dev/null | sed 's/^ *plan_hash: *//' | tr -d '[:space:]' | head -1)
+  fi
+
+  # If resume marker absent or no plan_hash entry: backward-compat presence-check
+  if [ -z "$resume_hash" ]; then
+    return 0
+  fi
+
+  # Both present: content-addressed comparison
+  if [ "$file_hash" = "$resume_hash" ]; then
+    return 0
+  else
+    return 1
+  fi
 }
 
 if [ "$SKIP_STATE" = false ]; then
@@ -267,16 +299,18 @@ if [ "$SKIP_STATE" = false ]; then
     block "state_plan_missing"
     log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_plan_missing"
   elif ! _validate_state_session_id "$STATE_DIR/plan-approved"; then
-    # Session-ID mismatch — check if recorded question_hash provides compensating control.
-    # A recorded hash proves the state file was written by plan-approval.sh, not forged.
-    if _has_recorded_plan_hash "$STATE_DIR/plan-approved"; then
-      echo "Advisory: plan-approved session_id mismatch but question_hash recorded — approval from legitimate plan-approval flow, downgrading to warning." >&2
-      warn "hash_present_sid_mismatch"
-      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "warn" "$START_MS" "hash_present_sid_mismatch"
+    # Session-ID mismatch — compare plan-approved.question_hash against resume marker plan_hash.
+    # Content-addressed validation: if both hashes match, the approval is for the current plan.
+    if _validate_plan_content_hash "$STATE_DIR/plan-approved"; then
+      echo "Advisory: plan-approved session_id mismatch but plan content hash validated — approval matches current plan, downgrading to warning." >&2
+      warn "hash_validated_sid_mismatch"
+      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "warn" "$START_MS" "hash_validated_sid_mismatch"
     else
-      echo "GATE-RECOVERABLE: plan-approved state file has stale session_id and no valid content hash. NEXT: Re-approve plan in this session. (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
-      block "state_plan_stale_session"
-      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_plan_stale_session"
+      # Hash mismatch: plan-approved question_hash does not match resume marker plan_hash.
+      # This means the plan changed after approval, or the plan-approved file is from a different session.
+      echo "GATE-RECOVERABLE: plan-approved question_hash does not match session resume marker — plan may have changed or file is stale. NEXT: Re-approve plan in this session. (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
+      block "hash_mismatch_sid_mismatch"
+      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "hash_mismatch_sid_mismatch"
     fi
   fi
 
