@@ -38,6 +38,7 @@
 | `audit` | Read-only (no gates unless deferrals create file changes). |
 | `queue-triage` | No gates (fully ephemeral). |
 | `taskdef-query` | No gates (fully ephemeral). |
+| `editor-live` | Per-loop: A4 only. Close: full gates minus plan-approved. |
 | `taskdef-brief` | Plan-approved gate only (Decision 0029). |
 
 ## State File Summary

@@ -317,6 +317,13 @@ _CACHED_SESSION_TYPE_SET=false
 _SESSION_OVERLAP_CHECKED=false
 _SESSION_OVERLAP_CHECK_PID=""
 get_session_type() {
+  # Fast-path (R13): if _phase-helper.sh already validated, use its cached result
+  # Guard: _PS_VALIDATED is only set when _phase-helper.sh is sourced
+  if [ -n "${_PS_VALIDATED+x}" ] && [ "$_PS_VALIDATED" = true ]; then
+    echo "$_PS_SESSION_TYPE"
+    return
+  fi
+
   if [ "$_CACHED_SESSION_TYPE_SET" = true ]; then
     echo "$_CACHED_SESSION_TYPE"
     return

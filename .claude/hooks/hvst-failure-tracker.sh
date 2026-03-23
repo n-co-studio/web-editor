@@ -47,7 +47,36 @@ if [ "$EVENT" = "PostToolUseFailure" ]; then
 elif [ "$EVENT" = "PostToolUse" ]; then
   # Bash command succeeded — emit only on state transition (counter resets from non-zero)
   # Suppresses already_zero and no_counter events (~80-90% noise reduction)
-  if [ -f "$COUNTER_FILE" ]; then
+  #
+  # R7: Skip reset for read-only commands. Interleaved git status / ls between
+  # test failures should not mask the consecutive failure count.
+  COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null || echo "")
+  _IS_READ_ONLY=false
+  if [ -n "$COMMAND" ]; then
+    # Strip leading whitespace, extract first token (the binary)
+    _FIRST_TOKEN=$(echo "$COMMAND" | sed 's/^[[:space:]]*//' | cut -d' ' -f1)
+    case "$_FIRST_TOKEN" in
+      git)
+        # git subcommands: only status/log/diff/show/branch are read-only
+        _GIT_SUB=$(echo "$COMMAND" | sed 's/^[[:space:]]*//' | cut -d' ' -f2)
+        case "$_GIT_SUB" in
+          status|log|diff|show|branch) _IS_READ_ONLY=true ;;
+        esac
+        ;;
+      ls|cat|echo|find|grep|head|tail|wc|pwd|which|file|type)
+        # Read-only if no redirect operator present
+        case "$COMMAND" in
+          *">"*|*"tee "*) ;; # has redirect — not read-only
+          *) _IS_READ_ONLY=true ;;
+        esac
+        ;;
+    esac
+  fi
+
+  if [ "$_IS_READ_ONLY" = true ]; then
+    # Don't reset counter for read-only commands
+    :
+  elif [ -f "$COUNTER_FILE" ]; then
     CURRENT=$(cat "$COUNTER_FILE" 2>/dev/null || echo "0")
     if [ "$CURRENT" != "0" ]; then
       echo "0" > "$COUNTER_FILE"

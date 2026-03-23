@@ -37,3 +37,5 @@ t-0026-session-type-validation.md
 t-0027-agent-tool-governance-gate.md
 t-0028-worktree-state-isolation.md
 t-0029-operator-ack-enforcement.md
+t-0030-worktree-session-isolation.md
+t-0031-recover-risk-posture.md

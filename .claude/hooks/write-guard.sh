@@ -32,59 +32,73 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-source "$SCRIPT_DIR/_analytics-helper.sh"
-source "$SCRIPT_DIR/_phase-helper.sh"
-source "$SCRIPT_DIR/_mode-guard-helper.sh"
-START_MS=$(now_ms)
 
 # ============================================================
-# Override pre-checks (before stdin read for fast exit)
+# Phase 1: Read stdin + Override pre-checks (builtins only)
 # ============================================================
 
-# --- State-guard operator overrides ---
+INPUT=$(cat)
+
+# --- State-guard operator overrides (builtins only — no sourced functions) ---
 SKIP_STATE_GUARD=false
+_RECOVER_VIA_SIGNAL=false
+RECOVER_SIGNAL_FILE="$(cd "$(dirname "$0")/../.." && pwd)/.claude/.state/.recover-signal"
 if [ "${REPO_OS_SKIP_STATE_GUARD:-0}" = "1" ]; then
-  log_override "state-guard" "REPO_OS_SKIP_STATE_GUARD"
-  log_hook_event "state-guard" "PreToolUse" "" "allow" "$START_MS" "skip_override"
   SKIP_STATE_GUARD=true
 fi
-
-RECOVER_SIGNAL_FILE="$_REPO_OS_ROOT/.claude/.state/.recover-signal"
-_RECOVER_VIA_SIGNAL=false
 if [ "${REPO_OS_RECOVER:-0}" = "1" ]; then
-  log_override "state-guard" "REPO_OS_RECOVER"
-  log_hook_event "state-guard" "PreToolUse" "" "allow" "$START_MS" "recovery_bypass"
   SKIP_STATE_GUARD=true
 elif [ -f "$RECOVER_SIGNAL_FILE" ]; then
   _RECOVER_VIA_SIGNAL=true
-  log_override "state-guard" "recover-signal-file"
-  log_hook_event "state-guard" "PreToolUse" "" "allow" "$START_MS" "recovery_signal_file"
   rm -f "$RECOVER_SIGNAL_FILE"
   echo "Recovery signal consumed — bypassing state-guard and mode-guard" >&2
   SKIP_STATE_GUARD=true
 fi
 
-# --- Mode-guard operator override ---
+# --- Mode-guard operator override (builtins only) ---
 SKIP_MODE_GUARD=false
 if [ "${REPO_OS_SKIP_MODE_GUARD:-0}" = "1" ]; then
-  log_override "mode-guard" "REPO_OS_SKIP_MODE_GUARD"
-  log_hook_event "mode-guard" "PreToolUse" "" "allow" "$START_MS" "skip_override"
   SKIP_MODE_GUARD=true
 fi
 if [ "$_RECOVER_VIA_SIGNAL" = true ]; then
   SKIP_MODE_GUARD=true
 fi
 
-# If both guards are skipped, fast-exit
+# If both guards are skipped, fast-exit (no sourcing needed)
 if [ "$SKIP_STATE_GUARD" = true ] && [ "$SKIP_MODE_GUARD" = true ]; then
   exit 0
 fi
 
 # ============================================================
-# Shared: Read tool call input (single stdin read, single parse)
+# Phase 2: Source libraries (single sourcing)
 # ============================================================
 
-INPUT=$(cat)
+source "$SCRIPT_DIR/_analytics-helper.sh"
+source "$SCRIPT_DIR/_phase-helper.sh"
+source "$SCRIPT_DIR/_mode-guard-helper.sh"
+START_MS=$(now_ms)
+
+# Log overrides that were detected pre-source
+if [ "${REPO_OS_SKIP_STATE_GUARD:-0}" = "1" ]; then
+  log_override "state-guard" "REPO_OS_SKIP_STATE_GUARD"
+  log_hook_event "state-guard" "PreToolUse" "" "allow" "$START_MS" "skip_override"
+fi
+if [ "${REPO_OS_RECOVER:-0}" = "1" ]; then
+  log_override "state-guard" "REPO_OS_RECOVER"
+  log_hook_event "state-guard" "PreToolUse" "" "allow" "$START_MS" "recovery_bypass"
+fi
+if [ "$_RECOVER_VIA_SIGNAL" = true ]; then
+  log_override "state-guard" "recover-signal-file"
+  log_hook_event "state-guard" "PreToolUse" "" "allow" "$START_MS" "recovery_signal_file"
+fi
+if [ "${REPO_OS_SKIP_MODE_GUARD:-0}" = "1" ]; then
+  log_override "mode-guard" "REPO_OS_SKIP_MODE_GUARD"
+  log_hook_event "mode-guard" "PreToolUse" "" "allow" "$START_MS" "skip_override"
+fi
+
+# ============================================================
+# Shared: Parse tool call input (single stdin read, single parse)
+# ============================================================
 
 # --- jq presence guard (fail-closed) ---
 if [ "$_REPO_OS_HAS_JQ" = false ]; then
@@ -97,6 +111,13 @@ _jq_out=$(echo "$INPUT" | jq -r '[.tool_input.file_path // "", .tool_input.comma
 _TAB=$(printf '\t')
 FILE_PATH="${_jq_out%%${_TAB}*}"
 COMMAND="${_jq_out#*${_TAB}}"
+
+# Cache extract_write_targets result (called once, reused by state-guard + mode-guard + bash scanning)
+if [ -n "$COMMAND" ]; then
+  _CACHED_WRITE_TARGETS=$(extract_write_targets "$COMMAND")
+else
+  _CACHED_WRITE_TARGETS=""
+fi
 
 REPO_ROOT="$_REPO_OS_ROOT"
 
@@ -128,7 +149,7 @@ if [ "$SKIP_STATE_GUARD" = false ]; then
   fi
 
   if [ -n "$COMMAND" ]; then
-    TARGETS=$(extract_write_targets "$COMMAND")
+    TARGETS="$_CACHED_WRITE_TARGETS"
     while IFS= read -r WT; do
       [ -z "$WT" ] && continue
       if [[ "$WT" == *".claude/.state/"* ]] || [[ "$WT" == *".claude/.session-id"* ]]; then
@@ -188,19 +209,11 @@ if [ -n "$FILE_PATH" ]; then
   esac
 fi
 
-# --- Resolve operating mode ---
-# Priority: REPO_OS_MODE env var > .claude/repo-mode file > default "child"
-MODE="${REPO_OS_MODE:-}"
-if [ -n "$MODE" ]; then
+# --- Resolve operating mode (via get_mode from _analytics-helper.sh) ---
+if [ -n "${REPO_OS_MODE:-}" ]; then
   log_override "mode-guard" "REPO_OS_MODE"
 fi
-if [ -z "$MODE" ]; then
-  MODE_FILE="$REPO_ROOT/.claude/repo-mode"
-  if [ -f "$MODE_FILE" ]; then
-    MODE=$(head -1 "$MODE_FILE" | tr -d '[:space:]')
-  fi
-fi
-MODE="${MODE:-child}"
+MODE=$(get_mode)
 
 # Validate mode
 case "$MODE" in
@@ -248,7 +261,7 @@ if [ "$MODE" != "template" ]; then
   fi
   # Immune path check on Bash write targets (redirect/tee)
   if [ -n "$COMMAND" ] && [ -z "$FILE_PATH" ]; then
-    FE_TARGETS=$(extract_write_targets "$COMMAND")
+    FE_TARGETS="$_CACHED_WRITE_TARGETS"
     while IFS= read -r FE_WT; do
       [ -z "$FE_WT" ] && continue
       FE_WT_ABS=$(resolve_path "$FE_WT")
@@ -331,7 +344,7 @@ fi
 # --- Bash command scanning for write patterns ---
 if [ -n "$COMMAND" ] && [ -z "$FILE_PATH" ]; then
   # Extract write targets via shared helper
-  TARGETS=$(extract_write_targets "$COMMAND")
+  TARGETS="$_CACHED_WRITE_TARGETS"
   while IFS= read -r WT; do
     [ -z "$WT" ] && continue
     WT_ABS=$(resolve_path "$WT")

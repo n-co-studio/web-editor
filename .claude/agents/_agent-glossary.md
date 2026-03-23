@@ -96,7 +96,7 @@ Governance evidence in `.claude/.state/`. Written by hooks via shell I/O (never 
 | `security-signed` | `state-writer.sh` (security-privacy) | High-risk detection |
 | `pragmatist-signed` | `state-writer.sh` (pragmatist) | Plan-review verification |
 | `high-risk-detected` | `pre-commit-gates.sh` | Audit trail |
-| `governance-checked` | `bash-guard.sh` (Gate 3, Bash) or `pre-commit-gates.sh` (Gate 3, commit) | First-fire marker (inter-session governance) |
+| `governance-checked` | `pre-commit-gates.sh` (Gate 3, commit) | First-fire marker (inter-session governance) |
 | `phase-state` | `_phase-helper.sh` (via hooks) | Phase-aware flow tracking (session type, current phase, cycle) |
 | `overrides.log` | `_analytics-helper.sh` (`log_override`) | Override audit (session-close-check) |
 | `task-contract.yaml` | Orchestrator (model) | Task contract — intent reference for cohesion review (Decision 0020). Lives in `.claude/local/` (not `.state/`) because it is model-written; state-guard blocks model writes to `.state/` |
@@ -124,6 +124,7 @@ Worktree-isolated subagents (`isolation: "worktree"` in Agent tool) run in a sep
 - **State reads pass through**: Phase-state reads in worktree hooks reflect the main session's phase. This is intentional — worktree subagents operate under the parent session's governance.
 - **Implication**: Governance agents (critic, qa-verifier, reviewer, security-privacy, pragmatist) dispatched with `isolation: "worktree"` will not produce state files. The parent session must re-dispatch in-tree if governance evidence is needed.
 - **Detection**: `is_worktree()` in `_analytics-helper.sh` compares `git rev-parse --git-dir` vs `--git-common-dir`. Cached per-process.
+- **Full worktree sessions**: For full worktree sessions (`claude --worktree`), see Decision 0030.
 
 ---
 
@@ -210,7 +211,7 @@ Three modes control file-edit permissions. Enforced by `write-guard.sh` (Decisio
 
 | Mode | Scope | Governance Carve-outs |
 |------|-------|-----------------------|
-| **template** | Governance only (no product code) | Full governance access (`.claude/`, `docs/ai/`, `docs/spec/_templates/`, `.github/`, `AI.md`, `CLAUDE.md`, `repo-os-explainer.html`). Contracts at `.claude/local/task-groups/` |
+| **template** | Governance only (no product code) | Full governance access (`.claude/`, `docs/ai/`, `docs/spec/_templates/`, `.github/`, `AI.md`, `CLAUDE.md`, `repo-os-explainer.html`). Contracts at `.claude/local/task-groups/`. Automation layer at `.claude/.automation/*` |
 | **child** (default) | Product code + limited governance | `docs/ai/decisions/0100+`, `docs/ai/logs/`, `docs/ai/governance/`, `docs/ai/task-groups/*.yaml` (non `_`-prefixed), `docs/spec/compiled/`, `docs/spec/prototypes/`, `.claude/settings.local.json`. Template `t-*` files protected |
 | **autonomous** | Product code + minimal governance | `docs/ai/logs/`, `docs/ai/task-groups/*.yaml` (non `_`-prefixed) only |
 

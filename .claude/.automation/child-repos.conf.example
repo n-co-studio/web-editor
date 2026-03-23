@@ -1,0 +1,13 @@
+# Child repo registry — used by child-sync.sh to sync local clones
+# after template changes are pushed to remote.
+#
+# Format: <github-repo-name> <local-path>
+# Lines starting with # are comments. Blank lines are ignored.
+# Paths must be absolute.
+#
+# Org directive (optional): sets the GitHub org for all repos below.
+# Override with REPO_OS_GITHUB_ORG env var.
+# org: your-github-org
+
+my-product-app   /Users/you/Developer/my-product-app
+my-internal-tool /Users/you/Developer/tools/my-internal-tool

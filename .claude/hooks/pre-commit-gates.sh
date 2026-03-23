@@ -26,6 +26,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/_analytics-helper.sh"
 source "$SCRIPT_DIR/_phase-helper.sh"
+source "$SCRIPT_DIR/_secret-pattern.sh"
 START_MS=$(now_ms)
 
 # --- jq presence guard (fail-closed) ---
@@ -101,16 +102,14 @@ _get_staged_diff() {
 # Scans added lines in staged diff (not working-tree files) to catch
 # only what's being committed. Pre-existing secrets are not flagged.
 # ============================================================
-SECRET_PATTERN='sk_live_|sk_test_|sk-ant-api[0-9]+-[A-Za-z0-9_-]+|ghp_[A-Za-z0-9]|github_pat_[A-Za-z0-9]|glpat-[A-Za-z0-9]|npm_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9]|sk-proj-[A-Za-z0-9]|pypi-[A-Za-z0-9]|AKIA[A-Z0-9]|AIza[A-Za-z0-9]|-----BEGIN.*PRIVATE KEY-----|://[^/:@[:space:]]+:[^/@[:space:]]+@[^[:space:]]+|password[[:space:]]*=[[:space:]]*["\x27][^"\x27]|secret[[:space:]]*=[[:space:]]*["\x27][^"\x27]|token[[:space:]]*=[[:space:]]*["\x27][^"\x27]'
-
 if [ -n "$STAGED_FILES" ]; then
   # Scan added lines only (^+ prefix) from staged diff — catches what's being
   # committed, not pre-existing content. Uses _get_staged_diff lazy cache.
   A4_ADDED_LINES=$(_get_staged_diff | awk '
     /^\+\+\+ / { file=substr($0,5); next }
-    /^\+/ && !/^\+\+\+/ { print file ": " substr($0,2) }
+    /^\+/ && !/^\+\+\+/ && file !~ /_secret-pattern\.sh$/ { print file ": " substr($0,2) }
   ')
-  A4_MATCHES=$(echo "$A4_ADDED_LINES" | grep -iE "$SECRET_PATTERN" 2>/dev/null || true)
+  A4_MATCHES=$(echo "$A4_ADDED_LINES" | grep -iE "$_REPO_OS_SECRET_PATTERN" 2>/dev/null || true)
   if [ -n "$A4_MATCHES" ]; then
     A4_FIRST_FILE=$(echo "$A4_MATCHES" | head -1 | sed 's/^b\///' | sed 's/: .*//')
     echo "GATE-RECOVERABLE: A4 — possible secret in staged diff: $A4_FIRST_FILE. NEXT: Remove the secret from staged files before committing." >&2
@@ -242,7 +241,11 @@ if [ "$SKIP_STATE" = false ]; then
   elif [ "${REPO_OS_SKIP_PLAN_GATE:-0}" = "1" ]; then
     log_override "pre-commit-gates" "REPO_OS_SKIP_PLAN_GATE"
   elif [ ! -f "$STATE_DIR/plan-approved" ]; then
-    if [ "$IS_HEADLESS" = true ]; then
+    # R13 diagnostic: distinguish "hook didn't fire" from "approval not given"
+    _CURRENT_PHASE=$(get_phase)
+    if [ "$_CURRENT_PHASE" = "build" ] || [ "$_CURRENT_PHASE" = "plan" ] || [ "$_CURRENT_PHASE" = "approval" ]; then
+      echo "GATE-RECOVERABLE: Phase is '$_CURRENT_PHASE' but plan-approved state file is missing — plan-approval.sh hook may not have fired after AskUserQuestion (see known-issues.md R13). NEXT: Create recovery signal (touch .claude/.state/.recover-signal) or set REPO_OS_SKIP_PLAN_GATE=1." >&2
+    elif [ "$IS_HEADLESS" = true ]; then
       echo "GATE-RECOVERABLE: plan-approved state file missing. NEXT: Write escalation file to .claude/.automation/escalations/ with type 'governance-block'. (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
     else
       echo "GATE-RECOVERABLE: plan-approved state file missing. NEXT: Use AskUserQuestion to present plan for operator approval (triggers plan-approval hook). (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
@@ -886,9 +889,12 @@ if [ "$SKIP_STATE" = false ] && [ -f "$STATE_DIR/overrides.log" ]; then
 fi
 
 # ============================================================
-# Project-Specific Checks
+# Project-Specific Checks (Gate A3 — Quality)
 # ============================================================
-# Add project-specific gate checks below. Examples:
+# Activation contract: Uncomment and adapt for your toolchain.
+# Guard each check with `command -v` so it stays no-op when the
+# tool is absent. This keeps the gate portable across environments
+# where not all dev tools are installed.
 #
 # # A3: Quality — Lint
 # if command -v npx &>/dev/null && [ -f package.json ]; then

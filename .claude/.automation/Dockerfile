@@ -40,6 +40,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN echo "TODO: Install claude CLI — see https://docs.anthropic.com" && \
     echo "Replace this RUN block with your installation method"
 
+# Build-time assertion: fail early if claude CLI is not installed
+RUN command -v claude || { echo "ERROR: claude CLI not installed — update the install block above"; exit 1; }
+
 # Working directory is the mounted repo
 WORKDIR /workspace
 

@@ -113,6 +113,9 @@ source "$SCRIPT_DIR/_phase-helper.sh"
 source "$SCRIPT_DIR/_mode-guard-helper.sh"
 START_MS=$(now_ms)
 
+# Prime _CACHED_BRANCH from pre-source git rev-parse result (I1 — avoids redundant git call)
+_CACHED_BRANCH="$CURRENT_BRANCH"
+
 REPO_ROOT="$_REPO_OS_ROOT"
 
 # Log overrides that were detected pre-source
@@ -192,6 +195,12 @@ _TAB=$(printf '\t')
 FILE_PATH="${_jq_out%%${_TAB}*}"
 COMMAND="${_jq_out#*${_TAB}}"
 
+# Cache extract_write_targets once (R11 — pure function, same input → same output)
+WRITE_TARGETS=""
+if [ -n "$COMMAND" ]; then
+  WRITE_TARGETS=$(extract_write_targets "$COMMAND")
+fi
+
 # ============================================================
 # Phase 7: Bash write-target scoping
 # ============================================================
@@ -199,7 +208,6 @@ COMMAND="${_jq_out#*${_TAB}}"
 # If no in-repo write targets, exit 0 (no gates needed for state/mode/branch).
 if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
   HAS_INREPO_WRITE=false
-  TARGETS=$(extract_write_targets "$COMMAND")
   while IFS= read -r WT; do
     [ -z "$WT" ] && continue
     _wt_abs=$(resolve_path "$WT")
@@ -207,7 +215,7 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
       HAS_INREPO_WRITE=true
       break
     fi
-  done <<< "$TARGETS"
+  done <<< "$WRITE_TARGETS"
   if [ "$HAS_INREPO_WRITE" = false ]; then
     log_hook_event "bash-guard" "PreToolUse" "Bash" "allow" "$START_MS" "bash_out_of_repo"
     exit 0
@@ -228,7 +236,6 @@ if [ "$SKIP_STATE_GUARD" = false ]; then
   STATE_TARGET_PATH=""
 
   if [ -n "$COMMAND" ]; then
-    SG_TARGETS=$(extract_write_targets "$COMMAND")
     while IFS= read -r SG_WT; do
       [ -z "$SG_WT" ] && continue
       if [[ "$SG_WT" == *".claude/.state/"* ]] || [[ "$SG_WT" == *".claude/.session-id"* ]]; then
@@ -239,7 +246,7 @@ if [ "$SKIP_STATE_GUARD" = false ]; then
           break
         fi
       fi
-    done <<< "$SG_TARGETS"
+    done <<< "$WRITE_TARGETS"
   fi
 
   # --- Indirect path construction hardening ---
@@ -277,18 +284,11 @@ if [ "$SKIP_MODE_GUARD" = false ]; then
     # No command means nothing to check for mode-guard on Bash calls
     log_hook_event "mode-guard" "PreToolUse" "Bash" "allow" "$START_MS" "no_command"
   else
-    # --- Resolve operating mode ---
-    MODE="${REPO_OS_MODE:-}"
-    if [ -n "$MODE" ]; then
+    # --- Resolve operating mode (via get_mode from _analytics-helper.sh) ---
+    if [ -n "${REPO_OS_MODE:-}" ]; then
       log_override "mode-guard" "REPO_OS_MODE"
     fi
-    if [ -z "$MODE" ]; then
-      MODE_FILE="$REPO_ROOT/.claude/repo-mode"
-      if [ -f "$MODE_FILE" ]; then
-        MODE=$(head -1 "$MODE_FILE" | tr -d '[:space:]')
-      fi
-    fi
-    MODE="${MODE:-child}"
+    MODE=$(get_mode)
 
     case "$MODE" in
       template|child|autonomous) ;;
@@ -304,7 +304,6 @@ if [ "$SKIP_MODE_GUARD" = false ]; then
     if [ "$MODE" != "template" ]; then
       # Immune path check on Bash write targets
       if [ -n "$COMMAND" ]; then
-        MG_TARGETS=$(extract_write_targets "$COMMAND")
         while IFS= read -r MG_WT; do
           [ -z "$MG_WT" ] && continue
           MG_WT_ABS=$(resolve_path "$MG_WT")
@@ -324,7 +323,7 @@ if [ "$SKIP_MODE_GUARD" = false ]; then
                 ;;
             esac
           fi
-        done <<< "$MG_TARGETS"
+        done <<< "$WRITE_TARGETS"
       fi
       log_hook_event "mode-guard" "PreToolUse" "Bash" "allow" "$START_MS" "fast_exit_${MODE}"
     else
@@ -363,7 +362,6 @@ if [ "$SKIP_MODE_GUARD" = false ]; then
 
       ALLOW_PATH=""
       if [ -n "$COMMAND" ]; then
-        MG_TGT=$(extract_write_targets "$COMMAND")
         while IFS= read -r MG_WT; do
           [ -z "$MG_WT" ] && continue
           MG_WT_ABS=$(resolve_path "$MG_WT")
@@ -373,7 +371,7 @@ if [ "$SKIP_MODE_GUARD" = false ]; then
           MG_WT_REL=$(make_relative "$MG_WT")
           [ -z "$ALLOW_PATH" ] && ALLOW_PATH="$MG_WT_REL"
           check_path "$MG_WT_REL" "bash"
-        done <<< "$MG_TGT"
+        done <<< "$WRITE_TARGETS"
       fi
 
       log_hook_event "mode-guard" "PreToolUse" "Bash" "allow" "$START_MS" "pass_${MODE}" "" "$ALLOW_PATH"
@@ -439,7 +437,16 @@ if [ "$ALLOW_REASON" = "pass" ]; then
           ALLOW_REASON="phase_gate_pass"
         else
           log_hook_event "branch-guard" "PreToolUse" "Bash" "block" "$START_MS" "phase_gate" "phase:$CURRENT_PHASE"
-          echo "GATE-RECOVERABLE: Session in '$CURRENT_PHASE' phase — plan not yet approved. NEXT: Use AskUserQuestion to present your plan for operator approval (triggers plan-approval hook). (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
+          # R13 diagnostic: distinguish "hook didn't fire" from "approval not given".
+          # When phase is plan/approval but plan-approved file is absent, the
+          # plan-approval.sh PostToolUse hook likely failed to fire after
+          # AskUserQuestion (known VS Code extension issue — see R13).
+          if [ ! -f "$REPO_ROOT/.claude/.state/plan-approved" ] && \
+             { [ "$CURRENT_PHASE" = "plan" ] || [ "$CURRENT_PHASE" = "approval" ]; }; then
+            echo "GATE-RECOVERABLE: Session in '$CURRENT_PHASE' phase and plan-approved state file is missing — plan-approval.sh hook may not have fired after AskUserQuestion (see known-issues.md R13). NEXT: Create recovery signal (touch .claude/.state/.recover-signal) or set REPO_OS_SKIP_PLAN_GATE=1." >&2
+          else
+            echo "GATE-RECOVERABLE: Session in '$CURRENT_PHASE' phase — plan not yet approved. NEXT: Use AskUserQuestion to present your plan for operator approval (triggers plan-approval hook). (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
+          fi
           exit 2
         fi
       else

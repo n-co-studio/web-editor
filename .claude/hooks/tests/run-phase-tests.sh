@@ -31,7 +31,7 @@ else
   RESET=""
 fi
 
-printf "${BOLD}Phase Model Cohesion Tests — L1 + L1b + L2 + L3${RESET}\n"
+printf "${BOLD}Phase Model Cohesion Tests — L1 + L1b + L1c + L2 + L3${RESET}\n"
 printf "==================================================\n\n"
 
 # --- Self-test: verify assertion functions ---
@@ -62,6 +62,15 @@ printf '%s\n' "-----------------------------------"
 
 l1b_exit=0
 bash "$SCRIPT_DIR/layer1b-registry-functions.sh" || l1b_exit=$?
+
+printf "\n"
+
+# --- Run Layer 1c ---
+printf '%s\n' "${BOLD}Layer 1c: Worktree Function Tests${RESET}"
+printf '%s\n' "-----------------------------------"
+
+l1c_exit=0
+bash "$SCRIPT_DIR/layer1c-worktree-functions.sh" || l1c_exit=$?
 
 printf "\n"
 
@@ -213,6 +222,13 @@ if [ "$l1b_exit" -eq 0 ]; then
   printf "Layer 1b (Registry Functions): ${GREEN}PASS${RESET}\n"
 else
   printf "Layer 1b (Registry Functions): ${RED}FAIL${RESET}\n"
+  overall=1
+fi
+
+if [ "$l1c_exit" -eq 0 ]; then
+  printf "Layer 1c (Worktree Functions): ${GREEN}PASS${RESET}\n"
+else
+  printf "Layer 1c (Worktree Functions): ${RED}FAIL${RESET}\n"
   overall=1
 fi
 

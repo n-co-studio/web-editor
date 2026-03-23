@@ -623,11 +623,21 @@ _run_single_entry() {
 
   # Launch headless session
   # Trust model for headless execution:
-  #   --permission-mode bypassPermissions — no interactive permission prompts
-  #   --disallowedTools — deny list is the primary CLI-level safety gate
-  #   PreToolUse hooks (pretooluse-permission.sh) — belt-and-suspenders deny
-  #   Note: PermissionRequest hooks do NOT fire in -p mode (Anthropic documented
-  #   limitation). Headless permission logic lives in pretooluse-permission.sh.
+  #   --permission-mode bypassPermissions — required because PermissionRequest
+  #   hooks do NOT fire in `claude -p` mode (Anthropic SDK documented limitation).
+  #   Without bypass, every tool call would block on an unattended permission dialog.
+  #
+  #   Three-layer compensating defense:
+  #     1. --disallowedTools — CLI-level deny list (primary gate, prevents tool
+  #        invocation entirely for blocked tools)
+  #     2. PreToolUse hooks (pretooluse-permission.sh) — belt-and-suspenders deny
+  #        list + headless fail-closed for unknown commands
+  #     3. Governance gates (pre-commit-gates.sh, pre-push-gates.sh, bash-guard.sh,
+  #        write-guard.sh) — enforce phase model, secret scanning, branch isolation
+  #
+  #   REVISIT: check PermissionRequest hook behavior at each Anthropic SDK upgrade.
+  #   If PermissionRequest hooks begin firing in -p mode, consider switching from
+  #   bypassPermissions to a permission-request-based allow/deny model.
   # Launch headless session in background to enable FORCE-HALT child kill
   local exit_code=0
   if [ -n "$stderr_file" ]; then

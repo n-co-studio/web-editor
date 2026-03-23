@@ -205,6 +205,12 @@ _PERMISSION_DENY_BASH=(
   '(^|[;&|] *)mv .* \.claude/\.state/'
   '(^|[;&|] *)mv .* \.claude/\.state$'
 
+  # --- Direct shell interpreter invocation (bypasses hook chain) ---
+  '(^|[;&|] *)/bin/sh( |$)'
+  '(^|[;&|] *)/bin/bash( |$)'
+  '(^|[;&|] *)/usr/bin/env sh( |$)'
+  '(^|[;&|] *)/usr/bin/env bash( |$)'
+
   # --- Supplementary: context-specific anchors ---
   '(^|[;&|] *)xargs .*kill -9'
 )

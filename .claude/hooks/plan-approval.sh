@@ -26,6 +26,13 @@ START_MS=$(now_ms)
 # --- Read PostToolUse payload ---
 INPUT=$(cat)
 
+# --- Debug logging (R13 investigation) ---
+# When REPO_OS_DEBUG=1, dump full payload to /tmp for diagnosing
+# VS Code extension hook dispatch timing issues.
+if [ "${REPO_OS_DEBUG:-0}" = "1" ]; then
+  echo "$INPUT" > /tmp/plan-approval-debug.json 2>/dev/null || true
+fi
+
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null)
 
 # Only process AskUserQuestion

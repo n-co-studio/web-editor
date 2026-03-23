@@ -33,18 +33,6 @@
 #
 # Overrides: SKIP_SESSION_LOG=1, SKIP_UNCOMMITTED_CHECK=1,
 #            SKIP_KNOWN_ISSUES_CHECK=1, SKIP_CONTRACT_CHECK=1
-#
-# --- Phase 2 Measurement Baseline (2d) ---
-# Deployed: 2026-03-03 (Phase 2 — governance-neutral refactors)
-# Changes: JSON stdout output (2a), HVST/deferrals advisory downgrade (2b),
-#          fast-path library sourcing elimination (2c).
-# Metrics to collect for Phase 3 evaluation (after 2-3 weeks):
-#   - Real-repo block rate (filter phase-test repos)
-#   - Retry depth distribution (stop_hook_active=true frequency)
-#   - Per-invocation duration (millisecond-resolution from analytics)
-#   - Safety valve rate (attempt_limit fires / total sessions)
-#   - Token cost estimate (reason field length * retry count)
-# Phase 3 decision point: evaluate after 2-3 weeks of post-Phase-2 telemetry.
 
 set -euo pipefail
 
@@ -111,6 +99,7 @@ fi
 source "$SCRIPT_DIR/_analytics-helper.sh"
 source "$SCRIPT_DIR/_phase-helper.sh"
 source "$SCRIPT_DIR/_cleanup-helper.sh"
+source "$SCRIPT_DIR/_secret-pattern.sh"
 START_MS=$(now_ms)
 
 # --- Retry detection via stop_hook_active (Phase 1 optimization) ---
@@ -545,10 +534,9 @@ if [ "$STOP_ATTEMPT" -ge 3 ]; then
   # but writes an escalation so the operator is alerted.
   _SV_STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || true)
   if [ -n "$_SV_STAGED_FILES" ]; then
-    _SV_SECRET_PATTERN='sk_live_|sk_test_|sk-ant-api[0-9]+-[A-Za-z0-9_-]+|ghp_[A-Za-z0-9]|github_pat_[A-Za-z0-9]|glpat-[A-Za-z0-9]|npm_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9]|sk-proj-[A-Za-z0-9]|pypi-[A-Za-z0-9]|AKIA[A-Z0-9]|AIza[A-Za-z0-9]|-----BEGIN.*PRIVATE KEY-----|://[^/:@[:space:]]+:[^/@[:space:]]+@[^[:space:]]+|password[[:space:]]*=[[:space:]]*["\x27][^"\x27]|secret[[:space:]]*=[[:space:]]*["\x27][^"\x27]|token[[:space:]]*=[[:space:]]*["\x27][^"\x27]'
     _SV_DIFF=$(git diff --cached -U0 2>/dev/null || true)
     _SV_ADDED=$(printf '%s\n' "$_SV_DIFF" | awk '/^\+/ && !/^\+\+\+/ { print substr($0,2) }')
-    _SV_MATCHES=$(printf '%s\n' "$_SV_ADDED" | grep -iE "$_SV_SECRET_PATTERN" 2>/dev/null || true)
+    _SV_MATCHES=$(printf '%s\n' "$_SV_ADDED" | grep -iE "$_REPO_OS_SECRET_PATTERN" 2>/dev/null || true)
     if [ -n "$_SV_MATCHES" ]; then
       echo "WARNING: A4 secret scan detected possible secrets in staged diff during safety valve exit" >&2
       _SV_ESC_DIR="$REPO_ROOT/.claude/.automation/escalations"

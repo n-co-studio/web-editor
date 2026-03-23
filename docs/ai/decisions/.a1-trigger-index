@@ -16,8 +16,10 @@
 0011|\.claude/local/task-groups/|task.group, contract, A6, next_brief, pre-approval, one.branch.per.group, parallel, execution, completion_markers, merge_brief, boundaries
 0012|\.claude/hooks/write-guard\.sh|write-guard, mode-guard, REPO_OS_MODE, REPO_OS_UNLOCK_PATH, REPO_OS_SKIP_MODE_GUARD, is_in_repo
 0012|\.claude/repo-mode|write-guard, mode-guard, REPO_OS_MODE, REPO_OS_UNLOCK_PATH, REPO_OS_SKIP_MODE_GUARD, is_in_repo
+0013|\.claude/hooks/(bash-guard|write-guard|session-close-check)\.sh|branch.reuse, session.isolation, closed-branches, one.session.per.branch, concurrent.session
 0014|\.claude/hooks/_phase-helper\.sh|phase, session_type, init_phase, advance_phase, assert_phase, phase-state, get_phase, get_tag, taskgroup-merge, editor-live
 0014|\.claude/\.state/phase-state|phase, session_type, init_phase, advance_phase, assert_phase, phase-state, get_phase, get_tag, taskgroup-merge, editor-live
+0015|\.claude/hooks/(session-close-check|_phase-helper)\.sh|solo, solo.mode, direct.merge, merge.to.main
 0016|\.claude/agents/auditor\.md|auditor, audit, dimension, co-audit, workshop, escalation, tech-debt, cohesion-drift
 0016|docs/ai/prompts/prompt-c-project-audit\.md|auditor, audit, dimension, co-audit, workshop, escalation, tech-debt, cohesion-drift
 0017|\.claude/\.automation/|automation, headless, runner, queue, escalation, blocker, claude -p, enabled, permission-request, allowlist, scope-deviation, scope_classification

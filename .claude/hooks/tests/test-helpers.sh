@@ -69,7 +69,12 @@ setup_sandbox() {
   export REPO_OS_TEST_MODE=1
   export _REPO_OS_TEST_ROOT="$_SANDBOX_DIR"
 
-  # Source the helpers (order matters: analytics first, then phase)
+  # --- Source-order contract (R11) ---
+  # _analytics-helper.sh MUST be sourced AFTER setup_sandbox() sets
+  # _REPO_OS_TEST_ROOT. It reads _REPO_OS_TEST_ROOT at source time to
+  # set _REPO_OS_ROOT. If sourced before setup_sandbox(), _REPO_OS_ROOT
+  # bakes in the real repo path and all sandbox isolation breaks silently.
+  # _phase-helper.sh depends on _analytics-helper.sh, so it comes second.
   local real_hooks_dir
   real_hooks_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
   # shellcheck disable=SC1091

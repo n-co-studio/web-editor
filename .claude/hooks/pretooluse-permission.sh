@@ -40,8 +40,10 @@ if [ "$_REPO_OS_HAS_JQ" = false ]; then
   exit 0
 fi
 
-TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null || true)
-TOOL_COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null || true)
+# Single jq invocation for both fields (halves subprocess count)
+_ptl_jq_out=$(echo "$INPUT" | jq -r '[.tool_name // "", .tool_input.command // ""] | join("\t")' 2>/dev/null || true)
+TOOL_NAME="${_ptl_jq_out%%	*}"
+TOOL_COMMAND="${_ptl_jq_out#*	}"
 
 # --- Decision helpers ---
 _ptl_allow() {

@@ -16,7 +16,18 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 AUTOMATION_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-CONF="$AUTOMATION_DIR/child-repos.conf"
+CONF=""
+if [ -f "$AUTOMATION_DIR/child-repos.conf" ]; then
+  CONF="$AUTOMATION_DIR/child-repos.conf"
+elif [ -f "$AUTOMATION_DIR/child-repos.conf.example" ]; then
+  echo "WARNING: child-repos.conf not found — falling back to child-repos.conf.example" >&2
+  echo "  Copy child-repos.conf.example to child-repos.conf and customize for your environment." >&2
+  CONF="$AUTOMATION_DIR/child-repos.conf.example"
+else
+  echo "ERROR: Neither child-repos.conf nor child-repos.conf.example found in $AUTOMATION_DIR" >&2
+  echo "  Create child-repos.conf with your child repo registry. See child-repos.conf.example for format." >&2
+  exit 1
+fi
 LOG="/tmp/repo-os-child-sync.log"
 MAX_WAIT=180   # seconds to wait for workflow completion
 
