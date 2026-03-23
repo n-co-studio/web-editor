@@ -139,7 +139,7 @@ Phase labels correspond to Decision 0014 `taskgroup-merge` phase sequence. Runs 
 | **Pragmatist** (brief-advisory mode) | Lite+ | Core group — always when board runs | No (advisory) |
 | **Exploration** | Standard+ | Standard tier and above | No (advisory) |
 | **Security Analyst** | Full | Signal-triggered at Full tier | No (advisory) |
-| **UX Strategist** | Full | Signal-triggered at Full tier | No (advisory) |
+| **UX Design Agent** | Full | Signal-triggered at Full tier | No (advisory) |
 | **Performance Engineer** | Full | Signal-triggered at Full tier | No (advisory) |
 | **Data Strategist** | Full | Signal-triggered at Full tier | No (advisory) |
 

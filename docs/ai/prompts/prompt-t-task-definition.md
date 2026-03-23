@@ -93,6 +93,7 @@ Dispatch all specialists in parallel. Each receives: the operator's task descrip
 | **Critic** | What could go wrong? What gaps exist in the task description? What assumptions are unstated? What risks or contradictions are present? |
 | **Pragmatist** | Is the proposed approach proportionate to the problem? Are there over-engineered patterns, unnecessary abstractions, or scope inflation? What simpler alternative would meet the same requirements? |
 | **PM Advisory** | Does this align with the MVP scope? Is it consistent with compiled specs? Are there scope or sequencing concerns? *(Conditional — dispatched only when compiled spec or `mvp-scope.yaml` exists. Skipped silently otherwise.)* |
+| **UX Design Agent** (Mode 1) | What should this look like? Produces a structured design brief covering layout, typography, visual hierarchy, interaction patterns, responsive behavior, motion, and accessibility foundations. Detects existing design system or proposes minimum viable token set. *(Conditional — dispatched when task description mentions UI, screens, pages, components, layouts, forms, dashboards, or design. Skipped silently otherwise.)* |
 
 Specialists produce lightweight briefs using the advisory board format (see `.claude/agents/_advisory-board-lite.md`). Severity labels: CRITICAL / RECOMMENDATION / IDEA. PM additionally uses scope labels: IN-SCOPE / OUT-OF-SCOPE / DEFER.
 
@@ -106,6 +107,7 @@ The Orchestrator synthesizes specialist findings into a draft task brief:
 - Incorporate Critic findings into the Risks and Verification sections
 - Incorporate Pragmatist findings into the Approach section — flag disproportionate approaches and suggest simpler alternatives
 - Incorporate PM findings into the Constraints and Risks sections (scope alignment, spec consistency, sequencing concerns)
+- Incorporate UX Design Agent design brief into the Approach section — embed the full design brief as a subsection so the Builder has concrete design direction. Reference design tokens and patterns in the Constraints section
 - Cross-reference Critic concerns with Architect/Exploration/PM suggestions (same pattern as advisory board Critic Cross-Reference)
 - If PM included spec-edit proposals, note them in the brief's Risks & Open Questions section for operator awareness
 

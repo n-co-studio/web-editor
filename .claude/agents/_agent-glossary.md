@@ -51,6 +51,30 @@ Post-build Critic review (cohesion mode): checks diff + surrounding code for bro
 ### PM Scope Labels
 PM-specific labels (orthogonal to severity): **IN-SCOPE**, **OUT-OF-SCOPE**, **DEFER**. Applied by PM Advisory alongside standard severity. Informational — do not affect Refinement Report routing.
 
+### UX Design Agent
+Three-mode UX agent (`.claude/agents/ux-strategist.md`). Mode selection is context-driven:
+
+| Mode | Name | Trigger | Output |
+|------|------|---------|--------|
+| 1 | Design (generative) | Prompt T Brief mode — task involves UI | Structured design brief (layout, typography, hierarchy, interactions, responsive, motion, tokens) |
+| 2 | UX Review (advisory) | Prompt A spec review, Prompt B post-build | Advisory findings with standard severity labels (CRITICAL / RECOMMENDATION / IDEA) |
+| 3 | Design Health (evaluative) | Prompt B post-build — after Mode 2, or parallel with Critic when Mode 2 not activated | Compliance findings with design health labels |
+
+**Activation conditions:** Mode 1 — task description mentions UI, screens, pages, components, layouts, forms, dashboards, or design. Mode 2 — spec contains UI/design system/user-flows/forms/components/responsive/design-tokens (Prompt A), or task involved UI changes (Prompt B post-build). Mode 3 — task involved UI changes (Prompt B post-build); auto-detects design system presence before scanning.
+
+**Design system detection:** Modes 1 and 3 detect the project's CSS approach by reading project config files (`tailwind.config.*`, `package.json` for CSS-in-JS, CSS module files, custom property definitions, design token files, compiled `design-system.md`). If no design system exists, Mode 1 proposes a minimum viable token set; Mode 3 recommends establishing one rather than flagging violations.
+
+### Design Health Labels
+Design system compliance labels used by UX Design Agent Mode 3 (orthogonal to standard severity):
+
+| Label | Meaning |
+|-------|---------|
+| **TOKEN-VIOLATION** | Hardcoded values (colors, spacing, font sizes, breakpoints, animation durations) where design tokens should be used |
+| **COMPONENT-BYPASS** | Custom implementations where design system components already exist |
+| **SYSTEM-DRIFT** | Patterns inconsistent with the design system architecture (off-grid spacing, non-scale typography, ad-hoc colors, undefined breakpoints) |
+
+Advisory only — no commit gate, no state file. Presented in review summary alongside Critic and PM findings. Unlike cohesion review (gate A5), design health findings do not block commit.
+
 ---
 
 ## Reserved Directories

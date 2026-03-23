@@ -41,13 +41,13 @@ The Orchestrator scans compiled specs (or the feature brief's "What It Touches" 
 | Signal Keywords | Activates (Full tier only) |
 |---|---|
 | auth, sessions, OAuth, tokens, permissions, login | Security Analyst |
-| UI, design-system, user-flows, forms, components, responsive | UX Strategist |
+| UI, design-system, user-flows, forms, components, responsive | UX Design Agent |
 | real-time, websockets, video, streaming, large-data, media, CDN | Performance Engineer |
 | database, data-contracts, migrations, schema, GDPR, data-lifecycle | Data Strategist |
 
 **Core group (Lite+):** Architect, Critic, Pragmatist — always active when advisory board runs.
 **Extended (Standard+):** Exploration, PM Advisory — active at Standard tier and above. PM requires compiled spec or `mvp-scope.yaml` (skipped silently when neither exists).
-**Conditional (Full only):** Security Analyst, UX Strategist, Performance Engineer, Data Strategist — signal-triggered, Full tier only.
+**Conditional (Full only):** Security Analyst, UX Design Agent, Performance Engineer, Data Strategist — signal-triggered, Full tier only.
 
 ---
 
@@ -95,7 +95,7 @@ The Orchestrator synthesizes all specialist briefs into a single report:
 | Exploration | Ran / Skipped | Standard+ |
 | PM Advisory | Ran / Skipped | Standard+ (requires compiled spec or mvp-scope.yaml) |
 | Security Analyst | Ran / Skipped | [trigger or "no signal"] |
-| UX Strategist | Ran / Skipped | [trigger or "no signal"] |
+| UX Design Agent | Ran / Skipped | [trigger or "no signal"] |
 | Performance Engineer | Ran / Skipped | [trigger or "no signal"] |
 | Data Strategist | Ran / Skipped | [trigger or "no signal"] |
 

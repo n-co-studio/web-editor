@@ -38,7 +38,7 @@ The phase model tracks session progress in `.claude/.state/phase-state`. Hooks e
 |-------|-------|-------|
 | plan | **Pragmatist** (plan-gating mode) | REQUIRE dispatch before presenting plan to operator. Foreground preferred (ensures verdict available before plan presentation; background supported but may complete during build). Passes plan text inline in Task prompt. GATE_RESULT: BLOCKED (FUNDAMENTAL-MISMATCH) or APPROVED. Findings and verdict presented alongside plan to operator. Auto mode: BLOCKED degrades to advisory-with-warning (Decision 0025) |
 | build | Builder | Implements changes |
-| review | **Critic** (cohesion mode) + **PM Advisory** (spec-drift) | REQUIRE: dispatch Critic before advancing to verify phase. Parallel dispatch. Critic checks internal coherence; PM checks spec alignment. PM is conditional — requires compiled spec or `mvp-scope.yaml` (skipped silently otherwise). PM findings are advisory (not gating) |
+| review | **Critic** (cohesion mode) + **PM Advisory** (spec-drift) + **UX Design Agent** (Mode 2 + Mode 3) | REQUIRE: dispatch Critic before advancing to verify phase. Parallel dispatch. Critic checks internal coherence; PM checks spec alignment. PM is conditional — requires compiled spec or `mvp-scope.yaml` (skipped silently otherwise). PM findings are advisory (not gating). UX Design Agent is conditional — dispatched when the task brief contains design brief content or the implementation includes UI changes; see UX Post-Build Review below |
 | verify | QA Verifier | REQUIRE: dispatch before advancing to commit phase. Commit blocker (A1–A6, B1–B3) |
 | user-review | User Review Tier agents | Optional — skipped when no User Review in brief |
 | commit | Orchestrator | Commit with trailers |
@@ -82,6 +82,32 @@ After the `verify` phase, check whether the task brief or task contract contains
 4. Produce a single User Review Report, advance to `commit`. Present during `op-review` (auto mode: logged in closing summary). Operator dispositions each finding (accept / note / dismiss).
 
 See `.claude/agents/_agent-glossary.md` § User Review for full system definition and Decision 0021 for scenario schema.
+
+## UX Post-Build Review
+
+After Builder completes, during the `review` phase, dispatch the UX Design Agent when the task involves UI changes:
+
+### Activation Conditions
+
+Dispatch when ANY of:
+- The task brief contains a `## Design Brief` section (from Mode 1 output in Prompt T)
+- The implementation diff includes UI files (`.tsx`, `.jsx`, `.vue`, `.svelte`, `.html`, CSS/SCSS files, component files)
+- The task brief mentions UI, screens, pages, components, layouts, forms, or dashboards
+
+Skip silently when none of the above conditions are met.
+
+### Dispatch Sequence
+
+1. **Mode 2 (UX Review):** Dispatch alongside Critic and PM Advisory (parallel). Receives: task brief, design brief (if present), list of modified files, implementation diff. Produces advisory findings with standard severity labels (CRITICAL / RECOMMENDATION / IDEA).
+
+2. **Mode 3 (Design Health):** Dispatch after Mode 2 completes, or in parallel with Critic when Mode 2 is not activated. Receives: list of modified files, implementation diff. Produces compliance findings with design health labels (TOKEN-VIOLATION / COMPONENT-BYPASS / SYSTEM-DRIFT). Mode 3 auto-detects whether a design system exists — if none exists, it recommends establishing one rather than flagging violations.
+
+### Integration with Review Phase
+
+- UX findings are advisory — they do not block commit (same enforcement level as cohesion review)
+- Critical UX findings (CRITICAL severity from Mode 2, or high-count TOKEN-VIOLATION/COMPONENT-BYPASS from Mode 3) should be presented to the operator alongside Critic and PM findings
+- If critical UX findings exist, the `review→build` loop applies (same as cohesion findings)
+- Design Health findings are informational — present in the review summary but do not trigger the review→build loop unless the operator requests fixes
 
 ## Operating Rules
 - REQUIRE: at session start, create a branch from main: `git checkout -b <category>/<description>` (standard: `feature/<description>`, hotfix: `hotfix/<description>`)
