@@ -7,9 +7,10 @@
 #   _phase-helper.sh — _load_phase_state, _PS_* cache variables
 #   blocker-reporter.sh — write_blocker_report (optional, for enriched reports)
 #
-# 5 outcome types (+ 1 edge case):
+# 6 outcome types (+ 1 edge case):
 #   completed — success (exit 0 + new commits)
 #   completed — clean-noop (exit 0 + no commits + clean tree)
+#   completed — killed-after-complete (exit 143/SIGTERM + new commits — git is source of truth)
 #   review    — escalation (exit 0 + escalation file or tag=operator)
 #   review    — dirty-noop (exit 0 + dirty tree + no commits — edge case)
 #   failed    — crash (non-zero + dirty tree)
@@ -137,7 +138,25 @@ detect_outcome() {
     return
   fi
 
-  # Non-zero exit
+  # Non-zero exit — check for SIGTERM (exit code 143 = 128 + 15)
+  # When a session completes its work (commits code, writes session log) and then
+  # gets killed by SIGTERM during close-phase output, exit code is 143 but the
+  # work is done. Git state is the source of truth, not exit code.
+  if [ "$exit_code" -eq 143 ] && [ "$has_new_commits" = true ]; then
+    echo "WARNING: Exit code 143 (SIGTERM) but session produced commits — classifying as completed" >&2
+    # Still check for escalations (session may have written one before being killed)
+    if [ "$has_escalation" = true ]; then
+      if [ "$has_scope_deviation" = true ]; then
+        echo "review:scope-deviation"
+      else
+        echo "review:escalation"
+      fi
+      return
+    fi
+    echo "completed:killed-after-complete"
+    return
+  fi
+
   if [ "$has_dirty_tree" = true ]; then
     # Crash (non-zero + dirty tree)
     _write_blocker_report "$exit_code" "$repo_root" "$entry_id" "$stderr_file"

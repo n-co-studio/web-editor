@@ -274,6 +274,28 @@ This is a headless automation session (runner-invoked via claude -p).
 - Follow the full phase model and gate requirements
 "
 
+    # Commit instructions (gate trailers required on all commits)
+    prompt="${prompt}
+## Commit Instructions
+Stage all changes and commit with git trailers:
+\`\`\`
+<commit subject>
+
+<description/rationale>
+
+Session: <session_number>
+Decisions: <applicable decisions>
+Gates-A: A1-pass A2-pass A3-<result> A4-pass A5-<result> A6-<result>
+Gates-B: B1-pass B2-<result> B3-<result>
+Automation: runner
+\`\`\`
+**IMPORTANT:** Every commit MUST include \`Gates-A:\` and \`Gates-B:\` trailers — including docs-only or session-log-only commits. For commits where gates were not exercised (no code changes), use \`n/a\`:
+\`\`\`
+Gates-A: A1-pass A2-n/a A3-n/a A4-n/a A5-n/a A6-n/a
+Gates-B: B1-n/a B2-n/a B3-n/a
+\`\`\`
+"
+
     # Task brief
     if [ -n "$brief_content" ]; then
       prompt="${prompt}

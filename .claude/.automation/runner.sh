@@ -250,8 +250,8 @@ _runner_crash_cleanup() {
   fi
 }
 
-# Clean up on exit
-trap '_stop_heartbeat; _runner_crash_cleanup' EXIT
+# Clean up on exit (guard each function to prevent cascade under set -euo pipefail)
+trap '_stop_heartbeat || true; _runner_crash_cleanup || true' EXIT
 
 # ============================================================
 # Circuit breaker — 3 consecutive global failures pauses daemon
@@ -408,7 +408,7 @@ _startup_crash_recovery() {
                 ;;
             esac
           fi
-          _rebuild_queue_index
+          _rebuild_queue_index || true
           release_queue_lock
           recovered=$((recovered + 1))
         else
@@ -659,7 +659,11 @@ _run_single_entry() {
   #   REVISIT: check PermissionRequest hook behavior at each Anthropic SDK upgrade.
   #   If PermissionRequest hooks begin firing in -p mode, consider switching from
   #   bypassPermissions to a permission-request-based allow/deny model.
-  # Launch headless session in background to enable FORCE-HALT child kill
+  # Launch headless session in background to enable FORCE-HALT child kill.
+  # SIGTERM deferral: when the daemon receives SIGTERM, the trap sets
+  # _SHUTDOWN_REQUESTED=true and `wait` is interrupted (returns 128+signum).
+  # The child may still be running — re-wait until it exits naturally.
+  # This prevents SIGTERM from killing sessions during close phase output.
   local exit_code=0
   if [ -n "$stderr_file" ]; then
     claude -p \
@@ -670,6 +674,12 @@ _run_single_entry() {
       2> >(tee "$stderr_file" >&2) &
     _CLAUDE_CHILD_PID=$!
     wait "$_CLAUDE_CHILD_PID" || exit_code=$?
+    # Re-wait if child is still alive (SIGTERM interrupted wait, not child)
+    while [ "$exit_code" -ne 0 ] && kill -0 "$_CLAUDE_CHILD_PID" 2>/dev/null; do
+      echo "SIGTERM deferred: child pid $_CLAUDE_CHILD_PID still running — re-waiting..." >&2
+      exit_code=0
+      wait "$_CLAUDE_CHILD_PID" || exit_code=$?
+    done
   else
     claude -p \
       --permission-mode bypassPermissions \
@@ -678,6 +688,12 @@ _run_single_entry() {
       <<< "$prompt" &
     _CLAUDE_CHILD_PID=$!
     wait "$_CLAUDE_CHILD_PID" || exit_code=$?
+    # Re-wait if child is still alive (SIGTERM interrupted wait, not child)
+    while [ "$exit_code" -ne 0 ] && kill -0 "$_CLAUDE_CHILD_PID" 2>/dev/null; do
+      echo "SIGTERM deferred: child pid $_CLAUDE_CHILD_PID still running — re-waiting..." >&2
+      exit_code=0
+      wait "$_CLAUDE_CHILD_PID" || exit_code=$?
+    done
   fi
   _CLAUDE_CHILD_PID=""
 
@@ -970,10 +986,17 @@ _cleanup_daemon_lock() {
 }
 _graceful_shutdown() {
   _SHUTDOWN_REQUESTED=true
-  echo "Shutdown requested — finishing current session if active..." >&2
+  # SIGTERM source diagnostics — helps identify whether signal comes from
+  # launchd, another runner instance, or macOS process management.
+  local _sig_ts _sig_ppid _sig_parent_cmd
+  _sig_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "unknown")
+  _sig_ppid=$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' ' || echo "unknown")
+  _sig_parent_cmd=$(ps -o comm= -p "$_sig_ppid" 2>/dev/null || echo "unknown")
+  echo "Shutdown requested at $_sig_ts — daemon pid $$, ppid $_sig_ppid ($_sig_parent_cmd), child_active=${_CLAUDE_CHILD_PID:+yes}${_CLAUDE_CHILD_PID:-no}" >&2
+  echo "Deferring shutdown until active session completes and queue transition finishes..." >&2
 }
 trap '_graceful_shutdown' TERM INT
-trap '_stop_heartbeat; _runner_crash_cleanup; _write_health "stopped"; _cleanup_daemon_lock' EXIT
+trap '_stop_heartbeat || true; _runner_crash_cleanup || true; _write_health "stopped" || true; _cleanup_daemon_lock || true' EXIT
 
 echo "Runner daemon starting (pid $$)..." >&2
 
@@ -1036,7 +1059,7 @@ while true; do
           _write_queue_entry "$_fh_qdir/failed/${_CURRENT_ENTRY_ID}.yaml"
           rm -f "$_fh_entry_file"
           rm -f "$_fh_qdir/running/${_CURRENT_ENTRY_ID}.heartbeat" 2>/dev/null || true
-          _rebuild_queue_index
+          _rebuild_queue_index || true
           # Propagate failure to work order if entry belongs to one
           if [ -n "$_QE_WORK_ORDER_ID" ]; then
             _fh_wo_status=$(wo_check_completion "$_QE_WORK_ORDER_ID" 2>/dev/null) || true
@@ -1173,7 +1196,7 @@ while true; do
                   ;;
               esac
             fi
-            _rebuild_queue_index
+            _rebuild_queue_index || true
             release_queue_lock
           else
             echo "WARNING: Could not acquire lock for stale entry recovery ($_sr_entry_id)" >&2
@@ -1428,13 +1451,26 @@ while true; do
       fi
       ;;
     failed)
-      if ! queue_fail "$ENTRY_ID"; then
-        echo "ERROR: queue_fail failed for $ENTRY_ID" >&2
-        _transition_ok=false
-      fi
+      # Infrastructure failures (empty-result) are non-retriable — go directly to
+      # terminal failed/ without incrementing retry_count. Retriable failures use
+      # queue_fail which respects max_retries.
+      case "$OUTCOME_RAW" in
+        failed:empty-result)
+          if ! queue_fail_terminal "$ENTRY_ID" "infrastructure failure: empty outcome from session"; then
+            echo "ERROR: queue_fail_terminal failed for $ENTRY_ID" >&2
+            _transition_ok=false
+          fi
+          ;;
+        *)
+          if ! queue_fail "$ENTRY_ID" "$OUTCOME_RAW"; then
+            echo "ERROR: queue_fail failed for $ENTRY_ID" >&2
+            _transition_ok=false
+          fi
+          ;;
+      esac
       ;;
     *)
-      if ! queue_fail "$ENTRY_ID"; then
+      if ! queue_fail "$ENTRY_ID" "$OUTCOME_RAW"; then
         echo "ERROR: queue_fail failed for $ENTRY_ID (wildcard outcome: $OUTCOME_RAW)" >&2
         _transition_ok=false
       fi
@@ -1443,6 +1479,8 @@ while true; do
 
   if [ "$_transition_ok" = false ]; then
     echo "WARNING: State transition failed for $ENTRY_ID — entry may be orphaned in running/" >&2
+    review_log_append "transition-failed" "${ENTRY_WORK_ORDER_ID:-}" "$ENTRY_ID" \
+      "State transition failed for $ENTRY_ID (outcome: $OUTCOME_RAW) — entry may be orphaned in running/" 2>/dev/null || true
   fi
   # Only release lock if we actually acquired it (Phase 6: prevents releasing another section's lock)
   if [ "$_lock_acquired" = true ]; then
