@@ -359,6 +359,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
     <a href="#promptt">Task Definition</a>
     <a href="#taskgroups">Task Groups</a>
     <a href="#promptc">Project Audit</a>
+    <a href="#prompth">Hotfix &amp; Debug</a>
     <a href="#hvstreview">HVST Review Board</a>
     <div class="sb-group">Scaling</div>
     <a href="#branches">Branch Categories</a>
@@ -465,6 +466,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
       <tr><td><span class="tag t-cyn">Visual editing</span></td><td>Prompt E</td><td>Editor-live session &mdash; agent responds to file saves, no plan gate (child mode only)</td></tr>
       <tr><td><span class="tag t-cyn">Queue triage</span></td><td>Prompt Q</td><td>Review escalations, approve queue entries, manage work orders conversationally</td></tr>
       <tr><td><span class="tag t-cyn">Daemon toggle</span></td><td>Prompt D</td><td>Quick on/off toggle for the automation runner (ephemeral session)</td></tr>
+      <tr><td><span class="tag t-red">Production bug</span></td><td>Prompt H</td><td>Hotfix &amp; debug &mdash; structured diagnosis, minimal fix, iterative validation on <code>hotfix/*</code> branch</td></tr>
     </tbody>
   </table>
 </section>
@@ -1220,6 +1222,14 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
   <div class="card dec"><div class="dec-id">t-0022</div><h3>Template Decision Naming (<code>t-</code> Prefix)</h3><p>Template decisions use <code>t-NNNN-*.md</code> naming, synced from upstream and locked in child/autonomous modes. Child decisions use plain <code>0100-*.md</code>+. Mode-guard enforces via prefix check. <code>t-manifest.txt</code> lists all template decisions for orphan cleanup.</p></div>
   <div class="card dec"><div class="dec-id">t-0023</div><h3>Editor-Live Session Type</h3><p>Continuous visual-development session type: <code>init &rarr; build &rarr; commit &rarr; review &rarr; verify &rarr; op-review &rarr; close</code>. No plan gate &mdash; operator edits are the plan. Loops: <code>commit&rarr;build</code> (next iteration), <code>verify&rarr;build</code> (QA failure). <code>editor-watch.sh</code> file watcher. 50-iteration cycle advisory. Child mode only.</p></div>
   <div class="card dec"><div class="dec-id">t-0024</div><h3>Child Repo Default Mode</h3><p>Child repos default to <code>child</code> mode via committed <code>.claude/repo-mode</code> file, eliminating manual setup and preventing accidental template restrictions in product repositories.</p></div>
+  <div class="card dec"><div class="dec-id">t-0025</div><h3>Pragmatist Agent</h3><p>Dual-mode over-engineering review agent. Brief-Advisory mode (Prompt T): 4th core specialist alongside Architect, Exploration, Critic. Plan-Gating mode (Prompt B): reviews implementation plans before operator approval with <code>GATE_RESULT</code> sentinel (BLOCKED or APPROVED). Anchored to YAGNI cost taxonomy with falsifiable anti-pattern checklist.</p></div>
+  <div class="card dec"><div class="dec-id">t-0026</div><h3>Session-Type Validation</h3><p>Mechanical check detecting when a brief contains <code>### Task Group</code> metadata but the session was initialized with a non-taskgroup type. Blocked at first governed Bash write (<code>bash-guard.sh</code> Gate 2b) and first governed Edit/Write (<code>write-guard.sh</code> Gate 2b). Fingerprint file: <code>.claude/.state/brief-has-taskgroup</code>.</p></div>
+  <div class="card dec"><div class="dec-id">t-0027</div><h3>Agent Tool Governance Gate</h3><p>Closes the Agent tool bypass that allowed write-capable subagents in no-write sessions (Prompt T, A, C, D, ephemeral). <code>pretooluse-permission.sh</code> checks <code>subagent_type</code> against a read-only allowlist. Fail-closed when phase-state is missing. Also blocks <code>claude</code> subprocess invocation via Bash deny pattern.</p></div>
+  <div class="card dec"><div class="dec-id">t-0028</div><h3>Worktree State Isolation</h3><p>Hardens governance state boundary for worktree-isolated subagents. When a governance agent runs inside a git worktree (spawned via <code>isolation: &ldquo;worktree&rdquo;</code>), <code>state-writer.sh</code> refuses to write state files, preventing subagent verdicts from contaminating parent session state.</p></div>
+  <div class="card dec"><div class="dec-id">t-0029</div><h3>Operator Acknowledgment Enforcement</h3><p>Generalizes operator-acknowledgment enforcement by renaming <code>taskdef-brief</code>&rsquo;s <code>op-review</code> phase to <code>approval</code>. Activates existing <code>has_plan_gate</code> / <code>advance_phase</code> substance check requiring <code>plan-approved</code> state file before advancing to the post-approval phase.</p></div>
+  <div class="card dec"><div class="dec-id">t-0030</div><h3>Worktree Session Isolation</h3><p>Enables full independent Claude Code sessions in git worktrees (<code>claude --worktree</code>) with per-session governance isolation and sequential merge coordination back to main. Supersedes Decision 0028 for full worktree sessions only &mdash; subagent worktree writes remain blocked.</p></div>
+  <div class="card dec"><div class="dec-id">t-0031</div><h3>REPO_OS_RECOVER Risk Posture</h3><p>Documents and accepts the risk posture of the <code>REPO_OS_RECOVER</code> emergency recovery mechanism. Recovery mode bypasses all state-dependent governance checks to unblock stuck sessions. File-based signal: <code>.claude/.state/.recover-signal</code> (single-use, consumed by first hook).</p></div>
+  <div class="card dec"><div class="dec-id">t-0032</div><h3>Parallel Task Group Worktree Isolation</h3><p>Parallel task group content briefs MUST run as full worktree sessions (<code>claude --worktree</code> with <code>REPO_OS_SESSION_ID</code>), each committing to its own isolated branch. The merge brief combines per-brief branches before cross-session cohesion review. REQUIRE-level constraint.</p></div>
 </section>
 
 <!-- ══════ HOOKS & FILES ══════ -->
@@ -1330,7 +1340,7 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
 <span class="p">│   └── </span><span class="d">ai/</span>
 <span class="p">│       ├── </span><span class="f">workflow.md</span> <span class="n">&mdash; execution model, HVST protocol</span>
 <span class="p">│       ├── </span><span class="f">quality-gates.md</span> <span class="n">&mdash; gate definitions (A/B/C)</span>
-<span class="p">│       ├── </span><span class="d">decisions/</span> <span class="n">&mdash; t-0001&ndash;t-0024 template decisions (t- prefix, synced from upstream)</span>
+<span class="p">│       ├── </span><span class="d">decisions/</span> <span class="n">&mdash; t-0001&ndash;t-0032 template decisions (t- prefix, synced from upstream)</span>
 <span class="p">│       ├── </span><span class="d">governance/</span> <span class="n">&mdash; inter-session governance evidence (spec-compiled, advisory-reviewed)</span>
 <span class="p">│       ├── </span><span class="d">task-groups/</span> <span class="n">&mdash; task group contracts (YAML)</span>
 <span class="p">│       ├── </span><span class="d">logs/</span>
@@ -1343,7 +1353,10 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
 <span class="p">│           ├── </span><span class="f">prompt-b-product-build.md</span> <span class="n">&mdash; development prompt</span>
 <span class="p">│           ├── </span><span class="f">prompt-t-task-definition.md</span> <span class="n">&mdash; task exploration &amp; planning</span>
 <span class="p">│           ├── </span><span class="f">prompt-c-project-audit.md</span> <span class="n">&mdash; project audit prompt</span>
-<span class="p">│           └── </span><span class="f">prompt-e-editor-live.md</span> <span class="n">&mdash; editor-live session prompt (Decision 0023)</span>
+<span class="p">│           ├── </span><span class="f">prompt-d-daemon-toggle.md</span> <span class="n">&mdash; automation runner toggle (ephemeral)</span>
+<span class="p">│           ├── </span><span class="f">prompt-e-editor-live.md</span> <span class="n">&mdash; editor-live session prompt (Decision 0023)</span>
+<span class="p">│           ├── </span><span class="f">prompt-h-hotfix-debug.md</span> <span class="n">&mdash; hotfix &amp; debug session prompt</span>
+<span class="p">│           └── </span><span class="f">prompt-q-queue-triage.md</span> <span class="n">&mdash; queue triage session prompt</span>
 <span class="p">└── </span><span class="d">src/</span> <span class="n">&mdash; your product code</span></div>
 </section>
 
@@ -1557,6 +1570,68 @@ table.ref td:first-child{color:var(--t1);font-weight:500;white-space:nowrap;}
 
   <h3>How to start</h3>
   <div class="cmd">Follow docs/ai/prompts/prompt-c-project-audit.md.</div>
+</section>
+
+<!-- ══════ HOTFIX & DEBUG ══════ -->
+<section id="prompth">
+  <div class="sec-num">Reactive Debugging</div>
+  <h2>Hotfix &amp; Debug &mdash; Prompt H</h2>
+  <p>Reactive debugging and fix session for runtime errors, integration failures, and production incidents. Operates on <code>hotfix/*</code> branches with expedited gates (A2 scope relaxed, A5 cohesion skipped). Structured workflow: diagnose root cause, apply minimal fix, iterate when fixes fail, escalate when diagnosis stalls.</p>
+
+  <h3>Workflow</h3>
+  <div class="flow">
+    <div class="flow-node fn-op">Symptoms<br><span style="font-size:.68rem;color:var(--t3)">error + context</span></div>
+    <span class="flow-arr">&rarr;</span>
+    <div class="fn-branch" style="border-style:solid;border-color:var(--b2);">
+      <span style="font-size:.72rem;font-weight:600;color:var(--t2);">Parallel Investigation</span>
+      <div style="display:flex;gap:.25rem;margin-top:.2rem;">
+        <div class="flow-node" style="font-size:.72rem;border-color:rgba(6,182,212,.3);color:var(--cyn)">Explore</div>
+        <div class="flow-node" style="font-size:.72rem;border-color:rgba(99,102,241,.3);color:var(--acc2)">Architect</div>
+        <div class="flow-node" style="font-size:.72rem;border-color:rgba(245,158,11,.3);color:var(--orn)">Exploration</div>
+      </div>
+    </div>
+    <span class="flow-arr">&rarr;</span>
+    <div class="flow-node fn-orch">Diagnosis<br><span style="font-size:.68rem;color:var(--t3)">root cause</span></div>
+    <span class="flow-arr">&rarr;</span>
+    <div class="flow-node fn-build">Fix<br><span style="font-size:.68rem;color:var(--t3)">minimal change</span></div>
+    <span class="flow-arr">&rarr;</span>
+    <div class="flow-node fn-qa">Verify<br><span style="font-size:.68rem;color:var(--t3)">repro test</span></div>
+  </div>
+  <p>Loop: <code>verify &rarr; build</code> when the fix doesn&rsquo;t work. Maximum 3 fix cycles before escalation.</p>
+
+  <h3>Agent dispatch</h3>
+  <table class="ref">
+    <thead><tr><th>Phase</th><th>Agent</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>plan (investigation)</td><td><strong>Explore</strong> + <strong>Architect</strong> + <strong>Exploration</strong></td><td>Parallel root cause investigation</td></tr>
+      <tr><td>plan (review)</td><td><strong>Pragmatist</strong></td><td>Plan-gating on fix strategy</td></tr>
+      <tr><td>build</td><td><strong>Builder</strong></td><td>Implements the fix</td></tr>
+      <tr><td>verify</td><td><strong>QA Verifier</strong></td><td>Expedited gates (A2 relaxed, A5 skipped)</td></tr>
+      <tr><td>commit</td><td><strong>Orchestrator</strong></td><td>Commit with trailers</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Escalation protocol</h3>
+  <p>After 3 failed fix cycles, Prompt H produces a structured <strong>Debug Report</strong> containing: symptoms observed, hypotheses tested (with results), root causes eliminated (with evidence), remaining candidates, and recommended next steps. The operator may provide new evidence, accept a partial fix, or redirect entirely.</p>
+
+  <h3>Known patterns</h3>
+  <table class="ref">
+    <thead><tr><th>Pattern</th><th>Symptoms</th><th>Fix approach</th></tr></thead>
+    <tbody>
+      <tr><td>Plugin scope issues</td><td>Permission denied, command not found at runtime</td><td>Bypass plugin, use custom IPC</td></tr>
+      <tr><td>OAuth flow failures</td><td>Auth callback errors, token exchange failures</td><td>Debug logging, check verification status values</td></tr>
+      <tr><td>Stale closure bugs</td><td>State appears stale, race conditions</td><td>Reload state before checking captured values</td></tr>
+      <tr><td>Dev vs production divergence</td><td>Works locally, fails in CI/production</td><td>Gate workarounds behind dev-mode guard</td></tr>
+      <tr><td>Build system stale cache</td><td>Config changes not taking effect</td><td>Clean rebuild</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <strong>HVST integration.</strong> If diagnosis is ambiguous after agent investigation, Prompt H uses the <a href="#hvstreview">HVST protocol</a> to form and test hypotheses structurally.
+  </div>
+
+  <h3>How to start</h3>
+  <div class="cmd">Follow docs/ai/prompts/prompt-h-hotfix-debug.md.</div>
 </section>
 
 <!-- ══════ HVST REVIEW BOARD ══════ -->
@@ -2044,7 +2119,8 @@ const TERMS={
   'Decision record':'A version-controlled constraint in docs/ai/decisions/. Decisions are laws \u2014 violations block commits.',
   'Feature brief':'Lightweight spec for individual feature additions, created by Prompt 0 Feature mode. Drives advisory board activation.',
   'Prompt Q':'Queue triage session. Review escalations, approve or reject queue entries, manage work orders. Conversational interface over the automation queue.',
-  'Prompt D':'Single-purpose ephemeral session to toggle the automation runner on or off. Touches two files only: config.yaml and HALT.'
+  'Prompt D':'Single-purpose ephemeral session to toggle the automation runner on or off. Touches two files only: config.yaml and HALT.',
+  'Prompt H':'Hotfix \u0026 debug session for runtime errors, integration failures, and production incidents. Structured diagnosis with parallel investigation agents, minimal fix, iterative validation. Expedited gates (A2 relaxed, A5 skipped). Max 3 fix cycles before escalation.'
 };
 
 function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
@@ -2345,19 +2421,35 @@ const DT = {
             'Verify decisions in docs/ai/decisions/'
           ],cmds:[{label:'Reset agents',value:'Follow docs/ai/prompts/prompt-a-repo-os.md.'}],
           goTo:{lbl:'Next: Start Development',path:[1,0]},nxt:{href:'#agents',lbl:'Review Agent Roles'}}},
-        {ico:'\u2261',lbl:'Code bug / instability',dsc:'Tests failing, build broken',
-          res:{act:'Prompt B (HVST activates)',title:'Use HVST Protocol',
-            why:'The '+term('HVST')+' protocol prevents random-fix loops by enforcing a structured debugging approach: hypothesize, validate, solve, test, record.',
-            outcome:'Bug fixed and documented in docs/ai/logs/known-issues.md.',
-            steps:[
-            'Continue with '+term('Prompt B')+' \u2014 '+term('HVST')+' activates automatically when failures are detected',
-            'Hypothesis: form a testable theory about what\u2019s wrong',
-            'Validate: run targeted tests/checks to confirm or reject',
-            'Solve: apply a minimal, targeted fix',
-            'Test: verify the fix works',
-            'Record: log findings in docs/ai/logs/known-issues.md'
-          ],cmds:[{label:'Start debugging session',value:'Follow docs/ai/prompts/prompt-b-product-build.md.'}],
-          nxt:{href:'#workflow',lbl:'See the Daily Workflow'}}},
+        {ico:'\u2261',lbl:'Code bug / instability',dsc:'Tests failing, build broken, runtime error',
+          next:{q:'Where is the bug?',opts:[
+            {ico:'\u2261',lbl:'Development bug',dsc:'Tests failing, build broken during a session',
+              res:{act:'Prompt B (HVST activates)',title:'Use HVST Protocol',
+                why:'The '+term('HVST')+' protocol prevents random-fix loops by enforcing a structured debugging approach: hypothesize, validate, solve, test, record.',
+                outcome:'Bug fixed and documented in docs/ai/logs/known-issues.md.',
+                steps:[
+                'Continue with '+term('Prompt B')+' \u2014 '+term('HVST')+' activates automatically when failures are detected',
+                'Hypothesis: form a testable theory about what\u2019s wrong',
+                'Validate: run targeted tests/checks to confirm or reject',
+                'Solve: apply a minimal, targeted fix',
+                'Test: verify the fix works',
+                'Record: log findings in docs/ai/logs/known-issues.md'
+              ],cmds:[{label:'Start debugging session',value:'Follow docs/ai/prompts/prompt-b-product-build.md.'}],
+              nxt:{href:'#workflow',lbl:'See the Daily Workflow'}}},
+            {ico:'\u26A1',lbl:'Production / runtime bug',dsc:'Error in running app, integration failure, incident',
+              res:{act:'Run Prompt H',title:'Hotfix \u0026 Debug Session',
+                why:term('Prompt H')+' runs a structured diagnosis with parallel investigation agents (Explore, Architect, Exploration), applies minimal fixes on a hotfix/* branch with expedited gates (A2 relaxed, A5 skipped). Max 3 fix cycles before escalation.',
+                outcome:'Root cause identified and fixed. Hotfix merged to main. Debug report if escalated.',
+                steps:[
+                'Start a new Claude Code session',
+                'Paste the '+term('Prompt H')+' starter below',
+                'Describe the symptoms: error messages, reproduction steps, what changed recently',
+                'Agent dispatches investigation agents in parallel to diagnose root cause',
+                'Review the fix strategy and approve',
+                'Agent applies the fix, verifies, and merges to main'
+              ],cmds:[{label:'Start hotfix session',value:'Follow docs/ai/prompts/prompt-h-hotfix-debug.md.'}],
+              nxt:{href:'#prompth',lbl:'See Hotfix \u0026 Debug details'}}}
+          ]}},
         {ico:'\u25A1',lbl:'Gate failed, stuck',dsc:'Can\u2019t meet a requirement',
           res:{act:'Log it + Follow-up',title:'Document the Gap',
             why:'Silent skipping causes drift. Documenting the gap creates accountability and a path to resolution.',
@@ -2438,7 +2530,8 @@ const DT_ALTS=[
   {id:'proto',ico:'\u26A1',       lbl:'Prototype',     dsc:'Prompt 0.5 \u2014 spike or experiment',  path:[4]},
   {id:'audit',ico:'\uD83D\uDCCB',lbl:'Audit Health',  dsc:'Prompt C \u2014 project health check',   path:[7]},
   {id:'queue',ico:'\u2261',       lbl:'Queue Triage', dsc:'Prompt Q \u2014 review automation queue', path:[13]},
-  {id:'daemon',ico:'\u23FB',      lbl:'Toggle Daemon',dsc:'Prompt D \u2014 enable/disable runner',  path:[13,2]}
+  {id:'daemon',ico:'\u23FB',      lbl:'Toggle Daemon',dsc:'Prompt D \u2014 enable/disable runner',  path:[13,2]},
+  {id:'hotfix',ico:'\uD83D\uDD27',lbl:'Hotfix',       dsc:'Prompt H \u2014 debug \u0026 fix production bug',path:[12,1,1]}
 ];
 function renderAlts(act){
   const a=act.toLowerCase(),ex=[];
@@ -2451,6 +2544,7 @@ function renderAlts(act){
   if(a.includes('feature')) ex.push('feat');
   if(a.includes('prompt q')||a.includes('queue triage')||a.includes('/queue')) ex.push('queue');
   if(a.includes('prompt d')||a.includes('daemon')) ex.push('daemon');
+  if(a.includes('prompt h')||a.includes('hotfix')) ex.push('hotfix');
   const tiles=DT_ALTS.filter(t=>!ex.includes(t.id));
   if(!tiles.length) return '';
   return '<div class="dt-alts-hdr">Alternatives</div><div class="dt-alts">'+
