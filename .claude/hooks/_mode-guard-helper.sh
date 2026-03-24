@@ -102,6 +102,7 @@ is_carved_out() {
         docs/ai/decisions/0[1-9][0-9][0-9]-*.md) return 0 ;;  # child decisions (0100+) — allowed
         docs/spec/compiled/*) return 0 ;;
         docs/spec/prototypes/*) return 0 ;;
+        .claude/.automation/*) return 0 ;;
         *) return 1 ;;
       esac
       ;;

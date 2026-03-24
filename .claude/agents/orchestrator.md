@@ -98,6 +98,7 @@ Before session close:
   - `task-group` or `taskgroup-merge` → Read `docs/ai/workflow-appendix/session-type-task-group.md`
   - `automation` → Read `docs/ai/workflow-appendix/session-type-automation.md`
   - `queue-triage` → Read `docs/ai/workflow-appendix/session-type-queue-triage.md`
+  - `hotfix` → Read `docs/ai/prompts/prompt-h-hotfix-debug.md`
   - `standard` or `ephemeral` → no appendix needed (rules are inline in workflow.md)
 - **When running Prompt A Phase 1** (advisory board review): Read `.claude/agents/_advisory-board.md` → Orchestration Procedure section
 - **When running Prompt T Brief mode** (task definition): Dispatch Architect + Exploration + Critic + Pragmatist + conditional PM + conditional UX Design Agent (Mode 1) for task-scoped analysis. Pragmatist runs in Brief-Advisory mode. UX Design Agent is dispatched when the task mentions UI, screens, pages, components, layouts, forms, dashboards, or design — produces a design brief that is incorporated into the task brief's Approach section. See `docs/ai/prompts/prompt-t-task-definition.md`

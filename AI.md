@@ -43,6 +43,7 @@ On-demand (loaded by orchestrator.md triggers, not at session start):
 - docs/ai/workflow-appendix/session-type-prototype.md (read when session type is prototype — detected at init from brief or experiment/* branch)
 - docs/ai/workflow-appendix/session-type-task-definition.md (read when session type is task-definition — detected at init from Prompt T invocation)
 - docs/ai/workflow-appendix/session-type-editor-live.md (read when session type is editor-live — detected at init from brief or operator signal)
+- docs/ai/prompts/prompt-h-hotfix-debug.md (read when session type is hotfix — detected at init from `hotfix/*` branch or operator signal)
 - docs/ai/workflow-appendix/session-type-task-group.md (read when session type is task-group or taskgroup-merge — detected at init from `### Task Group` in brief)
 - docs/ai/workflow-appendix/session-type-automation.md (read when session type is automation — detected at init from runner context or operator signal)
 - docs/ai/workflow-appendix/session-type-queue-triage.md (read when session type is queue-triage — detected at init from Prompt Q invocation)
@@ -86,6 +87,7 @@ Automation layer (Decision 0017): optional headless runner infrastructure in `.c
 - docs/ai/prompts/prompt-c-project-audit.md
 - docs/ai/prompts/prompt-d-daemon-toggle.md
 - docs/ai/prompts/prompt-e-editor-live.md
+- docs/ai/prompts/prompt-h-hotfix-debug.md
 - docs/ai/prompts/prompt-q-queue-triage.md
 - docs/ai/prompts/prompt-t-task-definition.md
 

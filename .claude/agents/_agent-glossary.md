@@ -205,6 +205,10 @@ Ordered phases tracked in `.claude/.state/phase-state` (Decision 0014). Hooks ma
 | `operator` | Agent pauses for operator decision |
 | `both` | Agent and operator work concurrently |
 
+### Hotfix Sessions
+
+Reactive debugging and fix sessions. Phases: `init → plan → approval → build → verify → commit → close`. Loop: `verify→build`. Expedited gates: A2 relaxed (scope limit), A5 skipped (cohesion review). Branch: `hotfix/*`. Solo mode: always merges to main at close. Plan phase includes parallel investigation dispatch (Explore + architect + exploration agents) for root cause diagnosis. Maximum 3 fix cycles before escalation. See `docs/ai/prompts/prompt-h-hotfix-debug.md`.
+
 ### Editor-Live Sessions
 
 Operator-driven editing. Phases: `init → build → commit → review → verify → op-review → close`. No plan gate. Loops: `commit→build`, `verify→build`. A4 per-loop; full gates at close. Child mode only. Cycle advisory at 50. See Decision 0023.
