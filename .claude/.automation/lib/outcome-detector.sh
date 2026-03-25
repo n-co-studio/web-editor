@@ -102,7 +102,7 @@ detect_outcome() {
   fi
 
   # Check phase-state for operator tag (with session ID validation)
-  local state_file="$repo_root/.claude/.state/phase-state"
+  local state_file="$(get_session_state_dir)/phase-state"
   if [ -f "$state_file" ]; then
     if _validate_phase_session "$state_file" 2>/dev/null; then
       if [ "$_PS_TAG" = "operator" ]; then
@@ -202,7 +202,7 @@ _write_blocker_report() {
   # Read phase-state if available (with session ID validation)
   local phase_at_exit=""
   local tag_at_exit=""
-  local state_file="$repo_root/.claude/.state/phase-state"
+  local state_file="$(get_session_state_dir)/phase-state"
   if [ -f "$state_file" ]; then
     if _validate_phase_session "$state_file" 2>/dev/null; then
       phase_at_exit="${_PS_CURRENT_PHASE:-}"

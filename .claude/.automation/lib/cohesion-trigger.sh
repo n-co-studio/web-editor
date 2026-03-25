@@ -185,15 +185,9 @@ _check_taskgroup_completion() {
     return
   fi
 
-  local state_dir="$REPO_ROOT/.claude/.state"
-
-  # Count completion markers for this group
-  local marker_count=0
-  local marker
-  for marker in "$state_dir"/tg-"${group_name}"-brief-*.complete; do
-    [ -f "$marker" ] || continue
-    marker_count=$((marker_count + 1))
-  done
+  # Count completion markers for this group (cross-session scan)
+  local marker_count
+  marker_count=$(count_cross_session_markers "tg-${group_name}-brief-*.complete")
 
   if [ "$marker_count" -eq 0 ]; then
     return

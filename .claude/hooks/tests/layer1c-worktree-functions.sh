@@ -67,12 +67,29 @@ unset REPO_OS_SESSION_ID
 # ============================================================
 tap_section "L1c.3: get_session_state_dir routing"
 
-# Without env var → flat .state/ directory
+# Without env var → per-session dir (all sessions route to wt-sessions/{sid}/)
 _CACHED_SESSION_STATE_DIR=""
 _CACHED_IS_WORKTREE=""
 unset REPO_OS_SESSION_ID 2>/dev/null || true
-_flat_dir=$(get_session_state_dir)
-assert_eq "$_flat_dir" "$SB/.claude/.state" "get_session_state_dir returns flat path when no env var"
+_per_session_dir=$(get_session_state_dir)
+_expected_sid=$(cat "$SB/.claude/.session-id" 2>/dev/null)
+_expected_sid="${_expected_sid//\//_}"
+_expected_sid="${_expected_sid//\.\./_}"
+assert_eq "$_per_session_dir" "$SB/.claude/.state/wt-sessions/$_expected_sid" \
+  "get_session_state_dir returns per-session path for interactive sessions"
+
+# Backward compat: flat state with matching SID → returns flat path
+_CACHED_SESSION_STATE_DIR=""
+_compat_sid=$(cat "$SB/.claude/.session-id" 2>/dev/null)
+printf 'session_id: %s\nsession_type: standard\n' "$_compat_sid" > "$SB/.claude/.state/phase-state"
+# Ensure per-session dir does not exist so backward compat triggers
+rmdir "$SB/.claude/.state/wt-sessions/$_expected_sid" 2>/dev/null || true
+_compat_dir=$(get_session_state_dir)
+assert_eq "$_compat_dir" "$SB/.claude/.state" \
+  "get_session_state_dir returns flat path for pre-migration session (backward compat)"
+# Clean up
+rm -f "$SB/.claude/.state/phase-state"
+_CACHED_SESSION_STATE_DIR=""
 
 # ============================================================
 # L1c.4 — Phase init/advance with env var session ID
@@ -166,10 +183,14 @@ assert_eq "$_compat_phase" "init" "backward compat: init_phase works without env
 _compat_stype=$(get_session_type)
 assert_eq "$_compat_stype" "hotfix" "backward compat: get_session_type works without env var"
 
-# State dir is flat
+# State dir is per-session (all sessions route to wt-sessions/{sid}/)
 _CACHED_SESSION_STATE_DIR=""
 _compat_dir=$(get_session_state_dir)
-assert_eq "$_compat_dir" "$SB/.claude/.state" "backward compat: state dir is flat without env var"
+_compat_expected_sid=$(cat "$SB/.claude/.session-id" 2>/dev/null)
+_compat_expected_sid="${_compat_expected_sid//\//_}"
+_compat_expected_sid="${_compat_expected_sid//\.\./_}"
+assert_eq "$_compat_dir" "$SB/.claude/.state/wt-sessions/$_compat_expected_sid" \
+  "interactive session: state dir is per-session without env var"
 
 # ============================================================
 # Finish

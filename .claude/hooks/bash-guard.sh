@@ -441,7 +441,7 @@ if [ "$ALLOW_REASON" = "pass" ]; then
           # When phase is plan/approval but plan-approved file is absent, the
           # plan-approval.sh PostToolUse hook likely failed to fire after
           # AskUserQuestion (known VS Code extension issue — see R13).
-          if [ ! -f "$REPO_ROOT/.claude/.state/plan-approved" ] && \
+          if [ ! -f "$(get_session_state_dir)/plan-approved" ] && \
              { [ "$CURRENT_PHASE" = "plan" ] || [ "$CURRENT_PHASE" = "approval" ]; }; then
             echo "GATE-RECOVERABLE: Session in '$CURRENT_PHASE' phase and plan-approved state file is missing — plan-approval.sh hook may not have fired after AskUserQuestion (see known-issues.md R13). NEXT: Create recovery signal (touch .claude/.state/.recover-signal) or set REPO_OS_SKIP_PLAN_GATE=1." >&2
           else

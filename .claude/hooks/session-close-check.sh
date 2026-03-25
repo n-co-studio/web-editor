@@ -60,13 +60,29 @@ else
 fi
 _ZC_BASELINE_FILE="$_EARLY_ROOT/.claude/.session-baseline-sha"
 # Session-scoped state dir for zero-change fast exit (Decision 0030)
+# All session types now route to per-session dirs under wt-sessions/{sid}/.
+# Backward compat: if per-session dir doesn't exist, fall back to flat dir.
 if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
-  # Sanitize: strip path components to prevent directory traversal (Decision 0030 security)
   _ZC_SID="${REPO_OS_SESSION_ID//\//_}"
   _ZC_SID="${_ZC_SID//\.\./_}"
   _ZC_STATE_DIR="$_EARLY_ROOT/.claude/.state/wt-sessions/$_ZC_SID"
 else
-  _ZC_STATE_DIR="$_EARLY_ROOT/.claude/.state"
+  # Interactive session: derive SID from .session-id file
+  _ZC_SID_FILE="$_EARLY_ROOT/.claude/.session-id"
+  if [ -f "$_ZC_SID_FILE" ]; then
+    _ZC_SID=$(cat "$_ZC_SID_FILE" 2>/dev/null)
+    _ZC_SID="${_ZC_SID//\//_}"
+    _ZC_SID="${_ZC_SID//\.\./_}"
+    _ZC_PER_SESSION="$_EARLY_ROOT/.claude/.state/wt-sessions/$_ZC_SID"
+    if [ -d "$_ZC_PER_SESSION" ]; then
+      _ZC_STATE_DIR="$_ZC_PER_SESSION"
+    else
+      # Backward compat: flat dir for pre-migration sessions
+      _ZC_STATE_DIR="$_EARLY_ROOT/.claude/.state"
+    fi
+  else
+    _ZC_STATE_DIR="$_EARLY_ROOT/.claude/.state"
+  fi
 fi
 _ZC_MERGE_FILE="$_ZC_STATE_DIR/merge-source-branch"
 _ZC_PHASE_FILE="$_ZC_STATE_DIR/phase-state"
@@ -142,37 +158,54 @@ _acquire_merge_lock() {
   local lock_path="$1"
   _MERGE_LOCK_PATH="$lock_path"
   mkdir -p "$(dirname "$lock_path")" 2>/dev/null || true
-  if command -v flock > /dev/null 2>&1; then
-    eval "exec ${_MERGE_LOCK_FD}>\"$lock_path\""
-    if ! flock -w 30 -x "$_MERGE_LOCK_FD" 2>/dev/null; then
-      echo "WARNING: Merge lock timeout (30s) — proceeding without lock" >&2
-      return 1
-    fi
-  else
-    # mkdir-based fallback (same pattern as .automation/lib/file-lock.sh)
-    local attempts=0
-    while [ "$attempts" -lt 60 ]; do
-      attempts=$((attempts + 1))
-      if mkdir "${lock_path}.dir" 2>/dev/null; then
-        echo "$$" > "${lock_path}.dir/pid" 2>/dev/null || true
-        break
+
+  # Bounded retry: 3 attempts × 10s before fail-closed (C3 isolation patch)
+  local retry=0
+  while [ "$retry" -lt 3 ]; do
+    retry=$((retry + 1))
+    local _acquired=false
+
+    if command -v flock > /dev/null 2>&1; then
+      eval "exec ${_MERGE_LOCK_FD}>\"$lock_path\""
+      if flock -n -x "$_MERGE_LOCK_FD" 2>/dev/null; then
+        _acquired=true
       fi
-      if [ -f "${lock_path}.dir/pid" ]; then
-        local lock_pid
-        lock_pid=$(cat "${lock_path}.dir/pid" 2>/dev/null || echo "")
-        if [ -n "$lock_pid" ] && ! kill -0 "$lock_pid" 2>/dev/null; then
-          rm -rf "${lock_path}.dir" 2>/dev/null || true
-          continue
+    else
+      # mkdir-based fallback (same pattern as .automation/lib/file-lock.sh)
+      local attempts=0
+      while [ "$attempts" -lt 20 ]; do
+        attempts=$((attempts + 1))
+        if mkdir "${lock_path}.dir" 2>/dev/null; then
+          echo "$$" > "${lock_path}.dir/pid" 2>/dev/null || true
+          _acquired=true
+          break
         fi
-      fi
-      sleep 0.5
-    done
-    if [ "$attempts" -ge 60 ]; then
-      echo "WARNING: Merge lock timeout (30s) — proceeding without lock" >&2
-      return 1
+        if [ -f "${lock_path}.dir/pid" ]; then
+          local lock_pid
+          lock_pid=$(cat "${lock_path}.dir/pid" 2>/dev/null || echo "")
+          if [ -n "$lock_pid" ] && ! kill -0 "$lock_pid" 2>/dev/null; then
+            rm -rf "${lock_path}.dir" 2>/dev/null || true
+            continue
+          fi
+        fi
+        sleep 0.5
+      done
     fi
-  fi
-  _MERGE_LOCK_HELD=true
+
+    if [ "$_acquired" = true ]; then
+      _MERGE_LOCK_HELD=true
+      return 0
+    fi
+
+    if [ "$retry" -lt 3 ]; then
+      echo "WARNING: Merge lock attempt $retry/3 failed — retrying in 10s" >&2
+      sleep 10
+    fi
+  done
+
+  # Fail-closed: all 3 attempts exhausted — do not proceed without lock
+  echo "ERROR: Merge lock timeout (3 attempts × 10s) — fail-closed, merge blocked" >&2
+  return 1
 }
 
 _release_merge_lock() {
@@ -339,14 +372,10 @@ is_final_brief() {
 
   # Merge brief: final only when completion markers exist.
   # Precise count validation happens at agent level (contract-init phase).
+  # Markers are cross-session: written by content briefs in their per-session dirs.
   if [ "$stype" = "taskgroup-merge" ]; then
-    local state_dir="$_SESSION_STATE_DIR"
-    local marker_count=0
-    local marker
-    for marker in "$state_dir"/tg-*-brief-*.complete; do
-      [ -f "$marker" ] || continue
-      marker_count=$((marker_count + 1))
-    done
+    local marker_count
+    marker_count=$(count_cross_session_markers "tg-*-brief-*.complete")
     if [ "$marker_count" -eq 0 ]; then
       echo "false"
       return
@@ -953,33 +982,60 @@ if [ "$SOLO" = "true" ] && [ "$BRANCH_SEALED" = false ]; then
       # Merge lock is intentionally in the shared (flat) .state/ dir, not session-scoped —
       # it must serialize across all concurrent worktree sessions.
       local _merge_lock="$_main_repo/.claude/.state/.merge-lock"
-      _acquire_merge_lock "$_merge_lock" || true
-
-      # Verify main repo is on the main branch
-      local _main_branch
-      _main_branch=$(git -C "$_main_repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-      if [ "$_main_branch" = "main" ]; then
-        if git -C "$_main_repo" merge --ff-only "$MERGE_BRANCH" 2>/dev/null; then
-          MERGE_OK=true
-        elif git -C "$_main_repo" merge --no-ff -m "Merge $MERGE_BRANCH" "$MERGE_BRANCH" 2>/dev/null; then
-          MERGE_OK=true
-        fi
-        if [ "$MERGE_OK" = false ]; then
-          git -C "$_main_repo" merge --abort 2>/dev/null || true
-        fi
-      else
-        echo "Advisory: Main repo is on '$_main_branch', not 'main' — cannot merge from worktree. Merge manually." >&2
-        log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "wt_merge_skip_not_main" "" "$MERGE_BRANCH" || true
+      if ! _acquire_merge_lock "$_merge_lock"; then
+        # Fail-closed (C3): write escalation and skip merge
+        local _esc_dir="$_main_repo/.claude/.automation/escalations"
+        mkdir -p "$_esc_dir" 2>/dev/null || true
+        local _esc_id="esc-merge-lock-$(date +%Y%m%d-%H%M%S)"
+        {
+          printf 'escalation:\n'
+          printf '  id: "%s"\n' "$_esc_id"
+          printf '  queue_entry_id: "stop-hook"\n'
+          printf '  type: "gate-failure"\n'
+          printf '  severity: "blocking"\n'
+          printf '  phase_at_exit: "close"\n'
+          printf '  tag_at_exit: "agent"\n'
+          printf '  message: "Merge lock acquisition failed after 3 attempts — merge blocked (fail-closed)"\n'
+          printf '  context: "lock_path: %s, branch: %s"\n' "$_merge_lock" "$MERGE_BRANCH"
+          printf '  created_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          printf '  resolved: false\n'
+          printf '  resolution: ""\n'
+        } > "$_esc_dir/${_esc_id}.yaml" 2>/dev/null || true
+        echo "ERROR: Merge blocked — lock acquisition failed. Escalation written: $_esc_id" >&2
+        log_hook_event "session-close-check" "Stop" "" "block" "$START_MS" "merge_lock_failed" "" "$MERGE_BRANCH" || true
+        _release_merge_lock
+        SHOULD_MERGE=false
       fi
+    fi
 
-      _release_merge_lock
-    else
-      # Standard (non-worktree) merge path — unchanged
-      if git checkout main 2>/dev/null; then
-        if git merge --ff-only "$MERGE_BRANCH" 2>/dev/null; then
-          MERGE_OK=true
-        elif git merge --no-ff -m "Merge $MERGE_BRANCH" "$MERGE_BRANCH" 2>/dev/null; then
-          MERGE_OK=true
+    if [ "$SHOULD_MERGE" = true ]; then
+      if is_full_worktree_session; then
+        # Verify main repo is on the main branch
+        local _main_branch
+        _main_branch=$(git -C "$_main_repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+        if [ "$_main_branch" = "main" ]; then
+          if git -C "$_main_repo" merge --ff-only "$MERGE_BRANCH" 2>/dev/null; then
+            MERGE_OK=true
+          elif git -C "$_main_repo" merge --no-ff -m "Merge $MERGE_BRANCH" "$MERGE_BRANCH" 2>/dev/null; then
+            MERGE_OK=true
+          fi
+          if [ "$MERGE_OK" = false ]; then
+            git -C "$_main_repo" merge --abort 2>/dev/null || true
+          fi
+        else
+          echo "Advisory: Main repo is on '$_main_branch', not 'main' — cannot merge from worktree. Merge manually." >&2
+          log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "wt_merge_skip_not_main" "" "$MERGE_BRANCH" || true
+        fi
+
+        _release_merge_lock
+      else
+        # Standard (non-worktree) merge path — unchanged
+        if git checkout main 2>/dev/null; then
+          if git merge --ff-only "$MERGE_BRANCH" 2>/dev/null; then
+            MERGE_OK=true
+          elif git merge --no-ff -m "Merge $MERGE_BRANCH" "$MERGE_BRANCH" 2>/dev/null; then
+            MERGE_OK=true
+          fi
         fi
       fi
     fi

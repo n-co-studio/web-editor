@@ -76,36 +76,53 @@ _acquire_runner_merge_lock() {
   local lock_path="$1"
   _RUNNER_MERGE_LOCK_PATH="$lock_path"
   mkdir -p "$(dirname "$lock_path")" 2>/dev/null || true
-  if command -v flock > /dev/null 2>&1; then
-    eval "exec ${_RUNNER_MERGE_LOCK_FD}>\"$lock_path\""
-    if ! flock -w 30 -x "$_RUNNER_MERGE_LOCK_FD" 2>/dev/null; then
-      echo "WARNING: Runner merge lock timeout (30s)" >&2
-      return 1
-    fi
-  else
-    local attempts=0
-    while [ "$attempts" -lt 60 ]; do
-      attempts=$((attempts + 1))
-      if mkdir "${lock_path}.dir" 2>/dev/null; then
-        echo "$$" > "${lock_path}.dir/pid" 2>/dev/null || true
-        break
+
+  # Bounded retry: 3 attempts × 10s before fail-closed (C3 isolation patch)
+  local retry=0
+  while [ "$retry" -lt 3 ]; do
+    retry=$((retry + 1))
+    local _acquired=false
+
+    if command -v flock > /dev/null 2>&1; then
+      eval "exec ${_RUNNER_MERGE_LOCK_FD}>\"$lock_path\""
+      if flock -n -x "$_RUNNER_MERGE_LOCK_FD" 2>/dev/null; then
+        _acquired=true
       fi
-      if [ -f "${lock_path}.dir/pid" ]; then
-        local lock_pid
-        lock_pid=$(cat "${lock_path}.dir/pid" 2>/dev/null || echo "")
-        if [ -n "$lock_pid" ] && ! kill -0 "$lock_pid" 2>/dev/null; then
-          rm -rf "${lock_path}.dir" 2>/dev/null || true
-          continue
+    else
+      local attempts=0
+      while [ "$attempts" -lt 20 ]; do
+        attempts=$((attempts + 1))
+        if mkdir "${lock_path}.dir" 2>/dev/null; then
+          echo "$$" > "${lock_path}.dir/pid" 2>/dev/null || true
+          _acquired=true
+          break
         fi
-      fi
-      sleep 0.5
-    done
-    if [ "$attempts" -ge 60 ]; then
-      echo "WARNING: Runner merge lock timeout (30s)" >&2
-      return 1
+        if [ -f "${lock_path}.dir/pid" ]; then
+          local lock_pid
+          lock_pid=$(cat "${lock_path}.dir/pid" 2>/dev/null || echo "")
+          if [ -n "$lock_pid" ] && ! kill -0 "$lock_pid" 2>/dev/null; then
+            rm -rf "${lock_path}.dir" 2>/dev/null || true
+            continue
+          fi
+        fi
+        sleep 0.5
+      done
     fi
-  fi
-  _RUNNER_MERGE_LOCK_HELD=true
+
+    if [ "$_acquired" = true ]; then
+      _RUNNER_MERGE_LOCK_HELD=true
+      return 0
+    fi
+
+    if [ "$retry" -lt 3 ]; then
+      echo "WARNING: Runner merge lock attempt $retry/3 failed — retrying in 10s" >&2
+      sleep 10
+    fi
+  done
+
+  # Fail-closed: all 3 attempts exhausted
+  echo "ERROR: Runner merge lock timeout (3 attempts × 10s) — fail-closed, merge blocked" >&2
+  return 1
 }
 
 _release_runner_merge_lock() {
@@ -456,6 +473,10 @@ _startup_crash_recovery() {
     recovered=$((recovered + 1))
   fi
 
+  # 5. Sweep stale session registry entries (C7 orphan TTL patch)
+  # Runs after step 4 to catch orphaned sessions with exceeded TTL.
+  sweep_stale_sessions || true
+
   if [ "$recovered" -gt 0 ]; then
     echo "Startup recovery complete: $recovered item(s) recovered" >&2
   fi
@@ -759,7 +780,29 @@ _solo_merge_if_needed() {
           # Worktree merge path (Decision 0030)
           local _main_repo="$REPO_ROOT"
           local _merge_lock="$_main_repo/.claude/.state/.merge-lock"
-          _acquire_runner_merge_lock "$_merge_lock" || true
+          if ! _acquire_runner_merge_lock "$_merge_lock"; then
+            # Fail-closed (C3): write escalation and skip merge
+            local _esc_dir="$REPO_ROOT/.claude/.automation/escalations"
+            mkdir -p "$_esc_dir" 2>/dev/null || true
+            local _esc_id="esc-merge-lock-$(date +%Y%m%d-%H%M%S)"
+            {
+              printf 'escalation:\n'
+              printf '  id: "%s"\n' "$_esc_id"
+              printf '  queue_entry_id: "%s"\n' "$brief_id"
+              printf '  type: "gate-failure"\n'
+              printf '  severity: "blocking"\n'
+              printf '  phase_at_exit: "close"\n'
+              printf '  tag_at_exit: "agent"\n'
+              printf '  message: "Runner merge lock acquisition failed after 3 attempts — merge blocked (fail-closed)"\n'
+              printf '  context: "lock_path: %s, branch: %s"\n' "$_merge_lock" "$entry_current_branch"
+              printf '  created_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              printf '  resolved: false\n'
+              printf '  resolution: ""\n'
+            } > "$_esc_dir/${_esc_id}.yaml" 2>/dev/null || true
+            echo "ERROR: Runner merge blocked — lock acquisition failed. Escalation: $_esc_id" >&2
+            _release_runner_merge_lock
+            return 0
+          fi
           local _main_br
           _main_br=$(git -C "$_main_repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
           if [ "$_main_br" = "main" ]; then
@@ -961,12 +1004,23 @@ else
       echo "Daemon already running (pid $EXISTING_PID)" >&2
       exit 0
     else
-      # Stale lock — reclaim
+      # Stale lock — reclaim (rm -rf: dir may be non-empty with pid file)
       echo "Removing stale daemon lock (pid $EXISTING_PID not running)" >&2
-      rmdir "$DAEMON_LOCK_FILE.d" 2>/dev/null || true
+      rm -rf "$DAEMON_LOCK_FILE.d" 2>/dev/null || true
       if ! mkdir "$DAEMON_LOCK_FILE.d" 2>/dev/null; then
         echo "ERROR: Cannot acquire daemon lock" >&2
         exit 1
+      fi
+      # Write our PID immediately after acquiring the lock dir so the
+      # secondary liveness check below reads fresh data (not stale PID).
+      printf '%s' "$$" > "$PID_FILE" 2>/dev/null || true
+      # Secondary liveness check (C10 TOCTOU patch): another process may have
+      # raced us — if PID file was overwritten by a different daemon, yield.
+      _post_pid=$(cat "$PID_FILE" 2>/dev/null || echo "")
+      if [ -n "$_post_pid" ] && [ "$_post_pid" != "$$" ] && kill -0 "$_post_pid" 2>/dev/null; then
+        echo "Race detected: daemon pid $_post_pid overwrote our PID — yielding" >&2
+        rm -rf "$DAEMON_LOCK_FILE.d" 2>/dev/null || true
+        exit 0
       fi
     fi
   fi
@@ -981,7 +1035,7 @@ _cleanup_daemon_lock() {
     # flock released automatically on fd close
     eval "exec ${_DAEMON_LOCK_FD}>&-" 2>/dev/null || true
   else
-    rmdir "$DAEMON_LOCK_FILE.d" 2>/dev/null || true
+    rm -rf "$DAEMON_LOCK_FILE.d" 2>/dev/null || true
   fi
 }
 _graceful_shutdown() {

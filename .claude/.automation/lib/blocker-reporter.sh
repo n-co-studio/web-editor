@@ -163,7 +163,7 @@ write_blocker_report() {
 
   # Read phase-state if available
   local phase_at_exit="" tag_at_exit=""
-  local state_file="$repo_root/.claude/.state/phase-state"
+  local state_file="$(get_session_state_dir)/phase-state"
   if [ -f "$state_file" ]; then
     if _validate_phase_session "$state_file" 2>/dev/null; then
       phase_at_exit="${_PS_CURRENT_PHASE:-}"

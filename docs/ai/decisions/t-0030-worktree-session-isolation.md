@@ -18,7 +18,7 @@ The key discriminator is the `REPO_OS_SESSION_ID` environment variable:
 
 | Context | `is_worktree()` | `REPO_OS_SESSION_ID` | Treatment |
 |---------|-----------------|---------------------|-----------|
-| Normal session (main repo) | false | unset | Standard governance — flat `.claude/.state/` |
+| Normal session (main repo) | false | unset | Per-session state dir — independent governance |
 | Subagent worktree (`isolation: "worktree"`) | true | unset | Decision 0028 applies — state writes blocked |
 | Full worktree session (`claude --worktree`) | true | set | Per-session state dir — independent governance |
 
@@ -46,7 +46,11 @@ Concurrent merge serialization uses `flock` (with `mkdir` fallback) on `.claude/
 
 ### Backward Compatibility
 
-When `REPO_OS_SESSION_ID` is not set, `get_session_state_dir()` returns the flat `.claude/.state/` directory. No behavioral change for single-session repos or non-worktree sessions.
+All session types now route to per-session state directories (`wt-sessions/{sid}/`). When a per-session directory does not exist but a flat `.claude/.state/phase-state` contains a matching session ID, the flat directory is used (pre-migration backward compatibility — valid for that session only). New sessions always create per-session directories via `init_phase()`.
+
+### Cross-Session Markers
+
+Task group completion markers (`tg-*-brief-*.complete`) are inherently cross-session — written by content brief sessions and read by merge briefs and cohesion triggers. Helper functions `count_cross_session_markers()` and `clean_cross_session_markers()` scan all per-session directories (and the flat directory for backward compat) to find and clean markers.
 
 ## Implication
 - `state-writer.sh` allows governance writes for full worktree sessions while continuing to block subagent worktrees

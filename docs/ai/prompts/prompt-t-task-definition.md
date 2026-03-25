@@ -113,7 +113,46 @@ The Orchestrator synthesizes specialist findings into a draft task brief:
 
 #### Step 4 — Operator Review
 
-Present the draft task brief to the operator. Use `AskUserQuestion` (not conversational text) to request approval — this ensures the operator gets a structured dialog. Use options: **"Approve"**, **"Revise"**, **"Narrow"**, **"Abandon"**. The operator reviews and may:
+Present the draft task brief to the operator. Use `AskUserQuestion` (not conversational text) to request approval — this ensures the operator gets a structured dialog. This triggers `plan-approved` state via `plan-approval.sh` — required for `taskdef-brief` sessions per Decision 0029.
+
+**Brief approval AskUserQuestion template:**
+
+```json
+{
+  "questions": [
+    {
+      "question": "Approve this task brief?",
+      "header": "<brief title and summary>",
+      "options": [
+        {
+          "label": "Approve",
+          "description": "Brief is final — display in copy-paste format"
+        },
+        {
+          "label": "Revise",
+          "description": "Request changes to the brief"
+        },
+        {
+          "label": "Narrow",
+          "description": "Split into smaller briefs (task group)"
+        },
+        {
+          "label": "Abandon",
+          "description": "Do not proceed with this task"
+        }
+      ],
+      "multiSelect": false
+    }
+  ]
+}
+```
+
+**Hook contract annotations (`plan-approval.sh`):**
+- `question` text: contains "task" and "brief" — Gate 1 passes (line 53, regex `\b(plan|brief|task)\b`)
+- `question` text contains "Approve" — Gate 2 passes at line 61 (regex `\b(approv|confirm|proceed|accept|ready)\b`); option label "Approve" provides redundant coverage via line 63
+- Selected answer (Gate 3 — line 89): "Approve" label text satisfies affirmative check
+
+The operator reviews and may:
 - **Approve** — Brief is final. Displayed in copy-paste format.
 - **Revise** — Operator requests changes. Update and re-present.
 - **Narrow** — Operator says "too big." Split into multiple smaller briefs. Each sub-brief gets a `### Task Group` section with a shared group name, sequence number (N of M), and integration notes (produces/consumes). The first brief in the group creates the task group contract during its Prompt B session; subsequent briefs read and update it. See `docs/ai/task-groups/_contract-template.yaml` for the contract structure. When producing a task group, ask the operator whether to pre-approve all briefs (**auto** mode — agent completes each brief through merge autonomously) or review each brief individually (**review** mode — agent pauses for operator review before commit). The contract carries this setting.
@@ -257,7 +296,33 @@ After displaying the brief, instruct: "Copy the block above and paste it into a 
 
 #### Step 6 — Queue Intake (opt-in)
 
-After displaying the brief in Step 5, use `AskUserQuestion` to offer: **"Add to automation queue?"** with options **"Yes"** and **"No"**. This ensures consistent use of structured dialogs for operator decisions.
+After displaying the brief in Step 5, use `AskUserQuestion` to offer queue intake. This ensures consistent use of structured dialogs for operator decisions.
+
+**Queue intake AskUserQuestion template:**
+
+```json
+{
+  "questions": [
+    {
+      "question": "Add to automation queue?",
+      "header": "Queue the brief for headless execution",
+      "options": [
+        {
+          "label": "Yes",
+          "description": "Write brief to disk and add to automation queue"
+        },
+        {
+          "label": "No",
+          "description": "Skip queue intake — close session normally"
+        }
+      ],
+      "multiSelect": false
+    }
+  ]
+}
+```
+
+> **CAUTION:** Do not add "plan", "brief", or "task" to the `question` text above — doing so would cause `plan-approval.sh` Gate 1 (line 53, regex `\b(plan|brief|task)\b`) to fire, erroneously writing `plan-approved` state. The current text "Add to automation queue?" deliberately avoids these trigger words.
 
 If the operator declines or does not respond, close the session normally — this step is opt-in.
 

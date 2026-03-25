@@ -880,12 +880,15 @@ _L3_OUT="$SB/.claude/.test-hook-output"
 # Reinitialize sandbox state after cleanup_session() destroys session files.
 _reinit_close_sandbox() {
   echo "test-session-$(date +%s)-$$" > "$SB/.claude/.session-id"
-  # Clear caches (analytics-helper caches session ID and branch)
+  # Clear caches (analytics-helper caches session ID, branch, and state dir)
   _CACHED_SESSION_ID=""
   _CACHED_BRANCH=""
+  _CACHED_SESSION_STATE_DIR=""
   rm -f "$SB/.claude/.state/.stop-attempt-count"
   rm -f "$SB/.claude/.hvst-fail-count"
   rm -f "$SB/.claude/.deferrals-pending"
+  # Clean per-session state dirs from prior test iterations
+  rm -rf "$SB/.claude/.state/wt-sessions" 2>/dev/null || true
   # Ensure clean git working tree (earlier tests may leave staged/modified files).
   # git reset --hard clears both index and working tree; git clean removes untracked.
   (cd "$SB" && git reset --hard HEAD 2>/dev/null || true)
@@ -1598,10 +1601,11 @@ _advance "contract-init" 2>/dev/null
 _advance "cohesion" 2>/dev/null
 _advance "verify" 2>/dev/null
 _advance "commit" 2>/dev/null
-# Create completion markers
-mkdir -p "$SB/.claude/.state"
-echo "2026-01-01T00:00:00Z" > "$SB/.claude/.state/tg-parallel-group-brief-1.complete"
-echo "2026-01-01T00:00:00Z" > "$SB/.claude/.state/tg-parallel-group-brief-2.complete"
+# Create completion markers in per-session state dir
+_TSD="$(get_session_state_dir)"
+mkdir -p "$_TSD"
+echo "2026-01-01T00:00:00Z" > "$_TSD/tg-parallel-group-brief-1.complete"
+echo "2026-01-01T00:00:00Z" > "$_TSD/tg-parallel-group-brief-2.complete"
 rm -f "$SB/.claude/local/closed-branches"
 run_hook_rc "session-close-check.sh" "$(fixture_stop)"
 assert_ok "$_LAST_RC" "session-close-check allows merge brief with markers"
@@ -1614,8 +1618,8 @@ _reinit_close_sandbox
 git -C "$SB" rev-parse HEAD > "$SB/.claude/.session-baseline-sha"
 _compute_log_hash > "$SB/.claude/.session-log-hash"
 reset_phase "taskgroup-merge"
-# Remove any markers
-rm -f "$SB/.claude/.state"/tg-*-brief-*.complete
+# Remove any markers from per-session state dir
+rm -f "$(get_session_state_dir)"/tg-*-brief-*.complete
 rm -f "$SB/.claude/local/closed-branches"
 run_hook_rc "session-close-check.sh" "$(fixture_stop)"
 assert_ok "$_LAST_RC" "session-close-check allows merge brief without markers (zero-change)"
@@ -1631,13 +1635,14 @@ _reinit_close_sandbox
 git -C "$SB" rev-parse HEAD > "$SB/.claude/.session-baseline-sha"
 _compute_log_hash > "$SB/.claude/.session-log-hash"
 reset_phase "taskgroup-merge"
-mkdir -p "$SB/.claude/.state"
-echo "2026-01-01T00:00:00Z" > "$SB/.claude/.state/tg-test-group-brief-1.complete"
-echo "2026-01-01T00:00:00Z" > "$SB/.claude/.state/tg-test-group-brief-2.complete"
+_TSD="$(get_session_state_dir)"
+mkdir -p "$_TSD"
+echo "2026-01-01T00:00:00Z" > "$_TSD/tg-test-group-brief-1.complete"
+echo "2026-01-01T00:00:00Z" > "$_TSD/tg-test-group-brief-2.complete"
 run_hook_rc "session-close-check.sh" "$(fixture_stop)" > /dev/null 2>&1
 assert_ok "$_LAST_RC" "session-close-check completes for taskgroup-merge cleanup test"
-# Markers should be cleaned up
-if ls "$SB/.claude/.state"/tg-*-brief-*.complete 2>/dev/null | grep -q .; then
+# Markers should be cleaned up (per-session dir may also be removed)
+if ls "$_TSD"/tg-*-brief-*.complete 2>/dev/null | grep -q .; then
   _tap_fail "taskgroup-merge cleanup removes completion markers" "markers still exist"
 else
   _tap_pass "taskgroup-merge cleanup removes completion markers"
@@ -1649,8 +1654,9 @@ _reinit_close_sandbox
 git -C "$SB" rev-parse HEAD > "$SB/.claude/.session-baseline-sha"
 _compute_log_hash > "$SB/.claude/.session-log-hash"
 reset_phase "taskgroup"
-mkdir -p "$SB/.claude/.state"
-echo "2026-01-01T00:00:00Z" > "$SB/.claude/.state/tg-test-group-brief-1.complete"
+_TSD="$(get_session_state_dir)"
+mkdir -p "$_TSD"
+echo "2026-01-01T00:00:00Z" > "$_TSD/tg-test-group-brief-1.complete"
 # Need a contract so is_final_brief doesn't return n/a
 mkdir -p "$SB/.claude/local/task-groups"
 cat > "$SB/.claude/local/task-groups/test-group.yaml" <<'YAML'
@@ -1668,13 +1674,13 @@ briefs:
 YAML
 run_hook_rc "session-close-check.sh" "$(fixture_stop)" > /dev/null 2>&1
 assert_ok "$_LAST_RC" "session-close-check completes for taskgroup marker preservation test"
-assert_file_exists "$SB/.claude/.state/tg-test-group-brief-1.complete" \
+assert_file_exists "$_TSD/tg-test-group-brief-1.complete" \
   "taskgroup session preserves completion markers"
 
 # Clean up parallel test fixtures
 rm -rf "$SB/.claude/local/task-groups"
 rm -f "$SB/.claude/local/closed-branches"
-rm -f "$SB/.claude/.state"/tg-*-brief-*.complete
+rm -f "$_TSD"/tg-*-brief-*.complete 2>/dev/null || true
 
 # ============================================================
 # Summary

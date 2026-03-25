@@ -38,8 +38,7 @@ state_manager_setup() {
   # Ensure session ID exists (uses REPO_OS_SESSION_ID env var if set)
   get_session_id "$repo_root" > /dev/null
 
-  # Resolve per-session state directory (routes to wt-sessions/{id}/ when
-  # REPO_OS_SESSION_ID is set — daemon and worktree sessions).
+  # Resolve per-session state directory (all sessions route to wt-sessions/{id}/).
   local state_dir
   state_dir="$(get_session_state_dir)"
   mkdir -p "$state_dir" 2>/dev/null || true

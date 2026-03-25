@@ -253,9 +253,12 @@ get_session_id() {
 }
 
 # --- Session-scoped state directory (Decision 0030) ---
-# Routes state file reads/writes to the correct directory:
-#   - REPO_OS_SESSION_ID set (worktree or daemon): .claude/.state/wt-sessions/{sid}/
-#   - All other contexts: .claude/.state/ (flat layout — backward compatible)
+# Routes ALL session types to per-session state directories:
+#   .claude/.state/wt-sessions/{sid}/
+# This eliminates shared-state collision vectors between concurrent sessions.
+# Backward compat: if per-session dir does not exist but flat .claude/.state/
+# contains a phase-state matching the current session ID, the flat dir is
+# returned (pre-migration session — valid for that session only).
 # Cached per-process to avoid repeated function calls.
 _CACHED_SESSION_STATE_DIR=""
 get_session_state_dir() {
@@ -264,17 +267,95 @@ get_session_state_dir() {
     return
   fi
   local repo_root="$_REPO_OS_ROOT"
-  if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
-    local sid
-    sid=$(get_session_id "$repo_root")
-    # Sanitize: strip path components to prevent directory traversal (Decision 0030 security)
-    sid="${sid//\//_}"
-    sid="${sid//\.\./_}"
-    _CACHED_SESSION_STATE_DIR="$repo_root/.claude/.state/wt-sessions/$sid"
+  local sid
+  sid=$(get_session_id "$repo_root")
+  # Sanitize: strip path components to prevent directory traversal (Decision 0030 security)
+  sid="${sid//\//_}"
+  sid="${sid//\.\./_}"
+  local per_session="$repo_root/.claude/.state/wt-sessions/$sid"
+
+  if [ -d "$per_session" ]; then
+    # Per-session dir exists — use it
+    _CACHED_SESSION_STATE_DIR="$per_session"
   else
-    _CACHED_SESSION_STATE_DIR="$repo_root/.claude/.state"
+    # Backward compat: check flat state for matching session ID (pre-migration)
+    local flat_state="$repo_root/.claude/.state/phase-state"
+    if [ -f "$flat_state" ]; then
+      local flat_sid
+      flat_sid=$(grep '^session_id:' "$flat_state" 2>/dev/null | sed 's/^session_id: *//' | tr -d '[:space:]' | head -1)
+      if [ -n "$flat_sid" ] && [ "$flat_sid" = "$sid" ]; then
+        _CACHED_SESSION_STATE_DIR="$repo_root/.claude/.state"
+        echo "$_CACHED_SESSION_STATE_DIR"
+        return
+      fi
+    fi
+    # No matching flat state — use per-session dir (init_phase will create it)
+    _CACHED_SESSION_STATE_DIR="$per_session"
   fi
   echo "$_CACHED_SESSION_STATE_DIR"
+}
+
+# --- Cross-session marker scan ---
+# Completion markers (tg-*-brief-*.complete) are cross-session: written by
+# content brief sessions, read by merge brief sessions and cohesion triggers.
+# With per-session state dirs, these markers live in each content brief's dir.
+# This helper scans ALL per-session dirs (and flat dir for backward compat)
+# to find markers matching a glob pattern.
+# Arguments:
+#   $1 — glob pattern (e.g., "tg-*-brief-*.complete" or "tg-mygroup-brief-*.complete")
+# Output: count on stdout
+count_cross_session_markers() {
+  local pattern="$1"
+  local repo_root="$_REPO_OS_ROOT"
+  local count=0
+
+  # Scan per-session dirs
+  local wt_dir="$repo_root/.claude/.state/wt-sessions"
+  if [ -d "$wt_dir" ]; then
+    local session_dir
+    for session_dir in "$wt_dir"/*/; do
+      [ -d "$session_dir" ] || continue
+      local marker
+      for marker in "$session_dir"/$pattern; do
+        [ -f "$marker" ] || continue
+        count=$((count + 1))
+      done
+    done
+  fi
+
+  # Backward compat: also check flat dir
+  local marker
+  for marker in "$repo_root/.claude/.state"/$pattern; do
+    [ -f "$marker" ] || continue
+    count=$((count + 1))
+  done
+
+  echo "$count"
+}
+
+# --- Clean cross-session markers ---
+# Removes completion markers from ALL per-session dirs and flat dir.
+# Called by cleanup_session_files for taskgroup-merge sessions.
+# Arguments:
+#   $1 — glob pattern (e.g., "tg-*-brief-*.complete")
+clean_cross_session_markers() {
+  local pattern="$1"
+  local repo_root="$_REPO_OS_ROOT"
+
+  # Clean from per-session dirs
+  local wt_dir="$repo_root/.claude/.state/wt-sessions"
+  if [ -d "$wt_dir" ]; then
+    local session_dir
+    for session_dir in "$wt_dir"/*/; do
+      [ -d "$session_dir" ] || continue
+      rm -f "$session_dir"/$pattern 2>/dev/null || true
+      # Remove now-empty session dir
+      rmdir "$session_dir" 2>/dev/null || true
+    done
+  fi
+
+  # Backward compat: also clean flat dir
+  rm -f "$repo_root/.claude/.state"/$pattern 2>/dev/null || true
 }
 
 # --- Cached branch name (avoid repeated git calls) ---
@@ -609,13 +690,21 @@ register_session() {
 
 # --- Sweep stale session registry entries ---
 # Removes entries with dead PIDs (kill -0 fails) or age >24h.
-# Called at both session init and close — two cleanup opportunities per lifecycle.
+# Also enforces SESSION_MAX_TTL (default 6h): live sessions exceeding the TTL
+# are transitioned to failed with an escalation (C7 orphan TTL patch).
+# Called at session init, close, and daemon startup crash recovery.
 # Fail-silent: sweep failures never block session operations.
+#
+# Configurable: SESSION_MAX_TTL env var (seconds, default 21600 = 6h).
 sweep_stale_sessions() {
   local repo_root
   repo_root="$_REPO_OS_ROOT"
   local sessions_dir="$repo_root/.claude/.state/sessions"
   [ -d "$sessions_dir" ] || return 0
+
+  local max_ttl="${SESSION_MAX_TTL:-21600}"
+  # Cap TTL below the 24h unconditional removal threshold to avoid silent skip
+  [ "$max_ttl" -gt 86400 ] 2>/dev/null && max_ttl=86400
 
   local stale_file
   for stale_file in "$sessions_dir"/*.yaml; do
@@ -640,9 +729,53 @@ sweep_stale_sessions() {
       now_epoch=$(date +%s)
       if [ -n "$file_epoch" ] && [ $(( now_epoch - file_epoch )) -gt 86400 ]; then
         rm -f "$stale_file" 2>/dev/null || true
+        continue
+      fi
+
+      # TTL guard (C7): session exceeding max TTL → failed + escalation
+      if [ -n "$file_epoch" ] && [ $(( now_epoch - file_epoch )) -gt "$max_ttl" ]; then
+        local _ttl_sid
+        _ttl_sid=$(basename "$stale_file" .yaml)
+        local _ttl_age_h=$(( (now_epoch - file_epoch) / 3600 ))
+        echo "WARNING: Session $_ttl_sid exceeded TTL (${_ttl_age_h}h > $((max_ttl / 3600))h) — writing escalation" >&2
+        local _esc_dir="$repo_root/.claude/.automation/escalations"
+        mkdir -p "$_esc_dir" 2>/dev/null || true
+        local _esc_id="esc-ttl-${_ttl_sid}-$(date +%Y%m%d-%H%M%S)"
+        {
+          printf 'escalation:\n'
+          printf '  id: "%s"\n' "$_esc_id"
+          printf '  queue_entry_id: "%s"\n' "$_ttl_sid"
+          printf '  type: "gate-failure"\n'
+          printf '  severity: "blocking"\n'
+          printf '  phase_at_exit: "unknown"\n'
+          printf '  tag_at_exit: "agent"\n'
+          printf '  message: "Session exceeded max TTL (%sh) — likely orphaned"\n' "$((max_ttl / 3600))"
+          printf '  context: "session_id: %s, age_hours: %s, max_ttl_seconds: %s"\n' "$_ttl_sid" "$_ttl_age_h" "$max_ttl"
+          printf '  created_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          printf '  resolved: false\n'
+          printf '  resolution: ""\n'
+        } > "$_esc_dir/${_esc_id}.yaml" 2>/dev/null || true
+        rm -f "$stale_file" 2>/dev/null || true
       fi
     fi
   done
+
+  # Clean orphaned per-session state directories whose owning session
+  # is no longer in the registry (dead PID or removed entry).
+  local wt_sessions_dir="$repo_root/.claude/.state/wt-sessions"
+  if [ -d "$wt_sessions_dir" ]; then
+    local state_subdir
+    for state_subdir in "$wt_sessions_dir"/*/; do
+      [ -d "$state_subdir" ] || continue
+      local dir_sid
+      dir_sid=$(basename "$state_subdir")
+      # Check if a registry entry exists for this session
+      if [ ! -f "$sessions_dir/${dir_sid}.yaml" ]; then
+        # No registry entry — orphaned state dir, remove
+        rm -rf "$state_subdir" 2>/dev/null || true
+      fi
+    done
+  fi
 }
 
 # --- Unregister session from the session registry ---

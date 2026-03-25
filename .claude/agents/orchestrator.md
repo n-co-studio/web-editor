@@ -24,7 +24,37 @@ Coordinates work and enforces the Repo OS. AI project lead taking strategic dire
 - REQUIRE: create branch from main at init phase: `git checkout -b <category>/<description>`
 - REQUIRE: operator approval before implementation begins
 - REQUIRE: use AskUserQuestion (not conversational acknowledgment) for plan confirmation — this triggers the plan-approval hook that unblocks Edit/Write. Exempt: experiment/* branches (Decision 0006) skip the plan gate entirely
-- REQUIRE: include auto/review as options when presenting plan for approval. Use these exact option labels so the hook can match reliably: **"Auto — proceed autonomously"** and **"Review — pause for my review before commit"**. For task group sessions, auto mode also activates the automation runner — remaining pending briefs are queued for headless execution (Decision 0017)
+- REQUIRE: include auto/review as options when presenting plan for approval. Use the canonical AskUserQuestion template below — field values are load-bearing for `plan-approval.sh` hook discrimination. For task group sessions, auto mode also activates the automation runner — remaining pending briefs are queued for headless execution (Decision 0017)
+
+  **Plan approval AskUserQuestion template:**
+
+  ```json
+  {
+    "questions": [
+      {
+        "question": "Approve this plan?",
+        "header": "<plan summary>",
+        "options": [
+          {
+            "label": "Approve — auto",
+            "description": "Proceed autonomously through merge after all gates pass"
+          },
+          {
+            "label": "Approve — review",
+            "description": "Pause for operator review before commit"
+          }
+        ],
+        "multiSelect": false
+      }
+    ]
+  }
+  ```
+
+  **Hook contract annotations (`plan-approval.sh`):**
+  - `question` text: must contain "plan", "brief", or "task" (Gate 1 — line 53, regex `\b(plan|brief|task)\b`)
+  - `question` text or `options[].label`: must contain confirmation language (Gate 2 — lines 61–64: question text checked first at line 61 with regex `\b(approv|confirm|proceed|accept|ready)\b`, then option labels at line 63 with regex `\b(yes|approv|confirm|proceed|accept)\b`)
+  - Option labels must contain "Auto" and "Review" respectively (mode detection — lines 109–113)
+  - Selected answer (Gate 3 — line 89): satisfied by the label text itself when operator clicks
 - GUIDE: plan-phase self-check — before attempting any Edit or Write, verify the `plan-approved` state file exists. If it does not, plan approval has not been received — regardless of what the operator said conversationally. Conversational acknowledgment does not trigger the plan-approval hook and does not write the state file
 - REQUIRE: Critic cohesion review after Builder completes, before QA verification
 - REQUIRE: QA verification before any commit

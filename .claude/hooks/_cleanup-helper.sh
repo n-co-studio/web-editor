@@ -108,14 +108,18 @@ cleanup_session_files() {
     rm -f "$state_dir/brief-has-taskgroup"
     _delete_if_owned "$state_dir/session-resume.yaml" "$closing_sid"
     # Clean completion markers when merge brief closes (parallel groups)
+    # Markers are cross-session: written by content briefs in their per-session dirs.
     if [ "$close_stype" = "taskgroup-merge" ]; then
-      rm -f "$state_dir"/tg-*-brief-*.complete
+      clean_cross_session_markers "tg-*-brief-*.complete"
     fi
 
-    # Remove per-session state directory if session-scoped and now empty (Decision 0030)
-    if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
-      rmdir "$state_dir" 2>/dev/null || true
-    fi
+    # Remove per-session state directory if now empty (all sessions use per-session dirs)
+    # Only rmdir if it's a per-session subdir, not the flat .claude/.state/ root
+    case "$state_dir" in
+      */wt-sessions/*)
+        rmdir "$state_dir" 2>/dev/null || true
+        ;;
+    esac
   fi
 }
 

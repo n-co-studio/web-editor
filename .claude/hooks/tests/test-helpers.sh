@@ -340,6 +340,11 @@ stage_sandbox_file() {
 # from blocking re-init within the same test process (same PID appears alive).
 reset_phase() {
   local stype="${1:-standard}"
+  # Clear per-session state dir if cached (new session will get new dir)
+  if [ -n "$_CACHED_SESSION_STATE_DIR" ] && [ -d "$_CACHED_SESSION_STATE_DIR" ]; then
+    rm -rf "$_CACHED_SESSION_STATE_DIR" 2>/dev/null || true
+  fi
+  _CACHED_SESSION_STATE_DIR=""
   rm -f "$_SANDBOX_DIR/.claude/.state/phase-state"
   rm -f "$_SANDBOX_DIR/.claude/.state/sessions"/*.yaml 2>/dev/null || true
   init_phase "$stype"

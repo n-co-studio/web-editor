@@ -51,6 +51,8 @@ When presenting the plan for approval, include **auto** and **review** as option
 - **Auto** — agent completes through merge autonomously after all gates pass. The `op-review` phase is skipped.
 - **Review** — agent pauses after verify for operator review before commit. Default.
 
+See `orchestrator.md` § Constraints for the canonical AskUserQuestion plan approval template and hook contract annotations.
+
 The mode is set at plan approval and recorded in phase-state.
 
 ### Solo Mode (Decision 0015)
