@@ -445,6 +445,58 @@ _derive_work_order_label() {
   esac
 }
 
+# --- Parse task group metadata from a brief file ---
+# Extracts ### Task Group section fields and sets module variables.
+# Arguments:
+#   $1 — brief file path (must exist)
+# Sets:
+#   _BRIEF_TG_DETECTED    (true/false) — whether valid task group metadata found
+#   _BRIEF_TG_GROUP_NAME  — extracted from "- **Group:** <value>" line
+#   _BRIEF_TG_IS_MERGE    (true/false) — true if brief title contains "merge"
+#   _BRIEF_TG_IS_PARALLEL (true/false) — true if "- **Execution:** parallel" found
+_parse_brief_taskgroup_metadata() {
+  local brief_file="$1"
+  _BRIEF_TG_DETECTED=false
+  _BRIEF_TG_GROUP_NAME=""
+  _BRIEF_TG_IS_MERGE=false
+  _BRIEF_TG_IS_PARALLEL=false
+
+  [ -f "$brief_file" ] || return 0
+
+  # Extract ### Task Group section (between exact level-3 heading and next ###)
+  local tg_section
+  tg_section=$(sed -n '/^### Task Group$/,/^###/{/^### Task Group$/d;/^###/d;p;}' "$brief_file")
+
+  # No section found — not a task group brief
+  [ -z "$tg_section" ] && return 0
+
+  # Extract Group: field
+  # Extract and trim leading/trailing whitespace only (Group values are kebab-case per template)
+  _BRIEF_TG_GROUP_NAME=$(printf '%s\n' "$tg_section" | grep -m1 '^\- \*\*Group:\*\*' | sed 's/^- \*\*Group:\*\* *//;s/^[[:space:]]*//;s/[[:space:]]*$//')
+
+  if [ -z "$_BRIEF_TG_GROUP_NAME" ]; then
+    echo "WARNING: Brief has ### Task Group section but no Group: field — treating as standard" >&2
+    return 0
+  fi
+
+  _BRIEF_TG_DETECTED=true
+
+  # Check for merge in brief title (first ## Task Brief: line)
+  local title_line
+  title_line=$(grep -m1 '^## Task Brief:' "$brief_file" 2>/dev/null || true)
+  if [ -n "$title_line" ]; then
+    # Case-insensitive merge check (Bash 3.2 compatible — use grep)
+    if printf '%s' "$title_line" | grep -qi 'merge'; then
+      _BRIEF_TG_IS_MERGE=true
+    fi
+  fi
+
+  # Check for parallel execution
+  if printf '%s\n' "$tg_section" | grep -q '^\- \*\*Execution:\*\* *parallel'; then
+    _BRIEF_TG_IS_PARALLEL=true
+  fi
+}
+
 # --- Enqueue a new entry ---
 # Creates a queue entry in pending-review/ with generated UUID.
 # Automatically associates the entry with a work order:

@@ -62,6 +62,8 @@ SESSION_TYPE="standard"
 BRANCH_NAME=""
 SOLO_MODE=false
 PUSH_ON_COMPLETE=false
+SESSION_TYPE_EXPLICIT=false
+BRANCH_EXPLICIT=false
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -75,10 +77,12 @@ while [ $# -gt 0 ]; do
       ;;
     --session-type)
       SESSION_TYPE="$2"
+      SESSION_TYPE_EXPLICIT=true
       shift 2
       ;;
     --branch)
       BRANCH_NAME="$2"
+      BRANCH_EXPLICIT=true
       shift 2
       ;;
     --solo)
@@ -130,7 +134,33 @@ if [ ! -s "$RESOLVED_BRIEF" ]; then
   exit 1
 fi
 
-# --- Validate session type ---
+# --- Auto-detect task group metadata from brief ---
+_parse_brief_taskgroup_metadata "$RESOLVED_BRIEF"
+
+if [ "$_BRIEF_TG_DETECTED" = true ]; then
+  # Derive session type when not explicitly provided
+  if [ "$SESSION_TYPE_EXPLICIT" = false ]; then
+    if [ "$_BRIEF_TG_IS_MERGE" = true ]; then
+      SESSION_TYPE="taskgroup-merge"
+    else
+      SESSION_TYPE="taskgroup"
+    fi
+  else
+    # Warn on conflict between explicit and detected
+    _expected_type="taskgroup"
+    [ "$_BRIEF_TG_IS_MERGE" = true ] && _expected_type="taskgroup-merge"
+    if [ "$SESSION_TYPE" != "$_expected_type" ]; then
+      echo "WARNING: Brief has ### Task Group metadata (detected: $_expected_type) but --session-type=$SESSION_TYPE was explicit — using explicit value" >&2
+    fi
+  fi
+
+  # Derive branch when not explicitly provided (skip for parallel groups)
+  if [ "$BRANCH_EXPLICIT" = false ] && [ "$_BRIEF_TG_IS_PARALLEL" = false ]; then
+    BRANCH_NAME="feature/${_BRIEF_TG_GROUP_NAME}"
+  fi
+fi
+
+# --- Validate session type (after auto-detection) ---
 VALID_PHASES=$(get_phases_for_type "$SESSION_TYPE" 2>/dev/null || true)
 if [ -z "$VALID_PHASES" ]; then
   echo "ERROR: Invalid session type: $SESSION_TYPE (not in Decision 0014 enum)" >&2

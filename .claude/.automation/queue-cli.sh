@@ -139,12 +139,13 @@ case "$SUBCOMMAND" in
   add)
     ADD_BRIEF="" ADD_BRANCH="" ADD_SESSION_TYPE="standard"
     ADD_AUTO_APPROVE=false ADD_SOLO=false ADD_PUSH=false
+    SESSION_TYPE_EXPLICIT=false BRANCH_EXPLICIT=false
 
     while [ $# -gt 0 ]; do
       case "$1" in
         --brief)         ADD_BRIEF="$2"; shift 2 ;;
-        --branch)        ADD_BRANCH="$2"; shift 2 ;;
-        --session-type)  ADD_SESSION_TYPE="$2"; shift 2 ;;
+        --branch)        ADD_BRANCH="$2"; BRANCH_EXPLICIT=true; shift 2 ;;
+        --session-type)  ADD_SESSION_TYPE="$2"; SESSION_TYPE_EXPLICIT=true; shift 2 ;;
         --auto-approve)  ADD_AUTO_APPROVE=true; shift ;;
         --solo)          ADD_SOLO=true; shift ;;
         --push)          ADD_PUSH=true; shift ;;
@@ -185,7 +186,33 @@ case "$SUBCOMMAND" in
         ;;
     esac
 
-    # Validate session type
+    # Auto-detect task group metadata from brief
+    _parse_brief_taskgroup_metadata "$ADD_BRIEF"
+
+    if [ "$_BRIEF_TG_DETECTED" = true ]; then
+      # Derive session type when not explicitly provided
+      if [ "$SESSION_TYPE_EXPLICIT" = false ]; then
+        if [ "$_BRIEF_TG_IS_MERGE" = true ]; then
+          ADD_SESSION_TYPE="taskgroup-merge"
+        else
+          ADD_SESSION_TYPE="taskgroup"
+        fi
+      else
+        # Warn on conflict between explicit and detected
+        _expected_type="taskgroup"
+        [ "$_BRIEF_TG_IS_MERGE" = true ] && _expected_type="taskgroup-merge"
+        if [ "$ADD_SESSION_TYPE" != "$_expected_type" ]; then
+          echo "WARNING: Brief has ### Task Group metadata (detected: $_expected_type) but --session-type=$ADD_SESSION_TYPE was explicit — using explicit value" >&2
+        fi
+      fi
+
+      # Derive branch when not explicitly provided (skip for parallel groups)
+      if [ "$BRANCH_EXPLICIT" = false ] && [ "$_BRIEF_TG_IS_PARALLEL" = false ]; then
+        ADD_BRANCH="feature/${_BRIEF_TG_GROUP_NAME}"
+      fi
+    fi
+
+    # Validate session type (after auto-detection so validated type reflects any upgrade)
     VALID_PHASES=$(get_phases_for_type "$ADD_SESSION_TYPE" 2>/dev/null || true)
     if [ -z "$VALID_PHASES" ]; then
       echo "ERROR: Invalid session type: $ADD_SESSION_TYPE" >&2
