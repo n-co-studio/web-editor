@@ -10,6 +10,23 @@ Breaking changes (field removal, type change, required field addition) increment
 
 ---
 
+## v1.2.0 — Post-Audit Remediation Trigger
+
+**Date:** 2026-03-26
+**Decision:** 0017 (Operator Automation Layer)
+
+### Changes
+
+**runner-config.yaml** (+2 fields):
+- `runner.auto_remediation` (boolean, default: `false`) — opt-in toggle for automatic remediation queue entry generation after audit sessions complete with actionable health report findings.
+- `runner.auto_remediation_severity` (string, default: `CRITICAL`) — severity filter for findings extraction. Accepts `CRITICAL` or `CRITICAL,RECOMMENDATION`.
+
+**New module: `lib/remediation-trigger.sh`** — sourced by `runner.sh`. Single public function `check_remediation_trigger` called in the `completed)` post-transition block after `check_cohesion_triggers`. Reads the newest health report, extracts findings by severity, deduplicates against existing queue entries, caps at 3 remediation entries per audit, and enqueues grouped findings as `standard` session type.
+
+**cohesion-trigger.sh** — `_check_line_threshold` now accepts an optional `brief_path` parameter and skips line-counter increment for remediation sessions (entries whose brief contains `[remediation-source:]`). This prevents remediation-audit-remediation feedback loops.
+
+---
+
 ## v1.1.1 — Work-Order Deferral
 
 **Date:** 2026-03-20

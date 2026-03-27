@@ -235,8 +235,25 @@ _check_taskgroup_completion() {
 # Check if cumulative lines changed exceeds cohesion trigger threshold.
 # Arguments:
 #   $1 — baseline_sha (from the just-completed entry)
+#   $2 — brief_path (optional, for loop guard checks)
 _check_line_threshold() {
   local baseline_sha="$1"
+  local brief_path="${2:-}"
+
+  # Loop guard: skip line-threshold increment for remediation sessions
+  # to prevent remediation → audit → remediation cycles
+  if [ -n "$brief_path" ]; then
+    local abs_brief=""
+    if [ -f "$brief_path" ]; then
+      abs_brief="$brief_path"
+    elif [ -f "$REPO_ROOT/$brief_path" ]; then
+      abs_brief="$REPO_ROOT/$brief_path"
+    fi
+    if [ -n "$abs_brief" ] && grep -q '\[remediation-source:' "$abs_brief" 2>/dev/null; then
+      echo "cohesion-trigger: skipping line-threshold for remediation session" >&2
+      return
+    fi
+  fi
 
   # Read threshold from config — early return when disabled (0 or unset)
   local threshold
@@ -304,6 +321,6 @@ check_cohesion_triggers() {
 
   # Trigger 2: cumulative line threshold (all session types)
   if [ -n "$baseline_sha" ]; then
-    _check_line_threshold "$baseline_sha"
+    _check_line_threshold "$baseline_sha" "$brief_path"
   fi
 }

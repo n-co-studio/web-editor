@@ -66,6 +66,8 @@ source "$LIB_DIR/cache-builder.sh"
 source "$LIB_DIR/file-lock.sh"
 # shellcheck source=lib/health-check.sh
 source "$LIB_DIR/health-check.sh"
+# shellcheck source=lib/remediation-trigger.sh
+source "$LIB_DIR/remediation-trigger.sh"
 
 # --- Runner merge lock helpers (Decision 0030 — worktree merge serialization) ---
 _RUNNER_MERGE_LOCK_FD=7
@@ -1576,6 +1578,11 @@ while true; do
       # Cohesion triggers (all session types)
       check_cohesion_triggers "$ENTRY_ID" "$ENTRY_SESSION_TYPE" \
         "$BASELINE_SHA" "$ENTRY_BRIEF_PATH" "$ENTRY_BRANCH" \
+        "$ENTRY_WORK_ORDER_ID" || true
+
+      # Remediation trigger (audit sessions only)
+      check_remediation_trigger "$ENTRY_ID" "$ENTRY_SESSION_TYPE" \
+        "$ENTRY_BRIEF_PATH" "$ENTRY_BRANCH" \
         "$ENTRY_WORK_ORDER_ID" || true
 
       # Drift detection (task group sessions only)
