@@ -277,6 +277,83 @@ ${branch}"
   echo "$removed"
 }
 
+# --- Detect orphan automation branches ---
+# Scans feature/auto-* branches not in the closed-branches ledger,
+# with no active session and older than 7 days. Writes stale-branch
+# escalation for operator review — does NOT auto-delete.
+# Output: count of orphans detected on stdout
+_detect_orphan_branches() {
+  local detected=0
+  local closed_file="$REPO_ROOT/.claude/local/closed-branches"
+  local sessions_dir="$REPO_ROOT/.claude/.state/sessions"
+  local esc_dir="$REPO_ROOT/.claude/.automation/escalations"
+  local now_epoch
+  now_epoch=$(date +%s)
+  local seven_days=$((7 * 86400))
+
+  # List all local feature/auto-* branches
+  local branch
+  while IFS= read -r branch; do
+    [ -z "$branch" ] && continue
+    # Strip leading whitespace and * prefix from current branch
+    branch=$(echo "$branch" | sed 's/^[* ]*//')
+
+    # Skip if already in closed-branches ledger
+    if [ -f "$closed_file" ] && grep -qxF "$branch" "$closed_file" 2>/dev/null; then
+      continue
+    fi
+
+    # Skip if branch has an active session
+    local _has_active=false
+    if [ -d "$sessions_dir" ]; then
+      local _sf
+      for _sf in "$sessions_dir"/*.yaml; do
+        [ -f "$_sf" ] || continue
+        if grep -q "branch: $branch" "$_sf" 2>/dev/null; then
+          local _spid
+          _spid=$(grep '^pid: ' "$_sf" 2>/dev/null | sed 's/^pid: *//')
+          if [ -n "$_spid" ] && kill -0 "$_spid" 2>/dev/null; then
+            _has_active=true
+            break
+          fi
+        fi
+      done
+    fi
+    [ "$_has_active" = true ] && continue
+
+    # Check age — skip branches younger than 7 days
+    local _last_commit_epoch
+    _last_commit_epoch=$(git log -1 --format=%ct "$branch" 2>/dev/null || echo "0")
+    local _age_secs=$(( now_epoch - _last_commit_epoch ))
+    if [ "$_age_secs" -lt "$seven_days" ]; then
+      continue
+    fi
+
+    # Write stale-branch escalation
+    mkdir -p "$esc_dir" 2>/dev/null || true
+    local _esc_id="esc-orphan-branch-$(date +%Y%m%d-%H%M%S)-${detected}"
+    local _last_sha
+    _last_sha=$(git rev-parse "$branch" 2>/dev/null || echo "unknown")
+    {
+      printf 'escalation:\n'
+      printf '  id: "%s"\n' "$_esc_id"
+      printf '  queue_entry_id: "cleanup"\n'
+      printf '  type: "stale-branch"\n'
+      printf '  severity: "advisory"\n'
+      printf '  phase_at_exit: "close"\n'
+      printf '  tag_at_exit: "agent"\n'
+      printf '  message: "Orphan automation branch detected — no active session, not sealed, older than 7 days"\n'
+      printf '  context: "branch: %s, last_commit: %s, age_days: %s"\n' "$branch" "$_last_sha" "$((_age_secs / 86400))"
+      printf '  created_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      printf '  resolved: false\n'
+      printf '  resolution: ""\n'
+    } > "$esc_dir/${_esc_id}.yaml" 2>/dev/null || true
+    detected=$((detected + 1))
+  done < <(git branch --list 'feature/auto-*' 2>/dev/null)
+
+  echo "$detected"
+}
+
 # --- Clean terminal work orders by retention ---
 # Deletes completed/escalated work orders older than max_days.
 # Arguments:
@@ -604,6 +681,10 @@ run_cleanup() {
   # Closed-branches compaction
   count=$(_compact_closed_branches)
   [ "$count" -gt 0 ] && echo "cleanup: compacted $count stale closed-branch entries" >&2
+
+  # Orphan automation branch detection (safety net)
+  count=$(_detect_orphan_branches)
+  [ "$count" -gt 0 ] && echo "cleanup: detected $count orphan automation branches (escalations written)" >&2
 
   # Orphaned defer-count files (entry no longer in approved/ or running/)
   local _defer_cleaned=0

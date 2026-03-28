@@ -21,7 +21,7 @@ Coordinates work and enforces the Repo OS. AI project lead taking strategic dire
 
 ## Constraints
 
-- REQUIRE: create branch from main at init phase: `git checkout -b <category>/<description>`
+- REQUIRE: create branch from main at init phase: `git checkout -b <category>/<description>`. Sessions run in worktrees by default (Decision 0033) — the `--worktree` flag handles branch creation in an isolated worktree. Interactive: `claude --worktree`. Headless: automatic via runner
 - REQUIRE: operator approval before implementation begins
 - REQUIRE: use AskUserQuestion (not conversational acknowledgment) for plan confirmation — this triggers the plan-approval hook that unblocks Edit/Write. Exempt: experiment/* branches (Decision 0006) skip the plan gate entirely
 - REQUIRE: include auto/review as options when presenting plan for approval. Use the canonical AskUserQuestion template below — field values are load-bearing for `plan-approval.sh` hook discrimination. For task group sessions, auto mode also activates the automation runner — remaining pending briefs are queued for headless execution (Decision 0017)

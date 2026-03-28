@@ -523,6 +523,28 @@ queue_enqueue() {
 
   _ensure_queue_dirs
 
+  # --- Brief deduplication: check pending-review/ and approved/ for matching brief_path ---
+  # Prevents double-queuing the same brief. Running/failed/completed are NOT checked
+  # to allow re-queuing after failure or completion.
+  local _dedup_dir _dedup_status
+  local qdir_dedup
+  qdir_dedup=$(_queue_dir)
+  for _dedup_status in pending-review approved; do
+    _dedup_dir="$qdir_dedup/$_dedup_status"
+    [ -d "$_dedup_dir" ] || continue
+    local _dedup_f
+    for _dedup_f in "$_dedup_dir"/*.yaml; do
+      [ -f "$_dedup_f" ] || continue
+      _load_queue_entry "$_dedup_f" 2>/dev/null || continue
+      if [ "$_QE_BRIEF_PATH" = "$brief_path" ]; then
+        local _existing_id="$_QE_ID"
+        echo "duplicate:$_existing_id" >&2
+        echo "$_existing_id"
+        return 0
+      fi
+    done
+  done
+
   # Generate UUID
   local entry_id
   if command -v uuidgen > /dev/null 2>&1; then

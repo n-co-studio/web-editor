@@ -52,6 +52,8 @@ Work happens on categorized branches. BLOCK: never commit directly to `main` —
 
 ## Session Lifecycle
 
+**Worktree isolation (Decision 0033)**: Every session runs in its own git worktree by default, eliminating branch conflicts and state interference when multiple sessions run concurrently. Interactive sessions: `claude --worktree`. Headless sessions: `runner.sh` passes `--worktree` automatically. The main worktree stays on `main` — no branch switching in the primary working tree. State files are isolated per session via `get_session_state_dir()` (Decision 0030). Opt-out: `REPO_OS_WORKTREE_ISOLATE=0` for runner sessions; omit `--worktree` for interactive.
+
 **Init sequence**: REQUIRE: create the session branch as the first action in the init phase, before reading docs or writing files.
 
 **Close sequence** — REQUIRE: execute these steps in order before the session ends:

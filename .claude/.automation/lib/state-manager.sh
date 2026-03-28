@@ -115,6 +115,32 @@ runner_external_cleanup() {
   local close_sid
   close_sid=$(get_session_id "$repo_root")
 
+  # Stale-branch escalation on crash (Leak Point 3) — do NOT seal branch.
+  # Crashed branches may need recovery; operator must investigate.
+  local _crash_branch
+  _crash_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+  if [ -n "$_crash_branch" ] && [ "$_crash_branch" != "main" ] && [ "$_crash_branch" != "HEAD" ]; then
+    local _sb_esc_dir="$repo_root/.claude/.automation/escalations"
+    mkdir -p "$_sb_esc_dir" 2>/dev/null || true
+    local _sb_esc_id="esc-stale-branch-$(date +%Y%m%d-%H%M%S)"
+    local _sb_last_sha
+    _sb_last_sha=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+    {
+      printf 'escalation:\n'
+      printf '  id: "%s"\n' "$_sb_esc_id"
+      printf '  queue_entry_id: "%s"\n' "$_cleanup_entry_id"
+      printf '  type: "stale-branch"\n'
+      printf '  severity: "advisory"\n'
+      printf '  phase_at_exit: "%s"\n' "$_cleanup_phase"
+      printf '  tag_at_exit: "agent"\n'
+      printf '  message: "Session crashed — branch left unsealed for investigation"\n'
+      printf '  context: "branch: %s, session_id: %s, last_commit: %s"\n' "$_crash_branch" "$close_sid" "$_sb_last_sha"
+      printf '  created_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      printf '  resolved: false\n'
+      printf '  resolution: ""\n'
+    } > "$_sb_esc_dir/${_sb_esc_id}.yaml" 2>/dev/null || true
+  fi
+
   # Unregister from session registry (before .session-id removal — needs ID)
   unregister_session || true
 

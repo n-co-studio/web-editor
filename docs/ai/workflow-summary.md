@@ -37,7 +37,7 @@ Gates-B: B1-pass B2-n/a B3-n/a
 ## Session Lifecycle
 | Rule | Detail |
 |------|--------|
-| **Init** | Create session branch first, before reading docs or writing files |
+| **Init** | Create session branch first, before reading docs or writing files. Sessions run in worktrees by default (Decision 0033) |
 | **Branch isolation** | One session per branch; sealed at close (Decision 0013; task groups exempt) |
 | **Solo mode** | Merge to main at close for `feature/*`, `fix/*`, `hotfix/*`. Non-final task group briefs skip merge |
 | **Overlap** | Registry blocks same-branch overlap (task groups: advisory only) |

@@ -2,7 +2,7 @@
 # Type taxonomy covers all runner failure modes and scope deviations
 # requiring human intervention.
 #
-# 9 escalation types:
+# 10 escalation types:
 #   gate-failure          — governance gate blocked commit/push
 #   governance-block      — hook enforcement prevented action
 #   phase-tag-escalation  — phase tag was 'operator' at exit
@@ -12,11 +12,12 @@
 #   security-risk         — vulnerability detected (auth bypass, injection, unsafe deserialization, etc.)
 #   structural-change     — spec-level or architectural change not in brief
 #   scope-deviation       — change outside brief scope (classified by scope_classification)
+#   stale-branch          — branch left unsealed after crash or orphan detection
 
 escalation:
   id: ""                    # unique escalation identifier
   queue_entry_id: ""        # references the originating queue entry
-  type: ""                  # gate-failure | governance-block | phase-tag-escalation | ambiguity | scope-exceeded | dependency-missing | security-risk | structural-change | scope-deviation
+  type: ""                  # gate-failure | governance-block | phase-tag-escalation | ambiguity | scope-exceeded | dependency-missing | security-risk | structural-change | scope-deviation | stale-branch
   severity: ""              # blocking | advisory
   phase_at_exit: ""         # phase when escalation occurred
   tag_at_exit: ""           # phase automation tag (agent/operator/both) at escalation

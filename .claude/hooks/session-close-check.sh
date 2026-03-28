@@ -1002,6 +1002,9 @@ if [ "$SOLO" = "true" ] && [ "$BRANCH_SEALED" = false ]; then
           printf '  resolution: ""\n'
         } > "$_esc_dir/${_esc_id}.yaml" 2>/dev/null || true
         echo "ERROR: Merge blocked — lock acquisition failed. Escalation written: $_esc_id" >&2
+        # Seal branch on lock failure — session is closing, branch is terminal (Leak Point 4)
+        record_closed_branch "$MERGE_BRANCH"
+        BRANCH_SEALED=true
         log_hook_event "session-close-check" "Stop" "" "block" "$START_MS" "merge_lock_failed" "" "$MERGE_BRANCH" || true
         _release_merge_lock
         SHOULD_MERGE=false
@@ -1036,6 +1039,11 @@ if [ "$SOLO" = "true" ] && [ "$BRANCH_SEALED" = false ]; then
           elif git merge --no-ff -m "Merge $MERGE_BRANCH" "$MERGE_BRANCH" 2>/dev/null; then
             MERGE_OK=true
           fi
+        else
+          # Checkout main failed — seal branch, merge never attempted (Leak Point 5)
+          record_closed_branch "$MERGE_BRANCH"
+          BRANCH_SEALED=true
+          log_hook_event "session-close-check" "Stop" "" "block" "$START_MS" "checkout_main_failed" "" "$MERGE_BRANCH" || true
         fi
       fi
     fi
@@ -1043,6 +1051,9 @@ if [ "$SOLO" = "true" ] && [ "$BRANCH_SEALED" = false ]; then
     if [ "$MERGE_OK" = false ] && ! is_full_worktree_session; then
       git merge --abort 2>/dev/null || true
       git checkout "$MERGE_BRANCH" 2>/dev/null || true
+      # Seal branch on non-conflict merge failure — branch is terminal (Leak Point 1)
+      record_closed_branch "$MERGE_BRANCH"
+      BRANCH_SEALED=true
       log_hook_event "session-close-check" "Stop" "" "block" "$START_MS" "solo_merge_failed" "" "$MERGE_BRANCH" || true
       _output_block "Solo merge failed — resolve conflicts manually" "ERROR: Solo merge of '$MERGE_BRANCH' into main failed.\n  Resolve manually: git checkout main && git merge '$MERGE_BRANCH'"
     fi
@@ -1053,7 +1064,10 @@ if [ "$SOLO" = "true" ] && [ "$BRANCH_SEALED" = false ]; then
       advisory_push_to_remote
       log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "solo_merge_success" "" "$MERGE_BRANCH" || true
     elif is_full_worktree_session; then
-      # Worktree merge failed or skipped — don't block, just warn
+      # Worktree merge failed or skipped — seal branch (Leak Point 2)
+      # Branch is terminal in worktree context; operator starts fresh on failure.
+      record_closed_branch "$MERGE_BRANCH"
+      BRANCH_SEALED=true
       log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "wt_merge_failed" "" "$MERGE_BRANCH" || true
     fi
   fi

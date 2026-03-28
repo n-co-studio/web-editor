@@ -53,6 +53,7 @@ is_governance() {
     .github/*) return 0 ;;
     AI.md) return 0 ;;
     CLAUDE.md) return 0 ;;
+    .gitignore) return 0 ;;
     repo-os-explainer.html) return 0 ;;
     *) return 1 ;;
   esac
@@ -74,6 +75,7 @@ is_carved_out() {
         .claude/local/known-issues.md) return 0 ;;
         .claude/local/task-groups/*) return 0 ;;
         .claude/local/task-contract.yaml) return 0 ;;
+        .gitignore) return 0 ;;
         docs/ai/prompts/*) return 0 ;;
         docs/ai/decisions/*) return 0 ;;
         docs/ai/logs/*) return 0 ;;

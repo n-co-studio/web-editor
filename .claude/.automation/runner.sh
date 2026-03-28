@@ -682,6 +682,13 @@ _run_single_entry() {
   #   REVISIT: check PermissionRequest hook behavior at each Anthropic SDK upgrade.
   #   If PermissionRequest hooks begin firing in -p mode, consider switching from
   #   bypassPermissions to a permission-request-based allow/deny model.
+  # Worktree isolation (Decision 0033): every session runs in its own worktree
+  # by default. Opt out with REPO_OS_WORKTREE_ISOLATE=0.
+  local worktree_flag=""
+  if [ "${REPO_OS_WORKTREE_ISOLATE:-1}" != "0" ]; then
+    worktree_flag="--worktree"
+  fi
+
   # Launch headless session in background to enable FORCE-HALT child kill.
   # SIGTERM deferral: when the daemon receives SIGTERM, the trap sets
   # _SHUTDOWN_REQUESTED=true and `wait` is interrupted (returns 128+signum).
@@ -693,6 +700,7 @@ _run_single_entry() {
       --permission-mode bypassPermissions \
       --disallowedTools "$disallowed" \
       --max-turns 200 \
+      $worktree_flag \
       <<< "$prompt" \
       2> >(tee "$stderr_file" >&2) &
     _CLAUDE_CHILD_PID=$!
@@ -708,6 +716,7 @@ _run_single_entry() {
       --permission-mode bypassPermissions \
       --disallowedTools "$disallowed" \
       --max-turns 200 \
+      $worktree_flag \
       <<< "$prompt" &
     _CLAUDE_CHILD_PID=$!
     wait "$_CLAUDE_CHILD_PID" || exit_code=$?
@@ -884,10 +893,13 @@ _solo_merge_if_needed() {
           _RESULT_OUTCOME="review:merge-conflict"
           echo "Solo merge conflict: $entry_current_branch — escalation $_esc_id written, entry → review" >&2
         else
-          # Non-conflict failure (e.g., checkout failed)
+          # Non-conflict failure (e.g., checkout failed) — seal branch (Leak Point 6)
           git merge --abort 2>/dev/null || true
           git checkout "$entry_current_branch" 2>/dev/null || true
-          echo "WARNING: Solo merge of '$entry_current_branch' into main failed — branch left open for manual resolution" >&2
+          if _is_final_taskgroup_entry "$brief_id" "$work_order_id"; then
+            record_closed_branch "$entry_current_branch"
+          fi
+          echo "WARNING: Solo merge of '$entry_current_branch' into main failed — branch sealed" >&2
         fi
         ;;
       *)

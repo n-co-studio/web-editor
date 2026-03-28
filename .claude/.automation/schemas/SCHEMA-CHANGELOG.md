@@ -10,6 +10,18 @@ Breaking changes (field removal, type change, required field addition) increment
 
 ---
 
+## v1.3.0 — Stale-Branch Escalation Type
+
+**Date:** 2026-03-28
+**Decision:** 0013 (Session Branch Isolation)
+
+### Changes
+
+**escalation.yaml** (+1 type):
+- `stale-branch` added to `type` enum — used for crashed sessions where the branch is left unsealed for operator investigation, and for orphan branch detection during cleanup. Total type count: 9 → 10.
+
+---
+
 ## v1.2.0 — Post-Audit Remediation Trigger
 
 **Date:** 2026-03-26

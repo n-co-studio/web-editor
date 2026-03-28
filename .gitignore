@@ -50,4 +50,7 @@ editor-queue-status.yaml
 
 # Operator-specific child repo registry (use child-repos.conf.example as template)
 .claude/.automation/child-repos.conf
+
+# Session worktree isolation (Decision 0033)
+.worktrees/
 # END REPO-OS MANAGED
