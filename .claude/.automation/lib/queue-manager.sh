@@ -243,7 +243,9 @@ _rebuild_queue_index() {
         fi
         # Escape any double quotes in field values for JSON safety
         local _json_bp="${_QE_BRIEF_PATH//\"/\\\"}"
-        entries_json="${entries_json}\"${_QE_ID}\":{\"status\":\"${_QE_STATUS}\",\"session_type\":\"${_QE_SESSION_TYPE}\",\"brief_path\":\"${_json_bp}\",\"updated_at\":\"${_QE_UPDATED_AT}\"}"
+        local _json_br="${_QE_BRANCH//\"/\\\"}"
+        local _json_woid="${_QE_WORK_ORDER_ID//\"/\\\"}"
+        entries_json="${entries_json}\"${_QE_ID}\":{\"status\":\"${_QE_STATUS}\",\"session_type\":\"${_QE_SESSION_TYPE}\",\"brief_path\":\"${_json_bp}\",\"branch\":\"${_json_br}\",\"work_order_id\":\"${_json_woid}\",\"created_at\":\"${_QE_CREATED_AT}\",\"updated_at\":\"${_QE_UPDATED_AT}\"}"
       done
     fi
 
@@ -658,36 +660,155 @@ queue_approve() {
   _transition "$entry_id" "pending-review" "approved"
 }
 
+# --- Parse task group brief sequence number ---
+# Extracts N from "**Brief:** N of M" in the ### Task Group section of a brief file.
+# Returns the sequence number via stdout, or empty string if not found/parseable.
+_parse_brief_sequence() {
+  local brief_path="$1"
+  [ -n "$brief_path" ] && [ -f "$brief_path" ] || return 0
+  local line in_taskgroup=false after seq
+  while IFS= read -r line; do
+    case "$line" in
+      "### Task Group") in_taskgroup=true ;;  # Exact match (consistent with _parse_brief_taskgroup_metadata)
+      "### "*) [ "$in_taskgroup" = true ] && break ;;  # Left the section
+      *"**Brief:**"*" of "*)
+        [ "$in_taskgroup" = true ] || continue
+        # Extract N from "**Brief:** N of M — title"
+        after="${line#*\*\*Brief:\*\* }"
+        seq="${after%% of *}"
+        # Validate it's a number
+        case "$seq" in
+          ''|*[!0-9]*) return 0 ;;
+          *) printf '%s' "$seq"; return 0 ;;
+        esac
+        ;;
+    esac
+  done < "$brief_path"
+}
+
+# --- Check if a task group entry has prior unfinished briefs ---
+# Returns 0 (true) if a sibling taskgroup entry with a lower sequence number
+# exists in approved/ or running/. Returns 1 (false) otherwise.
+# Only checks session_type "taskgroup" — taskgroup-merge entries are excluded
+# because merge briefs run after all content briefs, not as sequenced peers.
+_has_prior_taskgroup_entry() {
+  local work_order_id="$1"
+  local my_seq="$2"
+  local skip_file="$3"
+  local qdir
+  qdir=$(_queue_dir)
+
+  local dir f
+  for dir in "$qdir/approved" "$qdir/running"; do
+    for f in "$dir"/*.yaml; do
+      [ -f "$f" ] || continue
+      [ "$f" = "$skip_file" ] && continue
+      _load_queue_entry "$f"
+      [ "$_QE_WORK_ORDER_ID" = "$work_order_id" ] || continue
+      [ "$_QE_SESSION_TYPE" = "taskgroup" ] || continue
+      local sib_seq
+      sib_seq=$(_parse_brief_sequence "$_QE_BRIEF_PATH")
+      # Unparseable sibling → skip (not a sequencing barrier). Graceful degradation:
+      # a missing or malformed brief file does not block higher-sequence entries.
+      [ -n "$sib_seq" ] || continue
+      if [ "$sib_seq" -lt "$my_seq" ]; then
+        return 0
+      fi
+    done
+  done
+  return 1
+}
+
+# --- Clean up eval-based parallel arrays from queue_dequeue ---
+_dq_cleanup() {
+  local count="${1:-0}" k=0
+  while [ "$k" -lt "$count" ]; do
+    unset "_dq_ts_${k}" "_dq_fp_${k}" 2>/dev/null || true
+    k=$(( k + 1 ))
+  done
+}
+
 # --- Dequeue the oldest approved entry ---
 # Picks the entry with the earliest created_at from approved/.
-# Moves it to running/ and outputs the entry file path.
-# Returns 1 if no approved entries exist.
+# Task group entries respect brief sequencing: Brief N waits until all
+# briefs with lower sequence numbers have left approved/ and running/.
+# Moves the selected entry to running/ and outputs the entry file path.
+# Returns 1 if no approved entries exist (or all are deferred by sequencing).
+# Note: _QE_* module variables are indeterminate after return (inner calls to
+# _load_queue_entry during sibling scans overwrite them). Callers needing the
+# dequeued entry's fields should re-load from the returned file path.
 queue_dequeue() {
   local qdir
   qdir=$(_queue_dir)
-  local oldest_file="" oldest_ts=""
 
+  # Collect approved entries as parallel arrays (timestamp and filepath).
+  local _dq_count=0
   local f
   for f in "$qdir/approved"/*.yaml; do
     [ -f "$f" ] || continue
     _load_queue_entry "$f"
-    local ts="$_QE_CREATED_AT"
-    # ISO 8601 timestamps are lexicographically sortable
-    # POSIX-safe string comparison for ISO 8601 timestamps (lexicographic sort)
-    if [ -z "$oldest_ts" ] || expr "$ts" \< "$oldest_ts" > /dev/null 2>&1; then
-      oldest_ts="$ts"
-      oldest_file="$f"
-    fi
+    eval "_dq_ts_${_dq_count}=\"\$_QE_CREATED_AT\""
+    eval "_dq_fp_${_dq_count}=\"\$f\""
+    _dq_count=$(( _dq_count + 1 ))
   done
 
-  if [ -z "$oldest_file" ]; then
-    return 1
-  fi
+  [ "$_dq_count" -gt 0 ] || return 1
 
-  local entry_id
-  entry_id=$(basename "$oldest_file" .yaml)
-  _transition "$entry_id" "approved" "running"
-  printf '%s' "$qdir/running/${entry_id}.yaml"
+  # Simple selection sort by timestamp (small N — approved queue is typically <10).
+  # ISO 8601 timestamps are lexicographically comparable as strings.
+  local i j min_idx tmp_ts tmp_fp a_ts b_ts cand_file my_seq entry_id
+  i=0
+  while [ "$i" -lt "$(( _dq_count - 1 ))" ]; do
+    min_idx=$i
+    j=$(( i + 1 ))
+    while [ "$j" -lt "$_dq_count" ]; do
+      eval "a_ts=\"\$_dq_ts_${j}\""
+      eval "b_ts=\"\$_dq_ts_${min_idx}\""
+      if expr "$a_ts" \< "$b_ts" > /dev/null 2>&1; then
+        min_idx=$j
+      fi
+      j=$(( j + 1 ))
+    done
+    if [ "$min_idx" -ne "$i" ]; then
+      eval "tmp_ts=\"\$_dq_ts_${i}\""
+      eval "tmp_fp=\"\$_dq_fp_${i}\""
+      eval "_dq_ts_${i}=\"\$_dq_ts_${min_idx}\""
+      eval "_dq_fp_${i}=\"\$_dq_fp_${min_idx}\""
+      eval "_dq_ts_${min_idx}=\"\$tmp_ts\""
+      eval "_dq_fp_${min_idx}=\"\$tmp_fp\""
+    fi
+    i=$(( i + 1 ))
+  done
+
+  # Iterate sorted candidates, skip any blocked by task group sequencing.
+  i=0
+  while [ "$i" -lt "$_dq_count" ]; do
+    eval "cand_file=\"\$_dq_fp_${i}\""
+    _load_queue_entry "$cand_file"
+
+    # Task group sequencing check (Decision 0017)
+    # Brief 1 is always eligible (no predecessor). Brief N>1 waits for all
+    # lower-sequence siblings to leave approved/ and running/.
+    if [ "$_QE_SESSION_TYPE" = "taskgroup" ] && [ -n "$_QE_WORK_ORDER_ID" ]; then
+      my_seq=$(_parse_brief_sequence "$_QE_BRIEF_PATH")
+      if [ -n "$my_seq" ] && [ "$my_seq" -gt 1 ]; then
+        if _has_prior_taskgroup_entry "$_QE_WORK_ORDER_ID" "$my_seq" "$cand_file"; then
+          i=$(( i + 1 ))
+          continue  # Skip — prior brief still approved or running
+        fi
+      fi
+    fi
+
+    # This entry is eligible — clean up parallel arrays before returning
+    entry_id=$(basename "$cand_file" .yaml)
+    _transition "$entry_id" "approved" "running"
+    printf '%s' "$qdir/running/${entry_id}.yaml"
+    _dq_cleanup "$_dq_count"
+    return 0
+  done
+
+  _dq_cleanup "$_dq_count"
+  return 1
 }
 
 # --- Complete a running entry ---
