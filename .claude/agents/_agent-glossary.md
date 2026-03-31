@@ -48,6 +48,23 @@ Docs, tests, formatting, comments, dev tooling
 ### Cohesion Review
 Post-build Critic review (cohesion mode): checks diff + surrounding code for broken cross-references, dangling imports, inconsistent naming, contradictory patterns. Gate A5. Operates on code, not specs.
 
+**Downstream Consumer Validation** — mandatory finding category for Critic cohesion mode. For every modified function or interface, the Critic MUST:
+1. Identify all callers/consumers (grep for function name, check imports, trace call chains)
+2. For each caller, evaluate the interface contract change: did the return type, parameter signature, side effects, or error behavior change?
+3. Produce a per-function finding in this format: "Function `X` is called by `Y` at `file:line`. After this change, `Y` will receive [new behavior]. Impact: [works / breaks / needs update]"
+4. If any caller would break, flag as CRITICAL with specific remediation
+
+This is a specific check per modified function, not a general architectural concern. The Critic should grep for callers and evaluate the concrete impact — not speculate about theoretical consumers.
+
+### Regression Gate (Sequential Brief Verification)
+When the QA verifier runs after a brief completes, it MUST check for prior briefs that targeted the same files or system:
+1. Check if there is a previous brief in the same task group (via the `briefs[]` array in the task group contract YAML at `docs/ai/task-groups/`) or a recent session (via session log entries in `docs/ai/logs/session-log.md` or `.claude/local/session-log.md`) that modified the same files
+2. If a prior brief exists, read its verification checklist from the session log entry or the task contract's `verification:` field
+3. Re-verify each item from the prior brief's checklist against the current state of the code
+4. If any item from the prior brief's verification fails, flag it as a CRITICAL finding: "Regression: prior brief [N] verification item '[item]' no longer passes after this brief's changes"
+
+This catches cascading regressions at the gate rather than after the operator discovers them in a subsequent session. REQUIRE: the QA verifier must treat regression findings as commit-blocking — they indicate this brief broke something the previous brief established.
+
 ### PM Scope Labels
 PM-specific labels (orthogonal to severity): **IN-SCOPE**, **OUT-OF-SCOPE**, **DEFER**. Applied by PM Advisory alongside standard severity. Informational — do not affect Refinement Report routing.
 

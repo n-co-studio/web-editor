@@ -124,3 +124,27 @@ Skip silently when none of the above conditions are met.
 - REQUIRE: **Pragmatist Plan-Gating** (Decision 0025) — Pragmatist must be dispatched before presenting plan to operator. `pragmatist-signed` state file is verified at commit time by `pre-commit-gates.sh`. `advance_phase()` enforces `plan-approved` substance check before the post-approval phase transition. `init_phase()` blocks re-initialization for the same session (override: `REPO_OS_ALLOW_REINIT=1`). Session close runs forensic check on `phases_completed` to detect force-advance violations
 - REQUIRE: **Session Log Ordering** — session log must be the last file modified before the close-phase commit. Do not commit the session log before implementation work is complete, and do not modify it after the final commit
 - All other rules (human-led architecture, gates, decisions, small scope, session log) are defined in AI.md and enforced by the Repo OS
+
+## Integration Test Requirement
+
+When the task brief modifies a pipeline or multi-stage system, the Builder MUST execute a full lifecycle integration test before signaling completion.
+
+### Activation
+
+This requirement activates when ANY of:
+- The brief's `scope_files` touch more than one stage of a known pipeline (e.g., `runner.sh` + `branch-manager.sh`, or store + component + IPC, or intake → queue → session → merge)
+- The brief explicitly includes an `### Integration Test` section
+- The Architect or Pragmatist flagged the change as cross-stage during planning
+
+### What the Integration Test Must Define
+
+The brief (or the Orchestrator during planning) must specify:
+1. **Full lifecycle** — the end-to-end flow to test (e.g., "branch creation → session launch → commit → merge → cleanup")
+2. **Concrete steps** — executable actions the Builder must perform after implementation to verify the full pipeline works, not just the individual stage
+3. **Expected outcomes** — what success looks like at each stage boundary (e.g., "merge completes without conflict", "state file is cleaned up")
+
+### Enforcement
+
+- REQUIRE: if the brief touches a pipeline, the Builder must run the full integration test flow before signaling done. Individual unit-level verification is not sufficient
+- REQUIRE: integration test results must be included in the Builder's completion signal so the Critic and QA verifier can evaluate pipeline health
+- GUIDE: when the Orchestrator drafts the plan, it should identify pipeline boundaries and pre-populate the integration test steps. If the brief omits them, the Orchestrator adds them during planning

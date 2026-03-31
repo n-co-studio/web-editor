@@ -80,6 +80,16 @@ Ask the operator:
 
 If the operator has already provided this context in their opening message, do not re-ask. Extract and confirm: "I understand the task as: [summary]. Correct?"
 
+**Fix-on-fix detection:** Before proceeding to dispatch, check whether the operator's description references a recently completed brief that didn't work as expected — signals include: "the last fix didn't work", "this is still broken", "the fix caused a new issue", "we need to fix the fix", or referencing a specific prior session/brief that produced incorrect results. When detected:
+
+1. Identify the original brief and all subsequent fix briefs targeting the same system (check session log and recent git history for context)
+2. Inform the operator: "This is fix N for the same system. Incremental patching compounds errors. Consider reverting to the last known-good state and writing a single comprehensive brief instead of patching on top of patches."
+3. If the operator agrees, produce a **revert-and-redo brief** that:
+   - Reverts all prior fix commits back to the last known-good state
+   - Implements the complete solution in one pass with full pipeline coverage
+   - Includes an integration test section (see `docs/ai/prompts/prompt-b-product-build.md` § Integration Test Requirement)
+4. If the operator declines, proceed normally but add a risk note: "This is an incremental fix on top of prior fixes. Higher risk of cascading regressions."
+
 **User Review consideration:** If the task involves user-facing output (UI, documentation, onboarding flows, error messages), ask whether User Review tiers should be included in the brief. Explain briefly: "This task touches user-facing output. Want to include User Review (persona simulation) in the brief? I can suggest tiers and scenarios." The operator may decline.
 
 #### Step 2 — Dispatch Specialists
@@ -110,6 +120,13 @@ The Orchestrator synthesizes specialist findings into a draft task brief:
 - Incorporate UX Design Agent design brief into the Approach section — embed the full design brief as a subsection so the Builder has concrete design direction. Reference design tokens and patterns in the Constraints section
 - Cross-reference Critic concerns with Architect/Exploration/PM suggestions (same pattern as advisory board Critic Cross-Reference)
 - If PM included spec-edit proposals, note them in the brief's Risks & Open Questions section for operator awareness
+
+**Pipeline scoping heuristic:** When the Architect identifies that the change crosses pipeline stage boundaries — touching input, processing, AND output stages, or affecting multiple stages of a known pipeline (e.g., intake → queue → session → merge, or branch creation → worktree → build → commit → cleanup) — the Orchestrator MUST scope the entire pipeline in a single brief rather than splitting by stage.
+
+- REQUIRE: for pipeline changes, "keep it complete" overrides "keep it small." A 200-line brief that fixes a pipeline end-to-end is better than three 30-line briefs that each break the next stage
+- REQUIRE: when the operator describes a fix affecting a pipeline, scope ALL stages the data/control flow touches — not just the stage the operator mentioned. Example: "fix branch checkout in the runner" → scope: branch creation, worktree creation, session launch, commit, merge, cleanup — all in one brief
+- GUIDE: if the Pragmatist flags the brief as large, note in the brief that pipeline completeness is intentional: "This brief is sized larger than typical because it covers an end-to-end pipeline. Splitting would create cascading fix-on-fix patterns."
+- The Narrow path still applies for truly independent features, but pipeline-crossing changes must NOT be narrowed by stage boundary
 
 #### Step 4 — Operator Review
 
