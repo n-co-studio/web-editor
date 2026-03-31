@@ -148,6 +148,9 @@ _HEARTBEAT_PID=""
 # --- Child process tracking (for FORCE-HALT) ---
 _CLAUDE_CHILD_PID=""
 
+# --- Worktree tracking (for cleanup on crash/FORCE-HALT) ---
+_CURRENT_WORKTREE_DIR=""
+
 # --- Daemon lifecycle state ---
 _SHUTDOWN_REQUESTED=false
 _DAEMON_START_EPOCH=""
@@ -258,6 +261,12 @@ _runner_crash_cleanup() {
   _qdir=$(_queue_dir 2>/dev/null) || true
   if [ -n "$_qdir" ] && [ -d "$_qdir/running" ]; then
     rm -f "$_qdir/running/"*.heartbeat 2>/dev/null || true
+  fi
+  # Clean up worktree if one was created (Decision 0033)
+  if [ -n "$_CURRENT_WORKTREE_DIR" ] && [ -d "$_CURRENT_WORKTREE_DIR" ]; then
+    git worktree remove --force "$_CURRENT_WORKTREE_DIR" 2>/dev/null || true
+    git worktree prune 2>/dev/null || true
+    _CURRENT_WORKTREE_DIR=""
   fi
   # Clean session state (3.1: runner_external_cleanup on crash)
   # With REPO_OS_SESSION_ID set, cleanup targets the per-session state dir.
@@ -643,11 +652,16 @@ _run_single_entry() {
   # Pre-launch setup
   state_manager_setup "$REPO_ROOT" "$session_type"
 
-  # Branch setup
+  # Branch setup — sets _SETUP_BRANCH; when worktree-isolate active, does NOT checkout
   branch_manager_setup "$brief_id" "$existing_branch"
 
-  # Record baseline SHA
-  _RESULT_BASELINE=$(git rev-parse HEAD)
+  # Record baseline SHA — when worktree-isolate active, HEAD is still main,
+  # so use the branch ref directly
+  if [ "${REPO_OS_WORKTREE_ISOLATE:-1}" != "0" ] && [ -n "$_SETUP_BRANCH" ]; then
+    _RESULT_BASELINE=$(git rev-parse "$_SETUP_BRANCH")
+  else
+    _RESULT_BASELINE=$(git rev-parse HEAD)
+  fi
 
   # Set automation context for analytics hooks (inherited by claude -p child)
   export REPO_OS_AUTOMATION_ENTRY="$brief_id"
@@ -682,11 +696,28 @@ _run_single_entry() {
   #   REVISIT: check PermissionRequest hook behavior at each Anthropic SDK upgrade.
   #   If PermissionRequest hooks begin firing in -p mode, consider switching from
   #   bypassPermissions to a permission-request-based allow/deny model.
-  # Worktree isolation (Decision 0033): every session runs in its own worktree
-  # by default. Opt out with REPO_OS_WORKTREE_ISOLATE=0.
-  local worktree_flag=""
-  if [ "${REPO_OS_WORKTREE_ISOLATE:-1}" != "0" ]; then
-    worktree_flag="--worktree"
+
+  # Worktree isolation (Decision 0033): create a worktree targeting the feature
+  # branch so the session runs in isolation. Manual git worktree add is used
+  # instead of --worktree flag because --worktree creates from the invoking
+  # process's HEAD (main), not the target branch.
+  local launch_dir="$REPO_ROOT"
+  if [ "${REPO_OS_WORKTREE_ISOLATE:-1}" != "0" ] && [ -n "$_SETUP_BRANCH" ]; then
+    local worktree_dir="${REPO_ROOT}/.worktrees/${REPO_OS_SESSION_ID}"
+    if git worktree add "$worktree_dir" "$_SETUP_BRANCH" 2>/dev/null; then
+      _CURRENT_WORKTREE_DIR="$worktree_dir"
+      launch_dir="$worktree_dir"
+    else
+      echo "ERROR: Failed to create worktree at $worktree_dir for branch $_SETUP_BRANCH" >&2
+      _RESULT_OUTCOME="failed:worktree-creation"
+      unset REPO_OS_AUTOMATION_ENTRY
+      unset CLAUDE_HEADLESS
+      [ -n "$stderr_file" ] && rm -f "$stderr_file" 2>/dev/null || true
+      # Clean up state initialized by state_manager_setup before early return
+      runner_external_cleanup "$REPO_ROOT" "$brief_id" "close" "$_RESULT_BASELINE" 2>/dev/null || true
+      unset REPO_OS_SESSION_ID
+      return
+    fi
   fi
 
   # Launch headless session in background to enable FORCE-HALT child kill.
@@ -696,13 +727,12 @@ _run_single_entry() {
   # This prevents SIGTERM from killing sessions during close phase output.
   local exit_code=0
   if [ -n "$stderr_file" ]; then
-    claude -p \
+    (cd "$launch_dir" && claude -p \
       --permission-mode bypassPermissions \
       --disallowedTools "$disallowed" \
       --max-turns 200 \
-      $worktree_flag \
       <<< "$prompt" \
-      2> >(tee "$stderr_file" >&2) &
+      2> >(tee "$stderr_file" >&2)) &
     _CLAUDE_CHILD_PID=$!
     wait "$_CLAUDE_CHILD_PID" || exit_code=$?
     # Re-wait if child is still alive (SIGTERM interrupted wait, not child)
@@ -712,12 +742,11 @@ _run_single_entry() {
       wait "$_CLAUDE_CHILD_PID" || exit_code=$?
     done
   else
-    claude -p \
+    (cd "$launch_dir" && claude -p \
       --permission-mode bypassPermissions \
       --disallowedTools "$disallowed" \
       --max-turns 200 \
-      $worktree_flag \
-      <<< "$prompt" &
+      <<< "$prompt") &
     _CLAUDE_CHILD_PID=$!
     wait "$_CLAUDE_CHILD_PID" || exit_code=$?
     # Re-wait if child is still alive (SIGTERM interrupted wait, not child)
@@ -733,12 +762,22 @@ _run_single_entry() {
   unset REPO_OS_AUTOMATION_ENTRY
   unset CLAUDE_HEADLESS
 
-  # Outcome detection (with entry_id and stderr for enriched blocker reports)
-  _RESULT_OUTCOME=$(detect_outcome "$exit_code" "$_RESULT_BASELINE" "$REPO_ROOT" "$brief_id" "$stderr_file")
-
-  # Capture solo mode and branch BEFORE cleanup deletes phase-state (audit C1)
-  _RESULT_SOLO_MODE=$(get_solo 2>/dev/null || echo "false")
-  _RESULT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+  # Capture solo mode and branch from worktree context BEFORE removal
+  if [ -n "$_CURRENT_WORKTREE_DIR" ] && [ -d "$_CURRENT_WORKTREE_DIR" ]; then
+    _RESULT_SOLO_MODE=$(get_solo 2>/dev/null || echo "false")
+    _RESULT_BRANCH=$(git -C "$_CURRENT_WORKTREE_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+    # Outcome detection from worktree context
+    _RESULT_OUTCOME=$(detect_outcome "$exit_code" "$_RESULT_BASELINE" "$_CURRENT_WORKTREE_DIR" "$brief_id" "$stderr_file")
+    # Remove worktree
+    git worktree remove --force "$_CURRENT_WORKTREE_DIR" 2>/dev/null || true
+    git worktree prune 2>/dev/null || true
+    _CURRENT_WORKTREE_DIR=""
+  else
+    # Legacy path or worktree not created
+    _RESULT_OUTCOME=$(detect_outcome "$exit_code" "$_RESULT_BASELINE" "$REPO_ROOT" "$brief_id" "$stderr_file")
+    _RESULT_SOLO_MODE=$(get_solo 2>/dev/null || echo "false")
+    _RESULT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+  fi
 
   # External cleanup (Stop hook doesn't fire in headless mode)
   # With REPO_OS_SESSION_ID set, cleanup routes to the per-session state dir.
@@ -1112,6 +1151,12 @@ while true; do
         kill -KILL "$_CLAUDE_CHILD_PID" 2>/dev/null || true
         wait "$_CLAUDE_CHILD_PID" 2>/dev/null || true
       fi
+    fi
+    # --- Clean up worktree if one was created (Decision 0033) ---
+    if [ -n "$_CURRENT_WORKTREE_DIR" ] && [ -d "$_CURRENT_WORKTREE_DIR" ]; then
+      git worktree remove --force "$_CURRENT_WORKTREE_DIR" 2>/dev/null || true
+      git worktree prune 2>/dev/null || true
+      _CURRENT_WORKTREE_DIR=""
     fi
     # --- Transition running entry to failed/ ---
     if [ -n "$_CURRENT_ENTRY_ID" ]; then
