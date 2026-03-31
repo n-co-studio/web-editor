@@ -106,6 +106,8 @@ cleanup_session_files() {
     rm -f "$state_dir/merge-source-branch"
     rm -f "$state_dir/.stop-attempt-count"
     rm -f "$state_dir/brief-has-taskgroup"
+    rm -f "$state_dir/cycle-escalation"
+    rm -f "$state_dir"/cycle-advisory-*
     _delete_if_owned "$state_dir/session-resume.yaml" "$closing_sid"
     # Clean completion markers when merge brief closes (parallel groups)
     # Markers are cross-session: written by content briefs in their per-session dirs.

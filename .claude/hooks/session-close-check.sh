@@ -849,6 +849,23 @@ else
   log_override "session-close-check" "SKIP_KNOWN_ISSUES_CHECK"
 fi
 
+# --- Knowledge graph update reminder (Decision 0034, advisory) ---
+KG_GRAPH_FILE="$REPO_ROOT/docs/ai/knowledge-graph/graph.yaml"
+if [ -f "$KG_GRAPH_FILE" ]; then
+  # Check if any modified files have nodes in the graph
+  KG_MODIFIED_FILES=$(git -C "$REPO_ROOT" diff --cached --name-only 2>/dev/null || git -C "$REPO_ROOT" diff --name-only HEAD 2>/dev/null || true)
+  KG_HAS_GRAPH_NODE=false
+  for kgf in $KG_MODIFIED_FILES; do
+    if grep -q "path: \"${kgf}\"" "$KG_GRAPH_FILE" 2>/dev/null; then
+      KG_HAS_GRAPH_NODE=true
+      break
+    fi
+  done
+  if [ "$KG_HAS_GRAPH_NODE" = true ]; then
+    _add_advisory "Advisory: Modified files have knowledge graph nodes — consider updating graph.yaml (last_verified, new edges) before close. See Decision 0034."
+  fi
+fi
+
 # --- Failure report (Phase 2a: JSON stdout) ---
 if [ "$FAILURE_COUNT" -gt 0 ]; then
   SESSION_TYPE=$(infer_session_type)

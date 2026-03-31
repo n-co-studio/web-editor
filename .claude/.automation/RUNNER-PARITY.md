@@ -96,6 +96,7 @@ These apply identically in both modes (same hooks fire during `claude -p`):
 | 53 | Brief deduplication at intake | N/A | `queue_enqueue()` scans `pending-review/` and `approved/` for matching `brief_path` before creating new entry. Returns existing entry ID on match | Prevents duplicate queue entries from retry or parallel intake |
 | 54 | Crash stale-branch escalation | N/A | `runner_external_cleanup()` writes `stale-branch` escalation with branch name, session ID, and last commit SHA when crash cleanup runs on a non-main branch | Branch left unsealed for investigation; operator reviews via escalation |
 | 55 | Worktree isolation (Decision 0033) | Interactive: operator launches `claude --worktree` | Runner passes `--worktree` to all `claude -p` invocations (opt-out: `REPO_OS_WORKTREE_ISOLATE=0`) | Both modes use Claude Code's native worktree lifecycle management |
+| 56 | Completion report output path | N/A — agents write reports during session | `write_blocker_report()` in `blocker-reporter.sh` writes to `.claude/.automation/reports/`. Agents must also use this path for any runtime report artifacts (completion, health, escalation) | Canonical path: `.claude/.automation/reports/`. Governed by `_agent-glossary.md` § Reserved Directories. `.gitignore` covers both `reports/` and `review-items/` (defense-in-depth) |
 
 ## Shared Code
 

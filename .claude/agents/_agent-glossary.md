@@ -102,6 +102,8 @@ Advisory only — no commit gate, no state file. Presented in review summary alo
 | `.claude/analytics/` (legacy) | Historical event data (pre-migration). Read-only | Analytics agent (historical reads only) |
 | `.claude/.automation/` | Automation layer (Decision 0017). Tracked: schemas, config, decision cache, templates, lib. Gitignored: queue, reports, escalations, briefs, logs | Runner process + Dev Orchestrator (reports only). All others MUST NOT write |
 
+**Runtime report output path:** All runtime report artifacts (completion reports, blocker reports, escalation reports, health reports) MUST be written to `.claude/.automation/reports/`. Do not create new output directories under `.automation/` — use the existing gitignored paths listed above. This directory is the canonical destination for any YAML or JSON report generated during or after a session.
+
 ---
 
 ## Enforcement
@@ -146,6 +148,8 @@ Governance evidence in `.claude/.state/`. Written by hooks via shell I/O (never 
 | `scope-risk-gain` | Orchestrator (model) | Risk/gain context for unbriefed-in-scope files — read by `pre-commit-gates.sh` scope classification gate, included in advisory escalation (Decision 0017) |
 | `brief-has-taskgroup` | `_phase-helper.sh` (`write_taskgroup_brief_signal`) | Session-type validation (`check_taskgroup_brief_mismatch` in `bash-guard.sh`, Decision 0026). Cleaned by `cleanup_session_files` |
 | `session-resume.yaml` | `_phase-helper.sh` (`write_resume_marker`) | Compression recovery — orchestrator reads after context compression to resume without re-dispatching governance agents. Updated at every phase transition. Cleaned by `cleanup_session_files` |
+| `cycle-escalation` | `_phase-helper.sh` (`_check_cycle_limit`) | Cycle cap escalation marker — written when session cycle count reaches 5+. Advisory only (no gate). Cleaned by `cleanup_session_files` |
+| `cycle-advisory-N` | `bash-guard.sh` (Phase 3c) | Per-cycle dedup marker — prevents repeated advisory output on each Bash call within the same cycle. Cleaned by `cleanup_session_files` |
 
 **Sentinel files** (`.claude/local/`, persistent across sessions, gitignored): `.pragmatist-enforced` (backward-compatible gate deployment marker — written on first `pragmatist-signed` enforcement in `pre-commit-gates.sh`, prevents false positives on sessions started before the gate was deployed).
 

@@ -13,7 +13,17 @@ Read by the Orchestrator after Builder signals completion, before invoking QA.
    - **Ambiguous**: Could be intentional or could be a problem → surface to operator for decision
 4. **Resolve** — If clear fixes exist, delegate to Builder with specific instructions. If ambiguous findings exist, pause and present to operator.
 5. **Re-run** — If Builder made fixes, invoke Critic (cohesion mode) again to verify resolution. GUIDE: cap at 2 rounds — after that, escalate remaining findings to operator for accept/defer.
-6. **Proceed** — When Cohesion Brief shows clean (zero critical findings, or all findings operator-accepted) → invoke QA for gate verification.
+6. **Completeness pass** — After the cohesion review is clean (or findings resolved), evaluate whether the task contract's verification criteria are satisfied:
+   a. Read `.claude/local/task-contract.yaml` (already loaded in step 1). If no contract or no `verification:` field exists, skip this pass silently.
+   b. For each `verification:` criterion, evaluate the current codebase state (read files, check diffs) and produce a verdict:
+      - **COMPLETE** — the criterion is demonstrably satisfied
+      - **INCOMPLETE** — the criterion is not satisfied; include specific feedback on what is missing
+      - **PARTIAL** — some evidence exists but the criterion is not fully met; include what remains
+   c. Produce a completeness score: `completeness: N/M criteria met` (count COMPLETE as met).
+   d. If any criterion is INCOMPLETE, include specific remediation feedback and delegate to Builder for fixes. The Orchestrator tracks total Critic dispatch cycles (cohesion findings + completeness fixes share a single counter). If INCOMPLETE criteria remain after the 2-round cap is exhausted, escalate to operator for accept/defer.
+   e. Include the completeness results in the Critic's output, after the Contract Verification section. The `### Completeness` section goes inside the Cohesion Brief body. The `COMPLETENESS:` sentinel line must be emitted **after** the brief body and **before** the `GATE_RESULT:` line — as a top-level unindented line (not inside a code block). See `critic.md` § Cohesion Brief Format for the canonical output template.
+   f. The `COMPLETENESS:` line is a sentinel captured by `state-writer.sh` and recorded in the `cohesion-reviewed` state file. `GATE_RESULT:` must remain the last non-empty line of output (state-writer.sh depends on this). It is advisory in V1 — it does not block commits.
+7. **Proceed** — When Cohesion Brief shows clean (zero critical findings, or all findings operator-accepted) and completeness pass has no INCOMPLETE criteria (or remaining INCOMPLETE criteria are operator-accepted or round cap reached) → invoke QA for gate verification.
 
 ---
 

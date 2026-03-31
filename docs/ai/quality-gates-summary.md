@@ -11,7 +11,7 @@
 | **A2 Process** | Plan before code. Session log updated at close. Scope >100 lines requires `large-scope: true` in `plan-approved`. Hotfix: scope limit relaxed. | `plan-approved` |
 | **A3 Quality** | Formatter, lint, build/compile pass (when tooling exists). | — |
 | **A4 Safety** | No secrets/PII. High-risk path/content detection → Reviewer + Security sign-off. Automation-specific: no unbriefed network calls, new deps, or out-of-repo writes. | `reviewer-signed`, `security-signed` |
-| **A5 Cohesion** _(standard+ only)_ | Critic cohesion review clean. Contract `verification:` criteria evaluated (advisory). | `cohesion-reviewed` |
+| **A5 Cohesion** _(standard+ only)_ | Critic cohesion review clean. Contract `verification:` criteria evaluated (advisory). Completeness pass: each criterion scored COMPLETE/INCOMPLETE/PARTIAL; INCOMPLETE triggers loop-back to Builder (advisory, 2-round cap). Completeness score recorded in `cohesion-reviewed` state file. | `cohesion-reviewed` |
 | **A6 Task Group** _(taskgroup only)_ | Contract with `status: in_progress` exists; modified contract YAML staged. | — (contract file check) |
 
 ## Push Gates (B)

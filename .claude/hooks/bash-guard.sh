@@ -151,6 +151,20 @@ if [ "$_BG_SESSION_TYPE" = "ephemeral" ]; then
 fi
 
 # ============================================================
+# Phase 3c: Cycle cap advisory (Decision: session cycle cap)
+# ============================================================
+# Surface advisory when cycle count >= 5 on first Bash call of that cycle.
+# Uses _load_phase_state cache populated by get_session_type above (zero forks).
+# Advisory only — never blocks.
+if [ "$_EPHEMERAL_FAST_EXIT" = false ] && [ -n "$_PS_CYCLE" ] && [ "$_PS_CYCLE" -ge 5 ] 2>/dev/null; then
+  _cycle_marker="$(get_session_state_dir)/cycle-advisory-$_PS_CYCLE"
+  if [ ! -f "$_cycle_marker" ]; then
+    echo "Advisory: Session cycle count is $_PS_CYCLE (threshold: 5). Consider whether continued looping is productive." >&2
+    printf '%s\n' "$_PS_CYCLE" > "$_cycle_marker" 2>/dev/null || true
+  fi
+fi
+
+# ============================================================
 # Phase 4: Gate 7 enforcement (uses sourced functions)
 # ============================================================
 

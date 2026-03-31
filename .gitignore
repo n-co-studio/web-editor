@@ -44,12 +44,16 @@ editor-queue-status.yaml
 # Automation runtime artifacts (Decision 0017)
 .claude/.automation/queue/
 .claude/.automation/reports/
+.claude/.automation/review-items/
 .claude/.automation/escalations/
 .claude/.automation/briefs/
 .claude/.automation/logs/
 
 # Operator-specific child repo registry (use child-repos.conf.example as template)
 .claude/.automation/child-repos.conf
+
+# Knowledge graph lock directory (Decision 0034)
+docs/ai/knowledge-graph/.kg-lock
 
 # Session worktree isolation (Decision 0033)
 .worktrees/

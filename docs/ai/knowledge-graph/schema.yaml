@@ -1,0 +1,111 @@
+# Knowledge Graph Schema — Repo OS
+# Decision 0034 — Knowledge Graph Data Layer
+#
+# Defines the structure for graph.yaml. Schema changes require decision amendment.
+
+schema_version: 1
+
+node_fields:
+  id:
+    type: string
+    format: kebab-case
+    required: true
+    description: "Unique identifier for the node"
+  type:
+    type: enum
+    values:
+      - file
+      - decision
+      - hook
+      - prompt
+      - contract
+      - concept
+      - convention
+    required: true
+    description: "Entity category"
+  path:
+    type: string
+    required: false
+    description: "File path relative to repo root (if applicable)"
+  description:
+    type: string
+    required: true
+    description: "One-line description of the entity"
+  last_verified:
+    type: string
+    format: ISO-8601-date
+    required: true
+    description: "Date this node was last verified as accurate"
+  status:
+    type: enum
+    values:
+      - active
+      - stale
+      - unverified
+    required: true
+    description: "Current verification status"
+
+edge_fields:
+  source:
+    type: string
+    format: node-id-reference
+    required: true
+    description: "Source node id"
+  target:
+    type: string
+    format: node-id-reference
+    required: true
+    description: "Target node id"
+  relation:
+    type: enum
+    values:
+      - governs
+      - constrains
+      - implements
+      - depends-on
+      - produces
+      - consumes
+      - tests
+      - supersedes
+    required: true
+    description: "Semantic relationship type"
+  context:
+    type: string
+    required: true
+    description: "One-line description of why this connection exists"
+  source_type:
+    type: enum
+    values:
+      - agent-inferred
+      - operator-curated
+    required: true
+    description: "Origin of the edge — operator-curated edges are immutable by agents"
+  last_verified:
+    type: string
+    format: ISO-8601-date
+    required: true
+    description: "Date this edge was last verified"
+  status:
+    type: enum
+    values:
+      - active
+      - stale
+      - unverified
+    required: true
+    description: "Current verification status"
+  confidence:
+    type: float
+    range: [0, 1]
+    required: false
+    description: "Confidence score (agent-inferred only). Convention nodes start at 0.3-0.5"
+
+# Edge type taxonomy (8 types — extensions require decision amendment):
+#
+# governs      — Authority relationship (decision → code path)
+# constrains   — Behavioral restriction (convention → file, decision → hook)
+# implements   — Spec-to-code binding (code → spec feature)
+# depends-on   — Structural dependency (covers calls, imports, sourcing)
+# produces     — Data flow out (hook → state file, script → output)
+# consumes     — Data flow in (hook reads state file, agent reads config)
+# tests        — Verification relationship (test → module, QA → gate)
+# supersedes   — Versioning/deprecation (new decision → old decision)

@@ -52,3 +52,5 @@
 0030|\.claude/hooks/(state-writer|_analytics-helper|_phase-helper|session-close-check|_cleanup-helper)\.sh|is_full_worktree_session, get_session_state_dir, REPO_OS_SESSION_ID, wt-sessions, merge-lock
 0032|docs/ai/(workflow-appendix/session-type-task-group|prompts/prompt-t-task-definition|task-groups/_contract-template)\.|parallel, worktree, Execution: parallel, worktree isolation, per-brief branch
 0033|\.claude/(\.automation/runner|hooks/(session-close-check|_phase-helper|_cleanup-helper|_analytics-helper))\.sh|worktree, REPO_OS_WORKTREE_ISOLATE, --worktree, session isolation, concurrent session, .worktrees
+0034|docs/ai/knowledge-graph/|knowledge graph, knowledge-graph, graph.yaml, schema.yaml, kg-seed, kg-relevance, semantic connection, edge type, staleness
+0034|\.claude/tools/kg-|knowledge graph, knowledge-graph, graph.yaml, schema.yaml, kg-seed, kg-relevance, semantic connection, edge type, staleness

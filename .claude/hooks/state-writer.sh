@@ -114,6 +114,16 @@ fi
 printf 'timestamp: %s\nagent: %s\nsession_id: %s\n%s\n' "$TIMESTAMP" "$AGENT_TYPE" "$STATE_SID" "$LAST_LINE" \
   > "$STATE_DIR/$STATE_FILE" 2>/dev/null || true
 
+# --- Completeness score capture (critic only, advisory V1) ---
+# When the Critic includes a COMPLETENESS: sentinel (from the completeness pass),
+# append it to the cohesion-reviewed state file. Advisory only — no gate reads this.
+if [ "$AGENT_TYPE" = "critic" ]; then
+  COMPLETENESS_LINE=$(echo "$LAST_MESSAGE" | grep -E '^COMPLETENESS: ' | tail -1 || true)
+  if [ -n "$COMPLETENESS_LINE" ]; then
+    printf '%s\n' "$COMPLETENESS_LINE" >> "$STATE_DIR/$STATE_FILE" 2>/dev/null || true
+  fi
+fi
+
 # --- Phase advancement based on agent verdict ---
 # Only advance on APPROVED results (BLOCKED loops back to build via orchestrator).
 # Fail-silent: if phase-state absent, skip advancement.

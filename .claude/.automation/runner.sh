@@ -1343,9 +1343,32 @@ while true; do
   # --- Merge-idempotency check (Phase 4: skip re-execution if already merged) ---
   _retry_count="${_QE_RETRY_COUNT:-0}"
   if [ "$_retry_count" -gt 0 ] && [ -n "$ENTRY_BRANCH" ]; then
-    # Prior attempt created a branch — check if it was already merged to main
-    if git merge-base --is-ancestor "$ENTRY_BRANCH" main 2>/dev/null; then
-      echo "Entry $ENTRY_ID: branch $ENTRY_BRANCH already merged to main — skipping re-execution" >&2
+    # Prior attempt created a branch — determine merge state
+    _merge_skip=false
+    if git rev-parse --verify "$ENTRY_BRANCH" >/dev/null 2>&1; then
+      # Branch exists — count commits ahead of main
+      _commits_ahead=$(git rev-list --count "main..$ENTRY_BRANCH" 2>/dev/null) || _commits_ahead=""
+      if [ -z "$_commits_ahead" ] || [ "$_commits_ahead" -eq 0 ] 2>/dev/null; then
+        # Zero commits ahead — branch was created but session crashed before committing.
+        # Delete the stale branch so the retry can create a fresh one.
+        echo "Entry $ENTRY_ID: branch $ENTRY_BRANCH has 0 commits ahead of main — stale branch from crashed session, deleting for retry" >&2
+        git branch -D "$ENTRY_BRANCH" 2>/dev/null || true
+        # Fall through to normal retry execution
+      elif git merge-base --is-ancestor "$ENTRY_BRANCH" main 2>/dev/null; then
+        # Commits ahead AND all reachable from main — genuinely merged
+        echo "Entry $ENTRY_ID: branch $ENTRY_BRANCH has $_commits_ahead commit(s) ahead and is merged to main — skipping re-execution" >&2
+        _merge_skip=true
+      else
+        # Commits ahead but NOT merged — unmerged work from prior attempt, retry
+        echo "Entry $ENTRY_ID: branch $ENTRY_BRANCH has $_commits_ahead commit(s) ahead but is not merged to main — retrying" >&2
+        # Fall through to normal retry execution
+      fi
+    else
+      # Branch does not exist — fresh start, proceed normally
+      echo "Entry $ENTRY_ID: branch $ENTRY_BRANCH does not exist — proceeding with fresh session" >&2
+    fi
+
+    if [ "$_merge_skip" = true ]; then
       # Transition directly to completed (locked)
       _skip_lock_attempts=0
       while ! acquire_queue_lock; do

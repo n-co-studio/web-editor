@@ -104,6 +104,39 @@ Report contract verification in the Cohesion Brief after the Findings section:
 2. [next criterion...]
 ```
 
+### Completeness Pass
+
+After the Contract Verification section, evaluate each `verification:` criterion against the current codebase state (not just the diff — read files, check existence, verify behavior). This pass is distinct from Contract Verification: it evaluates whether the work is *done*, not whether structural evidence exists in the diff.
+
+For each `verification:` criterion, produce a verdict:
+
+- **COMPLETE** — the criterion is demonstrably satisfied in the current codebase
+- **INCOMPLETE** — the criterion is not satisfied; include specific feedback on what is missing
+- **PARTIAL** — some evidence exists but the criterion is not fully met; include what remains
+
+Count COMPLETE verdicts as met. Produce a completeness score line.
+
+Report the completeness pass in the Cohesion Brief after the Contract Verification section:
+
+```
+### Completeness
+1. [criterion text] — COMPLETE | INCOMPLETE | PARTIAL
+   - Evidence: [what was found or what is missing]
+2. [next criterion...]
+```
+
+After the Cohesion Brief body (after `### Summary`), emit the `COMPLETENESS:` sentinel as a top-level unindented line, followed by `GATE_RESULT:` as the final line:
+
+```
+COMPLETENESS: N/M criteria met
+
+GATE_RESULT: APPROVED
+```
+
+REQUIRE: `COMPLETENESS:` must appear as a bare line at column 0 — not inside a code block, not indented. `GATE_RESULT:` must remain the last non-empty line of output (`state-writer.sh` depends on this ordering). `COMPLETENESS:` is captured by `state-writer.sh` via grep across the full message and recorded in the `cohesion-reviewed` state file. Advisory only in V1 — does not block commits.
+
+If no contract or `verification:` criteria are provided, skip the completeness pass silently (same as Contract Verification).
+
 ---
 
 ## Hypothesis Mode Review Scope
@@ -136,8 +169,20 @@ Report contract verification in the Cohesion Brief after the Findings section:
 
 2. [Next finding...]
 
+### Contract Verification
+1. [criterion text] — VERIFIED | UNVERIFIED | INCONCLUSIVE
+   - Evidence: [file:line or "none found"]
+
+### Completeness
+1. [criterion text] — COMPLETE | INCOMPLETE | PARTIAL
+   - Evidence: [what was found or what is missing]
+
 ### Summary
 - Critical: [count]
 - Recommendations: [count]
 - Scope: [clean | needs-fixes]
 ```
+
+COMPLETENESS: N/M criteria met
+
+GATE_RESULT: APPROVED

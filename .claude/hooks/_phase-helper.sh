@@ -371,6 +371,27 @@ _validate_phase_session() {
   return 1
 }
 
+# --- Cycle cap threshold check (advisory only) ---
+# Called by advance_phase() after incrementing cycle on backward transitions.
+# Cycle 3: emit advisory warning to stderr.
+# Cycle 5: emit stronger warning and write escalation marker to state dir.
+# Never blocks — purely informational for orchestrator awareness.
+# Arguments: $1 = current cycle count, $2 = state directory path
+_check_cycle_limit() {
+  local cycle="$1"
+  local state_dir="$2"
+
+  if [ "$cycle" -ge 5 ]; then
+    echo "Advisory: Session cycle count is $cycle (threshold: 5). Consider whether continued looping is productive or if the task should be escalated/decomposed." >&2
+    # Write escalation marker for orchestrator detection
+    printf 'cycle_count: %s\nthreshold: 5\ntimestamp: %s\nmessage: Session has cycled %s times — review whether task needs decomposition or operator input.\n' \
+      "$cycle" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$cycle" \
+      > "$state_dir/cycle-escalation" 2>/dev/null || true
+  elif [ "$cycle" -ge 3 ]; then
+    echo "Advisory: Session cycle count is $cycle. Multiple review→build loops may indicate scope or complexity issues." >&2
+  fi
+}
+
 # ============================================================
 # Public API
 # ============================================================
@@ -518,6 +539,14 @@ advance_phase() {
         break
       fi
     done
+  fi
+
+  # --- Cycle cap check (advisory) ---
+  # After incrementing cycle on a backward transition, check thresholds.
+  # Cycle >= 3: advisory warning. Cycle >= 5: escalation marker to state dir.
+  # Advisory only — never blocks. Works for all 18 session types.
+  if [ "$is_loop" = true ]; then
+    _check_cycle_limit "$cycle" "$state_dir"
   fi
 
   if [ "$is_loop" = false ]; then

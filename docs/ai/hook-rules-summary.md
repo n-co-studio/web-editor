@@ -15,5 +15,7 @@
 | Phase re-init blocked | _phase-helper (init_phase) | Set `REPO_OS_ALLOW_REINIT=1` for crash recovery |
 | High-risk without sign-off | pre-commit-gates | Dispatch Reviewer + Security agents |
 | Secret detected (A4) | pre-commit-gates / session-close-check | Remove secret from staged files. Pattern: `_secret-pattern.sh` (single source of truth) |
+| Cycle count >= 3 | _phase-helper (advance_phase) | Advisory only — review scope and complexity |
+| Cycle count >= 5 | _phase-helper (advance_phase) + bash-guard (Phase 3c) | Advisory + escalation marker in `.claude/.state/cycle-escalation`. Consider decomposing task or requesting operator input |
 
 Recovery: `REPO_OS_RECOVER=1` bypasses all state-dependent checks (emergency only). File-based signal: `.claude/.state/.recover-signal` (single-use, consumed by first hook). See Decision 0031.

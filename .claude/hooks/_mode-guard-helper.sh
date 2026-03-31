@@ -69,6 +69,7 @@ is_carved_out() {
       case "$p" in
         .claude/agents/*) return 0 ;;
         .claude/hooks/*) return 0 ;;
+        .claude/tools/*) return 0 ;;
         .claude/settings.json) return 0 ;;
         .claude/settings.local.json) return 0 ;;
         .claude/local/session-log.md) return 0 ;;
@@ -83,6 +84,7 @@ is_carved_out() {
         docs/ai/quality-gates.md|docs/ai/hook-rules-summary.md|docs/ai/quality-gates-summary.md|docs/ai/workflow-summary.md) return 0 ;;
         docs/ai/workflow-appendix/*) return 0 ;;
         docs/ai/governance/*) return 0 ;;
+        docs/ai/knowledge-graph/*) return 0 ;;
         docs/ai/task-groups/_contract-template.yaml) return 0 ;;
         docs/spec/_templates/*) return 0 ;;
         AI.md) return 0 ;;
