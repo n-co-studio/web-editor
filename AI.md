@@ -47,7 +47,7 @@ On-demand (loaded by orchestrator.md triggers, not at session start):
 - docs/ai/workflow-appendix/session-type-task-group.md (read when session type is task-group or taskgroup-merge — detected at init from `### Task Group` in brief)
 - docs/ai/workflow-appendix/session-type-automation.md (read when session type is automation — detected at init from runner context or operator signal)
 - docs/ai/workflow-appendix/session-type-queue-triage.md (read when session type is queue-triage — detected at init from Prompt Q invocation)
-- docs/ai/knowledge-graph/graph.yaml (read when task brief references files with graph nodes or session touches governance-adjacent paths; used for relevance scoring via `.claude/tools/kg-relevance.sh`; Decision 0034)
+- docs/ai/knowledge-graph/graph.yaml, docs/ai/knowledge-graph/product-graph.yaml (read when task brief references files with graph nodes or session touches governance-adjacent paths; used for relevance scoring via `.claude/tools/kg-relevance.sh` which searches both graphs automatically; Decision 0034)
 - docs/ai/quality-gates.md (read in full when in verify or commit phase, or when QA agent is dispatched)
 - docs/ai/workflow.md (read when `upgrade_session_type` is called on an ephemeral session; read in full when in verify or commit phase, or when detailed close sequence reference is needed)
 

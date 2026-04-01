@@ -52,8 +52,9 @@ editor-queue-status.yaml
 # Operator-specific child repo registry (use child-repos.conf.example as template)
 .claude/.automation/child-repos.conf
 
-# Knowledge graph lock directory (Decision 0034)
-docs/ai/knowledge-graph/.kg-lock
+# Knowledge graph lock directories (Decision 0034)
+docs/ai/knowledge-graph/.graph-lock
+docs/ai/knowledge-graph/.product-graph-lock
 
 # Session worktree isolation (Decision 0033)
 .worktrees/

@@ -81,8 +81,9 @@ If issues found: list only the problems, propose fixes, and wait for operator ap
 
 After Phase 3 validation passes ("Repo OS ready") and before writing governance evidence:
 
-- If `docs/ai/knowledge-graph/graph.yaml` does not exist or is empty, run `.claude/tools/kg-seed.sh` to bootstrap the knowledge graph from governance metadata. This ensures every repo initialized with Prompt A gets a seeded graph.
+- If `docs/ai/knowledge-graph/graph.yaml` does not exist or is empty, run `.claude/tools/kg-seed.sh --target template` to bootstrap the template knowledge graph from governance metadata. This ensures every repo initialized with Prompt A gets a seeded template graph.
 - If `docs/ai/knowledge-graph/graph.yaml` already exists and has content (re-run of Prompt A), skip seeding — the graph has likely been enriched by agent sessions and seeding would overwrite agent-inferred edges.
+- Do NOT create `product-graph.yaml` in the template repo — child repos create it locally via `kg-seed.sh --target product`.
 
 Graph seeding is **advisory** — if `kg-seed.sh` fails, proceed to governance evidence and close normally.
 

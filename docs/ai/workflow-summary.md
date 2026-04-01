@@ -16,7 +16,7 @@
 
 ## Close Sequence
 
-1. Knowledge graph update (advisory — Decision 0034): update `graph.yaml` via shell I/O if it exists — new nodes, new edges, updated `last_verified`. Non-blocking
+1. Knowledge graph update (advisory — Decision 0034): update the appropriate graph (`graph.yaml` for template, `product-graph.yaml` for product) via shell I/O if either exists — new nodes, new edges, updated `last_verified`. Cross-layer edges go in source node's graph. Non-blocking
 2. Update session log (product: `docs/ai/logs/session-log.md`; template: `.claude/local/session-log.md`)
 3. Commit all remaining changes including session log
 4. Solo merge: `git checkout main && git merge --ff-only <branch>` (fallback `--no-ff`)

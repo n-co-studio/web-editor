@@ -15,7 +15,7 @@ Lightweight spec-mode dispatch of Architect + Exploration + Critic + Pragmatist 
 2. **Orchestrator → Architect + Exploration + Critic + Pragmatist**: Parallel dispatch with task context + specs
 3. **Specialists → Orchestrator**: Lightweight briefs (same format as advisory board)
 4. **Orchestrator → Operator**: Synthesized draft task brief for review
-5. **Operator → Orchestrator**: Approve / revise / narrow / abandon
+5. **Operator → Orchestrator**: Approve — display only / Approve & queue / Revise / Abandon (Narrow via "Other")
 6. **Orchestrator → Operator**: Final task brief displayed for copy-paste into Prompt B
 
 No file artifacts. No session log entry. No handoff to Build Flow — the operator manually carries the brief to a new Prompt B session.
@@ -194,31 +194,39 @@ User Review agents are dispatched by the Orchestrator during the `user-review` p
 
 ## Knowledge Graph Protocol (Decision 0034)
 
-When `docs/ai/knowledge-graph/graph.yaml` exists, agents participating in build sessions update the graph at session close with connections discovered during the session.
+Two-graph architecture: template infrastructure nodes live in `graph.yaml`, product code nodes live in `product-graph.yaml`. When either graph exists, agents participating in build sessions update the appropriate graph at session close with connections discovered during the session.
+
+### Graph File Routing
+- **Template graph** (`docs/ai/knowledge-graph/graph.yaml`): nodes for governance files — decisions, hooks, prompts, agents, conventions, concepts. Syncs to child repos via template sync
+- **Product graph** (`docs/ai/knowledge-graph/product-graph.yaml`): nodes for product application code. Child-owned, excluded from template sync. Not created in the template repo
+- **Cross-layer edges**: stored in the source node's graph file (e.g., a product node that `depends-on` a template hook stores that edge in the product graph)
+- **"Shared" concept**: derived at read time by detecting template nodes with incoming cross-layer edges from the product graph. Not a stored value
+- **ID uniqueness**: product nodes use distinct prefixes from template nodes (convention). Template nodes keep current prefixes (`decision-*`, `hook-*`, `agent-*`, etc.)
 
 ### Graph-First Lookup
 
 All agents in build sessions SHOULD consult graph context before broad codebase searches. The knowledge graph provides pre-computed connections that are faster and more complete than runtime search for governance relationships, cross-file dependencies, and data flow.
 
-- **Context injection is mechanical**: At build phase entry, `_phase-helper.sh` automatically runs `kg-relevance.sh` and writes the output to `.claude/.state/kg-relevance-context`. Agents do not need to load the graph manually — the context is pre-computed and available at that well-known path.
+- **Context injection is mechanical**: At build phase entry, `_phase-helper.sh` automatically runs `kg-relevance.sh` (which searches both graphs) and writes the output to `.claude/.state/kg-relevance-context`. Agents do not need to load the graph manually — the context is pre-computed and available at that well-known path.
 - **When to consult**: Before running broad searches (`grep -r`, `find`, repo-wide glob patterns) to discover which files are affected by changes. Read `.claude/.state/kg-relevance-context` first for pre-computed relevance-scored connections.
 - **When to search instead**: (a) Files not yet in the knowledge graph, (b) connections the graph doesn't cover (e.g., string literals, configuration values), (c) verifying graph edges you suspect are stale.
 - **When the context file is absent**: The graph may not exist or the task may lack a contract with scope files. Proceed with normal search — no enforcement.
 
 ### Rules
 - Graph writes use shell I/O (Bash redirection — not model Edit/Write tools) per Decision 0034
+- Route writes to the correct graph: template files → `graph.yaml`, product files → `product-graph.yaml`
 - Operator-curated edges (`source_type: operator-curated`) are never modified by agents
 - Agent-written edges use `source_type: agent-inferred` with appropriate `confidence` scores (0.7 for verified connections, 0.3–0.5 for inferred conventions)
 - Edge types are limited to the 8-type taxonomy in Decision 0034: `governs`, `constrains`, `implements`, `depends-on`, `produces`, `consumes`, `tests`, `supersedes` — do not invent new types
-- Use `mkdir`-based locking before writing: acquire `mkdir docs/ai/knowledge-graph/.graph-lock 2>/dev/null`, release `rmdir docs/ai/knowledge-graph/.graph-lock`
+- Use `mkdir`-based locking before writing: template graph uses `.graph-lock`, product graph uses `.product-graph-lock`
 - When traversing and confirming existing edges, update `last_verified` to the current date and set `status: active`
 - Invalid edges get `status: stale` (never deleted by agents)
 - Graph updates are **advisory** (not blocking) — if the write fails, the session still commits normally
 
 ### Lifecycle
-- **Read**: On-demand at session start via `.claude/tools/kg-relevance.sh` when task scope overlaps graph nodes (orchestrator trigger)
-- **Write**: At session close, before the final commit — new nodes, new edges, updated `last_verified` dates
-- **Seed**: During Prompt A initialization via `.claude/tools/kg-seed.sh` when no graph exists
+- **Read**: On-demand at session start via `.claude/tools/kg-relevance.sh` when task scope overlaps graph nodes (orchestrator trigger). Searches both graphs automatically
+- **Write**: At session close, before the final commit — new nodes, new edges, updated `last_verified` dates. Route to the correct graph by layer
+- **Seed**: During Prompt A initialization via `.claude/tools/kg-seed.sh --target template` when no template graph exists. Product graph seeded by child repos via `kg-seed.sh --target product`
 
 ---
 

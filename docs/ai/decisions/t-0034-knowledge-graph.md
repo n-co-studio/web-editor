@@ -8,7 +8,7 @@ Accepted
 - type: file
 - path: `docs/ai/knowledge-graph/`
 - path: `.claude/tools/kg-`
-- keywords: `knowledge graph, knowledge-graph, graph.yaml, schema.yaml, kg-seed, kg-relevance, semantic connection, edge type, staleness`
+- keywords: `knowledge graph, knowledge-graph, graph.yaml, product-graph.yaml, schema.yaml, kg-seed, kg-relevance, semantic connection, edge type, staleness, two-graph`
 
 ## Decision
 Add a persistent knowledge graph that maps semantic connections between codebase entities, enabling agents to consume pre-computed context and persist connection knowledge across sessions.
@@ -41,9 +41,25 @@ Add a persistent knowledge graph that maps semantic connections between codebase
 
 Adds a `layer` field to the node schema, enabling the knowledge graph to distinguish template infrastructure nodes from product code nodes.
 
-1. **Field definition**: `layer` — required enum field on all nodes. Values: `template` (governance and template infrastructure), `product` (product application code), `shared` (entities spanning both layers). Added to `schema.yaml` after the `status` field
+1. **Field definition**: `layer` — required enum field on all nodes. Values: `template` (governance and template infrastructure), `product` (product application code). Added to `schema.yaml` after the `status` field. "Shared" is not a stored value — it is derived at read time (see Amendment 2)
 2. **Migration**: All 69 existing nodes assigned `layer: "template"` — they are governance/template entities (decisions, hooks, prompts, agents, conventions, concepts, source-of-truth files)
 3. **Product nodes**: Product-layer nodes are seeded separately by child repos (e.g., massimo). This amendment does not add product nodes to the template graph
 4. **UI integration**: The massimo child repo implements layer-aware filtering in the knowledge graph explorer (filter chips, visual badges, color-coded edges). Product code changes live on branch `feature/knowledge-graph-layer-taxonomy` in the massimo repo
 5. **Validation**: The massimo validator (`kg-validate.ts`) enforces the `layer` field as required on all nodes. The massimo branch must be merged before this template change syncs downstream to avoid validation failures
 6. **Authorization**: This schema extension is authorized under §3 (schema changes require decision amendment)
+
+## Amendment 2 — Two-Graph Architecture (2026-03-31)
+
+Splits the single graph data file into a two-graph model — one for template infrastructure (synced to child repos) and one for product code (child-owned, never overwritten by template sync). This prevents template sync from destroying product graph data in child repos.
+
+1. **Split rationale**: Template sync overwrites `graph.yaml` in child repos, destroying product-layer nodes and edges added by the child. Splitting into two files with distinct sync behavior eliminates this data loss
+2. **File locations**: Template graph remains at `docs/ai/knowledge-graph/graph.yaml`. Product graph at `docs/ai/knowledge-graph/product-graph.yaml`. The product graph is NOT created in the template repo — child repos create it locally
+3. **Sync exclusion**: `product-graph.yaml` added to `.templatesyncignore`. This syncs to child repos as a protective measure, ensuring the path is excluded before any child creates their product graph
+4. **Cross-layer edge ownership**: Edges are stored in the source node's graph file. A product node that `depends-on` a template hook stores that edge in `product-graph.yaml`. This ensures each graph is self-contained for its layer's outbound relationships
+5. **Derived "shared" concept**: The `shared` value is removed from the `layer` enum. "Shared" is derived at read time by detecting template nodes that have incoming cross-layer edges from the product graph. This avoids ambiguity about which graph owns a "shared" node
+6. **Lock separation**: Each graph has its own lock directory — `.graph-lock` for the template graph, `.product-graph-lock` for the product graph. This allows concurrent writes to different graphs without contention
+7. **Seeder update**: `kg-seed.sh` gains `--target template|product` flag (default: `template`). The `--target` value determines the output file, lock directory, and `layer` field emitted on seeded nodes. Product seeding is a child-repo responsibility
+8. **Relevance scoring update**: `kg-relevance.sh` searches both graph files automatically. If only one exists, it searches that one. No complex merge logic — grep naturally handles multiple files
+9. **Cross-graph integrity check**: At the end of a seed run, `kg-seed.sh` validates that all edge `source`/`target` IDs exist as node IDs in the union of both graphs. Dangling references are reported as warnings (advisory)
+10. **ID uniqueness convention**: Product nodes use distinct prefixes from template nodes to prevent collisions across graphs. Template prefixes: `decision-*`, `hook-*`, `agent-*`, `prompt-*`, `sot-*`, `convention-*`, `concept-*`. Product prefixes are child-defined
+11. **Authorization**: This structural split is authorized under §3 (schema changes require decision amendment) and §8 (concurrent write safety)

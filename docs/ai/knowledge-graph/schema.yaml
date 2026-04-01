@@ -49,9 +49,8 @@ node_fields:
     values:
       - template
       - product
-      - shared
     required: true
-    description: "Whether this node belongs to template infrastructure, product code, or spans both layers"
+    description: "Whether this node belongs to template infrastructure or product code"
 
 edge_fields:
   source:

@@ -94,7 +94,7 @@ If the operator has already provided this context in their opening message, do n
 
 #### Step 2 — Dispatch Specialists
 
-Before dispatching specialists, check if `docs/ai/knowledge-graph/graph.yaml` exists. If it does, run `.claude/tools/kg-relevance.sh` with the operator's described scope files as arguments. Include the also-relevant files in the context given to Architect and Critic — the Architect uses graph connections to identify affected modules beyond what the operator described, and the Critic uses graph connections to identify untested or ungoverned relationships (Decision 0034). Skip silently when graph.yaml does not exist.
+Before dispatching specialists, check if either `docs/ai/knowledge-graph/graph.yaml` or `product-graph.yaml` exists. If so, run `.claude/tools/kg-relevance.sh` with the operator's described scope files as arguments (the script searches both graphs automatically). Include the also-relevant files in the context given to Architect and Critic — the Architect uses graph connections to identify affected modules beyond what the operator described, and the Critic uses graph connections to identify untested or ungoverned relationships (Decision 0034). Skip silently when neither graph exists.
 
 Dispatch all specialists in parallel. Each receives: the operator's task description, compiled spec files (if they exist), graph relevance output (if available), and codebase access.
 
@@ -144,16 +144,16 @@ Present the draft task brief to the operator. Use `AskUserQuestion` (not convers
       "header": "<brief title and summary>",
       "options": [
         {
-          "label": "Approve",
+          "label": "Approve — display only",
           "description": "Brief is final — display in copy-paste format"
+        },
+        {
+          "label": "Approve & queue",
+          "description": "Brief is final — display, write to disk, and add to automation queue (defaults: auto-approve yes, solo yes, push no)"
         },
         {
           "label": "Revise",
           "description": "Request changes to the brief"
-        },
-        {
-          "label": "Narrow",
-          "description": "Split into smaller briefs (task group)"
         },
         {
           "label": "Abandon",
@@ -168,25 +168,33 @@ Present the draft task brief to the operator. Use `AskUserQuestion` (not convers
 
 **Hook contract annotations (`plan-approval.sh`):**
 - `question` text: contains "task" and "brief" — Gate 1 passes (line 53, regex `\b(plan|brief|task)\b`)
-- `question` text contains "Approve" — Gate 2 passes at line 61 (regex `\b(approv|confirm|proceed|accept|ready)\b`); option label "Approve" provides redundant coverage via line 63
-- Selected answer (Gate 3 — line 89): "Approve" label text satisfies affirmative check
+- `question` text contains "Approve" — Gate 2 passes at line 61 (regex `\b(approv|confirm|proceed|accept|ready)\b`); both "Approve — display only" and "Approve & queue" labels provide redundant coverage via line 63
+- Selected answer (Gate 3 — line 89): both "Approve — display only" and "Approve & queue" label text contains "Approve", satisfying the affirmative check. "Queue" in the label does not interfere with any gate regex — `DETECTED_MODE` (lines 109–113) scans for `\bauto\b` or `\breview\b`, neither of which appears in "Approve & queue", so mode defaults to `review` (correct behavior)
+- Operators who want **Narrow** (split into smaller briefs) can select "Other" and type "Narrow" or "Split" — see Narrow path documentation below
 
 The operator reviews and may:
-- **Approve** — Brief is final. Displayed in copy-paste format.
+- **Approve — display only** — Brief is final. Proceeds to Step 5 (display brief in copy-paste format), then close.
+- **Approve & queue** — Brief is final. Proceeds to Step 5 (display brief), then executes queue intake inline:
+  1. **Write the brief to disk**: Path: `.claude/.automation/briefs/<YYYYMMDD-HHMMSS>-<slug>.md` (slug: derived from brief title, kebab-case, truncated to 50 chars). For task groups: write each brief as a separate file using the same naming convention.
+  2. **Add to queue**: Run `queue-cli.sh add --brief <path> --auto-approve --solo` (defaults: auto-approve yes, solo yes, push no). For task groups: add all briefs and create a work order. If the group has sequential execution, add entries in order with `--branch` for the shared group branch. If parallel, add all content briefs then the merge brief — each parallel content brief gets its own per-brief branch (`{group-branch}/brief-{seq}`), so omit `--branch` for content briefs (the worktree session creates the branch); use `--branch` for the merge brief only (targeting the group base branch).
+  3. **Start daemon**: Run `queue-cli.sh start-daemon` (checks PID file, starts daemon if not running).
+  4. **Confirm**: "Brief queued. Daemon is running." (or "Briefs queued. Work order created. Daemon is running." for task groups).
+  Operators who want non-default queue flags (e.g., push:yes, solo:no) can select "Other" and specify custom flags, or adjust post-hoc via `queue-cli.sh`.
 - **Revise** — Operator requests changes. Update and re-present.
-- **Narrow** — Operator says "too big." Split into multiple smaller briefs. Each sub-brief gets a `### Task Group` section with a shared group name, sequence number (N of M), and integration notes (produces/consumes). The first brief in the group creates the task group contract during its Prompt B session; subsequent briefs read and update it. See `docs/ai/task-groups/_contract-template.yaml` for the contract structure. When producing a task group, ask the operator whether to pre-approve all briefs (**auto** mode — agent completes each brief through merge autonomously) or review each brief individually (**review** mode — agent pauses for operator review before commit). The contract carries this setting.
-
-  **Parallel detection (Narrow path only):** After splitting into sub-briefs, evaluate whether briefs have non-overlapping file scope — no two briefs edit the same files or directories. If so, offer parallel execution: "These briefs have non-overlapping file scope. Run in parallel or sequential?" When the operator selects **parallel**:
-  1. Set `Execution: parallel` in each brief's `### Task Group` section
-  2. Add `Boundaries:` field to each brief — list of file paths/globs the brief owns exclusively
-  3. Auto-generate a **merge brief** (Brief M) appended after all content briefs. The merge brief uses the `taskgroup-merge` session type, performs cross-session cohesion review, integration verification, and merges to main. Template:
-     - **Goal:** Combine per-brief worktree branches, cross-session cohesion review, integration verification, and merge to main
-     - **Scope:** All files modified by Briefs 1–N (source branches read from `briefs[].branch` in the contract roster)
-     - **Approach:** Read contract, verify all briefs complete (completion markers present), combine per-brief branches (merge or cherry-pick each `briefs[].branch`), run cohesion review across combined diff (`git diff main...HEAD`), resolve integration issues and merge conflicts with per-brief attribution, merge + seal all branches
-  4. Shared files (e.g., index files, config) that multiple briefs would need to edit should be listed as merge brief boundaries, not individual brief boundaries
-  5. Each content brief runs as a full worktree session (`claude --worktree` with `REPO_OS_SESSION_ID`) and commits to its own branch. The merge brief combines these branches. See `docs/ai/workflow-appendix/session-type-task-group.md` § Parallel Execution and Decision 0032
-  When the operator selects **sequential** or parallel is not offered: existing behavior unchanged.
 - **Abandon** — Operator decides not to proceed. No output.
+
+**Narrow path (via "Other"):** If the operator selects "Other" and types "Narrow" or "Split", this triggers the Narrow path — the operator says "too big." Split into multiple smaller briefs. Each sub-brief gets a `### Task Group` section with a shared group name, sequence number (N of M), and integration notes (produces/consumes). The first brief in the group creates the task group contract during its Prompt B session; subsequent briefs read and update it. See `docs/ai/task-groups/_contract-template.yaml` for the contract structure. When producing a task group, ask the operator whether to pre-approve all briefs (**auto** mode — agent completes each brief through merge autonomously) or review each brief individually (**review** mode — agent pauses for operator review before commit). The contract carries this setting.
+
+**Parallel detection (Narrow path only):** After splitting into sub-briefs, evaluate whether briefs have non-overlapping file scope — no two briefs edit the same files or directories. If so, offer parallel execution: "These briefs have non-overlapping file scope. Run in parallel or sequential?" When the operator selects **parallel**:
+1. Set `Execution: parallel` in each brief's `### Task Group` section
+2. Add `Boundaries:` field to each brief — list of file paths/globs the brief owns exclusively
+3. Auto-generate a **merge brief** (Brief M) appended after all content briefs. The merge brief uses the `taskgroup-merge` session type, performs cross-session cohesion review, integration verification, and merges to main. Template:
+   - **Goal:** Combine per-brief worktree branches, cross-session cohesion review, integration verification, and merge to main
+   - **Scope:** All files modified by Briefs 1–N (source branches read from `briefs[].branch` in the contract roster)
+   - **Approach:** Read contract, verify all briefs complete (completion markers present), combine per-brief branches (merge or cherry-pick each `briefs[].branch`), run cohesion review across combined diff (`git diff main...HEAD`), resolve integration issues and merge conflicts with per-brief attribution, merge + seal all branches
+4. Shared files (e.g., index files, config) that multiple briefs would need to edit should be listed as merge brief boundaries, not individual brief boundaries
+5. Each content brief runs as a full worktree session (`claude --worktree` with `REPO_OS_SESSION_ID`) and commits to its own branch. The merge brief combines these branches. See `docs/ai/workflow-appendix/session-type-task-group.md` § Parallel Execution and Decision 0032
+When the operator selects **sequential** or parallel is not offered: existing behavior unchanged.
 
 Do not finalize without explicit operator approval.
 
@@ -313,69 +321,15 @@ lifecycle: task-scoped
 
 After displaying the brief, instruct: "Copy the block above and paste it into a new session to begin implementation." For phased briefs, instruct: "Copy each block into its own new session. Run them in order." For parallel briefs, instruct: "Copy each block into its own new session. Launch Briefs 1–N in parallel using `claude --worktree` with a unique `REPO_OS_SESSION_ID` per brief. Run the merge brief (Brief M) after all others complete — it will combine the per-brief branches."
 
-#### Step 6 — Queue Intake (opt-in)
-
-After displaying the brief in Step 5, use `AskUserQuestion` to offer queue intake. This ensures consistent use of structured dialogs for operator decisions.
-
-**Queue intake AskUserQuestion template:**
-
-```json
-{
-  "questions": [
-    {
-      "question": "Add to automation queue?",
-      "header": "Queue the brief for headless execution",
-      "options": [
-        {
-          "label": "Yes",
-          "description": "Write brief to disk and add to automation queue"
-        },
-        {
-          "label": "No",
-          "description": "Skip queue intake — close session normally"
-        }
-      ],
-      "multiSelect": false
-    }
-  ]
-}
-```
-
-> **CAUTION:** Do not add "plan", "brief", or "task" to the `question` text above — doing so would cause `plan-approval.sh` Gate 1 (line 53, regex `\b(plan|brief|task)\b`) to fire, erroneously writing `plan-approved` state. The current text "Add to automation queue?" deliberately avoids these trigger words.
-
-If the operator declines or does not respond, close the session normally — this step is opt-in.
-
-If the operator accepts:
-
-1. **Ask for queue flags** with sensible defaults:
-   - Auto-approve: yes/no (default: yes)
-   - Solo mode: yes/no (default: yes)
-   - Push on complete: yes/no (default: no)
-
-2. **Write the brief to disk**:
-   - Path: `.claude/.automation/briefs/<YYYYMMDD-HHMMSS>-<slug>.md`
-   - Slug: derived from the brief title, kebab-case, truncated to 50 chars
-   - For task groups: write each brief as a separate file using the same naming convention
-
-3. **Add to queue**:
-   - Run: `queue-cli.sh add --brief <path> [--auto-approve] [--solo] [--push]` with the operator-selected flags
-   - For task groups: add all briefs and create a work order. If the group has sequential execution, add entries in order with `--branch` for the shared group branch. If parallel, add all content briefs then the merge brief — each parallel content brief gets its own per-brief branch (`{group-branch}/brief-{seq}`), so omit `--branch` for content briefs (the worktree session creates the branch); use `--branch` for the merge brief only (targeting the group base branch)
-
-4. **Check daemon status and start if needed**:
-   - Run: `queue-cli.sh start-daemon`
-   - This checks the PID file and starts the daemon if not running
-
-5. **Confirm**: "Brief queued. Daemon is running." (or "Briefs queued. Work order created. Daemon is running." for task groups)
-
 ## Rules
 
-- REQUIRE: **never write files** except during Step 6 (Queue Intake), where writing brief files to `.claude/.automation/briefs/` and calling `queue-cli.sh` are permitted. All other output goes to the terminal.
-- REQUIRE: **never make code changes.** This is an exploration and planning session only. The Step 6 exception is narrow: only brief files in `.claude/.automation/briefs/` and queue CLI invocations. No product code changes.
+- REQUIRE: **never write files** except during the queue intake path of Step 4 ("Approve & queue"), where writing brief files to `.claude/.automation/briefs/` and calling `queue-cli.sh` are permitted. All other output goes to the terminal.
+- REQUIRE: **never make code changes.** This is an exploration and planning session only. The Step 4 queue intake exception is narrow: only brief files in `.claude/.automation/briefs/` and queue CLI invocations. No product code changes.
 - REQUIRE: **never create session log entries.** Prompt T sessions produce no artifacts and are exempt via the zero-change rule.
 - REQUIRE: **never dispatch specialists in Query mode.** Query mode is conversational — the Orchestrator answers directly.
 - REQUIRE: **always dispatch the 4 core specialists in Brief mode** (Architect, Exploration, Critic, Pragmatist). Additionally dispatch PM Advisory when a compiled spec (`manifest.json` `active` ≠ null) or `mvp-scope.yaml` exists. No tier selection — the core team is fixed, PM is conditional.
 - REQUIRE: **never finalize a brief without operator approval.** Always present the draft for review first.
-- REQUIRE: **use AskUserQuestion (not conversational acknowledgment) for operator approval** — consistent with orchestrator.md constraint. Applies to Step 4 (brief approval) and Step 6 (queue intake offer).
+- REQUIRE: **use AskUserQuestion (not conversational acknowledgment) for operator approval** — consistent with orchestrator.md constraint. Applies to Step 4 (brief approval and queue intake).
 - REQUIRE: **if specs don't exist, say so.** Note in the brief's Spec References section that specs were unavailable and the brief was grounded in codebase analysis alone.
 - REQUIRE: **never use the Agent tool with write-capable subagent types** (builder, qa-verifier, security-privacy, general-purpose, reviewer) or request worktree isolation. Only read-only advisory agents are permitted.
 - GUIDE: **if the task is too large for a single brief**, proactively suggest splitting. A brief that maps to more than one Prompt B session should be broken into sequential briefs.

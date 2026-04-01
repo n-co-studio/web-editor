@@ -113,10 +113,15 @@ Skip silently when none of the above conditions are met.
 
 ## Knowledge Graph Updates (Decision 0034)
 
-When `docs/ai/knowledge-graph/graph.yaml` exists, the Builder participates in the knowledge graph lifecycle:
+When either `docs/ai/knowledge-graph/graph.yaml` (template) or `product-graph.yaml` (product) exists, the Builder participates in the knowledge graph lifecycle:
+
+### Graph File Routing
+- **Template files** (governance, hooks, prompts, decisions, agents) → update `graph.yaml`
+- **Product files** (application code, product features) → update `product-graph.yaml`
+- **Cross-layer edges** (e.g., product node depends-on template hook) → stored in the source node's graph
 
 ### Graph-First File Discovery
-When you need to discover which files are affected by your changes, consult the knowledge graph context first. At build phase entry, `_phase-helper.sh` automatically runs `kg-relevance.sh` and writes pre-computed relevance-scored connections to `.claude/.state/kg-relevance-context`. Read this file before running broad codebase searches.
+When you need to discover which files are affected by your changes, consult the knowledge graph context first. At build phase entry, `_phase-helper.sh` automatically runs `kg-relevance.sh` (which searches both graphs) and writes pre-computed relevance-scored connections to `.claude/.state/kg-relevance-context`. Read this file before running broad codebase searches.
 
 Use grep/glob search only for:
 - Files not yet in the knowledge graph
@@ -129,13 +134,13 @@ When you discover connections not in the graph, note them for graph update at cl
 As you work, note connections you discover between files — governance relationships, dependencies, data flow, test coverage. These will be written to the knowledge graph at close.
 
 ### At Close (before commit)
-Update `docs/ai/knowledge-graph/graph.yaml` via shell I/O (Bash redirection — not Edit/Write tools) with:
-- New nodes for files you created (type matches: `file`, `decision`, `hook`, `prompt`, `contract`, `concept`, `convention`)
+Update the appropriate graph file via shell I/O (Bash redirection — not Edit/Write tools) with:
+- New nodes for files you created (type matches: `file`, `decision`, `hook`, `prompt`, `contract`, `concept`, `convention`). Set `layer` to match the graph (`template` or `product`)
 - New edges for connections you discovered (use `source_type: agent-inferred`, `status: active`, `confidence: 0.7` for connections verified during this session)
 - Updated `last_verified` dates for existing edges you traversed and confirmed
 - Edge types are limited to the 8-type taxonomy: `governs`, `constrains`, `implements`, `depends-on`, `produces`, `consumes`, `tests`, `supersedes`
 
-Use `mkdir`-based locking per Decision 0034 before writing (acquire: `mkdir docs/ai/knowledge-graph/.graph-lock 2>/dev/null`; release: `rmdir docs/ai/knowledge-graph/.graph-lock`). Operator-curated edges (`source_type: operator-curated`) are never modified by agents.
+Use `mkdir`-based locking per Decision 0034 before writing. Template graph uses `.graph-lock`, product graph uses `.product-graph-lock`. Operator-curated edges (`source_type: operator-curated`) are never modified by agents.
 
 Graph updates are **advisory** — if the graph write fails (lock contention, parse error), the session still commits normally. Do not block the close sequence on graph update failures.
 

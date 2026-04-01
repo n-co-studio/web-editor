@@ -29,6 +29,9 @@ docs/spec/prototypes/
 # Child-sync config (template-operator-specific local paths)
 .claude/.automation/child-repos.conf
 
+# Product knowledge graph (child-owned, never overwritten by template sync)
+docs/ai/knowledge-graph/product-graph.yaml
+
 # Workflow files (repo-specific; GITHUB_TOKEN cannot push workflow changes)
 .github/workflows/template-sync.yml
 .github/workflows/auto-version-tag.yml

@@ -58,7 +58,7 @@ Work happens on categorized branches. BLOCK: never commit directly to `main` —
 
 **Close sequence** — REQUIRE: execute these steps in order before the session ends:
 
-1. Knowledge graph update (advisory — Decision 0034): if `docs/ai/knowledge-graph/graph.yaml` exists, write new nodes, new edges (`source_type: agent-inferred`), and updated `last_verified` dates via shell I/O. Use `mkdir`-based locking. If the write fails, proceed — graph updates are non-blocking. See `.claude/agents/_agent-workflow.md` § Knowledge Graph Protocol
+1. Knowledge graph update (advisory — Decision 0034): if either `docs/ai/knowledge-graph/graph.yaml` (template) or `product-graph.yaml` (product) exists, update the appropriate graph with new nodes, new edges (`source_type: agent-inferred`), and updated `last_verified` dates via shell I/O. Template files → `graph.yaml`, product files → `product-graph.yaml`. Cross-layer edges go in the source node's graph. Use `mkdir`-based locking (`.graph-lock` for template, `.product-graph-lock` for product). If the write fails, proceed — graph updates are non-blocking. See `.claude/agents/_agent-workflow.md` § Knowledge Graph Protocol
 2. Update session log (`docs/ai/logs/session-log.md`; template mode: `.claude/local/session-log.md`)
 3. Commit all remaining changes including the session log
 4. Merge to main (solo mode) — REQUIRE: agent executes the merge explicitly:

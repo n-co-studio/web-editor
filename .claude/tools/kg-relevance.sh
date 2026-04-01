@@ -5,6 +5,9 @@
 # Given a list of scope files from a task brief, produces a ranked list of
 # also-relevant files by weighted graph traversal.
 #
+# Two-graph architecture (Amendment 2): searches both template graph
+# (graph.yaml) and product graph (product-graph.yaml) when both exist.
+#
 # Weight model:
 #   - Files in brief scope: weight x50
 #   - Direct edges from scope files: weight x10
@@ -21,10 +24,20 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-GRAPH_FILE="$REPO_ROOT/docs/ai/knowledge-graph/graph.yaml"
+TEMPLATE_GRAPH="$REPO_ROOT/docs/ai/knowledge-graph/graph.yaml"
+PRODUCT_GRAPH="$REPO_ROOT/docs/ai/knowledge-graph/product-graph.yaml"
 
-if [ ! -f "$GRAPH_FILE" ]; then
-  echo "ERROR: Graph file not found at $GRAPH_FILE" >&2
+# Build GRAPH_FILES list — both graphs if they exist, at least one required
+GRAPH_FILES=""
+if [ -f "$TEMPLATE_GRAPH" ]; then
+  GRAPH_FILES="$TEMPLATE_GRAPH"
+fi
+if [ -f "$PRODUCT_GRAPH" ]; then
+  GRAPH_FILES="${GRAPH_FILES:+$GRAPH_FILES }$PRODUCT_GRAPH"
+fi
+
+if [ -z "$GRAPH_FILES" ]; then
+  echo "ERROR: No graph files found (checked graph.yaml and product-graph.yaml)" >&2
   echo "Run .claude/tools/kg-seed.sh first to bootstrap the graph." >&2
   exit 1
 fi
@@ -65,12 +78,12 @@ fi
 # --- Build scope node set ---
 SCOPE_NODE_IDS=""
 for scope_file in $SCOPE_FILES; do
-  node_ids=$(grep -B5 "path: \"${scope_file}\"" "$GRAPH_FILE" 2>/dev/null | grep 'id: "' | sed 's/.*id: "\([^"]*\)".*/\1/' || true)
+  node_ids=$(grep -B5 "path: \"${scope_file}\"" $GRAPH_FILES 2>/dev/null | grep 'id: "' | sed 's/.*id: "\([^"]*\)".*/\1/' || true)
   if [ -n "$node_ids" ]; then
     SCOPE_NODE_IDS="${SCOPE_NODE_IDS:+$SCOPE_NODE_IDS }$node_ids"
   fi
   # Partial match for glob patterns
-  node_ids=$(grep -B5 "path: \".*${scope_file}" "$GRAPH_FILE" 2>/dev/null | grep 'id: "' | sed 's/.*id: "\([^"]*\)".*/\1/' || true)
+  node_ids=$(grep -B5 "path: \".*${scope_file}" $GRAPH_FILES 2>/dev/null | grep 'id: "' | sed 's/.*id: "\([^"]*\)".*/\1/' || true)
   if [ -n "$node_ids" ]; then
     SCOPE_NODE_IDS="${SCOPE_NODE_IDS:+$SCOPE_NODE_IDS }$node_ids"
   fi
@@ -94,7 +107,7 @@ _rank=0
 
 for scope_id in $SCOPE_NODE_IDS; do
   # Forward edges (scope is source)
-  grep -A8 "source: \"${scope_id}\"" "$GRAPH_FILE" 2>/dev/null | while IFS= read -r eline; do
+  grep -A8 "source: \"${scope_id}\"" $GRAPH_FILES 2>/dev/null | while IFS= read -r eline; do
     target=$(echo "$eline" | grep 'target: "' | sed 's/.*target: "\([^"]*\)".*/\1/')
     relation=$(echo "$eline" | grep 'relation: "' | sed 's/.*relation: "\([^"]*\)".*/\1/')
     status=$(echo "$eline" | grep 'status: "' | sed 's/.*status: "\([^"]*\)".*/\1/')
@@ -110,7 +123,7 @@ for scope_id in $SCOPE_NODE_IDS; do
   done || true
 
   # Reverse edges (scope is target)
-  grep -A8 "target: \"${scope_id}\"" "$GRAPH_FILE" 2>/dev/null | while IFS= read -r eline; do
+  grep -A8 "target: \"${scope_id}\"" $GRAPH_FILES 2>/dev/null | while IFS= read -r eline; do
     source=$(echo "$eline" | grep 'source: "' | sed 's/.*source: "\([^"]*\)".*/\1/')
     relation=$(echo "$eline" | grep 'relation: "' | sed 's/.*relation: "\([^"]*\)".*/\1/')
     status=$(echo "$eline" | grep 'status: "' | sed 's/.*status: "\([^"]*\)".*/\1/')
@@ -131,7 +144,7 @@ if [ -f "$SCORE_FILE" ] && [ -s "$SCORE_FILE" ]; then
   HOP1_NODES=$(cut -d' ' -f1 "$SCORE_FILE" | sort -u)
   for hop1_id in $HOP1_NODES; do
     case " $SCOPE_NODE_IDS " in *" $hop1_id "*) continue ;; esac
-    grep -A8 "source: \"${hop1_id}\"" "$GRAPH_FILE" 2>/dev/null | while IFS= read -r eline; do
+    grep -A8 "source: \"${hop1_id}\"" $GRAPH_FILES 2>/dev/null | while IFS= read -r eline; do
       target=$(echo "$eline" | grep 'target: "' | sed 's/.*target: "\([^"]*\)".*/\1/')
       relation=$(echo "$eline" | grep 'relation: "' | sed 's/.*relation: "\([^"]*\)".*/\1/')
       if [ -n "$target" ]; then
@@ -213,7 +226,7 @@ if [ "$CONTEXT_INJECT" = true ]; then
   while IFS=$'\t' read -r _node_id _score _edge_path; do
     [ -z "$_node_id" ] && continue
     _rank=$((_rank + 1))
-    _fpath=$(grep -A3 "id: \"${_node_id}\"" "$GRAPH_FILE" 2>/dev/null | grep 'path: "' | head -1 | sed 's/.*path: "\([^"]*\)".*/\1/' || true)
+    _fpath=$(grep -A3 "id: \"${_node_id}\"" $GRAPH_FILES 2>/dev/null | grep 'path: "' | head -1 | sed 's/.*path: "\([^"]*\)".*/\1/' || true)
     _relation=$(echo "$_edge_path" | sed 's/.*->\([^-]*\)->.*$/\1/' | xargs)
     if [ -n "$_fpath" ]; then
       _ci_output="${_ci_output}
@@ -253,7 +266,7 @@ echo ""
 echo "File paths for top results:"
 while IFS=$'\t' read -r _node_id _score _edge_path; do
   [ -z "$_node_id" ] && continue
-  file_path=$(grep -A3 "id: \"${_node_id}\"" "$GRAPH_FILE" 2>/dev/null | grep 'path: "' | head -1 | sed 's/.*path: "\([^"]*\)".*/\1/' || true)
+  file_path=$(grep -A3 "id: \"${_node_id}\"" $GRAPH_FILES 2>/dev/null | grep 'path: "' | head -1 | sed 's/.*path: "\([^"]*\)".*/\1/' || true)
   if [ -n "$file_path" ] && [ "$file_path" != "" ]; then
     echo "  $file_path"
   fi

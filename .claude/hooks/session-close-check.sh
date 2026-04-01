@@ -850,19 +850,23 @@ else
 fi
 
 # --- Knowledge graph update reminder (Decision 0034, advisory) ---
-KG_GRAPH_FILE="$REPO_ROOT/docs/ai/knowledge-graph/graph.yaml"
-if [ -f "$KG_GRAPH_FILE" ]; then
-  # Check if any modified files have nodes in the graph
+# Two-graph architecture: check both template graph (graph.yaml) and product graph (product-graph.yaml)
+KG_TEMPLATE_GRAPH="$REPO_ROOT/docs/ai/knowledge-graph/graph.yaml"
+KG_PRODUCT_GRAPH="$REPO_ROOT/docs/ai/knowledge-graph/product-graph.yaml"
+if [ -f "$KG_TEMPLATE_GRAPH" ] || [ -f "$KG_PRODUCT_GRAPH" ]; then
+  # Check if any modified files have nodes in either graph
   KG_MODIFIED_FILES=$(git -C "$REPO_ROOT" diff --cached --name-only 2>/dev/null || git -C "$REPO_ROOT" diff --name-only HEAD 2>/dev/null || true)
   KG_HAS_GRAPH_NODE=false
   for kgf in $KG_MODIFIED_FILES; do
-    if grep -q "path: \"${kgf}\"" "$KG_GRAPH_FILE" 2>/dev/null; then
-      KG_HAS_GRAPH_NODE=true
-      break
-    fi
+    for kg_file in "$KG_TEMPLATE_GRAPH" "$KG_PRODUCT_GRAPH"; do
+      if [ -f "$kg_file" ] && grep -q "path: \"${kgf}\"" "$kg_file" 2>/dev/null; then
+        KG_HAS_GRAPH_NODE=true
+        break 2
+      fi
+    done
   done
   if [ "$KG_HAS_GRAPH_NODE" = true ]; then
-    _add_advisory "Advisory: Modified files have knowledge graph nodes — consider updating graph.yaml (last_verified, new edges) before close. See Decision 0034."
+    _add_advisory "Advisory: Modified files have knowledge graph nodes — update the appropriate graph before close. Template files → graph.yaml, product files → product-graph.yaml. Cross-layer edges go in the source node's graph. See Decision 0034."
   fi
 fi
 

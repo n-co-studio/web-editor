@@ -496,14 +496,15 @@ init_phase() {
 # Advisory only — failures are silently ignored.
 _inject_kg_context() {
   local repo_root="$_REPO_OS_ROOT"
-  local graph_file="$repo_root/docs/ai/knowledge-graph/graph.yaml"
+  local template_graph="$repo_root/docs/ai/knowledge-graph/graph.yaml"
+  local product_graph="$repo_root/docs/ai/knowledge-graph/product-graph.yaml"
   local contract_file="$repo_root/.claude/local/task-contract.yaml"
   # Use flat .state/ path (not per-session dir) so agents can find it at a
   # well-known location regardless of worktree session state directory scoping.
   local output_file="$repo_root/.claude/.state/kg-relevance-context"
 
-  # Gate: graph must exist
-  [ -f "$graph_file" ] || return 0
+  # Gate: at least one graph must exist
+  [ -f "$template_graph" ] || [ -f "$product_graph" ] || return 0
 
   # Gate: task contract must exist with scope_files
   [ -f "$contract_file" ] || return 0
@@ -758,7 +759,7 @@ advance_phase() {
   write_resume_marker "$stype" "$sid" "$new_phase" "$phases_completed"
 
   # Inject knowledge graph context when entering build phase (Decision 0034)
-  # Advisory — failures silently ignored. Gated on graph.yaml + task contract.
+  # Advisory — failures silently ignored. Gated on graph existence + task contract.
   if [ "$new_phase" = "build" ]; then
     _inject_kg_context
   fi
