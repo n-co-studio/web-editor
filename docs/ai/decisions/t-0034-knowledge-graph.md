@@ -36,3 +36,14 @@ Add a persistent knowledge graph that maps semantic connections between codebase
 - Decision 0009 pattern followed: shell I/O for session-boundary writes
 - Decision 0014 respected: graph read at init, graph write before commit
 - Decision 0030/0033 respected: concurrent write safety via mkdir locking
+
+## Amendment — Layer Taxonomy (2026-03-31)
+
+Adds a `layer` field to the node schema, enabling the knowledge graph to distinguish template infrastructure nodes from product code nodes.
+
+1. **Field definition**: `layer` — required enum field on all nodes. Values: `template` (governance and template infrastructure), `product` (product application code), `shared` (entities spanning both layers). Added to `schema.yaml` after the `status` field
+2. **Migration**: All 69 existing nodes assigned `layer: "template"` — they are governance/template entities (decisions, hooks, prompts, agents, conventions, concepts, source-of-truth files)
+3. **Product nodes**: Product-layer nodes are seeded separately by child repos (e.g., massimo). This amendment does not add product nodes to the template graph
+4. **UI integration**: The massimo child repo implements layer-aware filtering in the knowledge graph explorer (filter chips, visual badges, color-coded edges). Product code changes live on branch `feature/knowledge-graph-layer-taxonomy` in the massimo repo
+5. **Validation**: The massimo validator (`kg-validate.ts`) enforces the `layer` field as required on all nodes. The massimo branch must be merged before this template change syncs downstream to avoid validation failures
+6. **Authorization**: This schema extension is authorized under §3 (schema changes require decision amendment)

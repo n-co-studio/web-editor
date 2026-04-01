@@ -77,6 +77,15 @@ If a task brief exists, instruct the operator to append it.
 
 If issues found: list only the problems, propose fixes, and wait for operator approval before confirming readiness.
 
+## Knowledge Graph Seeding (Decision 0034)
+
+After Phase 3 validation passes ("Repo OS ready") and before writing governance evidence:
+
+- If `docs/ai/knowledge-graph/graph.yaml` does not exist or is empty, run `.claude/tools/kg-seed.sh` to bootstrap the knowledge graph from governance metadata. This ensures every repo initialized with Prompt A gets a seeded graph.
+- If `docs/ai/knowledge-graph/graph.yaml` already exists and has content (re-run of Prompt A), skip seeding — the graph has likely been enriched by agent sessions and seeding would overwrite agent-inferred edges.
+
+Graph seeding is **advisory** — if `kg-seed.sh` fails, proceed to governance evidence and close normally.
+
 ## Governance Evidence
 
 After Phase 3 validation passes ("Repo OS ready"), write a governance evidence file at `docs/ai/governance/advisory-reviewed`:

@@ -44,6 +44,14 @@ node_fields:
       - unverified
     required: true
     description: "Current verification status"
+  layer:
+    type: enum
+    values:
+      - template
+      - product
+      - shared
+    required: true
+    description: "Whether this node belongs to template infrastructure, product code, or spans both layers"
 
 edge_fields:
   source:

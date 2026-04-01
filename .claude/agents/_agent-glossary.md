@@ -150,6 +150,8 @@ Governance evidence in `.claude/.state/`. Written by hooks via shell I/O (never 
 | `session-resume.yaml` | `_phase-helper.sh` (`write_resume_marker`) | Compression recovery — orchestrator reads after context compression to resume without re-dispatching governance agents. Updated at every phase transition. Cleaned by `cleanup_session_files` |
 | `cycle-escalation` | `_phase-helper.sh` (`_check_cycle_limit`) | Cycle cap escalation marker — written when session cycle count reaches 5+. Advisory only (no gate). Cleaned by `cleanup_session_files` |
 | `cycle-advisory-N` | `bash-guard.sh` (Phase 3c) | Per-cycle dedup marker — prevents repeated advisory output on each Bash call within the same cycle. Cleaned by `cleanup_session_files` |
+| `kg-relevance-context` | `_phase-helper.sh` (`_inject_kg_context`) | Pre-computed knowledge graph relevance context for the current brief's scope files — written at build phase entry, read by agents before broad codebase searches (Decision 0034). Cleaned by `cleanup_session_files` |
+| `kg-search-advisory-fired` | `bash-guard.sh` (Phase 1b) | One-shot dedup marker — prevents repeated graph-first advisory on broad search patterns during build phase. Cleaned by `cleanup_session_files` |
 
 **Sentinel files** (`.claude/local/`, persistent across sessions, gitignored): `.pragmatist-enforced` (backward-compatible gate deployment marker — written on first `pragmatist-signed` enforcement in `pre-commit-gates.sh`, prevents false positives on sessions started before the gate was deployed).
 

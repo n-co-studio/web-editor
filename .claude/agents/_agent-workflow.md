@@ -190,4 +190,36 @@ Operations and Audit agents are invoked directly by the operator, not as part of
 
 User Review agents are dispatched by the Orchestrator during the `user-review` phase (after `verify`, before `commit`). The phase is skipped when the task brief has no User Review section. Agents simulate user personas walking through implementation scenarios using JTBD job stories. Results are synthesized (deduplicated, severity-escalated) and presented during `op-review`. All findings are advisory — the operator decides disposition (accept / note / dismiss). Available in child mode only. See Decision 0021.
 
+---
+
+## Knowledge Graph Protocol (Decision 0034)
+
+When `docs/ai/knowledge-graph/graph.yaml` exists, agents participating in build sessions update the graph at session close with connections discovered during the session.
+
+### Graph-First Lookup
+
+All agents in build sessions SHOULD consult graph context before broad codebase searches. The knowledge graph provides pre-computed connections that are faster and more complete than runtime search for governance relationships, cross-file dependencies, and data flow.
+
+- **Context injection is mechanical**: At build phase entry, `_phase-helper.sh` automatically runs `kg-relevance.sh` and writes the output to `.claude/.state/kg-relevance-context`. Agents do not need to load the graph manually — the context is pre-computed and available at that well-known path.
+- **When to consult**: Before running broad searches (`grep -r`, `find`, repo-wide glob patterns) to discover which files are affected by changes. Read `.claude/.state/kg-relevance-context` first for pre-computed relevance-scored connections.
+- **When to search instead**: (a) Files not yet in the knowledge graph, (b) connections the graph doesn't cover (e.g., string literals, configuration values), (c) verifying graph edges you suspect are stale.
+- **When the context file is absent**: The graph may not exist or the task may lack a contract with scope files. Proceed with normal search — no enforcement.
+
+### Rules
+- Graph writes use shell I/O (Bash redirection — not model Edit/Write tools) per Decision 0034
+- Operator-curated edges (`source_type: operator-curated`) are never modified by agents
+- Agent-written edges use `source_type: agent-inferred` with appropriate `confidence` scores (0.7 for verified connections, 0.3–0.5 for inferred conventions)
+- Edge types are limited to the 8-type taxonomy in Decision 0034: `governs`, `constrains`, `implements`, `depends-on`, `produces`, `consumes`, `tests`, `supersedes` — do not invent new types
+- Use `mkdir`-based locking before writing: acquire `mkdir docs/ai/knowledge-graph/.graph-lock 2>/dev/null`, release `rmdir docs/ai/knowledge-graph/.graph-lock`
+- When traversing and confirming existing edges, update `last_verified` to the current date and set `status: active`
+- Invalid edges get `status: stale` (never deleted by agents)
+- Graph updates are **advisory** (not blocking) — if the write fails, the session still commits normally
+
+### Lifecycle
+- **Read**: On-demand at session start via `.claude/tools/kg-relevance.sh` when task scope overlaps graph nodes (orchestrator trigger)
+- **Write**: At session close, before the final commit — new nodes, new edges, updated `last_verified` dates
+- **Seed**: During Prompt A initialization via `.claude/tools/kg-seed.sh` when no graph exists
+
+---
+
 Subagents load their own definitions from `.claude/agents/`. REQUIRE: do not read subagent files into orchestrator context.

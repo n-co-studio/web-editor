@@ -94,7 +94,9 @@ If the operator has already provided this context in their opening message, do n
 
 #### Step 2 — Dispatch Specialists
 
-Dispatch all specialists in parallel. Each receives: the operator's task description, compiled spec files (if they exist), and codebase access.
+Before dispatching specialists, check if `docs/ai/knowledge-graph/graph.yaml` exists. If it does, run `.claude/tools/kg-relevance.sh` with the operator's described scope files as arguments. Include the also-relevant files in the context given to Architect and Critic — the Architect uses graph connections to identify affected modules beyond what the operator described, and the Critic uses graph connections to identify untested or ungoverned relationships (Decision 0034). Skip silently when graph.yaml does not exist.
+
+Dispatch all specialists in parallel. Each receives: the operator's task description, compiled spec files (if they exist), graph relevance output (if available), and codebase access.
 
 | Specialist | Focus |
 |---|---|

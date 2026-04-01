@@ -111,6 +111,34 @@ Skip silently when none of the above conditions are met.
 - If critical UX findings exist, the `review→build` loop applies (same as cohesion findings)
 - Design Health findings are informational — present in the review summary but do not trigger the review→build loop unless the operator requests fixes
 
+## Knowledge Graph Updates (Decision 0034)
+
+When `docs/ai/knowledge-graph/graph.yaml` exists, the Builder participates in the knowledge graph lifecycle:
+
+### Graph-First File Discovery
+When you need to discover which files are affected by your changes, consult the knowledge graph context first. At build phase entry, `_phase-helper.sh` automatically runs `kg-relevance.sh` and writes pre-computed relevance-scored connections to `.claude/.state/kg-relevance-context`. Read this file before running broad codebase searches.
+
+Use grep/glob search only for:
+- Files not yet in the knowledge graph
+- Connections the graph doesn't cover (e.g., string literals, configuration values)
+- Verifying graph edges you suspect are stale
+
+When you discover connections not in the graph, note them for graph update at close.
+
+### During Build
+As you work, note connections you discover between files — governance relationships, dependencies, data flow, test coverage. These will be written to the knowledge graph at close.
+
+### At Close (before commit)
+Update `docs/ai/knowledge-graph/graph.yaml` via shell I/O (Bash redirection — not Edit/Write tools) with:
+- New nodes for files you created (type matches: `file`, `decision`, `hook`, `prompt`, `contract`, `concept`, `convention`)
+- New edges for connections you discovered (use `source_type: agent-inferred`, `status: active`, `confidence: 0.7` for connections verified during this session)
+- Updated `last_verified` dates for existing edges you traversed and confirmed
+- Edge types are limited to the 8-type taxonomy: `governs`, `constrains`, `implements`, `depends-on`, `produces`, `consumes`, `tests`, `supersedes`
+
+Use `mkdir`-based locking per Decision 0034 before writing (acquire: `mkdir docs/ai/knowledge-graph/.graph-lock 2>/dev/null`; release: `rmdir docs/ai/knowledge-graph/.graph-lock`). Operator-curated edges (`source_type: operator-curated`) are never modified by agents.
+
+Graph updates are **advisory** — if the graph write fails (lock contention, parse error), the session still commits normally. Do not block the close sequence on graph update failures.
+
 ## Operating Rules
 - REQUIRE: at session start, create a branch from main: `git checkout -b <category>/<description>` (standard: `feature/<description>`, hotfix: `hotfix/<description>`)
 - REQUIRE: extract and write task contract at session init when present in the brief (Decision 0020). Contract serves as cohesion review reference

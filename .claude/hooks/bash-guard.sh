@@ -96,6 +96,44 @@ if [ "${REPO_OS_RECOVER:-0}" != "1" ] && [ "$_RECOVER_VIA_SIGNAL" != true ] && [
   fi
 fi
 
+# --- Phase 1b: Knowledge graph search advisory (Decision 0034) ---
+# Detects broad codebase searches (grep -r, find) during build phase and
+# emits a one-time advisory nudging the agent to consult graph context first.
+# Uses builtins + minimal file checks only (no sourcing). Advisory only.
+_KG_ADVISORY_EMITTED=false
+if [ "$_TG_MERGE_BLOCK" = false ]; then
+  # Quick pattern match: broad search commands targeting repo root
+  _IS_BROAD_SEARCH=false
+  if [[ "$INPUT" == *'grep -r'* ]] || [[ "$INPUT" == *'grep -R'* ]] \
+  || [[ "$INPUT" == *'grep --recursive'* ]] \
+  || [[ "$INPUT" == *'find .'* ]] || [[ "$INPUT" == *'find "'* ]]; then
+    _IS_BROAD_SEARCH=true
+  fi
+  if [ "$_IS_BROAD_SEARCH" = true ]; then
+    # Check if graph context exists and advisory not yet fired (builtins + stat only)
+    _HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+    _BG_REPO_ROOT="$(cd "$_HOOK_DIR/../.." && pwd)"
+    _BG_STATE_DIR="$_BG_REPO_ROOT/.claude/.state"
+    if [ -f "$_BG_STATE_DIR/kg-relevance-context" ] \
+    && [ ! -f "$_BG_STATE_DIR/kg-search-advisory-fired" ]; then
+      # Verify we're in build phase (read phase-state with builtins)
+      _BG_PHASE=""
+      if [ -f "$_BG_STATE_DIR/phase-state" ]; then
+        while IFS= read -r _ps_line; do
+          case "$_ps_line" in
+            "current_phase: "*) _BG_PHASE="${_ps_line#current_phase: }"; break ;;
+          esac
+        done < "$_BG_STATE_DIR/phase-state"
+      fi
+      if [ "$_BG_PHASE" = "build" ]; then
+        echo "Advisory: Broad codebase search detected. Knowledge graph context is available at .claude/.state/kg-relevance-context — check graph connections before searching." >&2
+        printf 'fired\n' > "$_BG_STATE_DIR/kg-search-advisory-fired" 2>/dev/null || true
+        _KG_ADVISORY_EMITTED=true
+      fi
+    fi
+  fi
+fi
+
 # --- Combined pre-source fast-exit ---
 # When no Gate 7 match AND no write patterns → exit 0 without sourcing.
 # Saves ~14ms sourcing overhead for the majority of Bash calls (~56%).

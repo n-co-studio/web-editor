@@ -16,13 +16,14 @@
 
 ## Close Sequence
 
-1. Update session log (product: `docs/ai/logs/session-log.md`; template: `.claude/local/session-log.md`)
-2. Commit all remaining changes including session log
-3. Solo merge: `git checkout main && git merge --ff-only <branch>` (fallback `--no-ff`)
+1. Knowledge graph update (advisory — Decision 0034): update `graph.yaml` via shell I/O if it exists — new nodes, new edges, updated `last_verified`. Non-blocking
+2. Update session log (product: `docs/ai/logs/session-log.md`; template: `.claude/local/session-log.md`)
+3. Commit all remaining changes including session log
+4. Solo merge: `git checkout main && git merge --ff-only <branch>` (fallback `--no-ff`)
    - On success: `write_merge_signal "<branch>"`
    - On failure: `git merge --abort && git checkout <branch>`, notify operator
    - Post-merge push: `git push origin main` (advisory, skip template mode / no remote, never force-push)
-4. Present closing summary — final agent message
+5. Present closing summary — final agent message
 
 Zero-change sessions: exempt from session log (stop hook downgrades to advisory).
 

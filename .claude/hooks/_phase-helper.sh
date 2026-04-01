@@ -488,6 +488,60 @@ init_phase() {
 
 }
 
+# --- Inject knowledge graph context at build phase entry ---
+# When transitioning to the build phase, reads scope files from the task
+# contract and runs kg-relevance.sh to produce a context file that agents
+# can consult before searching the codebase.
+# Decision 0034: graph reads are always allowed, no locking needed.
+# Advisory only — failures are silently ignored.
+_inject_kg_context() {
+  local repo_root="$_REPO_OS_ROOT"
+  local graph_file="$repo_root/docs/ai/knowledge-graph/graph.yaml"
+  local contract_file="$repo_root/.claude/local/task-contract.yaml"
+  # Use flat .state/ path (not per-session dir) so agents can find it at a
+  # well-known location regardless of worktree session state directory scoping.
+  local output_file="$repo_root/.claude/.state/kg-relevance-context"
+
+  # Gate: graph must exist
+  [ -f "$graph_file" ] || return 0
+
+  # Gate: task contract must exist with scope_files
+  [ -f "$contract_file" ] || return 0
+
+  # Extract scope_files from task contract (YAML list items under scope_files:)
+  local scope_files=""
+  local in_scope=false
+  while IFS= read -r line; do
+    case "$line" in
+      "scope_files:"*)
+        in_scope=true
+        continue
+        ;;
+    esac
+    if [ "$in_scope" = true ]; then
+      case "$line" in
+        "  - "*)
+          # Strip leading "  - " and quotes
+          local file_entry="${line#  - }"
+          file_entry="${file_entry#\"}"
+          file_entry="${file_entry%\"}"
+          scope_files="${scope_files:+$scope_files }$file_entry"
+          ;;
+        *)
+          # End of scope_files list
+          break
+          ;;
+      esac
+    fi
+  done < "$contract_file"
+
+  [ -z "$scope_files" ] && return 0
+
+  # Run kg-relevance.sh in context-inject mode (advisory — ignore failures)
+  bash "$repo_root/.claude/tools/kg-relevance.sh" $scope_files \
+    --context-inject --output "$output_file" 2>/dev/null || true
+}
+
 # --- Advance to a new phase ---
 # Validates the transition is legal (forward-only + defined loops).
 # Updates current_phase, phases_completed, tag, cycle, timestamp.
@@ -702,6 +756,12 @@ advance_phase() {
 
   # Write resume marker (compression recovery)
   write_resume_marker "$stype" "$sid" "$new_phase" "$phases_completed"
+
+  # Inject knowledge graph context when entering build phase (Decision 0034)
+  # Advisory — failures silently ignored. Gated on graph.yaml + task contract.
+  if [ "$new_phase" = "build" ]; then
+    _inject_kg_context
+  fi
 }
 
 # --- Assert current phase meets requirement ---
