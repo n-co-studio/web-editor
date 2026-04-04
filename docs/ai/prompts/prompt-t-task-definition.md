@@ -78,7 +78,7 @@ Ask the operator:
 2. **Why** — What problem does this solve or what value does it add?
 3. **Constraints** — Anything off-limits, time-sensitive, or technically constrained?
 
-If the operator has already provided What, Why, and Constraints in their opening message, do not re-ask and do not echo a confirmation — proceed directly to Step 2. Only pause when a genuinely required element (What, Why, or Constraints) is missing.
+If the operator has already provided this context in their opening message, do not re-ask. Extract and confirm: "I understand the task as: [summary]. Correct?"
 
 **Fix-on-fix detection:** Before proceeding to dispatch, check whether the operator's description references a recently completed brief that didn't work as expected — signals include: "the last fix didn't work", "this is still broken", "the fix caused a new issue", "we need to fix the fix", or referencing a specific prior session/brief that produced incorrect results. When detected:
 
@@ -130,29 +130,18 @@ The Orchestrator synthesizes specialist findings into a draft task brief:
 - GUIDE: if the Pragmatist flags the brief as large, note in the brief that pipeline completeness is intentional: "This brief is sized larger than typical because it covers an end-to-end pipeline. Splitting would create cascading fix-on-fix patterns."
 - The Narrow path still applies for truly independent features, but pipeline-crossing changes must NOT be narrowed by stage boundary
 
-#### Step 3.5 — Write Draft to Disk
-
-After synthesis, write the draft brief to disk before presenting the approval question:
-
-- **Path:** `.claude/.automation/briefs/draft-<YYYYMMDD-HHMMSS>-<slug>.md` (slug: brief title in kebab-case, truncated to 50 chars)
-- For task groups: write each brief as a separate draft file using the same naming convention.
-
-This file is ephemeral — it exists only until the operator approves, revises, or abandons. Lifecycle is managed in Step 4: promotion on Approve, overwrite on Revise, deletion on Abandon.
-
 #### Step 4 — Operator Review
 
-Present the approval question to the operator. Use `AskUserQuestion` (not conversational text) — this triggers `plan-approved` state via `plan-approval.sh` — required for `taskdef-brief` sessions per Decision 0029.
+Present the draft task brief to the operator. Use `AskUserQuestion` (not conversational text) to request approval — this ensures the operator gets a structured dialog. This triggers `plan-approved` state via `plan-approval.sh` — required for `taskdef-brief` sessions per Decision 0029.
 
 **Brief approval AskUserQuestion template:**
-
-The `header` field must contain a structured executive summary — not the full brief. The operator reads the draft file for full detail.
 
 ```json
 {
   "questions": [
     {
       "question": "Approve this task brief?",
-      "header": "<Brief title>\nGoal: <1-sentence goal>\nScope: <N files · small|medium|large>\nApproach: <top 3 steps, comma-separated>\nTop risk: <1-sentence risk>\nDraft: <draft file path>",
+      "header": "<brief title and summary>",
       "options": [
         {
           "label": "Approve — display only",
@@ -184,15 +173,15 @@ The `header` field must contain a structured executive summary — not the full 
 - Operators who want **Narrow** (split into smaller briefs) can select "Other" and type "Narrow" or "Split" — see Narrow path documentation below
 
 The operator reviews and may:
-- **Approve — display only** — Brief is final. Promote draft to final name (remove `draft-` prefix). No sidecar written. Proceeds to Step 5 (display brief in copy-paste format), then close.
-- **Approve & queue** — Brief is final. Promote draft to final name (remove `draft-` prefix), then execute queue intake inline — **do not re-display the full brief in Step 5**:
-  1. **Promote draft**: Rename `.claude/.automation/briefs/draft-<timestamp>-<slug>.md` → `.claude/.automation/briefs/<timestamp>-<slug>.md`. For task groups: promote all draft files. Write the Task Contract as a sidecar `.yaml` file alongside the brief (same base name, `.yaml` extension — see sidecar format below).
+- **Approve — display only** — Brief is final. Proceeds to Step 5 (display brief in copy-paste format), then close.
+- **Approve & queue** — Brief is final. Proceeds to Step 5 (display brief), then executes queue intake inline:
+  1. **Write the brief to disk**: Path: `.claude/.automation/briefs/<YYYYMMDD-HHMMSS>-<slug>.md` (slug: derived from brief title, kebab-case, truncated to 50 chars). For task groups: write each brief as a separate file using the same naming convention.
   2. **Add to queue**: Run `queue-cli.sh add --brief <path> --auto-approve --solo` (defaults: auto-approve yes, solo yes, push no). For task groups: add all briefs and create a work order. If the group has sequential execution, add entries in order with `--branch` for the shared group branch. If parallel, add all content briefs then the merge brief — each parallel content brief gets its own per-brief branch (`{group-branch}/brief-{seq}`), so omit `--branch` for content briefs (the worktree session creates the branch); use `--branch` for the merge brief only (targeting the group base branch).
   3. **Start daemon**: Run `queue-cli.sh start-daemon` (checks PID file, starts daemon if not running).
-  4. **Confirm**: "Brief queued at `<path>`. Daemon is running." (or "Briefs queued. Work order created. Daemon is running." for task groups).
+  4. **Confirm**: "Brief queued. Daemon is running." (or "Briefs queued. Work order created. Daemon is running." for task groups).
   Operators who want non-default queue flags (e.g., push:yes, solo:no) can select "Other" and specify custom flags, or adjust post-hoc via `queue-cli.sh`.
-- **Revise** — Operator requests changes. Re-synthesize, overwrite the draft file, and re-present the approval question.
-- **Abandon** — Operator decides not to proceed. Delete the draft file. No further output.
+- **Revise** — Operator requests changes. Update and re-present.
+- **Abandon** — Operator decides not to proceed. No output.
 
 **Narrow path (via "Other"):** If the operator selects "Other" and types "Narrow" or "Split", this triggers the Narrow path — the operator says "too big." Split into multiple smaller briefs. Each sub-brief gets a `### Task Group` section with a shared group name, sequence number (N of M), and integration notes (produces/consumes). The first brief in the group creates the task group contract during its Prompt B session; subsequent briefs read and update it. See `docs/ai/task-groups/_contract-template.yaml` for the contract structure. When producing a task group, ask the operator whether to pre-approve all briefs (**auto** mode — agent completes each brief through merge autonomously) or review each brief individually (**review** mode — agent pauses for operator review before commit). The contract carries this setting.
 
@@ -211,9 +200,7 @@ Do not finalize without explicit operator approval.
 
 #### Step 5 — Output
 
-**"Approve — display only" path:** Display the finalized brief in a self-contained fenced code block. Follow the Session Handoff Convention (see `workflow.md`): first line is a plain-text short title that becomes the VS Code tab label. **For phased briefs (Narrow path):** display each brief in its own separate fenced code block. Do not bundle multiple briefs into a single block. After displaying, instruct: "Copy the block above and paste it into a new session to begin implementation."
-
-**"Approve & queue" path:** Do not re-display the full brief. Queue intake (draft promotion, sidecar write, queue add, daemon start, confirm) runs as defined in Step 4. Step 5 produces no additional output for this path.
+Display the finalized task brief in a self-contained fenced code block. Follow the Session Handoff Convention (see `workflow.md`): first line is a plain-text short title that becomes the VS Code tab label. **For phased briefs (Narrow path):** display each brief in its own separate fenced code block so the operator can copy-paste them individually. Do not bundle multiple briefs into a single block.
 
 ~~~
 [Short Title] — Task Brief
@@ -283,31 +270,10 @@ Follow docs/ai/prompts/prompt-b-product-build.md.
 ### Spec References
 [Which compiled spec files are relevant. The Prompt B session should read these.]
 - `docs/spec/compiled/{active}/[file]` — [why relevant]
-~~~
 
-**For task groups (Narrow path):** Instead of embedding the task contract as a `### Task Contract` section, embed the contract content in each brief's `### Task Group` section as a `Contract:` field:
-
-```
-### Task Group
-- **Group:** [group-name]
-- **Brief:** [N of M] — [title]
-- **Contract:**
-  - **Goal:** [1-2 sentences]
-  - **Verification:** [falsifiable criteria, comma-separated]
-  - **Scope Files:** [file paths, comma-separated]
-  - **Spec References:** [paths, comma-separated]
-- **Produces:** [...]
-- **Consumes:** [...]
-```
-
-For phased briefs ("Approve — display only"), instruct: "Copy each block into its own new session. Run them in order." For parallel briefs, instruct: "Copy each block into its own new session. Launch Briefs 1–N in parallel using `claude --worktree` with a unique `REPO_OS_SESSION_ID` per brief. Run the merge brief (Brief M) after all others complete — it will combine the per-brief branches."
-
-**Task Contract sidecar (written on "Approve & queue" only):**
-
-The `### Task Contract` section is **not** included in the display brief template. On "Approve & queue", write the contract as a separate sidecar file alongside the brief (same base name, `.yaml` extension):
+### Task Contract
 
 ```yaml
-# <brief-slug>.yaml  — Task Contract sidecar
 goal: "[1-2 sentences from the Goal section]"
 scope_files:
   - "[file paths from Scope section]"
@@ -336,13 +302,29 @@ user_review:                        # optional — only when User Review section
         - "[criteria]"
 lifecycle: task-scoped
 ```
+~~~
 
-Prompt B sessions using queued briefs read this sidecar when present. Copy-pasted briefs (display-only path) do not need the machine-readable contract.
+**For task groups (Narrow path):** Instead of embedding the task contract as a `### Task Contract` section, embed the contract content in each brief's `### Task Group` section as a `Contract:` field:
+
+```
+### Task Group
+- **Group:** [group-name]
+- **Brief:** [N of M] — [title]
+- **Contract:**
+  - **Goal:** [1-2 sentences]
+  - **Verification:** [falsifiable criteria, comma-separated]
+  - **Scope Files:** [file paths, comma-separated]
+  - **Spec References:** [paths, comma-separated]
+- **Produces:** [...]
+- **Consumes:** [...]
+```
+
+After displaying the brief, instruct: "Copy the block above and paste it into a new session to begin implementation." For phased briefs, instruct: "Copy each block into its own new session. Run them in order." For parallel briefs, instruct: "Copy each block into its own new session. Launch Briefs 1–N in parallel using `claude --worktree` with a unique `REPO_OS_SESSION_ID` per brief. Run the merge brief (Brief M) after all others complete — it will combine the per-brief branches."
 
 ## Rules
 
-- REQUIRE: **never write files** except in two narrow cases: (1) Step 3.5 pre-approval draft — write the draft brief to `.claude/.automation/briefs/draft-*` before the approval question; (2) Step 4 queue intake ("Approve & queue") — promote the draft to final, write the Task Contract sidecar `.yaml`, and call `queue-cli.sh`. On Abandon, delete the draft file. All other output goes to the terminal.
-- REQUIRE: **never make code changes.** This is an exploration and planning session only. The file-write exceptions are narrow: brief files in `.claude/.automation/briefs/` and queue CLI invocations only. No product code changes.
+- REQUIRE: **never write files** except during the queue intake path of Step 4 ("Approve & queue"), where writing brief files to `.claude/.automation/briefs/` and calling `queue-cli.sh` are permitted. All other output goes to the terminal.
+- REQUIRE: **never make code changes.** This is an exploration and planning session only. The Step 4 queue intake exception is narrow: only brief files in `.claude/.automation/briefs/` and queue CLI invocations. No product code changes.
 - REQUIRE: **never create session log entries.** Prompt T sessions produce no artifacts and are exempt via the zero-change rule.
 - REQUIRE: **never dispatch specialists in Query mode.** Query mode is conversational — the Orchestrator answers directly.
 - REQUIRE: **always dispatch the 4 core specialists in Brief mode** (Architect, Exploration, Critic, Pragmatist). Additionally dispatch PM Advisory when a compiled spec (`manifest.json` `active` ≠ null) or `mvp-scope.yaml` exists. No tier selection — the core team is fixed, PM is conditional.
