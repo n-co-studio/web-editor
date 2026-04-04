@@ -48,49 +48,46 @@ Docs, tests, formatting, comments, dev tooling
 ### Cohesion Review
 Post-build Critic review (cohesion mode): checks diff + surrounding code for broken cross-references, dangling imports, inconsistent naming, contradictory patterns. Gate A5. Operates on code, not specs.
 
-**Downstream Consumer Validation** — mandatory finding category for Critic cohesion mode. For every modified function or interface, the Critic MUST:
-1. Identify all callers/consumers (grep for function name, check imports, trace call chains)
-2. For each caller, evaluate the interface contract change: did the return type, parameter signature, side effects, or error behavior change?
-3. Produce a per-function finding in this format: "Function `X` is called by `Y` at `file:line`. After this change, `Y` will receive [new behavior]. Impact: [works / breaks / needs update]"
-4. If any caller would break, flag as CRITICAL with specific remediation
-
-This is a specific check per modified function, not a general architectural concern. The Critic should grep for callers and evaluate the concrete impact — not speculate about theoretical consumers.
+**Downstream Consumer Validation** — mandatory Critic finding category. For every modified function/interface: grep all callers, evaluate contract change (return type, params, side effects, errors), produce per-function finding: "Function `X` called by `Y` at `file:line`. After change, `Y` will receive [new behavior]. Impact: [works / breaks / needs update]." Flag as CRITICAL if any caller breaks. Evaluate concrete callers — do not speculate about theoretical consumers.
 
 ### Regression Gate (Sequential Brief Verification)
-When the QA verifier runs after a brief completes, it MUST check for prior briefs that targeted the same files or system:
-1. Check if there is a previous brief in the same task group (via the `briefs[]` array in the task group contract YAML at `docs/ai/task-groups/`) or a recent session (glob `docs/ai/logs/sessions/session-*.md` or `.claude/local/sessions/session-*.md` and read the 3 most recent files sorted by name) that modified the same files
-2. If a prior brief exists, read its verification checklist from the session log entry or the task contract's `verification:` field
-3. Re-verify each item from the prior brief's checklist against the current state of the code
-4. If any item from the prior brief's verification fails, flag it as a CRITICAL finding: "Regression: prior brief [N] verification item '[item]' no longer passes after this brief's changes"
+QA MUST check for prior briefs targeting the same files: (1) find prior brief in same task group (`briefs[]` in contract) or recent session logs (3 most recent `session-*.md`); (2) read its `verification:` checklist; (3) re-verify each item; (4) flag failures as CRITICAL: "Regression: prior brief [N] item '[item]' no longer passes." Regression findings are commit-blocking — they indicate this brief broke something a previous brief established.
 
-This catches cascading regressions at the gate rather than after the operator discovers them in a subsequent session. REQUIRE: the QA verifier must treat regression findings as commit-blocking — they indicate this brief broke something the previous brief established.
+### Knowledge Graph Protocol (Decision 0034)
+
+Two-graph architecture: `docs/ai/knowledge-graph/graph.yaml` (template infrastructure nodes — decisions, hooks, prompts, agents) and `product-graph.yaml` (product code nodes, child-owned). Cross-layer edges stored in the source node's graph.
+
+**Graph-First Lookup** — REQUIRE: Before any broad search (`grep -r`, `find`, repo-wide glob) in a build session, read `.claude/.state/kg-relevance-context` when it exists and is non-empty. This file is pre-computed by `_phase-helper.sh` at build phase entry via `kg-relevance.sh` (searches both graphs). When absent/empty: proceed with normal search.
+
+**Session-Type Profiles:**
+
+| Profile | Session Type | Read | Write |
+|---------|-------------|------|-------|
+| Full | Prompt B | REQUIRE: `kg-relevance-context` when present | REQUIRE-attempt at close |
+| Expedited | Prompt H | Call `kg-relevance.sh` directly after investigation | REQUIRE-attempt at close |
+| Light | Prompt E | Once at build entry if present | REQUIRE-attempt at close |
+| Audit | Prompt C | Read-only (`graph-health` mode) | None |
+
+**Rules:** Graph writes via shell I/O only (not Edit/Write). Route: template files → `graph.yaml`, product → `product-graph.yaml`. Lock via `mkdir` (`.graph-lock` / `.product-graph-lock`). Edge types: 8-type taxonomy (`governs`, `constrains`, `implements`, `depends-on`, `produces`, `consumes`, `tests`, `supersedes`). Agent edges: `source_type: agent-inferred`, confidence 0.7 (verified) / 0.3–0.5 (inferred). Never modify `operator-curated` edges. Stale edges: set `status: stale` (never delete). REQUIRE: attempt write at close before final commit — log failure and proceed, do not skip.
+
+**Lifecycle:** Read — `.claude/.state/kg-relevance-context` (pre-computed). Write — session close, before final commit. Seed — `kg-seed.sh --target template|product` during Prompt A init.
 
 ### PM Scope Labels
 PM-specific labels (orthogonal to severity): **IN-SCOPE**, **OUT-OF-SCOPE**, **DEFER**. Applied by PM Advisory alongside standard severity. Informational — do not affect Refinement Report routing.
 
 ### UX Design Agent
-Three-mode UX agent (`.claude/agents/ux-designer.md`). Mode selection is context-driven:
+Three-mode UX agent (`.claude/agents/ux-designer.md`):
 
-| Mode | Name | Trigger | Output |
-|------|------|---------|--------|
-| 1 | Design (generative) | Prompt T Brief mode — task involves UI | Structured design brief (layout, typography, hierarchy, interactions, responsive, motion, tokens) |
-| 2 | UX Review (advisory) | Prompt A spec review, Prompt B post-build | Advisory findings with standard severity labels (CRITICAL / RECOMMENDATION / IDEA) |
-| 3 | Design Health (evaluative) | Prompt B post-build — after Mode 2, or parallel with Critic when Mode 2 not activated | Compliance findings with design health labels |
+| Mode | Trigger | Output |
+|------|---------|--------|
+| 1 — Design (generative) | Prompt T — task mentions UI/screens/forms/design | Structured design brief |
+| 2 — UX Review (advisory) | Prompt A spec review; Prompt B post-build (UI changes) | Advisory findings (CRITICAL / RECOMMENDATION / IDEA) |
+| 3 — Design Health (evaluative) | Prompt B post-build — UI changes; after Mode 2 or parallel with Critic | Design health compliance findings |
 
-**Activation conditions:** Mode 1 — task description mentions UI, screens, pages, components, layouts, forms, dashboards, or design. Mode 2 — spec contains UI/design system/user-flows/forms/components/responsive/design-tokens (Prompt A), or task involved UI changes (Prompt B post-build). Mode 3 — task involved UI changes (Prompt B post-build); auto-detects design system presence before scanning.
-
-**Design system detection:** Modes 1 and 3 detect the project's CSS approach by reading project config files (`tailwind.config.*`, `package.json` for CSS-in-JS, CSS module files, custom property definitions, design token files, compiled `design-system.md`). If no design system exists, Mode 1 proposes a minimum viable token set; Mode 3 recommends establishing one rather than flagging violations.
+Modes 1+3 auto-detect design system (`tailwind.config.*`, CSS-in-JS, token files). No design system: Mode 1 proposes minimum token set; Mode 3 recommends establishing one.
 
 ### Design Health Labels
-Design system compliance labels used by UX Design Agent Mode 3 (orthogonal to standard severity):
-
-| Label | Meaning |
-|-------|---------|
-| **TOKEN-VIOLATION** | Hardcoded values (colors, spacing, font sizes, breakpoints, animation durations) where design tokens should be used |
-| **COMPONENT-BYPASS** | Custom implementations where design system components already exist |
-| **SYSTEM-DRIFT** | Patterns inconsistent with the design system architecture (off-grid spacing, non-scale typography, ad-hoc colors, undefined breakpoints) |
-
-Advisory only — no commit gate, no state file. Presented in review summary alongside Critic and PM findings. Unlike cohesion review (gate A5), design health findings do not block commit.
+Advisory only (no gate, no state file). Labels used by Mode 3: **TOKEN-VIOLATION** (hardcoded values where tokens should be used) · **COMPONENT-BYPASS** (custom impl where design system component exists) · **SYSTEM-DRIFT** (off-grid spacing, non-scale typography, ad-hoc colors, undefined breakpoints).
 
 ---
 
@@ -130,49 +127,26 @@ Hook authors: use `GATE-RECOVERABLE` when the agent has a concrete next step. Us
 ### State Files
 Governance evidence in `.claude/.state/`. Written by hooks via shell I/O (never model tools). Read by pre-commit gates.
 
-| File | Writer | Gate |
-|------|--------|------|
-| `plan-approved` | `plan-approval.sh` | Branch guard, A2 scope (covers both plan approval and brief approval — Decision 0029) |
+**Agent-written state files** (`.claude/.state/` unless noted):
+
+| File | Writer | Gate / Purpose |
+|------|--------|----------------|
+| `plan-approved` | `plan-approval.sh` | Branch guard + A2 scope (Decision 0029) |
 | `cohesion-reviewed` | `state-writer.sh` (critic) | State verification |
 | `qa-verified` | `state-writer.sh` (qa-verifier) | State verification |
 | `reviewer-signed` | `state-writer.sh` (reviewer) | High-risk detection |
 | `security-signed` | `state-writer.sh` (security-privacy) | High-risk detection |
 | `pragmatist-signed` | `state-writer.sh` (pragmatist) | Plan-review verification |
-| `high-risk-detected` | `pre-commit-gates.sh` | Audit trail |
-| `governance-checked` | `pre-commit-gates.sh` (Gate 3, commit) | First-fire marker (inter-session governance) |
-| `phase-state` | `_phase-helper.sh` (via hooks) | Phase-aware flow tracking (session type, current phase, cycle) |
-| `overrides.log` | `_analytics-helper.sh` (`log_override`) | Override audit (session-close-check) |
-| `task-contract.yaml` | Orchestrator (model) | Task contract — intent reference for cohesion review (Decision 0020). Lives in `.claude/local/` (not `.state/`) because it is model-written; state-guard blocks model writes to `.state/` |
-| `.stop-attempt-count` | `session-close-check.sh` | Stop hook attempt counter — safety valve at 3 attempts |
-| `merge-source-branch` | `_phase-helper.sh` (`write_merge_signal`) | Agent-to-hook merge signal — indicates agent completed merge in close phase (session-close-check.sh skips redundant merge) |
-| `scope-risk-gain` | Orchestrator (model) | Risk/gain context for unbriefed-in-scope files — read by `pre-commit-gates.sh` scope classification gate, included in advisory escalation (Decision 0017) |
-| `brief-has-taskgroup` | `_phase-helper.sh` (`write_taskgroup_brief_signal`) | Session-type validation (`check_taskgroup_brief_mismatch` in `bash-guard.sh`, Decision 0026). Cleaned by `cleanup_session_files` |
-| `session-resume.yaml` | `_phase-helper.sh` (`write_resume_marker`) | Compression recovery — orchestrator reads after context compression to resume without re-dispatching governance agents. Updated at every phase transition. Cleaned by `cleanup_session_files` |
-| `cycle-escalation` | `_phase-helper.sh` (`_check_cycle_limit`) | Cycle cap escalation marker — written when session cycle count reaches 5+. Advisory only (no gate). Cleaned by `cleanup_session_files` |
-| `cycle-advisory-N` | `bash-guard.sh` (Phase 3c) | Per-cycle dedup marker — prevents repeated advisory output on each Bash call within the same cycle. Cleaned by `cleanup_session_files` |
-| `kg-relevance-context` | `_phase-helper.sh` (`_inject_kg_context`) | Pre-computed knowledge graph relevance context for the current brief's scope files — written at build phase entry, read by agents before broad codebase searches (Decision 0034). Cleaned by `cleanup_session_files` |
-| `kg-search-advisory-fired` | `bash-guard.sh` (Phase 1b) | One-shot dedup marker — prevents repeated graph-first advisory on broad search patterns during build phase. Cleaned by `cleanup_session_files` |
 
-**Sentinel files** (`.claude/local/`, persistent across sessions, gitignored): `.pragmatist-enforced` (backward-compatible gate deployment marker — written on first `pragmatist-signed` enforcement in `pre-commit-gates.sh`, prevents false positives on sessions started before the gate was deployed).
+**Hook-written files** (all cleaned by `cleanup_session_files` unless noted): `phase-state` (`_phase-helper.sh` — phase tracking), `overrides.log` (`_analytics-helper.sh` — override audit, append-only), `high-risk-detected` (`pre-commit-gates.sh` — audit trail), `governance-checked` (`pre-commit-gates.sh` Gate 3 — first-fire inter-session marker), `merge-source-branch` (`_phase-helper.sh` `write_merge_signal` — agent-to-hook merge signal), `brief-has-taskgroup` (`_phase-helper.sh` — session-type validation, Decision 0026), `session-resume.yaml` (`_phase-helper.sh` — compression recovery, updated each phase), `cycle-escalation` (`_phase-helper.sh` — cycle cap at 5+, advisory), `cycle-advisory-N` (`bash-guard.sh` — per-cycle dedup), `kg-relevance-context` (`_phase-helper.sh` — KG pre-computed context at build entry, Decision 0034), `kg-search-advisory-fired` (`bash-guard.sh` — one-shot graph-first advisory dedup), `.stop-attempt-count` (`session-close-check.sh` — safety valve at 3 attempts, not cleaned).
 
-**Operational files** (`.claude/`, outside `.state/`): `.session-baseline-sha` (commit baseline), `.session-id` (analytics correlation, immune path), `.session-type` (session classification), `.hvst-fail-count` (HVST counter), `.deferrals-pending` (deferred findings signal).
+**Model-written files** (in `.claude/local/`, not `.state/` — state-guard allows): `task-contract.yaml` (orchestrator — intent + verification for cohesion review, Decision 0020), `scope-risk-gain` (orchestrator — risk/gain for unbriefed-in-scope files, Decision 0017).
 
-**Recovery signal** (`.claude/.state/.recover-signal`): File-based alternative to `REPO_OS_RECOVER=1` env var for autonomous mode where env vars cannot be set. Created by the agent via shell I/O (bypasses write-guard). On next gate invocation (bash-guard, write-guard, pre-commit-gates, pre-push-gates), the signal is consumed (read + delete) and triggers recovery mode for that invocation. Auto-deletes after first consumption.
-
-**Session registry** (`.claude/.state/sessions/*.yaml`): Active session tracking (branch, PID, timestamp). Cleaned by `unregister_session()` at close and stale-entry cleanup (dead PIDs, >24h age).
-
-**Lifecycle:** `.state/` files, `.session-id`, `.session-type`, `.hvst-fail-count`, `.deferrals-pending` are session-scoped (cleaned at close). `.session-baseline-sha` is persistent (survives across sessions). Per-session log files (`docs/ai/logs/sessions/session-{id}.md` or `.claude/local/sessions/session-{id}.md`) accumulate in the sessions directory and are never auto-deleted.
+**Other files:** `.pragmatist-enforced` (`.claude/local/` — gate deployment sentinel, persistent). Operational (`.claude/`): `.session-baseline-sha` (persistent baseline), `.session-id` (analytics, immune), `.session-type`, `.hvst-fail-count`, `.deferrals-pending`. Recovery: `.claude/.state/.recover-signal` (file-based `REPO_OS_RECOVER=1` alternative — single-use, auto-deletes). Registry: `.claude/.state/sessions/*.yaml` (session tracking — cleaned at close or after stale >24h/dead PID). Session-scoped files cleaned at close; per-session logs (`docs/ai/logs/sessions/session-{id}.md`) accumulate and are never auto-deleted.
 
 ### Worktree State Isolation (Decision 0028)
 
-Worktree-isolated subagents (`isolation: "worktree"` in Agent tool) run in a separate git worktree but share the main repo's hook infrastructure. Hooks resolve `_REPO_OS_ROOT` from their own file path (main repo), so all state reads/writes target the main session's `.claude/.state/`.
-
-**Contract:**
-- **State writes blocked**: `state-writer.sh` refuses to write governance state files when `is_worktree()` detects a worktree CWD. Worktree subagent verdicts are silently skipped (audit-logged, reason: `worktree_blocked`).
-- **State reads pass through**: Phase-state reads in worktree hooks reflect the main session's phase. This is intentional — worktree subagents operate under the parent session's governance.
-- **Implication**: Governance agents (critic, qa-verifier, reviewer, security-privacy, pragmatist) dispatched with `isolation: "worktree"` will not produce state files. The parent session must re-dispatch in-tree if governance evidence is needed.
-- **Detection**: `is_worktree()` in `_analytics-helper.sh` compares `git rev-parse --git-dir` vs `--git-common-dir`. Cached per-process.
-- **Full worktree sessions**: For full worktree sessions (`claude --worktree`), see Decision 0030.
+Worktree-isolated subagents (`isolation: "worktree"`) share the main repo's hook infrastructure — all state reads/writes target the main session's `.claude/.state/`. State writes blocked: `state-writer.sh` refuses when `is_worktree()` detects worktree CWD (verdicts silently skipped, reason: `worktree_blocked`). State reads pass through. Governance agents dispatched with worktree isolation will not produce state files — re-dispatch in-tree if evidence needed. Detection: `is_worktree()` compares `git rev-parse --git-dir` vs `--git-common-dir`. Full worktree sessions (`claude --worktree`): see Decision 0030.
 
 ---
 
@@ -190,70 +164,35 @@ Worktree-isolated subagents (`isolation: "worktree"` in Agent tool) run in a sep
 
 ## Phase Model
 
-Ordered phases tracked in `.claude/.state/phase-state` (Decision 0014). Hooks manage transitions automatically.
+Ordered phases tracked in `.claude/.state/phase-state` (Decision 0014). Tags: `agent` (autonomous) · `operator` (pauses) · `both`. Auto mode: skips `op-review`. Solo mode (Decision 0015): merges `feature/*`/`fix/*`/`hotfix/*` to main; `experiment/*`/`release/*` excluded; merge failure → abort + notify.
 
 | Phase | Description |
 |-------|-------------|
-| init | Session setup — create branch, load context |
-| plan | Define goal, scope, files, verification |
-| approval | Operator reviews and approves plan |
-| build | Implement changes |
-| review | Critic cohesion review |
-| verify | QA gate verification |
-| user-review | User Review persona dispatch (optional — skipped when no User Review in brief) |
+| init | Setup |
+| plan | Scope + plan |
+| approval | Operator approves |
+| build | Implement |
+| review | Critic cohesion |
+| verify | QA gates |
+| user-review | Persona dispatch (opt-in, standard only) |
 | commit | Commit with trailers |
-| op-review | Operator review before close (skipped in auto mode) |
-| close | Update session log, commit, merge to main, seal branch |
-| contract-init | Task group: create or sync contract |
-| contract-update | Task group: update contract at close |
-| interview | Prompt 0: operator interview |
-| write | Prompt 0: write spec files |
-| governance | Write governance evidence |
-| tier-select | Prompt A: select review tier |
-| dispatch | Dispatch specialist agents |
-| synthesize | Merge specialist findings |
-| output | Display final output |
-| conversation | Prompt T query / Prompt Q: conversational Q&A |
-| evaluate | Prompt 0.5: evaluate prototype results |
-| document | Prompt 0.5 PoC: document learnings |
-| scope | Prompt C: select audit dimensions |
-| validate | Prompt A: validate Repo OS configuration |
-| cohesion | Task group merge: cross-session cohesion review across parallel briefs |
+| op-review | Operator review (skipped in auto) |
+| close | Session log + merge + seal |
+| contract-init | Task group: create/sync contract |
+| contract-update | Task group: update at close |
+| cohesion | Taskgroup-merge: cross-brief cohesion |
 
-### Automation Tags
+Session-type-specific phases (see sequences table): `interview`/`write` (Prompt 0), `tier-select`/`dispatch`/`synthesize`/`output`/`governance`/`validate` (advisory), `conversation` (ephemeral/queue-triage), `evaluate`/`document` (prototype), `scope` (Prompt C).
 
-| Tag | Meaning |
-|-----|---------|
-| `agent` | Agent proceeds autonomously |
-| `operator` | Agent pauses for operator decision |
-| `both` | Agent and operator work concurrently |
-
-### Hotfix Sessions
-
-Reactive debugging and fix sessions. Phases: `init → plan → approval → build → verify → commit → close`. Loop: `verify→build`. Expedited gates: A2 relaxed (scope limit), A5 skipped (cohesion review). Branch: `hotfix/*`. Solo mode: always merges to main at close. Plan phase includes parallel investigation dispatch (Explore + architect + exploration agents) for root cause diagnosis. Maximum 3 fix cycles before escalation. See `docs/ai/prompts/prompt-h-hotfix-debug.md`.
-
-### Editor-Live Sessions
-
-Operator-driven editing. Phases: `init → build → commit → review → verify → op-review → close`. No plan gate. Loops: `commit→build`, `verify→build`. A4 per-loop; full gates at close. Child mode only. Cycle advisory at 50. See Decision 0023.
-
-### Advisory Sessions
-
-Prompt A review sessions. Two session types:
-- **advisory-init**: Full advisory review — `init → tier-select → dispatch → synthesize → op-review → validate → governance → close`. Dispatches specialist agents for multi-tier review.
-- **advisory-reinit**: Lightweight re-review — `init → validate → governance → close`. Validates prior advisory configuration without full re-dispatch.
-
-Both are advisory-only (governance evidence at close, no implementation gates).
-
-### Ephemeral Sessions (Phase 3b)
-
-Lightweight Q&A/exploration: `init → conversation → close`. Skips mode-guard, branch gates, close checks. No solo merge or branch seal. Convert to standard via `upgrade_session_type` (resets phase to `plan`). REQUIRE: on upgrade, read `workflow.md` and `quality-gates.md` (full) if not in context.
-
-### Auto/Review Mode
-**Auto**: completes through merge autonomously (`op-review` skipped). **Review** (default): pauses at `op-review` for operator acceptance.
-
-### Solo Mode (Decision 0015)
-
-Merge to main at session close. Applies to `feature/*`, `fix/*`, `hotfix/*` only (`experiment/*`, `release/*` excluded). Auto mode: autonomous after gates pass. Review mode: pauses at `op-review`. Merge failure: `git merge --abort` + operator notification (no auto conflict resolution on main).
+| Session type | Phase sequence | Notes |
+|-------------|----------------|-------|
+| standard | init→plan→approval→build→review→verify→[user-review]→commit→[op-review]→close | op-review skipped in auto |
+| hotfix | init→plan→approval→build→verify→commit→close | Loop: verify→build; A2 relaxed, A5 skip; max 3 cycles |
+| editor-live | init→build→commit→review→verify→op-review→close | No plan gate; loop: commit→build; child mode only |
+| advisory-init | init→tier-select→dispatch→synthesize→op-review→validate→governance→close | Advisory only |
+| advisory-reinit | init→validate→governance→close | Lightweight re-review |
+| ephemeral | init→conversation→close | Skip gates; upgrade via `upgrade_session_type` |
+| taskgroup-merge | init→contract-init→cohesion→verify→commit→[op-review]→close | Cross-brief Critic; seal all branches |
 
 ---
 
@@ -269,34 +208,20 @@ Three modes control file-edit permissions. Enforced by `write-guard.sh` (Decisio
 
 **Resolution:** `REPO_OS_MODE` env var > `.claude/repo-mode` file > default `child`. Override: `REPO_OS_SKIP_MODE_GUARD=1` (skip entirely), `REPO_OS_UNLOCK_PATH=<path>` (single-file unlock, immune paths excluded).
 
-### Session Close Overrides
+### Overrides
 
-Stop hook (`session-close-check.sh`) gates. All overrides logged via `log_override()`.
+All overrides logged via `log_override()`.
 
-| Override | Gate | Effect |
-|----------|------|--------|
-| `SKIP_SESSION_LOG=1` | Session log (blocking) | Bypasses session log check |
-| `SKIP_UNCOMMITTED_CHECK=1` | Uncommitted changes (blocking) | Allows close with dirty tree |
-| `SKIP_KNOWN_ISSUES_CHECK=1` | Known-issues (advisory) | Suppresses known-issues reminder |
-| `SKIP_CONTRACT_CHECK=1` | Task group contract (blocking) | Bypasses A6 contract + governance checks |
-
-### Pre-Commit Overrides
-
-Commit hook (`pre-commit-gates.sh`) gates. All overrides logged via `log_override()`.
-
-| Override | Gate | Effect |
-|----------|------|--------|
-| `REPO_OS_RECOVER=1` | All state-dependent checks | Emergency recovery — skips plan-approved, cohesion-reviewed, qa-verified, pragmatist-signed |
-| `REPO_OS_SKIP_PLAN_GATE=1` | plan-approved (blocking) | Bypasses plan-approved state file check |
-| `REPO_OS_SKIP_PRAGMATIST_GATE=1` | pragmatist-signed (blocking) | Bypasses pragmatist-signed state file check (Decision 0025) |
-
-### Phase Helper Overrides
-
-Phase management (`_phase-helper.sh`) gates.
-
-| Override | Gate | Effect |
-|----------|------|--------|
-| `REPO_OS_ALLOW_REINIT=1` | init_phase double-init guard | Allows re-initialization of phase state for the same session (crash recovery) |
+| Override | Hook | Gate | Effect |
+|----------|------|------|--------|
+| `SKIP_SESSION_LOG=1` | session-close-check | Session log | Bypass session log check |
+| `SKIP_UNCOMMITTED_CHECK=1` | session-close-check | Uncommitted changes | Allow close with dirty tree |
+| `SKIP_KNOWN_ISSUES_CHECK=1` | session-close-check | Known-issues (advisory) | Suppress known-issues reminder |
+| `SKIP_CONTRACT_CHECK=1` | session-close-check | Task group contract | Bypass A6 contract + governance |
+| `REPO_OS_RECOVER=1` | pre-commit-gates | All state checks | Emergency recovery — skip plan-approved, cohesion-reviewed, qa-verified, pragmatist-signed |
+| `REPO_OS_SKIP_PLAN_GATE=1` | pre-commit-gates / bash-guard | plan-approved | Bypass plan-approved check |
+| `REPO_OS_SKIP_PRAGMATIST_GATE=1` | pre-commit-gates | pragmatist-signed | Bypass pragmatist-signed check (Decision 0025) |
+| `REPO_OS_ALLOW_REINIT=1` | _phase-helper | double-init guard | Allow re-init of phase state (crash recovery) |
 
 ### Decision Naming Convention
 `t-NNNN-*.md` = template decisions (synced from upstream, locked in child/autonomous). `0100-*.md`+ = child decisions (editable in child mode). Enforced by mode-guard `t-` prefix check (Decision 0022). `t-manifest.txt` lists template decisions for orphan cleanup.
@@ -305,24 +230,18 @@ Phase management (`_phase-helper.sh`) gates.
 
 ## User Review
 
-Decision 0021. LLM persona simulation — synthetic user perspective on implementation. Advisory only (no gate, no state file). Phase: `user-review` (after `verify`, before `commit`). Skipped when brief has no `### User Review` section.
+Decision 0021. LLM persona simulation — synthetic user perspective. Advisory only (no gate, no state file). Phase: `user-review` (after `verify`, before `commit`). Opt-in only: `### User Review` section in brief (with tiers/scenarios). Never default-on. Child mode only — excluded from template, autonomous, headless, and experiment sessions. Token cost: 20k–50k per run.
 
-**Activation** (never default-on): task brief opt-in (`### User Review` section with tiers/scenarios, carried via contract `user_review:` block) or operator request mid-session.
+**Dispatch:** Persona agents in parallel → deduplicate → escalate to highest severity → present at `op-review`. Operator: accept / note / dismiss.
 
-**Dispatch:** Orchestrator dispatches persona agents (`_user-review-tier-{1,2,3}.md`) in parallel. Results deduplicated across tiers, severity-escalated to highest. Report presented at `op-review`. Operator dispositions each finding (accept / note / dismiss). Deferred findings noted in closing summary.
-
-**Exclusions:** Child mode only. Excluded from template, autonomous, headless/automation, and experiment sessions. Token cost: 20k–50k per run (mitigated by opt-in).
-
-| Tier | Persona | Mental Model | Error Recovery | Confusion Threshold |
-|------|---------|-------------|----------------|---------------------|
-| **1** | Power User | Strong | 2–3 alternatives | Low |
-| **2** | Everyday User | Partial | Once, then help | Moderate |
-| **3** | Novice User | None | Stops immediately | High |
+| Tier | Persona | Mental Model | Error Recovery |
+|------|---------|-------------|----------------|
+| **1** | Power User | Strong | 2–3 alternatives |
+| **2** | Everyday User | Partial | Once, then help |
+| **3** | Novice User | None | Stops immediately |
 
 ---
 
 ## Governance Prefixes
 
-Protected path prefixes enforced by `write-guard.sh`, subject to mode-based restrictions: `.claude/`, `docs/ai/`, `docs/spec/_templates/`, `.github/`, `AI.md`, `CLAUDE.md`, `repo-os-explainer.html`.
-
-Immune paths (never modifiable, no override): `.claude/hooks/write-guard.sh`, `.claude/repo-mode`, `.claude/.session-id`. To maintain: `REPO_OS_SKIP_MODE_GUARD=1` (disables guard entirely, logged).
+Protected paths enforced by `write-guard.sh`: `.claude/`, `docs/ai/`, `docs/spec/_templates/`, `.github/`, `AI.md`, `CLAUDE.md`, `repo-os-explainer.html`. Immune (no override): `.claude/hooks/write-guard.sh`, `.claude/repo-mode`, `.claude/.session-id`. To maintain: `REPO_OS_SKIP_MODE_GUARD=1` (logged).

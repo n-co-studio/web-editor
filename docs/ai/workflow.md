@@ -58,7 +58,7 @@ Work happens on categorized branches. BLOCK: never commit directly to `main` —
 
 **Close sequence** — REQUIRE: execute these steps in order before the session ends:
 
-1. Knowledge graph update (advisory — Decision 0034): if either `docs/ai/knowledge-graph/graph.yaml` (template) or `product-graph.yaml` (product) exists, update the appropriate graph with new nodes, new edges (`source_type: agent-inferred`), and updated `last_verified` dates via shell I/O. Template files → `graph.yaml`, product files → `product-graph.yaml`. Cross-layer edges go in the source node's graph. Use `mkdir`-based locking (`.graph-lock` for template, `.product-graph-lock` for product). If the write fails, proceed — graph updates are non-blocking. See `.claude/agents/_agent-workflow.md` § Knowledge Graph Protocol
+1. Knowledge graph update (advisory — Decision 0034): if either `docs/ai/knowledge-graph/graph.yaml` (template) or `product-graph.yaml` (product) exists, update the appropriate graph with new nodes, new edges (`source_type: agent-inferred`), and updated `last_verified` dates via shell I/O. Template files → `graph.yaml`, product files → `product-graph.yaml`. Cross-layer edges go in the source node's graph. Use `mkdir`-based locking (`.graph-lock` for template, `.product-graph-lock` for product). If the write fails, proceed — graph updates are non-blocking. See `.claude/agents/_agent-glossary.md` § Knowledge Graph Protocol
 2. Update session log (`docs/ai/logs/sessions/session-{id}.md`; template mode: `.claude/local/sessions/session-{id}.md`)
 3. Commit all remaining changes including the session log
 4. Merge to main (solo mode) — REQUIRE: agent executes the merge explicitly:
@@ -75,7 +75,7 @@ Zero-change sessions (no commits, no working tree changes) are exempt from the s
 
 ### Solo Mode
 
-See: `.claude/agents/_agent-glossary.md` § Solo Mode for full semantics (branch types, auto/review behavior, conflict handling).
+See: `.claude/agents/_agent-glossary.md` § Phase Model for full semantics (branch types, auto/review behavior, conflict handling).
 
 ### Session Branch Isolation
 
@@ -102,7 +102,7 @@ Query session history: `git log --format="%(trailers:key=Session)"` or `git log 
 
 ### Ephemeral Sessions
 
-See: `_agent-glossary.md` § Ephemeral Sessions for semantics. Use `init_phase "ephemeral"` for Q&A/exploration. Convert to standard via `upgrade_session_type` when code changes are needed.
+See: `_agent-glossary.md` § Phase Model (session-type sequences table) for semantics. Use `init_phase "ephemeral"` for Q&A/exploration. Convert to standard via `upgrade_session_type` when code changes are needed.
 
 ### Editor Live Sessions — See: `docs/ai/workflow-appendix/session-type-editor-live.md`
 

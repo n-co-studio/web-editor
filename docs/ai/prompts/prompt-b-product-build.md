@@ -57,7 +57,7 @@ The mode is set at plan approval and recorded in phase-state.
 
 ### Solo Mode (Decision 0015)
 
-Branches merge to main directly at session close. See `.claude/agents/_agent-glossary.md` § Solo Mode for full merge semantics and branch type applicability, and `docs/ai/workflow-appendix/session-type-task-group.md` for task group branch strategy.
+Branches merge to main directly at session close. See `.claude/agents/_agent-glossary.md` § Phase Model for full merge semantics and branch type applicability, and `docs/ai/workflow-appendix/session-type-task-group.md` for task group branch strategy.
 
 ## Task Contract (Decision 0020)
 

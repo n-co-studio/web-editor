@@ -194,48 +194,7 @@ User Review agents are dispatched by the Orchestrator during the `user-review` p
 
 ## Knowledge Graph Protocol (Decision 0034)
 
-Two-graph architecture: template infrastructure nodes live in `graph.yaml`, product code nodes live in `product-graph.yaml`. When either graph exists, agents participating in build sessions update the appropriate graph at session close with connections discovered during the session.
-
-### Graph File Routing
-- **Template graph** (`docs/ai/knowledge-graph/graph.yaml`): nodes for governance files — decisions, hooks, prompts, agents, conventions, concepts. Syncs to child repos via template sync
-- **Product graph** (`docs/ai/knowledge-graph/product-graph.yaml`): nodes for product application code. Child-owned, excluded from template sync. Not created in the template repo
-- **Cross-layer edges**: stored in the source node's graph file (e.g., a product node that `depends-on` a template hook stores that edge in the product graph)
-- **"Shared" concept**: derived at read time by detecting template nodes with incoming cross-layer edges from the product graph. Not a stored value
-- **ID uniqueness**: product nodes use distinct prefixes from template nodes (convention). Template nodes keep current prefixes (`decision-*`, `hook-*`, `agent-*`, etc.)
-
-### Graph-First Lookup
-
-REQUIRE: All agents in build sessions MUST read `.claude/.state/kg-relevance-context` before any broad codebase search (`grep -r`, `find`, repo-wide glob patterns), when that file exists and is non-empty. The knowledge graph provides pre-computed connections that are faster and more complete than runtime search for governance relationships, cross-file dependencies, and data flow.
-
-- **Context injection is mechanical**: At build phase entry, `_phase-helper.sh` automatically runs `kg-relevance.sh` (which searches both graphs) and writes the output to `.claude/.state/kg-relevance-context`. Agents do not need to load the graph manually — the context is pre-computed and available at that well-known path.
-- **When to consult**: Before running broad searches (`grep -r`, `find`, repo-wide glob patterns) to discover which files are affected by changes. Read `.claude/.state/kg-relevance-context` first for pre-computed relevance-scored connections.
-- **When to search instead**: (a) Files not yet in the knowledge graph, (b) connections the graph doesn't cover (e.g., string literals, configuration values), (c) verifying graph edges you suspect are stale.
-- **When the context file is absent or empty**: Documented exception — proceed with normal search. The graph may not exist or the task may lack a contract with scope files. Note: for Prompt H (hotfix/debug), `_inject_kg_context()` is a no-op (no task contract) — use the Expedited Profile direct-invocation pattern instead (see Session-Type Profiles below).
-
-### Session-Type Profiles (Decision 0034 Amendment 3)
-
-| Profile | Session Type | Read Requirement | Write Requirement |
-|---------|-------------|-----------------|------------------|
-| Full | Prompt B (standard build) | REQUIRE: read `kg-relevance-context` when present | REQUIRE-attempt at close before final commit |
-| Expedited | Prompt H (hotfix/debug) | REQUIRE: call `kg-relevance.sh` directly with diagnosed files after investigation | REQUIRE-attempt at close |
-| Light | Prompt E (editor-live) | Read `kg-relevance-context` once at build phase entry if present | REQUIRE-attempt at close only |
-| Audit | Prompt C (project audit) | Read-only (`graph-health` Auditor mode) | No writes |
-
-### Rules
-- Graph writes use shell I/O (Bash redirection — not model Edit/Write tools) per Decision 0034
-- Route writes to the correct graph: template files → `graph.yaml`, product files → `product-graph.yaml`
-- Operator-curated edges (`source_type: operator-curated`) are never modified by agents
-- Agent-written edges use `source_type: agent-inferred` with appropriate `confidence` scores (0.7 for verified connections, 0.3–0.5 for inferred conventions)
-- Edge types are limited to the 8-type taxonomy in Decision 0034: `governs`, `constrains`, `implements`, `depends-on`, `produces`, `consumes`, `tests`, `supersedes` — do not invent new types
-- Use `mkdir`-based locking before writing: template graph uses `.graph-lock`, product graph uses `.product-graph-lock`
-- When traversing and confirming existing edges, update `last_verified` to the current date and set `status: active`
-- Invalid edges get `status: stale` (never deleted by agents)
-- REQUIRE: attempt graph writes at session close before the final commit. If the write fails (lock contention, parse error), log the failure in the closing summary and proceed to commit. Skipping the attempt entirely is a REQUIRE violation (Decision 0034 Amendment 3).
-
-### Lifecycle
-- **Read**: On-demand at session start via `.claude/tools/kg-relevance.sh` when task scope overlaps graph nodes (orchestrator trigger). Searches both graphs automatically
-- **Write**: At session close, before the final commit — new nodes, new edges, updated `last_verified` dates. Route to the correct graph by layer
-- **Seed**: During Prompt A initialization via `.claude/tools/kg-seed.sh --target template` when no template graph exists. Product graph seeded by child repos via `kg-seed.sh --target product`
+Canonical definition in `_agent-glossary.md` § Knowledge Graph Protocol. Two-graph architecture (`graph.yaml` for template, `product-graph.yaml` for product). Agents in build sessions read `.claude/.state/kg-relevance-context` (pre-computed by `_phase-helper.sh` at build entry) before broad searches; write graph updates at session close via shell I/O. Session-type profiles: Full (Prompt B), Expedited (Prompt H — call `kg-relevance.sh` directly), Light (Prompt E), Audit (read-only). See glossary for full rules (locking, edge types, write-at-close REQUIRE, lifecycle).
 
 ---
 
