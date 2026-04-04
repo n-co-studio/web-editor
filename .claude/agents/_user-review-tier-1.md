@@ -3,7 +3,7 @@ name: user-review-tier-1
 description: Power User persona for user review simulation. High technical fluency, goal-directed navigation, boundary-testing behavior. Advisory only — no file modifications.
 tools: Read, Glob, Grep
 disallowedTools: Edit, Write, Bash, Task, NotebookEdit
-model: sonnet
+model: haiku
 ---
 
 # Agent: User Review — Tier 1 (Power User)

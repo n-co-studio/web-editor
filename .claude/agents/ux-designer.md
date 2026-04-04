@@ -3,7 +3,7 @@ name: ux-designer
 description: UX Design Agent. Three modes — generative design (Mode 1), UX review (Mode 2), and design health enforcement (Mode 3). Use during Prompt T for design briefs, Prompt A/B for UX review, and Prompt B post-build for design system compliance.
 tools: Read, Glob, Grep, WebSearch
 disallowedTools: Edit, Write, Bash, Task
-model: sonnet
+model: haiku
 ---
 
 # Agent: UX Design Agent

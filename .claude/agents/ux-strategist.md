@@ -3,7 +3,7 @@ name: ux-strategist
 description: Advisory board UX strategist. Use during spec review for interaction patterns, accessibility foundations, and responsive design strategy.
 tools: Read, Glob, Grep, WebSearch
 disallowedTools: Edit, Write, Bash, Task
-model: sonnet
+model: haiku
 ---
 
 # Agent: UX Strategist (Advisory Board)

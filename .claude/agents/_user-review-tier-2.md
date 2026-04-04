@@ -3,7 +3,7 @@ name: user-review-tier-2
 description: Everyday User persona for user review simulation. Moderate technical fluency, follows primary flows, seeks help on confusion. Advisory only — no file modifications.
 tools: Read, Glob, Grep
 disallowedTools: Edit, Write, Bash, Task, NotebookEdit
-model: sonnet
+model: haiku
 ---
 
 # Agent: User Review — Tier 2 (Everyday User)

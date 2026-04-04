@@ -24,6 +24,7 @@ Select which dimensions to audit. Not all-or-nothing — pick what's relevant.
 | Governance | Auditor | `governance` | Analytics |
 | Tech debt | Auditor | `tech-debt` | Analytics |
 | Dependency health | Security/Privacy | full dep audit | — |
+| Graph health | Auditor | `graph-health` | Architect |
 
 ## Depth Tiers
 
@@ -32,10 +33,10 @@ The operator selects a tier, or the Orchestrator defaults based on context.
 | Tier | When | Dimensions |
 |---|---|---|
 | **Quick** | Routine check-in | Governance + Security |
-| **Standard** | Milestone or pre-release | Operator-selected dimensions (tech-debt available) |
+| **Standard** | Milestone or pre-release | Operator-selected dimensions (tech-debt and graph-health available) |
 | **Deep** | Full health audit | All dimensions |
 
-Tech debt is available at Standard and Deep tiers. Not included in Quick tier.
+Tech debt and Graph health are available at Standard and Deep tiers. Not included in Quick tier.
 
 If no tier is specified:
 - Operator selected specific dimensions → **Standard**
@@ -56,6 +57,7 @@ If `manifest.json` has `"active": null` (no compiled specs):
 | Governance | **Degrade** — check session log and known issues only, skip decision staleness |
 | Tech debt | **Run** — governance-scoped when no product code exists (categories 1–4 only; categories 5–7 adapt to available file types) |
 | Dependency health | **Run** — works on code alone |
+| Graph health | **Run** — works on graph files alone; **Skip** if no graph files exist |
 
 Inform the operator which dimensions were skipped or degraded and why.
 
@@ -63,7 +65,7 @@ Inform the operator which dimensions were skipped or degraded and why.
 
 The Orchestrator dispatches selected dimensions in parallel:
 
-- **Auditor dimensions** (drift, compliance, cohesion-drift, governance, tech-debt): Dispatch Auditor via Task with the mode specified. Each mode runs as a separate Task dispatch.
+- **Auditor dimensions** (drift, compliance, cohesion-drift, governance, tech-debt, graph-health): Dispatch Auditor via Task with the mode specified. Each mode runs as a separate Task dispatch.
 - **Security dimension**: Dispatch Security/Privacy via Task with explicit scope: "Full-codebase security review — not scoped to a diff or spec. Audit all source code for vulnerabilities, secrets, and security risks."
 - **Performance dimension**: Dispatch Performance Engineer via Task with explicit scope: "Full-codebase performance review — not scoped to a diff or spec. Audit source code for performance issues, inefficient patterns, and optimization opportunities."
 - **Dependency health dimension**: Dispatch Security/Privacy via Task with explicit scope: "Full dependency audit — check all dependency manifests for known vulnerabilities, outdated packages, and supply chain risks."

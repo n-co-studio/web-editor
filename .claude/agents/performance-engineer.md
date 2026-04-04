@@ -3,7 +3,7 @@ name: performance-engineer
 description: Advisory board performance engineer. Use during spec review for caching strategy, bundle size, rendering approach, and data fetching patterns.
 tools: Read, Glob, Grep, WebSearch
 disallowedTools: Edit, Write, Bash, Task
-model: sonnet
+model: haiku
 ---
 
 # Agent: Performance Engineer (Advisory Board)

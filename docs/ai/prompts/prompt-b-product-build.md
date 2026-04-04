@@ -61,7 +61,11 @@ Branches merge to main directly at session close. See `.claude/agents/_agent-glo
 
 ## Task Contract (Decision 0020)
 
-At session init, after branch creation and spec loading, extract the task contract from the brief text:
+At session init, after branch creation and spec loading:
+
+**Product graph auto-seeding (first-session guard):** If `docs/ai/knowledge-graph/product-graph.yaml` does not exist, run `.claude/tools/kg-seed.sh --target product` to bootstrap the product graph. Skip if the file already exists. This is a first-session-only operation — the guard prevents redundant re-seeding.
+
+Extract the task contract from the brief text:
 
 - **Singular builds**: If the brief contains a `### Task Contract` section with a YAML code block, extract the YAML content and write it to `.claude/local/task-contract.yaml`. The task contract is embedded inside the brief template (not a separate block). If `.claude/local/task-contract.yaml` already exists (orphan from a crashed session), delete it before writing the new one and log: "Cleaned stale task contract from previous session."
 - **Task groups**: If the brief's `### Task Group` section contains a `Contract:` field, extract the contract content and write it as the `intent:` block in the task group contract YAML during the `contract-init` phase. Use the fields: `goal`, `verification`, `scope_files`, `spec_references`.
@@ -121,12 +125,13 @@ When either `docs/ai/knowledge-graph/graph.yaml` (template) or `product-graph.ya
 - **Cross-layer edges** (e.g., product node depends-on template hook) → stored in the source node's graph
 
 ### Graph-First File Discovery
-When you need to discover which files are affected by your changes, consult the knowledge graph context first. At build phase entry, `_phase-helper.sh` automatically runs `kg-relevance.sh` (which searches both graphs) and writes pre-computed relevance-scored connections to `.claude/.state/kg-relevance-context`. Read this file before running broad codebase searches.
+REQUIRE: when `.claude/.state/kg-relevance-context` exists and is non-empty, read it before running any broad codebase search (`grep -r`, `find`, repo-wide glob patterns). At build phase entry, `_phase-helper.sh` automatically runs `kg-relevance.sh` (which searches both graphs) and writes pre-computed relevance-scored connections to `.claude/.state/kg-relevance-context`.
 
 Use grep/glob search only for:
 - Files not yet in the knowledge graph
 - Connections the graph doesn't cover (e.g., string literals, configuration values)
 - Verifying graph edges you suspect are stale
+- When `kg-relevance-context` is absent or empty (documented exception — not default behavior)
 
 When you discover connections not in the graph, note them for graph update at close.
 
@@ -142,7 +147,7 @@ Update the appropriate graph file via shell I/O (Bash redirection — not Edit/W
 
 Use `mkdir`-based locking per Decision 0034 before writing. Template graph uses `.graph-lock`, product graph uses `.product-graph-lock`. Operator-curated edges (`source_type: operator-curated`) are never modified by agents.
 
-Graph updates are **advisory** — if the graph write fails (lock contention, parse error), the session still commits normally. Do not block the close sequence on graph update failures.
+REQUIRE: attempt graph writes at close before the final commit. If the write fails (lock contention, parse error), log the failure in the closing summary and proceed to commit — do not block the close sequence. Skipping the attempt entirely is a REQUIRE violation (Decision 0034 Amendment 3).
 
 ## Operating Rules
 - REQUIRE: at session start, create a branch from main: `git checkout -b <category>/<description>` (standard: `feature/<description>`, hotfix: `hotfix/<description>`)

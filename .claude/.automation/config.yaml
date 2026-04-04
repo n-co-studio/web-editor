@@ -22,6 +22,21 @@ runner:
   max_consecutive_sessions: 0
   max_deferral_cycles: 3
 
+# Model routing — controls the --model flag passed to claude -p in runner.sh.
+# Agent frontmatter controls per-subagent model (cost layer 1: subagent routing).
+# model_routing_overrides controls the orchestrator process model (cost layer 2: session routing).
+# Precedence: model_routing_overrides[session_type] → model_routing.default.
+# NOTE: model_routing_overrides is a top-level block (not nested) because
+# _parse_config_field requires top-level keys for its sed range pattern.
+model_routing:
+  default: sonnet
+
+model_routing_overrides:
+  audit: haiku
+  queue-triage: haiku
+  standard: sonnet
+  taskgroup-merge: sonnet
+
 retention:
   queue_days: 30
   report_days: 90

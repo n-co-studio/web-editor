@@ -167,7 +167,7 @@ Phase labels correspond to Decision 0014 `taskgroup-merge` phase sequence. Runs 
 
 | Agent | Invoke When | Blocks Commit? |
 |-------|------------|----------------|
-| **Auditor** | Operator runs Prompt C — dispatched per dimension (drift, compliance, cohesion-drift, governance, tech-debt) | No (read-only) |
+| **Auditor** | Operator runs Prompt C — dispatched per dimension (drift, compliance, cohesion-drift, governance, tech-debt, graph-health) | No (read-only) |
 
 Audit agents are dispatched by the Orchestrator during Prompt C. Security/Privacy and Performance Engineer may also be dispatched in audit scope (full-codebase, not diff-scoped). See `docs/ai/prompts/prompt-c-project-audit.md`.
 
@@ -205,12 +205,21 @@ Two-graph architecture: template infrastructure nodes live in `graph.yaml`, prod
 
 ### Graph-First Lookup
 
-All agents in build sessions SHOULD consult graph context before broad codebase searches. The knowledge graph provides pre-computed connections that are faster and more complete than runtime search for governance relationships, cross-file dependencies, and data flow.
+REQUIRE: All agents in build sessions MUST read `.claude/.state/kg-relevance-context` before any broad codebase search (`grep -r`, `find`, repo-wide glob patterns), when that file exists and is non-empty. The knowledge graph provides pre-computed connections that are faster and more complete than runtime search for governance relationships, cross-file dependencies, and data flow.
 
 - **Context injection is mechanical**: At build phase entry, `_phase-helper.sh` automatically runs `kg-relevance.sh` (which searches both graphs) and writes the output to `.claude/.state/kg-relevance-context`. Agents do not need to load the graph manually — the context is pre-computed and available at that well-known path.
 - **When to consult**: Before running broad searches (`grep -r`, `find`, repo-wide glob patterns) to discover which files are affected by changes. Read `.claude/.state/kg-relevance-context` first for pre-computed relevance-scored connections.
 - **When to search instead**: (a) Files not yet in the knowledge graph, (b) connections the graph doesn't cover (e.g., string literals, configuration values), (c) verifying graph edges you suspect are stale.
-- **When the context file is absent**: The graph may not exist or the task may lack a contract with scope files. Proceed with normal search — no enforcement.
+- **When the context file is absent or empty**: Documented exception — proceed with normal search. The graph may not exist or the task may lack a contract with scope files. Note: for Prompt H (hotfix/debug), `_inject_kg_context()` is a no-op (no task contract) — use the Expedited Profile direct-invocation pattern instead (see Session-Type Profiles below).
+
+### Session-Type Profiles (Decision 0034 Amendment 3)
+
+| Profile | Session Type | Read Requirement | Write Requirement |
+|---------|-------------|-----------------|------------------|
+| Full | Prompt B (standard build) | REQUIRE: read `kg-relevance-context` when present | REQUIRE-attempt at close before final commit |
+| Expedited | Prompt H (hotfix/debug) | REQUIRE: call `kg-relevance.sh` directly with diagnosed files after investigation | REQUIRE-attempt at close |
+| Light | Prompt E (editor-live) | Read `kg-relevance-context` once at build phase entry if present | REQUIRE-attempt at close only |
+| Audit | Prompt C (project audit) | Read-only (`graph-health` Auditor mode) | No writes |
 
 ### Rules
 - Graph writes use shell I/O (Bash redirection — not model Edit/Write tools) per Decision 0034
@@ -221,7 +230,7 @@ All agents in build sessions SHOULD consult graph context before broad codebase 
 - Use `mkdir`-based locking before writing: template graph uses `.graph-lock`, product graph uses `.product-graph-lock`
 - When traversing and confirming existing edges, update `last_verified` to the current date and set `status: active`
 - Invalid edges get `status: stale` (never deleted by agents)
-- Graph updates are **advisory** (not blocking) — if the write fails, the session still commits normally
+- REQUIRE: attempt graph writes at session close before the final commit. If the write fails (lock contention, parse error), log the failure in the closing summary and proceed to commit. Skipping the attempt entirely is a REQUIRE violation (Decision 0034 Amendment 3).
 
 ### Lifecycle
 - **Read**: On-demand at session start via `.claude/tools/kg-relevance.sh` when task scope overlaps graph nodes (orchestrator trigger). Searches both graphs automatically

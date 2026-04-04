@@ -3,7 +3,7 @@ name: accessibility
 description: Accessibility review agent. Use for UI changes to check WCAG 2.1 AA compliance.
 tools: Read, Glob, Grep
 disallowedTools: Edit, Write, Bash, Task
-model: sonnet
+model: haiku
 ---
 
 # Agent: Accessibility

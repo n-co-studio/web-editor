@@ -21,7 +21,7 @@ Add a persistent knowledge graph that maps semantic connections between codebase
 6. **Authority hierarchy**: Edges carry `source_type: operator-curated | agent-inferred`. Operator-curated edges are immutable by agents — agents cannot overwrite, mark stale, or delete them. Agent-inferred edges can be modified by any agent or operator
 7. **Staleness protocol**: Edges carry `status: active | stale | unverified` and `last_verified` (ISO date). When an agent reads and confirms an edge, it updates `last_verified` and sets `status: active`. Invalid edges get `status: stale` (not deleted). Edges stale for 90+ days are prune candidates. Session-count-based staleness (30 sessions without verification) is tracked via `last_verified` date aging
 8. **Concurrent write safety**: Single-file graph means worktree sessions writing simultaneously could conflict. Graph writes use `mkdir`-based locking (atomic directory creation as lock — same approach used by merge-lock in Decision 0030 for macOS compatibility)
-9. **Session integration**: Graph loaded on-demand at session start when task brief references files with graph nodes or when the session touches governance-adjacent paths (AI.md on-demand trigger). Advisory graph-update reminder in session-close-check.sh
+9. **Session integration**: Graph loaded on-demand at session start when task brief references files with graph nodes or when the session touches governance-adjacent paths (AI.md on-demand trigger). Graph writes at session close are REQUIRE-attempt/tolerate-failure (Amendment 3 — supersedes the original advisory reminder). Session-type profiles: Full (Prompt B), Expedited (Prompt H), Light (Prompt E), Audit (Prompt C)
 10. **Bootstrap seeder**: `.claude/tools/kg-seed.sh` generates initial graph from governance metadata (DIGEST.md trigger annotations, AI.md source-of-truth, hook table). All seeded edges are `agent-inferred` and `unverified`. Utility scripts placed under `.claude/tools/` (not `scripts/`) because they are governance utilities — `scripts/` is treated as product code by the mode guard, which blocks writes in template mode
 11. **Relevance scoring**: `.claude/tools/kg-relevance.sh` performs weighted graph traversal given scope files, producing ranked also-relevant files with edge paths. Weight model: scope files x50, direct edges x10, governance edges x5, two-hop x2, stale x0.3, unverified x0.5
 12. **Convention nodes**: Nodes with `type: convention` represent implicit codebase patterns. Edges from convention nodes to exemplar files use `constrains` relation. Agent-inferred conventions start with confidence 0.3–0.5, promotable to `operator-curated` when verified
@@ -47,6 +47,39 @@ Adds a `layer` field to the node schema, enabling the knowledge graph to disting
 4. **UI integration**: The massimo child repo implements layer-aware filtering in the knowledge graph explorer (filter chips, visual badges, color-coded edges). Product code changes live on branch `feature/knowledge-graph-layer-taxonomy` in the massimo repo
 5. **Validation**: The massimo validator (`kg-validate.ts`) enforces the `layer` field as required on all nodes. The massimo branch must be merged before this template change syncs downstream to avoid validation failures
 6. **Authorization**: This schema extension is authorized under §3 (schema changes require decision amendment)
+
+## Amendment 3 — Mandatory Integration Across Session Types (2026-04-04)
+
+Closes knowledge graph integration gaps and makes graph usage mandatory (not advisory) across Prompts B, H, E, and C via governance model enforcement. No new hooks.
+
+### Behavioral Changes
+
+1. **Write stance — REQUIRE attempt, tolerate failure.** Agents MUST attempt graph writes at session close. If the write fails (lock contention, parse error), log the failure in the closing summary and proceed to commit. Skipping the attempt entirely is a REQUIRE violation.
+
+2. **Read stance — REQUIRE when context file is present and non-empty.** Agents MUST read `.claude/.state/kg-relevance-context` before broad codebase searches (`grep -r`, `find`, repo-wide glob patterns) when that file exists and is non-empty. When absent or empty, proceed with normal search (documented exception, not default behavior).
+
+3. **Session-type profiles:**
+
+   | Profile | Session Type | Read | Write |
+   |---------|-------------|------|-------|
+   | Full | Prompt B (standard build) | REQUIRE: read `kg-relevance-context` when present; `_inject_kg_context()` auto-populates at build phase entry | REQUIRE-attempt at close before final commit |
+   | Expedited | Prompt H (hotfix/debug) | REQUIRE: call `kg-relevance.sh` directly with diagnosed affected files after plan phase investigation | REQUIRE-attempt at close |
+   | Light | Prompt E (editor-live) | Read `kg-relevance-context` once at build phase entry if present | REQUIRE-attempt at close only (no mid-cycle writes) |
+   | Audit | Prompt C (project audit) | Read-only — new `graph-health` Auditor mode | No writes |
+
+### Rationale
+
+REQUIRE creates auditable obligations — session logs, cohesion review, and Pragmatist plan-gating can flag violations. Hook-based enforcement is explicitly excluded (operator constraint). The distinction between REQUIRE and advisory: skipping the attempt is now a violation, not a missed suggestion. Agents whose attempt fails are compliant; agents who don't try are non-compliant.
+
+### Prompt H — Direct Invocation Rationale
+
+Prompt H has no task contract, so `_inject_kg_context()` silently no-ops. Direct invocation with diagnosed files fits the expedited session model.
+
+### Authorization
+
+This behavioral upgrade is authorized under §9 (session integration) and §2 (write authority). No schema changes — §3 amendment not triggered.
+
+---
 
 ## Amendment 2 — Two-Graph Architecture (2026-03-31)
 

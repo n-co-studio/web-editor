@@ -136,6 +136,22 @@ At session start, check `docs/ai/governance/` for governance evidence:
 
 These are advisory checks. The operator may direct you to proceed without them.
 
+## Knowledge Graph Integration (Decision 0034 — Light Profile)
+
+### Graph Context at Build Phase Entry
+
+If `.claude/.state/kg-relevance-context` exists and is non-empty at build phase entry, read it before the first build cycle. Context is injected once at init — not refreshed per loop. This surfaces relevant product-layer connections for the visual editing session without adding overhead to each cycle.
+
+When absent, proceed normally — editor-live sessions often start before product graph exists.
+
+### Graph Writes at Close
+
+In the Close Signal sequence, before the final commit:
+
+REQUIRE: attempt knowledge graph writes at close per Decision 0034 Amendment 3 (Light Profile). Write new product-layer nodes for components or files created during the session, and edges for connections discovered. If the write fails, log the failure in the closing summary and proceed to commit — do not block the close sequence.
+
+No mid-cycle graph interaction. The close-time write captures product-layer nodes (new components created during visual editing) — the primary value of graph participation for editor-live sessions.
+
 ## Rules
 
 - BLOCK: **child mode only** — `editor-live` sessions require product code access. Template mode (no product code) and autonomous mode (no operator) are excluded. Enforced by `write-guard.sh` mode guard.

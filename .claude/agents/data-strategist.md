@@ -3,7 +3,7 @@ name: data-strategist
 description: Advisory board data strategist. Use during spec review for schema design, migration safety, data lifecycle, and contract consistency.
 tools: Read, Glob, Grep
 disallowedTools: Edit, Write, Bash, Task
-model: sonnet
+model: haiku
 ---
 
 # Agent: Data Strategist (Advisory Board)

@@ -15,6 +15,13 @@ runner:
   max_consecutive_sessions: 0      # Max sessions before daemon exits; 0 = unlimited
   max_deferral_cycles: 3           # Max work-order deferral cycles before entry transitions to blocked
 
+model_routing:
+  default: sonnet            # model for claude -p when no model_routing_overrides match (sonnet | haiku)
+
+model_routing_overrides:     # per-session-type model override map (keys: Decision 0014 session types)
+  # <session_type>: <model>  e.g., audit: haiku
+  # Must be top-level block — _parse_config_field requires column-0 keys
+
 retention:
   queue_days: 30            # days to retain completed queue entries
   report_days: 90           # days to retain blocker reports

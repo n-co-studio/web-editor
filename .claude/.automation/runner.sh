@@ -607,6 +607,39 @@ _is_final_taskgroup_entry() {
 }
 
 # ============================================================
+# ============================================================
+# Model routing — resolve CLI --model flag for claude -p
+# ============================================================
+
+# Maps config model names to Claude CLI model IDs.
+# Returns the --model flag value for a given session type.
+# Precedence: model_routing_overrides[session_type] → model_routing.default → "".
+# Empty return means no --model flag (use CLI default).
+_resolve_model_for_session() {
+  local session_type="$1"
+  local model=""
+
+  # Check model_routing_overrides for this session type.
+  # _parse_config_field handles local → tracked fallback.
+  # model_routing_overrides is a top-level block (not nested under model_routing)
+  # because _parse_config_field requires column-0 keys for its sed range pattern.
+  model=$(_parse_config_field "model_routing_overrides" "$session_type")
+
+  # Fall back to model_routing.default
+  if [ -z "$model" ]; then
+    model=$(_parse_config_field "model_routing" "default")
+  fi
+
+  # Map config names to CLI model IDs
+  case "$model" in
+    sonnet) printf '%s' "claude-sonnet-4-6" ;;
+    haiku)  printf '%s' "claude-haiku-4-5-20251001" ;;
+    "")     printf '' ;;  # no model flag — use CLI default
+    *)      printf '%s' "$model" ;;  # pass through unknown values as-is
+  esac
+}
+
+# ============================================================
 # Core execution — run a single entry (used by both modes)
 # ============================================================
 
@@ -679,6 +712,14 @@ _run_single_entry() {
   local stderr_file
   stderr_file=$(mktemp "${TMPDIR:-/tmp}/runner-stderr-XXXXXX" 2>/dev/null || echo "")
 
+  # Resolve model for this session type (model routing — Decision 0017)
+  local model_id
+  model_id=$(_resolve_model_for_session "$session_type")
+  local model_flag=""
+  if [ -n "$model_id" ]; then
+    model_flag="--model $model_id"
+  fi
+
   # Launch headless session
   # Trust model for headless execution:
   #   --permission-mode bypassPermissions — required because PermissionRequest
@@ -727,10 +768,12 @@ _run_single_entry() {
   # This prevents SIGTERM from killing sessions during close phase output.
   local exit_code=0
   if [ -n "$stderr_file" ]; then
+    # shellcheck disable=SC2086 — $model_flag intentionally unquoted (expands to nothing when empty)
     (cd "$launch_dir" && claude -p \
       --permission-mode bypassPermissions \
       --disallowedTools "$disallowed" \
       --max-turns 200 \
+      $model_flag \
       <<< "$prompt" \
       2> >(tee "$stderr_file" >&2)) &
     _CLAUDE_CHILD_PID=$!
@@ -742,10 +785,12 @@ _run_single_entry() {
       wait "$_CLAUDE_CHILD_PID" || exit_code=$?
     done
   else
+    # shellcheck disable=SC2086 — $model_flag intentionally unquoted (expands to nothing when empty)
     (cd "$launch_dir" && claude -p \
       --permission-mode bypassPermissions \
       --disallowedTools "$disallowed" \
       --max-turns 200 \
+      $model_flag \
       <<< "$prompt") &
     _CLAUDE_CHILD_PID=$!
     wait "$_CLAUDE_CHILD_PID" || exit_code=$?

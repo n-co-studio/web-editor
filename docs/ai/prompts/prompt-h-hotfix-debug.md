@@ -180,6 +180,27 @@ At session start, check `docs/ai/governance/` for governance evidence:
 
 These are advisory checks. Hotfix sessions often proceed without full governance — the operator may direct you to proceed.
 
+## Knowledge Graph Integration (Decision 0034 — Expedited Profile)
+
+### Graph-First Context
+
+After synthesizing investigation findings in the plan phase (post agent dispatch, before presenting fix strategy), call `kg-relevance.sh` directly with the diagnosed affected files as arguments:
+
+```bash
+.claude/tools/kg-relevance.sh <file1> <file2> ...
+```
+
+Read the output before proposing the fix strategy. This surfaces dependency and governance relationships that inform root cause diagnosis — dependency chains, governance constraints, cross-file relationships the investigation agents may not have surfaced.
+
+**Why direct invocation:** Prompt H has no task contract, so `_inject_kg_context()` (the standard auto-injection path) silently no-ops. Direct invocation with diagnosed files is simpler and fits the expedited session model.
+
+### Graph Writes at Close
+
+REQUIRE: attempt knowledge graph writes at close before the final commit per Decision 0034 Amendment 3. Use the same REQUIRE-attempt/tolerate-failure pattern as Prompt B:
+- Write new nodes for files created, new edges for connections discovered
+- If the write fails (lock contention, parse error), log the failure in closing summary and proceed to commit
+- Do not block the close sequence on graph write failures
+
 ## Rules
 
 - REQUIRE: at session start, create a `hotfix/<description>` branch from main
@@ -189,6 +210,7 @@ These are advisory checks. Hotfix sessions often proceed without full governance
 - REQUIRE: escalation report must include hypotheses tested, causes eliminated, and remaining candidates
 - REQUIRE: include git trailers on commits per the convention in `docs/ai/workflow.md` (Session Lifecycle > Git Trailer Convention)
 - REQUIRE: solo mode — merge to main at close (hotfix branches always merge)
+- REQUIRE: attempt knowledge graph writes at close per Decision 0034 Amendment 3 (Expedited Profile)
 - BLOCK: A5 cohesion review is skipped for hotfix sessions (expedited gate profile)
 - GUIDE: A2 scope limit is relaxed — hotfix fixes may exceed 100 lines if the root cause requires it
 - GUIDE: use HVST protocol when diagnosis is ambiguous (see `_agent-glossary.md` § HVST)

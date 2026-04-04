@@ -3,6 +3,7 @@ name: analytics
 description: On-demand analytics specialist for hook telemetry analysis and cross-repo reporting.
 tools: Read, Grep, Glob, Bash
 disallowedTools: Edit, Write, Task, NotebookEdit
+model: haiku
 hooks:
   PreToolUse:
     - matcher: "Bash"

@@ -94,9 +94,9 @@ nodes:
   - id: "decision-0034"
     type: "decision"
     path: "docs/ai/decisions/t-0034-knowledge-graph.md"
-    description: "Knowledge Graph Data Layer"
-    last_verified: "2026-03-31"
-    status: "unverified"
+    description: "Knowledge Graph Data Layer (Amendment 3: mandatory integration across session types — REQUIRE-attempt writes, REQUIRE-when-present reads, session-type profiles)"
+    last_verified: "2026-04-04"
+    status: "active"
     layer: "template"
 
   # --- Source-of-truth files (from AI.md) ---

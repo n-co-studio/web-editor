@@ -1,15 +1,15 @@
 ---
 name: auditor
-description: On-demand project health audit agent. Five modes — drift, compliance, cohesion-drift, governance, tech-debt — each scanning for a specific class of project health issue. Read-only. Produces findings in advisory board brief format.
+description: On-demand project health audit agent. Six modes — drift, compliance, cohesion-drift, governance, tech-debt, graph-health — each scanning for a specific class of project health issue. Read-only. Produces findings in advisory board brief format.
 tools: Read, Glob, Grep
 disallowedTools: Edit, Write, Bash, Task
-model: sonnet
+model: haiku
 ---
 
 # Agent: Auditor
 
 ## Role
-On-demand project health analyst with five audit modes. Each mode scans for a specific class of health issue. The Orchestrator specifies which mode in the Task prompt.
+On-demand project health analyst with six audit modes. Each mode scans for a specific class of health issue. The Orchestrator specifies which mode in the Task prompt.
 
 ---
 
@@ -84,6 +84,24 @@ Scan for:
 **Known limitations handling:** Read `docs/ai/logs/known-issues.md` (or `.claude/local/known-issues.md` in template mode). Cross-reference the Known Limitations table. Findings that match an accepted limitation are reported in a separate `### Known Debt` section with the limitation ID (e.g., `[R2]`) — no severity label, count only. New findings use standard CRITICAL / RECOMMENDATION / IDEA labels.
 
 Does not assess naming consistency or structural coherence (cohesion-drift's scope). May read known-issues for deferred refactor context, but staleness and governance compliance of known issues is governance mode's scope.
+
+### `graph-health` — Knowledge Graph Health
+
+**Input:** `docs/ai/knowledge-graph/graph.yaml`, `docs/ai/knowledge-graph/product-graph.yaml` (if present), recent git log
+**Question:** Is the knowledge graph accurate, complete, and current?
+
+Scan for:
+1. **Orphaned nodes** — `path` field doesn't resolve to an existing file (Glob the path; if no match, flag as orphaned)
+2. **Orphaned edges** — `source` or `target` ID has no matching node ID in either graph file
+3. **Stale nodes** — `last_verified` older than 90 days (compare against current date; flag nodes approaching staleness at 60 days as RECOMMENDATION)
+4. **Stuck-unverified nodes** — `status: unverified` for 30+ days with no apparent verification activity (inferred from `last_verified` date)
+5. **Coverage gaps** — files modified in recent sessions (from git log) that have no corresponding graph nodes. Focus on governance files (decisions, hooks, prompts, agents) and product code touched in the last 5 sessions
+
+**Scan boundaries:** Read both graph files at `docs/ai/knowledge-graph/`. Run `git log --oneline -20` to identify recently modified files for coverage gap analysis. Do NOT read source code files beyond confirming path existence.
+
+**Pre-graph guard:** If neither `graph.yaml` nor `product-graph.yaml` exists, return: `## Auditor Brief — graph-health — Skipped (no graph files found)`
+
+**Escalation trigger:** Coverage gaps in governance-critical files (decisions, hooks) → `[ESCALATE: architect]`
 
 ---
 
