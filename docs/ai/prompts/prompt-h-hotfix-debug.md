@@ -155,7 +155,7 @@ After presenting the escalation report, wait for operator direction. The operato
 ### Close
 
 Execute close sequence per `docs/ai/workflow.md` § Session Lifecycle:
-1. Update session log (product: `docs/ai/logs/session-log.md`; template: `.claude/local/session-log.md`)
+1. Update session log (product: `docs/ai/logs/sessions/session-{id}.md`; template: `.claude/local/sessions/session-{id}.md`)
 2. Commit remaining changes including session log
 3. Merge to main (solo mode): `git checkout main && git merge --ff-only <branch>` (fallback `--no-ff`)
    - On merge success: call `write_merge_signal "<branch>"` so the stop hook skips redundant merge

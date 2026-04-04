@@ -106,7 +106,7 @@ For parallel task groups: restrict edits to files within declared boundaries. Sh
 3. `advance_phase("close")` — this skips op-review when auto mode is active
 
 ### Non-Final Brief Close ({is_final} = false)
-- Update the session log (template mode: `.claude/local/session-log.md`, product mode: `docs/ai/logs/session-log.md`)
+- Update the session log (template mode: `.claude/local/sessions/session-{id}.md`, product mode: `docs/ai/logs/sessions/session-{id}.md`)
 - Commit the session log update
 - Do NOT merge to main — the branch stays open for the next brief (Decision 0013 task group exemption)
 - For parallel groups: write completion marker `.claude/.state/tg-{group_name}-brief-{brief_seq}.complete` (content: ISO 8601 timestamp)

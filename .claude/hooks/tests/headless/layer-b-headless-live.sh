@@ -123,15 +123,13 @@ create_scratch_repo() {
   rm -rf "$scratch/.claude/.state"
   rm -f "$scratch/.claude/.session-id"
   rm -f "$scratch/.claude/.session-type"
-  rm -f "$scratch/.claude/.session-log-hash"
   rm -f "$scratch/.claude/.session-baseline-sha"
   rm -f "$scratch/.claude/.hvst-fail-count"
   rm -f "$scratch/.claude/.deferrals-pending"
   mkdir -p "$scratch/.claude/.state"
 
-  # Create session log (template mode)
-  mkdir -p "$scratch/.claude/local"
-  printf '# Session Log\n\n---\n' > "$scratch/.claude/local/session-log.md"
+  # Create per-session log directory (template mode uses .claude/local/sessions/).
+  mkdir -p "$scratch/.claude/local/sessions"
 
   # Create minimal CLAUDE.md
   cat > "$scratch/CLAUDE.md" <<'EOF'
@@ -344,7 +342,8 @@ timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$scratch/.claude/.state/phase-stat
 
   # Run a headless session that writes a file and commits
   # NOTE: Solo merge happens in the Stop hook, which may or may not fire
-  output=$(cd "$scratch" && $CLAUDE_CLI -p "Create a file src/headless-solo.ts with content 'export const solo = true;'. Then update .claude/local/session-log.md with a brief entry about this headless test session. Then commit all changes with message 'headless solo test commit'." \
+  _test_sid=$(cat "$scratch/.claude/.session-id" 2>/dev/null || echo "test-session")
+  output=$(cd "$scratch" && $CLAUDE_CLI -p "Create a file src/headless-solo.ts with content 'export const solo = true;'. Then write a session log entry to .claude/local/sessions/session-${_test_sid}.md with a brief entry about this headless test session. Then commit all changes with message 'headless solo test commit'." \
     --max-turns 8 2>&1) || true
 
   # Check if main branch advanced (solo merge happened)

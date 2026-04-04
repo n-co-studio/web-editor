@@ -719,13 +719,63 @@ _has_prior_taskgroup_entry() {
   return 1
 }
 
-# --- Clean up eval-based parallel arrays from queue_dequeue ---
-_dq_cleanup() {
+# --- Shared entry sort — selection sort on _se_ts_N/_se_fp_N parallel arrays ---
+# Used by queue_dequeue (via _dq_cleanup alias below) and queue_list.
+# Sort contract: approved/pending-review/running use "asc" (created_at ASC),
+# matching dequeue execution order. completed uses "desc" (completed_at DESC).
+# failed/blocked/review use "desc" (updated_at DESC).
+# ISO 8601 timestamps are lexicographically comparable as strings.
+# Arguments:
+#   $1 — count of entries in _se_ts_N/_se_fp_N arrays
+#   $2 — order: "asc" (smallest first) or "desc" (largest first)
+_sort_entries_by_ts() {
+  local count="$1" order="${2:-asc}"
+  [ "$count" -gt 1 ] || return 0
+  local i j min_idx tmp_ts tmp_fp a_ts b_ts
+  i=0
+  while [ "$i" -lt "$(( count - 1 ))" ]; do
+    min_idx=$i
+    j=$(( i + 1 ))
+    while [ "$j" -lt "$count" ]; do
+      eval "a_ts=\"\$_se_ts_${j}\""
+      eval "b_ts=\"\$_se_ts_${min_idx}\""
+      if [ "$order" = "asc" ]; then
+        if expr "$a_ts" \< "$b_ts" > /dev/null 2>&1; then
+          min_idx=$j
+        fi
+      else
+        if expr "$a_ts" \> "$b_ts" > /dev/null 2>&1; then
+          min_idx=$j
+        fi
+      fi
+      j=$(( j + 1 ))
+    done
+    if [ "$min_idx" -ne "$i" ]; then
+      eval "tmp_ts=\"\$_se_ts_${i}\""
+      eval "tmp_fp=\"\$_se_fp_${i}\""
+      eval "_se_ts_${i}=\"\$_se_ts_${min_idx}\""
+      eval "_se_fp_${i}=\"\$_se_fp_${min_idx}\""
+      eval "_se_ts_${min_idx}=\"\$tmp_ts\""
+      eval "_se_fp_${min_idx}=\"\$tmp_fp\""
+    fi
+    i=$(( i + 1 ))
+  done
+}
+
+# --- Clean up _se_ts_N/_se_fp_N parallel arrays ---
+_se_cleanup() {
   local count="${1:-0}" k=0
   while [ "$k" -lt "$count" ]; do
-    unset "_dq_ts_${k}" "_dq_fp_${k}" 2>/dev/null || true
+    unset "_se_ts_${k}" "_se_fp_${k}" 2>/dev/null || true
     k=$(( k + 1 ))
   done
+}
+
+# --- Clean up eval-based parallel arrays from queue_dequeue ---
+# Retained for backward compatibility — queue_dequeue now uses _se_* arrays
+# via _sort_entries_by_ts; this cleanup is an alias for _se_cleanup.
+_dq_cleanup() {
+  _se_cleanup "$@"
 }
 
 # --- Dequeue the oldest approved entry ---
@@ -741,49 +791,30 @@ queue_dequeue() {
   local qdir
   qdir=$(_queue_dir)
 
-  # Collect approved entries as parallel arrays (timestamp and filepath).
-  local _dq_count=0
+  # Collect approved entries into shared _se_ts_N/_se_fp_N parallel arrays.
+  # Sort contract: created_at ASC — oldest approved entry runs first.
+  # See _sort_entries_by_ts() for the shared sort implementation used by
+  # both queue_dequeue and queue_list (sort contract parity guarantee).
+  local _se_count=0
   local f
   for f in "$qdir/approved"/*.yaml; do
     [ -f "$f" ] || continue
     _load_queue_entry "$f"
-    eval "_dq_ts_${_dq_count}=\"\$_QE_CREATED_AT\""
-    eval "_dq_fp_${_dq_count}=\"\$f\""
-    _dq_count=$(( _dq_count + 1 ))
+    eval "_se_ts_${_se_count}=\"\$_QE_CREATED_AT\""
+    eval "_se_fp_${_se_count}=\"\$f\""
+    _se_count=$(( _se_count + 1 ))
   done
 
-  [ "$_dq_count" -gt 0 ] || return 1
+  [ "$_se_count" -gt 0 ] || return 1
 
-  # Simple selection sort by timestamp (small N — approved queue is typically <10).
-  # ISO 8601 timestamps are lexicographically comparable as strings.
-  local i j min_idx tmp_ts tmp_fp a_ts b_ts cand_file my_seq entry_id
-  i=0
-  while [ "$i" -lt "$(( _dq_count - 1 ))" ]; do
-    min_idx=$i
-    j=$(( i + 1 ))
-    while [ "$j" -lt "$_dq_count" ]; do
-      eval "a_ts=\"\$_dq_ts_${j}\""
-      eval "b_ts=\"\$_dq_ts_${min_idx}\""
-      if expr "$a_ts" \< "$b_ts" > /dev/null 2>&1; then
-        min_idx=$j
-      fi
-      j=$(( j + 1 ))
-    done
-    if [ "$min_idx" -ne "$i" ]; then
-      eval "tmp_ts=\"\$_dq_ts_${i}\""
-      eval "tmp_fp=\"\$_dq_fp_${i}\""
-      eval "_dq_ts_${i}=\"\$_dq_ts_${min_idx}\""
-      eval "_dq_fp_${i}=\"\$_dq_fp_${min_idx}\""
-      eval "_dq_ts_${min_idx}=\"\$tmp_ts\""
-      eval "_dq_fp_${min_idx}=\"\$tmp_fp\""
-    fi
-    i=$(( i + 1 ))
-  done
+  # Sort by created_at ASC using shared helper (small N — approved queue typically <10).
+  _sort_entries_by_ts "$_se_count" "asc"
 
   # Iterate sorted candidates, skip any blocked by task group sequencing.
+  local i cand_file my_seq entry_id
   i=0
-  while [ "$i" -lt "$_dq_count" ]; do
-    eval "cand_file=\"\$_dq_fp_${i}\""
+  while [ "$i" -lt "$_se_count" ]; do
+    eval "cand_file=\"\$_se_fp_${i}\""
     _load_queue_entry "$cand_file"
 
     # Task group sequencing check (Decision 0017)
@@ -803,11 +834,11 @@ queue_dequeue() {
     entry_id=$(basename "$cand_file" .yaml)
     _transition "$entry_id" "approved" "running"
     printf '%s' "$qdir/running/${entry_id}.yaml"
-    _dq_cleanup "$_dq_count"
+    _se_cleanup "$_se_count"
     return 0
   done
 
-  _dq_cleanup "$_dq_count"
+  _se_cleanup "$_se_count"
   return 1
 }
 

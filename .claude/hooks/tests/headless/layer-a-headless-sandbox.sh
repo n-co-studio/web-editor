@@ -36,8 +36,18 @@ SB="$(get_sandbox)"
 STATE_DIR="$SB/.claude/.state"
 
 # Local helpers
-_compute_log_hash() {
-  portable_hash < "$SB/.claude/local/session-log.md"
+_session_log_path() {
+  local sid
+  sid=$(cat "$SB/.claude/.session-id")
+  echo "$SB/.claude/local/sessions/session-${sid}.md"
+}
+
+_write_session_log() {
+  local log_path
+  log_path=$(_session_log_path)
+  mkdir -p "$(dirname "$log_path")"
+  printf '# Session Log\n\nSession: %s\nDate: 2026-04-04\n\n[Test session log — verifying close sequence enforcement.]\n' \
+    "$(cat "$SB/.claude/.session-id")" > "$log_path"
 }
 
 _L3_OUT="$SB/.claude/.test-hook-output"
@@ -53,16 +63,14 @@ _reinit_sandbox() {
   # blocking re-init within the same test process (same PID appears alive).
   rm -f "$SB/.claude/.state/phase-state"
   rm -f "$SB/.claude/.state/sessions"/*.yaml 2>/dev/null || true
+  # Clean per-session log files from prior test iterations
+  rm -rf "$SB/.claude/local/sessions" 2>/dev/null || true
   (cd "$SB" && git reset --hard HEAD 2>/dev/null || true)
   (cd "$SB" && git clean -fd -e .claude/ 2>/dev/null || true)
 }
 
-# Create session log
-mkdir -p "$SB/.claude/local"
-if [ ! -f "$SB/.claude/local/session-log.md" ]; then
-  printf '# Session Log (Template Development)\n\nRolling cap: last 5 sessions.\n\n---\n' \
-    > "$SB/.claude/local/session-log.md"
-fi
+# Create per-session log directory (template mode uses .claude/local/sessions/).
+mkdir -p "$SB/.claude/local/sessions"
 
 switch_sandbox_branch "feature/test"
 
@@ -143,7 +151,7 @@ tap_section "HA.2: Ephemeral session exemption (taskdef-brief, taskdef-query)"
 _reinit_sandbox
 reset_phase "taskdef-brief"
 # Set up conditions that would normally block: log not modified, commits exist
-_compute_log_hash > "$SB/.claude/.session-log-hash"
+# (no per-session log file written — simulates unmodified state)
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 run_hook_rc "session-close-check.sh" "$(fixture_stop)"
 assert_ok "$_LAST_RC" "session-close-check allows taskdef-brief (ephemeral exemption)"
@@ -151,7 +159,7 @@ assert_ok "$_LAST_RC" "session-close-check allows taskdef-brief (ephemeral exemp
 # --- taskdef-query also bypasses ---
 _reinit_sandbox
 reset_phase "taskdef-query"
-_compute_log_hash > "$SB/.claude/.session-log-hash"
+# (no per-session log file written — simulates unmodified state)
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 run_hook_rc "session-close-check.sh" "$(fixture_stop)"
 assert_ok "$_LAST_RC" "session-close-check allows taskdef-query (ephemeral exemption)"
@@ -159,7 +167,7 @@ assert_ok "$_LAST_RC" "session-close-check allows taskdef-query (ephemeral exemp
 # --- audit also bypasses ---
 _reinit_sandbox
 reset_phase "audit"
-_compute_log_hash > "$SB/.claude/.session-log-hash"
+# (no per-session log file written — simulates unmodified state)
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 run_hook_rc "session-close-check.sh" "$(fixture_stop)"
 assert_ok "$_LAST_RC" "session-close-check allows audit (ephemeral exemption)"
@@ -167,7 +175,7 @@ assert_ok "$_LAST_RC" "session-close-check allows audit (ephemeral exemption)"
 # --- standard does NOT bypass ---
 _reinit_sandbox
 reset_phase "standard"
-_compute_log_hash > "$SB/.claude/.session-log-hash"
+# (no per-session log file written — simulates unmodified state)
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 run_hook_rc "session-close-check.sh" "$(fixture_stop)" > "$_L3_OUT"
 assert_blocked "session-close-check blocks standard session with unchanged log"
@@ -191,7 +199,7 @@ stage_sandbox_file "src/solo.ts" "export const solo = true;"
 reset_phase "standard"
 set_solo "true"
 # Mark session log as modified (stale hash)
-echo "stale-hash-value" > "$SB/.claude/.session-log-hash"
+_write_session_log  # creates per-session file with >100 bytes
 # Use current HEAD as baseline (there are commits since initial = non-zero session)
 (cd "$SB" && git rev-parse HEAD~1) > "$SB/.claude/.session-baseline-sha" 2>/dev/null || \
   echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
@@ -216,7 +224,7 @@ reset_phase "experiment"
 set_solo "true"
 # Experiment sessions are ephemeral — use zero-change path
 git -C "$SB" rev-parse HEAD > "$SB/.claude/.session-baseline-sha"
-_compute_log_hash > "$SB/.claude/.session-log-hash"
+# (no per-session log file written — simulates unmodified state)
 run_hook_rc "session-close-check.sh" "$(fixture_stop)" > "$_L3_OUT" 2>&1
 assert_ok "$_LAST_RC" "session-close-check allows experiment branch close"
 current_branch=$(cd "$SB" && git rev-parse --abbrev-ref HEAD)
@@ -230,7 +238,7 @@ stage_sandbox_file "src/fix.ts" "export const fix = true;"
 (cd "$SB" && git commit -q -m "solo fix commit")
 reset_phase "standard"
 set_solo "true"
-echo "stale-hash-value" > "$SB/.claude/.session-log-hash"
+_write_session_log  # creates per-session file with >100 bytes
 (cd "$SB" && git rev-parse HEAD~1) > "$SB/.claude/.session-baseline-sha" 2>/dev/null || \
   echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 run_hook_rc "session-close-check.sh" "$(fixture_stop)" > "$_L3_OUT" 2>&1
@@ -248,7 +256,7 @@ _reinit_sandbox
 reset_phase "standard"
 
 # --- Attempt 1: blocks (log not modified) ---
-_compute_log_hash > "$SB/.claude/.session-log-hash"
+# (no per-session log file written — simulates unmodified state)
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 run_hook_rc "session-close-check.sh" "$(fixture_stop)" > "$_L3_OUT"
 assert_blocked "attempt 1: stop blocked"
@@ -506,7 +514,7 @@ assert_ok "$_LAST_RC" "runner pattern: pre-commit gates pass"
 (cd "$SB" && git commit -q -m "headless runner e2e commit")
 advance_phase "op-review" 2>/dev/null
 advance_phase "close" 2>/dev/null
-echo "stale-hash-value" > "$SB/.claude/.session-log-hash"
+_write_session_log  # creates per-session file with >100 bytes
 (cd "$SB" && git rev-parse HEAD~1) > "$SB/.claude/.session-baseline-sha" 2>/dev/null || \
   echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 run_hook_rc "session-close-check.sh" "$(fixture_stop)"

@@ -24,7 +24,6 @@ dist/
 .claude/.hvst-fail-count
 
 # Session-scoped state files (stop hook baselines)
-.claude/.session-log-hash
 .claude/.session-baseline-sha
 .claude/.session-id
 .claude/.session-type

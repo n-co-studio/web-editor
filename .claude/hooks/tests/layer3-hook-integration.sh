@@ -89,9 +89,9 @@ reset_phase "standard"
 REPO_OS_SKIP_STATE_GUARD=1 REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/.claude/.state/test-file")"
 assert_ok "$_LAST_RC" "write-guard allows .claude/.state/ edit in init phase"
 
-# .claude/local/ is exempt (session-scoped)
-run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/.claude/local/session-log.md")"
-assert_ok "$_LAST_RC" "write-guard allows .claude/local/ edit in init phase"
+# .claude/local/sessions/ is exempt (per-session log files)
+run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/.claude/local/sessions/session-test.md")"
+assert_ok "$_LAST_RC" "write-guard allows .claude/local/sessions/ edit in init phase"
 
 # docs/ai/governance/ is exempt (skip mode-guard — not carved out in template mode)
 REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/docs/ai/governance/spec-compiled")"
@@ -867,9 +867,20 @@ assert_fail "$_LAST_RC" "pre-commit-gates blocks when no phase-state even with s
 tap_section "L3.10: session-close-check.sh — session close verification"
 
 # --- Local helpers for L3.10+ ---
-# Compute session log hash using the same portable fallback as the hook.
-_compute_log_hash() {
-  portable_hash < "$SB/.claude/local/session-log.md"
+# Get the per-session log path for the current test session.
+_session_log_path() {
+  local sid
+  sid=$(cat "$SB/.claude/.session-id")
+  echo "$SB/.claude/local/sessions/session-${sid}.md"
+}
+
+# Write a per-session log with sufficient content (>100 bytes).
+_write_session_log() {
+  local log_path
+  log_path=$(_session_log_path)
+  mkdir -p "$(dirname "$log_path")"
+  printf '# Session Log\n\nSession: %s\nDate: 2026-04-04\n\n[Test session log — verifying close sequence enforcement.]\n' \
+    "$(cat "$SB/.claude/.session-id")" > "$log_path"
 }
 
 # Temp file for capturing hook output without losing _LAST_RC.
@@ -889,6 +900,8 @@ _reinit_close_sandbox() {
   rm -f "$SB/.claude/.deferrals-pending"
   # Clean per-session state dirs from prior test iterations
   rm -rf "$SB/.claude/.state/wt-sessions" 2>/dev/null || true
+  # Clean per-session log files from prior test iterations
+  rm -rf "$SB/.claude/local/sessions" 2>/dev/null || true
   # Ensure clean git working tree (earlier tests may leave staged/modified files).
   # git reset --hard clears both index and working tree; git clean removes untracked.
   (cd "$SB" && git reset --hard HEAD 2>/dev/null || true)
@@ -896,12 +909,8 @@ _reinit_close_sandbox() {
   reset_phase "standard"
 }
 
-# Create session log if missing (template mode uses .claude/local/).
-mkdir -p "$SB/.claude/local"
-if [ ! -f "$SB/.claude/local/session-log.md" ]; then
-  printf '# Session Log (Template Development)\n\nRolling cap: last 5 sessions.\n\n---\n' \
-    > "$SB/.claude/local/session-log.md"
-fi
+# Create per-session log directory (template mode uses .claude/local/sessions/).
+mkdir -p "$SB/.claude/local/sessions"
 
 # Ensure we're on a feature branch (not main).
 switch_sandbox_branch "feature/test"
@@ -911,7 +920,7 @@ _reinit_close_sandbox
 # Store current HEAD as baseline (no new commits = zero-change)
 git -C "$SB" rev-parse HEAD > "$SB/.claude/.session-baseline-sha"
 # Set hash to current value (not modified)
-_compute_log_hash > "$SB/.claude/.session-log-hash"
+# (no per-session log file written — simulates unmodified state)
 run_hook_rc "session-close-check.sh" "$(fixture_stop)" > "$_L3_OUT"
 assert_ok "$_LAST_RC" "session-close-check allows zero-change session"
 assert_contains "$(cat "$_L3_OUT")" "zero-change" "session-close-check emits zero-change advisory"
@@ -919,7 +928,7 @@ assert_contains "$(cat "$_L3_OUT")" "zero-change" "session-close-check emits zer
 # --- Test 2: Commits + session log modified → allow ---
 _reinit_close_sandbox
 # Set a stale hash so current content differs (= modified)
-echo "stale-hash-value" > "$SB/.claude/.session-log-hash"
+_write_session_log  # creates per-session file with >100 bytes
 # Invalid baseline SHA → treated as non-zero session (baseline-missing)
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 run_hook_rc "session-close-check.sh" "$(fixture_stop)"
@@ -928,7 +937,7 @@ assert_ok "$_LAST_RC" "session-close-check allows when session log modified and 
 # --- Test 3: Commits + session log NOT modified → block ---
 _reinit_close_sandbox
 # Hash matches current (not modified)
-_compute_log_hash > "$SB/.claude/.session-log-hash"
+# (no per-session log file written — simulates unmodified state)
 # Invalid baseline = non-zero session
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 run_hook_rc "session-close-check.sh" "$(fixture_stop)" > "$_L3_OUT"
@@ -940,7 +949,7 @@ assert_contains "$(cat "$_L3_OUT")" "Session log not updated" "session-close-che
 
 # --- Test 4: SKIP_SESSION_LOG=1 override → allow ---
 _reinit_close_sandbox
-_compute_log_hash > "$SB/.claude/.session-log-hash"
+# (no per-session log file written — simulates unmodified state)
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 SKIP_SESSION_LOG=1 run_hook_rc "session-close-check.sh" "$(fixture_stop)"
 assert_ok "$_LAST_RC" "session-close-check allows with SKIP_SESSION_LOG=1"
@@ -951,14 +960,14 @@ _reinit_close_sandbox
 mkdir -p "$SB/.claude/.state"
 echo "2" > "$SB/.claude/.state/.stop-attempt-count"
 # Would normally block (log not modified + commits)
-_compute_log_hash > "$SB/.claude/.session-log-hash"
+# (no per-session log file written — simulates unmodified state)
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 run_hook_rc "session-close-check.sh" "$(fixture_stop)"
 assert_ok "$_LAST_RC" "session-close-check forces exit after 3 stop attempts (safety valve)"
 
 # --- Test 6: Task group non-final brief → branch NOT sealed ---
 _reinit_close_sandbox
-echo "stale-hash-value" > "$SB/.claude/.session-log-hash"
+_write_session_log  # creates per-session file with >100 bytes
 # Invalid baseline → non-zero session (avoids zero-change short-circuit)
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 # Set up as taskgroup session
@@ -992,7 +1001,7 @@ fi
 
 # --- Test 7: Task group final brief → branch sealed ---
 _reinit_close_sandbox
-echo "stale-hash-value" > "$SB/.claude/.session-log-hash"
+_write_session_log  # creates per-session file with >100 bytes
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 reset_phase "taskgroup"
 _advance "contract-init" 2>/dev/null
@@ -1076,7 +1085,7 @@ rm -rf "$SB/.claude/local/task-groups"
 # --- Test 4: Zero-change session seals branch ---
 _reinit_close_sandbox
 git -C "$SB" rev-parse HEAD > "$SB/.claude/.session-baseline-sha"
-_compute_log_hash > "$SB/.claude/.session-log-hash"
+# (no per-session log file written — simulates unmodified state)
 rm -f "$SB/.claude/local/closed-branches"
 run_hook_rc "session-close-check.sh" "$(fixture_stop)" > "$_L3_OUT"
 assert_ok "$_LAST_RC" "zero-change session allows close with seal"
@@ -1086,7 +1095,7 @@ assert_file_contains "$SB/.claude/local/closed-branches" "feature/test" \
 # --- Test 5: Zero-change session detects agent merge signal ---
 _reinit_close_sandbox
 git -C "$SB" rev-parse HEAD > "$SB/.claude/.session-baseline-sha"
-_compute_log_hash > "$SB/.claude/.session-log-hash"
+# (no per-session log file written — simulates unmodified state)
 rm -f "$SB/.claude/local/closed-branches"
 mkdir -p "$SB/.claude/.state"
 echo "feature/zero-merged" > "$SB/.claude/.state/merge-source-branch"
@@ -1364,7 +1373,7 @@ _CACHED_BRANCH=""
 reset_phase "standard"
 SID_L314="$(cat "$SB/.claude/.session-id")"
 git -C "$SB" rev-parse HEAD > "$SB/.claude/.session-baseline-sha"
-_compute_log_hash > "$SB/.claude/.session-log-hash"
+# (no per-session log file written — simulates unmodified state)
 # Verify session file exists (registered by init_phase → register_session)
 if [ -f "$SESSIONS_DIR/${SID_L314}.yaml" ]; then
   _tap_pass "session file exists before close"
@@ -1489,7 +1498,7 @@ switch_sandbox_branch "feature/test"
 # --- Test 1: spec-fresh with commits closes without session-log block ---
 _reinit_close_sandbox
 # Hash matches current (not modified) — would normally block
-_compute_log_hash > "$SB/.claude/.session-log-hash"
+# (no per-session log file written — simulates unmodified state)
 # Invalid baseline → non-zero session
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 reset_phase "spec-fresh"
@@ -1506,7 +1515,7 @@ fi
 
 # --- Test 2: prototype-poc with commits closes without session-log block ---
 _reinit_close_sandbox
-_compute_log_hash > "$SB/.claude/.session-log-hash"
+# (no per-session log file written — simulates unmodified state)
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 reset_phase "prototype-poc"
 _advance "build" 2>/dev/null
@@ -1520,7 +1529,7 @@ fi
 
 # --- Test 3: standard session still blocks on missing session log ---
 _reinit_close_sandbox
-_compute_log_hash > "$SB/.claude/.session-log-hash"
+# (no per-session log file written — simulates unmodified state)
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 reset_phase "standard"
 _advance "plan" 2>/dev/null
@@ -1533,7 +1542,7 @@ assert_contains "$(cat "$_L3_OUT")" "block" "standard session emits block for mi
 # --- Test 4: spec-fresh with uncommitted changes still blocks ---
 _reinit_close_sandbox
 # Session log is "modified" (stale hash) so log check passes
-echo "stale-hash-value" > "$SB/.claude/.session-log-hash"
+_write_session_log  # creates per-session file with >100 bytes
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 reset_phase "spec-fresh"
 _advance "interview" 2>/dev/null
@@ -1558,7 +1567,7 @@ switch_sandbox_branch "feature/test"
 
 # --- Test 1: Parallel content brief never seals branch ---
 _reinit_close_sandbox
-echo "stale-hash-value" > "$SB/.claude/.session-log-hash"
+_write_session_log  # creates per-session file with >100 bytes
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 reset_phase "taskgroup"
 _advance "contract-init" 2>/dev/null
@@ -1594,7 +1603,7 @@ fi
 
 # --- Test 2: Merge brief with markers seals branch ---
 _reinit_close_sandbox
-echo "stale-hash-value" > "$SB/.claude/.session-log-hash"
+_write_session_log  # creates per-session file with >100 bytes
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 reset_phase "taskgroup-merge"
 _advance "contract-init" 2>/dev/null
@@ -1616,7 +1625,7 @@ assert_file_contains "$SB/.claude/local/closed-branches" "feature/test" \
 _reinit_close_sandbox
 # Use zero-change path so hook doesn't block on session log
 git -C "$SB" rev-parse HEAD > "$SB/.claude/.session-baseline-sha"
-_compute_log_hash > "$SB/.claude/.session-log-hash"
+# (no per-session log file written — simulates unmodified state)
 reset_phase "taskgroup-merge"
 # Remove any markers from per-session state dir
 rm -f "$(get_session_state_dir)"/tg-*-brief-*.complete
@@ -1633,7 +1642,7 @@ fi
 _reinit_close_sandbox
 # Zero-change session so hook allows close
 git -C "$SB" rev-parse HEAD > "$SB/.claude/.session-baseline-sha"
-_compute_log_hash > "$SB/.claude/.session-log-hash"
+# (no per-session log file written — simulates unmodified state)
 reset_phase "taskgroup-merge"
 _TSD="$(get_session_state_dir)"
 mkdir -p "$_TSD"
@@ -1652,7 +1661,7 @@ fi
 _reinit_close_sandbox
 # Zero-change session
 git -C "$SB" rev-parse HEAD > "$SB/.claude/.session-baseline-sha"
-_compute_log_hash > "$SB/.claude/.session-log-hash"
+# (no per-session log file written — simulates unmodified state)
 reset_phase "taskgroup"
 _TSD="$(get_session_state_dir)"
 mkdir -p "$_TSD"

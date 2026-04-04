@@ -118,8 +118,12 @@ queue_status() {
 }
 
 # --- List queue entries ---
-# Reads queue-index.json entries section. Optional status filter.
-# Output: one line per entry: id|status|session_type|brief_path|updated_at
+# Scans directory state directly for reliability. Optional status filter.
+# Output: one line per entry: id|status|session_type|brief_path|<sort-field>
+# The 5th column reflects the sort field for each status:
+#   approved/pending-review/running → created_at (ASC — matches dequeue order)
+#   completed                       → completed_at (DESC — newest first)
+#   failed/blocked/review           → updated_at (DESC — most recently changed first)
 # Arguments:
 #   $1 — status filter (optional)
 queue_list() {
@@ -137,13 +141,65 @@ queue_list() {
     fi
     local dir="$qdir/$status"
     [ -d "$dir" ] || continue
+
+    # Determine sort field and order per status.
+    # approved/pending-review/running: created_at ASC — matches queue_dequeue execution
+    # order (sort contract parity: _sort_entries_by_ts "asc" in both paths).
+    # completed: completed_at DESC — newest completed at top.
+    # failed/blocked/review: updated_at DESC — most recently changed at top.
+    local sort_order ts_field
+    case "$status" in
+      approved|pending-review|running)
+        sort_order="asc"
+        ts_field="created_at"
+        ;;
+      completed)
+        sort_order="desc"
+        ts_field="completed_at"
+        ;;
+      *)
+        sort_order="desc"
+        ts_field="updated_at"
+        ;;
+    esac
+
+    # Collect entries into _se_ts_N/_se_fp_N parallel arrays.
+    local _se_count=0
     local f
     for f in "$dir"/*.yaml; do
       [ -f "$f" ] || continue
       _load_queue_entry "$f"
-      printf '%s|%s|%s|%s|%s\n' \
-        "$_QE_ID" "$_QE_STATUS" "$_QE_SESSION_TYPE" "$_QE_BRIEF_PATH" "$_QE_UPDATED_AT"
+      local sort_ts
+      case "$ts_field" in
+        created_at)   sort_ts="$_QE_CREATED_AT" ;;
+        completed_at) sort_ts="$_QE_COMPLETED_AT" ;;
+        *)            sort_ts="$_QE_UPDATED_AT" ;;
+      esac
+      eval "_se_ts_${_se_count}=\"\$sort_ts\""
+      eval "_se_fp_${_se_count}=\"\$f\""
+      _se_count=$(( _se_count + 1 ))
     done
+
+    # Sort using shared helper (same algorithm as queue_dequeue for asc order).
+    _sort_entries_by_ts "$_se_count" "$sort_order"
+
+    # Output sorted entries with sort-field timestamp in 5th column.
+    local k=0
+    while [ "$k" -lt "$_se_count" ]; do
+      eval "f=\"\$_se_fp_${k}\""
+      _load_queue_entry "$f"
+      local display_ts
+      case "$ts_field" in
+        created_at)   display_ts="$_QE_CREATED_AT" ;;
+        completed_at) display_ts="$_QE_COMPLETED_AT" ;;
+        *)            display_ts="$_QE_UPDATED_AT" ;;
+      esac
+      printf '%s|%s|%s|%s|%s\n' \
+        "$_QE_ID" "$_QE_STATUS" "$_QE_SESSION_TYPE" "$_QE_BRIEF_PATH" "$display_ts"
+      k=$(( k + 1 ))
+    done
+
+    _se_cleanup "$_se_count"
   done
 }
 

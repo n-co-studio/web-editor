@@ -11,7 +11,7 @@ Runners must handle post-session tasks externally.
 
 | # | Responsibility | Stop Hook (`session-close-check.sh`) | Runner (`runner.sh` / `lib/`) | Notes |
 |---|---------------|--------------------------------------|-------------------------------|-------|
-| 1 | Session log check | Blocking — verifies session log modified since baseline | N/A — runner does not enforce; agent writes session log during close phase | Agent responsibility in headless mode |
+| 1 | Session log check | Blocking — verifies per-session file `docs/ai/logs/sessions/session-{id}.md` exists and has >100 bytes (template: `.claude/local/sessions/session-{id}.md`). Absence means agent hasn't written it yet. Hash-based check removed. | N/A — runner does not enforce; agent writes per-session log file during close phase | Agent responsibility in headless mode |
 | 2 | Uncommitted changes check | Blocking — verifies no unstaged/staged changes | `runner_external_cleanup()` writes dirty-tree escalation if uncommitted changes present (hardening 4.1) | Stop hook blocks; runner escalates |
 | 3 | HVST known-issues check | Advisory — reminds agent to update known-issues.md after 2+ failures | N/A — runner does not enforce | Agent responsibility via prompt instructions |
 | 4 | Deferrals known-issues check | Advisory — reminds agent to update known-issues.md for deferred findings | N/A — runner does not enforce | Agent responsibility via prompt instructions |
@@ -24,7 +24,7 @@ Runners must handle post-session tasks externally.
 | 11 | Override audit summary | Advisory — lists all governance overrides used this session | N/A — runner does not summarize overrides | Overrides are logged in `overrides.log` regardless |
 | 12 | Governance evidence check | Advisory — verifies task group contract has governance entry | N/A — runner does not verify | Agent responsibility via prompt instructions |
 | 13 | Next-brief reminder | Advisory — prints reminder for pending briefs in task group | N/A — runner manages queue sequencing directly | Runner uses queue state machine instead |
-| 14 | Baseline SHA update | Updates `.session-log-hash` and `.session-baseline-sha` | `runner_external_cleanup()` updates `.session-baseline-sha` with validated SHA (hardening H8) | Both paths update baseline |
+| 14 | Baseline SHA update | Updates `.session-baseline-sha` (`.session-log-hash` removed — per-session files use existence+size check instead of content hash) | `runner_external_cleanup()` updates `.session-baseline-sha` with validated SHA (hardening H8) | Both paths update baseline; hash file no longer used |
 | 15 | 3-attempt safety valve | Exits unconditionally after 3 stop attempts; preserves A4 secret scan (hardening C5) | N/A — runner has circuit breaker (3 consecutive global failures) | Different mechanism, same intent. Safety valve now writes A4 escalation if secrets detected |
 | 16 | Task group finality check | `is_final_brief()` reads contract and checks completion markers | Runner receives finality from queue entry metadata (solo_mode flag) | Behavioral divergence: stop hook reads contract; runner reads queue config |
 | 17 | Agent-merge detection | Reads `merge-source-branch` signal file to skip redundant merge | N/A — runner always handles merge externally | No signal file needed in headless mode |

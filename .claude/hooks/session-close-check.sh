@@ -133,12 +133,15 @@ REPO_ROOT="$_REPO_OS_ROOT"
 # Three-tier resolution: REPO_OS_MODE env var > .claude/repo-mode file > default "child"
 IS_TEMPLATE=false
 [ "$(get_mode)" = "template" ] && IS_TEMPLATE=true
+# Per-session log file: docs/ai/logs/sessions/session-{id}.md (product) or
+# .claude/local/sessions/session-{id}.md (template). Eliminates merge conflicts
+# when multiple automation sessions complete concurrently.
+_SESSION_LOG_ID=$(get_session_id "$REPO_ROOT")
 if [ "$IS_TEMPLATE" = true ]; then
-  SESSION_LOG="$REPO_ROOT/.claude/local/session-log.md"
+  SESSION_LOG="$REPO_ROOT/.claude/local/sessions/session-${_SESSION_LOG_ID}.md"
 else
-  SESSION_LOG="$REPO_ROOT/docs/ai/logs/session-log.md"
+  SESSION_LOG="$REPO_ROOT/docs/ai/logs/sessions/session-${_SESSION_LOG_ID}.md"
 fi
-HASH_FILE="$REPO_ROOT/.claude/.session-log-hash"
 BASELINE_SHA_FILE="$REPO_ROOT/.claude/.session-baseline-sha"
 COUNTER_FILE="$REPO_ROOT/.claude/.hvst-fail-count"
 _SESSION_STATE_DIR="$(get_session_state_dir)"
@@ -219,19 +222,9 @@ _release_merge_lock() {
   fi
 }
 
-# --- Portable SHA-256 (file-based, delegates to portable_hash from _analytics-helper.sh) ---
-file_hash() {
-  [ -f "$1" ] || return 1
-  portable_hash < "$1"
-}
-
 # --- Update baseline for next session ---
-# Re-computes hash fresh (never uses cached value). Stores commit SHA for
-# session-scoped change detection. Handles missing session log gracefully.
+# Stores commit SHA for session-scoped change detection.
 update_baseline() {
-  if [ -f "$SESSION_LOG" ]; then
-    file_hash "$SESSION_LOG" > "$HASH_FILE" 2>/dev/null || true
-  fi
   git rev-parse HEAD > "$BASELINE_SHA_FILE" 2>/dev/null || true
 }
 
@@ -695,32 +688,15 @@ if [ "${SKIP_SESSION_LOG:-0}" = "1" ]; then
 fi
 
 # --- Bootstrap ---
-# If session log is missing, recover from git (product mode) or create empty (template mode) or skip.
-if [ ! -f "$SESSION_LOG" ]; then
-  if [ "$IS_TEMPLATE" = true ]; then
-    # Template mode: local file doesn't exist in git — create with structural header
-    mkdir -p "$(dirname "$SESSION_LOG")"
-    printf '# Session Log (Template Development)\n\nRolling cap: last 5 sessions.\n\n---\n' > "$SESSION_LOG"
-  elif git show HEAD:"docs/ai/logs/session-log.md" > "$SESSION_LOG" 2>/dev/null; then
-    : # Product mode: recovered from git — continue normal flow
-  else
-    log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "bootstrap_recovery" || true
-    exit 0
-  fi
-fi
+# Ensure per-session log directory exists. For per-session files, absence means
+# the agent hasn't written the log yet — no recovery needed.
+mkdir -p "$(dirname "$SESSION_LOG")" 2>/dev/null || true
 
-# --- Session log modification check (content hash) ---
-# Compares current file hash against baseline stored at last session close.
-CURRENT_HASH=$(file_hash "$SESSION_LOG")
-
+# --- Session log check (existence + size) ---
+# Per-session files: existence AND meaningful content (>100 bytes) signals the
+# agent wrote the log. Absence or tiny file = not written yet.
 SESSION_LOG_MODIFIED=false
-if [ -f "$HASH_FILE" ]; then
-  STORED_HASH=$(cat "$HASH_FILE")
-  if [ "$CURRENT_HASH" != "$STORED_HASH" ]; then
-    SESSION_LOG_MODIFIED=true
-  fi
-else
-  # First session — no baseline exists. Lenient: allow close.
+if [ -f "$SESSION_LOG" ] && [ "$(wc -c < "$SESSION_LOG")" -gt 100 ]; then
   SESSION_LOG_MODIFIED=true
 fi
 

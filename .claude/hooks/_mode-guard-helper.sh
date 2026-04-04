@@ -73,7 +73,7 @@ is_carved_out() {
         .claude/tools/*) return 0 ;;
         .claude/settings.json) return 0 ;;
         .claude/settings.local.json) return 0 ;;
-        .claude/local/session-log.md) return 0 ;;
+        .claude/local/sessions/*) return 0 ;;
         .claude/local/known-issues.md) return 0 ;;
         .claude/local/task-groups/*) return 0 ;;
         .claude/local/task-contract.yaml) return 0 ;;

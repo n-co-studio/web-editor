@@ -86,7 +86,7 @@ Follow all conventions from AI.md, the compiled spec, and applicable decisions.
 ## Phase 6 — Close
 
 1. `advance_phase("close")` — this skips op-review when auto mode is active
-2. Update the session log (template mode: `.claude/local/session-log.md`, product mode: `docs/ai/logs/session-log.md`)
+2. Update the session log (template mode: `.claude/local/sessions/session-{id}.md`, product mode: `docs/ai/logs/sessions/session-{id}.md`)
 3. Commit the session log update
 4. Solo merge happens automatically via `session-close-check.sh` when `solo=true`
 

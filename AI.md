@@ -24,7 +24,7 @@ Agent-allowed:
 - docs/ai/quality-gates-summary.md
 - docs/ai/hook-rules-summary.md
 - docs/ai/decisions/ (all files except t-0001 through t-0004, which are on-demand below; includes DIGEST.md as compressed foundational reference)
-- docs/ai/logs/session-log.md (template mode: `.claude/local/session-log.md`)
+- docs/ai/logs/sessions/session-{id}.md (template mode: `.claude/local/sessions/session-{id}.md`)
 - docs/ai/logs/known-issues.md (template mode: `.claude/local/known-issues.md`)
 - docs/ai/governance/ (inter-session governance evidence)
 - .claude/agents/orchestrator.md

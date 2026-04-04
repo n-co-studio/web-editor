@@ -63,7 +63,7 @@ Scan for:
 3. **Outdated decisions** — Decisions in `docs/ai/decisions/` that reference superseded patterns, deleted files, or contradict newer decisions
 4. **Conflicting decisions** — Two accepted decisions that mandate contradictory approaches
 
-**Scan boundaries:** Read `docs/ai/logs/session-log.md` (or `.claude/local/session-log.md` in template mode), `docs/ai/logs/known-issues.md` (or `.claude/local/known-issues.md` in template mode), and Glob `docs/ai/decisions/*.md`. For staleness checks, note file modification dates and cross-reference with content. Do NOT read source code in this mode — governance audits process artifacts, not implementation. Does not assess implementation evidence of known issues — that is tech-debt's scope.
+**Scan boundaries:** Glob `docs/ai/logs/sessions/session-*.md` (or `.claude/local/sessions/session-*.md` in template mode) and read the 3 most recent files sorted by name. Read `docs/ai/logs/known-issues.md` (or `.claude/local/known-issues.md` in template mode), and Glob `docs/ai/decisions/*.md`. For staleness checks, note file modification dates and cross-reference with content. Do NOT read source code in this mode — governance audits process artifacts, not implementation. Does not assess implementation evidence of known issues — that is tech-debt's scope.
 
 ### `tech-debt` — Tech Debt
 

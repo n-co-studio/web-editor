@@ -228,7 +228,7 @@ sot_path_to_id() {
     docs/ai/quality-gates-summary.md) echo "quality-gates-summary" ;;
     docs/ai/hook-rules-summary.md) echo "hook-rules-summary" ;;
     docs/ai/decisions/*) echo "decisions" ;;
-    docs/ai/logs/session-log.md) echo "session-log" ;;
+    docs/ai/logs/sessions/session-*.md) echo "session-log" ;;
     docs/ai/logs/known-issues.md) echo "known-issues" ;;
     docs/ai/governance/*) echo "governance" ;;
     AI.md) echo "ai-md" ;;
