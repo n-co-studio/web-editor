@@ -177,13 +177,14 @@ if [ "${REPO_OS_SKIP_MODE_GUARD:-0}" = "1" ]; then
 fi
 
 # ============================================================
-# Phase 3: Ephemeral session fast-exit (Phase 3b)
+# Phase 3: Ephemeral/taskdef session fast-exit (Phase 3b)
 # ============================================================
-# Ephemeral sessions skip mode-guard and all branch-guard gates.
+# Ephemeral, taskdef-query, taskdef-brief, and queue-triage sessions skip
+# mode-guard and all branch-guard gates (they operate on main by design).
 # State-guard still runs (protect .claude/.state/ in all session types).
 _EPHEMERAL_FAST_EXIT=false
 _BG_SESSION_TYPE=$(get_session_type)
-if [ "$_BG_SESSION_TYPE" = "ephemeral" ]; then
+if [ "$_BG_SESSION_TYPE" = "ephemeral" ] || [ "$_BG_SESSION_TYPE" = "taskdef-query" ] || [ "$_BG_SESSION_TYPE" = "taskdef-brief" ] || [ "$_BG_SESSION_TYPE" = "queue-triage" ]; then
   _EPHEMERAL_FAST_EXIT=true
   SKIP_MODE_GUARD=true
 fi

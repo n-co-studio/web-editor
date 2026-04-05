@@ -382,6 +382,29 @@ if [ -n "$FILE_PATH" ]; then
     CURRENT_BRANCH=$(get_branch)
     BG_ALLOW_REASON="pass"
 
+    # --- Taskdef/queue-triage session-type gate (before Gate 1) ---
+    # taskdef-query, taskdef-brief, and queue-triage operate on main by design.
+    # They bypass the main-branch gate but are subject to their own write restrictions.
+    # taskdef-query, queue-triage: fully read-only — block all writes.
+    # taskdef-brief: queue intake only — allow .automation/briefs/, block all else.
+    _WG_SESSION_TYPE=$(get_session_type)
+    if [ "$_WG_SESSION_TYPE" = "taskdef-query" ] || [ "$_WG_SESSION_TYPE" = "taskdef-brief" ] || [ "$_WG_SESSION_TYPE" = "queue-triage" ]; then
+      if [ "$_WG_SESSION_TYPE" = "taskdef-query" ] || [ "$_WG_SESSION_TYPE" = "queue-triage" ]; then
+        log_hook_event "write-guard" "PreToolUse" "" "block" "$START_MS" "taskdef_query_no_write"
+        echo "GATE-FINAL: ${_WG_SESSION_TYPE} sessions are read-only." >&2
+        exit 2
+      fi
+      # taskdef-brief: allow only .automation/briefs/ writes, skip main-branch gate
+      if [[ "$FILE_PATH" == *".claude/.automation/briefs/"* ]]; then
+        log_hook_event "write-guard" "PreToolUse" "" "allow" "$START_MS" "taskdef_brief_queue_intake"
+        exit 0
+      fi
+      # taskdef-brief writing anywhere else is blocked
+      log_hook_event "write-guard" "PreToolUse" "" "block" "$START_MS" "taskdef_brief_non_intake_write"
+      echo "GATE-FINAL: taskdef-brief sessions may only write to .claude/.automation/briefs/ (queue intake)." >&2
+      exit 2
+    fi
+
     # --- Gate 1: Main branch protection ---
     if [ "$CURRENT_BRANCH" = "main" ] && [ "${REPO_OS_ALLOW_MAIN:-0}" != "1" ]; then
       log_hook_event "write-guard" "PreToolUse" "" "block" "$START_MS" "main_branch"
