@@ -1,3 +1,10 @@
+---
+title: "[Feature Name]"
+scope_modules: []
+keywords: []
+spec_type: feature
+---
+
 # Feature: [Feature Name]
 
 ## Summary

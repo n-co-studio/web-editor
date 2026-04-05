@@ -162,7 +162,22 @@ When running Prompt A Phase 1 (advisory board review), the Orchestrator follows 
    - Lite: Architect + Critic + Pragmatist
    - Standard: Architect + Critic + Pragmatist + Exploration + PM Advisory (if compiled spec or mvp-scope.yaml exists)
    - Full: Standard set + any signal-triggered conditional specialists
-4. **Dispatch** all activated specialists in parallel — each receives the compiled spec files
+4. **Dispatch** all activated specialists in parallel — apply selective spec context per the mapping below (Decision 0035). When `DIGEST.md` is absent or `manifest.json` has `"active": null`, fall back to full spec loading for all specialists.
+
+   **Selective context per specialist (when DIGEST.md is present):**
+   | Specialist | Context |
+   |---|---|
+   | Architect | `DIGEST.md` + `manifest.json` features + task-relevant feature briefs + full `architecture.md` + full `boundaries.md` |
+   | Critic (spec mode) | Full core specs (gap detection requires full picture) + task-relevant feature briefs |
+   | Pragmatist | `DIGEST.md` + `manifest.json` features + task-relevant feature briefs + full `architecture.md` |
+   | Exploration | `DIGEST.md` + `manifest.json` features + task-relevant feature briefs + full `architecture.md` + full `integrations.md` |
+   | PM Advisory | `DIGEST.md` + `manifest.json` features + task-relevant feature briefs + full `product.md` + full `mvp-scope.yaml` |
+   | UX Strategist | `DIGEST.md` + task-relevant feature briefs + full `design-system.md` + full `product.md` |
+   | Performance Engineer | `DIGEST.md` + full `architecture.md` + task-relevant feature briefs |
+   | Data Strategist | `DIGEST.md` + full `data-contracts.md` + task-relevant feature briefs |
+   | Security Analyst | `DIGEST.md` + full `architecture.md` + full `integrations.md` + task-relevant feature briefs |
+
+   **Task-relevant feature briefs** = feature briefs whose `scope_modules` or `keywords` overlap with the task scope. When no match is found and no product graph exists, include all feature briefs (fallback — see Decision 0035).
 5. **Collect** individual briefs from each specialist
 6. **Synthesize** into a single Refinement Report (see Refinement Report above):
    a. Merge all non-Critic findings directly (they already include suggestions)

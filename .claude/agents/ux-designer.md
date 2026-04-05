@@ -25,7 +25,7 @@ The dispatching prompt determines which mode to activate. The agent selects its 
 | **Mode 2 — UX Review** | Dispatched from Prompt B (post-build review) | Advisory findings (severity-labeled) |
 | **Mode 3 — Design Health** | Dispatched from Prompt B post-build, after Mode 2 | Compliance findings (design health labels) |
 
-**First action (all modes):** Read `.claude/agents/_advisory-board-lite.md` and `.claude/agents/_agent-glossary.md` for shared definitions and brief format.
+**First action (all modes):** If the dispatch prompt includes an `=== INLINE CONTEXT ===` block, use that content directly for advisory board format rules and shared definitions — do not read `_advisory-board-lite.md` or `_agent-glossary.md`. Otherwise (dispatched outside Prompt T Brief mode), read `.claude/agents/_advisory-board-lite.md` and `.claude/agents/_agent-glossary.md` for shared definitions and brief format.
 
 ---
 

@@ -3,7 +3,30 @@
 Read and follow AI.md. Read all files referenced in AI.md's source-of-truth sections.
 
 ## Project Specification
-Read `docs/spec/compiled/manifest.json` to find the active version. Then read all files in `docs/spec/compiled/{active}/` before planning or implementing any work:
+
+Read `docs/spec/compiled/manifest.json` to find the active version.
+
+**Selective spec loading (Decision 0035):** When compiled specs exist, use task-scoped loading based on the `### Spec References` section of the task brief:
+
+1. **When `### Spec References` is present in the brief:**
+   - Read `DIGEST.md` (if it exists at `docs/spec/compiled/{active}/DIGEST.md`) for orientation
+   - Read the full text of each spec file explicitly listed in `### Spec References`
+   - Verify `DIGEST.md` provenance: check that `spec_version` in DIGEST.md matches `manifest.json` `active`. If they differ, fall back to full spec loading
+   - **Feature discovery — four-step fallback chain (Decision 0035):**
+     1. Explicit reference in `### Spec References` section of this brief
+     2. Knowledge graph relevance (`kg-relevance.sh`) when product graph exists with spec-feature nodes
+     3. Keyword match between task scope and `manifest.json` `features[].scope_modules`
+     4. When none of the above produces results AND the knowledge graph does not exist: load all feature briefs
+
+2. **When `### Spec References` is absent** (legacy briefs, hotfixes, or pre-digest sessions):
+   - Fall back to full spec loading — read all files in `docs/spec/compiled/{active}/`
+   - This is the backward-compatible path; no regression in behavior
+
+3. **When `manifest.json` has `"active": null`**: specs have not been compiled yet. Instruct the operator to run Prompt 0 first.
+
+The compiled spec remains the source of truth. `DIGEST.md` is a derived artifact — when digest and spec conflict, spec wins.
+
+Full spec file list for reference (used in fallback or when explicitly referenced):
 - `product.md` — What the product is and who it's for
 - `architecture.md` — Tech stack and structure
 - `design-system.md` — Visual language (spacing, typography, colors, components)
@@ -11,10 +34,6 @@ Read `docs/spec/compiled/manifest.json` to find the active version. Then read al
 - `features/` — Per-feature specs (inputs, outputs, UI states, edge cases)
 - `integrations.md` — External services, MCP connections
 - `boundaries.md` — What NOT to build, protected areas
-
-The compiled spec is the source of truth for what to build and how it should look and behave.
-
-If `manifest.json` has `"active": null`, specs have not been compiled yet. Instruct the operator to run Prompt 0 first.
 
 ## Prototype Learnings
 Before planning new features or architectural work, check `docs/spec/prototypes/` for completed experiment briefs. Validated learnings from prototype sessions may inform architecture decisions, feature design, or spec updates.
@@ -68,9 +87,10 @@ At session init, after branch creation and spec loading:
 Extract the task contract from the brief text:
 
 - **Singular builds**: If the brief contains a `### Task Contract` section with a YAML code block, extract the YAML content and write it to `.claude/local/task-contract.yaml`. The task contract is embedded inside the brief template (not a separate block). If `.claude/local/task-contract.yaml` already exists (orphan from a crashed session), delete it before writing the new one and log: "Cleaned stale task contract from previous session."
+- **Sidecar contract**: If the brief does not contain a `### Task Contract` section, check for a sidecar file at the same path as the brief with a `.yaml` extension (e.g., `.claude/.automation/briefs/20260404-foo.yaml` alongside `.claude/.automation/briefs/20260404-foo.md`). If the sidecar exists, copy it to `.claude/local/task-contract.yaml`. For copy-pasted briefs (no file path available), this path is skipped — the "No contract present" fallback applies.
 - **Task groups**: If the brief's `### Task Group` section contains a `Contract:` field, extract the contract content and write it as the `intent:` block in the task group contract YAML during the `contract-init` phase. Use the fields: `goal`, `verification`, `scope_files`, `spec_references`.
 - **Sidecar contract**: If a `.contract.yaml` sidecar file exists alongside the brief in `.claude/.automation/briefs/` (same slug, `.contract.yaml` extension), read it as the task contract source instead of re-parsing the embedded `### Task Contract` section. Takes precedence over embedded extraction for singular builds. The sidecar is a standalone YAML file containing the same content as the embedded `### Task Contract` block — write it directly to `.claude/local/task-contract.yaml`. The **No contract present** fallback still applies when neither a sidecar nor an embedded `### Task Contract` section nor a `Contract:` field exists.
-- **No contract present**: If the brief contains neither a `### Task Contract` section nor a `Contract:` field in `### Task Group`, skip contract extraction silently (backward compatibility with legacy briefs, hotfixes, etc.).
+- **No contract present**: If the brief contains neither a `### Task Contract` section nor a sidecar `.yaml` file nor a `Contract:` field in `### Task Group`, skip contract extraction silently (backward compatibility with legacy briefs, hotfixes, etc.).
 
 The task contract serves as the cohesion review reference — Critic uses its `verification:` criteria to evaluate whether the implementation achieves the stated intent.
 

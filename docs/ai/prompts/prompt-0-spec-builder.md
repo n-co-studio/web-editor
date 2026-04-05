@@ -117,7 +117,17 @@ This file is committed and read by subsequent Prompt B sessions as inter-session
 
 ### Close Sequence
 
-At close: update session log, commit all changes (including governance evidence and compiled specs), present closing summary. See `docs/ai/workflow.md` Close Sequence.
+After the operator confirms "Spec complete" and governance evidence is written, run spec digest generation **before** committing:
+
+```bash
+bash .claude/tools/spec-digest.sh
+```
+
+This generates `docs/spec/compiled/{active}/DIGEST.md` and updates the `features` array and `spec_digest_sha` in `manifest.json`. Applies to both Fresh and Update modes. If the script fails (non-zero exit), log the failure in the closing summary and proceed — digest generation is advisory (Decision 0035).
+
+For **existing projects** whose spec files lack YAML frontmatter (written before this change): the script falls back to extracting `# Title` headers and first paragraphs. A future Prompt 0 Update run will add proper frontmatter.
+
+At close: update session log, commit all changes (including governance evidence, compiled specs, DIGEST.md, and manifest.json), present closing summary. See `docs/ai/workflow.md` Close Sequence.
 
 ### What "complete" means
 

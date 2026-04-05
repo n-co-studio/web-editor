@@ -15,7 +15,7 @@ Combines research and creative exploration in a single pass. Grounds recommendat
 
 ## First Action
 
-Read `.claude/agents/_advisory-board-lite.md` and `.claude/agents/_agent-glossary.md` for shared definitions and brief format before beginning review.
+If the dispatch prompt includes an `=== INLINE CONTEXT ===` block, use that content directly for advisory board format rules and task context — do not read `_advisory-board-lite.md` or `_agent-glossary.md`. Otherwise (dispatched outside Prompt T Brief mode), read `.claude/agents/_advisory-board-lite.md` and `.claude/agents/_agent-glossary.md` for shared definitions and brief format before beginning review.
 
 ---
 

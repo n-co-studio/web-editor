@@ -26,8 +26,8 @@ After mode selection, build your task list to match the selected mode:
 Run after Prompt 0 completes (spec or feature brief is ready). Skip this phase if `manifest.json` has `"active": null` (no spec yet). Skip entirely in Re-initialize mode.
 
 1. Read `docs/spec/compiled/manifest.json` to find the active version
-2. Read all compiled spec files in `docs/spec/compiled/{active}/`
-3. Read `.claude/agents/_advisory-board.md` for tier definitions, activation logic, and report format
+2. **Orchestrator loads full specs for activation signal scanning** — read all compiled spec files in `docs/spec/compiled/{active}/`. Tier selection and conditional specialist activation require full fidelity; selective loading does NOT apply to the Orchestrator's own reads in Phase 1 (Decision 0035)
+3. Read `.claude/agents/_advisory-board.md` for tier definitions, activation logic, and report format; selective context per specialist mapping is defined there
 4. **Select review tier** (operator can override):
    - Feature brief → **Lite** (Architect + Critic)
    - Full compiled spec → **Standard** (+ Exploration)

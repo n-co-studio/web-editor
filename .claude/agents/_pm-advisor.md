@@ -15,7 +15,7 @@ Reviews specs, feature briefs, and implementation diffs for product strategy ali
 
 ## First Action
 
-Read `.claude/agents/_advisory-board-lite.md` and `.claude/agents/_agent-glossary.md` for shared definitions and brief format before beginning review.
+If the dispatch prompt includes an `=== INLINE CONTEXT ===` block, use that content directly for advisory board format rules and shared definitions — do not read `_advisory-board-lite.md` or `_agent-glossary.md`. Otherwise (dispatched outside Prompt T Brief mode), read `.claude/agents/_advisory-board-lite.md` and `.claude/agents/_agent-glossary.md` for shared definitions and brief format before beginning review.
 
 Then check for MVP scope context:
 1. Read `docs/spec/compiled/manifest.json` — if `active` is not null, read all compiled spec files in `docs/spec/compiled/{active}/`

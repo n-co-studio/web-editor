@@ -40,3 +40,6 @@ t-0029-operator-ack-enforcement.md
 t-0030-worktree-session-isolation.md
 t-0031-recover-risk-posture.md
 t-0032-parallel-worktree-isolation.md
+t-0033-session-worktree-default.md
+t-0034-knowledge-graph.md
+t-0035-selective-spec-loading.md

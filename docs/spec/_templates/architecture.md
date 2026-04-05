@@ -1,3 +1,10 @@
+---
+title: "Architecture & Tech Stack"
+scope_modules: []
+keywords: []
+spec_type: core
+---
+
 # Architecture & Tech Stack
 
 ## Tech Stack

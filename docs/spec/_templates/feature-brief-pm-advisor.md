@@ -1,3 +1,10 @@
+---
+title: "PM Advisory Agent"
+scope_modules: []
+keywords: []
+spec_type: feature
+---
+
 # Feature Brief: PM Advisory Agent
 
 ## What

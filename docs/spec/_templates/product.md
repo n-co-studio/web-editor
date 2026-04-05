@@ -1,3 +1,10 @@
+---
+title: "Product Definition"
+scope_modules: []
+keywords: []
+spec_type: core
+---
+
 # Product Definition
 
 ## Product Name

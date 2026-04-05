@@ -1,3 +1,10 @@
+---
+title: "Design System"
+scope_modules: []
+keywords: []
+spec_type: core
+---
+
 # Design System
 
 The visual language for the project. Defaults are baked in and ready to use as-is.

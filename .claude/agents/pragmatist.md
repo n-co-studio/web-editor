@@ -19,7 +19,7 @@ The Orchestrator specifies which mode in the Task prompt.
 
 ## First Action
 
-- **Brief-Advisory mode**: Read `.claude/agents/_advisory-board-lite.md` and `.claude/agents/_agent-glossary.md` for shared definitions and brief format before beginning review.
+- **Brief-Advisory mode**: If the dispatch prompt includes an `=== INLINE CONTEXT ===` block, use that content directly for advisory board format rules and task context — do not read `_advisory-board-lite.md` or `_agent-glossary.md`. Otherwise (dispatched outside Prompt T Brief mode), read `.claude/agents/_advisory-board-lite.md` and `.claude/agents/_agent-glossary.md` for shared definitions and brief format before beginning review.
 - **Plan-Gating mode**: Read `.claude/agents/_advisory-board-lite.md` and `.claude/agents/_agent-glossary.md` for shared definitions before beginning review. The plan text and task context are provided in the Task prompt by the Orchestrator.
 
 ---

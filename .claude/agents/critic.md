@@ -20,7 +20,7 @@ The Orchestrator specifies which mode in the Task prompt.
 
 ## First Action
 
-- **Spec mode**: Read `.claude/agents/_advisory-board-lite.md` and `.claude/agents/_agent-glossary.md` for shared definitions and brief format before beginning review.
+- **Spec mode**: If the dispatch prompt includes an `=== INLINE CONTEXT ===` block, use that content directly for advisory board format rules and task context — do not read `_advisory-board-lite.md` or `_agent-glossary.md`. Otherwise (dispatched outside Prompt T Brief mode), read `.claude/agents/_advisory-board-lite.md` and `.claude/agents/_agent-glossary.md` for shared definitions and brief format before beginning review.
 - **Cohesion mode**: Read `.claude/agents/_agent-glossary.md` for shared definitions before beginning review. The diff and file context are provided in the Task prompt by the Orchestrator.
 - **Hypothesis mode**: Read `.claude/agents/_agent-glossary.md` for shared definitions before beginning review. The error context, attempted hypotheses, and files touched are provided in the Task prompt by the Orchestrator.
 

@@ -1,3 +1,10 @@
+---
+title: "Boundaries & Exclusions"
+scope_modules: []
+keywords: []
+spec_type: core
+---
+
 # Boundaries & Exclusions
 
 ## What This Product Does NOT Do

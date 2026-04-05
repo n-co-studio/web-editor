@@ -348,8 +348,8 @@ nodes:
     type: "prompt"
     path: "docs/ai/prompts/prompt-b-product-build.md"
     description: "Prompt B — Product Build"
-    last_verified: "2026-03-31"
-    status: "unverified"
+    last_verified: "2026-04-04"
+    status: "active"
     layer: "template"
   - id: "prompt-c-project-audit"
     type: "prompt"
@@ -770,6 +770,14 @@ edges:
     source_type: "agent-inferred"
     last_verified: "2026-03-31"
     status: "unverified"
+  - source: "prompt-b-product-build"
+    target: "decision-0020"
+    relation: "implements"
+    context: "Prompt B implements Task Contract extraction (embedded + sidecar + task-group paths)"
+    source_type: "agent-inferred"
+    last_verified: "2026-04-04"
+    status: "active"
+    confidence: 0.9
 
   # --- Convention constrains edges ---
   - source: "convention-kebab-case-files"
