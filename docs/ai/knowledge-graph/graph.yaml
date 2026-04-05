@@ -3,7 +3,7 @@
 # Seeded from governance metadata on 2026-03-31
 
 schema_version: 1
-last_updated: "2026-04-05T00:00:00Z"
+last_updated: "2026-04-05T18:25:00Z"
 
 nodes:
   # --- Decisions (from DIGEST.md) ---
@@ -386,12 +386,19 @@ nodes:
     last_verified: "2026-03-31"
     status: "unverified"
     layer: "template"
+  - id: "decision-0035"
+    type: "decision"
+    path: "docs/ai/decisions/t-0035-selective-spec-loading.md"
+    description: "Selective Spec Loading — DIGEST.md as optimization, keyword-matched feature dispatch"
+    last_verified: "2026-04-05"
+    status: "active"
+    layer: "template"
   - id: "prompt-t-task-definition"
     type: "prompt"
     path: "docs/ai/prompts/prompt-t-task-definition.md"
     description: "Prompt T — Task Definition"
-    last_verified: "2026-03-31"
-    status: "unverified"
+    last_verified: "2026-04-05"
+    status: "active"
     layer: "template"
 
   # --- Agents ---
@@ -1105,6 +1112,14 @@ edges:
     context: "Prompt B implements Task Contract extraction (embedded + sidecar + task-group paths)"
     source_type: "agent-inferred"
     last_verified: "2026-04-04"
+    status: "active"
+    confidence: 0.9
+  - source: "decision-0035"
+    target: "prompt-t-task-definition"
+    relation: "governs"
+    context: "Decision 0035 selective spec loading governs Prompt T Brief mode specialist dispatch"
+    source_type: "agent-inferred"
+    last_verified: "2026-04-05"
     status: "active"
     confidence: 0.9
 
