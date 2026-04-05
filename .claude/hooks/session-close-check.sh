@@ -825,6 +825,19 @@ else
   log_override "session-close-check" "SKIP_KNOWN_ISSUES_CHECK"
 fi
 
+# 5. Completeness advisory: warn if session is closing with incomplete deliverables
+# (backward compat: absent cohesion-reviewed file or absent COMPLETENESS_GATE field is silent)
+if [ "$IS_RETRY" = false ]; then
+  _SCC_COHESION_FILE="$_SESSION_STATE_DIR/cohesion-reviewed"
+  if [ -f "$_SCC_COHESION_FILE" ]; then
+    _SCC_GATE=$(grep '^COMPLETENESS_GATE: ' "$_SCC_COHESION_FILE" 2>/dev/null | sed 's/^COMPLETENESS_GATE: *//' | head -1 || true)
+    if [ "$_SCC_GATE" = "NEEDS_WORK" ]; then
+      _SCC_SCORE=$(grep '^COMPLETENESS: ' "$_SCC_COHESION_FILE" 2>/dev/null | sed 's/^COMPLETENESS: *//' | head -1 || true)
+      _add_advisory "Advisory: Session closing with incomplete deliverables — ${_SCC_SCORE:-criteria not fully met}. Operator review required before marking complete."
+    fi
+  fi
+fi
+
 # --- Knowledge graph update reminder (Decision 0034, advisory) ---
 # Two-graph architecture: check both template graph (graph.yaml) and product graph (product-graph.yaml)
 KG_TEMPLATE_GRAPH="$REPO_ROOT/docs/ai/knowledge-graph/graph.yaml"

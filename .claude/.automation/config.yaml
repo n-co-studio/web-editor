@@ -21,6 +21,7 @@ runner:
   cooldown_between_sessions: 5
   max_consecutive_sessions: 0
   max_deferral_cycles: 3
+  session_max_ttl_seconds: 21600  # Per-session elapsed-time cap (6 hours). 0 = disabled.
 
 # Model routing — controls the --model flag passed to claude -p in runner.sh.
 # Agent frontmatter controls per-subagent model (cost layer 1: subagent routing).

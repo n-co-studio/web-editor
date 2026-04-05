@@ -323,6 +323,17 @@ if [ "$SKIP_STATE" = false ]; then
     echo "GATE-RECOVERABLE: cohesion-reviewed state file has stale session_id. NEXT: Re-run Critic cohesion review in this session. (override: REPO_OS_RECOVER=1)" >&2
     block "state_cohesion_stale_session"
     log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_cohesion_stale_session"
+  elif [ "$IS_HOTFIX" = false ] && [ -f "$STATE_DIR/cohesion-reviewed" ] && \
+       _validate_state_session_id "$STATE_DIR/cohesion-reviewed"; then
+    # A5 extension: completeness check — block if COMPLETENESS_GATE: NEEDS_WORK
+    # Backward compat: absent COMPLETENESS_GATE field falls through silently.
+    _PCG_COMPLETENESS_GATE=$(grep '^COMPLETENESS_GATE: ' "$STATE_DIR/cohesion-reviewed" 2>/dev/null | sed 's/^COMPLETENESS_GATE: *//' | head -1 || true)
+    if [ "$_PCG_COMPLETENESS_GATE" = "NEEDS_WORK" ]; then
+      _PCG_COMPLETENESS_SCORE=$(grep '^COMPLETENESS: ' "$STATE_DIR/cohesion-reviewed" 2>/dev/null | sed 's/^COMPLETENESS: *//' | head -1 || true)
+      echo "GATE-RECOVERABLE: A5 completeness check failed — ${_PCG_COMPLETENESS_SCORE:-N/M criteria not met}. NEXT: Loop back to Builder to address incomplete criteria, then re-run Critic and QA. (override: REPO_OS_RECOVER=1)" >&2
+      block "A5_completeness_needs_work"
+      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A5_completeness_needs_work" "${_PCG_COMPLETENESS_SCORE:-unknown}"
+    fi
   fi
 
   # qa-verified: required on all non-experiment branches

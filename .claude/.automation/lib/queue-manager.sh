@@ -975,6 +975,39 @@ queue_fail_terminal() {
   _rebuild_queue_index || true
 }
 
+# --- Route an incomplete-deliverable entry to review ---
+# Moves from running to review/ and writes an escalation file noting incomplete criteria.
+# Called by runner.sh for outcome review:incomplete-deliverable.
+# Arguments:
+#   $1 — entry_id
+#   $2 — completeness_detail (optional; e.g., "3/5 criteria met")
+queue_incomplete() {
+  local entry_id="$1"
+  local completeness_detail="${2:-}"
+
+  # Delegate queue transition to queue_escalate (running → review/)
+  queue_escalate "$entry_id" || return $?
+
+  # Write escalation file so operator can see which criteria were incomplete
+  local esc_dir="$AUTOMATION_DIR/escalations"
+  mkdir -p "$esc_dir" 2>/dev/null || true
+  local esc_id="esc-${entry_id}-incomplete-$(date +%Y%m%d-%H%M%S)"
+  local timestamp
+  timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  {
+    printf 'escalation:\n'
+    printf '  id: "%s"\n' "$esc_id"
+    printf '  queue_entry_id: "%s"\n' "$entry_id"
+    printf '  type: "incomplete-deliverable"\n'
+    printf '  severity: "review-required"\n'
+    printf '  message: "Session completed with incomplete deliverables — completeness veto triggered"\n'
+    printf '  context: "%s"\n' "${completeness_detail:-COMPLETENESS_GATE: NEEDS_WORK}"
+    printf '  created_at: "%s"\n' "$timestamp"
+    printf '  resolved: false\n'
+    printf '  resolution: ""\n'
+  } > "$esc_dir/${esc_id}.yaml" 2>/dev/null || true
+}
+
 # --- Escalate a running entry ---
 # Moves from running to review/ for operator attention.
 # Arguments:

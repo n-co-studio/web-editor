@@ -14,6 +14,7 @@ runner:
   cooldown_between_sessions: 5     # Pause between sessions in seconds (default: 5)
   max_consecutive_sessions: 0      # Max sessions before daemon exits; 0 = unlimited
   max_deferral_cycles: 3           # Max work-order deferral cycles before entry transitions to blocked
+  session_max_ttl_seconds: 21600   # Per-session elapsed-time cap in seconds (6h default). 0 = disabled.
 
 model_routing:
   default: sonnet            # model for claude -p when no model_routing_overrides match (sonnet | haiku)

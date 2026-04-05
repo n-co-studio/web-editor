@@ -766,6 +766,18 @@ _run_single_entry() {
   # _SHUTDOWN_REQUESTED=true and `wait` is interrupted (returns 128+signum).
   # The child may still be running — re-wait until it exits naturally.
   # This prevents SIGTERM from killing sessions during close phase output.
+
+  # Session TTL guard (session_max_ttl_seconds: 0 = disabled, default 21600).
+  # A background watchdog sends SIGTERM to the child after the TTL expires.
+  # The wait-loop check provides belt-and-suspenders enforcement on each
+  # SIGTERM-interrupted iteration. Exit code 143 is handled by outcome-detector.
+  local _session_max_ttl
+  _session_max_ttl=$(_parse_config_field "runner" "session_max_ttl_seconds" 2>/dev/null || echo "21600")
+  _session_max_ttl="${_session_max_ttl:-21600}"
+  local _session_launch_epoch
+  _session_launch_epoch=$(date +%s)
+  local _ttl_watchdog_pid=""
+
   local exit_code=0
   if [ -n "$stderr_file" ]; then
     # shellcheck disable=SC2086 — $model_flag intentionally unquoted (expands to nothing when empty)
@@ -777,9 +789,29 @@ _run_single_entry() {
       <<< "$prompt" \
       2> >(tee "$stderr_file" >&2)) &
     _CLAUDE_CHILD_PID=$!
+    # Start TTL watchdog: kills child directly after TTL seconds
+    if [ "$_session_max_ttl" -gt 0 ]; then
+      local _child_pid_capture="$_CLAUDE_CHILD_PID"
+      ( sleep "$_session_max_ttl"
+        if kill -0 "$_child_pid_capture" 2>/dev/null; then
+          echo "Session exceeded TTL (${_session_max_ttl}s) — sending SIGTERM to child pid ${_child_pid_capture}" >&2
+          kill -TERM "$_child_pid_capture" 2>/dev/null || true
+        fi ) &
+      _ttl_watchdog_pid=$!
+    fi
     wait "$_CLAUDE_CHILD_PID" || exit_code=$?
     # Re-wait if child is still alive (SIGTERM interrupted wait, not child)
     while [ "$exit_code" -ne 0 ] && kill -0 "$_CLAUDE_CHILD_PID" 2>/dev/null; do
+      # TTL belt-and-suspenders: send SIGTERM if elapsed exceeds threshold
+      if [ "$_session_max_ttl" -gt 0 ]; then
+        local _now_epoch _elapsed
+        _now_epoch=$(date +%s)
+        _elapsed=$(( _now_epoch - _session_launch_epoch ))
+        if [ "$_elapsed" -gt "$_session_max_ttl" ]; then
+          echo "Session exceeded TTL (${_session_max_ttl}s, elapsed ${_elapsed}s) — sending SIGTERM to child pid $_CLAUDE_CHILD_PID" >&2
+          kill -TERM "$_CLAUDE_CHILD_PID" 2>/dev/null || true
+        fi
+      fi
       echo "SIGTERM deferred: child pid $_CLAUDE_CHILD_PID still running — re-waiting..." >&2
       exit_code=0
       wait "$_CLAUDE_CHILD_PID" || exit_code=$?
@@ -793,13 +825,39 @@ _run_single_entry() {
       $model_flag \
       <<< "$prompt") &
     _CLAUDE_CHILD_PID=$!
+    # Start TTL watchdog: kills child directly after TTL seconds
+    if [ "$_session_max_ttl" -gt 0 ]; then
+      local _child_pid_capture="$_CLAUDE_CHILD_PID"
+      ( sleep "$_session_max_ttl"
+        if kill -0 "$_child_pid_capture" 2>/dev/null; then
+          echo "Session exceeded TTL (${_session_max_ttl}s) — sending SIGTERM to child pid ${_child_pid_capture}" >&2
+          kill -TERM "$_child_pid_capture" 2>/dev/null || true
+        fi ) &
+      _ttl_watchdog_pid=$!
+    fi
     wait "$_CLAUDE_CHILD_PID" || exit_code=$?
     # Re-wait if child is still alive (SIGTERM interrupted wait, not child)
     while [ "$exit_code" -ne 0 ] && kill -0 "$_CLAUDE_CHILD_PID" 2>/dev/null; do
+      # TTL belt-and-suspenders: send SIGTERM if elapsed exceeds threshold
+      if [ "$_session_max_ttl" -gt 0 ]; then
+        local _now_epoch _elapsed
+        _now_epoch=$(date +%s)
+        _elapsed=$(( _now_epoch - _session_launch_epoch ))
+        if [ "$_elapsed" -gt "$_session_max_ttl" ]; then
+          echo "Session exceeded TTL (${_session_max_ttl}s, elapsed ${_elapsed}s) — sending SIGTERM to child pid $_CLAUDE_CHILD_PID" >&2
+          kill -TERM "$_CLAUDE_CHILD_PID" 2>/dev/null || true
+        fi
+      fi
       echo "SIGTERM deferred: child pid $_CLAUDE_CHILD_PID still running — re-waiting..." >&2
       exit_code=0
       wait "$_CLAUDE_CHILD_PID" || exit_code=$?
     done
+  fi
+  # Kill TTL watchdog if still running (session completed before TTL fired)
+  if [ -n "$_ttl_watchdog_pid" ]; then
+    kill "$_ttl_watchdog_pid" 2>/dev/null || true
+    wait "$_ttl_watchdog_pid" 2>/dev/null || true
+    _ttl_watchdog_pid=""
   fi
   _CLAUDE_CHILD_PID=""
 
@@ -808,8 +866,10 @@ _run_single_entry() {
   unset CLAUDE_HEADLESS
 
   # Capture solo mode and branch from worktree context BEFORE removal
+  # Use _QE_SOLO_MODE global (populated by _load_queue_entry) instead of get_solo()
+  # to avoid reading already-cleaned phase-state post-session (Bug fix — solo merge).
   if [ -n "$_CURRENT_WORKTREE_DIR" ] && [ -d "$_CURRENT_WORKTREE_DIR" ]; then
-    _RESULT_SOLO_MODE=$(get_solo 2>/dev/null || echo "false")
+    _RESULT_SOLO_MODE="${_QE_SOLO_MODE:-false}"
     _RESULT_BRANCH=$(git -C "$_CURRENT_WORKTREE_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
     # Outcome detection from worktree context
     _RESULT_OUTCOME=$(detect_outcome "$exit_code" "$_RESULT_BASELINE" "$_CURRENT_WORKTREE_DIR" "$brief_id" "$stderr_file")
@@ -820,7 +880,7 @@ _run_single_entry() {
   else
     # Legacy path or worktree not created
     _RESULT_OUTCOME=$(detect_outcome "$exit_code" "$_RESULT_BASELINE" "$REPO_ROOT" "$brief_id" "$stderr_file")
-    _RESULT_SOLO_MODE=$(get_solo 2>/dev/null || echo "false")
+    _RESULT_SOLO_MODE="${_QE_SOLO_MODE:-false}"
     _RESULT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
   fi
 
@@ -1161,6 +1221,13 @@ _DAEMON_START_EPOCH=$(date +%s)
 
 # --- Startup crash recovery ---
 _startup_crash_recovery
+
+# --- Startup review-items sweep ---
+# Remove stale review-items/ subdirectories older than 7 days.
+# Follows the same startup-sweep pattern as sweep_stale_sessions above.
+_ri_count=$(sweep_stale_review_items 2>/dev/null || echo "0")
+[ "$_ri_count" -gt 0 ] && echo "startup: removed $_ri_count stale review-items directories (>7d)" >&2
+unset _ri_count
 
 # Cleanup tracking — run cleanup every N idle cycles
 _IDLE_CYCLE_COUNT=0
@@ -1626,10 +1693,22 @@ while true; do
       fi
       ;;
     review)
-      if ! queue_escalate "$ENTRY_ID"; then
-        echo "ERROR: queue_escalate failed for $ENTRY_ID" >&2
-        _transition_ok=false
-      fi
+      case "$OUTCOME_RAW" in
+        review:incomplete-deliverable)
+          # Completeness veto: route to review/ and write escalation file with criteria detail
+          _ri_score=$(grep '^COMPLETENESS: ' "$(get_session_state_dir)/cohesion-reviewed" 2>/dev/null | sed 's/^COMPLETENESS: *//' | head -1 || true)
+          if ! queue_incomplete "$ENTRY_ID" "${_ri_score:-COMPLETENESS_GATE: NEEDS_WORK}"; then
+            echo "ERROR: queue_incomplete failed for $ENTRY_ID" >&2
+            _transition_ok=false
+          fi
+          ;;
+        *)
+          if ! queue_escalate "$ENTRY_ID"; then
+            echo "ERROR: queue_escalate failed for $ENTRY_ID" >&2
+            _transition_ok=false
+          fi
+          ;;
+      esac
       ;;
     failed)
       # Infrastructure failures (empty-result) are non-retriable — go directly to

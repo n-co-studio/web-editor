@@ -114,13 +114,19 @@ fi
 printf 'timestamp: %s\nagent: %s\nsession_id: %s\n%s\n' "$TIMESTAMP" "$AGENT_TYPE" "$STATE_SID" "$LAST_LINE" \
   > "$STATE_DIR/$STATE_FILE" 2>/dev/null || true
 
-# --- Completeness score capture (critic only, advisory V1) ---
-# When the Critic includes a COMPLETENESS: sentinel (from the completeness pass),
-# append it to the cohesion-reviewed state file. Advisory only — no gate reads this.
+# --- Completeness capture (critic only) ---
+# Appends COMPLETENESS: score and COMPLETENESS_GATE: verdict to cohesion-reviewed state file.
+# COMPLETENESS_GATE: APPROVED|NEEDS_WORK is the downstream blocking signal read by
+# outcome-detector.sh, pre-commit-gates.sh, and session-close-check.sh.
+# Distinct from GATE_RESULT (cohesion verdict — always the last non-empty line).
 if [ "$AGENT_TYPE" = "critic" ]; then
   COMPLETENESS_LINE=$(echo "$LAST_MESSAGE" | grep -E '^COMPLETENESS: ' | tail -1 || true)
+  COMPLETENESS_GATE_LINE=$(echo "$LAST_MESSAGE" | grep -E '^COMPLETENESS_GATE: ' | tail -1 || true)
   if [ -n "$COMPLETENESS_LINE" ]; then
     printf '%s\n' "$COMPLETENESS_LINE" >> "$STATE_DIR/$STATE_FILE" 2>/dev/null || true
+  fi
+  if [ -n "$COMPLETENESS_GATE_LINE" ]; then
+    printf '%s\n' "$COMPLETENESS_GATE_LINE" >> "$STATE_DIR/$STATE_FILE" 2>/dev/null || true
   fi
 fi
 

@@ -43,18 +43,21 @@ detect_outcome() {
   local has_escalation=false
   local has_operator_tag=false
 
+  # Defensive guard: fall back to CWD when repo_root is empty
+  local _git_repo_root="${repo_root:-$(pwd)}"
+
   # Check for new commits since baseline
   local commit_count
-  commit_count=$(git log --oneline "$baseline_sha..HEAD" 2>/dev/null | wc -l | tr -d ' ')
+  commit_count=$(git -C "$_git_repo_root" log --oneline "$baseline_sha..HEAD" 2>/dev/null | wc -l | tr -d ' ')
   if [ "$commit_count" -gt 0 ]; then
     has_new_commits=true
   fi
 
   # Check for dirty working tree
   local uncommitted
-  uncommitted=$(git diff --name-only 2>/dev/null || true)
+  uncommitted=$(git -C "$_git_repo_root" diff --name-only 2>/dev/null || true)
   local staged
-  staged=$(git diff --cached --name-only 2>/dev/null || true)
+  staged=$(git -C "$_git_repo_root" diff --cached --name-only 2>/dev/null || true)
   if [ -n "$uncommitted" ] || [ -n "$staged" ]; then
     has_dirty_tree=true
   fi
@@ -123,6 +126,18 @@ detect_outcome() {
       fi
       return
     fi
+    # Completeness check: COMPLETENESS_GATE: NEEDS_WORK → review:incomplete-deliverable
+    # Read cohesion-reviewed state file (backward compat: absent file falls through).
+    if [ "$has_new_commits" = true ]; then
+      local _cohesion_state
+      _cohesion_state="$(get_session_state_dir)/cohesion-reviewed"
+      if [ -f "$_cohesion_state" ] && \
+         grep -q '^COMPLETENESS_GATE: NEEDS_WORK' "$_cohesion_state" 2>/dev/null; then
+        echo "review:incomplete-deliverable"
+        return
+      fi
+    fi
+
     # Success (exit 0 + new commits)
     if [ "$has_new_commits" = true ]; then
       echo "completed:success"
@@ -211,8 +226,9 @@ _write_blocker_report() {
   fi
 
   # Capture git status (single-line: replace newlines with literal \n for YAML)
+  local _wr_git_root="${repo_root:-$(pwd)}"
   local git_status_raw
-  git_status_raw=$(git status --short 2>/dev/null || echo "unavailable")
+  git_status_raw=$(git -C "$_wr_git_root" status --short 2>/dev/null || echo "unavailable")
   local git_status_output=""
   local _gs_line
   local _gs_first=true

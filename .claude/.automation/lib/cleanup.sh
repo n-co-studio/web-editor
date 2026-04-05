@@ -354,6 +354,37 @@ _detect_orphan_branches() {
   echo "$detected"
 }
 
+# --- Sweep stale review-items/ subdirectories ---
+# Removes subdirectories in .claude/.automation/review-items/ older than 7 days.
+# Called at daemon startup to reclaim disk from abandoned review sessions.
+# Output: count of removed directories on stdout
+sweep_stale_review_items() {
+  local review_items_dir="${AUTOMATION_DIR:-$REPO_ROOT/.claude/.automation}/review-items"
+  local removed=0
+
+  [ -d "$review_items_dir" ] || { echo "0"; return; }
+
+  local now_epoch seven_days_secs
+  now_epoch=$(date +%s)
+  seven_days_secs=$((7 * 86400))
+
+  local dir
+  for dir in "$review_items_dir"/*/; do
+    [ -d "$dir" ] || continue
+    local dir_epoch
+    dir_epoch=$(_portable_mod_epoch "$dir")
+    if [ "$dir_epoch" -gt 0 ]; then
+      local age_secs=$(( now_epoch - dir_epoch ))
+      if [ "$age_secs" -ge "$seven_days_secs" ]; then
+        rm -rf "$dir" 2>/dev/null || true
+        removed=$((removed + 1))
+      fi
+    fi
+  done
+
+  echo "$removed"
+}
+
 # --- Clean terminal work orders by retention ---
 # Deletes completed/escalated work orders older than max_days.
 # Arguments:
@@ -685,6 +716,11 @@ run_cleanup() {
   # Orphan automation branch detection (safety net)
   count=$(_detect_orphan_branches)
   [ "$count" -gt 0 ] && echo "cleanup: detected $count orphan automation branches (escalations written)" >&2
+
+  # Stale review-items/ subdirectories (>7 days)
+  count=$(sweep_stale_review_items)
+  total_deleted=$((total_deleted + count))
+  [ "$count" -gt 0 ] && echo "cleanup: removed $count stale review-items directories (>7d)" >&2
 
   # Orphaned defer-count files (entry no longer in approved/ or running/)
   local _defer_cleaned=0
