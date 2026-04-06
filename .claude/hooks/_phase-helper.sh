@@ -488,6 +488,73 @@ init_phase() {
 
 }
 
+# --- Git-aware freshness check for KG nodes ---
+# Detects nodes whose source files have been modified after their last_verified
+# date using a bulk O(1) git log approach: one awk pass to extract dates, one
+# git log call to get all recently-modified files, one awk pass to intersect.
+# Decision 0034 §7 (staleness protocol), §11 (weight model).
+# Returns annotation text for flagged nodes, or empty output if none found.
+# Advisory only — failures are silently ignored by the caller.
+_kg_git_freshness() {
+  local repo_root="$_REPO_OS_ROOT"
+  local template_graph="$repo_root/docs/ai/knowledge-graph/graph.yaml"
+  local product_graph="$repo_root/docs/ai/knowledge-graph/product-graph.yaml"
+
+  # Collect available graph files
+  local graph_files=""
+  [ -f "$template_graph" ] && graph_files="$template_graph"
+  [ -f "$product_graph" ] && graph_files="${graph_files:+$graph_files }$product_graph"
+  [ -z "$graph_files" ] && return 0
+
+  # Single awk pass: extract node IDs, paths, last_verified dates.
+  # Resets on each new node entry (  - id: ...) to avoid cross-node pollution.
+  # Only nodes with all three fields are emitted; edges lack an id: field at
+  # this indentation level and are naturally excluded.
+  local node_data
+  node_data=$(awk '
+    /^  - id: "/ {
+      cur_id = $0; gsub(/.*id: "/, "", cur_id); gsub(/".*/, "", cur_id)
+      cur_path = ""; cur_lv = ""
+    }
+    /^    path: "/ {
+      cur_path = $0; gsub(/.*path: "/, "", cur_path); gsub(/".*/, "", cur_path)
+    }
+    /^    last_verified: "/ {
+      cur_lv = $0; gsub(/.*last_verified: "/, "", cur_lv); gsub(/".*/, "", cur_lv)
+      if (cur_id != "" && cur_path != "" && cur_lv != "")
+        print cur_id "\t" cur_path "\t" cur_lv
+    }
+  ' $graph_files 2>/dev/null)
+  [ -z "$node_data" ] && return 0
+
+  # Find minimum last_verified date across all nodes (O(1) git call anchor).
+  # Conservative: git log --since=min_date captures all files possibly modified
+  # after any node's verification date.
+  local min_date
+  min_date=$(printf '%s\n' "$node_data" | awk -F'\t' '{print $3}' | sort | head -1)
+  [ -z "$min_date" ] && return 0
+
+  # Single git log call: all files touched since the oldest last_verified date.
+  local modified_files
+  modified_files=$(git -C "$repo_root" log --name-only --format='' --since="$min_date" 2>/dev/null | sort -u)
+  [ -z "$modified_files" ] && return 0
+
+  # Intersect: nodes whose path appears in the git-modified set.
+  local flagged_output
+  flagged_output=$(printf '%s\n' "$node_data" | awk -F'\t' -v mods="$modified_files" '
+    BEGIN { n = split(mods, m, "\n"); for (i=1;i<=n;i++) mod_set[m[i]] = 1 }
+    { if ($2 in mod_set) print $1 "\t" $2 "\t" $3 }
+  ')
+  [ -z "$flagged_output" ] && return 0
+
+  # Emit annotation text for each flagged node.
+  printf '# Freshness Check — needs-reverification (file modified after last_verified):\n'
+  while IFS=$'\t' read -r _fg_id _fg_path _fg_lv; do
+    printf '#   [needs-reverification] %s — %s (last_verified: %s)\n' \
+      "$_fg_id" "$_fg_path" "$_fg_lv"
+  done <<< "$flagged_output"
+}
+
 # --- Inject knowledge graph context at build phase entry ---
 # When transitioning to the build phase, reads scope files from the task
 # contract and runs kg-relevance.sh to produce a context file that agents
@@ -540,7 +607,15 @@ _inject_kg_context() {
 
   # Run kg-relevance.sh in context-inject mode (advisory — ignore failures)
   bash "$repo_root/.claude/tools/kg-relevance.sh" $scope_files \
-    --context-inject --output "$output_file" 2>/dev/null || true
+    --freshness-check --context-inject --output "$output_file" 2>/dev/null || true
+
+  # Append git-aware freshness annotations from _kg_git_freshness() helper
+  # (advisory — ignore failures; _kg_git_freshness writes to stdout)
+  local _freshness_annotations
+  _freshness_annotations=$(_kg_git_freshness 2>/dev/null) || true
+  if [ -n "$_freshness_annotations" ] && [ -n "$output_file" ]; then
+    printf '\n%s\n' "$_freshness_annotations" >> "$output_file" 2>/dev/null || true
+  fi
 }
 
 # --- Advance to a new phase ---

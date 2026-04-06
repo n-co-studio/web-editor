@@ -838,11 +838,14 @@ if [ "$IS_RETRY" = false ]; then
   fi
 fi
 
-# --- Knowledge graph update reminder (Decision 0034, advisory) ---
+# --- Knowledge graph update reminder (Decision 0034, Amendment 3) ---
+# REQUIRE-attempt write stance: fires for Full (standard), Expedited (hotfix), Light (editor-live).
+# Audit (Prompt C, session type "audit") has no write requirement — excluded.
 # Two-graph architecture: check both template graph (graph.yaml) and product graph (product-graph.yaml)
+KG_SESSION_TYPE=$(infer_session_type)
 KG_TEMPLATE_GRAPH="$REPO_ROOT/docs/ai/knowledge-graph/graph.yaml"
 KG_PRODUCT_GRAPH="$REPO_ROOT/docs/ai/knowledge-graph/product-graph.yaml"
-if [ -f "$KG_TEMPLATE_GRAPH" ] || [ -f "$KG_PRODUCT_GRAPH" ]; then
+if [ "$KG_SESSION_TYPE" != "audit" ] && { [ -f "$KG_TEMPLATE_GRAPH" ] || [ -f "$KG_PRODUCT_GRAPH" ]; }; then
   # Check if any modified files have nodes in either graph
   KG_MODIFIED_FILES=$(git -C "$REPO_ROOT" diff --cached --name-only 2>/dev/null || git -C "$REPO_ROOT" diff --name-only HEAD 2>/dev/null || true)
   KG_HAS_GRAPH_NODE=false

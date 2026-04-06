@@ -1,0 +1,99 @@
+# Task Group Contract — ds-enforcement
+# Created by session 272 (Brief 1)
+
+identity:
+  group_name: "ds-enforcement"
+  created_by_session: 272
+  created_date: "2026-04-05"
+  execution: sequential
+
+briefs:
+  - title: "A3 Gate Activation (Template)"
+    sequence: 1
+    session: daemon-20260405-161731-1695
+    branch: "feature/ds-enforcement"
+    status: complete
+    commit: "0b71dc9"
+    next_brief: "Child Repo Adoption Guide"
+    boundaries:
+      - ".claude/hooks/pre-commit-gates.sh"
+      - ".claude/hooks/_a3-design-token-check.sh"
+
+  - title: "Child Repo Adoption Guide"
+    sequence: 2
+    session: null
+    branch: ""
+    status: pending
+    next_brief: "Token Manifest Generator"
+    boundaries: []
+
+  - title: "Token Manifest Generator"
+    sequence: 3
+    session: null
+    branch: ""
+    status: pending
+    next_brief: ""
+    boundaries: []
+
+intent:
+  goal: "Activate progressive A3 design token enforcement gate in template hook infrastructure. Gate is inert without tooling, advisory with grep-only, blocking when ESLint token rules are active."
+  verification:
+    - "A3 section in pre-commit-gates.sh is uncommented and functional"
+    - "Gate passes when no ESLint token rules or manifest exist (advisory only)"
+    - "Gate blocks when ESLint is present and staged diff contains arbitrary Tailwind values"
+    - "Gate blocks when ESLint is present and staged diff contains hardcoded hex colors in className"
+    - "Gate passes for files in the allowlist (token build scripts, tests, config)"
+    - "Gate passes for non-frontend files (Rust, markdown, YAML)"
+    - "Helper script _a3-design-token-check.sh exists and exports the documented functions"
+    - "Grep fallback detects raw hex and arbitrary pixel patterns in staged diff (advisory mode)"
+  scope_files:
+    - ".claude/hooks/pre-commit-gates.sh"
+    - ".claude/hooks/_a3-design-token-check.sh"
+  spec_references:
+    - "docs/spec/compiled/v1/design-system.md"
+    - "docs/spec/compiled/v1/component-system.md"
+    - "docs/ai/decisions/t-0004-mechanical-enforcement.md"
+
+conventions:
+  naming:
+    - pattern: "_a3-*.sh"
+      scope: "A3 gate helper scripts in .claude/hooks/"
+    - pattern: "check_design_token_tooling / run_eslint_staged / run_grep_fallback / get_staged_frontend_files"
+      scope: "Public function names exported by _a3-design-token-check.sh"
+  patterns:
+    - pattern: "Source helper at gate entry: source \"$SCRIPT_DIR/_a3-design-token-check.sh\""
+      rationale: "Consistent with existing helper sourcing pattern in pre-commit-gates.sh (uses $SCRIPT_DIR, not $(dirname $0))"
+    - pattern: "Progressive enforcement: inert -> advisory -> blocking"
+      rationale: "Prevents breaking child repos before their tooling is configured (Decision 0004)"
+    - pattern: "Gates staged diff only — never full codebase scan"
+      rationale: "Performance and scope constraint from brief"
+    - pattern: "Path allowlist: src/shared/tokens/, *.test.tsx/ts, *.spec.tsx/ts, *.stories.tsx, *.d.ts, tailwind.config.*, postcss.config.*, files outside src/"
+      rationale: "Exempt paths from token enforcement as specified in brief"
+  decisions:
+    - "t-0004"
+  boundaries:
+    - module: ".claude/hooks/pre-commit-gates.sh (A3 section)"
+      owner_brief: "A3 Gate Activation (Template)"
+    - module: ".claude/hooks/_a3-design-token-check.sh"
+      owner_brief: "A3 Gate Activation (Template)"
+
+integration_points:
+  - name: "_a3-design-token-check.sh helper functions"
+    producer: "A3 Gate Activation (Template)"
+    consumer: "future child repo sessions that extend A3 enforcement"
+    artifact: ".claude/hooks/_a3-design-token-check.sh"
+
+session_decisions:
+  - session: daemon-20260405-161731-1695
+    decision: "Use $SCRIPT_DIR (not $(dirname $0)) for sourcing helper — matches established pattern at pre-commit-gates.sh lines 28-30"
+  - session: daemon-20260405-161731-1695
+    decision: "Blocking messages use GATE-RECOVERABLE: prefix with NEXT: and (override: REPO_OS_RECOVER=1) suffix — canonical format from _agent-glossary.md"
+  - session: daemon-20260405-161731-1695
+    decision: "run_eslint_staged call site has no 2>/dev/null so function advisory messages propagate; run_grep_fallback call keeps 2>/dev/null as it has no advisory stderr"
+
+governance:
+  - session: daemon-20260405-161731-1695
+    date: "2026-04-05"
+    brief: "A3 Gate Activation (Template)"
+    commit: "0b71dc9"
+    outcome: "Critic APPROVED (5/5 criteria, 2 recommendations — documentation only), QA APPROVED (8/8 criteria). Brief 1 complete."

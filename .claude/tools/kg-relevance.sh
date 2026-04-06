@@ -47,6 +47,8 @@ TOP_N=10
 SCOPE_FILES=""
 CONTEXT_INJECT=false
 OUTPUT_FILE=""
+FRESHNESS_CHECK=false
+FRESHNESS_FLAGGED_IDS=""  # Space-separated node IDs flagged as needing re-verification
 while [ $# -gt 0 ]; do
   case "$1" in
     --top)
@@ -59,6 +61,9 @@ while [ $# -gt 0 ]; do
     --output)
       shift
       OUTPUT_FILE="${1:-}"
+      ;;
+    --freshness-check)
+      FRESHNESS_CHECK=true
       ;;
     *)
       SCOPE_FILES="${SCOPE_FILES:+$SCOPE_FILES }$1"
@@ -99,6 +104,41 @@ fi
 
 echo "Scope nodes: $SCOPE_NODE_IDS"
 echo "---"
+
+
+# --- Git-aware freshness computation (Decision 0034 §7, §11) ---
+# Bulk approach: single awk pass for node data, single git log call, one intersect.
+# Populates FRESHNESS_FLAGGED_IDS with space-separated node IDs whose paths have
+# been modified after their last_verified date. Applied as x0.3 weight penalty.
+if [ "$FRESHNESS_CHECK" = true ]; then
+  _freshness_data=$(awk '
+    /^  - id: "/ {
+      cur_id = $0; gsub(/.*id: "/, "", cur_id); gsub(/".*/, "", cur_id)
+      cur_path = ""; cur_lv = ""
+    }
+    /^    path: "/ {
+      cur_path = $0; gsub(/.*path: "/, "", cur_path); gsub(/".*/, "", cur_path)
+    }
+    /^    last_verified: "/ {
+      cur_lv = $0; gsub(/.*last_verified: "/, "", cur_lv); gsub(/".*/, "", cur_lv)
+      if (cur_id != "" && cur_path != "" && cur_lv != "")
+        print cur_id "\t" cur_path "\t" cur_lv
+    }
+  ' $GRAPH_FILES 2>/dev/null)
+  if [ -n "$_freshness_data" ]; then
+    _freshness_min=$(printf '%s\n' "$_freshness_data" | awk -F'\t' '{print $3}' | sort | head -1)
+    if [ -n "$_freshness_min" ]; then
+      _freshness_modified=$(git -C "$REPO_ROOT" log --name-only --format='' --since="$_freshness_min" 2>/dev/null | sort -u)
+      if [ -n "$_freshness_modified" ]; then
+        FRESHNESS_FLAGGED_IDS=$(printf '%s\n' "$_freshness_data" | awk -F'\t' \
+          -v mods="$_freshness_modified" '
+          BEGIN { n = split(mods, m, "\n"); for (i=1;i<=n;i++) mod_set[m[i]] = 1 }
+          { if ($2 in mod_set) printf "%s ", $1 }
+        ')
+      fi
+    fi
+  fi
+fi
 
 # --- Weighted traversal ---
 SCORE_FILE=$(mktemp)
@@ -178,10 +218,14 @@ fi
 RANKED_FILE=$(mktemp)
 trap "rm -f '$SCORE_FILE' '$RANKED_FILE'" EXIT
 
-awk -v scope="$SCOPE_NODE_IDS" '
+awk -v scope="$SCOPE_NODE_IDS" -v flagged="${FRESHNESS_FLAGGED_IDS:-}" '
 BEGIN {
   split(scope, s, " ")
   for (i in s) skip[s[i]] = 1
+  if (flagged != "") {
+    split(flagged, f, " ")
+    for (i in f) if (f[i] != "") stale[f[i]] = 1
+  }
 }
 {
   node = $1
@@ -194,6 +238,10 @@ BEGIN {
   }
 }
 END {
+  # Apply freshness penalty (x0.3) to flagged nodes — Decision 0034 §11
+  for (node in scores) {
+    if (node in stale) scores[node] = int(scores[node] * 3 / 10)
+  }
   n = 0
   for (node in scores) {
     n++
@@ -250,6 +298,20 @@ ${_rank}. ${_node_id} — ${_relation} — via ${_edge_path}"
 fi
 
 # --- Standard output mode ---
+# Freshness check summary (only when --freshness-check was passed)
+if [ "$FRESHNESS_CHECK" = true ]; then
+  if [ -n "$FRESHNESS_FLAGGED_IDS" ]; then
+    echo "Freshness check — needs-reverification (x0.3 weight penalty applied):"
+    for _ff_id in $FRESHNESS_FLAGGED_IDS; do
+      [ -z "$_ff_id" ] && continue
+      _ff_path=$(grep -A3 "id: \"${_ff_id}\"" $GRAPH_FILES 2>/dev/null | grep 'path: "' | head -1 | sed 's/.*path: "\([^"]*\)".*/\1/' || true)
+      echo "  [needs-reverification] ${_ff_id}${_ff_path:+ (${_ff_path})}"
+    done
+  else
+    echo "Freshness check — no nodes flagged (all paths up-to-date or untracked)"
+  fi
+  echo "---"
+fi
 echo ""
 echo "Top-${TOP_N} also-relevant nodes:"
 echo ""

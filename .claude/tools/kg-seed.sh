@@ -12,10 +12,16 @@
 #   --target template  →  writes docs/ai/knowledge-graph/graph.yaml (default)
 #   --target product   →  writes docs/ai/knowledge-graph/product-graph.yaml
 #
+# Product file discovery (Amendment 2 §10):
+#   --source files     →  discover product source files (default for --target product)
+#   --file-pattern     →  glob pattern for file discovery (default: src/**/*.ts)
+#                         Format: <base-dir>/**/*.<ext>  e.g. src/**/*.tsx
+#
 # Output: writes to the target graph file
 # All edges are agent-inferred and unverified.
 #
-# Usage: bash .claude/tools/kg-seed.sh [--target template|product] [--dry-run]
+# Usage: bash .claude/tools/kg-seed.sh [--target template|product]
+#          [--source files|governance] [--file-pattern PATTERN] [--dry-run]
 
 set -euo pipefail
 
@@ -25,6 +31,8 @@ AI_MD="$REPO_ROOT/AI.md"
 TODAY=$(date -u +%Y-%m-%d)
 DRY_RUN=false
 TARGET="template"
+SOURCE="files"                # files | governance
+FILE_PATTERN="src/**/*.ts"    # glob pattern for product file discovery
 
 # --- Parse arguments ---
 while [ $# -gt 0 ]; do
@@ -36,9 +44,17 @@ while [ $# -gt 0 ]; do
       shift
       TARGET="${1:-template}"
       ;;
+    --source)
+      shift
+      SOURCE="${1:-files}"
+      ;;
+    --file-pattern)
+      shift
+      FILE_PATTERN="${1:-src/**/*.ts}"
+      ;;
     *)
       echo "Unknown argument: $1" >&2
-      echo "Usage: kg-seed.sh [--target template|product] [--dry-run]" >&2
+      echo "Usage: kg-seed.sh [--target template|product] [--source files|governance] [--file-pattern PATTERN] [--dry-run]" >&2
       exit 1
       ;;
   esac
@@ -50,6 +66,15 @@ case "$TARGET" in
   template|product) ;;
   *)
     echo "ERROR: --target must be 'template' or 'product', got '$TARGET'" >&2
+    exit 1
+    ;;
+esac
+
+# Validate source
+case "$SOURCE" in
+  files|governance) ;;
+  *)
+    echo "ERROR: --source must be 'files' or 'governance', got '$SOURCE'" >&2
     exit 1
     ;;
 esac
@@ -159,10 +184,83 @@ _integrity_check_cross_graph() {
   echo "  Cross-graph integrity: check complete"
 }
 
-# --- Product target: scan product source code ---
+# ============================================================
+# Product target: scan product source code (Amendment 2 §10)
+# ============================================================
 if [ "$TARGET" = "product" ]; then
-  echo "Product seeding is child-repo responsibility."
-  echo "This script provides the framework — child repos extend Pass logic for their codebase."
+  if [ "$SOURCE" = "files" ]; then
+    echo "Discovering product files: $FILE_PATTERN"
+
+    # Parse pattern: extract base dir (before /**) and extension (after *.)
+    # Supports: src/**/*.ts  src/**/*.tsx  lib/**/*.py  etc.
+    PATTERN_BASE="${FILE_PATTERN%%/**/*}"
+    if [ "$PATTERN_BASE" = "$FILE_PATTERN" ]; then
+      PATTERN_BASE="src"
+    fi
+    FILE_EXT="${FILE_PATTERN##*.}"
+    if [ "$FILE_EXT" = "$FILE_PATTERN" ] || [ -z "$FILE_EXT" ]; then
+      FILE_EXT="ts"
+    fi
+
+    SEARCH_ROOT="$REPO_ROOT/$PATTERN_BASE"
+
+    if [ ! -d "$SEARCH_ROOT" ]; then
+      echo "  Source directory not found: $SEARCH_ROOT — no nodes added"
+      echo "  Tip: set --file-pattern to match your project layout (e.g. app/**/*.ts)"
+    else
+      echo "  Scanning: $SEARCH_ROOT for *.${FILE_EXT} files"
+
+      # Load existing node IDs for deduplication
+      EXISTING_IDS=""
+      if [ -f "$GRAPH_FILE" ]; then
+        EXISTING_IDS=$(grep '  id: "' "$GRAPH_FILE" | sed 's/.*id: "\([^"]*\)".*/\1/' | tr '\n' ',')
+      fi
+
+      ADDED=0
+      SKIPPED_EXIST=0
+
+      while IFS= read -r fpath; do
+        [ -z "$fpath" ] && continue
+
+        rel_path="${fpath#$REPO_ROOT/}"
+        fname=$(basename "$fpath")
+        fname_noext="${fname%.*}"
+
+        # Derive feature label from immediate parent directory name
+        parent_dir=$(dirname "$rel_path")
+        feature=$(basename "$parent_dir" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g')
+        if [ -z "$feature" ] || [ "$feature" = "." ]; then
+          feature="root"
+        fi
+
+        # Generate node ID: product-<feature>-<filename> (Decision 0034 Amendment 2 §10)
+        sanitized=$(echo "$fname_noext" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g')
+        node_id="product-${feature}-${sanitized}"
+
+        # Skip if node ID already exists in graph
+        case ",$EXISTING_IDS," in
+          *",$node_id,"*) SKIPPED_EXIST=$((SKIPPED_EXIST+1)); continue ;;
+        esac
+
+        add_node "$node_id" "file" "$rel_path" "Product source file"
+        ADDED=$((ADDED+1))
+      done < <(find "$SEARCH_ROOT" \
+        -not \( -path "*/node_modules/*" \) \
+        -not \( -path "*/dist/*" \) \
+        -not \( -path "*/build/*" \) \
+        -not \( -path "*/.git/*" \) \
+        -not \( -path "*/coverage/*" \) \
+        -not \( -path "*/.next/*" \) \
+        -type f -name "*.${FILE_EXT}" 2>/dev/null | sort)
+
+      echo "  Added $ADDED nodes, skipped $SKIPPED_EXIST (already exist in graph)"
+    fi
+  else
+    # governance source: not implemented for product target
+    echo "  --source governance: no product governance seeding implemented"
+    echo "  Use --source files for automatic file node discovery"
+  fi
+
   echo ""
   echo "Results: ${NODE_COUNT} nodes, ${EDGE_COUNT} edges"
 

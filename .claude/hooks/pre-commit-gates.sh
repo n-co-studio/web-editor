@@ -6,6 +6,7 @@
 # Gates enforced:
 #   Phase — assert_phase commit (blocking, primary check when phase-state active)
 #   A4  Safety — secret scanning (always, blocking)
+#   A3  Quality — design token enforcement (progressive; advisory when no tooling, blocking with ESLint)
 #   State verification — plan-approved, cohesion-reviewed, qa-verified, pragmatist-signed (always blocking)
 #   A2  Process — scope check >100 lines (blocking with large-scope override)
 #   A6  Task Group — contract staging (blocking)
@@ -955,23 +956,113 @@ if [ "$SKIP_STATE" = false ] && [ -f "$STATE_DIR/overrides.log" ]; then
   fi
 fi
 
+
 # ============================================================
-# Project-Specific Checks (Gate A3 — Quality)
+# Project-Specific Checks (Gate A3 — Design Token Enforcement)
 # ============================================================
-# Activation contract: Uncomment and adapt for your toolchain.
-# Guard each check with `command -v` so it stays no-op when the
-# tool is absent. This keeps the gate portable across environments
-# where not all dev tools are installed.
-#
-# # A3: Quality — Lint
-# if command -v npx &>/dev/null && [ -f package.json ]; then
-#   npx eslint --quiet . || { echo "GATE A3 FAILED: Lint errors"; FAILED=1; }
-# fi
-#
-# # A3: Quality — Format
-# if command -v npx &>/dev/null && [ -f package.json ]; then
-#   npx prettier --check . || { echo "GATE A3 FAILED: Formatting errors"; FAILED=1; }
-# fi
+# A3: Design Token Enforcement (Progressive)
+# Activation: Install eslint-plugin-tailwindcss + custom design-token rules in child repo.
+# Generate .tokens-manifest.json via `npm run tokens:build`.
+# Gate is inert until tooling detected. Advisory when grep-only. Blocking when ESLint active.
+# ============================================================
+# Source helper (defines check_design_token_tooling, run_eslint_staged,
+# run_grep_fallback, get_staged_frontend_files)
+# shellcheck source=_a3-design-token-check.sh
+source "$SCRIPT_DIR/_a3-design-token-check.sh"
+
+# Only run when staged files exist and we are not in recovery mode
+if [ "$SKIP_STATE" = false ] && [ -n "$STAGED_FILES" ]; then
+
+  # --- Stage 1: Tooling detection ---
+  A3_HAS_TOOLING=false
+  check_design_token_tooling && A3_HAS_TOOLING=true
+
+  if [ "$A3_HAS_TOOLING" = false ]; then
+    # Neither ESLint token rules nor .tokens-manifest.json present — inert / advisory
+    echo "A3 ADVISORY: Design token enforcement not configured — install ESLint token rules and generate token manifest to activate." >&2
+    warn "A3_tooling_absent"
+    log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "warn" "$START_MS" "A3_tooling_absent"
+  else
+    # --- Stage 2: ESLint on staged frontend files ---
+    A3_ESLINT_OUTPUT=""
+    A3_ESLINT_EXIT=0
+    A3_ESLINT_OUTPUT=$(run_eslint_staged) || A3_ESLINT_EXIT=$?
+
+    if [ "$A3_ESLINT_EXIT" -ne 0 ]; then
+      echo "GATE-RECOVERABLE: A3 — ESLint design token violations in staged frontend files (see output above). NEXT: Fix token violations then re-stage. (override: REPO_OS_RECOVER=1)" >&2
+      printf '%s\n' "$A3_ESLINT_OUTPUT" >&2
+      block "A3_eslint_violation"
+      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A3_eslint_violation"
+    fi
+  fi
+
+  # --- Stage 3: Grep fallback (always runs when frontend files are staged) ---
+  # Advisory when ESLint absent; redundant catch (still blocking) when ESLint present.
+  A3_GREP_FINDINGS=""
+  A3_GREP_EXIT=0
+  A3_GREP_FINDINGS=$(run_grep_fallback 2>/dev/null) || A3_GREP_EXIT=$?
+
+  if [ "$A3_GREP_EXIT" -ne 0 ] && [ -n "$A3_GREP_FINDINGS" ]; then
+    if [ "$A3_HAS_TOOLING" = true ]; then
+      # ESLint present — grep catch is redundant confirmation, still block
+      echo "GATE-RECOVERABLE: A3 — Hardcoded design values detected in staged diff (grep fallback). NEXT: Replace hardcoded values with design tokens then re-stage. (override: REPO_OS_RECOVER=1)" >&2
+      printf '%s\n' "$A3_GREP_FINDINGS" | head -5 >&2
+      block "A3_grep_violation_with_eslint"
+      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A3_grep_violation_with_eslint"
+    else
+      # No ESLint — advisory only
+      echo "A3 ADVISORY: Possible hardcoded design values detected (grep fallback — install ESLint token rules to enforce blocking):" >&2
+      printf '%s\n' "$A3_GREP_FINDINGS" | head -5 >&2
+      warn "A3_grep_advisory"
+      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "warn" "$START_MS" "A3_grep_advisory"
+    fi
+  fi
+
+fi
+
+
+# ============================================================
+# KG Coverage Advisory (advisory, non-blocking)
+# Warns when committed governance files lack knowledge graph nodes.
+# Scopes to governance paths only — product files use folder-level nodes.
+# Template graph only (Decision 0034 Amendment 2).
+# Decision 0034 excludes KG blocking enforcement.
+# ============================================================
+if [ "$SKIP_STATE" = false ] && [ -n "$STAGED_FILES" ]; then
+  KG_GRAPH="$REPO_ROOT/docs/ai/knowledge-graph/graph.yaml"
+  if [ -f "$KG_GRAPH" ]; then
+    # Governance paths to check (space-delimited prefix list)
+    KG_GOV_PATHS='.claude/hooks/ .claude/tools/ docs/ai/decisions/ docs/ai/prompts/ .claude/agents/'
+
+    KG_MISSING_NODES=""
+    while IFS= read -r _kg_file; do
+      [ -z "$_kg_file" ] && continue
+      # Skip lock/log files (generated artifacts that may land in governance paths)
+      case "$_kg_file" in
+        *.lock|*.log) continue ;;
+      esac
+      # Check if file is in a governance path
+      _kg_in_gov=false
+      for _kg_gov in $KG_GOV_PATHS; do
+        case "$_kg_file" in
+          "$_kg_gov"*) _kg_in_gov=true; break ;;
+        esac
+      done
+      [ "$_kg_in_gov" = false ] && continue
+      # Check if an exact path entry exists in the template graph
+      if ! grep -qF "path: \"$_kg_file\"" "$KG_GRAPH" 2>/dev/null; then
+        KG_MISSING_NODES="${KG_MISSING_NODES:+$KG_MISSING_NODES }$_kg_file"
+      fi
+    done <<< "$STAGED_FILES"
+
+    if [ -n "$KG_MISSING_NODES" ]; then
+      _kg_count=$(echo "$KG_MISSING_NODES" | wc -w | tr -d ' ')
+      echo "Advisory: KG coverage — $_kg_count governance file(s) lack nodes in graph.yaml. Add nodes at session close: $KG_MISSING_NODES" >&2
+      warn "kg_coverage_advisory"
+      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "warn" "$START_MS" "kg_coverage_advisory" "count:$_kg_count"
+    fi
+  fi
+fi
 
 # ============================================================
 # Final exit

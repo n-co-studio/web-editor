@@ -183,7 +183,7 @@ The Orchestrator synthesizes specialist findings into a draft task brief:
 
 #### Step 4 — Operator Review
 
-Present the draft task brief to the operator. Use `AskUserQuestion` (not conversational text) to request approval — this ensures the operator gets a structured dialog. This triggers `plan-approved` state via `plan-approval.sh` — required for `taskdef-brief` sessions per Decision 0029.
+Present a concise summary of the draft task brief to the operator — title, goal, scope (files/modules), approach outline (numbered steps, one line each), and key risks. Do NOT display the full brief at this stage. Then use `AskUserQuestion` (not conversational text) to request approval — this ensures the operator gets a structured dialog. This triggers `plan-approved` state via `plan-approval.sh` — required for `taskdef-brief` sessions per Decision 0029.
 
 **Brief approval AskUserQuestion template:**
 
@@ -200,7 +200,7 @@ Present the draft task brief to the operator. Use `AskUserQuestion` (not convers
         },
         {
           "label": "Approve & queue",
-          "description": "Brief is final — display, write to disk, and add to automation queue (defaults: auto-approve yes, solo yes, push no)"
+          "description": "Brief is final — write to disk and add to automation queue (defaults: auto-approve yes, solo yes, push no)"
         },
         {
           "label": "Revise",
@@ -220,12 +220,12 @@ Present the draft task brief to the operator. Use `AskUserQuestion` (not convers
 **Hook contract annotations (`plan-approval.sh`):**
 - `question` text: contains "task" and "brief" — Gate 1 passes (line 53, regex `\b(plan|brief|task)\b`)
 - `question` text contains "Approve" — Gate 2 passes at line 61 (regex `\b(approv|confirm|proceed|accept|ready)\b`); both "Approve — display only" and "Approve & queue" labels provide redundant coverage via line 63
-- Selected answer (Gate 3 — line 89): both "Approve — display only" and "Approve & queue" label text contains "Approve", satisfying the affirmative check. "Queue" in the label does not interfere with any gate regex — `DETECTED_MODE` (lines 109–113) scans for `\bauto\b` or `\breview\b`, neither of which appears in "Approve & queue", so mode defaults to `review` (correct behavior)
+- Selected answer (Gate 3 — line 89): both "Approve — display only" and "Approve & queue" label text contains "Approve", satisfying the affirmative check. "Queue" in the label does not interfere with any gate regex — `DETECTED_MODE` (lines 109–113) scans for `\bauto\b` or `\breview\b`, neither appears, so mode defaults to `review` (correct behavior)
 - Operators who want **Narrow** (split into smaller briefs) can select "Other" and type "Narrow" or "Split" — see Narrow path documentation below
 
 The operator reviews and may:
 - **Approve — display only** — Brief is final. Proceeds to Step 5 (display brief in copy-paste format), then close.
-- **Approve & queue** — Brief is final. Proceeds to Step 5 (display brief), then executes queue intake inline:
+- **Approve & queue** — Brief is final. Skips display and executes queue intake inline:
   1. **Write the brief to disk**: Path: `.claude/.automation/briefs/<YYYYMMDD-HHMMSS>-<slug>.md` (slug: derived from brief title, kebab-case, truncated to 50 chars). For task groups: write each brief as a separate file using the same naming convention.
   2. **Write the sidecar contract**: For singular briefs that contain a `### Task Contract` section, also write the YAML content of that section as a standalone file alongside the brief: same path and slug, with `.contract.yaml` extension instead of `.md` (e.g., `.claude/.automation/briefs/<YYYYMMDD-HHMMSS>-<slug>.contract.yaml`). This provides a machine-readable contract for the automation layer. Task group briefs (which use `Contract:` fields in `### Task Group`, not a `### Task Contract` section) do not get a sidecar.
   3. **Add to queue**: Run `queue-cli.sh add --brief <path> --auto-approve --solo` (defaults: auto-approve yes, solo yes, push no). For task groups: add all briefs and create a work order. If the group has sequential execution, add entries in order with `--branch` for the shared group branch. If parallel, add all content briefs then the merge brief — each parallel content brief gets its own per-brief branch (`{group-branch}/brief-{seq}`), so omit `--branch` for content briefs (the worktree session creates the branch); use `--branch` for the merge brief only (targeting the group base branch).
@@ -251,6 +251,8 @@ When the operator selects **sequential** or parallel is not offered: existing be
 Do not finalize without explicit operator approval.
 
 #### Step 5 — Output
+
+**This step runs only for "Approve — display only".** When the operator selected "Approve & queue", the brief was already written to disk and queued in Step 4 — skip this step entirely.
 
 Display the finalized task brief in a self-contained fenced code block. Follow the Session Handoff Convention (see `workflow.md`): first line is a plain-text short title that becomes the VS Code tab label. **For phased briefs (Narrow path):** display each brief in its own separate fenced code block so the operator can copy-paste them individually. Do not bundle multiple briefs into a single block.
 

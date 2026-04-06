@@ -136,7 +136,7 @@ Skip silently when none of the above conditions are met.
 - If critical UX findings exist, the `review→build` loop applies (same as cohesion findings)
 - Design Health findings are informational — present in the review summary but do not trigger the review→build loop unless the operator requests fixes
 
-## Knowledge Graph Updates (Decision 0034)
+## Knowledge Graph Integration (Decision 0034 — Full Profile)
 
 When either `docs/ai/knowledge-graph/graph.yaml` (template) or `product-graph.yaml` (product) exists, the Builder participates in the knowledge graph lifecycle:
 

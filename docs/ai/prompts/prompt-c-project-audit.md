@@ -138,6 +138,20 @@ No auto-remediation — audit is read-only. The operator decides what action to 
 - GUIDE: **finding prioritization** — auditor caps findings at ~10 per dimension, CRITICAL first. Note if truncated.
 - REQUIRE: **inform on skips** — always tell the operator which dimensions were skipped or degraded, and why (pre-spec, operator choice, etc.).
 
+## Knowledge Graph Integration (Decision 0034 — Audit Profile)
+
+Prompt C uses the **Audit profile** from Amendment 3: read-only KG access via the `graph-health` Auditor mode. No writes.
+
+### Graph Context
+
+When the `graph-health` dimension is selected (Standard or Deep tier), the Auditor runs in `graph-health` mode which reads both `docs/ai/knowledge-graph/graph.yaml` and `docs/ai/knowledge-graph/product-graph.yaml` directly. No `kg-relevance-context` injection — the Auditor consumes the full graph for structural analysis.
+
+When `graph-health` is NOT selected, `.claude/.state/kg-relevance-context` may still be present from a prior session. It is advisory — check it for relevant connections if it exists, but do not block on its absence.
+
+### No Writes
+
+Prompt C sessions MUST NOT write to the knowledge graph. The Audit profile has no write requirement (Decision 0034 Amendment 3). Graph update obligations belong to the Prompt B, H, or E session that remediates any findings the audit uncovers.
+
 ## Close Sequence
 
 At close: update session log, commit all changes, present closing summary. See `docs/ai/workflow.md` Close Sequence. For zero-change audit sessions (no deferrals), the session log requirement is exempt.
