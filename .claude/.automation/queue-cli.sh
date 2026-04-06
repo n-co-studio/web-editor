@@ -7,10 +7,11 @@
 #   queue-cli.sh <subcommand> [options]
 #
 # Subcommands:
-#   add --brief <path> [--branch NAME] [--session-type TYPE] [--auto-approve] [--solo] [--push]
+#   add --brief <path> [--branch NAME] [--session-type TYPE] [--auto-approve] [--solo] [--push] [--priority N]
 #   approve <id>
 #   remove <id>
 #   edit <id> <field> <value>
+#   set-priority <id> <N>
 #   status
 #   list [--status <filter>]
 #   show <id>
@@ -77,10 +78,11 @@ _usage() {
 Usage: queue-cli.sh [--json] <subcommand> [args]
 
 Subcommands:
-  add --brief <path> [--branch NAME] [--session-type TYPE] [--auto-approve] [--solo] [--push]
+  add --brief <path> [--branch NAME] [--session-type TYPE] [--auto-approve] [--solo] [--push] [--priority N]
   approve <id>
   remove <id>
   edit <id> <field> <value>
+  set-priority <id> <N>
   status
   list [--status <filter>]
   show <id>
@@ -138,7 +140,7 @@ case "$SUBCOMMAND" in
   # --- add: create a queue entry ---
   add)
     ADD_BRIEF="" ADD_BRANCH="" ADD_SESSION_TYPE="standard"
-    ADD_AUTO_APPROVE=false ADD_SOLO=false ADD_PUSH=false
+    ADD_AUTO_APPROVE=false ADD_SOLO=false ADD_PUSH=false ADD_PRIORITY="0"
     SESSION_TYPE_EXPLICIT=false BRANCH_EXPLICIT=false
 
     while [ $# -gt 0 ]; do
@@ -149,6 +151,13 @@ case "$SUBCOMMAND" in
         --auto-approve)  ADD_AUTO_APPROVE=true; shift ;;
         --solo)          ADD_SOLO=true; shift ;;
         --push)          ADD_PUSH=true; shift ;;
+        --priority)
+          ADD_PRIORITY="$2"
+          # Validate numeric
+          case "$ADD_PRIORITY" in
+            ''|*[!0-9]*) echo "ERROR: --priority requires a non-negative integer" >&2; exit 1 ;;
+          esac
+          shift 2 ;;
         *) echo "ERROR: Unknown add option: $1" >&2; exit 1 ;;
       esac
     done
@@ -242,7 +251,7 @@ case "$SUBCOMMAND" in
     fi
 
     _ensure_queue_dirs
-    ENTRY_ID=$(queue_enqueue "$ADD_BRIEF" "$ADD_SESSION_TYPE" "$ADD_AUTO_MODE" "$ADD_SOLO_STR" "$ADD_BRANCH" "" "$ADD_PUSH_STR")
+    ENTRY_ID=$(queue_enqueue "$ADD_BRIEF" "$ADD_SESSION_TYPE" "$ADD_AUTO_MODE" "$ADD_SOLO_STR" "$ADD_BRANCH" "" "$ADD_PUSH_STR" "$ADD_PRIORITY")
 
     if [ -z "$ENTRY_ID" ]; then
       release_queue_lock
@@ -353,6 +362,37 @@ case "$SUBCOMMAND" in
     fi
     ;;
 
+  # --- set-priority: convenience wrapper for edit <id> priority <N> ---
+  set-priority)
+    if [ $# -lt 2 ]; then
+      echo "ERROR: set-priority requires <id> <N>" >&2
+      exit 1
+    fi
+    SP_ID="$1" SP_VAL="$2"
+
+    # Validate numeric
+    case "$SP_VAL" in
+      ''|*[!0-9]*) echo "ERROR: Priority must be a non-negative integer" >&2; exit 1 ;;
+    esac
+
+    if ! acquire_queue_lock; then
+      echo "ERROR: Queue lock unavailable" >&2
+      exit 1
+    fi
+
+    queue_edit "$SP_ID" "priority" "$SP_VAL"
+    release_queue_lock
+
+    if [ "$JSON_OUTPUT" = true ]; then
+      printf '{%s,%s,%s}\n' \
+        "$(_json_kv "entry_id" "$SP_ID")" \
+        "$(_json_kv "field" "priority")" \
+        "$(_json_kv "value" "$SP_VAL")"
+    else
+      printf 'Updated %s: priority = %s\n' "$SP_ID" "$SP_VAL"
+    fi
+    ;;
+
   # --- status: queue summary ---
   status)
     if [ "$JSON_OUTPUT" = true ]; then
@@ -427,9 +467,10 @@ case "$SUBCOMMAND" in
       _load_queue_entry "$ENTRY_FILE"
       # Truncate last_prompt for JSON output (first 500 chars)
       _SHOW_LP="${_QE_LAST_PROMPT:0:500}"
-      printf '{%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s}\n' \
+      printf '{%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s}\n' \
         "$(_json_kv "id" "$_QE_ID")" \
         "$(_json_kv "status" "$_QE_STATUS")" \
+        "$(_json_kv "priority" "${_QE_PRIORITY:-0}")" \
         "$(_json_kv "session_type" "$_QE_SESSION_TYPE")" \
         "$(_json_kv "branch" "$_QE_BRANCH")" \
         "$(_json_kv "brief_path" "$_QE_BRIEF_PATH")" \

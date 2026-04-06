@@ -4,6 +4,7 @@
 entry:
   id: ""                    # unique entry identifier (UUID or timestamp-based)
   status: pending-review    # pending-review | approved | running | completed | failed | review | blocked
+  priority: 0               # lower = higher priority; 0 = default
   session_type: ""          # Decision 0014 enum (18 types, not extended)
   branch: ""                # target branch name
   brief_path: ""            # path to task brief (if applicable)

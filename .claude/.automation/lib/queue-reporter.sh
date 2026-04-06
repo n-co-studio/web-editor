@@ -121,7 +121,7 @@ queue_status() {
 # Scans directory state directly for reliability. Optional status filter.
 # Output: one line per entry: id|status|session_type|brief_path|<sort-field>
 # The 5th column reflects the sort field for each status:
-#   approved/pending-review/running → created_at (ASC — matches dequeue order)
+#   approved/pending-review/running → priority ASC, then created_at ASC (matches dequeue order)
 #   completed                       → completed_at (DESC — newest first)
 #   failed/blocked/review           → updated_at (DESC — most recently changed first)
 # Arguments:
@@ -164,6 +164,8 @@ queue_list() {
     esac
 
     # Collect entries into _se_ts_N/_se_fp_N parallel arrays.
+    # For active statuses (asc order), use composite key (priority + timestamp)
+    # to match dequeue sort contract (priority ASC, then timestamp ASC).
     local _se_count=0
     local f
     for f in "$dir"/*.yaml; do
@@ -175,7 +177,13 @@ queue_list() {
         completed_at) sort_ts="$_QE_COMPLETED_AT" ;;
         *)            sort_ts="$_QE_UPDATED_AT" ;;
       esac
-      eval "_se_ts_${_se_count}=\"\$sort_ts\""
+      # Active statuses use composite key for priority-aware sort
+      if [ "$sort_order" = "asc" ]; then
+        local _pri="${_QE_PRIORITY:-0}"
+        eval "_se_ts_${_se_count}=\"\$(printf '%05d_%s' \"\$_pri\" \"\$sort_ts\")\""
+      else
+        eval "_se_ts_${_se_count}=\"\$sort_ts\""
+      fi
       eval "_se_fp_${_se_count}=\"\$f\""
       _se_count=$(( _se_count + 1 ))
     done
@@ -184,6 +192,7 @@ queue_list() {
     _sort_entries_by_ts "$_se_count" "$sort_order"
 
     # Output sorted entries with sort-field timestamp in 5th column.
+    # Prefix brief_path with [PN] for non-zero priority entries.
     local k=0
     while [ "$k" -lt "$_se_count" ]; do
       eval "f=\"\$_se_fp_${k}\""
@@ -194,8 +203,12 @@ queue_list() {
         completed_at) display_ts="$_QE_COMPLETED_AT" ;;
         *)            display_ts="$_QE_UPDATED_AT" ;;
       esac
+      local display_brief="$_QE_BRIEF_PATH"
+      if [ "${_QE_PRIORITY:-0}" != "0" ]; then
+        display_brief="[P${_QE_PRIORITY}] ${display_brief}"
+      fi
       printf '%s|%s|%s|%s|%s\n' \
-        "$_QE_ID" "$_QE_STATUS" "$_QE_SESSION_TYPE" "$_QE_BRIEF_PATH" "$display_ts"
+        "$_QE_ID" "$_QE_STATUS" "$_QE_SESSION_TYPE" "$display_brief" "$display_ts"
       k=$(( k + 1 ))
     done
 
@@ -222,6 +235,7 @@ queue_show() {
 
   printf 'id: %s\n' "$_QE_ID"
   printf 'status: %s\n' "$_QE_STATUS"
+  printf 'priority: %s\n' "${_QE_PRIORITY:-0}"
   printf 'session_type: %s\n' "$_QE_SESSION_TYPE"
   printf 'branch: %s\n' "$_QE_BRANCH"
   printf 'brief_path: %s\n' "$_QE_BRIEF_PATH"

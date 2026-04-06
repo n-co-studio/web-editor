@@ -32,7 +32,7 @@ _ensure_queue_dirs() {
 }
 
 # --- Module variables (mirrors queue-entry.yaml fields) ---
-_QE_ID="" _QE_STATUS="" _QE_SESSION_TYPE="" _QE_BRANCH="" _QE_BRIEF_PATH=""
+_QE_ID="" _QE_STATUS="" _QE_PRIORITY="" _QE_SESSION_TYPE="" _QE_BRANCH="" _QE_BRIEF_PATH=""
 _QE_PROMPT="" _QE_LAST_PROMPT="" _QE_AUTO_MODE="" _QE_SOLO_MODE="" _QE_PUSH_ON_COMPLETE="" _QE_RETRY_COUNT=""
 _QE_MAX_RETRIES="" _QE_ERROR_LOG="" _QE_WORK_ORDER_ID="" _QE_CREATED_AT=""
 _QE_UPDATED_AT="" _QE_COMPLETED_AT=""
@@ -90,7 +90,7 @@ _yaml_escape_scalar() {
 # Returns 1 if the file is missing.
 _load_queue_entry() {
   local entry_file="$1"
-  _QE_ID="" _QE_STATUS="" _QE_SESSION_TYPE="" _QE_BRANCH="" _QE_BRIEF_PATH=""
+  _QE_ID="" _QE_STATUS="" _QE_PRIORITY="" _QE_SESSION_TYPE="" _QE_BRANCH="" _QE_BRIEF_PATH=""
   _QE_PROMPT="" _QE_LAST_PROMPT="" _QE_AUTO_MODE="" _QE_SOLO_MODE="" _QE_PUSH_ON_COMPLETE="" _QE_RETRY_COUNT=""
   _QE_MAX_RETRIES="" _QE_ERROR_LOG="" _QE_WORK_ORDER_ID="" _QE_CREATED_AT=""
   _QE_UPDATED_AT="" _QE_COMPLETED_AT=""
@@ -120,6 +120,7 @@ ${_line#    }"
     case "$_line" in
       "  id: "*)           _QE_ID="${_line#  id: }" ;;
       "  status: "*)       _QE_STATUS="${_line#  status: }" ;;
+      "  priority: "*)     _QE_PRIORITY="${_line#  priority: }" ;;
       "  session_type: "*) _QE_SESSION_TYPE="${_line#  session_type: }" ;;
       "  branch: "*)       _QE_BRANCH="${_line#  branch: }" ;;
       "  brief_path: "*)   _QE_BRIEF_PATH="${_line#  brief_path: }" ;;
@@ -144,6 +145,9 @@ ${_line#    }"
   # Block scalar fields (prompt loaded via `|`) are not quoted and need no unescaping.
   _QE_ID=$(_strip_quotes "$_QE_ID")
   _QE_STATUS=$(_strip_quotes "$_QE_STATUS")
+  _QE_PRIORITY=$(_strip_quotes "$_QE_PRIORITY")
+  # Default missing priority to 0 (backward compat with entries created before priority support)
+  [ -n "$_QE_PRIORITY" ] || _QE_PRIORITY="0"
   _QE_SESSION_TYPE=$(_strip_quotes "$_QE_SESSION_TYPE")
   _QE_BRANCH=$(_strip_quotes "$_QE_BRANCH")
   _QE_BRIEF_PATH=$(_strip_quotes "$_QE_BRIEF_PATH")
@@ -175,6 +179,7 @@ _write_queue_entry() {
     printf 'entry:\n'
     printf '  id: "%s"\n' "$(_yaml_escape_scalar "$_QE_ID")"
     printf '  status: "%s"\n' "$(_yaml_escape_scalar "$_QE_STATUS")"
+    printf '  priority: "%s"\n' "$(_yaml_escape_scalar "${_QE_PRIORITY:-0}")"
     printf '  session_type: "%s"\n' "$(_yaml_escape_scalar "$_QE_SESSION_TYPE")"
     printf '  branch: "%s"\n' "$(_yaml_escape_scalar "$_QE_BRANCH")"
     printf '  brief_path: "%s"\n' "$(_yaml_escape_scalar "$_QE_BRIEF_PATH")"
@@ -513,6 +518,7 @@ _parse_brief_taskgroup_metadata() {
 #   $5 — branch (optional, for task group briefs)
 #   $6 — work_order_id (optional, explicit work order association)
 #   $7 — push_on_complete (optional, default from config)
+#   $8 — priority (optional, default 0; lower = higher priority)
 # Output: UUID on stdout
 queue_enqueue() {
   local brief_path="$1"
@@ -522,6 +528,7 @@ queue_enqueue() {
   local branch="${5:-}"
   local work_order_id="${6:-}"
   local push_on_complete="${7:-}"
+  local priority="${8:-0}"
 
   _ensure_queue_dirs
 
@@ -578,6 +585,7 @@ queue_enqueue() {
   # Populate module variables
   _QE_ID="$entry_id"
   _QE_STATUS="pending-review"
+  _QE_PRIORITY="$priority"
   _QE_SESSION_TYPE="$session_type"
   _QE_BRANCH="$branch"
   _QE_BRIEF_PATH="$brief_path"
@@ -778,8 +786,9 @@ _dq_cleanup() {
   _se_cleanup "$@"
 }
 
-# --- Dequeue the oldest approved entry ---
-# Picks the entry with the earliest created_at from approved/.
+# --- Dequeue the highest-priority approved entry ---
+# Picks the entry with the lowest priority value from approved/ (priority ASC),
+# breaking ties by earliest created_at (created_at ASC).
 # Task group entries respect brief sequencing: Brief N waits until all
 # briefs with lower sequence numbers have left approved/ and running/.
 # Moves the selected entry to running/ and outputs the entry file path.
@@ -792,22 +801,25 @@ queue_dequeue() {
   qdir=$(_queue_dir)
 
   # Collect approved entries into shared _se_ts_N/_se_fp_N parallel arrays.
-  # Sort contract: created_at ASC — oldest approved entry runs first.
+  # Sort contract: priority ASC first, then created_at ASC as tiebreaker.
+  # Composite key: zero-padded priority prefix + timestamp, keeping
+  # _sort_entries_by_ts unchanged (Pragmatist finding 2).
   # See _sort_entries_by_ts() for the shared sort implementation used by
   # both queue_dequeue and queue_list (sort contract parity guarantee).
   local _se_count=0
-  local f
+  local f _pri
   for f in "$qdir/approved"/*.yaml; do
     [ -f "$f" ] || continue
     _load_queue_entry "$f"
-    eval "_se_ts_${_se_count}=\"\$_QE_CREATED_AT\""
+    _pri="${_QE_PRIORITY:-0}"
+    eval "_se_ts_${_se_count}=\"\$(printf '%05d_%s' \"\$_pri\" \"\$_QE_CREATED_AT\")\""
     eval "_se_fp_${_se_count}=\"\$f\""
     _se_count=$(( _se_count + 1 ))
   done
 
   [ "$_se_count" -gt 0 ] || return 1
 
-  # Sort by created_at ASC using shared helper (small N — approved queue typically <10).
+  # Sort by composite key ASC (priority ASC, then created_at ASC).
   _sort_entries_by_ts "$_se_count" "asc"
 
   # Iterate sorted candidates, skip any blocked by task group sequencing.
@@ -1182,9 +1194,9 @@ queue_edit() {
 
   # Editable fields whitelist
   case "$field" in
-    brief_path|session_type|branch|auto_mode|solo_mode|push_on_complete|max_retries) ;;
+    brief_path|session_type|branch|auto_mode|solo_mode|push_on_complete|max_retries|priority) ;;
     *)
-      echo "ERROR: Field '$field' is not editable (allowed: brief_path, session_type, branch, auto_mode, solo_mode, push_on_complete, max_retries)" >&2
+      echo "ERROR: Field '$field' is not editable (allowed: brief_path, session_type, branch, auto_mode, solo_mode, push_on_complete, max_retries, priority)" >&2
       return 1
       ;;
   esac
@@ -1222,6 +1234,12 @@ queue_edit() {
     solo_mode)         _QE_SOLO_MODE="$value" ;;
     push_on_complete)  _QE_PUSH_ON_COMPLETE="$value" ;;
     max_retries)       _QE_MAX_RETRIES="$value" ;;
+    priority)
+      # Validate numeric (non-negative integer)
+      case "$value" in
+        ''|*[!0-9]*) echo "ERROR: priority must be a non-negative integer" >&2; return 1 ;;
+      esac
+      _QE_PRIORITY="$value" ;;
   esac
 
   _QE_UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
