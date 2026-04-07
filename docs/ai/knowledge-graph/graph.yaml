@@ -864,6 +864,15 @@ nodes:
     status: "active"
     layer: "template"
 
+  # --- Added by session 20260405-170636-5434 (hotfix/queue-priority-field) ---
+  - id: queue-priority-field
+    type: concept
+    path: .claude/.automation/schemas/queue-entry.yaml
+    label: "Queue entry priority field"
+    layer: template
+    last_verified: "2026-04-06"
+    notes: "Numeric priority (lower=higher) added to queue entry schema, manager, CLI, and reporter"
+
 edges:
   # --- Decision -> hook governance ---
   - source: "decision-0002"
@@ -2602,11 +2611,3 @@ edges:
     status: "active"
     confidence: 0.9
 
-  # --- Added by session 20260405-170636-5434 (hotfix/queue-priority-field) ---
-  - id: queue-priority-field
-    type: concept
-    path: .claude/.automation/schemas/queue-entry.yaml
-    label: "Queue entry priority field"
-    layer: template
-    last_verified: "2026-04-06"
-    notes: "Numeric priority (lower=higher) added to queue entry schema, manager, CLI, and reporter"
