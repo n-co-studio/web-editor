@@ -60,6 +60,9 @@ get_phases_for_type() {
       echo "init contract-init cohesion verify commit op-review close" ;;
     editor-live)
       echo "init build commit review verify op-review close" ;;
+    finish-loop)
+      # Loop: reassess:fix (backward transition — reassess failure triggers another fix cycle)
+      echo "init assess fix reassess commit close" ;;
     *)
       echo "" ;;
   esac
@@ -211,6 +214,9 @@ get_tag_for_phase() {
         *)         echo "agent" ;;
       esac
       ;;
+    finish-loop)
+      # All phases agent-tagged — no operator pause in finish-loop
+      echo "agent" ;;
     *)
       echo "agent" ;;
   esac
@@ -293,6 +299,7 @@ get_loops_for_type() {
     hotfix)             echo "verify:build" ;;
     taskgroup-merge)    echo "cohesion:cohesion" ;;
     editor-live)        echo "commit:build verify:build" ;;
+    finish-loop)        echo "reassess:fix" ;;
     *)                  echo "" ;;
   esac
 }

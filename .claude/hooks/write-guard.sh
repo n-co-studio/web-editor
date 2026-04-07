@@ -225,10 +225,11 @@ case "$MODE" in
 esac
 
 
-# --- Fast-exit for non-template modes ---
-# In child/autonomous modes, product code always passes and governance path
-# blocking is deferred to review-time. Template mode retains full edit-time
-# enforcement. Immune paths are still checked in all modes (self-protection).
+# --- Child/autonomous mode checks ---
+# In child/autonomous modes, product code always passes. Immune paths, template
+# decisions, and non-carved-out governance paths are blocked. Carved-out
+# governance paths fall through to Section 3. Template mode uses check_path()
+# below for full edit-time enforcement.
 if [ "$MODE" != "template" ]; then
   # Immune path check on Edit/Write file_path
   if [ -n "$FILE_PATH" ]; then
@@ -257,6 +258,24 @@ if [ "$MODE" != "template" ]; then
           exit 2
           ;;
       esac
+      # Governance path check for child/autonomous modes (edit-time enforcement)
+      if is_governance "$REL_PATH_FE"; then
+        if ! is_carved_out "$MODE" "$REL_PATH_FE"; then
+          # Check REPO_OS_UNLOCK_PATH override before blocking
+          if [ -n "${REPO_OS_UNLOCK_PATH:-}" ]; then
+            _UNLOCK_REL_FE=$(make_relative "$REPO_OS_UNLOCK_PATH")
+            if [ "$REL_PATH_FE" = "$_UNLOCK_REL_FE" ]; then
+              log_override "mode-guard" "REPO_OS_UNLOCK_PATH"
+              log_hook_event "mode-guard" "PreToolUse" "" "allow" "$START_MS" "unlock_path" "" "$REL_PATH_FE"
+              exit 0
+            fi
+          fi
+          log_hook_event "mode-guard" "PreToolUse" "" "block" "$START_MS" "file_governance_${MODE}" "" "$REL_PATH_FE"
+          echo "GATE-FINAL: $REL_PATH_FE is a governance path — not editable in '$MODE' mode (override: REPO_OS_UNLOCK_PATH=$REL_PATH_FE or REPO_OS_SKIP_MODE_GUARD=1)" >&2
+          exit 2
+        fi
+        # Governance AND carved out — fall through to Section 3
+      fi
     fi
   fi
   # Immune path check on Bash write targets (redirect/tee)
@@ -280,6 +299,24 @@ if [ "$MODE" != "template" ]; then
             exit 2
             ;;
         esac
+        # Governance path check for child/autonomous modes (edit-time enforcement)
+        if is_governance "$FE_WT_REL"; then
+          if ! is_carved_out "$MODE" "$FE_WT_REL"; then
+            # Check REPO_OS_UNLOCK_PATH override before blocking
+            if [ -n "${REPO_OS_UNLOCK_PATH:-}" ]; then
+              _UNLOCK_REL_WT=$(make_relative "$REPO_OS_UNLOCK_PATH")
+              if [ "$FE_WT_REL" = "$_UNLOCK_REL_WT" ]; then
+                log_override "mode-guard" "REPO_OS_UNLOCK_PATH"
+                log_hook_event "mode-guard" "PreToolUse" "" "allow" "$START_MS" "unlock_path" "" "$FE_WT_REL"
+                exit 0
+              fi
+            fi
+            log_hook_event "mode-guard" "PreToolUse" "" "block" "$START_MS" "bash_governance_${MODE}" "" "$FE_WT_REL"
+            echo "GATE-FINAL: $FE_WT_REL is a governance path — not editable in '$MODE' mode (override: REPO_OS_UNLOCK_PATH=$FE_WT_REL or REPO_OS_SKIP_MODE_GUARD=1)" >&2
+            exit 2
+          fi
+          # Governance AND carved out — fall through
+        fi
       fi
     done <<< "$FE_TARGETS"
   fi

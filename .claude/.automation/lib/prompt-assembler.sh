@@ -44,6 +44,9 @@ _get_template_for_type() {
     audit)
       template_file="$template_dir/dev-orchestrator-brief.md"
       ;;
+    finish-loop)
+      template_file="$template_dir/finish-loop-brief.md"
+      ;;
   esac
   if [ -n "$template_file" ] && [ -f "$template_file" ]; then
     printf '%s' "$template_file"

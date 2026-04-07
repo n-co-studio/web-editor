@@ -1569,6 +1569,13 @@ while true; do
     fi
   fi
 
+  # Re-source phase helper to pick up session types added after daemon start.
+  # Fixes: new session types registered in _phase-helper.sh after daemon launch are
+  # not recognized without daemon restart. Re-sourcing is safe — all functions are
+  # pure lookups with no state side effects.
+  # shellcheck disable=SC1090
+  source "$REPO_ROOT/.claude/hooks/_phase-helper.sh" 2>/dev/null || true
+
   # Validate session type
   if [ -z "$(get_phases_for_type "$ENTRY_SESSION_TYPE" 2>/dev/null)" ]; then
     echo "ERROR: Invalid session type '$ENTRY_SESSION_TYPE' for entry $ENTRY_ID" >&2

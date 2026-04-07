@@ -353,7 +353,10 @@ if [ "$SKIP_MODE_GUARD" = false ]; then
 
     # --- Path helpers (make_relative, is_immune sourced from _mode-guard-helper.sh) ---
 
-    # --- Fast-exit for non-template modes ---
+    # --- Child/autonomous mode checks ---
+    # In child/autonomous modes, product code always passes. Immune paths,
+    # template decisions, and non-carved-out governance paths are blocked.
+    # Carved-out governance paths fall through to branch-guard.
     if [ "$MODE" != "template" ]; then
       # Immune path check on Bash write targets
       if [ -n "$COMMAND" ]; then
@@ -375,6 +378,24 @@ if [ "$SKIP_MODE_GUARD" = false ]; then
                 exit 2
                 ;;
             esac
+            # Governance path check for child/autonomous modes (edit-time enforcement)
+            if is_governance "$MG_WT_REL"; then
+              if ! is_carved_out "$MODE" "$MG_WT_REL"; then
+                # Check REPO_OS_UNLOCK_PATH override before blocking
+                if [ -n "${REPO_OS_UNLOCK_PATH:-}" ]; then
+                  _UNLOCK_REL_MG=$(make_relative "$REPO_OS_UNLOCK_PATH")
+                  if [ "$MG_WT_REL" = "$_UNLOCK_REL_MG" ]; then
+                    log_override "mode-guard" "REPO_OS_UNLOCK_PATH"
+                    log_hook_event "mode-guard" "PreToolUse" "Bash" "allow" "$START_MS" "unlock_path" "" "$MG_WT_REL"
+                    exit 0
+                  fi
+                fi
+                log_hook_event "mode-guard" "PreToolUse" "Bash" "block" "$START_MS" "bash_governance_${MODE}" "" "$MG_WT_REL"
+                echo "GATE-FINAL: $MG_WT_REL is a governance path — not editable in '$MODE' mode (override: REPO_OS_UNLOCK_PATH=$MG_WT_REL or REPO_OS_SKIP_MODE_GUARD=1)" >&2
+                exit 2
+              fi
+              # Governance AND carved out — fall through
+            fi
           fi
         done <<< "$WRITE_TARGETS"
       fi

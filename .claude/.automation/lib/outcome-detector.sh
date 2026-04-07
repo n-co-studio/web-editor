@@ -138,6 +138,25 @@ detect_outcome() {
       fi
     fi
 
+    # FINISH_LOOP sentinel parsing — scoped to finish-loop sessions only.
+    # Regression sentinel takes priority over incomplete sentinel.
+    local _fl_session_type
+    _fl_session_type=$(get_session_type 2>/dev/null || echo "")
+    if [ "$_fl_session_type" = "finish-loop" ] && [ "$has_new_commits" = true ]; then
+      local _fl_cohesion_state
+      _fl_cohesion_state="$(get_session_state_dir)/cohesion-reviewed"
+      if [ -f "$_fl_cohesion_state" ]; then
+        if grep -q '^FINISH_LOOP_REGRESSION:' "$_fl_cohesion_state" 2>/dev/null; then
+          echo "review:scope-deviation"
+          return
+        fi
+        if grep -q '^FINISH_LOOP_RESULT: INCOMPLETE' "$_fl_cohesion_state" 2>/dev/null; then
+          echo "review:finish-incomplete"
+          return
+        fi
+      fi
+    fi
+
     # Success (exit 0 + new commits)
     if [ "$has_new_commits" = true ]; then
       echo "completed:success"

@@ -189,6 +189,7 @@ Session-type-specific phases (see sequences table): `interview`/`write` (Prompt 
 | standard | init→plan→approval→build→review→verify→[user-review]→commit→[op-review]→close | op-review skipped in auto |
 | hotfix | init→plan→approval→build→verify→commit→close | Loop: verify→build; A2 relaxed, A5 skip; max 3 cycles |
 | editor-live | init→build→commit→review→verify→op-review→close | No plan gate; loop: commit→build; child mode only |
+| finish-loop | init→assess→fix→reassess→commit→close | Loop: reassess→fix; convergent quality assessment; cycle cap 5 |
 | advisory-init | init→tier-select→dispatch→synthesize→op-review→validate→governance→close | Advisory only |
 | advisory-reinit | init→validate→governance→close | Lightweight re-review |
 | ephemeral | init→conversation→close | Skip gates; upgrade via `upgrade_session_type` |

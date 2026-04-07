@@ -45,6 +45,7 @@ On-demand (loaded by orchestrator.md triggers, not at session start):
 - docs/ai/workflow-appendix/session-type-editor-live.md (read when session type is editor-live — detected at init from brief or operator signal)
 - docs/ai/prompts/prompt-h-hotfix-debug.md (read when session type is hotfix — detected at init from `hotfix/*` branch or operator signal)
 - docs/ai/workflow-appendix/session-type-task-group.md (read when session type is task-group or taskgroup-merge — detected at init from `### Task Group` in brief)
+- docs/ai/workflow-appendix/session-type-finish.md (read when session type is finish-loop — detected at init from brief or operator signal)
 - docs/ai/workflow-appendix/session-type-automation.md (read when session type is automation — detected at init from runner context or operator signal)
 - docs/ai/workflow-appendix/session-type-queue-triage.md (read when session type is queue-triage — detected at init from Prompt Q invocation)
 - docs/ai/knowledge-graph/graph.yaml, docs/ai/knowledge-graph/product-graph.yaml (read when task brief references files with graph nodes or session touches governance-adjacent paths; used for relevance scoring via `.claude/tools/kg-relevance.sh` which searches both graphs automatically; Decision 0034)
@@ -88,6 +89,7 @@ Automation layer (Decision 0017): optional headless runner in `.claude/.automati
 - docs/ai/prompts/prompt-c-project-audit.md
 - docs/ai/prompts/prompt-d-daemon-toggle.md
 - docs/ai/prompts/prompt-e-editor-live.md
+- docs/ai/prompts/prompt-f-finish-loop.md
 - docs/ai/prompts/prompt-h-hotfix-debug.md
 - docs/ai/prompts/prompt-q-queue-triage.md
 - docs/ai/prompts/prompt-t-task-definition.md

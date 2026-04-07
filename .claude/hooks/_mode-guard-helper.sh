@@ -33,12 +33,17 @@ make_relative() {
 }
 
 # --- Immune paths (never modifiable, no override) ---
+# Settings files are structural enforcement anchors: if either can be
+# modified by an agent, the hook chain can be dismantled via env var overrides.
+# Immune in ALL modes — REPO_OS_UNLOCK_PATH does not apply.
 is_immune() {
   local p="$1"
   case "$p" in
     .claude/hooks/write-guard.sh) return 0 ;;
     .claude/repo-mode) return 0 ;;
     .claude/.session-id) return 0 ;;
+    .claude/settings.json) return 0 ;;
+    .claude/settings.local.json) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -71,8 +76,7 @@ is_carved_out() {
         .claude/agents/*) return 0 ;;
         .claude/hooks/*) return 0 ;;
         .claude/tools/*) return 0 ;;
-        .claude/settings.json) return 0 ;;
-        .claude/settings.local.json) return 0 ;;
+        # .claude/settings.json and .claude/settings.local.json are immune — not reachable here
         .claude/local/sessions/*) return 0 ;;
         .claude/local/known-issues.md) return 0 ;;
         .claude/local/task-groups/*) return 0 ;;
@@ -99,7 +103,6 @@ is_carved_out() {
       ;;
     child)
       case "$p" in
-        .claude/settings.local.json) return 0 ;;
         docs/ai/governance/*) return 0 ;;
         docs/ai/logs/*) return 0 ;;
         docs/ai/task-groups/_*) return 1 ;;
