@@ -151,7 +151,7 @@ Dispatch all specialists in parallel. Each receives the inline context payload a
 
 | Specialist | Focus |
 |---|---|
-| **Architect** | Where does this change fit? Which files/modules are affected? What structural patterns apply? Are there dependencies or ordering constraints? |
+| **Architect** | Where does this change fit? Which files/modules are affected? What structural patterns apply? Are there dependencies or ordering constraints? For tasks that exceed Small Scope (see `_agent-glossary.md` § Scope), also produce an Implementation Design block (see `_advisory-board-lite.md` § Architect — Implementation Design Block). |
 | **Exploration** | What are alternative approaches? Are there libraries, patterns, or best practices to consider? What creative options exist? |
 | **Critic** | What could go wrong? What gaps exist in the task description? What assumptions are unstated? What risks or contradictions are present? |
 | **Pragmatist** | Is the proposed approach proportionate to the problem? Are there over-engineered patterns, unnecessary abstractions, or scope inflation? What simpler alternative would meet the same requirements? |
@@ -172,7 +172,8 @@ The Orchestrator synthesizes specialist findings into a draft task brief:
 - Incorporate PM findings into the Constraints and Risks sections (scope alignment, spec consistency, sequencing concerns)
 - Incorporate UX Design Agent design brief into the Approach section — embed the full design brief as a subsection so the Builder has concrete design direction. Reference design tokens and patterns in the Constraints section
 - Cross-reference Critic concerns with Architect/Exploration/PM suggestions (same pattern as advisory board Critic Cross-Reference)
-- If PM included spec-edit proposals, note them in the brief's Risks & Open Questions section for operator awareness
+- If PM included spec-edit proposals, note them in the brief's Risks & Assumptions section for operator awareness
+- **Implementation Design routing**: When the Architect produces an Implementation Design block (scope exceeds Small Scope threshold), place it verbatim in the `### Implementation Design` section of the brief (after Approach). This signals to Prompt B that alignment review mode applies.
 
 **Pipeline scoping heuristic:** When the Architect identifies that the change crosses pipeline stage boundaries — touching input, processing, AND output stages, or affecting multiple stages of a known pipeline (e.g., intake → queue → session → merge, or branch creation → worktree → build → commit → cleanup) — the Orchestrator MUST scope the entire pipeline in a single brief rather than splitting by stage.
 
@@ -267,7 +268,8 @@ Follow docs/ai/prompts/prompt-b-product-build.md.
 [1-2 sentences: what this task accomplishes and why]
 
 ### Scope
-- **Files likely affected:** [list of file paths or patterns]
+- **Files to create or edit:** [list of file paths or patterns]
+- **Files to read:** [files to read for context but not modify]
 - **Modules/areas:** [which parts of the system this touches]
 - **Estimated size:** [small / medium / large]
 
@@ -278,11 +280,14 @@ Follow docs/ai/prompts/prompt-b-product-build.md.
 2. [Step]
 3. ...
 
+### Implementation Design
+[Optional — present only when scope exceeds Small Scope and the Architect produced an Implementation Design block. Omit entirely for small-scope tasks.]
+
 ### Alternatives Considered
 [1-2 alternatives that were discussed and why the chosen approach was preferred.]
 
-### Risks & Open Questions
-[Anything the builder should watch for.]
+### Risks & Assumptions
+[Anything the builder should watch for, plus assumptions made during planning.]
 
 ### Constraints
 - [Constraint from operator or from spec boundaries]
@@ -330,7 +335,7 @@ Follow docs/ai/prompts/prompt-b-product-build.md.
 ```yaml
 goal: "[1-2 sentences from the Goal section]"
 scope_files:
-  - "[file paths from Scope section]"
+  - "[file paths from Scope section — files to create or edit]"
 scope_modules:
   - "[module names from Scope section]"
 approach:
@@ -341,6 +346,11 @@ spec_references:
   - "[paths from Spec References section]"
 constraints:
   - "[constraints from Constraints section]"
+implementation_design:              # optional — present only when ### Implementation Design section exists in brief
+  components: "[summary of Components block]"
+  key_interfaces: "[summary of Key Interfaces block]"
+  data_flow: "[summary of Data Flow block]"
+  error_handling: "[summary of Error Handling block]"
 user_review:                        # optional — only when User Review section present
   tiers: [1, 2, 3]                 # which tiers to dispatch
   mode: static                     # static only (live deferred)

@@ -50,3 +50,19 @@ spec_type: feature
 
 - [ ] [Criterion 1]
 - [ ] [Criterion 2]
+
+## Internal Design
+<!-- Optional — include when Prompt T produced an Implementation Design block for this feature.
+     Captures the pre-approved design decisions so the build brief can reference them. -->
+
+### Components
+[List of components/modules and their roles]
+
+### Key Interfaces
+[Function signatures, API surfaces, or data contracts]
+
+### Data Flow
+[How data moves through the system for the primary use case]
+
+### Error Handling
+[Key error paths, failure modes, and recovery strategies]

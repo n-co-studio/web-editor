@@ -36,6 +36,28 @@ Summary: C: [n] | R: [n] | I: [n]
 - REQUIRE: actionable suggestions — every specialist (except Critic) must include a concrete suggestion with every finding
 - REQUIRE: cite sources — reference specific spec sections, standards, or URLs when applicable
 
+## Architect — Implementation Design Block
+
+When the Architect's scope assessment indicates scope that **exceeds Small Scope** (as defined in `_agent-glossary.md` § Scope — more than ~100 lines, more than 3 files, or cross-cutting concerns), produce an Implementation Design block in addition to the standard brief. For tasks that fit within Small Scope, use the standard brief format only.
+
+```
+### Implementation Design
+
+**Components**
+[List of components/modules involved and their roles in the solution]
+
+**Key Interfaces**
+[Function signatures, API surfaces, or data contracts between components]
+
+**Data Flow**
+[How data moves through the system end-to-end for the primary use case]
+
+**Error Handling**
+[Key error paths, failure modes, and recovery strategies]
+```
+
+The Implementation Design block is placed in the `### Implementation Design` section of the task brief output. Prompt B sessions that receive this block operate in alignment review mode — the plan is validated against the approved design rather than re-designed from scratch.
+
 ## Pragmatist
 
 Pragmatist is a Core (Lite+) specialist that reviews for over-engineering, unnecessary complexity, and disproportionate approaches. Uses custom severity: OVER-ENGINEERED (maps to RECOMMENDATION) and FUNDAMENTAL-MISMATCH (maps to CRITICAL). Has two modes: Brief-Advisory (Prompt T, advisory board) and Plan-Gating (Prompt B, GATE_RESULT sentinel). Every finding must include a falsifiability condition ("This finding is wrong if: [condition]"). See `pragmatist.md` for anti-pattern checklist and full review criteria.

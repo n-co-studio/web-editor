@@ -81,7 +81,7 @@ All shared rules in `docs/ai/workflow.md` and `docs/ai/quality-gates.md` apply (
 Before implementation:
 - [ ] Branch created from main (`git checkout -b <category>/<description>`)
 - [ ] Applicable decisions identified and listed
-- [ ] Plan documented (goal, steps, files, verification)
+- [ ] Plan documented (goal, steps, files, verification). **Implementation Design check**: if the brief contains a `### Implementation Design` section AND the task contract has `implementation_design:`, the plan = build order aligned to the approved design (alignment review mode). When Implementation Design is present, the plan is not re-architected — it is validated against the pre-approved design.
 - [ ] Operator approved plan via AskUserQuestion (plan-approved state file exists — conversational approval is insufficient)
 - [ ] Scope is small (or explicit approval for larger)
 - [ ] High-risk triggers identified?
@@ -139,7 +139,7 @@ Before session close:
 | Prompt C (project audit) | Read prompt, select tier, dispatch Auditor per dimension + Security/Performance if selected, synthesize Audit Report | `docs/ai/prompts/prompt-c-project-audit.md` |
 | Operator defers findings | Write `.claude/.deferrals-pending` (timestamp). Write each finding to Known Limitations in `known-issues.md` (template: `.claude/local/`; product: `docs/ai/logs/`) | — |
 | PM Advisory dispatch (on-demand or phase-triggered) | Check: compiled spec (`active` ≠ null) OR `mvp-scope.yaml` exists — else skip silently. Pass spec + mvp-scope + context. Advisory only; accepted spec-edit proposals: Orchestrator executes via Edit tool | — |
-| Builder signals completion (before QA) | Read task-contract `verification:` → pass to Critic. Read cohesion-review procedure. Dispatch PM Advisory (spec-drift, parallel). Dispatch UX Design Agent Mode 2+3 when UI files changed | `.claude/agents/_cohesion-review.md`, `prompt-b-product-build.md` § UX Post-Build Review |
+| Builder signals completion (before QA) | Read task-contract `verification:` → pass to Critic. Read cohesion-review procedure. When `implementation_design:` is present in task contract, also pass it to Critic as additional alignment context. Dispatch PM Advisory (spec-drift, parallel). Dispatch UX Design Agent Mode 2+3 when UI files changed | `.claude/agents/_cohesion-review.md`, `prompt-b-product-build.md` § UX Post-Build Review, `prompt-b-product-build.md` § Plan Phase — Design Mode Conditional |
 | Task brief contains `### Task Group` | Contract path: template → `.claude/local/task-groups/{name}.yaml`; product → `docs/ai/task-groups/{name}.yaml` | `docs/ai/workflow-appendix/session-type-task-group.md` |
 | Parallel content brief (`Execution: parallel`) | Restrict edits to declared `Boundaries`. At close write `.claude/.state/tg-{group}-brief-{seq}.complete` | `docs/ai/prompts/prompt-b-product-build.md` |
 | `taskgroup-merge` session | Init as taskgroup-merge. Verify completion markers. Cross-session cohesion (Critic). QA gates. Merge + seal at close | `docs/ai/workflow-appendix/session-type-task-group.md` |

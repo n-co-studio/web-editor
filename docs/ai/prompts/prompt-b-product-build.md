@@ -55,7 +55,7 @@ The phase model tracks session progress in `.claude/.state/phase-state`. Hooks e
 
 | Phase | Agent | Notes |
 |-------|-------|-------|
-| plan | **Pragmatist** (plan-gating mode) | REQUIRE dispatch before presenting plan to operator. Foreground preferred (ensures verdict available before plan presentation; background supported but may complete during build). Passes plan text inline in Task prompt. GATE_RESULT: BLOCKED (FUNDAMENTAL-MISMATCH) or APPROVED. Findings and verdict presented alongside plan to operator. Auto mode: BLOCKED degrades to advisory-with-warning (Decision 0025) |
+| plan | **Pragmatist** (plan-gating mode) | REQUIRE dispatch before presenting plan to operator. Foreground preferred (ensures verdict available before plan presentation; background supported but may complete during build). Passes plan text inline in Task prompt. GATE_RESULT: BLOCKED (FUNDAMENTAL-MISMATCH) or APPROVED. Findings and verdict presented alongside plan to operator. Auto mode: BLOCKED degrades to advisory-with-warning (Decision 0025). When `implementation_design:` is present in the task contract, Pragmatist operates in alignment-check sub-mode (evaluates plan alignment to approved design, not proportionality — see `pragmatist.md` § Constraints, Implementation Design alignment bullet) |
 | build | Builder | Implements changes |
 | review | **Critic** (cohesion mode) + **PM Advisory** (spec-drift) + **UX Design Agent** (Mode 2 + Mode 3) | REQUIRE: dispatch Critic before advancing to verify phase. Parallel dispatch. Critic checks internal coherence; PM checks spec alignment. PM is conditional — requires compiled spec or `mvp-scope.yaml` (skipped silently otherwise). PM findings are advisory (not gating). UX Design Agent is conditional — dispatched when the task brief contains design brief content or the implementation includes UI changes; see UX Post-Build Review below |
 | verify | QA Verifier | REQUIRE: dispatch before advancing to commit phase. Commit blocker (A1–A6, B1–B3) |
@@ -63,6 +63,18 @@ The phase model tracks session progress in `.claude/.state/phase-state`. Hooks e
 | commit | Orchestrator | Commit with trailers |
 
 Loops: `review→build` (cohesion findings), `verify→build` (QA failure).
+
+### Plan Phase — Design Mode Conditional
+
+At the start of the plan phase, check whether an Implementation Design has been pre-approved at Prompt T:
+
+**Condition:** Brief contains a `### Implementation Design` section AND task contract has an `implementation_design:` field.
+
+- **Alignment review mode** (both present): The plan = execution order aligned to the approved design. Do not re-architect. Confirm the implementation follows the approved Components, Key Interfaces, Data Flow, and Error Handling. Present the plan as "executing approved design" — the Pragmatist will validate alignment, not proportionality.
+- **Standard mode** (neither or only one present): Current behavior unchanged — plan the implementation from scratch, dispatch Pragmatist for full proportionality review.
+- **Divergence** (only one present — mismatch between brief and contract): Default to standard mode. Log in plan summary: "Implementation Design mismatch: present in [brief/contract] but not [contract/brief] — treating as standard plan phase."
+
+When in alignment review mode, the Critic's cohesion review also receives the `implementation_design:` contract content as additional context for evaluating whether the build faithfully implements the approved design.
 
 ### Auto/Review Mode
 

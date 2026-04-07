@@ -103,6 +103,7 @@ The boundary is: Pragmatist checks whether the **approach** is proportionate. Re
 - OVER-ENGINEERED findings alone → APPROVED (findings are advisory recommendations)
 - Scope: plan text + task brief context + codebase patterns. Do not review implementation code
 - **Auto mode degradation**: When the session is running in auto mode and the verdict is BLOCKED, the Orchestrator degrades to advisory-with-warning: log the finding, proceed with the plan, and notify the operator in the post-session summary. This prevents auto mode from becoming unresolvable while preserving the signal
+- **Implementation Design alignment**: When the task contract contains an `implementation_design:` field, the approved design's proportionality is NOT re-evaluated — it was already reviewed at Prompt T. Instead, evaluate only whether the execution plan materially diverges from the approved design (Components, Key Interfaces, Data Flow, Error Handling). A plan that faithfully executes the approved design → APPROVED. A plan that materially deviates from the approved design (different components, different interfaces, different data flow) → FUNDAMENTAL-MISMATCH with reason explaining the divergence.
 
 **Triage (cross-mode):**
 - If the Orchestrator indicates that a concern was already addressed at Prompt T (Brief-Advisory), reference the prior resolution rather than re-flag. Only re-flag if the plan reintroduces the concern in a materially different form

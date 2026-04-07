@@ -2610,4 +2610,27 @@ edges:
     last_verified: "2026-04-05"
     status: "active"
     confidence: 0.9
-
+  - source: "prompt-t-task-definition"
+    target: "agent-advisory-board-lite"
+    relation: "depends-on"
+    context: "Prompt T Brief mode reads _advisory-board-lite.md for Implementation Design Block format and inline context payload"
+    source_type: "agent-inferred"
+    last_verified: "2026-04-07"
+    status: "active"
+    confidence: 0.7
+  - source: "prompt-t-task-definition"
+    target: "agent-pragmatist"
+    relation: "depends-on"
+    context: "Prompt T Brief mode dispatches Pragmatist as advisory peer (Brief-Advisory mode) for over-engineering review during task definition"
+    source_type: "agent-inferred"
+    last_verified: "2026-04-07"
+    status: "active"
+    confidence: 0.7
+  - source: "prompt-b-product-build"
+    target: "agent-pragmatist"
+    relation: "governs"
+    context: "Prompt B dispatches Pragmatist in Plan-Gating mode; alignment-check sub-mode activates when implementation_design: present in contract"
+    source_type: "agent-inferred"
+    last_verified: "2026-04-07"
+    status: "active"
+    confidence: 0.7
