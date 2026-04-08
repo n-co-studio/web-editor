@@ -158,7 +158,7 @@ if [ "${REPO_OS_RECOVER:-0}" != "1" ] && [ "$_RECOVER_VIA_SIGNAL" != true ]; the
       # Locate repo root relative to this hook (self-referential — no sourced deps)
       _D_HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
       _D_REPO_ROOT="$(cd "$_D_HOOK_DIR/../.." && pwd)"
-      _D_PID_FILE="$_D_REPO_ROOT/.claude/.automation/.daemon-pid"
+      _D_PID_FILE="$_D_REPO_ROOT/.claude/.automation/runner.pid"
       _DAEMON_ACTIVE=false
       # Check PID file first (no subprocess required)
       if [ -f "$_D_PID_FILE" ]; then

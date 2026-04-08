@@ -17,7 +17,7 @@ The main working tree MUST NOT change branches while the automation daemon is ru
 
 ### Rule
 
-- BLOCK: `git checkout <branch>`, `git checkout -b <branch>` (create-and-switch), `git switch <branch>`, `git switch -c <branch>` (create-and-switch), and `git reset --hard` on the main working tree when the daemon is active (detected via `.claude/.automation/.daemon-pid` or `pgrep -f "runner.sh --daemon"`)
+- BLOCK: `git checkout <branch>`, `git checkout -b <branch>` (create-and-switch), `git switch <branch>`, `git switch -c <branch>` (create-and-switch), and `git reset --hard` on the main working tree when the daemon is active (detected via `.claude/.automation/runner.pid` or `pgrep -f "runner.sh --daemon"`)
 - EXEMPT: `git checkout -- <file>` (file restores, not branch switches)
 - EXEMPT: commands run from within a worktree context (git dir contains `worktrees`)
 
@@ -31,7 +31,7 @@ Root cause: nothing in the governance layer or hook chain prevented branch switc
 
 Two enforcement layers:
 
-1. **Hook guard (`bash-guard.sh` Phase 1c):** Detects `git checkout`, `git switch`, and `git reset --hard` commands. Checks for an active daemon via PID file at `.claude/.automation/.daemon-pid` (no subprocess needed) with `pgrep -f "runner.sh --daemon"` fallback. If daemon is active, emits `GATE-RECOVERABLE` and blocks.
+1. **Hook guard (`bash-guard.sh` Phase 1c):** Detects `git checkout`, `git switch`, and `git reset --hard` commands. Checks for an active daemon via PID file at `.claude/.automation/runner.pid` (no subprocess needed) with `pgrep -f "runner.sh --daemon"` fallback. If daemon is active, emits `GATE-RECOVERABLE` and blocks.
 
 2. **Prompt rule (prompt-h-hotfix-debug.md):** REQUIRE rule instructs hotfix session facilitators to check for a running daemon before creating a hotfix branch, and to halt the daemon or use worktree isolation if one is found.
 
