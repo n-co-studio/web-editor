@@ -43,3 +43,4 @@ t-0032-parallel-worktree-isolation.md
 t-0033-session-worktree-default.md
 t-0034-knowledge-graph.md
 t-0035-selective-spec-loading.md
+t-0036-daemon-safe-branching.md

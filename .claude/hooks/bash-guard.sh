@@ -11,7 +11,9 @@
 #   1. Pre-source fast-exits (builtins only — no library sourcing)
 #      a. Gate 7: Task group merge protection pattern detection
 #      b. Override pre-checks (REPO_OS_SKIP_STATE_GUARD, REPO_OS_RECOVER, REPO_OS_SKIP_MODE_GUARD)
-#      c. Combined fast-exit: no Gate 7 match AND no write patterns AND all guards skipped
+#      c. Phase 1b: Knowledge graph search advisory (Decision 0034)
+#      d. Phase 1c: Daemon-safe branching guard (Decision 0036)
+#      e. Combined fast-exit: no Gate 7/daemon match AND no write patterns AND all guards skipped
 #   2. Source libraries (single sourcing of _analytics-helper.sh + _phase-helper.sh)
 #   3. Gate 7 enforcement (task group merge protection — Decision 0018)
 #   4. Fast-exit for no-write-target Bash commands
@@ -132,6 +134,55 @@ if [ "$_TG_MERGE_BLOCK" = false ]; then
       fi
     fi
   fi
+fi
+
+# --- Phase 1c: Daemon-safe branching guard (Decision 0036) ---
+# Blocks git checkout/switch/reset --hard on the main working tree when the
+# automation daemon is active. File restores (git checkout -- <file>) and
+# commands run from a worktree context are exempt.
+_DAEMON_BRANCH_BLOCK=false
+if [ "${REPO_OS_RECOVER:-0}" != "1" ] && [ "$_RECOVER_VIA_SIGNAL" != true ]; then
+  _IS_BRANCH_SWITCH=false
+  # Detect branch-switching patterns; exempt git checkout -- <file> (file restores)
+  if [[ "$INPUT" == *'git checkout '* ]] && [[ "$INPUT" != *'git checkout -- '* ]]; then
+    _IS_BRANCH_SWITCH=true
+  elif [[ "$INPUT" == *'git switch '* ]]; then
+    _IS_BRANCH_SWITCH=true
+  elif [[ "$INPUT" == *'git reset --hard'* ]]; then
+    _IS_BRANCH_SWITCH=true
+  fi
+  if [ "$_IS_BRANCH_SWITCH" = true ]; then
+    # Exempt: command run from within a worktree context (git dir path contains "worktrees")
+    _D_GIT_DIR=$(git rev-parse --git-dir 2>/dev/null || echo "")
+    if [[ "$_D_GIT_DIR" != *"worktrees"* ]]; then
+      # Locate repo root relative to this hook (self-referential — no sourced deps)
+      _D_HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+      _D_REPO_ROOT="$(cd "$_D_HOOK_DIR/../.." && pwd)"
+      _D_PID_FILE="$_D_REPO_ROOT/.claude/.automation/.daemon-pid"
+      _DAEMON_ACTIVE=false
+      # Check PID file first (no subprocess required)
+      if [ -f "$_D_PID_FILE" ]; then
+        _D_PID=$(cat "$_D_PID_FILE" 2>/dev/null || echo "")
+        if [ -n "$_D_PID" ] && kill -0 "$_D_PID" 2>/dev/null; then
+          _DAEMON_ACTIVE=true
+        fi
+      fi
+      # Fallback: pgrep check when PID file absent or stale
+      if [ "$_DAEMON_ACTIVE" = false ] && command -v pgrep >/dev/null 2>&1; then
+        if pgrep -f "runner.sh --daemon" >/dev/null 2>&1; then
+          _DAEMON_ACTIVE=true
+        fi
+      fi
+      if [ "$_DAEMON_ACTIVE" = true ]; then
+        _DAEMON_BRANCH_BLOCK=true
+      fi
+    fi
+  fi
+fi
+
+if [ "$_DAEMON_BRANCH_BLOCK" = true ]; then
+  echo "GATE-RECOVERABLE: Daemon is running — halt it first (queue-cli.sh halt) or use worktree isolation. Branch switches on the main working tree corrupt active daemon sessions. (override: REPO_OS_RECOVER=1)" >&2
+  exit 2
 fi
 
 # --- Combined pre-source fast-exit ---

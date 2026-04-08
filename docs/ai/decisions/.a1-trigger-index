@@ -54,3 +54,6 @@
 0033|\.claude/(\.automation/runner|hooks/(session-close-check|_phase-helper|_cleanup-helper|_analytics-helper))\.sh|worktree, REPO_OS_WORKTREE_ISOLATE, --worktree, session isolation, concurrent session, .worktrees
 0034|docs/ai/knowledge-graph/|knowledge graph, knowledge-graph, graph.yaml, schema.yaml, kg-seed, kg-relevance, semantic connection, edge type, staleness
 0034|\.claude/tools/kg-|knowledge graph, knowledge-graph, graph.yaml, schema.yaml, kg-seed, kg-relevance, semantic connection, edge type, staleness
+0036|\.claude/\.automation/runner\.sh|daemon, branch switch, daemon-pid, runner.sh --daemon, daemon-safe
+0036|\.claude/\.automation/lib/|daemon, branch switch, daemon-pid, runner.sh --daemon, daemon-safe
+0036|\.claude/hooks/bash-guard\.sh|daemon, branch switch, git checkout, git switch, git reset --hard, daemon-pid, daemon-safe

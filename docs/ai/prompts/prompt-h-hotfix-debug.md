@@ -203,6 +203,7 @@ REQUIRE: attempt knowledge graph writes at close before the final commit per Dec
 
 ## Rules
 
+- REQUIRE: before creating a hotfix branch, check if the daemon is running (`pgrep -f "runner.sh --daemon"`). If running, either halt it (`queue-cli.sh halt`) or use worktree isolation for the hotfix session. Never switch branches on the main working tree with an active daemon (Decision 0036)
 - REQUIRE: at session start, create a `hotfix/<description>` branch from main
 - REQUIRE: diagnose before fixing — investigation agents must be dispatched before proposing a fix. Do not skip diagnosis and jump to "try this"
 - REQUIRE: one fix per `verify→build` cycle — do not bundle multiple changes
