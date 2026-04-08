@@ -17,7 +17,7 @@
 #   show <id>
 #   review
 #   log [--lines N]
-#   prune [--briefs-only] [--dry-run]
+#   prune [--briefs-only] [--dry-run] [--fix]
 #   recover-entry <id>
 #   reopen-wo <work-order-id>
 #   start-daemon
@@ -88,7 +88,7 @@ Subcommands:
   show <id>
   review
   log [--lines N]
-  prune [--briefs-only] [--dry-run]
+  prune [--briefs-only] [--dry-run] [--fix]
   recover-entry <id>
   reopen-wo <work-order-id>
   start-daemon
@@ -537,11 +537,13 @@ case "$SUBCOMMAND" in
   prune)
     PRUNE_BRIEFS_ONLY=false
     PRUNE_DRY_RUN=false
+    PRUNE_FIX=false
 
     while [ $# -gt 0 ]; do
       case "$1" in
         --briefs-only) PRUNE_BRIEFS_ONLY=true; shift ;;
         --dry-run)     PRUNE_DRY_RUN=true; shift ;;
+        --fix)         PRUNE_FIX=true; shift ;;
         *) echo "ERROR: Unknown prune option: $1" >&2; exit 1 ;;
       esac
     done
@@ -549,7 +551,7 @@ case "$SUBCOMMAND" in
     if [ "$PRUNE_DRY_RUN" = true ]; then
       # Dry-run is read-only — no lock needed
       _dry_run_cleanup
-    elif [ "$PRUNE_BRIEFS_ONLY" = true ]; then
+    elif [ "$PRUNE_BRIEFS_ONLY" = true ]  && [ "$PRUNE_FIX" = false ]; then
       # Mutating — acquire lock
       if ! acquire_queue_lock; then
         echo "ERROR: Queue lock unavailable" >&2
@@ -581,15 +583,72 @@ case "$SUBCOMMAND" in
       # Repair directory/status mismatches (lock already held)
       PRUNE_REPAIRED=$(_repair_status_mismatches)
 
+      # Stale WO reconciliation: detect non-terminal WOs with all-terminal children
+      PRUNE_STALE_WO_COUNT=0
+      PRUNE_STALE_WO_FIXED=0
+      _prune_wo_dir="$(_queue_dir)/work-orders"
+      if [ -d "$_prune_wo_dir" ]; then
+        for _prune_wo_file in "$_prune_wo_dir"/*.yaml; do
+          [ -f "$_prune_wo_file" ] || continue
+          _load_work_order "$_prune_wo_file"
+          # Skip terminal WOs
+          case "$_WO_STATUS" in
+            completed) continue ;;
+          esac
+          # Check if all children are terminal
+          if [ -z "$_WO_ENTRY_IDS" ]; then
+            PRUNE_STALE_WO_COUNT=$((PRUNE_STALE_WO_COUNT + 1))
+            if [ "$PRUNE_FIX" = true ]; then
+              wo_reconcile "$_WO_ID" > /dev/null 2>&1 || true
+              PRUNE_STALE_WO_FIXED=$((PRUNE_STALE_WO_FIXED + 1))
+            fi
+            continue
+          fi
+          _prune_all_terminal=true
+          _prune_old_ifs="$IFS"
+          IFS=','
+          # shellcheck disable=SC2086 — intentional word splitting
+          set -- $_WO_ENTRY_IDS
+          IFS="$_prune_old_ifs"
+          for _prune_eid in "$@"; do
+            _prune_ef=$(_find_entry_file "$_prune_eid") || true
+            [ -z "$_prune_ef" ] && { _prune_all_terminal=false; break; }
+            _load_queue_entry "$_prune_ef"
+            case "$_QE_STATUS" in
+              completed|failed) ;;
+              *) _prune_all_terminal=false; break ;;
+            esac
+          done
+          if [ "$_prune_all_terminal" = true ]; then
+            PRUNE_STALE_WO_COUNT=$((PRUNE_STALE_WO_COUNT + 1))
+            if [ "$PRUNE_FIX" = true ]; then
+              # Reload WO after _load_queue_entry clobbered nothing — but _WO_* may have been reset
+              _prune_wo_id="$_WO_ID"
+              wo_reconcile "$_prune_wo_id" > /dev/null 2>&1 || true
+              PRUNE_STALE_WO_FIXED=$((PRUNE_STALE_WO_FIXED + 1))
+            fi
+          fi
+        done
+      fi
+
       release_queue_lock
 
       if [ "$JSON_OUTPUT" = true ]; then
-        printf '{%s,%s}\n' \
+        printf '{%s,%s,%s,%s}\n' \
           "$(_json_kv "action" "prune-complete")" \
-          "$(_json_kv_raw "status_repairs" "$PRUNE_REPAIRED")"
+          "$(_json_kv_raw "status_repairs" "$PRUNE_REPAIRED")" \
+          "$(_json_kv_raw "stale_work_orders_detected" "$PRUNE_STALE_WO_COUNT")" \
+          "$(_json_kv_raw "stale_work_orders_fixed" "$PRUNE_STALE_WO_FIXED")"
       else
         if [ "$PRUNE_REPAIRED" -gt 0 ]; then
           echo "Repaired $PRUNE_REPAIRED status mismatch(es)."
+        fi
+        if [ "$PRUNE_STALE_WO_COUNT" -gt 0 ]; then
+          if [ "$PRUNE_FIX" = true ]; then
+            echo "Reconciled $PRUNE_STALE_WO_FIXED stale work order(s) (of $PRUNE_STALE_WO_COUNT detected)."
+          else
+            echo "Detected $PRUNE_STALE_WO_COUNT stale work order(s) with all-terminal children. Run with --fix to reconcile."
+          fi
         fi
         echo "Prune complete."
       fi
@@ -756,11 +815,23 @@ case "$SUBCOMMAND" in
     fi
     _rebuild_queue_index
 
+    # Post-reopen completion check: if all children are already terminal,
+    # the WO should immediately reach the correct terminal state rather than
+    # staying open indefinitely waiting for entries that are already done.
+    _reopen_final_status=$(wo_check_completion "$REOPEN_WO_ID" 2>/dev/null) || {
+      echo "WARNING: wo_check_completion failed for work order $REOPEN_WO_ID after reopen" >&2
+    }
+
     release_queue_lock
 
     # Review log
     review_log_append "work-order-reopened" "$REOPEN_WO_ID" "" \
       "Work order $REOPEN_WO_ID reopened — $_REOPEN_RESET_COUNT sibling(s) reset to approved" 2>/dev/null || true
+
+    if [ -n "$_reopen_final_status" ] && [ "$_reopen_final_status" != "open" ]; then
+      review_log_append "work-order-${_reopen_final_status}" "$REOPEN_WO_ID" "" \
+        "Work order $REOPEN_WO_ID immediately reached $_reopen_final_status after reopen — all children already terminal" 2>/dev/null || true
+    fi
 
     if [ "$JSON_OUTPUT" = true ]; then
       printf '{%s,%s,%s}\n' \

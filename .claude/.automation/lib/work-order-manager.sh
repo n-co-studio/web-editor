@@ -134,12 +134,12 @@ _transition_work_order() {
       ;;
     escalated)
       case "$new_status" in
-        in_progress|open) _legal=true ;; # retry after escalation review
+        in_progress|open|completed) _legal=true ;; # retry after escalation review; completed when all children terminal
       esac
       ;;
     failed)
       case "$new_status" in
-        in_progress|open) _legal=true ;; # retry after failure review
+        in_progress|open|completed) _legal=true ;; # retry after failure review; completed when all children terminal
       esac
       ;;
     completed)
@@ -453,6 +453,97 @@ wo_is_failed() {
     return 0
   fi
   return 1
+}
+
+# --- Reconcile a work order against its children's actual states ---
+# Idempotent safety net: loads a WO, skips if already terminal (completed),
+# and calls wo_check_completion for non-terminal WOs.
+#
+# Zero-children edge case: wo_check_completion returns "open" for empty entry
+# lists (event-driven path is conservative). wo_reconcile instead transitions
+# to "completed" — a WO with no entries has nothing to wait for. Note that
+# wo_remove_child deletes the WO file when the last entry is removed, so the
+# zero-children WO path is reached only via corruption or force-removal.
+#
+# Lock contract: does NOT call acquire_queue_lock — caller must hold the lock
+# before calling this function. All write operations inside wo_check_completion
+# and _write_work_order assume the caller holds the lock.
+#
+# Arguments:
+#   $1 — wo_id (work order identifier)
+# Output: new status on stdout (or empty if no change needed)
+# Returns: 0 on success/no-op, 1 on error
+wo_reconcile() {
+  local wo_id="$1"
+  local wo_file="$(_wo_dir)/${wo_id}.yaml"
+
+  _load_work_order "$wo_file" || {
+    echo "ERROR: wo_reconcile: work order $wo_id not found" >&2
+    return 1
+  }
+
+  # Already terminal — nothing to do
+  if [ "$_WO_STATUS" = "completed" ]; then
+    return 0
+  fi
+
+  # Non-terminal: check if status matches children reality
+  case "$_WO_STATUS" in
+    open|in_progress|escalated|failed) ;;
+    *)
+      echo "WARNING: wo_reconcile: work order $wo_id has unknown status '$_WO_STATUS'" >&2
+      return 1
+      ;;
+  esac
+
+  # Zero-children edge case: if entry list is empty, complete the WO
+  if [ -z "$_WO_ENTRY_IDS" ]; then
+    echo "WARNING: wo_reconcile: work order $wo_id ($_WO_STATUS) has no children — transitioning to completed" >&2
+    _transition_work_order "completed" || {
+      echo "ERROR: wo_reconcile: failed to transition $wo_id to completed" >&2
+      return 1
+    }
+    _write_work_order "$wo_file"
+    printf '%s' "completed"
+    return 0
+  fi
+
+  # Check whether all children are in terminal states before calling wo_check_completion
+  local _all_terminal=true
+  local _old_ifs="$IFS"
+  IFS=','
+  set -- $_WO_ENTRY_IDS
+  IFS="$_old_ifs"
+  local _eid
+  for _eid in "$@"; do
+    local _ef
+    _ef=$(_find_entry_file "$_eid")
+    if [ -z "$_ef" ]; then
+      # Entry not found — treat as still in progress (matches wo_check_completion logic)
+      _all_terminal=false
+      break
+    fi
+    _load_queue_entry "$_ef" 2>/dev/null || { _all_terminal=false; break; }
+    case "$_QE_STATUS" in
+      completed|failed) ;;
+      *) _all_terminal=false; break ;;
+    esac
+  done
+
+  if [ "$_all_terminal" = true ]; then
+    echo "WARNING: wo_reconcile: invariant violation — work order $wo_id is $_WO_STATUS but all children are terminal; reconciling" >&2
+  fi
+
+  # Delegate to wo_check_completion for the actual status derivation and write
+  local new_status
+  new_status=$(wo_check_completion "$wo_id") || {
+    echo "ERROR: wo_reconcile: wo_check_completion failed for $wo_id" >&2
+    return 1
+  }
+  if [ -n "$new_status" ]; then
+    printf '%s' "$new_status"
+  fi
+  return 0
 }
 
 # --- List work orders ---

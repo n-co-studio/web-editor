@@ -580,6 +580,55 @@ _dry_run_cleanup() {
     done
   fi
 
+  # Stale non-terminal work orders (all children already terminal — invariant violation)
+  local stale_wo=0
+  local wo_dir_check="$qdir/work-orders"
+  if [ -d "$wo_dir_check" ]; then
+    local f
+    for f in "$wo_dir_check"/*.yaml; do
+      [ -f "$f" ] || continue
+      _load_work_order "$f" 2>/dev/null || continue
+      # Skip terminal WOs
+      case "$_WO_STATUS" in
+        completed) continue ;;
+      esac
+      # Check if all children are in terminal states
+      if [ -z "$_WO_ENTRY_IDS" ]; then
+        echo "would reconcile: $f (work order $_WO_ID is $_WO_STATUS with no children)"
+        stale_wo=$((stale_wo + 1))
+        continue
+      fi
+      local _dr_all_terminal=true
+      local _dr_old_ifs="$IFS"
+      IFS=','
+      # shellcheck disable=SC2086 — intentional word splitting
+      set -- $_WO_ENTRY_IDS
+      IFS="$_dr_old_ifs"
+      local _dr_eid
+      for _dr_eid in "$@"; do
+        local _dr_ef
+        _dr_ef=$(_find_entry_file "$_dr_eid") 2>/dev/null || true
+        if [ -z "$_dr_ef" ]; then
+          _dr_all_terminal=false
+          break
+        fi
+        _load_queue_entry "$_dr_ef" 2>/dev/null || { _dr_all_terminal=false; break; }
+        case "$_QE_STATUS" in
+          completed|failed) ;;
+          *) _dr_all_terminal=false; break ;;
+        esac
+      done
+      if [ "$_dr_all_terminal" = true ]; then
+        echo "would reconcile: $f (work order $_WO_ID is $_WO_STATUS but all children are terminal — stale, would be reconciled by prune --fix)"
+        stale_wo=$((stale_wo + 1))
+      fi
+    done
+  fi
+  if [ "$stale_wo" -gt 0 ]; then
+    echo "---"
+    echo "stale work orders: $stale_wo non-terminal WO(s) with all-terminal children detected (run prune --fix to reconcile)"
+  fi
+
   echo "---"
   echo "dry-run: $total artifacts would be deleted"
 }

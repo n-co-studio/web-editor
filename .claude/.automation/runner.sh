@@ -424,7 +424,9 @@ _startup_crash_recovery() {
           rm -f "$hb_file" 2>/dev/null || true
           # Propagate failure to work order if entry belongs to one
           if [ -n "$_QE_WORK_ORDER_ID" ]; then
-            _sr_wo_status=$(wo_check_completion "$_QE_WORK_ORDER_ID" 2>/dev/null) || true
+            _sr_wo_status=$(wo_check_completion "$_QE_WORK_ORDER_ID" 2>/dev/null) || {
+              echo "WARNING: wo_check_completion failed for work order $_QE_WORK_ORDER_ID after startup recovery of entry $entry_id" >&2
+            }
             case "$_sr_wo_status" in
               failed)
                 review_log_append "work-order-failed" "$_QE_WORK_ORDER_ID" "" \
@@ -433,6 +435,13 @@ _startup_crash_recovery() {
               escalated)
                 review_log_append "work-order-escalated" "$_QE_WORK_ORDER_ID" "" \
                   "Work order $_QE_WORK_ORDER_ID escalated — orphaned entry $entry_id recovered at startup. Recovery: queue-cli.sh reopen-wo $_QE_WORK_ORDER_ID" 2>/dev/null || true
+                ;;
+              completed)
+                review_log_append "work-order-completed" "$_QE_WORK_ORDER_ID" "" \
+                  "Work order $_QE_WORK_ORDER_ID completed — all children terminal after startup recovery of $entry_id" 2>/dev/null || true
+                ;;
+              "")
+                echo "WARNING: wo_check_completion returned empty status for work order $_QE_WORK_ORDER_ID (startup recovery, entry $entry_id)" >&2
                 ;;
             esac
           fi
@@ -994,6 +1003,12 @@ _solo_merge_if_needed() {
             record_closed_branch "$entry_current_branch"
           fi
           echo "Solo merge: $entry_current_branch → main (success)" >&2
+          # Sync main repo index/working tree after worktree merge (Decision 0030)
+          # _main_repo is only set in the worktree branch — non-empty check is the discriminator
+          if [ -n "${_main_repo:-}" ]; then
+            git -C "$_main_repo" reset HEAD -- . 2>/dev/null || true
+            git -C "$_main_repo" checkout -- . 2>/dev/null || true
+          fi
           # Push to remote — push_on_complete or advisory fallback
           local _repo_mode_file="$REPO_ROOT/.claude/repo-mode"
           local _is_template=false
@@ -1287,7 +1302,9 @@ while true; do
           _rebuild_queue_index || true
           # Propagate failure to work order if entry belongs to one
           if [ -n "$_QE_WORK_ORDER_ID" ]; then
-            _fh_wo_status=$(wo_check_completion "$_QE_WORK_ORDER_ID" 2>/dev/null) || true
+            _fh_wo_status=$(wo_check_completion "$_QE_WORK_ORDER_ID" 2>/dev/null) || {
+              echo "WARNING: wo_check_completion failed for work order $_QE_WORK_ORDER_ID after force-halt of entry $_CURRENT_ENTRY_ID" >&2
+            }
             case "$_fh_wo_status" in
               failed)
                 review_log_append "work-order-failed" "$_QE_WORK_ORDER_ID" "" \
@@ -1296,6 +1313,13 @@ while true; do
               escalated)
                 review_log_append "work-order-escalated" "$_QE_WORK_ORDER_ID" "" \
                   "Work order $_QE_WORK_ORDER_ID escalated — entry $_CURRENT_ENTRY_ID force-halted. Recovery: queue-cli.sh reopen-wo $_QE_WORK_ORDER_ID" 2>/dev/null || true
+                ;;
+              completed)
+                review_log_append "work-order-completed" "$_QE_WORK_ORDER_ID" "" \
+                  "Work order $_QE_WORK_ORDER_ID completed — all children terminal after force-halt of $_CURRENT_ENTRY_ID" 2>/dev/null || true
+                ;;
+              "")
+                echo "WARNING: wo_check_completion returned empty status for work order $_QE_WORK_ORDER_ID (force-halt, entry $_CURRENT_ENTRY_ID)" >&2
                 ;;
             esac
           fi
@@ -1409,7 +1433,9 @@ while true; do
             rm -f "$_sr_hb_file" 2>/dev/null || true
             # Propagate failure to work order if entry belongs to one
             if [ -n "$_QE_WORK_ORDER_ID" ]; then
-              _sr_wo_status=$(wo_check_completion "$_QE_WORK_ORDER_ID" 2>/dev/null) || true
+              _sr_wo_status=$(wo_check_completion "$_QE_WORK_ORDER_ID" 2>/dev/null) || {
+                echo "WARNING: wo_check_completion failed for work order $_QE_WORK_ORDER_ID after idle-scan recovery of entry $_sr_entry_id" >&2
+              }
               case "$_sr_wo_status" in
                 failed)
                   review_log_append "work-order-failed" "$_QE_WORK_ORDER_ID" "" \
@@ -1418,6 +1444,13 @@ while true; do
                 escalated)
                   review_log_append "work-order-escalated" "$_QE_WORK_ORDER_ID" "" \
                     "Work order $_QE_WORK_ORDER_ID escalated — stranded entry $_sr_entry_id recovered by idle scan. Recovery: queue-cli.sh reopen-wo $_QE_WORK_ORDER_ID" 2>/dev/null || true
+                  ;;
+                completed)
+                  review_log_append "work-order-completed" "$_QE_WORK_ORDER_ID" "" \
+                    "Work order $_QE_WORK_ORDER_ID completed — all children terminal after idle-scan recovery of $_sr_entry_id" 2>/dev/null || true
+                  ;;
+                "")
+                  echo "WARNING: wo_check_completion returned empty status for work order $_QE_WORK_ORDER_ID (idle-scan recovery, entry $_sr_entry_id)" >&2
                   ;;
               esac
             fi
@@ -1428,6 +1461,38 @@ while true; do
           fi
         fi
       done
+
+      # --- Work order reconciliation pass (level-triggered safety net) ---
+      # Catches any WO left non-terminal by the event-driven path due to daemon
+      # crashes, partial writes, or missed transitions. Runs inside queue lock.
+      _wo_dir_path=$(_queue_dir)/work-orders
+      if [ -d "$_wo_dir_path" ]; then
+        for _rec_wo_file in "$_wo_dir_path"/*.yaml; do
+          [ -f "$_rec_wo_file" ] || continue
+          _load_work_order "$_rec_wo_file"
+          # Skip already-terminal WOs
+          case "$_WO_STATUS" in
+            completed) continue ;;
+          esac
+          # Non-terminal WO — attempt reconciliation under queue lock
+          _rec_wo_id="$_WO_ID"
+          if acquire_queue_lock; then
+            _rec_new_status=$(wo_reconcile "$_rec_wo_id" 2>/dev/null) || {
+              echo "WARNING: wo_reconcile failed for work order $_rec_wo_id (idle-scan reconciliation pass)" >&2
+            }
+            _rebuild_queue_index || true
+            release_queue_lock
+            if [ -n "$_rec_new_status" ] && [ "$_rec_new_status" != "$_WO_STATUS" ]; then
+              review_log_append "work-order-reconciled" "$_rec_wo_id" "" \
+                "Work order $_rec_wo_id reconciled: $_WO_STATUS → $_rec_new_status (idle-scan safety net)" 2>/dev/null || true
+              echo "INFO: Work order $_rec_wo_id reconciled: $_WO_STATUS → $_rec_new_status" >&2
+            fi
+          else
+            echo "WARNING: Could not acquire lock for WO reconciliation of $_rec_wo_id" >&2
+          fi
+        done
+      fi
+
       _IDLE_CYCLE_COUNT=0
     fi
     _CONSECUTIVE_SESSION_COUNT=0
@@ -1498,7 +1563,9 @@ while true; do
       if [ -n "$ENTRY_WORK_ORDER_ID" ]; then
         review_log_append "entry-completed" "$ENTRY_WORK_ORDER_ID" "$ENTRY_ID" \
           "Entry $ENTRY_ID completed (idempotent — already merged)" 2>/dev/null || true
-        _wo_new_status=$(wo_check_completion "$ENTRY_WORK_ORDER_ID" 2>/dev/null) || true
+        _wo_new_status=$(wo_check_completion "$ENTRY_WORK_ORDER_ID" 2>/dev/null) || {
+          echo "WARNING: wo_check_completion failed for work order $ENTRY_WORK_ORDER_ID after idempotent completion of entry $ENTRY_ID" >&2
+        }
         case "$_wo_new_status" in
           completed)
             review_log_append "work-order-completed" "$ENTRY_WORK_ORDER_ID" "" \
@@ -1511,6 +1578,9 @@ while true; do
           escalated)
             review_log_append "work-order-escalated" "$ENTRY_WORK_ORDER_ID" "" \
               "Work order $ENTRY_WORK_ORDER_ID escalated — child failure detected. Recovery: queue-cli.sh reopen-wo $ENTRY_WORK_ORDER_ID" 2>/dev/null || true
+            ;;
+          "")
+            echo "WARNING: wo_check_completion returned empty status for work order $ENTRY_WORK_ORDER_ID (idempotent completion, entry $ENTRY_ID)" >&2
             ;;
         esac
       fi
@@ -1551,11 +1621,16 @@ while true; do
         review_log_append "entry-blocked" "$ENTRY_WORK_ORDER_ID" "$ENTRY_ID" \
           "Entry $ENTRY_ID blocked — max deferral cycles exceeded ($_defer_count/$_max_deferrals)" 2>/dev/null || true
         # Check if this triggers work order escalation
-        _wo_new_status=$(wo_check_completion "$ENTRY_WORK_ORDER_ID" 2>/dev/null) || true
+        _wo_new_status=$(wo_check_completion "$ENTRY_WORK_ORDER_ID" 2>/dev/null) || {
+          echo "WARNING: wo_check_completion failed for work order $ENTRY_WORK_ORDER_ID after blocking entry $ENTRY_ID (deferral cap)" >&2
+        }
         case "$_wo_new_status" in
           escalated|failed)
             review_log_append "work-order-${_wo_new_status}" "$ENTRY_WORK_ORDER_ID" "" \
               "Work order $ENTRY_WORK_ORDER_ID ${_wo_new_status} — entry blocked (deferral cap). Recovery: queue-cli.sh reopen-wo $ENTRY_WORK_ORDER_ID" 2>/dev/null || true
+            ;;
+          "")
+            echo "WARNING: wo_check_completion returned empty status for work order $ENTRY_WORK_ORDER_ID (deferral cap, entry $ENTRY_ID)" >&2
             ;;
         esac
       else
@@ -1769,7 +1844,9 @@ while true; do
       if [ -n "$ENTRY_WORK_ORDER_ID" ]; then
         review_log_append "entry-completed" "$ENTRY_WORK_ORDER_ID" "$ENTRY_ID" \
           "Entry $ENTRY_ID completed ($ENTRY_SESSION_TYPE)" 2>/dev/null || true
-        _wo_new_status=$(wo_check_completion "$ENTRY_WORK_ORDER_ID" 2>/dev/null) || true
+        _wo_new_status=$(wo_check_completion "$ENTRY_WORK_ORDER_ID" 2>/dev/null) || {
+          echo "WARNING: wo_check_completion failed for work order $ENTRY_WORK_ORDER_ID after completion of entry $ENTRY_ID" >&2
+        }
         case "$_wo_new_status" in
           completed)
             review_log_append "work-order-completed" "$ENTRY_WORK_ORDER_ID" "" \
@@ -1782,6 +1859,9 @@ while true; do
           escalated)
             review_log_append "work-order-escalated" "$ENTRY_WORK_ORDER_ID" "" \
               "Work order $ENTRY_WORK_ORDER_ID escalated — child failure detected. Recovery: queue-cli.sh reopen-wo $ENTRY_WORK_ORDER_ID" 2>/dev/null || true
+            ;;
+          "")
+            echo "WARNING: wo_check_completion returned empty status for work order $ENTRY_WORK_ORDER_ID (entry $ENTRY_ID completed)" >&2
             ;;
         esac
       fi
@@ -1813,7 +1893,9 @@ while true; do
       if [ -n "$ENTRY_WORK_ORDER_ID" ]; then
         review_log_append "entry-escalated" "$ENTRY_WORK_ORDER_ID" "$ENTRY_ID" \
           "Entry $ENTRY_ID escalated ($ENTRY_SESSION_TYPE)" 2>/dev/null || true
-        _wo_new_status=$(wo_check_completion "$ENTRY_WORK_ORDER_ID" 2>/dev/null) || true
+        _wo_new_status=$(wo_check_completion "$ENTRY_WORK_ORDER_ID" 2>/dev/null) || {
+          echo "WARNING: wo_check_completion failed for work order $ENTRY_WORK_ORDER_ID after escalation of entry $ENTRY_ID" >&2
+        }
         case "$_wo_new_status" in
           failed)
             review_log_append "work-order-failed" "$ENTRY_WORK_ORDER_ID" "" \
@@ -1822,6 +1904,9 @@ while true; do
           escalated)
             review_log_append "work-order-escalated" "$ENTRY_WORK_ORDER_ID" "" \
               "Work order $ENTRY_WORK_ORDER_ID escalated — entry requires review" 2>/dev/null || true
+            ;;
+          "")
+            echo "WARNING: wo_check_completion returned empty status for work order $ENTRY_WORK_ORDER_ID (entry $ENTRY_ID escalated)" >&2
             ;;
         esac
       fi
@@ -1838,7 +1923,9 @@ while true; do
         if [ -f "$(_queue_dir)/failed/${ENTRY_ID}.yaml" ]; then
           review_log_append "entry-failed" "$ENTRY_WORK_ORDER_ID" "$ENTRY_ID" \
             "Entry $ENTRY_ID failed — retries exhausted ($ENTRY_SESSION_TYPE)" 2>/dev/null || true
-          _wo_new_status=$(wo_check_completion "$ENTRY_WORK_ORDER_ID" 2>/dev/null) || true
+          _wo_new_status=$(wo_check_completion "$ENTRY_WORK_ORDER_ID" 2>/dev/null) || {
+            echo "WARNING: wo_check_completion failed for work order $ENTRY_WORK_ORDER_ID after terminal failure of entry $ENTRY_ID" >&2
+          }
           case "$_wo_new_status" in
             failed)
               review_log_append "work-order-failed" "$ENTRY_WORK_ORDER_ID" "" \
@@ -1847,6 +1934,9 @@ while true; do
             escalated)
               review_log_append "work-order-escalated" "$ENTRY_WORK_ORDER_ID" "" \
                 "Work order $ENTRY_WORK_ORDER_ID escalated — entry failed" 2>/dev/null || true
+              ;;
+            "")
+              echo "WARNING: wo_check_completion returned empty status for work order $ENTRY_WORK_ORDER_ID (terminal failure, entry $ENTRY_ID)" >&2
               ;;
           esac
         fi
