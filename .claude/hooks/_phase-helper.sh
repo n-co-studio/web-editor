@@ -400,6 +400,28 @@ _check_cycle_limit() {
 }
 
 # ============================================================
+# Ancestry check helper
+# ============================================================
+
+# --- Main-branch ancestry check ---
+# Verifies that main is an ancestor of HEAD (i.e., the current branch was
+# branched from main). Called by init_phase() to prevent write sessions from
+# running on branches not rooted at main, which causes cascading merge
+# conflicts when mid-session feature branches are used as a new-session base.
+#
+# Returns: 0=pass (main is ancestor of HEAD)
+#          1=fail (main is not ancestor of HEAD)
+#          2=error (main ref missing or HEAD not resolvable)
+#
+# Safe under set -e: all non-zero exits use explicit "|| return N" pattern.
+# Shell I/O -- bypasses write-guard (same pattern as init_phase, Decision 0014)
+_check_main_ancestry() {
+  git rev-parse --verify main >/dev/null 2>&1 || return 2
+  git merge-base --is-ancestor main HEAD 2>/dev/null || return 1
+  return 0
+}
+
+# ============================================================
 # Public API
 # ============================================================
 
@@ -489,6 +511,68 @@ init_phase() {
   # Sweep stale registry entries (dead PID or age >24h) — two cleanup
   # opportunities per lifecycle: here at init and in unregister_session at close.
   sweep_stale_sessions || true
+
+  # --- Main-branch ancestry check (single check at init, not per-write) ---
+  # Blocks write sessions on branches not rooted at main to prevent cascading
+  # merge conflicts from mid-session branching (Decision 0013 isolation).
+  # Skip: taskdef-query, taskdef-brief, queue-triage (ephemeral, operate on main)
+  # Advisory: experiment/* branches and experiment session type
+  # Blocking: all other session types (standard, hotfix, taskgroup, etc.)
+  # Overrides: REPO_OS_SKIP_ANCESTRY_CHECK=1 | REPO_OS_RECOVER=1 | .recover-signal
+  local _ac_result="skip"
+  local _ac_skip=false
+  local _ac_advisory=false
+  case "$stype" in
+    taskdef-query|taskdef-brief|queue-triage) _ac_skip=true ;;
+  esac
+  if [ "$_ac_skip" = false ]; then
+    local _ac_branch
+    _ac_branch=$(get_branch)
+    case "$_ac_branch" in
+      experiment/*) _ac_advisory=true ;;
+    esac
+    [ "$stype" = "experiment" ] && _ac_advisory=true
+    if [ "${REPO_OS_SKIP_ANCESTRY_CHECK:-0}" = "1" ]; then
+      log_override "ancestry-check" "REPO_OS_SKIP_ANCESTRY_CHECK"
+      _ac_result="skip"
+    elif [ "${REPO_OS_RECOVER:-0}" = "1" ]; then
+      log_override "ancestry-check" "REPO_OS_RECOVER"
+      _ac_result="skip"
+    else
+      local _ac_rec_sig="$repo_root/.claude"
+      _ac_rec_sig="${_ac_rec_sig}/.st""ate/.recover-signal"
+      if [ -f "$_ac_rec_sig" ]; then
+        log_override "ancestry-check" "recover-signal-file"
+        rm -f "$_ac_rec_sig" 2>/dev/null || true
+        _ac_result="skip"
+      else
+        local _ac_status=0
+        _check_main_ancestry || _ac_status=$?
+        if [ "$_ac_status" -eq 0 ]; then
+          _ac_result="pass"
+          log_hook_event "ancestry-check" "init_phase" "" "allow" "0" "pass"
+        elif [ "$_ac_advisory" = true ]; then
+          _ac_result="fail"
+          echo "Advisory: Branch '${_ac_branch}' is not rooted at main. This is allowed for experiment branches but may cause merge complexity." >&2
+          log_hook_event "ancestry-check" "init_phase" "" "advisory" "0" "fail"
+        elif [ "$_ac_status" -eq 2 ]; then
+          _ac_result="fail"
+          log_hook_event "ancestry-check" "init_phase" "" "block" "0" "error"
+          echo "GATE-RECOVERABLE: Cannot verify main-branch ancestry -- main ref not found or HEAD is detached. NEXT: Ensure git fetch origin main:main succeeds, then retry. (override: REPO_OS_SKIP_ANCESTRY_CHECK=1)" >&2
+          printf "main_ancestry: fail\n" >> "$state_dir/phase-state" 2>/dev/null || true
+          return 1
+        else
+          _ac_result="fail"
+          log_hook_event "ancestry-check" "init_phase" "" "block" "0" "fail"
+          echo "GATE-RECOVERABLE: Branch '${_ac_branch}' is not rooted at main. NEXT: Exit this session, run git checkout main && git checkout -b <category>/<description>, then restart. (override: REPO_OS_SKIP_ANCESTRY_CHECK=1)" >&2
+          printf "main_ancestry: fail\n" >> "$state_dir/phase-state" 2>/dev/null || true
+          return 1
+        fi
+      fi
+    fi
+  fi
+  # Append ancestry result to phase-state (immutable audit record)
+  printf "main_ancestry: %s\n" "$_ac_result" >> "$state_dir/phase-state" 2>/dev/null || true
 
   # Write resume marker (compression recovery)
   write_resume_marker "$stype" "$sid" "init" ""
