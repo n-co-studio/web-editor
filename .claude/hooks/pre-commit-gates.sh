@@ -1065,6 +1065,50 @@ if [ "$SKIP_STATE" = false ] && [ -n "$STAGED_FILES" ]; then
 fi
 
 # ============================================================
+# KG Schema Gate (blocking — Decision 0034 Amendment 4)
+# Triggered only when graph YAML files are staged.
+# Calls kg-validate.sh --strict to enforce enum constraints.
+# ============================================================
+if [ -n "$STAGED_FILES" ]; then
+  KG_TEMPLATE_STAGED=false
+  KG_PRODUCT_STAGED=false
+  case "$STAGED_FILES" in
+    *"docs/ai/knowledge-graph/graph.yaml"*)         KG_TEMPLATE_STAGED=true ;;
+  esac
+  case "$STAGED_FILES" in
+    *"docs/ai/knowledge-graph/product-graph.yaml"*) KG_PRODUCT_STAGED=true ;;
+  esac
+
+  if [ "$KG_TEMPLATE_STAGED" = true ] || [ "$KG_PRODUCT_STAGED" = true ]; then
+    KG_VALIDATOR="$REPO_ROOT/.claude/tools/kg-validate.sh"
+    if [ ! -f "$KG_VALIDATOR" ]; then
+      echo "Advisory: kg-validate.sh not found at $KG_VALIDATOR — KG schema gate skipped" >&2
+      warn "kg_schema_validator_missing"
+    else
+      # Determine which target(s) to validate
+      KG_VALIDATE_TARGET="both"
+      if [ "$KG_TEMPLATE_STAGED" = true ] && [ "$KG_PRODUCT_STAGED" = false ]; then
+        KG_VALIDATE_TARGET="template"
+      elif [ "$KG_TEMPLATE_STAGED" = false ] && [ "$KG_PRODUCT_STAGED" = true ]; then
+        KG_VALIDATE_TARGET="product"
+      fi
+
+      KG_VALIDATE_OUTPUT=$(bash "$KG_VALIDATOR" --strict --target "$KG_VALIDATE_TARGET" 2>&1) || KG_VALIDATE_EXIT=$?
+      KG_VALIDATE_EXIT=${KG_VALIDATE_EXIT:-0}
+
+      if [ "$KG_VALIDATE_EXIT" -ne 0 ]; then
+        echo "GATE-RECOVERABLE: KG schema — invalid graph data in staged file(s). NEXT: Fix the violations listed below and re-stage." >&2
+        printf '%s\n' "$KG_VALIDATE_OUTPUT" >&2
+        block "kg_schema_violation"
+        log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "kg_schema_violation" "target:$KG_VALIDATE_TARGET"
+      else
+        log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "kg_schema_pass" "target:$KG_VALIDATE_TARGET"
+      fi
+    fi
+  fi
+fi
+
+# ============================================================
 # Final exit
 # ============================================================
 if [ "$FAILED" -ne 0 ]; then

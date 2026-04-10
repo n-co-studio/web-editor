@@ -141,6 +141,15 @@ add_node() {
 
 add_edge() {
   local src="$1" tgt="$2" rel="$3" ctx="$4"
+  # Inline relation guard (Amendment 4) — reject invalid relations at construction time
+  case "$rel" in
+    governs|constrains|implements|depends-on|produces|consumes|tests|supersedes)
+      ;;  # valid
+    *)
+      echo "ERROR: add_edge() — invalid relation '$rel' (src=$src tgt=$tgt). Valid: governs constrains implements depends-on produces consumes tests supersedes" >&2
+      return 1
+      ;;
+  esac
   EDGE_COUNT=$((EDGE_COUNT + 1))
   EDGE_LINES="${EDGE_LINES}  - source: \"${src}\"
     target: \"${tgt}\"
@@ -286,6 +295,17 @@ GRAPH_EOF
 
     release_lock
     echo "Graph written to $GRAPH_FILE"
+
+    # Post-write schema validation (Amendment 4) — after lock release, before returning
+    KG_VALIDATE="$(dirname "$0")/kg-validate.sh"
+    if [ -f "$KG_VALIDATE" ]; then
+      echo ""
+      echo "Running schema validation..."
+      if ! bash "$KG_VALIDATE" --strict --target product; then
+        echo "ERROR: Schema validation failed for $GRAPH_FILE — graph may contain invalid data" >&2
+        exit 1
+      fi
+    fi
   fi
 
   # Cross-graph integrity check (advisory)
@@ -520,6 +540,17 @@ GRAPH_EOF
 release_lock
 
 echo "Graph written to $GRAPH_FILE"
+
+# Post-write schema validation (Amendment 4) — after lock release, before returning
+KG_VALIDATE="$(dirname "$0")/kg-validate.sh"
+if [ -f "$KG_VALIDATE" ]; then
+  echo ""
+  echo "Running schema validation..."
+  if ! bash "$KG_VALIDATE" --strict --target template; then
+    echo "ERROR: Schema validation failed for $GRAPH_FILE — graph may contain invalid data" >&2
+    exit 1
+  fi
+fi
 
 echo ""
 echo "Cross-graph integrity check..."

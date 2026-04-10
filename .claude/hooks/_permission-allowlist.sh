@@ -248,6 +248,7 @@ _PERMISSION_READONLY_AGENTS=(
   auditor
   claude-code-guide
   security-hacker
+  build-planner
 )
 
 # --- Check if an agent subagent_type is in the read-only allowlist ---
@@ -335,4 +336,21 @@ is_bash_allowed() {
     fi
   done
   return 1
+}
+
+# --- Check if an agent name exists in the custom agent namespace ---
+# Arguments: $1 = agent name (filename without .md extension)
+# Returns: 0 if the custom agent exists, 1 if not
+# Security: rejects names containing path separators (path traversal guard)
+is_custom_agent() {
+  local agent_name="$1"
+  # Reject path traversal attempts
+  if echo "$agent_name" | grep -q '/'; then
+    return 1
+  fi
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  local custom_dir
+  custom_dir="$(cd "$script_dir/../agents/custom" 2>/dev/null && pwd)" || return 1
+  [ -f "$custom_dir/${agent_name}.md" ]
 }

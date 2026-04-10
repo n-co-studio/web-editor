@@ -308,6 +308,73 @@ case "$upgrade_out" in
 esac
 
 # ============================================================
+# L1.8 — get_write_phases_for_type returns correct phases
+# ============================================================
+tap_section "L1.8: get_write_phases_for_type — per-type write-allowed phase lists"
+
+# Standard: build, review, verify, commit
+assert_eq "$(get_write_phases_for_type standard)" \
+  "build review verify commit" \
+  "standard write phases"
+
+# Taskgroup: build, review, verify, commit, contract-update
+assert_eq "$(get_write_phases_for_type taskgroup)" \
+  "build review verify commit contract-update" \
+  "taskgroup write phases"
+
+# Taskgroup-merge: cohesion, verify, commit
+assert_eq "$(get_write_phases_for_type taskgroup-merge)" \
+  "cohesion verify commit" \
+  "taskgroup-merge write phases"
+
+# Hotfix: build, verify, commit
+assert_eq "$(get_write_phases_for_type hotfix)" \
+  "build verify commit" \
+  "hotfix write phases"
+
+# Finish-loop: fix, commit (assess and reassess intentionally excluded)
+assert_eq "$(get_write_phases_for_type finish-loop)" \
+  "fix commit" \
+  "finish-loop write phases (assess/reassess excluded)"
+
+# Experiment: build, commit
+assert_eq "$(get_write_phases_for_type experiment)" \
+  "build commit" \
+  "experiment write phases"
+
+# Spec sessions: write, governance
+assert_eq "$(get_write_phases_for_type spec-fresh)" \
+  "write governance" \
+  "spec-fresh write phases"
+assert_eq "$(get_write_phases_for_type spec-update)" \
+  "write governance" \
+  "spec-update write phases"
+
+# Prototype and editor-live: all phases exempt
+assert_eq "$(get_write_phases_for_type prototype-napkin)" "all" "prototype-napkin returns all"
+assert_eq "$(get_write_phases_for_type prototype-spike)" "all" "prototype-spike returns all"
+assert_eq "$(get_write_phases_for_type prototype-poc)" "all" "prototype-poc returns all"
+assert_eq "$(get_write_phases_for_type editor-live)" "all" "editor-live returns all"
+
+# Advisory: governance only
+assert_eq "$(get_write_phases_for_type advisory-init)" \
+  "governance" \
+  "advisory-init write phases"
+assert_eq "$(get_write_phases_for_type advisory-reinit)" \
+  "governance" \
+  "advisory-reinit write phases"
+
+# No-write session types return empty
+assert_eq "$(get_write_phases_for_type taskdef-query)" "" "taskdef-query write phases = empty"
+assert_eq "$(get_write_phases_for_type taskdef-brief)" "" "taskdef-brief write phases = empty"
+assert_eq "$(get_write_phases_for_type queue-triage)" "" "queue-triage write phases = empty"
+assert_eq "$(get_write_phases_for_type audit)" "" "audit write phases = empty"
+assert_eq "$(get_write_phases_for_type ephemeral)" "" "ephemeral write phases = empty"
+
+# Unknown type returns empty
+assert_eq "$(get_write_phases_for_type unknown-type)" "" "unknown-type write phases = empty"
+
+# ============================================================
 # Summary
 # ============================================================
 finish_tests

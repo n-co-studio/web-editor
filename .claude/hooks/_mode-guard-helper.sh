@@ -112,6 +112,7 @@ is_carved_out() {
         docs/spec/compiled/*) return 0 ;;
         docs/spec/prototypes/*) return 0 ;;
         .claude/.automation/*) return 0 ;;
+        .claude/agents/custom/*) return 0 ;;  # custom agent namespace — operator-writable in child mode
         *) return 1 ;;
       esac
       ;;

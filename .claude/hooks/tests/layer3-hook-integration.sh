@@ -162,6 +162,73 @@ assert_ok "$_LAST_RC" "write-guard allows edit on closed branch with REPO_OS_SKI
 rm -f "$SB/.claude/local/closed-branches"
 
 # ============================================================
+# L3.1b — write-guard.sh Gate 2 (phase-type): session-type write-phase enforcement
+# ============================================================
+tap_section "L3.1b: write-guard.sh Gate 2 phase-type — session-type write-phase enforcement"
+
+# --- finish-loop: blocked in assess phase ---
+reset_phase "finish-loop"
+_advance "assess" 2>/dev/null
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+assert_fail "$_LAST_RC" "write-guard blocks edit in finish-loop assess phase"
+
+# --- finish-loop: blocked in reassess phase ---
+reset_phase "finish-loop"
+_advance "assess" 2>/dev/null
+_advance "fix" 2>/dev/null
+_advance "reassess" 2>/dev/null
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+assert_fail "$_LAST_RC" "write-guard blocks edit in finish-loop reassess phase"
+
+# --- finish-loop: allowed in fix phase ---
+reset_phase "finish-loop"
+_advance "assess" 2>/dev/null
+_advance "fix" 2>/dev/null
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+assert_ok "$_LAST_RC" "write-guard allows edit in finish-loop fix phase"
+
+# --- finish-loop: allowed in commit phase ---
+reset_phase "finish-loop"
+_advance "assess" 2>/dev/null
+_advance "fix" 2>/dev/null
+_advance "reassess" 2>/dev/null
+_advance "commit" 2>/dev/null
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+assert_ok "$_LAST_RC" "write-guard allows edit in finish-loop commit phase"
+
+# --- standard: build still allowed (regression check) ---
+reset_phase "standard"
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+assert_ok "$_LAST_RC" "write-guard still allows edit in standard build phase (regression)"
+
+# --- finish-loop assess: path exemptions still work ---
+reset_phase "finish-loop"
+_advance "assess" 2>/dev/null
+# docs/ai/governance/ exempt (skip mode-guard — not carved out in template mode)
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/docs/ai/governance/evidence.md")"
+assert_ok "$_LAST_RC" "write-guard allows docs/ai/governance/ edit in finish-loop assess (path exempt)"
+# docs/ai/task-groups/ exempt (skip mode-guard — not carved out in template mode)
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/docs/ai/task-groups/test.yaml")"
+assert_ok "$_LAST_RC" "write-guard allows docs/ai/task-groups/ edit in finish-loop assess (path exempt)"
+
+# --- REPO_OS_SKIP_PLAN_GATE=1 overrides phase-type gate ---
+reset_phase "finish-loop"
+_advance "assess" 2>/dev/null
+REPO_OS_SKIP_PLAN_GATE=1 REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+assert_ok "$_LAST_RC" "write-guard allows edit in finish-loop assess with REPO_OS_SKIP_PLAN_GATE=1"
+
+# --- editor-live: all phases exempt from phase-type gate ---
+reset_phase "editor-live"
+_advance "build" 2>/dev/null
+_advance "commit" 2>/dev/null
+_advance "review" 2>/dev/null
+REPO_OS_SKIP_MODE_GUARD=1 run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/src/foo.ts")"
+assert_ok "$_LAST_RC" "write-guard allows edit for editor-live (all phases exempt)"
+
+# ============================================================
 # L3.2 — bash-guard.sh (PreToolUse Bash)
 # ============================================================
 tap_section "L3.2: bash-guard.sh — bash write-target gate"

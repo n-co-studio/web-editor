@@ -37,6 +37,39 @@ Add a persistent knowledge graph that maps semantic connections between codebase
 - Decision 0014 respected: graph read at init, graph write before commit
 - Decision 0030/0033 respected: concurrent write safety via mkdir locking
 
+## Amendment 4 — Mechanical Schema Validation (2026-04-09)
+
+Adds mechanical enforcement of KG schema constraints at three points: write time (inline in `add_edge()`), post-seed (after graph write, before lock release), and commit time (blocking pre-commit gate). Closes a recurring defect class where agents invent relations outside the 8-type taxonomy.
+
+### Enforcement Points
+
+1. **Inline `add_edge()` guard** — `kg-seed.sh` `add_edge()` rejects any relation not in the 8-type taxonomy via a `case` guard. Returns 1 on invalid relation (edge not appended). This is the earliest enforcement point — catches invalid relations at construction time.
+
+2. **Post-seed validation** — after `kg-seed.sh` writes graph content and releases the lock, it calls `kg-validate.sh --strict --target <target>` before returning. If validation fails, an error is reported and the seeder exits non-zero. The lock release trap is idempotent so cleanup is safe regardless.
+
+3. **Pre-commit gate** — `pre-commit-gates.sh` calls `kg-validate.sh --strict` when `docs/ai/knowledge-graph/graph.yaml` or `docs/ai/knowledge-graph/product-graph.yaml` is staged. Uses `GATE-RECOVERABLE` + `FAILED=1` (blocking) — schema violations are corrupt data, not advisory coverage gaps. Gate is scoped to staged graph files only: zero impact on commits that don't touch graph YAML.
+
+### New Tool: `.claude/tools/kg-validate.sh`
+
+Standalone validator using grep/awk only (no external dependencies). Accepts `--target template|product|both` and `--strict` flags.
+
+Validates:
+- `relation:` values against the 8-type taxonomy
+- Node `type:` values against the 7 valid types
+- `status:` values against 3 valid statuses
+- `source_type:` values against 2 valid source types
+- Required field presence for nodes (`id`, `type`, `description`, `last_verified`, `status`, `layer`) and edges (`source`, `target`, `relation`, `context`, `source_type`, `last_verified`, `status`)
+
+Does NOT check referential integrity or node ID format.
+
+Fail-open: if `schema.yaml` is absent, the validator exits 0 with a warning (does not block commits in repos without the schema file).
+
+### Authorization
+
+Authorized under §3 (schema changes require decision amendment) and §5 (edge type taxonomy — extensions require decision amendment). No new node types or edge types added — this amendment adds mechanical enforcement of existing constraints. Zero external dependencies maintained.
+
+---
+
 ## Amendment — Layer Taxonomy (2026-03-31)
 
 Adds a `layer` field to the node schema, enabling the knowledge graph to distinguish template infrastructure nodes from product code nodes.

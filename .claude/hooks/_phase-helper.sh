@@ -68,6 +68,52 @@ get_phases_for_type() {
   esac
 }
 
+# --- Write-allowed phase lookup ---
+# Returns space-delimited list of phases where Edit/Write is permitted for a session type,
+# "all" for session types that are fully exempt from write-phase restrictions,
+# or "" for session types where writes are already blocked by the session-type gate.
+# Consumed by write-guard.sh Gate 2 (phase-type enforcement).
+get_write_phases_for_type() {
+  local stype="$1"
+  case "$stype" in
+    standard)
+      echo "build review verify commit" ;;
+    taskgroup)
+      # contract-init intentionally excluded: task-group contract writes target
+      # docs/ai/task-groups/ which is covered by the path-based exemption.
+      echo "build review verify commit contract-update" ;;
+    taskgroup-merge)
+      echo "cohesion verify commit" ;;
+    hotfix)
+      echo "build verify commit" ;;
+    finish-loop)
+      # assess and reassess are intentionally excluded — read-only evaluation phases.
+      # The new Gate 2 (phase-type) catches assess/reassess; the existing init|plan gate
+      # does not, because those phases are not named "init" or "plan".
+      echo "fix commit" ;;
+    experiment)
+      echo "build commit" ;;
+    spec-fresh|spec-update)
+      # approval is intentionally excluded — operator-gated phase; no agent writes expected.
+      echo "write governance" ;;
+    prototype-napkin|prototype-spike|prototype-poc|editor-live)
+      # All phases permitted — exempt from write-phase restriction
+      echo "all" ;;
+    advisory-init|advisory-reinit)
+      echo "governance" ;;
+    taskdef-query|taskdef-brief|queue-triage|audit|ephemeral)
+      # No writes permitted. taskdef-* and queue-triage are already hard-blocked by the
+      # session-type gate at the top of Section 3. For audit/ephemeral: empty write-phases
+      # causes the new gate to block. Sessions that call upgrade_session_type() will have
+      # their type updated in phase-state; get_session_type() returns the new type on the
+      # next hook call, so upgrades are not affected.
+      echo "" ;;
+    *)
+      # Unknown session type — conservative: no phases
+      echo "" ;;
+  esac
+}
+
 # --- Automation tag lookup ---
 # Returns the tag (agent/operator/both) for a given session type and phase.
 get_tag_for_phase() {

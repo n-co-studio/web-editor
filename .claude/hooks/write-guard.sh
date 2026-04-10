@@ -492,6 +492,48 @@ if [ -n "$FILE_PATH" ]; then
             fi
             ;;
         esac
+
+        # --- Gate 2 (phase-type): Session-type-specific write-phase enforcement ---
+        # Extends the init|plan gate above to enforce write-allowed phases per session type.
+        # Example: finish-loop sessions may only write during fix and commit phases.
+        # Runs for all non-init|plan phases when BG_ALLOW_REASON is still "pass".
+        # Override: REPO_OS_SKIP_PLAN_GATE=1
+        if [ "$BG_ALLOW_REASON" = "pass" ]; then
+          _WG2T_STYPE=$(get_session_type)
+          _WG2T_ALLOWED=$(get_write_phases_for_type "$_WG2T_STYPE")
+          # "all" means the session type is fully exempt from write-phase restrictions
+          if [ "$_WG2T_ALLOWED" != "all" ] && [ -n "$_WG2T_STYPE" ]; then
+            _WG2T_OK=false
+            # Path-based exemptions (same set as init|plan gate above)
+            if [ -n "$FILE_PATH" ]; then
+              case "$FILE_PATH" in
+                "$REPO_ROOT/.claude/.state/"*|\
+                "$REPO_ROOT/.claude/local/"*|\
+                "$REPO_ROOT/docs/ai/governance/"*|\
+                "$REPO_ROOT/docs/ai/task-groups/"*)
+                  _WG2T_OK=true ;;
+              esac
+            fi
+            # Phase membership check
+            if [ "$_WG2T_OK" = false ]; then
+              for _wg2t_p in $_WG2T_ALLOWED; do
+                if [ "$_wg2t_p" = "$CURRENT_PHASE" ]; then
+                  _WG2T_OK=true
+                  break
+                fi
+              done
+            fi
+            if [ "$_WG2T_OK" = false ]; then
+              if [ "${REPO_OS_SKIP_PLAN_GATE:-0}" = "1" ]; then
+                log_override "write-guard" "REPO_OS_SKIP_PLAN_GATE"
+              else
+                log_hook_event "write-guard" "PreToolUse" "" "block" "$START_MS" "phase_gate_type" "type:$_WG2T_STYPE,phase:$CURRENT_PHASE"
+                echo "GATE-RECOVERABLE: Session type '$_WG2T_STYPE' in '$CURRENT_PHASE' phase — Edit/Write only permitted during: ${_WG2T_ALLOWED:-none}. NEXT: Advance to the correct write phase before editing. (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
+                exit 2
+              fi
+            fi
+          fi
+        fi
       else
         # Phase-state absent/stale — sentinel controls fail-closed vs advisory (Decision 0019)
         _FC_EXEMPT=false

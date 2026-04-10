@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Approval Rules",
+  "description": "JSON Schema for .claude/.automation/approval-rules.yaml — defines custom approval routing rules for work orders.",
+  "type": "object",
+  "required": ["rules"],
+  "properties": {
+    "rules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/rule"
+      }
+    }
+  },
+  "$defs": {
+    "rule": {
+      "type": "object",
+      "required": ["name", "conditions", "match_mode", "approvers", "approval_mode", "priority", "active"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique identifier for the rule."
+        },
+        "conditions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/condition"
+          }
+        },
+        "match_mode": {
+          "type": "string",
+          "enum": ["all", "any"],
+          "description": "'all' = every condition must match; 'any' = at least one."
+        },
+        "approvers": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "description": "User ID (uuid) or role reference (role:<role_name>)."
+          }
+        },
+        "approval_mode": {
+          "type": "string",
+          "enum": ["all_must_approve", "any_one"]
+        },
+        "priority": {
+          "type": "integer",
+          "description": "Higher values evaluated first. Ties broken by file order."
+        },
+        "active": {
+          "type": "boolean",
+          "description": "Inactive rules are skipped during evaluation."
+        },
+        "timeout_hours": {
+          "type": ["integer", "null"],
+          "description": "Hours before escalation to escalation_target. Null = no timeout."
+        },
+        "escalation_target": {
+          "type": ["string", "null"],
+          "description": "Role name or user ID to escalate to on timeout."
+        }
+      },
+      "if": {
+        "properties": {
+          "timeout_hours": {
+            "type": "integer"
+          }
+        },
+        "required": ["timeout_hours"]
+      },
+      "then": {
+        "required": ["escalation_target"],
+        "properties": {
+          "escalation_target": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "condition": {
+      "type": "object",
+      "required": ["field", "operator", "value"],
+      "properties": {
+        "field": {
+          "type": "string",
+          "enum": ["work_order_type", "domain", "session_type", "deploy_target"]
+        },
+        "operator": {
+          "type": "string",
+          "enum": ["equals", "not_equals", "in", "not_in"]
+        },
+        "value": {
+          "description": "Single value for equals/not_equals, array for in/not_in.",
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" } }
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

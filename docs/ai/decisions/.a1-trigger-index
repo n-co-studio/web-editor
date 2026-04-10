@@ -57,3 +57,6 @@
 0036|\.claude/\.automation/runner\.sh|daemon, branch switch, daemon-pid, runner.sh --daemon, daemon-safe
 0036|\.claude/\.automation/lib/|daemon, branch switch, daemon-pid, runner.sh --daemon, daemon-safe
 0036|\.claude/hooks/bash-guard\.sh|daemon, branch switch, git checkout, git switch, git reset --hard, daemon-pid, daemon-safe
+0037|\.claude/hooks/.*\.sh|governance packaging, content/enforcement split, hook lifecycle, enforcement standalone, content standalone
+0037|\.claude/\.automation/|governance packaging, content/enforcement split, hook lifecycle, enforcement standalone, content standalone
+0037|\.claude/agents/custom/|governance packaging, content/enforcement split, hook lifecycle, enforcement standalone, content standalone
