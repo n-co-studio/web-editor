@@ -41,6 +41,7 @@ editor-queue-status.yaml
 .claude/analytics/
 
 # Automation runtime artifacts (Decision 0017)
+.claude/.automation/.queue-lock/
 .claude/.automation/queue/
 .claude/.automation/reports/
 .claude/.automation/review-items/
