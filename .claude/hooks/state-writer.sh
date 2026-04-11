@@ -51,6 +51,13 @@ esac
 # --- Extract last assistant message ---
 LAST_MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty')
 
+# --- Critic diff-review mode routing ---
+# When critic runs in diff-review mode, it emits 'MODE: diff-review' before GATE_RESULT.
+# Route to 'diff-review-complete' instead of 'cohesion-reviewed' for correct gate tracking.
+if [ "$AGENT_TYPE" = "critic" ] && echo "$LAST_MESSAGE" | grep -q '^MODE: diff-review'; then
+  STATE_FILE="diff-review-complete"
+fi
+
 if [ -z "$LAST_MESSAGE" ]; then
   echo "WARNING: $AGENT_TYPE completed with empty output — state file not written" >&2
   log_hook_event "state-writer" "SubagentStop" "$AGENT_TYPE" "skip" "$START_MS" "no_message"
@@ -80,7 +87,8 @@ PHASE_OK=true
 if [ -n "$CURRENT_PHASE" ]; then
   case "$AGENT_TYPE" in
     critic)
-      # critic writes cohesion-reviewed during review phase
+      # critic writes cohesion-reviewed (cohesion mode) or diff-review-complete (diff-review mode)
+      # both during the review phase — STATE_FILE is already routed correctly above
       [ "$CURRENT_PHASE" != "review" ] && PHASE_OK=false
       ;;
     qa-verifier)
@@ -114,12 +122,13 @@ fi
 printf 'timestamp: %s\nagent: %s\nsession_id: %s\n%s\n' "$TIMESTAMP" "$AGENT_TYPE" "$STATE_SID" "$LAST_LINE" \
   > "$STATE_DIR/$STATE_FILE" 2>/dev/null || true
 
-# --- Completeness capture (critic only) ---
+# --- Completeness capture (critic cohesion mode only) ---
 # Appends COMPLETENESS: score and COMPLETENESS_GATE: verdict to cohesion-reviewed state file.
 # COMPLETENESS_GATE: APPROVED|NEEDS_WORK is the downstream blocking signal read by
 # outcome-detector.sh, pre-commit-gates.sh, and session-close-check.sh.
 # Distinct from GATE_RESULT (cohesion verdict — always the last non-empty line).
-if [ "$AGENT_TYPE" = "critic" ]; then
+# Skip for diff-review mode: diff-review-complete does not use completeness scoring.
+if [ "$AGENT_TYPE" = "critic" ] && [ "$STATE_FILE" = "cohesion-reviewed" ]; then
   COMPLETENESS_LINE=$(echo "$LAST_MESSAGE" | grep -E '^COMPLETENESS: ' | tail -1 || true)
   COMPLETENESS_GATE_LINE=$(echo "$LAST_MESSAGE" | grep -E '^COMPLETENESS_GATE: ' | tail -1 || true)
   if [ -n "$COMPLETENESS_LINE" ]; then
@@ -138,8 +147,10 @@ GATE_VALUE=$(echo "$LAST_LINE" | sed 's/^GATE_RESULT: *//' | awk '{print $1}')
 if [ -n "$(get_phase)" ]; then
   case "$AGENT_TYPE" in
     critic)
-      # critic (cohesion-reviewed): advance review → verify on APPROVED only
-      if [ "$GATE_VALUE" = "APPROVED" ]; then
+      # critic cohesion mode (cohesion-reviewed): advance review → verify on APPROVED only
+      # critic diff-review mode (diff-review-complete): no phase advancement
+      # (cohesion-reviewed is the primary phase gate; diff-review is a parallel check)
+      if [ "$STATE_FILE" = "cohesion-reviewed" ] && [ "$GATE_VALUE" = "APPROVED" ]; then
         advance_phase "verify" 2>/dev/null || true
       fi
       ;;

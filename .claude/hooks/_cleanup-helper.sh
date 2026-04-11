@@ -88,6 +88,7 @@ cleanup_session_files() {
     # Session-bound files: check session_id before deleting
     _delete_if_owned "$state_dir/plan-approved" "$closing_sid"
     _delete_if_owned "$state_dir/cohesion-reviewed" "$closing_sid"
+    _delete_if_owned "$state_dir/diff-review-complete" "$closing_sid"
     _delete_if_owned "$state_dir/qa-verified" "$closing_sid"
     _delete_if_owned "$state_dir/reviewer-signed" "$closing_sid"
     _delete_if_owned "$state_dir/security-signed" "$closing_sid"
@@ -110,6 +111,7 @@ cleanup_session_files() {
     rm -f "$state_dir"/cycle-advisory-*
     rm -f "$repo_root/.claude/.state/kg-relevance-context"
     rm -f "$repo_root/.claude/.state/kg-search-advisory-fired"
+    rm -f "$repo_root/.claude/.state/cross-session-context"
     _delete_if_owned "$state_dir/session-resume.yaml" "$closing_sid"
     # Clean completion markers when merge brief closes (parallel groups)
     # Markers are cross-session: written by content briefs in their per-session dirs.

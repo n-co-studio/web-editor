@@ -755,6 +755,40 @@ _inject_kg_context() {
   fi
 }
 
+# --- Inject cross-session context at build phase entry ---
+# When transitioning to the build phase, assembles a context block from recent
+# git log and the last session log tail, then writes it to a well-known state
+# file that agents can consult at build phase entry.
+# Decision 0014: injected at phase transition (build entry).
+# Decision 0034: follows same injection pattern as _inject_kg_context().
+# Advisory only — failures are silently ignored.
+# Override: SKIP_CROSS_SESSION_CONTEXT=1 bypasses injection (logged via log_override).
+_inject_cross_session_context() {
+  local repo_root="$_REPO_OS_ROOT"
+  # Use flat .state/ path (not per-session dir) so agents can find it at a
+  # well-known location regardless of worktree session state directory scoping.
+  local output_file="$repo_root/.claude/.state/cross-session-context"
+
+  # Override: SKIP_CROSS_SESSION_CONTEXT=1
+  if [ "${SKIP_CROSS_SESSION_CONTEXT:-0}" = "1" ]; then
+    log_override "cross-session-context" "SKIP_CROSS_SESSION_CONTEXT"
+    return 0
+  fi
+
+  # Source the helper
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  # shellcheck source=_cross-session-context.sh
+  source "$script_dir/_cross-session-context.sh" 2>/dev/null || return 0
+
+  # Assemble context and write to state file
+  local context
+  context=$(_assemble_cross_session_context 2>/dev/null) || return 0
+  [ -z "$context" ] && return 0
+
+  printf '%s\n' "$context" > "$output_file" 2>/dev/null || true
+}
+
 # --- Advance to a new phase ---
 # Validates the transition is legal (forward-only + defined loops).
 # Updates current_phase, phases_completed, tag, cycle, timestamp.
@@ -974,6 +1008,7 @@ advance_phase() {
   # Advisory — failures silently ignored. Gated on graph existence + task contract.
   if [ "$new_phase" = "build" ]; then
     _inject_kg_context
+    _inject_cross_session_context
   fi
 }
 

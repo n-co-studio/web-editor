@@ -132,13 +132,14 @@ Governance evidence in `.claude/.state/`. Written by hooks via shell I/O (never 
 | File | Writer | Gate / Purpose |
 |------|--------|----------------|
 | `plan-approved` | `plan-approval.sh` | Branch guard + A2 scope (Decision 0029) |
-| `cohesion-reviewed` | `state-writer.sh` (critic) | State verification |
+| `cohesion-reviewed` | `state-writer.sh` (critic — cohesion mode) | A5 state verification; GATE_RESULT: BLOCKED is now blocking |
+| `diff-review-complete` | `state-writer.sh` (critic — diff-review mode) | A5 state verification; written when Critic output contains `MODE: diff-review` sentinel; GATE_RESULT: BLOCKED blocks commit |
 | `qa-verified` | `state-writer.sh` (qa-verifier) | State verification |
 | `reviewer-signed` | `state-writer.sh` (reviewer) | High-risk detection |
 | `security-signed` | `state-writer.sh` (security-privacy) | High-risk detection |
 | `pragmatist-signed` | `state-writer.sh` (pragmatist) | Plan-review verification |
 
-**Hook-written files** (all cleaned by `cleanup_session_files` unless noted): `phase-state` (`_phase-helper.sh` — phase tracking), `overrides.log` (`_analytics-helper.sh` — override audit, append-only), `high-risk-detected` (`pre-commit-gates.sh` — audit trail), `governance-checked` (`pre-commit-gates.sh` Gate 3 — first-fire inter-session marker), `merge-source-branch` (`_phase-helper.sh` `write_merge_signal` — agent-to-hook merge signal), `brief-has-taskgroup` (`_phase-helper.sh` — session-type validation, Decision 0026), `session-resume.yaml` (`_phase-helper.sh` — compression recovery, updated each phase), `cycle-escalation` (`_phase-helper.sh` — cycle cap at 5+, advisory), `cycle-advisory-N` (`bash-guard.sh` — per-cycle dedup), `kg-relevance-context` (`_phase-helper.sh` — KG pre-computed context at build entry, Decision 0034), `kg-search-advisory-fired` (`bash-guard.sh` — one-shot graph-first advisory dedup), `.stop-attempt-count` (`session-close-check.sh` — safety valve at 3 attempts, not cleaned).
+**Hook-written files** (all cleaned by `cleanup_session_files` unless noted): `phase-state` (`_phase-helper.sh` — phase tracking), `overrides.log` (`_analytics-helper.sh` — override audit, append-only), `high-risk-detected` (`pre-commit-gates.sh` — audit trail), `governance-checked` (`pre-commit-gates.sh` Gate 3 — first-fire inter-session marker), `merge-source-branch` (`_phase-helper.sh` `write_merge_signal` — agent-to-hook merge signal), `brief-has-taskgroup` (`_phase-helper.sh` — session-type validation, Decision 0026), `session-resume.yaml` (`_phase-helper.sh` — compression recovery, updated each phase), `cycle-escalation` (`_phase-helper.sh` — cycle cap at 5+, advisory), `cycle-advisory-N` (`bash-guard.sh` — per-cycle dedup), `kg-relevance-context` (`_phase-helper.sh` — KG pre-computed context at build entry, Decision 0034), `kg-search-advisory-fired` (`bash-guard.sh` — one-shot graph-first advisory dedup), `cross-session-context` (`_phase-helper.sh` via `_cross-session-context.sh` — recent git log + last session log tail injected at build entry), `.stop-attempt-count` (`session-close-check.sh` — safety valve at 3 attempts, not cleaned).
 
 **Model-written files** (in `.claude/local/`, not `.state/` — state-guard allows): `task-contract.yaml` (orchestrator — intent + verification for cohesion review, Decision 0020), `scope-risk-gain` (orchestrator — risk/gain for unbriefed-in-scope files, Decision 0017).
 
@@ -219,7 +220,8 @@ All overrides logged via `log_override()`.
 | `SKIP_UNCOMMITTED_CHECK=1` | session-close-check | Uncommitted changes | Allow close with dirty tree |
 | `SKIP_KNOWN_ISSUES_CHECK=1` | session-close-check | Known-issues (advisory) | Suppress known-issues reminder |
 | `SKIP_CONTRACT_CHECK=1` | session-close-check | Task group contract | Bypass A6 contract + governance |
-| `REPO_OS_RECOVER=1` | pre-commit-gates | All state checks | Emergency recovery — skip plan-approved, cohesion-reviewed, qa-verified, pragmatist-signed |
+| `SKIP_CROSS_SESSION_CONTEXT=1` | _phase-helper | Cross-session context injection | Bypass git log + session log injection at build entry |
+| `REPO_OS_RECOVER=1` | pre-commit-gates | All state checks | Emergency recovery — skip plan-approved, cohesion-reviewed, diff-review-complete, qa-verified, pragmatist-signed |
 | `REPO_OS_SKIP_PLAN_GATE=1` | pre-commit-gates / bash-guard | plan-approved | Bypass plan-approved check |
 | `REPO_OS_SKIP_PRAGMATIST_GATE=1` | pre-commit-gates | pragmatist-signed | Bypass pragmatist-signed check (Decision 0025) |
 | `REPO_OS_ALLOW_REINIT=1` | _phase-helper | double-init guard | Allow re-init of phase state (crash recovery) |

@@ -7,15 +7,22 @@
 #   Phase — assert_phase commit (blocking, primary check when phase-state active)
 #   A4  Safety — secret scanning (always, blocking)
 #   A3  Quality — design token enforcement (progressive; advisory when no tooling, blocking with ESLint)
-#   State verification — plan-approved, cohesion-reviewed, qa-verified, pragmatist-signed (always blocking)
+#   A3.3 Build verification — tsc --noEmit --incremental (skips if no tsconfig.json; SKIP_BUILD_CHECK=1)
+#   State verification — plan-approved, cohesion-reviewed, diff-review-complete, qa-verified,
+#                        pragmatist-signed (always blocking)
+#   A5  Cohesion — cohesion-reviewed + diff-review-complete both APPROVED required (blocking);
+#                  session-type-aware: only enforced for session types with a review phase;
+#                  GATE_RESULT: BLOCKED in either file blocks commit
 #   A2  Process — scope check >100 lines (blocking with large-scope override)
 #   A6  Task Group — contract staging (blocking)
+#   A6.3 Integration points — artifact existence check from contract integration_points (blocking)
 #   High-risk — pattern detection + sign-off enforcement (blocking)
 #   A1  Decision trigger parser (blocking — enforced by .a1-triggers-enforced sentinel)
 #
 # Overrides:
 #   REPO_OS_RECOVER=1    — skip all state-dependent checks (emergency recovery)
-#   SKIP_CONTRACT_CHECK=1 — skip A6 contract checks (existence + staging)
+#   SKIP_CONTRACT_CHECK=1 — skip A6 contract checks (existence, staging, A6.3 integration points)
+#   SKIP_BUILD_CHECK=1    — skip A3.3 TypeScript type-check
 #
 # Branch profiles:
 #   experiment/*  — A4 only (all state checks skipped)
@@ -315,17 +322,59 @@ if [ "$SKIP_STATE" = false ]; then
     fi
   fi
 
-  # cohesion-reviewed: required except on hotfix/* (A5 skipped per gate profile)
-  if [ "$IS_HOTFIX" = false ] && [ ! -f "$STATE_DIR/cohesion-reviewed" ]; then
-    echo "GATE-RECOVERABLE: cohesion-reviewed state file missing. NEXT: Dispatch Critic agent in cohesion mode (after Builder completes, before QA). (override: REPO_OS_RECOVER=1)" >&2
+  # A3.3: Build Verification — TypeScript type-check
+  # Placed before A5 (cohesion gate) so build errors surface before review state checks.
+  # Skips silently when tsconfig.json is absent (non-TypeScript projects).
+  # Override: SKIP_BUILD_CHECK=1
+  if [ -n "$STAGED_FILES" ]; then
+    if [ "${SKIP_BUILD_CHECK:-0}" = "1" ]; then
+      log_override "pre-commit-gates" "SKIP_BUILD_CHECK"
+    elif [ -f "$REPO_ROOT/tsconfig.json" ]; then
+      A33_OUTPUT=""
+      A33_EXIT=0
+      A33_OUTPUT=$(cd "$REPO_ROOT" && npx tsc --noEmit --incremental 2>&1) || A33_EXIT=$?
+      if [ "$A33_EXIT" -ne 0 ]; then
+        echo "GATE-RECOVERABLE: A3.3 build verification failed — TypeScript type errors detected. NEXT: Fix type errors shown below. (override: SKIP_BUILD_CHECK=1)" >&2
+        printf '%s\n' "$A33_OUTPUT" >&2
+        block "A3.3_type_error"
+        log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A3.3_type_error"
+      fi
+    fi
+  fi
+
+  # A5: Cohesion + Diff-Review Gate (blocking)
+  # Session-type-aware: only enforce for session types whose phase sequence includes 'review'.
+  # hotfix/* is always exempt (IS_HOTFIX). Other session types without review phase also exempt.
+  # REPO_OS_RECOVER=1 bypasses all A5 checks via SKIP_STATE=true (already handled above).
+  _A5_SKIP="$IS_HOTFIX"
+  if [ "$_A5_SKIP" = false ]; then
+    _A5_STYPE=$(get_session_type)
+    _A5_PHASES=$(get_phases_for_type "$_A5_STYPE" 2>/dev/null || echo "")
+    case " $_A5_PHASES " in
+      *" review "*) ;; # has review phase — A5 applies
+      *) _A5_SKIP=true ;; # no review phase — skip A5 silently
+    esac
+  fi
+
+  # cohesion-reviewed: required when A5 applies
+  if [ "$_A5_SKIP" = false ] && [ ! -f "$STATE_DIR/cohesion-reviewed" ]; then
+    echo "GATE-RECOVERABLE: A5 cohesion review not passed — cohesion-reviewed state file missing. NEXT: Dispatch Critic agent in cohesion mode (after Builder completes, before QA). (override: REPO_OS_RECOVER=1)" >&2
     block "state_cohesion_missing"
     log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_cohesion_missing"
-  elif [ "$IS_HOTFIX" = false ] && [ -f "$STATE_DIR/cohesion-reviewed" ] && ! _validate_state_session_id "$STATE_DIR/cohesion-reviewed"; then
-    echo "GATE-RECOVERABLE: cohesion-reviewed state file has stale session_id. NEXT: Re-run Critic cohesion review in this session. (override: REPO_OS_RECOVER=1)" >&2
+  elif [ "$_A5_SKIP" = false ] && [ -f "$STATE_DIR/cohesion-reviewed" ] && ! _validate_state_session_id "$STATE_DIR/cohesion-reviewed"; then
+    echo "GATE-RECOVERABLE: A5 — cohesion-reviewed state file has stale session_id. NEXT: Re-run Critic cohesion review in this session. (override: REPO_OS_RECOVER=1)" >&2
     block "state_cohesion_stale_session"
     log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_cohesion_stale_session"
-  elif [ "$IS_HOTFIX" = false ] && [ -f "$STATE_DIR/cohesion-reviewed" ] && \
+  elif [ "$_A5_SKIP" = false ] && [ -f "$STATE_DIR/cohesion-reviewed" ] && \
        _validate_state_session_id "$STATE_DIR/cohesion-reviewed"; then
+    # A5 hardening: block if cohesion-reviewed contains GATE_RESULT: BLOCKED
+    # This enforces that critical cohesion findings were resolved before committing.
+    _PCG_COHESION_RESULT=$(grep '^GATE_RESULT: ' "$STATE_DIR/cohesion-reviewed" 2>/dev/null | sed 's/^GATE_RESULT: *//' | awk '{print $1}' | head -1 || true)
+    if [ "$_PCG_COHESION_RESULT" = "BLOCKED" ]; then
+      echo "GATE-RECOVERABLE: A5 cohesion review blocked — Critic found critical findings that were not resolved. NEXT: Resolve all critical cohesion findings and re-run Critic in cohesion mode. (override: REPO_OS_RECOVER=1)" >&2
+      block "A5_cohesion_blocked"
+      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A5_cohesion_blocked"
+    fi
     # A5 extension: completeness check — block if COMPLETENESS_GATE: NEEDS_WORK
     # Backward compat: absent COMPLETENESS_GATE field falls through silently.
     _PCG_COMPLETENESS_GATE=$(grep '^COMPLETENESS_GATE: ' "$STATE_DIR/cohesion-reviewed" 2>/dev/null | sed 's/^COMPLETENESS_GATE: *//' | head -1 || true)
@@ -334,6 +383,26 @@ if [ "$SKIP_STATE" = false ]; then
       echo "GATE-RECOVERABLE: A5 completeness check failed — ${_PCG_COMPLETENESS_SCORE:-N/M criteria not met}. NEXT: Loop back to Builder to address incomplete criteria, then re-run Critic and QA. (override: REPO_OS_RECOVER=1)" >&2
       block "A5_completeness_needs_work"
       log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A5_completeness_needs_work" "${_PCG_COMPLETENESS_SCORE:-unknown}"
+    fi
+  fi
+
+  # diff-review-complete: required alongside cohesion-reviewed when A5 applies
+  # New in Brief 3 — enforced for session types with a review phase (same as cohesion).
+  if [ "$_A5_SKIP" = false ] && [ ! -f "$STATE_DIR/diff-review-complete" ]; then
+    echo "GATE-RECOVERABLE: A5 diff-review not passed — diff-review-complete state file missing. NEXT: Dispatch Critic in diff-review mode (after cohesion review, before QA). (override: REPO_OS_RECOVER=1)" >&2
+    block "state_diff_review_missing"
+    log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_diff_review_missing"
+  elif [ "$_A5_SKIP" = false ] && [ -f "$STATE_DIR/diff-review-complete" ] && ! _validate_state_session_id "$STATE_DIR/diff-review-complete"; then
+    echo "GATE-RECOVERABLE: A5 — diff-review-complete state file has stale session_id. NEXT: Re-run Critic in diff-review mode in this session. (override: REPO_OS_RECOVER=1)" >&2
+    block "state_diff_review_stale_session"
+    log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_diff_review_stale_session"
+  elif [ "$_A5_SKIP" = false ] && [ -f "$STATE_DIR/diff-review-complete" ] && \
+       _validate_state_session_id "$STATE_DIR/diff-review-complete"; then
+    _PCG_DIFF_REVIEW_RESULT=$(grep '^GATE_RESULT: ' "$STATE_DIR/diff-review-complete" 2>/dev/null | sed 's/^GATE_RESULT: *//' | awk '{print $1}' | head -1 || true)
+    if [ "$_PCG_DIFF_REVIEW_RESULT" = "BLOCKED" ]; then
+      echo "GATE-RECOVERABLE: A5 diff-review blocked — Critic found critical mechanical bugs. NEXT: Resolve all critical diff-review findings and re-run Critic in diff-review mode. (override: REPO_OS_RECOVER=1)" >&2
+      block "A5_diff_review_blocked"
+      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A5_diff_review_blocked"
     fi
   fi
 
@@ -457,7 +526,9 @@ if [ "$SKIP_STATE" = false ] && [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
   # Task group sessions must have a contract with status: in_progress before
   # committing. Prevents the failure where an agent commits without ever
   # creating the contract during contract-init phase.
+  # Also tracks the contract file path for A6.3 integration point verification.
   A6_SESSION_TYPE=$(get_session_type)
+  A6_CONTRACT_PATH=""  # set when in_progress contract is found — used by A6.3
   if [ "$A6_SESSION_TYPE" = "taskgroup" ] || [ "$A6_SESSION_TYPE" = "taskgroup-merge" ]; then
     CONTRACT_FOUND=false
     if [ -d "$CONTRACT_DIR" ]; then
@@ -467,6 +538,7 @@ if [ "$SKIP_STATE" = false ] && [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
         case "$(basename "$_a6_cf")" in _*) continue ;; esac
         if grep -q "status: in_progress" "$_a6_cf" 2>/dev/null; then
           CONTRACT_FOUND=true
+          A6_CONTRACT_PATH="$_a6_cf"
           break
         fi
       done
@@ -494,6 +566,126 @@ if [ "$SKIP_STATE" = false ] && [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
         block "A6_contract_unstaged"
         log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A6_contract_unstaged" "" "$NOT_STAGED"
       fi
+    fi
+  fi
+
+  # A6.3: Integration point artifact verification (blocking)
+  # When a task group contract exists with non-empty integration_points:,
+  # verify each artifact path exists in the working tree.
+  # Skip silently when: no contract found, no integration_points block, empty integration_points.
+  # Override: SKIP_CONTRACT_CHECK=1 (already applies — outer guard handles this).
+  if [ -n "$A6_CONTRACT_PATH" ]; then
+    _A63_IN_IP=false
+    _A63_ENTRY_STARTED=false
+    _A63_NAME=""
+    _A63_PRODUCER=""
+    _A63_CONSUMER=""
+    _A63_ARTIFACT=""
+
+    _a63_check_artifact() {
+      local _name="$1" _producer="$2" _consumer="$3" _artifact="$4"
+      [ -z "$_artifact" ] && return  # empty artifact — skip silently
+      local _found=false
+      # Check for glob pattern vs specific file path
+      case "$_artifact" in
+        *\**|*\?*)
+          # Glob pattern — check if any match exists
+          set +e
+          ls "$REPO_ROOT/$_artifact" > /dev/null 2>&1 && _found=true
+          set -e
+          ;;
+        *)
+          # Specific file path
+          [ -f "$REPO_ROOT/$_artifact" ] && _found=true
+          ;;
+      esac
+      if [ "$_found" = false ]; then
+        echo "GATE-RECOVERABLE: A6.3 integration point artifact missing — $_artifact declared as produced by '${_producer:-unknown}' for '${_consumer:-unknown}' not found in working tree. NEXT: Ensure the producing brief has created this artifact. (override: SKIP_CONTRACT_CHECK=1)" >&2
+        block "A6_3_artifact_missing"
+        log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A6_3_artifact_missing" "" "$_artifact"
+      fi
+    }
+
+    while IFS= read -r _a63_line; do
+      case "$_a63_line" in
+        "integration_points:"*)
+          _A63_IN_IP=true
+          ;;
+        "  - "*)
+          # New list entry — check previous entry if we have one
+          if [ "$_A63_ENTRY_STARTED" = true ] && [ -n "$_A63_ARTIFACT" ]; then
+            _a63_check_artifact "$_A63_NAME" "$_A63_PRODUCER" "$_A63_CONSUMER" "$_A63_ARTIFACT"
+          fi
+          _A63_ENTRY_STARTED=true
+          _A63_NAME=""
+          _A63_PRODUCER=""
+          _A63_CONSUMER=""
+          _A63_ARTIFACT=""
+          # Inline name: YAML format is "  - name: ..." (name on same line as list marker)
+          if [ "$_A63_IN_IP" = true ]; then
+            case "$_a63_line" in
+              *"name: "*)
+                _A63_NAME="${_a63_line#*name: }"
+                _A63_NAME="${_A63_NAME#\"}"
+                _A63_NAME="${_A63_NAME%\"}"
+                # Strip inline YAML comment if present
+                _A63_NAME="${_A63_NAME%%  #*}"
+                _A63_NAME="${_A63_NAME% }"
+                ;;
+            esac
+          fi
+          ;;
+        "    name: "*)
+          # Separate-line name field (alternative YAML style)
+          if [ "$_A63_IN_IP" = true ] && [ -z "$_A63_NAME" ]; then
+            _A63_NAME="${_a63_line#*name: }"
+            _A63_NAME="${_A63_NAME#\"}"
+            _A63_NAME="${_A63_NAME%\"}"
+          fi
+          ;;
+        "    producer: "*)
+          if [ "$_A63_IN_IP" = true ]; then
+            _A63_PRODUCER="${_a63_line#*producer: }"
+            _A63_PRODUCER="${_A63_PRODUCER#\"}"
+            _A63_PRODUCER="${_A63_PRODUCER%\"}"
+          fi
+          ;;
+        "    consumer: "*)
+          if [ "$_A63_IN_IP" = true ]; then
+            _A63_CONSUMER="${_a63_line#*consumer: }"
+            _A63_CONSUMER="${_A63_CONSUMER#\"}"
+            _A63_CONSUMER="${_A63_CONSUMER%\"}"
+          fi
+          ;;
+        "    artifact: "*)
+          if [ "$_A63_IN_IP" = true ]; then
+            _A63_ARTIFACT="${_a63_line#*artifact: }"
+            _A63_ARTIFACT="${_A63_ARTIFACT#\"}"
+            _A63_ARTIFACT="${_A63_ARTIFACT%\"}"
+          fi
+          ;;
+        *)
+          # Non-indented line after integration_points: ends the block
+          if [ "$_A63_IN_IP" = true ]; then
+            case "$_a63_line" in
+              "  "*) ;; # still indented — inside integration_points
+              *)
+                # Check last entry before exiting block
+                if [ "$_A63_ENTRY_STARTED" = true ] && [ -n "$_A63_ARTIFACT" ]; then
+                  _a63_check_artifact "$_A63_NAME" "$_A63_PRODUCER" "$_A63_CONSUMER" "$_A63_ARTIFACT"
+                  _A63_ENTRY_STARTED=false
+                fi
+                _A63_IN_IP=false
+                ;;
+            esac
+          fi
+          ;;
+      esac
+    done < "$A6_CONTRACT_PATH"
+
+    # Check last entry if file ends while still in block
+    if [ "$_A63_ENTRY_STARTED" = true ] && [ -n "$_A63_ARTIFACT" ]; then
+      _a63_check_artifact "$_A63_NAME" "$_A63_PRODUCER" "$_A63_CONSUMER" "$_A63_ARTIFACT"
     fi
   fi
 fi
@@ -1019,7 +1211,6 @@ if [ "$SKIP_STATE" = false ] && [ -n "$STAGED_FILES" ]; then
   fi
 
 fi
-
 
 # ============================================================
 # KG Coverage Advisory (advisory, non-blocking)

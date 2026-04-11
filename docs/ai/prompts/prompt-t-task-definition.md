@@ -298,6 +298,9 @@ Follow docs/ai/prompts/prompt-b-product-build.md.
 
 - [ ] [Verification step]
 - [ ] [Verification step]
+- [ ] Build verification: tsc --noEmit passes with this change
+- [ ] Integration points: all imports/exports between this brief's files and existing modules resolve
+- [ ] Cross-session: changes are compatible with recent session outputs (check git log --oneline -10)
 
 ### Dependencies
 [Other tasks that must complete first, or that this task unblocks. "None" if standalone.]

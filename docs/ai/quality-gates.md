@@ -10,10 +10,10 @@ Verification details: `.claude/agents/qa-verifier.md`
 |------|--------|
 | **A1 Decision Compliance** | All applicable decisions identified and followed. Conflicts → propose new decision record before committing. Mechanically enforced via trigger parser: decisions with `## Triggers` sections are matched against staged files and `+` diff lines — triggered decisions must be declared in `Decisions:` git trailer. Blocking (enforced by `docs/ai/decisions/.a1-triggers-enforced` sentinel). New decisions must include a `## Triggers` section. |
 | **A2 Process** | Plan exists before code. Changes explainable (what + why). Session log updated at close. Scope >100 lines blocks commit unless `plan-approved` state file contains `large-scope: true`. Hotfix branches: A2 scope relaxed (check skipped). |
-| **A3 Quality** (if tooling exists) | Formatter run. Lint passes. Build/compile passes. |
+| **A3 Quality** (if tooling exists) | Formatter run. Lint passes. Build/compile passes. **A3.3 Build verification**: TypeScript type-check passes (`tsc --noEmit --incremental`). Catches broken imports, missing exports, and type contract violations. Skips silently when `tsconfig.json` is absent. Override: `SKIP_BUILD_CHECK=1`. |
 | **A4 Safety** | No secrets (tokens, keys, credentials, private URLs). No PII in logs/fixtures. High-risk pattern detection: staged files matching risk paths (`auth`, `login`, `session`, `payment`, `billing`, `crypto`, `migration`, `schema`) or containing risk content (`password`, `secret`, `token`) require Reviewer + Security sign-off. Test/fixture/mock paths and governance docs (`docs/ai/`, `.claude/`, `AI.md`, `CLAUDE.md`, `repo-os-explainer.html`) excluded from high-risk scanning (A4 secret scanning still applies to all files). **Automation-specific (A4-auto)**: when `Automation: runner` trailer is present, A4 additionally covers outbound network calls added without brief justification (curl/wget/fetch), new package dependencies added without brief instruction, and writes outside the repository root. Mechanical enforcement via permission profile blocklists; review-time enforcement via security-privacy agent's Automation Runtime checks. |
-| **A5 Cohesion** (standard+ branches) | Critic (cohesion mode) reviewed diff for internal codebase coherence. All critical findings resolved. Re-run clean after fixes. When a task contract is present (Decision 0020), cohesion review also includes contract verification — Critic evaluates each `verification:` criterion as VERIFIED/UNVERIFIED/INCONCLUSIVE (advisory, not blocking). Mechanically verified: `cohesion-reviewed` state file must exist at commit time. |
-| **A6 Task Group Compliance** (when applicable) | Two sub-gates (Decision 0018). **A6.1 Contract existence** (blocking): task group sessions (`taskgroup`/`taskgroup-merge`) must have a contract with `status: in_progress` in the contract directory before committing. Uses filesystem check — works in template mode with gitignored `.claude/local/task-groups/`. **A6.2 Contract staging** (blocking): modified contract YAML must be staged. Applies only when task brief contains `### Task Group`. Override: `SKIP_CONTRACT_CHECK=1`. |
+| **A5 Cohesion** (standard+ branches) | Two parallel checks — both must be APPROVED. **Cohesion check**: Critic (cohesion mode) reviewed diff for internal codebase coherence. All critical findings resolved. Re-run clean after fixes. `cohesion-reviewed` state file must exist with `GATE_RESULT: APPROVED`. **Diff-review check**: Critic (diff-review mode) reviewed staged changes for mechanical bugs — broken imports, missing exports, type contract violations, null/undefined access, logic errors. `diff-review-complete` state file must exist with `GATE_RESULT: APPROVED`. When a task contract is present (Decision 0020), cohesion review also includes contract verification — Critic evaluates each `verification:` criterion as VERIFIED/UNVERIFIED/INCONCLUSIVE (advisory, not blocking). Session-type-aware: only enforced for session types whose phase sequence includes `review`. Override: `REPO_OS_RECOVER=1`. |
+| **A6 Task Group Compliance** (when applicable) | Three sub-gates (Decision 0018). **A6.1 Contract existence** (blocking): task group sessions (`taskgroup`/`taskgroup-merge`) must have a contract with `status: in_progress` in the contract directory before committing. Uses filesystem check — works in template mode with gitignored `.claude/local/task-groups/`. **A6.2 Contract staging** (blocking): modified contract YAML must be staged. Applies only when task brief contains `### Task Group`. **A6.3 Integration point artifacts** (blocking): when the contract has non-empty `integration_points:`, verifies each `artifact:` path exists in the working tree. File paths use `[ -f ]`; glob patterns use `ls`. Skips silently when `integration_points:` is empty or absent. Override: `SKIP_CONTRACT_CHECK=1`. |
 
 ### A1 Trigger Enforcement Sentinel
 
@@ -57,7 +57,7 @@ Branch type determines which gates apply and at what strictness.
 | `release/*` | Release candidates | All gates (A + B) + release checklist (C gates). Reviewer + Security required on every merge. |
 | `feature/*` | New functionality | Standard gates (A + B). Normal workflow. |
 | `fix/*` | Bug fixes | Standard gates (A + B). Normal workflow. |
-| `hotfix/*` | Urgent production fixes | Expedited: A2 scope limit relaxed, A5 skipped (operator discretion). A1, A3, A4 still enforced. Push gates still apply. |
+| `hotfix/*` | Urgent production fixes | Expedited: A2 scope limit relaxed, A5 skipped (no review phase in hotfix sequence). A1, A3, A4 still enforced. Push gates still apply. |
 | `experiment/*` | Spikes, prototypes, exploration | A4 (safety) only. No push to main without full gates. Must not be merged — rewrite into `feature/*` branch. See Prompt 0.5 for prototyping tiers (Napkin / Spike / PoC). |
 
 **Naming convention:** `<category>/<short-description>` (e.g., `feature/user-auth`, `hotfix/stripe-webhook-fix`).
@@ -84,7 +84,8 @@ See: `.claude/agents/_agent-glossary.md` § State Files for the full state file 
 
 Gate-specific notes:
 - `plan-approved`: required by state verification and A2 scope (reads `large-scope: true` flag)
-- `cohesion-reviewed`: required by state verification (skipped on `hotfix/*`)
+- `cohesion-reviewed`: required by A5 (skipped for session types without a review phase); `GATE_RESULT: BLOCKED` is now blocking (not just file-presence check)
+- `diff-review-complete`: required by A5 alongside `cohesion-reviewed`; written by `state-writer.sh` when Critic runs in diff-review mode (detected via `MODE: diff-review` sentinel)
 - Gate 5 (session isolation, Decision 0013) uses `.claude/local/closed-branches` — a persistent ledger, not a session-scoped state file. Enforced by `write-guard.sh` (Section 3) on Edit/Write and `bash-guard.sh` on Bash.
 
 **Recovery override:** Set `REPO_OS_RECOVER=1` to skip all state-dependent checks in pre-commit, pre-push, and bash-guard gates. Emergency path for hook crashes or debugging sessions.
@@ -110,8 +111,8 @@ Which gates apply varies by session type. Enforced at `verify`/`commit` phases. 
 
 | Session Types | Gate Profile |
 |---------------|-------------|
-| `standard`, `taskgroup`, `taskgroup-merge` | Full gates (A1–A6, B1–B3). A6 applies only to taskgroup/taskgroup-merge |
-| `hotfix` | Expedited (A2 scope relaxed, A5 skipped) |
+| `standard`, `taskgroup`, `taskgroup-merge` | Full gates (A1–A6, B1–B3). A5 includes both cohesion-reviewed and diff-review-complete. A6 (including A6.3) applies only to taskgroup/taskgroup-merge |
+| `hotfix` | Expedited (A2 scope relaxed, A5 skipped — no review phase in hotfix sequence) |
 | `experiment`, `prototype-*` | A4 safety only |
 | `spec-fresh`, `spec-update`, `advisory-init`, `advisory-reinit` | Advisory only (governance evidence at close) |
 | `audit` | Read-only (no gates unless deferrals create file changes) |
