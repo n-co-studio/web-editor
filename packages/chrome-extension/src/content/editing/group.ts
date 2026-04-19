@@ -1,5 +1,5 @@
 /**
- * Group editing — wraps 2+ sibling elements in a flex container.
+ * Group editing — wraps 1+ sibling elements in a flex container.
  *
  * Provides the block-reason guard and pure DOM mutation function.
  * Phase 2 wires these into the UI (toolbar button, keyboard shortcut).
@@ -16,8 +16,8 @@ import { detectContainerLayout } from './gap-math';
  * or null if grouping is allowed.
  */
 export function getGroupBlockReason(elements: Element[]): string | null {
-  if (elements.length < 2) {
-    return 'Select at least 2 elements to group';
+  if (elements.length < 1) {
+    return 'Select at least 1 element to group';
   }
 
   const parent = elements[0].parentElement;
@@ -65,7 +65,7 @@ export interface GroupResult {
  * 5. Insert wrapper before the first selected element.
  * 6. Move each element into wrapper (moveBefore if available, appendChild fallback).
  *
- * @param elements - 2+ sibling HTMLElements to wrap. Must share the same parent.
+ * @param elements - 1+ sibling HTMLElements to wrap. Must share the same parent.
  * @param _shadow  - ShadowRoot for overlay rendering (reserved for Phase 2).
  * @returns The wrapper element and original positions for history.
  */

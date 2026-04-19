@@ -7,6 +7,7 @@ import type {
   ReorderChange,
   InsertChange,
   GroupChange,
+  ReparentChange,
   RelatedChange,
   PageContext,
 } from '@frontend-editor/shared';
@@ -90,6 +91,20 @@ export class DiffBuilder {
       element: elementInfo,
       changes: [],
       groupChanges: [groupChange],
+      context: this.buildPageContext(),
+      status: 'pending',
+      sourceVerified: Boolean(elementInfo.sourceFile),
+    };
+  }
+
+  /** Build a VisualDiff for a reparent operation (cross-container move). */
+  buildReparent(elementInfo: ElementInfo, reparentChange: ReparentChange): VisualDiff {
+    return {
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      element: elementInfo,
+      changes: [],
+      reparentChanges: [reparentChange],
       context: this.buildPageContext(),
       status: 'pending',
       sourceVerified: Boolean(elementInfo.sourceFile),

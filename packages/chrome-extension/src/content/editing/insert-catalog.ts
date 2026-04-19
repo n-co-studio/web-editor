@@ -230,6 +230,8 @@ const ICON_TABLE = svg(
 
 export const INSERT_CATALOG: readonly InsertCatalogEntry[] = [
   // --- Layout ---
+  // All layout elements default to display:flex so they immediately accept
+  // child insertions and reparent drops without manual styling.
   {
     tag: 'div',
     label: 'Container',
@@ -237,6 +239,7 @@ export const INSERT_CATALOG: readonly InsertCatalogEntry[] = [
     icon: ICON_DIV,
     defaultWidthPreset: 'stretch',
     defaultHeightPreset: 'auto',
+    defaultStyles: [{ property: 'display', value: 'flex' }],
   },
   {
     tag: 'section',
@@ -245,6 +248,7 @@ export const INSERT_CATALOG: readonly InsertCatalogEntry[] = [
     icon: ICON_SECTION,
     defaultWidthPreset: 'stretch',
     defaultHeightPreset: 'auto',
+    defaultStyles: [{ property: 'display', value: 'flex' }],
   },
   {
     tag: 'article',
@@ -253,6 +257,7 @@ export const INSERT_CATALOG: readonly InsertCatalogEntry[] = [
     icon: ICON_ARTICLE,
     defaultWidthPreset: 'stretch',
     defaultHeightPreset: 'auto',
+    defaultStyles: [{ property: 'display', value: 'flex' }],
   },
   {
     tag: 'header',
@@ -261,6 +266,7 @@ export const INSERT_CATALOG: readonly InsertCatalogEntry[] = [
     icon: ICON_HEADER,
     defaultWidthPreset: 'stretch',
     defaultHeightPreset: 'auto',
+    defaultStyles: [{ property: 'display', value: 'flex' }],
   },
   {
     tag: 'footer',
@@ -269,6 +275,7 @@ export const INSERT_CATALOG: readonly InsertCatalogEntry[] = [
     icon: ICON_FOOTER,
     defaultWidthPreset: 'stretch',
     defaultHeightPreset: 'auto',
+    defaultStyles: [{ property: 'display', value: 'flex' }],
   },
   {
     tag: 'nav',
@@ -277,6 +284,7 @@ export const INSERT_CATALOG: readonly InsertCatalogEntry[] = [
     icon: ICON_NAV,
     defaultWidthPreset: 'stretch',
     defaultHeightPreset: 'auto',
+    defaultStyles: [{ property: 'display', value: 'flex' }],
   },
   {
     tag: 'main',
@@ -285,6 +293,7 @@ export const INSERT_CATALOG: readonly InsertCatalogEntry[] = [
     icon: ICON_MAIN,
     defaultWidthPreset: 'stretch',
     defaultHeightPreset: 'auto',
+    defaultStyles: [{ property: 'display', value: 'flex' }],
   },
   {
     tag: 'aside',
@@ -293,6 +302,7 @@ export const INSERT_CATALOG: readonly InsertCatalogEntry[] = [
     icon: ICON_ASIDE,
     defaultWidthPreset: 'stretch',
     defaultHeightPreset: 'auto',
+    defaultStyles: [{ property: 'display', value: 'flex' }],
   },
 
   // --- Text ---

@@ -108,6 +108,7 @@ export const HANDLE_COLORS = {
   borderRadius: '#22c55e',  // green (corner)
   snapped: '#22c55e',       // green (token snap feedback)
   reorder: '#6366f1',       // indigo (drag reorder)
+  reparent: '#8b5cf6',      // violet (cross-container move)
 } as const;
 
 // Spacing zone overlay fills + outlines

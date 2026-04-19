@@ -6,6 +6,7 @@ export type {
   PropertyChange,
   ReorderChange,
   GroupChange,
+  ReparentChange,
   SiblingAnchor,
   ChildSnapshotEntry,
   InsertChange,

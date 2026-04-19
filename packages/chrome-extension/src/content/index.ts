@@ -27,6 +27,8 @@ import { GridOverlay } from './grid-overlay';
 import { RulerOverlay } from './ruler-overlay';
 import { ReorderEditor, getReorderBlockReason } from './editing/reorder';
 import type { ReorderCommitCallback } from './editing/reorder';
+import { ReparentEditor, getReparentBlockReason } from './editing/reparent';
+import type { ReparentCommitCallback } from './editing/reparent';
 import { InsertEditor, getInsertBlockReason } from './editing/insert';
 import { TextEditor, getTextBlockReason } from './editing/text';
 import { MediaEditor } from './editing/media';
@@ -41,7 +43,7 @@ import { MeasureOverlay } from './selection/measure-overlay';
 import { MultiSelectManager } from './selection/multi-select';
 import { MultiSelectToolbar } from './editing/multi-select-toolbar';
 import { buildElementInfo, getTopElementAt, generateSelector } from '../shared/dom-utils';
-import type { VisualDiff, PropertyChange, AttributeChange, TextChange, ReorderChange, GroupChange } from '@frontend-editor/shared';
+import type { VisualDiff, PropertyChange, AttributeChange, TextChange, ReorderChange, ReparentChange, GroupChange } from '@frontend-editor/shared';
 import type { ExtensionMode, ConnectionStatus, EditMode } from '../shared/types';
 
 // ---------------------------------------------------------------------------
@@ -78,6 +80,7 @@ let notesStore: NotesStore | null = null;
 let notesEditor: NotesEditor | null = null;
 let gridOverlay: GridOverlay | null = null;
 let reorderEditor: ReorderEditor | null = null;
+let reparentEditor: ReparentEditor | null = null;
 let insertEditor: InsertEditor | null = null;
 let textEditor: TextEditor | null = null;
 let mediaEditor: MediaEditor | null = null;
@@ -204,6 +207,7 @@ async function activate(): Promise<void> {
   gridOverlay = new GridOverlay(shadow, tokenStore);
   rulerOverlay = new RulerOverlay(shadow, () => gridOverlay!.getEffectiveSettings(), () => gridOverlay?.isVisible() ?? false);
   reorderEditor = new ReorderEditor(shadow);
+  reparentEditor = new ReparentEditor(shadow);
   insertEditor = new InsertEditor(shadow);
   textEditor = new TextEditor();
   mediaEditor = new MediaEditor(preview);
@@ -316,6 +320,7 @@ async function activate(): Promise<void> {
     spacingEditor!.cleanup();
     positionEditor!.cleanup();
     reorderEditor!.cleanup();
+    reparentEditor!.cleanup();
     insertEditor!.cleanup();
     textEditor!.cleanup();
     mediaEditor!.cleanup();
@@ -333,11 +338,13 @@ async function activate(): Promise<void> {
     // Determine disabled tools
     const dimBlock = getDimensionBlockReason(element);
     const reorderBlock = getReorderBlockReason(element);
+    const reparentBlock = getReparentBlockReason(element);
     const insertBlock = getInsertBlockReason(element);
     const textBlock = getTextBlockReason(element);
     const disabled: Partial<Record<EditMode, string>> = {};
     if (dimBlock) disabled['dimensions'] = dimBlock;
     if (reorderBlock) disabled['reorder'] = reorderBlock;
+    if (reparentBlock) disabled['reparent'] = reparentBlock;
     if (insertBlock) disabled['insert'] = insertBlock;
     if (textBlock) disabled['text'] = textBlock;
     toolbar!.setDisabledTools(disabled);
@@ -368,6 +375,7 @@ async function activate(): Promise<void> {
     spacingEditor!.cleanup();
     positionEditor!.cleanup();
     reorderEditor!.cleanup();
+    reparentEditor!.cleanup();
     insertEditor!.cleanup();
     textEditor!.cleanup();
     mediaEditor!.cleanup();
@@ -446,6 +454,7 @@ async function activate(): Promise<void> {
       spacingEditor!.cleanup();
       positionEditor!.cleanup();
       reorderEditor!.cleanup();
+    reparentEditor!.cleanup();
       insertEditor!.cleanup();
       textEditor!.cleanup();
       mediaEditor!.cleanup();
@@ -503,6 +512,7 @@ async function activate(): Promise<void> {
       notesEditor!.reposition(toolbar!.getButtonPosition('notes'));
     }
     reorderEditor!.reposition(toolbar!.getButtonPosition('reorder'));
+    reparentEditor!.reposition({ x: 0, y: 0 }); // no-op — reparent has no positioned panel
     mediaEditor!.reposition(toolbar!.getButtonPosition('media'));
     effectsEditor!.reposition(toolbar!.getButtonPosition('effects'));
     appearanceEditor!.reposition(toolbar!.getButtonPosition('appearance'));
@@ -965,6 +975,7 @@ function activateToolForElement(el: Element, mode: EditMode): void {
   spacingEditor!.cleanup();
   positionEditor!.cleanup();
   reorderEditor!.cleanup();
+  reparentEditor!.cleanup();
   insertEditor!.cleanup();
   textEditor!.cleanup();
   mediaEditor!.cleanup();
@@ -1033,6 +1044,9 @@ function activateToolForElement(el: Element, mode: EditMode): void {
   } else if (mode === 'reorder') {
     reorderEditor!.render(el, makeReorderCommit(el));
     toolbar!.setActiveMode('reorder');
+  } else if (mode === 'reparent') {
+    reparentEditor!.render(el, makeReparentCommit(el));
+    toolbar!.setActiveMode('reparent');
   } else if (mode === 'insert') {
     insertEditor!.enter(el as HTMLElement, makeInsertCommit(el));
     toolbar!.setActiveMode('insert');
@@ -1201,6 +1215,67 @@ function makeReorderCommit(el: Element): ReorderCommitCallback {
 }
 
 // ---------------------------------------------------------------------------
+// Reparent commit helper — builds diff + history entry, re-renders reparent mode
+// ---------------------------------------------------------------------------
+
+function makeReparentCommit(el: Element): ReparentCommitCallback {
+  return (element, sourceContainer, sourceIndex, targetContainer, targetIndex) => {
+    const info = buildElementInfo(element);
+
+    // Build sibling selectors from target container's children (pre-move — element not yet in target)
+    const targetChildren = Array.from(targetContainer.children)
+      .filter((c): c is HTMLElement => c instanceof HTMLElement && c !== element);
+    const siblingSelectors = targetChildren.map((c) => generateSelector(c));
+
+    // Build sibling anchors at the insert position (pre-move state)
+    const prevEl = targetIndex > 0 ? targetChildren[targetIndex - 1] : null;
+    const nextEl = targetIndex < targetChildren.length ? targetChildren[targetIndex] : null;
+
+    const buildAnchor = (anchorEl: Element | null) => {
+      if (!anchorEl || anchorEl === element) return null;
+      const anchorInfo = buildElementInfo(anchorEl);
+      return {
+        selector: anchorInfo.selector,
+        sourceFile: anchorInfo.sourceFile,
+        sourceLine: anchorInfo.sourceLine,
+        instanceIndex: anchorInfo.instanceIndex,
+      };
+    };
+
+    const reparentChange: ReparentChange = {
+      type: 'reparent',
+      sourceContainerSelector: generateSelector(sourceContainer),
+      sourceIndex,
+      targetContainerSelector: generateSelector(targetContainer),
+      targetIndex,
+      siblingSelectors,
+      prevSibling: buildAnchor(prevEl),
+      nextSibling: buildAnchor(nextEl),
+    };
+
+    const diff = diffBuilder!.buildReparent(info, reparentChange);
+
+    queue!.add(diff);
+    editHistory!.push({
+      type: 'reparent',
+      element,
+      sourceContainer,
+      sourceIndex,
+      targetContainer,
+      targetIndex,
+      diff,
+    });
+    badge!.update();
+    reviewPanel!.refresh();
+    devtoolsPanel?.refreshProperties();
+    selection?.refreshHighlight();
+
+    // Re-render reparent mode on the element at its new position
+    reparentEditor!.render(el, makeReparentCommit(el));
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Insert commit helper — builds diff + history entry
 // ---------------------------------------------------------------------------
 
@@ -1321,11 +1396,18 @@ function makeGroupCommit(elements: Element[]): void {
 // ---------------------------------------------------------------------------
 
 function refreshReorderAfterHistoryChange(entry: HistoryEntry): void {
-  if (entry.type !== 'reorder') return;
-  if (!reorderEditor?.isActive()) return;
-  const el = selection?.getSelectedElement();
-  if (el) {
-    reorderEditor.render(el, makeReorderCommit(el));
+  if (entry.type === 'reorder') {
+    if (!reorderEditor?.isActive()) return;
+    const el = selection?.getSelectedElement();
+    if (el) {
+      reorderEditor.render(el, makeReorderCommit(el));
+    }
+  } else if (entry.type === 'reparent') {
+    if (!reparentEditor?.isActive()) return;
+    const el = selection?.getSelectedElement();
+    if (el) {
+      reparentEditor.render(el, makeReparentCommit(el));
+    }
   }
 }
 
@@ -1463,6 +1545,7 @@ function handleScroll(): void {
     handles?.refreshHandles();
     positionEditor?.refreshMoveOverlay();
     reorderEditor?.refreshOverlay();
+    reparentEditor?.refreshOverlay();
     insertEditor?.refreshOverlay();
     gridOverlay?.refreshScroll();
     rulerOverlay?.refreshGuides();
@@ -1665,17 +1748,17 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
     return;
   }
 
-  // Cmd+G / Ctrl+G — group selected elements (multi-select only)
+  // Cmd+G / Ctrl+G — group/wrap selected elements
   if (e.key === 'g' && (e.metaKey || e.ctrlKey)) {
-    if (multiSelect?.isActive()) {
-      e.preventDefault();
-      e.stopPropagation();
-      const primary = selection?.getSelectedElement();
-      if (primary) {
-        const allElements = multiSelect.getAllElements(primary);
-        if (!getGroupBlockReason(allElements)) {
-          makeGroupCommit(allElements);
-        }
+    e.preventDefault();
+    e.stopPropagation();
+    const primary = selection?.getSelectedElement();
+    if (primary) {
+      const allElements = multiSelect?.isActive()
+        ? multiSelect.getAllElements(primary)
+        : [primary];
+      if (!getGroupBlockReason(allElements)) {
+        makeGroupCommit(allElements);
       }
     }
     return;
@@ -1897,6 +1980,9 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
     } else if (reorderEditor?.isDragging()) {
       // Level 1a: cancel reorder drag — revert preview, stay in reorder mode
       reorderEditor.cancelDrag();
+    } else if (reparentEditor?.isDragging()) {
+      // Level 1a: cancel reparent drag — revert, stay in reparent mode
+      reparentEditor.cancelDrag();
     } else if (positionEditor?.isMoveDragging()) {
       // Level 1b: cancel move drag — overlay stays, panel stays, toggle stays active
       positionEditor.cancelMoveDrag();

@@ -106,6 +106,13 @@ const ICONS: Record<string, string> = {
     <circle cx="6" cy="12" r="1.25"/><circle cx="10" cy="12" r="1.25"/>
   </svg>`,
 
+  reparent: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="1" y="2" width="5" height="5" rx="1"/>
+    <rect x="10" y="9" width="5" height="5" rx="1"/>
+    <path d="M6 4.5h3.5a1.5 1.5 0 0 1 1.5 1.5v3"/>
+    <polyline points="9.5,7.5 11,9 12.5,7.5"/>
+  </svg>`,
+
   insert: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
     <circle cx="8" cy="8" r="6.5"/>
     <line x1="8" y1="5" x2="8" y2="11"/>
@@ -170,6 +177,7 @@ const TOOL_LABELS: Record<EditMode, string> = {
   'border-radius': 'Radius',
   position: 'Position',
   reorder: 'Reorder',
+  reparent: 'Move to',
   insert: 'Insert',
   text: 'Text',
   media: 'Media',
@@ -188,6 +196,7 @@ const TOOL_ORDER: EditMode[] = [
   'border-radius',
   'position',
   'reorder',
+  'reparent',
   'insert',
   'text',
   'media',

@@ -52,6 +52,16 @@ interface GroupHistoryEntry {
   readonly diff: VisualDiff;
 }
 
+interface ReparentHistoryEntry {
+  readonly type: 'reparent';
+  readonly element: HTMLElement;
+  readonly sourceContainer: HTMLElement;
+  readonly sourceIndex: number;
+  readonly targetContainer: HTMLElement;
+  readonly targetIndex: number;
+  readonly diff: VisualDiff;
+}
+
 interface AttributeHistoryEntry {
   readonly type: 'attribute';
   readonly element: HTMLElement;
@@ -67,7 +77,7 @@ interface TextHistoryEntry {
   readonly diff: VisualDiff;
 }
 
-export type HistoryEntry = CssHistoryEntry | RemovalHistoryEntry | ReorderHistoryEntry | InsertionHistoryEntry | GroupHistoryEntry | AttributeHistoryEntry | TextHistoryEntry;
+export type HistoryEntry = CssHistoryEntry | RemovalHistoryEntry | ReorderHistoryEntry | InsertionHistoryEntry | GroupHistoryEntry | ReparentHistoryEntry | AttributeHistoryEntry | TextHistoryEntry;
 
 type HistoryCallback = () => void;
 
@@ -123,6 +133,18 @@ export class EditHistory {
         }
         entry.wrapper.remove();
         break;
+      case 'reparent': {
+        // Move element back to source container at original position
+        const srcChildren = Array.from(entry.sourceContainer.children)
+          .filter((c): c is HTMLElement => c instanceof HTMLElement);
+        const refNode = entry.sourceIndex < srcChildren.length ? srcChildren[entry.sourceIndex] : null;
+        if ('moveBefore' in entry.sourceContainer && typeof (entry.sourceContainer as any).moveBefore === 'function') {
+          (entry.sourceContainer as any).moveBefore(entry.element, refNode);
+        } else {
+          entry.sourceContainer.insertBefore(entry.element, refNode);
+        }
+        break;
+      }
       case 'attribute':
         for (const ac of entry.attributeChanges) {
           if (ac.fromValue) {
@@ -179,6 +201,18 @@ export class EditHistory {
         // Move elements into wrapper in DOM order
         for (const pos of entry.originalPositions) {
           entry.wrapper.appendChild(pos.element);
+        }
+        break;
+      }
+      case 'reparent': {
+        // Re-apply reparent: move element to target container
+        const tgtChildren = Array.from(entry.targetContainer.children)
+          .filter((c): c is HTMLElement => c instanceof HTMLElement && c !== entry.element);
+        const tgtRef = entry.targetIndex < tgtChildren.length ? tgtChildren[entry.targetIndex] : null;
+        if ('moveBefore' in entry.targetContainer && typeof (entry.targetContainer as any).moveBefore === 'function') {
+          (entry.targetContainer as any).moveBefore(entry.element, tgtRef);
+        } else {
+          entry.targetContainer.insertBefore(entry.element, tgtRef);
         }
         break;
       }
@@ -241,6 +275,17 @@ export class EditHistory {
           }
           entry.wrapper.remove();
           break;
+        case 'reparent': {
+          const srcChildren = Array.from(entry.sourceContainer.children)
+            .filter((c): c is HTMLElement => c instanceof HTMLElement);
+          const refNode = entry.sourceIndex < srcChildren.length ? srcChildren[entry.sourceIndex] : null;
+          if ('moveBefore' in entry.sourceContainer && typeof (entry.sourceContainer as any).moveBefore === 'function') {
+            (entry.sourceContainer as any).moveBefore(entry.element, refNode);
+          } else {
+            entry.sourceContainer.insertBefore(entry.element, refNode);
+          }
+          break;
+        }
         case 'attribute':
           for (const ac of entry.attributeChanges) {
             if (ac.fromValue) {
