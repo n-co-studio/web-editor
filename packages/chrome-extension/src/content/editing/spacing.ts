@@ -314,8 +314,16 @@ export class SpacingEditor {
       minWidth: '0',
     }) as HTMLSelectElement;
 
-    // Check if current value matches a token
-    const hasMatch = tokens.some((t) => t.value === currentValue);
+    // "auto" is valid for margin and browsers accept it for padding; offer it up-front.
+    const autoOpt = document.createElement('option');
+    autoOpt.value = 'auto';
+    autoOpt.textContent = 'auto';
+    if (currentValue === 'auto') autoOpt.selected = true;
+    select.appendChild(autoOpt);
+
+    // Check if current value matches a token or auto
+    const hasMatch =
+      currentValue === 'auto' || tokens.some((t) => t.value === currentValue);
     if (!hasMatch) {
       const opt = document.createElement('option');
       opt.value = currentValue;

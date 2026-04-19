@@ -6,6 +6,11 @@ import type { TokenStore } from '../../tokens/store';
 import type { ToggleManager } from '../../inspection/toggle-manager';
 import { stepCssValue, getStepDelta } from './css-value-stepping';
 
+/** Properties for which 'auto' should be offered as a first-class option. */
+function propertyAcceptsAuto(property: string): boolean {
+  return property.startsWith('margin') || property.startsWith('padding');
+}
+
 type SingleCommitCb = (property: string, fromValue: string, toValue: string, tokenName?: string) => void;
 type MultiCommitCb = (property: string, toValue: string, elements: Element[], tokenName?: string) => void;
 
@@ -72,6 +77,18 @@ export class InlineEditor {
       select.appendChild(customOpt);
 
       let hasMatch = false;
+
+      if (propertyAcceptsAuto(property)) {
+        const autoOpt = document.createElement('option');
+        autoOpt.value = 'auto';
+        autoOpt.textContent = 'auto';
+        if (currentValue === 'auto') {
+          autoOpt.selected = true;
+          hasMatch = true;
+        }
+        select.appendChild(autoOpt);
+      }
+
       for (const t of tokens) {
         const opt = document.createElement('option');
         opt.value = t.value;
@@ -243,6 +260,18 @@ export class InlineEditor {
       select.appendChild(customOpt);
 
       let hasMatch = false;
+
+      if (propertyAcceptsAuto(property)) {
+        const autoOpt = document.createElement('option');
+        autoOpt.value = 'auto';
+        autoOpt.textContent = 'auto';
+        if (currentValue === 'auto') {
+          autoOpt.selected = true;
+          hasMatch = true;
+        }
+        select.appendChild(autoOpt);
+      }
+
       for (const t of tokens) {
         const opt = document.createElement('option');
         opt.value = t.value;
