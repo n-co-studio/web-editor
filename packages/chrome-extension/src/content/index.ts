@@ -305,11 +305,8 @@ async function activate(): Promise<void> {
       exitMultiSelectMode();
     }
 
-    // Auto-open DevTools on element select (replaces old floating properties auto-open)
-    if (!devtoolsUserClosed && !devtoolsPanel!.isOpen()) {
-      devtoolsPanel!.show(element, info);
-      toolbar!.setInspectorOpen('devtools', true);
-    } else if (devtoolsPanel!.isOpen()) {
+    // Only update DevTools if already open; selection no longer auto-opens the panel.
+    if (devtoolsPanel!.isOpen()) {
       devtoolsPanel!.updateElement(element, info);
     }
     toolbar!.setDeleteEnabled(true);
