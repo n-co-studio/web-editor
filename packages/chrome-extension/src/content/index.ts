@@ -1699,6 +1699,13 @@ function exitMultiSelectMode(): void {
 // ---------------------------------------------------------------------------
 
 function handleGlobalKeydown(e: KeyboardEvent): void {
+  // While the inline text editor is active, every keystroke belongs to the
+  // operator's typing — bail before any shortcut runs. This is stricter than
+  // the DOM-inspection guard below because it does not depend on the event's
+  // target resolving to the contenteditable element (e.g. after the shortcut
+  // steals focus or the selection moves).
+  if (textEditor?.isActive()) return;
+
   // Skip all shortcuts when user is typing in a text field/input/contenteditable.
   // Use composedPath() to pierce Shadow DOM boundaries — e.target is retargeted
   // to the shadow host at document level, hiding the actual input element.

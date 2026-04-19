@@ -934,6 +934,18 @@ export class RulerOverlay {
 
   private attachKeyboard(): void {
     this.keydownHandler = (e: KeyboardEvent) => {
+      // Skip when the user is typing in a text field/input/contenteditable
+      // (including the inline text editor). composedPath() pierces Shadow DOM
+      // boundaries — otherwise e.target is retargeted to the shadow host at
+      // document level, hiding the actual input element.
+      const composedTarget = e.composedPath()[0] as HTMLElement | undefined;
+      if (composedTarget?.tagName) {
+        const tag = composedTarget.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || composedTarget.isContentEditable) {
+          return;
+        }
+      }
+
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (this.hoveredGuideId) {
           e.preventDefault();
