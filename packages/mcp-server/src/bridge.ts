@@ -19,6 +19,7 @@ import type { ConnectedClient, PendingNote, PersistedQueue, SessionExport, Drift
 
 const PERSIST_DIR = '.frontend-editor';
 const PERSIST_FILE = 'pending-queue.json';
+const LOCK_FILE = 'server.lock';
 
 export class Bridge {
   private wss: WebSocketServer | null = null;
@@ -36,10 +37,12 @@ export class Bridge {
   private lastToolCallAt: string | null = null;
   private readonly persistPath: string;
   private readonly statusFilePath: string;
+  private readonly lockPath: string;
   private lastStatusUpdate: string = new Date().toISOString();
 
   constructor(private readonly cwd: string) {
     this.persistPath = join(cwd, PERSIST_DIR, PERSIST_FILE);
+    this.lockPath = join(cwd, PERSIST_DIR, LOCK_FILE);
     this.statusFilePath = process.env.VISUAL_BRIDGE_STATUS_FILE
       ? resolve(cwd, process.env.VISUAL_BRIDGE_STATUS_FILE)
       : join(cwd, 'editor-queue-status.yaml');
@@ -56,22 +59,33 @@ export class Bridge {
 
   /** Start the WebSocket server. Tries ports from base to base+9. */
   async start(): Promise<number> {
-    const basePort = parseInt(process.env.FRONTEND_EDITOR_PORT ?? '7890', 10);
-
-    for (let port = basePort; port < basePort + 10; port++) {
-      const bound = await this.tryPort(port);
-      if (bound) {
-        await this.restoreQueue();
-        // Initialize status file — reflects restored queue state or clean start
-        await this.writeStatusFile(this.pendingQueue.length > 0 ? 'active' : 'closed');
-        console.error(`[frontend-editor] WebSocket server listening on port ${port}`);
-        return port;
-      }
+    if (!(await this.acquireLock())) {
+      throw new Error(
+        'Another frontend-editor MCP server is already running in this project directory',
+      );
     }
 
-    throw new Error(
-      `Could not bind to any port in range ${basePort}–${basePort + 9}`,
-    );
+    try {
+      const basePort = parseInt(process.env.FRONTEND_EDITOR_PORT ?? '7890', 10);
+
+      for (let port = basePort; port < basePort + 10; port++) {
+        const bound = await this.tryPort(port);
+        if (bound) {
+          await this.restoreQueue();
+          // Initialize status file — reflects restored queue state or clean start
+          await this.writeStatusFile(this.pendingQueue.length > 0 ? 'active' : 'closed');
+          console.error(`[frontend-editor] WebSocket server listening on port ${port}`);
+          return port;
+        }
+      }
+
+      throw new Error(
+        `Could not bind to any port in range ${basePort}–${basePort + 9}`,
+      );
+    } catch (err) {
+      await this.releaseLock();
+      throw err;
+    }
   }
 
   /** Stop the WebSocket server. */
@@ -85,6 +99,69 @@ export class Bridge {
         this.wss!.close(() => resolve());
       });
       this.wss = null;
+    }
+    await this.releaseLock();
+  }
+
+  // -----------------------------------------------------------------------
+  // Singleton lock — one server per project directory
+  // -----------------------------------------------------------------------
+
+  /** Acquire an exclusive lock file. Returns false if another live server holds it. */
+  private async acquireLock(): Promise<boolean> {
+    await mkdir(dirname(this.lockPath), { recursive: true });
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await writeFile(this.lockPath, String(process.pid), { flag: 'wx' });
+        return true;
+      } catch (err) {
+        if (!isEexist(err)) throw err;
+      }
+
+      let holderPid = NaN;
+      try {
+        const raw = await readFile(this.lockPath, 'utf-8');
+        holderPid = parseInt(raw.trim(), 10);
+      } catch {
+        // Lock file vanished between creation check and read — retry
+        continue;
+      }
+
+      if (
+        Number.isInteger(holderPid) &&
+        holderPid > 0 &&
+        holderPid !== process.pid &&
+        isPidAlive(holderPid)
+      ) {
+        console.error(
+          `[frontend-editor] Another server is already running (PID ${holderPid}) ` +
+            `in ${this.cwd}. Exiting. If you believe this is stale, delete ${this.lockPath}.`,
+        );
+        return false;
+      }
+
+      console.error(
+        `[frontend-editor] Removing stale lock file (PID ${holderPid || 'unknown'} not alive)`,
+      );
+      try {
+        await unlink(this.lockPath);
+      } catch {
+        // Another process may have removed it — retry
+      }
+    }
+
+    return false;
+  }
+
+  /** Release the lock file — only if we still own it. */
+  private async releaseLock(): Promise<void> {
+    try {
+      const raw = await readFile(this.lockPath, 'utf-8');
+      if (parseInt(raw.trim(), 10) !== process.pid) return;
+      await unlink(this.lockPath);
+    } catch {
+      // Lock file already gone or unreadable — nothing to release
     }
   }
 
@@ -811,5 +888,23 @@ function isValidDiff(obj: unknown): obj is VisualDiff {
     typeof d.context === 'object' && d.context !== null &&
     typeof d.status === 'string' &&
     typeof d.sourceVerified === 'boolean'
+  );
+}
+
+/** Probe whether a PID corresponds to a live process (signal 0 is a no-op probe). */
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isEexist(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as NodeJS.ErrnoException).code === 'EEXIST'
   );
 }
