@@ -25,6 +25,16 @@ const entries = [
     entryPoints: [resolve(__dirname, 'src/service-worker/index.ts')],
     outfile: resolve(__dirname, 'dist/service-worker.js'),
   },
+  {
+    // Web-embed bundle for the portfolio site. IIFE so a <script> tag can
+    // execute it immediately; chrome.* APIs are shimmed at runtime via
+    // installChromeShim() in web-env.ts.
+    entryPoints: [resolve(__dirname, 'src/content/web-embed.ts')],
+    outfile: resolve(__dirname, 'dist/web-embed.js'),
+    format: 'iife',
+    globalName: '__frontendEditorBundle',
+    minify: !isWatch,
+  },
 ];
 
 // Copy static assets to dist

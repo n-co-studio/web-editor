@@ -113,7 +113,7 @@ let tabId: string | null = null;
 // Lifecycle
 // ---------------------------------------------------------------------------
 
-async function activate(): Promise<void> {
+export async function activate(): Promise<void> {
   if (mode !== 'inactive') return;
 
   // Get or create tab session ID
@@ -852,7 +852,7 @@ async function activate(): Promise<void> {
   devtoolsPanel.log(`WebSocket connecting to localhost…`);
 }
 
-function deactivate(): void {
+export function deactivate(): void {
   if (mode === 'inactive') return;
 
   // Remove global listeners

@@ -6,6 +6,8 @@
   "scripts": {
     "build": "node esbuild.config.js",
     "build:watch": "node esbuild.config.js --watch",
+    "build:web-embed:copy": "node ./scripts/copy-web-embed.mjs",
+    "build:web-embed": "node esbuild.config.js && npm run build:web-embed:copy",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   },

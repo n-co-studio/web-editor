@@ -136,6 +136,15 @@ export class HoverHighlight {
       this.rafId = null;
       if (!this.active) return;
 
+      // Opt-out: any element (or ancestor) with data-frontend-editor-ignore
+      // is treated as non-page UI (e.g. an embed-site's walkthrough tooltip
+      // that covers the viewport). Clears any existing highlight.
+      if ((e.target as Element | null)?.closest?.('[data-frontend-editor-ignore]')) {
+        this.currentElement = null;
+        this.hideHighlight();
+        return;
+      }
+
       const target = getTopElementAt(e.clientX, e.clientY, this.host);
       if (target && target !== this.currentElement && isElementVisible(target)) {
         this.currentElement = target;
@@ -157,6 +166,11 @@ export class HoverHighlight {
     // In shadow DOM, e.target is retargeted to the host element at the
     // document scope. So if target === host, the click is on our UI.
     if (e.target === this.host) return;
+
+    // Opt-out: clicks inside an element marked data-frontend-editor-ignore
+    // (e.g. embed-site walkthrough tooltip / absorber) pass through without
+    // being captured as a page selection.
+    if ((e.target as Element | null)?.closest?.('[data-frontend-editor-ignore]')) return;
 
     const target = getTopElementAt(e.clientX, e.clientY, this.host);
     if (!target) return;

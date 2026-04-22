@@ -263,28 +263,33 @@ export class ReviewPanel {
   }
 
   private renderConnectionWarning(): HTMLDivElement {
+    const demoMode = (globalThis as any).__FRONTEND_EDITOR_DEMO__ === true;
+
     const banner = createElement('div', {}, {
-      background: 'rgba(245, 158, 11, 0.15)',
-      border: `1px solid ${OVERLAY.warning}`,
+      background: demoMode ? 'rgba(255, 255, 255, 0.06)' : 'rgba(245, 158, 11, 0.15)',
+      border: `1px solid ${demoMode ? 'rgba(255, 255, 255, 0.2)' : OVERLAY.warning}`,
       borderRadius: OVERLAY.radiusSm,
       padding: '8px 12px',
       margin: '8px',
       fontSize: OVERLAY.bodySize,
-      color: OVERLAY.warning,
+      color: demoMode ? 'rgba(255, 255, 255, 0.85)' : OVERLAY.warning,
       fontFamily: OVERLAY.fontFamily,
     });
 
-    banner.textContent =
-      'Not connected to MCP server \u2014 check that Claude Code is running with the frontend-editor MCP configured (port 7890).';
+    banner.textContent = demoMode
+      ? 'Demo mode — this is a public embed, so change-request funnels are disconnected. Play around freely; a page refresh resets everything.'
+      : 'Not connected to MCP server \u2014 check that Claude Code is running with the frontend-editor MCP configured (port 7890).';
 
-    const retryBtn = createButton('Retry', 'ghost', () => {
-      this.wsClient.retryNow();
-    });
-    retryBtn.style.marginTop = '6px';
-    retryBtn.style.fontSize = '11px';
-    retryBtn.style.color = OVERLAY.warning;
-    retryBtn.style.borderColor = OVERLAY.warning;
-    banner.appendChild(retryBtn);
+    if (!demoMode) {
+      const retryBtn = createButton('Retry', 'ghost', () => {
+        this.wsClient.retryNow();
+      });
+      retryBtn.style.marginTop = '6px';
+      retryBtn.style.fontSize = '11px';
+      retryBtn.style.color = OVERLAY.warning;
+      retryBtn.style.borderColor = OVERLAY.warning;
+      banner.appendChild(retryBtn);
+    }
 
     return banner;
   }
@@ -816,12 +821,16 @@ export class ReviewPanel {
     }
 
     // "Apply Changes" — requires connection, only counts pending items
+    const demoMode = (globalThis as any).__FRONTEND_EDITOR_DEMO__ === true;
     const sendDisabled =
-      pendingTotal === 0 || this.connectionStatus !== 'connected' || this.sending;
+      demoMode || pendingTotal === 0 || this.connectionStatus !== 'connected' || this.sending;
 
     const sendBtn = createButton('Apply Changes', 'primary', () => {
       this.handleSend();
     });
+    if (demoMode) {
+      sendBtn.title = 'Demo mode — this embed is not connected to a local MCP server, so changes cannot be submitted. Refresh the page to reset.';
+    }
     if (sendDisabled) {
       sendBtn.style.opacity = '0.5';
       sendBtn.style.pointerEvents = 'none';

@@ -23,6 +23,7 @@ import {
   WS_KEEPALIVE_INTERVAL_MS,
 } from '../shared/constants';
 import type { ConnectionStatus } from '../shared/types';
+import { isDemoMode } from './web-env';
 
 // ---------------------------------------------------------------------------
 // Public interface
@@ -62,12 +63,19 @@ export class WebSocketClient {
   /** Start the connection attempt (port scan → handshake). */
   connect(): void {
     if (this.destroyed) return;
+    if (isDemoMode()) {
+      // Demo mode: no local MCP server to reach. Stay disconnected so the
+      // UI naturally disables Apply-Changes without spamming port scans.
+      this.setStatus('disconnected');
+      return;
+    }
     this.setStatus('connecting');
     this.scanPorts(WS_PORT_BASE);
   }
 
   /** Send a batch of diffs over the WebSocket. */
   sendDiffBatch(diffs: readonly VisualDiff[], batchNote?: string): boolean {
+    if (isDemoMode()) return false;
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false;
     this.send({
       type: MessageType.VISUAL_DIFF_BATCH,
