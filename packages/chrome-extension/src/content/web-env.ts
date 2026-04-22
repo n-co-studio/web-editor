@@ -6,7 +6,10 @@
  * embedded in a website, it is not. This module installs a minimal shim that
  * satisfies the APIs the content script actually uses:
  *
- *   - chrome.storage.session.get/set  → localStorage, session-scoped keys
+ *   - chrome.storage.session.get/set  → in-memory Map (per page load only,
+ *                                        nothing persists across reloads —
+ *                                        matches the demo's "refresh resets
+ *                                        everything" promise)
  *   - chrome.runtime.sendMessage      → noop that resolves with `{ ok: false }`
  *   - chrome.runtime.onMessage        → registry-backed dispatch (broadcast()
  *                                        fires all listeners synchronously)
@@ -19,6 +22,8 @@
 type StorageBag = Record<string, unknown>;
 const LS_PREFIX = 'frontend-editor-demo:';
 
+const memoryStore = new Map<string, unknown>();
+
 type MessageListener = (
   msg: unknown,
   sender: unknown,
@@ -29,48 +34,42 @@ const messageListeners: MessageListener[] = [];
 
 function storageGet(keys: string | string[] | null | undefined): Promise<StorageBag> {
   const out: StorageBag = {};
-  const keyList = keys == null
-    ? null
-    : Array.isArray(keys) ? keys : [keys];
-  try {
-    if (keyList === null) {
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (!k || !k.startsWith(LS_PREFIX)) continue;
-        const raw = localStorage.getItem(k);
-        if (raw != null) {
-          try { out[k.slice(LS_PREFIX.length)] = JSON.parse(raw); }
-          catch { /* skip bad json */ }
-        }
-      }
-    } else {
-      for (const key of keyList) {
-        const raw = localStorage.getItem(LS_PREFIX + key);
-        if (raw != null) {
-          try { out[key] = JSON.parse(raw); }
-          catch { /* skip bad json */ }
-        }
-      }
+  if (keys == null) {
+    for (const [k, v] of memoryStore) out[k] = v;
+  } else {
+    const keyList = Array.isArray(keys) ? keys : [keys];
+    for (const k of keyList) {
+      if (memoryStore.has(k)) out[k] = memoryStore.get(k);
     }
-  } catch { /* localStorage may be blocked; best-effort */ }
+  }
   return Promise.resolve(out);
 }
 
 function storageSet(items: StorageBag): Promise<void> {
-  try {
-    for (const [k, v] of Object.entries(items)) {
-      localStorage.setItem(LS_PREFIX + k, JSON.stringify(v));
-    }
-  } catch { /* localStorage quota or block; best-effort */ }
+  for (const [k, v] of Object.entries(items)) memoryStore.set(k, v);
   return Promise.resolve();
 }
 
 function storageRemove(keys: string | string[]): Promise<void> {
   const keyList = Array.isArray(keys) ? keys : [keys];
-  try {
-    for (const k of keyList) localStorage.removeItem(LS_PREFIX + k);
-  } catch { /* best-effort */ }
+  for (const k of keyList) memoryStore.delete(k);
   return Promise.resolve();
+}
+
+/**
+ * Removes any stale localStorage entries left behind by an earlier version of
+ * the shim that did persist to localStorage. Safe to keep indefinitely — the
+ * cost is one storage scan per shim install.
+ */
+function purgeLegacyLocalStorage(): void {
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(LS_PREFIX)) keysToRemove.push(k);
+    }
+    for (const k of keysToRemove) localStorage.removeItem(k);
+  } catch { /* localStorage may be blocked; best-effort */ }
 }
 
 function sendMessage(_msg: unknown): Promise<unknown> {
@@ -116,6 +115,10 @@ export function installChromeShim(): void {
   w.__FRONTEND_EDITOR_DEMO__ = true;
 
   if (w.chrome && w.chrome.__FRONTEND_EDITOR_SHIM__) return;
+
+  // Clear any leftover keys from an older shim build that persisted to
+  // localStorage; the current shim is in-memory only.
+  purgeLegacyLocalStorage();
 
   const existing = w.chrome || {};
   w.chrome = {
