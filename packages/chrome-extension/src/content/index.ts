@@ -43,7 +43,7 @@ import { MeasureOverlay } from './selection/measure-overlay';
 import { MultiSelectManager } from './selection/multi-select';
 import { MultiSelectToolbar } from './editing/multi-select-toolbar';
 import { buildElementInfo, getTopElementAt, generateSelector } from '../shared/dom-utils';
-import type { VisualDiff, PropertyChange, AttributeChange, TextChange, ReorderChange, ReparentChange, GroupChange } from '@frontend-editor/shared';
+import type { VisualDiff, PropertyChange, AttributeChange, TextChange, ReorderChange, ReparentChange, GroupChange, RemoveChange } from '@frontend-editor/shared';
 import type { ExtensionMode, ConnectionStatus, EditMode } from '../shared/types';
 
 // ---------------------------------------------------------------------------
@@ -1440,26 +1440,25 @@ function deleteSelectedElement(): void {
   const el = selection?.getSelectedElement();
   if (!el) return;
 
-  const fromValue = getComputedStyle(el).display;
-  if (fromValue === 'none') return; // already hidden
-
   // Capture insertion context before removal
   const parent = el.parentNode;
   const nextSibling = el.nextSibling;
-  if (!parent) return;
+  if (!(parent instanceof Element)) return;
 
+  const removedIndex = Array.from(parent.children).indexOf(el);
   const info = buildElementInfo(el);
-  const changes: PropertyChange[] = [{
-    property: 'display',
-    fromValue,
-    toValue: 'none',
-  }];
-  const diff = diffBuilder!.build(info, changes);
+  const removeChange: RemoveChange = {
+    type: 'remove',
+    tagName: el.tagName.toLowerCase(),
+    containerSelector: buildElementInfo(parent).selector,
+    removedIndex,
+  };
+  const diff = diffBuilder!.buildRemove(info, removeChange);
 
   // Remove element from DOM
   el.remove();
 
-  commitEdit(el, changes, diff, { parent, nextSibling });
+  commitEdit(el, [], diff, { parent, nextSibling });
   selection?.deselect();
 }
 

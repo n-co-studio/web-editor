@@ -80,6 +80,10 @@ function registerTools(server: McpServer, bridge: Bridge): void {
         '(prevSibling/nextSibling with sourceFile+sourceLine) indicating the exact JSX insertion point. ' +
         'sameSiblingSource=true means siblings share a .map() call; crossFileInsertion=true means the ' +
         'container and siblings are from different source files. ' +
+        'When `removeChanges` is present, the intent is to delete the element from the source file at ' +
+        '`element.sourceFile:element.sourceLine` — physically remove the JSX node, not hide it via CSS ' +
+        '(do not add `display: none` or any visibility style). Each remove change includes tagName, ' +
+        'containerSelector, and removedIndex (the original position within the container). ' +
         'When `groupChanges` is present, the intent is to wrap the elements identified by ' +
         '`wrappedSelectors` in a new wrapper element at the specified position in the container. ' +
         'Each group change includes wrapperTagName, wrapperInitialStyles (display:flex etc.), ' +

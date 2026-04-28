@@ -6,6 +6,7 @@ import type {
   TextChange,
   ReorderChange,
   InsertChange,
+  RemoveChange,
   GroupChange,
   ReparentChange,
   RelatedChange,
@@ -59,6 +60,20 @@ export class DiffBuilder {
       element: elementInfo,
       changes: [],
       insertChanges: [insertChange],
+      context: this.buildPageContext(),
+      status: 'pending',
+      sourceVerified: Boolean(elementInfo.sourceFile),
+    };
+  }
+
+  /** Build a VisualDiff for a remove operation (no CSS property changes). */
+  buildRemove(elementInfo: ElementInfo, removeChange: RemoveChange): VisualDiff {
+    return {
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      element: elementInfo,
+      changes: [],
+      removeChanges: [removeChange],
       context: this.buildPageContext(),
       status: 'pending',
       sourceVerified: Boolean(elementInfo.sourceFile),

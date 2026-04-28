@@ -150,6 +150,18 @@ export interface InsertChange {
 }
 
 /**
+ * A remove operation — deletes an element from its container.
+ * Stored as a parallel array on VisualDiff (separate from PropertyChange[]).
+ * The target element is identified by VisualDiff.element (selector + sourceFile + sourceLine).
+ */
+export interface RemoveChange {
+  readonly type: 'remove';
+  readonly tagName: string;
+  readonly containerSelector: string;
+  readonly removedIndex: number;
+}
+
+/**
  * An HTML attribute change (e.g. src, alt) on the target element.
  * Stored as a parallel array on VisualDiff (separate from CSS PropertyChange[]).
  */
@@ -202,6 +214,7 @@ export interface VisualDiff {
   readonly changes: readonly PropertyChange[];
   readonly reorderChanges?: readonly ReorderChange[];
   readonly insertChanges?: readonly InsertChange[];
+  readonly removeChanges?: readonly RemoveChange[];
   readonly groupChanges?: readonly GroupChange[];
   readonly reparentChanges?: readonly ReparentChange[];
   readonly attributeChanges?: readonly AttributeChange[];

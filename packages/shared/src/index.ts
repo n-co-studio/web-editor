@@ -11,6 +11,7 @@ export type {
   ChildSnapshotEntry,
   InsertChange,
   CompoundChildDescriptor,
+  RemoveChange,
   AttributeChange,
   TextChange,
   RelatedChange,

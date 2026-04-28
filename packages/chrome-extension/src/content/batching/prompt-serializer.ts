@@ -32,6 +32,7 @@ export function serializeToPrompt(
   // Collect structural changes separately
   const reorders: Array<{ diff: VisualDiff }> = [];
   const inserts: Array<{ diff: VisualDiff }> = [];
+  const removes: Array<{ diff: VisualDiff }> = [];
   const groups: Array<{ diff: VisualDiff }> = [];
   const textEdits: Array<{ diff: VisualDiff }> = [];
 
@@ -67,6 +68,13 @@ export function serializeToPrompt(
       if (diff.insertChanges) {
         for (const _ic of diff.insertChanges) {
           inserts.push({ diff });
+        }
+      }
+
+      // Collect remove changes for a separate section
+      if (diff.removeChanges) {
+        for (const _rmc of diff.removeChanges) {
+          removes.push({ diff });
         }
       }
 
@@ -127,6 +135,28 @@ export function serializeToPrompt(
           const styleDesc = ic.initialStyles.map(s => `${s.property}: ${s.toValue}`).join(', ');
           sections.push(`  Initial styles: ${styleDesc}`);
         }
+      }
+    }
+    sections.push('');
+  }
+
+  // Remove changes section
+  if (removes.length > 0) {
+    sections.push('## Remove Changes\n');
+    const seen = new Set<string>();
+    for (const { diff } of removes) {
+      if (seen.has(diff.id)) continue;
+      seen.add(diff.id);
+      for (const rmc of diff.removeChanges!) {
+        const lineInfo = diff.element.sourceLine
+          ? ` (line ${diff.element.sourceLine})`
+          : '';
+        const fileInfo = diff.element.sourceFile
+          ? ` in ${diff.element.sourceFile}${lineInfo}`
+          : '';
+        sections.push(
+          `- Remove \`<${rmc.tagName}>\` (\`${diff.element.selector}\`) from \`${rmc.containerSelector}\` at position ${rmc.removedIndex + 1}${fileInfo}`,
+        );
       }
     }
     sections.push('');
