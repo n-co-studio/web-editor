@@ -20,6 +20,8 @@ const entries = [
   {
     entryPoints: [resolve(__dirname, 'src/content/index.ts')],
     outfile: resolve(__dirname, 'dist/content.js'),
+    format: 'iife',
+    globalName: '__frontendEditorContent',
   },
   {
     entryPoints: [resolve(__dirname, 'src/service-worker/index.ts')],
