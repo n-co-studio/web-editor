@@ -4,6 +4,7 @@ export type {
   NoteElementRef,
   NoteEntry,
   PropertyChange,
+  RuleSource,
   ReorderChange,
   GroupChange,
   ReparentChange,
