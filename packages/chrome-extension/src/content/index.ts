@@ -13,6 +13,7 @@ import { SpacingEditor } from './editing/spacing';
 import { PositionEditor } from './editing/position';
 import { KeyboardHandler } from './editing/keyboard';
 import { DiffBuilder } from './batching/diff-builder';
+import { getMatchedRules, findOwningRule, toRuleSource } from './inspection/css-rules';
 import { PendingQueue } from './batching/queue';
 import { BadgeUpdater } from './batching/badge';
 import { ReviewPanel } from './batching/review-panel';
@@ -130,7 +131,19 @@ export async function activate(): Promise<void> {
   await queue.restore();
 
   badge = new BadgeUpdater(queue);
-  diffBuilder = new DiffBuilder(tabId, tokenStore);
+  diffBuilder = new DiffBuilder(tabId, tokenStore, (element, property) => {
+    // Best-effort source resolution. Excludes the extension's own shadow-DOM
+    // styles via excludeHost. The toggle-manager override sheet (if any) is
+    // owned by PropertiesPane; in practice it's empty at edit time, so the
+    // extra precision isn't worth threading the dependency.
+    try {
+      const result = getMatchedRules(element, undefined, host ?? undefined);
+      const owning = findOwningRule(result.rules, property);
+      return owning ? toRuleSource(owning) : undefined;
+    } catch {
+      return undefined;
+    }
+  });
   snapping = new SnappingEngine(tokenStore);
   preview = new PreviewManager();
   staleDetector = new StaleDetector();
@@ -246,7 +259,7 @@ export async function activate(): Promise<void> {
       toValue,
       toToken: tokenName,
     }];
-    const diff = diffBuilder!.build(info, changes);
+    const diff = diffBuilder!.build(info, changes, el);
     commitEdit(el, changes, diff);
     selection!.refreshHighlight();
   });
@@ -261,7 +274,7 @@ export async function activate(): Promise<void> {
         toValue: c.toValue,
         toToken: c.token,
       }];
-      const diff = diffBuilder!.build(info, propChanges);
+      const diff = diffBuilder!.build(info, propChanges, c.element);
       commitEdit(c.element, propChanges, diff);
     }
     selection?.refreshHighlight();
@@ -831,7 +844,7 @@ export async function activate(): Promise<void> {
   // Wire editing → diff creation → queue + history
   handles.onEditCommit((elementInfo, changes) => {
     const el = selection!.getSelectedElement();
-    const diff = diffBuilder!.build(elementInfo, changes);
+    const diff = diffBuilder!.build(elementInfo, changes, el ?? undefined);
     commitEdit(el, changes, diff);
   });
 
@@ -990,7 +1003,7 @@ function activateToolForElement(el: Element, mode: EditMode): void {
     const pos = toolbar!.getButtonPosition('typography');
     const controls = typographyEditor!.render(el, pos, (changes) => {
       const info = buildElementInfo(el);
-      const diff = diffBuilder!.build(info, changes);
+      const diff = diffBuilder!.build(info, changes, el);
       commitEdit(el, changes, diff);
     });
     shadow!.appendChild(controls);
@@ -999,7 +1012,7 @@ function activateToolForElement(el: Element, mode: EditMode): void {
     const pos = toolbar!.getButtonPosition('colors');
     const controls = colorEditor!.render(el, 'color', pos, (changes) => {
       const info = buildElementInfo(el);
-      const diff = diffBuilder!.build(info, changes);
+      const diff = diffBuilder!.build(info, changes, el);
       commitEdit(el, changes, diff);
     });
     shadow!.appendChild(controls);
@@ -1009,7 +1022,7 @@ function activateToolForElement(el: Element, mode: EditMode): void {
     const pos = toolbar!.getButtonPosition('dimensions');
     const controls = dimensionsEditor!.render(el, pos, (changes) => {
       const info = buildElementInfo(el);
-      const diff = diffBuilder!.build(info, changes);
+      const diff = diffBuilder!.build(info, changes, el);
       commitEdit(el, changes, diff);
       selection!.refreshHighlight();
       handles!.refreshHandles();
@@ -1021,7 +1034,7 @@ function activateToolForElement(el: Element, mode: EditMode): void {
     const pos = toolbar!.getButtonPosition('spacing');
     const controls = spacingEditor!.render(el, pos, (changes) => {
       const info = buildElementInfo(el);
-      const diff = diffBuilder!.build(info, changes);
+      const diff = diffBuilder!.build(info, changes, el);
       commitEdit(el, changes, diff);
       selection!.refreshHighlight();
       handles!.refreshHandles();
@@ -1032,7 +1045,7 @@ function activateToolForElement(el: Element, mode: EditMode): void {
     const pos = toolbar!.getButtonPosition('position');
     const controls = positionEditor!.render(el, pos, (changes) => {
       const info = buildElementInfo(el);
-      const diff = diffBuilder!.build(info, changes);
+      const diff = diffBuilder!.build(info, changes, el);
       commitEdit(el, changes, diff);
       selection!.refreshHighlight();
     });
@@ -1058,11 +1071,11 @@ function activateToolForElement(el: Element, mode: EditMode): void {
     const pos = toolbar!.getButtonPosition('media');
     const controls = mediaEditor!.render(el, pos, (changes) => {
       const info = buildElementInfo(el);
-      const diff = diffBuilder!.build(info, changes);
+      const diff = diffBuilder!.build(info, changes, el);
       commitEdit(el, changes, diff);
     }, (attrChanges) => {
       const info = buildElementInfo(el);
-      const diff = diffBuilder!.buildAttribute(info, attrChanges);
+      const diff = diffBuilder!.buildAttribute(info, attrChanges, undefined, el);
       commitAttributeEdit(el, attrChanges, diff);
     });
     shadow!.appendChild(controls);
@@ -1071,11 +1084,11 @@ function activateToolForElement(el: Element, mode: EditMode): void {
     const pos = toolbar!.getButtonPosition('effects');
     const controls = effectsEditor!.render(el, pos, (changes) => {
       const info = buildElementInfo(el);
-      const diff = diffBuilder!.build(info, changes);
+      const diff = diffBuilder!.build(info, changes, el);
       commitEdit(el, changes, diff);
     }, (changes, relatedChanges) => {
       const info = buildElementInfo(el);
-      const diff = diffBuilder!.buildWithRelatedChanges(info, changes, relatedChanges);
+      const diff = diffBuilder!.buildWithRelatedChanges(info, changes, relatedChanges, el);
       commitEdit(el, changes, diff);
     });
     shadow!.appendChild(controls);
@@ -1084,7 +1097,7 @@ function activateToolForElement(el: Element, mode: EditMode): void {
     const pos = toolbar!.getButtonPosition('appearance');
     const controls = appearanceEditor!.render(el, pos, (changes) => {
       const info = buildElementInfo(el);
-      const diff = diffBuilder!.build(info, changes);
+      const diff = diffBuilder!.build(info, changes, el);
       commitEdit(el, changes, diff);
     });
     shadow!.appendChild(controls);
@@ -1667,7 +1680,7 @@ function enterMultiSelectMode(): void {
     const pos = toolbar!.getPosition();
     const msToolbar = multiSelectToolbar!.render(allElements, pos, (element, changes) => {
       const info = buildElementInfo(element);
-      const diff = diffBuilder!.build(info, changes);
+      const diff = diffBuilder!.build(info, changes, element);
       commitEdit(element, changes, diff);
       // Refresh highlights after alignment/spacing changes
       selection?.refreshHighlight();

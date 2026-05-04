@@ -3,7 +3,8 @@
 // ---------------------------------------------------------------------------
 
 import type { MatchedRule, AccessLevel, MatchResult } from '../../shared/css-types';
-import { computeSpecificity } from './specificity';
+import type { RuleSource } from '@frontend-editor/shared';
+import { computeSpecificity, compareSpecificity } from './specificity';
 
 const RULE_COUNT_CEILING = 5_000;
 const ASYNC_CHUNK_SIZE = 500;
@@ -169,6 +170,80 @@ export function getMatchedRulesAsync(
       requestIdleCallback(processChunk);
     }
   });
+}
+
+/**
+ * Return the cascade-winning rule that currently sets `property` on the
+ * matched-rule list, or null if no rule sets it.
+ *
+ * Cascade order (CSS spec):
+ *   1. !important > normal — encoded by the trailing " !important" suffix on
+ *      the value extracted by `extractDeclarations` (priority within layers
+ *      and cascade origins is approximated; this is good enough for author
+ *      stylesheets, which is the editing target).
+ *   2. Specificity (a, b, c) — higher wins.
+ *   3. Source order — later in the document wins (higher `sourceIndex`).
+ *
+ * Inline styles (isInline=true) carry specificity [Infinity, 0, 0] so they
+ * win unconditionally.
+ */
+export function findOwningRule(
+  rules: readonly MatchedRule[],
+  property: string,
+): MatchedRule | null {
+  let winner: MatchedRule | null = null;
+  let winnerImportant = false;
+
+  for (const rule of rules) {
+    const value = rule.declarations.get(property);
+    if (value == null) continue;
+
+    const important = / !important$/.test(value);
+
+    if (winner == null) {
+      winner = rule;
+      winnerImportant = important;
+      continue;
+    }
+
+    // !important beats normal regardless of specificity.
+    if (important && !winnerImportant) {
+      winner = rule;
+      winnerImportant = true;
+      continue;
+    }
+    if (!important && winnerImportant) continue;
+
+    const cmp = compareSpecificity(rule.specificity, winner.specificity);
+    if (cmp > 0 || (cmp === 0 && rule.sourceIndex >= winner.sourceIndex)) {
+      winner = rule;
+      winnerImportant = important;
+    }
+  }
+
+  return winner;
+}
+
+/**
+ * Convert a MatchedRule into the cross-package RuleSource shape that flows
+ * through the diff queue and out to the MCP server.
+ *
+ * Specificity is JSON-serialized; CSSOM inline rules use Infinity which
+ * collapses to null on the wire. Cap inline at a sentinel finite value so
+ * the receiving agent sees a real number tuple.
+ */
+export function toRuleSource(rule: MatchedRule): RuleSource {
+  const [a, b, c] = rule.specificity;
+  const finiteA = Number.isFinite(a) ? a : 10000;
+  return {
+    selector: rule.selectorText,
+    sourceHref: rule.sourceHref,
+    sourceIndex: rule.sourceIndex,
+    specificity: [finiteA, b, c] as const,
+    isInline: rule.isInline,
+    mediaQuery: rule.mediaQuery,
+    layerName: rule.layerName,
+  };
 }
 
 // ---------------------------------------------------------------------------

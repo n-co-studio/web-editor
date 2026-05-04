@@ -71,6 +71,18 @@ function registerTools(server: McpServer, bridge: Bridge): void {
         'Returns all visual diffs and operator notes queued by the Chrome extension. ' +
         'Diffs may include CSS property changes (in `changes`), element reorder operations ' +
         '(in `reorderChanges`), and/or element insertion operations (in `insertChanges`). ' +
+        'Each PropertyChange in `changes` may carry a `source` field identifying the existing ' +
+        'CSS rule that currently owns the property — including its selector, sourceHref ' +
+        '(stylesheet URL), specificity, and any enclosing @media / @layer scope. When `source` ' +
+        'is present, edit the existing declaration in-place inside its original scope (preserve ' +
+        'the @media / @layer wrapper) — do NOT append a new override declaration, which would ' +
+        'produce redundant CSS and shadow the responsive rule. When `source` is absent, the ' +
+        'property has no current rule and a new declaration should be written at an appropriate ' +
+        'site (typically the file in `element.sourceFile`). The diff `context.breakpoint` and ' +
+        '`context.viewport` indicate which breakpoint was active when the edit was made; if the ' +
+        '`source.mediaQuery` matches that breakpoint, the edit is breakpoint-scoped; if ' +
+        '`source` is absent at a non-default breakpoint, consider whether the new declaration ' +
+        'should be wrapped in an @media block matching `context.breakpointValue`. ' +
         'When `reorderChanges` is present with empty `changes`, the intent is ' +
         'to physically reorder children in the source file at `element.sourceFile:element.sourceLine`, ' +
         'not to add a CSS `order` property. Each reorder change includes fromIndex, toIndex, ' +

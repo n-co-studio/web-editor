@@ -49,9 +49,32 @@ export interface NoteEntry {
 }
 
 /**
+ * Provenance for a CSS declaration that currently sets a property on an element.
+ * Captures the cascade winner at the moment the edit was made so a downstream
+ * agent can edit the existing rule in-place (preserving its @media / @layer /
+ * @supports scope) instead of appending an override declaration.
+ *
+ * Absence of `source` on a PropertyChange means no existing rule sets the
+ * property — the agent should write a new declaration at an appropriate site.
+ */
+export interface RuleSource {
+  readonly selector: string;
+  readonly sourceHref: string | null;
+  readonly sourceIndex: number;
+  readonly specificity: readonly [number, number, number];
+  readonly isInline: boolean;
+  readonly mediaQuery?: string;
+  readonly layerName?: string;
+}
+
+/**
  * A single CSS property change.
  * Property is always a CSS longhand name — shorthand expansion
  * happens at the extension layer before diff creation.
+ *
+ * `source` identifies the existing rule (if any) that currently sets this
+ * property, including its `@media` / `@layer` context. Downstream agents
+ * should edit the source rule in-place when present to avoid CSS bloat.
  */
 export interface PropertyChange {
   readonly property: string;
@@ -60,6 +83,7 @@ export interface PropertyChange {
   readonly fromToken?: string;
   readonly toToken?: string;
   readonly unit?: string;
+  readonly source?: RuleSource;
 }
 
 /**

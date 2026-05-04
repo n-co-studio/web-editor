@@ -11,27 +11,49 @@ import type {
   ReparentChange,
   RelatedChange,
   PageContext,
+  RuleSource,
 } from '@frontend-editor/shared';
 import type { TokenStore } from '../tokens/store';
 
 /**
+ * Resolves the cascade-winning rule that currently sets a property on an
+ * element. Returns undefined if no rule sets it (e.g. computed default,
+ * UA stylesheet, or property being introduced fresh).
+ */
+export type RuleSourceResolver = (
+  element: Element,
+  property: string,
+) => RuleSource | undefined;
+
+/**
  * Assembles complete VisualDiff objects from editing results.
  * Handles UUID generation, timestamp, PageContext, sourceVerified flag,
- * and client-side token resolution for fromToken/toToken fields.
+ * client-side token resolution for fromToken/toToken fields, and source
+ * provenance (which CSS rule currently owns each property — including
+ * @media / @layer context).
+ *
+ * Source provenance is best-effort: when no resolver is configured or the
+ * caller doesn't pass the live element, the `source` field is simply
+ * omitted (signaling "no known owning rule") rather than failing the build.
  */
 export class DiffBuilder {
   constructor(
     private readonly tabId: string,
     private readonly tokenStore: TokenStore,
+    private readonly resolveRuleSource?: RuleSourceResolver,
   ) {}
 
   /** Build a VisualDiff from an element and its property changes. */
-  build(elementInfo: ElementInfo, changes: PropertyChange[]): VisualDiff {
+  build(
+    elementInfo: ElementInfo,
+    changes: PropertyChange[],
+    element?: Element,
+  ): VisualDiff {
     return {
       id: crypto.randomUUID(),
       timestamp: new Date().toISOString(),
       element: elementInfo,
-      changes: changes.map((c) => this.resolveTokens(c)),
+      changes: changes.map((c) => this.enrich(c, element)),
       context: this.buildPageContext(),
       status: 'pending',
       sourceVerified: Boolean(elementInfo.sourceFile),
@@ -85,12 +107,13 @@ export class DiffBuilder {
     elementInfo: ElementInfo,
     attributeChanges: AttributeChange[],
     cssChanges?: PropertyChange[],
+    element?: Element,
   ): VisualDiff {
     return {
       id: crypto.randomUUID(),
       timestamp: new Date().toISOString(),
       element: elementInfo,
-      changes: cssChanges ? cssChanges.map((c) => this.resolveTokens(c)) : [],
+      changes: cssChanges ? cssChanges.map((c) => this.enrich(c, element)) : [],
       attributeChanges,
       context: this.buildPageContext(),
       status: 'pending',
@@ -145,12 +168,13 @@ export class DiffBuilder {
     elementInfo: ElementInfo,
     changes: PropertyChange[],
     relatedChanges: RelatedChange[],
+    element?: Element,
   ): VisualDiff {
     return {
       id: crypto.randomUUID(),
       timestamp: new Date().toISOString(),
       element: elementInfo,
-      changes: changes.map((c) => this.resolveTokens(c)),
+      changes: changes.map((c) => this.enrich(c, element)),
       relatedChanges,
       context: this.buildPageContext(),
       status: 'pending',
@@ -161,6 +185,20 @@ export class DiffBuilder {
   // -----------------------------------------------------------------------
   // Internals
   // -----------------------------------------------------------------------
+
+  /**
+   * Resolve tokens and stamp source provenance onto a property change.
+   * Source resolution is best-effort: silently skipped if the resolver is
+   * absent, the element is absent, or the caller already supplied a source.
+   */
+  private enrich(change: PropertyChange, element: Element | undefined): PropertyChange {
+    const tokenResolved = this.resolveTokens(change);
+    if (tokenResolved.source != null || element == null || this.resolveRuleSource == null) {
+      return tokenResolved;
+    }
+    const source = this.resolveRuleSource(element, change.property);
+    return source ? { ...tokenResolved, source } : tokenResolved;
+  }
 
   /** Resolve fromToken and toToken using the client-side token store. */
   private resolveTokens(change: PropertyChange): PropertyChange {
