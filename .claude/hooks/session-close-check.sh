@@ -747,6 +747,84 @@ if [ -z "$UNCOMMITTED" ] && [ -z "$STAGED" ] && [ -z "$RECENT_COMMITS" ]; then
   exit 0
 fi
 
+# --- Force-commit backstop (opt-in) ---
+# When the agent writes a session log claiming completion (`SESSION_LOG_MODIFIED=true`)
+# but leaves the working tree dirty, the workflow's step 3 ("Commit all remaining
+# changes including the session log") never happened. Without this backstop the
+# hook escalates and the work is stranded — the dominant historical failure
+# pattern (47% of dirty-tree escalations in the archive analysis: agent declared
+# gates passed but never committed).
+#
+# When `REPO_OS_FORCE_COMMIT_BACKSTOP=1`, the hook stages everything and commits
+# with a clearly-marked `[backstop]` message before the failure collector runs.
+# Pre-commit gates do NOT fire on this commit (the backstop is a subshell of the
+# hook, not an agent tool call) — the work is committed on the agent's
+# self-reported gate-pass authority. An escalation YAML is still written so the
+# operator has an audit trail.
+#
+# Exempt from backstop: experiment/* branches; template mode; explicit
+# SKIP_UNCOMMITTED_CHECK=1 override; sessions with no SESSION_LOG_MODIFIED
+# (those are class C failures — workflow didn't engage at all, force-commit
+# would create surprising commits with no narrative).
+if [ "${REPO_OS_FORCE_COMMIT_BACKSTOP:-0}" = "1" ] \
+   && [ "${SKIP_UNCOMMITTED_CHECK:-0}" != "1" ] \
+   && [ "$IS_TEMPLATE" = false ] \
+   && [ "$SESSION_LOG_MODIFIED" = true ] \
+   && { [ -n "$UNCOMMITTED" ] || [ -n "$STAGED" ]; }; then
+  _FCB_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+  case "$_FCB_BRANCH" in
+    experiment/*) ;;  # exempt per workflow.md
+    *)
+      log_override "session-close-check" "REPO_OS_FORCE_COMMIT_BACKSTOP"
+      _FCB_SESSION_ID=$(get_session_id 2>/dev/null || echo "unknown")
+      _FCB_FILES_COUNT=$(printf '%s\n%s\n' "$UNCOMMITTED" "$STAGED" \
+          | grep -cv '^$' 2>/dev/null || echo 0)
+      _FCB_MSG="[backstop] close-phase commit — agent skipped step 3"$'\n\n'"\
+The session log was updated but git commit was never run. Backstop staged \
+$_FCB_FILES_COUNT file(s) and committed on the agent's self-reported gate-pass.\
+"$'\n\n'"\
+Session: $_FCB_SESSION_ID"$'\n'"\
+Pre-commit gates: NOT enforced (backstop runs in close-hook, not as an agent \
+tool call). Operator should review the commit if the session log's gate \
+self-report is suspect."
+      git add -A 2>/dev/null
+      if git -c user.email='backstop@repo-os' -c user.name='Repo OS Backstop' \
+             commit -m "$_FCB_MSG" 2>/dev/null; then
+        _FCB_COMMIT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "")
+        log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" \
+            "force_commit_backstop_fired" "$_FCB_COMMIT_SHA" "$_FCB_BRANCH" || true
+        # Write an escalation for the audit trail.
+        _FCB_ESC_DIR="$REPO_ROOT/.claude/.automation/escalations"
+        mkdir -p "$_FCB_ESC_DIR" 2>/dev/null
+        _FCB_ESC_TS=$(date -u +'%Y%m%d-%H%M%S')
+        _FCB_ESC_FILE="$_FCB_ESC_DIR/esc-force-commit-backstop-$_FCB_ESC_TS.yaml"
+        {
+          printf 'escalation:\n'
+          printf '  id: "esc-force-commit-backstop-%s"\n' "$_FCB_ESC_TS"
+          printf '  session_id: "%s"\n' "$_FCB_SESSION_ID"
+          printf '  type: "force-commit-backstop"\n'
+          printf '  severity: "advisory"\n'
+          printf '  phase_at_exit: "close"\n'
+          printf '  message: "Force-commit backstop fired — agent updated session log but did not run git commit"\n'
+          printf '  context: "branch: %s; commit: %s; files_count: %s"\n' \
+              "$_FCB_BRANCH" "$_FCB_COMMIT_SHA" "$_FCB_FILES_COUNT"
+          printf '  created_at: "%s"\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          printf '  resolved: false\n'
+          printf '  resolution: ""\n'
+        } > "$_FCB_ESC_FILE" 2>/dev/null
+        # Re-read uncommitted state so subsequent checks see the clean tree.
+        UNCOMMITTED=$(git diff --name-only 2>/dev/null || echo "")
+        STAGED=$(git diff --cached --name-only 2>/dev/null || echo "")
+      else
+        # Commit failed — leave UNCOMMITTED/STAGED alone so the normal
+        # blocking flow fires below, but log the attempt for the operator.
+        log_hook_event "session-close-check" "Stop" "" "block" "$START_MS" \
+            "force_commit_backstop_failed" "" "$_FCB_BRANCH" || true
+      fi
+      ;;
+  esac
+fi
+
 # --- Log overrides (once each, before failure collection) ---
 if [ "${SKIP_CONTRACT_CHECK:-0}" = "1" ]; then
   log_override "session-close-check" "SKIP_CONTRACT_CHECK"
