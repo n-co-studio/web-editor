@@ -747,7 +747,7 @@ if [ -z "$UNCOMMITTED" ] && [ -z "$STAGED" ] && [ -z "$RECENT_COMMITS" ]; then
   exit 0
 fi
 
-# --- Force-commit backstop (opt-in) ---
+# --- Force-commit backstop (default-on) ---
 # When the agent writes a session log claiming completion (`SESSION_LOG_MODIFIED=true`)
 # but leaves the working tree dirty, the workflow's step 3 ("Commit all remaining
 # changes including the session log") never happened. Without this backstop the
@@ -755,18 +755,18 @@ fi
 # pattern (47% of dirty-tree escalations in the archive analysis: agent declared
 # gates passed but never committed).
 #
-# When `REPO_OS_FORCE_COMMIT_BACKSTOP=1`, the hook stages everything and commits
-# with a clearly-marked `[backstop]` message before the failure collector runs.
-# Pre-commit gates do NOT fire on this commit (the backstop is a subshell of the
-# hook, not an agent tool call) — the work is committed on the agent's
-# self-reported gate-pass authority. An escalation YAML is still written so the
-# operator has an audit trail.
+# The hook stages everything and commits with a clearly-marked `[backstop]`
+# message before the failure collector runs. Pre-commit gates do NOT fire on
+# this commit (the backstop is a subshell of the hook, not an agent tool call)
+# — the work is committed on the agent's self-reported gate-pass authority.
+# An escalation YAML is still written so the operator has an audit trail.
 #
 # Exempt from backstop: experiment/* branches; template mode; explicit
-# SKIP_UNCOMMITTED_CHECK=1 override; sessions with no SESSION_LOG_MODIFIED
-# (those are class C failures — workflow didn't engage at all, force-commit
-# would create surprising commits with no narrative).
-if [ "${REPO_OS_FORCE_COMMIT_BACKSTOP:-0}" = "1" ] \
+# SKIP_UNCOMMITTED_CHECK=1 override; explicit SKIP_FORCE_COMMIT_BACKSTOP=1
+# override; sessions with no SESSION_LOG_MODIFIED (class C failures — workflow
+# didn't engage at all, force-commit would create surprising commits with no
+# narrative).
+if [ "${SKIP_FORCE_COMMIT_BACKSTOP:-0}" != "1" ] \
    && [ "${SKIP_UNCOMMITTED_CHECK:-0}" != "1" ] \
    && [ "$IS_TEMPLATE" = false ] \
    && [ "$SESSION_LOG_MODIFIED" = true ] \
@@ -775,7 +775,10 @@ if [ "${REPO_OS_FORCE_COMMIT_BACKSTOP:-0}" = "1" ] \
   case "$_FCB_BRANCH" in
     experiment/*) ;;  # exempt per workflow.md
     *)
-      log_override "session-close-check" "REPO_OS_FORCE_COMMIT_BACKSTOP"
+      # Log the fire (not an override — this is default behaviour now).
+      # If the operator explicitly opted out via SKIP_FORCE_COMMIT_BACKSTOP=1,
+      # this branch is unreachable.
+      :
       _FCB_SESSION_ID=$(get_session_id 2>/dev/null || echo "unknown")
       _FCB_FILES_COUNT=$(printf '%s\n%s\n' "$UNCOMMITTED" "$STAGED" \
           | grep -cv '^$' 2>/dev/null || echo 0)
