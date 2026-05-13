@@ -9,6 +9,7 @@
     "build:web-embed:copy": "node ./scripts/copy-web-embed.mjs",
     "build:web-embed": "node esbuild.config.js && npm run build:web-embed:copy",
     "typecheck": "tsc --noEmit",
+    "test": "node ./scripts/run-tests.mjs",
     "clean": "rm -rf dist"
   },
   "dependencies": {

@@ -1,4 +1,9 @@
-import type { VisualDiff, NoteEntry, CompoundChildDescriptor } from '@frontend-editor/shared';
+import type {
+  VisualDiff,
+  NoteEntry,
+  CompoundChildDescriptor,
+  RuleSource,
+} from '@frontend-editor/shared';
 
 /**
  * Serialize active diffs and notes into a clipboard-ready prompt.
@@ -12,6 +17,12 @@ export function serializeToPrompt(
   const sections: string[] = [];
 
   sections.push('# Visual Changes from Frontend Editor\n');
+
+  if (hasResponsiveContext(diffs)) {
+    sections.push(
+      '> Scope edits to the active breakpoint where applicable. Active breakpoint is shown on each element heading; per-property [@ ...] annotations indicate a rule defined at a different breakpoint.\n',
+    );
+  }
 
   // Group diffs by source file (empty sourceFile → "unresolved" bucket)
   const byFile = new Map<string, VisualDiff[]>();
@@ -43,17 +54,22 @@ export function serializeToPrompt(
     sections.push(heading + '\n');
 
     for (const diff of fileDiffs) {
-      // Element heading with selector and optional line number
+      // Element heading with selector, optional line number, and optional breakpoint annotation
       const lineInfo = diff.element.sourceLine
         ? ` (line ${diff.element.sourceLine})`
         : '';
-      sections.push(`### \`${diff.element.selector}\`${lineInfo}\n`);
+      const breakpointInfo = formatBreakpointHeading(diff.context);
+      sections.push(`### \`${diff.element.selector}\`${lineInfo}${breakpointInfo}\n`);
 
       // Property changes
       for (const c of diff.changes) {
         const tokenInfo = formatTokenInfo(c.fromToken, c.toToken);
+        const sourceContext = formatSourceContext(
+          c.source,
+          diff.context.breakpointValue,
+        );
         sections.push(
-          `- \`${c.property}\`: ${c.fromValue} \u2192 ${c.toValue}${tokenInfo}`,
+          `- \`${c.property}\`: ${c.fromValue} \u2192 ${c.toValue}${tokenInfo}${sourceContext}`,
         );
       }
 
@@ -248,4 +264,66 @@ function formatTokenInfo(
   if (toToken) return ` (\u2192 ${toToken})`;
   if (fromToken) return ` (${fromToken} \u2192)`;
   return '';
+}
+
+/**
+ * Format the element-heading breakpoint annotation from PageContext.
+ * Returns "" when neither breakpoint nor breakpointValue is present.
+ * Handles all four combinations of the two optional fields symmetrically.
+ */
+function formatBreakpointHeading(
+  context: VisualDiff['context'],
+): string {
+  const { breakpoint, breakpointValue } = context;
+  if (breakpoint && breakpointValue) return ` \u2014 @ ${breakpoint} (${breakpointValue})`;
+  if (breakpointValue) return ` \u2014 @ ${breakpointValue}`;
+  if (breakpoint) return ` \u2014 @ ${breakpoint}`;
+  return '';
+}
+
+/**
+ * Format the per-property source-rule annotation when its media query diverges
+ * from the active breakpoint. Extension point reused by downstream consumers.
+ *
+ * @param source                Cascade-winning rule for the property (RuleSource.mediaQuery
+ *                              is expected to be raw CSSOM conditionText, e.g.
+ *                              "(min-width: 768px)" — not a design-token name).
+ * @param activeBreakpointValue PageContext.breakpointValue (the design-system-resolved
+ *                              value, e.g. "768px") — NOT PageContext.breakpoint (the
+ *                              token name). The token name is shown separately on the
+ *                              element heading and is not used for divergence comparison.
+ *
+ * Comparison is heuristic: whitespace stripped and lowercased. Token-resolved
+ * values (e.g. "768px") will not normalise to conditionText (e.g.
+ * "(min-width: 768px)"); divergent annotations are emitted in that case.
+ */
+export function formatSourceContext(
+  source: RuleSource | undefined,
+  activeBreakpointValue: string | undefined,
+): string {
+  if (!source || !source.mediaQuery) return '';
+  const normSource = normaliseMediaQuery(source.mediaQuery);
+  const normActive = activeBreakpointValue
+    ? normaliseMediaQuery(activeBreakpointValue)
+    : '';
+  if (normActive && normSource === normActive) return '';
+  return ` [@ ${source.mediaQuery}]`;
+}
+
+function normaliseMediaQuery(value: string): string {
+  return value.replace(/\s+/g, '').toLowerCase();
+}
+
+/**
+ * True when any diff carries breakpoint metadata on its context or a
+ * source.mediaQuery on any property change.
+ */
+function hasResponsiveContext(diffs: readonly VisualDiff[]): boolean {
+  for (const d of diffs) {
+    if (d.context.breakpoint || d.context.breakpointValue) return true;
+    for (const c of d.changes) {
+      if (c.source?.mediaQuery) return true;
+    }
+  }
+  return false;
 }

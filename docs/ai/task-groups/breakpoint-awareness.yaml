@@ -1,0 +1,87 @@
+identity:
+  group_name: breakpoint-awareness
+  created_by_session: 148
+  created_date: 2026-05-13
+  execution: sequential
+
+briefs:
+  - title: "Surface breakpoint context in copy-prompt markdown"
+    sequence: 1
+    session: 148
+    branch: feature/breakpoint-awareness
+    status: complete
+    next_brief: "Brief 2 (consumer of formatSourceContext helper)"
+    boundaries:
+      - packages/chrome-extension/src/content/batching/prompt-serializer.ts
+  - title: "Brief 2 (consumer of formatSourceContext helper)"
+    sequence: 2
+    session: null
+    branch: feature/breakpoint-awareness
+    status: pending
+    next_brief: ""
+    boundaries: []
+
+intent:
+  goal: >-
+    Make the copy-prompt markdown carry breakpoint context (active breakpoint
+    on element heading, per-property [@ mediaQuery] annotation when a rule
+    diverges from the active breakpoint, and a blockquote instruction when
+    any breakpoint metadata is present) so the receiving AI knows which
+    viewport / media-query the edits target.
+  verification:
+    - Edit at viewport 1280 with a `lg` design token shows `— @ lg (1280px)` on the element heading
+    - Edit at a viewport with no design token loaded shows no breakpoint annotation
+    - Per-property `[@ <conditionText>]` appears only when source.mediaQuery differs from active breakpoint
+    - Active-breakpoint rules emit no per-property annotation
+    - Instruction blockquote appears only when at least one diff carries breakpoint or mediaQuery metadata
+    - Raw-JSON HTML comment is byte-identical to pre-change output
+  scope_files:
+    - packages/chrome-extension/src/content/batching/prompt-serializer.ts
+  spec_references:
+    - docs/spec/compiled/v1/data-contracts.md
+    - docs/spec/compiled/v1/features/feature-002-visual-property-editing.md
+    - docs/spec/compiled/v1/features/feature-005-mcp-server-bridge.md
+
+conventions:
+  naming:
+    - pattern: "formatSourceContext(source, activeBreakpointValue)"
+      scope: "prompt-serializer.ts helper signature — Brief 2 reuses this name"
+  patterns:
+    - pattern: "Heading annotation uses em-dash + @ token (value) form"
+      rationale: "Visual separation from selector + line-info; readable in copy-paste"
+    - pattern: "Per-property annotation uses [@ ...] suffix (only when divergent)"
+      rationale: "Bracketed marker is unambiguous; absence is the signal for active-breakpoint rules"
+    - pattern: "Comparison normaliser strips whitespace and lowercases conditionText before comparing"
+      rationale: "Heuristic chosen by brief; imperfect — Brief 1 includes test cases covering the divergence path"
+  decisions: []
+  boundaries:
+    - module: packages/chrome-extension/src/content/batching/prompt-serializer.ts
+      owner_brief: "Surface breakpoint context in copy-prompt markdown"
+
+integration_points:
+  - name: formatSourceContext helper
+    producer: "Surface breakpoint context in copy-prompt markdown"
+    consumer: "Brief 2 (consumer of formatSourceContext helper)"
+    artifact: packages/chrome-extension/src/content/batching/prompt-serializer.ts
+
+session_decisions:
+  - session: 148
+    decision: "Tests use Node's built-in test runner with an esbuild-based bundler script — no new dev-dependencies"
+    rationale: "Pragmatist flagged vitest as over-engineered for the four-case suite in a zero-test repo; lightweight node:test runner matches the existing esbuild build chain"
+  - session: 148
+    decision: "Heading annotation handles all four combinations of {breakpoint, breakpointValue} symmetrically"
+    rationale: "Cohesion review caught that the original two-branch form silently dropped the token-only case; symmetric handling avoids surprising the receiving AI when only one of the fields is populated"
+
+governance:
+  - brief_sequence: 1
+    gates_a:
+      A1: pass
+      A2: pass
+      A3: pass
+      A4: pass
+      A5: pass
+      A6: pass
+    gates_b:
+      B1: pass
+    timestamp: 2026-05-13T23:10:00Z
+    notes: "Cohesion review BLOCKED on first pass (formatBreakpointHeading missing breakpoint-only branch); fixed and re-reviewed APPROVED. Diff-review APPROVED on first pass. QA APPROVED."
