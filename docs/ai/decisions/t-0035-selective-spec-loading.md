@@ -122,3 +122,7 @@ In mature projects (massimo: 42 files, 612KB, 31 feature briefs), full spec load
 1. **Digest staleness between Prompt 0 runs:** If a feature brief is added via Prompt B (two-brief Prompt T path), the digest may not include it until the next Prompt 0 Update or manual `spec-digest.sh` run. Mitigated by: the trigger rule above.
 2. **Specialist under-loading:** A specialist might miss context because the Orchestrator didn't include a relevant spec. Mitigated by: Critic always getting full specs, fallback to full load when `Spec References` absent, and specialists retaining codebase access for independent exploration.
 3. **Digest quality for retroactive projects:** Existing spec files without YAML frontmatter produce less-structured digests. Mitigated by header+paragraph fallback and Prompt 0 Update path.
+
+## Amendment (Decision 0038 — Handoff Bundle)
+
+When a handoff bundle is present, selective spec loading runs once at Prompt T and the resulting `spec_snapshot.files[]` (path + sha256) is sealed into the bundle. Prompt B's `drift-check` validates the snapshot matches the working tree before forward-jumping; if any file's sha differs, drift-check returns code 4 (focused re-approval). This eliminates the second selective-load pass that Prompt B would otherwise run in the legacy path. Sessions without a bundle (legacy briefs) continue to run selective spec loading at Prompt B init.

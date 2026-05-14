@@ -186,6 +186,8 @@ The Orchestrator synthesizes specialist findings into a draft task brief:
 
 Present a concise summary of the draft task brief to the operator — title, goal, scope (files/modules), approach outline (numbered steps, one line each), and key risks. Do NOT display the full brief at this stage. Then use `AskUserQuestion` (not conversational text) to request approval — this ensures the operator gets a structured dialog. This triggers `plan-approved` state via `plan-approval.sh` — required for `taskdef-brief` sessions per Decision 0029.
 
+The approval question merges brief approval and auto/review mode selection into a single gate (Decision 0038 — the bundle approval here is the single operator-ack for the downstream Prompt B session; Prompt B's `drift-check` phase reads `mode` from the bundle rather than re-prompting).
+
 **Brief approval AskUserQuestion template:**
 
 ```json
@@ -196,12 +198,20 @@ Present a concise summary of the draft task brief to the operator — title, goa
       "header": "<brief title and summary>",
       "options": [
         {
-          "label": "Approve — display only",
-          "description": "Brief is final — display in copy-paste format"
+          "label": "Approve — review",
+          "description": "Brief is final — write the handoff bundle and display the copy-paste block. Downstream Prompt B will pause at op-review before commit."
         },
         {
-          "label": "Approve & queue",
-          "description": "Brief is final — write to disk and add to automation queue (defaults: auto-approve yes, solo yes, push no)"
+          "label": "Approve — auto",
+          "description": "Brief is final — write the handoff bundle and display the copy-paste block. Downstream Prompt B will proceed autonomously through merge."
+        },
+        {
+          "label": "Approve & queue (review)",
+          "description": "Brief is final — write the handoff bundle, write the brief to disk, queue for headless execution in review mode."
+        },
+        {
+          "label": "Approve & queue (auto)",
+          "description": "Brief is final — write the handoff bundle, write the brief to disk, queue for headless execution in auto mode."
         },
         {
           "label": "Revise",
@@ -220,18 +230,21 @@ Present a concise summary of the draft task brief to the operator — title, goa
 
 **Hook contract annotations (`plan-approval.sh`):**
 - `question` text: contains "task" and "brief" — Gate 1 passes (line 53, regex `\b(plan|brief|task)\b`)
-- `question` text contains "Approve" — Gate 2 passes at line 61 (regex `\b(approv|confirm|proceed|accept|ready)\b`); both "Approve — display only" and "Approve & queue" labels provide redundant coverage via line 63
-- Selected answer (Gate 3 — line 89): both "Approve — display only" and "Approve & queue" label text contains "Approve", satisfying the affirmative check. "Queue" in the label does not interfere with any gate regex — `DETECTED_MODE` (lines 109–113) scans for `\bauto\b` or `\breview\b`, neither appears, so mode defaults to `review` (correct behavior)
+- `question` text contains "Approve" — Gate 2 passes at line 61 (regex `\b(approv|confirm|proceed|accept|ready)\b`); option labels also provide redundant coverage via line 63
+- Selected answer (Gate 3 — line 89): every `Approve — *` and `Approve & queue (*)` label contains "Approve", satisfying the affirmative check
+- Mode detection (lines 109–113): `DETECTED_MODE` scans the selected label for `\bauto\b` or `\breview\b`; the `(review)` / `(auto)` / `— review` / `— auto` qualifiers in the labels above make mode load-bearing on every approve path
 - Operators who want **Narrow** (split into smaller briefs) can select "Other" and type "Narrow" or "Split" — see Narrow path documentation below
 
 The operator reviews and may:
-- **Approve — display only** — Brief is final. Proceeds to Step 5 (display brief in copy-paste format), then close.
-- **Approve & queue** — Brief is final. Skips display and executes queue intake inline:
+- **Approve — review** — Brief is final. Writes the handoff bundle (Step 5 `Bundle Write`) and proceeds to Step 5 display (in copy-paste format), then close. Downstream Prompt B reads the bundle, runs `drift-check`, and pauses at op-review before commit.
+- **Approve — auto** — Same as `review` but with `mode: auto` in the bundle. Downstream Prompt B completes autonomously through merge.
+- **Approve & queue (review)** / **Approve & queue (auto)** — Brief is final. Writes handoff bundle, writes brief to disk, executes queue intake inline. `mode` in the bundle reflects the qualifier selected:
   1. **Write the brief to disk**: Path: `.claude/.automation/briefs/<YYYYMMDD-HHMMSS>-<slug>.md` (slug: derived from brief title, kebab-case, truncated to 50 chars). For task groups: write each brief as a separate file using the same naming convention.
   2. **Write the sidecar contract**: For singular briefs that contain a `### Task Contract` section, also write the YAML content of that section as a standalone file alongside the brief: same path and slug, with `.contract.yaml` extension instead of `.md` (e.g., `.claude/.automation/briefs/<YYYYMMDD-HHMMSS>-<slug>.contract.yaml`). This provides a machine-readable contract for the automation layer. Task group briefs (which use `Contract:` fields in `### Task Group`, not a `### Task Contract` section) do not get a sidecar.
-  3. **Add to queue**: Run `queue-cli.sh add --brief <path> --auto-approve --solo` (defaults: auto-approve yes, solo yes, push no). For task groups: add all briefs and create a work order. If the group has sequential execution, add entries in order with `--branch` for the shared group branch. If parallel, add all content briefs then the merge brief — each parallel content brief gets its own per-brief branch (`{group-branch}/brief-{seq}`), so omit `--branch` for content briefs (the worktree session creates the branch); use `--branch` for the merge brief only (targeting the group base branch).
-  4. **Start daemon**: Run `queue-cli.sh start-daemon` (checks PID file, starts daemon if not running).
-  5. **Confirm**: "Brief queued. Daemon is running." (or "Briefs queued. Work order created. Daemon is running." for task groups).
+  3. **Write the handoff bundle** (Decision 0038): write the bundle YAML alongside the brief at `.claude/.automation/briefs/<YYYYMMDD-HHMMSS>-<slug>.bundle.yaml` (singular briefs) or under `.claude/local/task-groups/{group}/briefs/{seq}.bundle.yaml` (task group briefs). Mode field reflects the qualifier in the selected option (`review` or `auto`). See § Bundle Schema below.
+  4. **Add to queue**: Run `queue-cli.sh add --brief <path> --auto-approve --solo` (defaults: auto-approve yes, solo yes, push no). The bundle path is recorded in the queue entry alongside the brief path. For task groups: add all briefs and create a work order. If the group has sequential execution, add entries in order with `--branch` for the shared group branch. If parallel, add all content briefs then the merge brief — each parallel content brief gets its own per-brief branch (`{group-branch}/brief-{seq}`), so omit `--branch` for content briefs (the worktree session creates the branch); use `--branch` for the merge brief only (targeting the group base branch).
+  5. **Start daemon**: Run `queue-cli.sh start-daemon` (checks PID file, starts daemon if not running).
+  6. **Confirm**: "Brief queued. Daemon is running." (or "Briefs queued. Work order created. Daemon is running." for task groups).
   Operators who want non-default queue flags (e.g., push:yes, solo:no) can select "Other" and specify custom flags, or adjust post-hoc via `queue-cli.sh`.
 - **Revise** — Operator requests changes. Update and re-present.
 - **Abandon** — Operator decides not to proceed. No output.
@@ -251,11 +264,17 @@ When the operator selects **sequential** or parallel is not offered: existing be
 
 Do not finalize without explicit operator approval.
 
-#### Step 5 — Output
+#### Step 5 — Output (Bundle Write + Display)
 
-**This step runs only for "Approve — display only".** When the operator selected "Approve & queue", the brief was already written to disk and queued in Step 4 — skip this step entirely.
+**This step runs for both `Approve — review` and `Approve — auto`.** When the operator selected `Approve & queue (*)`, the brief, sidecar contract, and bundle were already written to disk and queued in Step 4 — skip the display half of this step entirely.
 
-Display the finalized task brief in a self-contained fenced code block. Follow the Session Handoff Convention (see `workflow.md`): first line is a plain-text short title that becomes the VS Code tab label. **For phased briefs (Narrow path):** display each brief in its own separate fenced code block so the operator can copy-paste them individually. Do not bundle multiple briefs into a single block.
+**Bundle Write (mandatory on every `Approve — *` path):** Write the handoff bundle to disk before displaying the brief. Path:
+- **Singular brief:** `.claude/local/handoff-bundle.yaml` (overwrites any prior bundle from a crashed session — same single-file pattern as `task-contract.yaml`).
+- **Task group:** `.claude/local/task-groups/{group}/briefs/{seq}.bundle.yaml` (one per brief in the group).
+
+Use shell I/O (a single `printf > path` line) — the path sits under `.claude/local/` and is exempt from the state-guard. Populate the bundle from the synthesized brief content (Step 3) and the operator's selection in Step 4 (`mode`). Compute `spec_snapshot.files[].sha` by `sha256sum`-ing each file in `contract.spec_references` at the working-copy state at approval time. Set `expiry.soft_hours: 24` and `expiry.hard_hours: 168` (defaults from Decision 0038 — operators who want non-default expiry can override at queue time).
+
+After writing the bundle, display the finalized task brief in a self-contained fenced code block. Follow the Session Handoff Convention (see `workflow.md`): first line is a plain-text short title that becomes the VS Code tab label. **For phased briefs (Narrow path):** display each brief in its own separate fenced code block so the operator can copy-paste them individually. Do not bundle multiple briefs into a single block. The displayed handoff block ends with a note: `Bundle: .claude/local/handoff-bundle.yaml` so the receiving session can find it.
 
 ~~~
 [Short Title] — Task Brief
@@ -386,11 +405,15 @@ lifecycle: task-scoped
 - **Consumes:** [...]
 ```
 
-After displaying the brief, instruct: "Copy the block above and paste it into a new session to begin implementation." For phased briefs, instruct: "Copy each block into its own new session. Run them in order." For parallel briefs, instruct: "Copy each block into its own new session. Launch Briefs 1–N in parallel using `claude --worktree` with a unique `REPO_OS_SESSION_ID` per brief. Run the merge brief (Brief M) after all others complete — it will combine the per-brief branches."
+After displaying the brief, instruct: "Copy the block above and paste it into a new session to begin implementation. The handoff bundle at `.claude/local/handoff-bundle.yaml` carries the approved plan — the new session's `drift-check` phase will read it and forward-jump to `build` automatically (Decision 0038)." For phased briefs, instruct: "Copy each block into its own new session. Run them in order. Each brief's bundle lives at `.claude/local/task-groups/{group}/briefs/{seq}.bundle.yaml`." For parallel briefs, instruct: "Copy each block into its own new session. Launch Briefs 1–N in parallel using `claude --worktree` with a unique `REPO_OS_SESSION_ID` per brief. Run the merge brief (Brief M) after all others complete — it will combine the per-brief branches."
+
+#### Bundle Schema
+
+See Decision 0038 § 1 for the full handoff bundle YAML schema. Required top-level fields: `brief_id`, `approved_at`, `approved_by`, `mode`, `contract`, `plan`. Optional: `implementation_design` (top-level mirror — present when the brief has an `### Implementation Design` section), `spec_snapshot`, `pragmatist`, `expiry`. Singular bundles live at `.claude/local/handoff-bundle.yaml`; task group bundles live at `.claude/local/task-groups/{group}/briefs/{seq}.bundle.yaml`.
 
 ## Rules
 
-- REQUIRE: **never write files** except during the queue intake path of Step 4 ("Approve & queue"), where writing brief files to `.claude/.automation/briefs/` and calling `queue-cli.sh` are permitted. All other output goes to the terminal.
+- REQUIRE: **never write files** except for (a) the handoff bundle (Step 5 — always written on `Approve — *` paths under `.claude/local/`), and (b) the queue intake path of Step 4 (`Approve & queue (*)`), where writing brief files + sidecar contract + bundle to `.claude/.automation/briefs/` and calling `queue-cli.sh` are permitted. All other output goes to the terminal.
 - REQUIRE: **never make code changes.** This is an exploration and planning session only. The Step 4 queue intake exception is narrow: only brief files in `.claude/.automation/briefs/` and queue CLI invocations. No product code changes.
 - REQUIRE: **never create session log entries.** Prompt T sessions produce no artifacts and are exempt via the zero-change rule.
 - REQUIRE: **never dispatch specialists in Query mode.** Query mode is conversational — the Orchestrator answers directly.

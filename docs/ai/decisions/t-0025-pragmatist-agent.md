@@ -35,6 +35,8 @@ Introduce a dual-mode Pragmatist agent that reviews implementation proposals for
 
 8. **Agent constraints**: Read-only (tools: Read, Glob, Grep; disallowed: Edit, Write, Bash, Task). Model: sonnet. First action: read `_advisory-board-lite.md` and `_agent-glossary.md`.
 
+9. **Plan-Gating demotion to deterministic check (Decision 0038, amendment)**: When a valid handoff bundle is present at `.claude/local/handoff-bundle.yaml` AND the bundle (or contract) carries an `implementation_design:` field, Plan-Gating's alignment sub-mode is demoted to an Orchestrator-side deterministic check (`deterministic_alignment_check` in `_phase-helper.sh`). The Pragmatist is not dispatched in the aligned case — `pragmatist-signed` is written directly from `bundle.pragmatist.verdict` via `bundle_to_pragmatist_signed`. Full Pragmatist Plan-Gating dispatch is preserved for: (a) sessions without a bundle (legacy path), (b) bundles without `implementation_design` (no design to align against), (c) deterministic check returning `diverged` with operator declining to confirm the divergence.
+
 ## Context
 Existing advisory board specialists (Architect, Critic, Exploration) identify structural gaps, logical errors, and alternatives — but none specifically targets disproportionate complexity. The Reviewer agent checks implementation-level code quality post-build but does not evaluate whether the chosen approach was proportionate to the problem. The Pragmatist fills this gap by catching over-engineering before implementation begins (Prompt T) and before plan approval (Prompt B).
 

@@ -566,22 +566,59 @@ if [ -n "$FILE_PATH" ]; then
     # Blocks if brief contains ### Task Group but session type is not taskgroup/taskgroup-merge.
     check_taskgroup_brief_mismatch "$START_MS"
 
+    # --- Gates 5 + 6: Session overlap + branch isolation (Decision 0013) ---
+    # Decision 0042: read pre-computed verdicts from <state_dir>/phase-state.gates
+    # when the cache is fresh. Cache miss falls through to the inline checks below.
+    # Override env vars are checked first in each branch.
+    _GATES_CACHE_HIT=0
+    if [ "${REPO_OS_SKIP_OVERLAP_CHECK:-0}" != "1" ] || [ "${REPO_OS_SKIP_BRANCH_REUSE:-0}" != "1" ]; then
+      if read_phase_gates; then
+        _GATES_CACHE_HIT=1
+      fi
+    fi
+
     # --- Gate 6: Session overlap check (Decision 0013) ---
-    if ! check_session_overlap; then
-      log_hook_event "write-guard" "PreToolUse" "" "block" "$START_MS" "session_overlap"
-      exit 2
+    if [ "$_GATES_CACHE_HIT" = "1" ]; then
+      if [ "${REPO_OS_SKIP_OVERLAP_CHECK:-0}" = "1" ]; then
+        log_override "write-guard" "REPO_OS_SKIP_OVERLAP_CHECK"
+      elif [ "$GATES_SESSION_OVERLAP" = "blocked" ]; then
+        [ -n "$GATES_SESSION_OVERLAP_DETAIL" ] && echo "$GATES_SESSION_OVERLAP_DETAIL" >&2
+        log_hook_event "write-guard" "PreToolUse" "" "block" "$START_MS" "session_overlap" "cache:hit"
+        exit 2
+      elif [ "$GATES_SESSION_OVERLAP" = "advisory" ] && [ -n "$GATES_SESSION_OVERLAP_DETAIL" ]; then
+        # Surface advisory message — parity with check_session_overlap inline path.
+        echo "$GATES_SESSION_OVERLAP_DETAIL" >&2
+      fi
+    else
+      if ! check_session_overlap; then
+        log_hook_event "write-guard" "PreToolUse" "" "block" "$START_MS" "session_overlap"
+        exit 2
+      fi
     fi
 
     # --- Gate 5: Session branch isolation (Decision 0013) ---
-    CLOSED_BRANCHES_FILE="$REPO_ROOT/.claude/local/closed-branches"
-    if [ -f "$CLOSED_BRANCHES_FILE" ] && grep -qxF "$CURRENT_BRANCH" "$CLOSED_BRANCHES_FILE" 2>/dev/null; then
-      if [ "${REPO_OS_SKIP_BRANCH_REUSE:-0}" = "1" ]; then
-        log_override "write-guard" "REPO_OS_SKIP_BRANCH_REUSE"
-        BG_ALLOW_REASON="branch_reuse_override"
-      else
-        log_hook_event "write-guard" "PreToolUse" "" "block" "$START_MS" "branch_reused"
-        echo "GATE-RECOVERABLE: Branch '$CURRENT_BRANCH' was sealed by a previous session. NEXT: git checkout -b <category>/<description>. (override: REPO_OS_SKIP_BRANCH_REUSE=1)" >&2
-        exit 2
+    if [ "$_GATES_CACHE_HIT" = "1" ]; then
+      if [ "$GATES_BRANCH_ISOLATION" = "blocked" ]; then
+        if [ "${REPO_OS_SKIP_BRANCH_REUSE:-0}" = "1" ]; then
+          log_override "write-guard" "REPO_OS_SKIP_BRANCH_REUSE"
+          BG_ALLOW_REASON="branch_reuse_override"
+        else
+          log_hook_event "write-guard" "PreToolUse" "" "block" "$START_MS" "branch_reused" "cache:hit"
+          echo "GATE-RECOVERABLE: Branch '$CURRENT_BRANCH' was sealed by a previous session. NEXT: git checkout -b <category>/<description>. (override: REPO_OS_SKIP_BRANCH_REUSE=1)" >&2
+          exit 2
+        fi
+      fi
+    else
+      CLOSED_BRANCHES_FILE="$REPO_ROOT/.claude/local/closed-branches"
+      if [ -f "$CLOSED_BRANCHES_FILE" ] && grep -qxF "$CURRENT_BRANCH" "$CLOSED_BRANCHES_FILE" 2>/dev/null; then
+        if [ "${REPO_OS_SKIP_BRANCH_REUSE:-0}" = "1" ]; then
+          log_override "write-guard" "REPO_OS_SKIP_BRANCH_REUSE"
+          BG_ALLOW_REASON="branch_reuse_override"
+        else
+          log_hook_event "write-guard" "PreToolUse" "" "block" "$START_MS" "branch_reused"
+          echo "GATE-RECOVERABLE: Branch '$CURRENT_BRANCH' was sealed by a previous session. NEXT: git checkout -b <category>/<description>. (override: REPO_OS_SKIP_BRANCH_REUSE=1)" >&2
+          exit 2
+        fi
       fi
     fi
 

@@ -1,0 +1,24 @@
+brief_id: "test-expired-bundle-fixture"
+approved_at: "2000-01-01T00:00:00Z"
+approved_by: "operator"
+mode: "review"
+contract:
+  goal: "Test fixture for hard-expired predicate"
+  scope_files: []
+  scope_modules: []
+  approach: []
+  verification: []
+  spec_references: []
+  constraints: []
+  lifecycle: task-scoped
+plan:
+  - "Step 1"
+spec_snapshot:
+  version: "v1"
+  files: []
+pragmatist:
+  verdict: "APPROVED"
+  findings: ""
+expiry:
+  soft_hours: 24
+  hard_hours: 168

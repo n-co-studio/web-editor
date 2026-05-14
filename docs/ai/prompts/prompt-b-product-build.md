@@ -39,11 +39,27 @@ Full spec file list for reference (used in fallback or when explicitly reference
 Before planning new features or architectural work, check `docs/spec/prototypes/` for completed experiment briefs. Validated learnings from prototype sessions may inform architecture decisions, feature design, or spec updates.
 
 ## Inter-Session Governance
-At session start, check `docs/ai/governance/` for governance evidence:
-- `spec-compiled` — confirms Prompt 0 completed. If missing, warn operator.
-- `advisory-reviewed` — confirms Prompt A completed. If missing, warn operator.
 
-These are advisory checks. The operator may direct you to proceed without them (e.g., for standalone tasks not tied to a spec). The `pre-commit-gates.sh` hook also checks for these files at commit-time (advisory, first-fire). On Bash writes, `bash-guard.sh` checks them as well.
+At session start, check `docs/ai/governance/` for governance evidence and evaluate the **version-match predicate** (Decision 0041). Both `manifest.json.active == null` and the evidence file's `spec_version == null` are normalised to the empty string before comparison:
+
+```
+governance_match(file) :=
+  exists(file)
+  AND (normalised(spec_version in file) == normalised(manifest.json.active))
+```
+
+For each evidence file (`spec-compiled` — Prompt 0; `advisory-reviewed` — Prompt A):
+- **Match** → fast-skip silently. No warning, no operator prompt.
+- **Mismatch** (file exists but `spec_version` differs from `manifest.json` `active`) → warn operator with both versions, e.g. `"Prompt 0 not re-run since spec v2026.03 → v2026.04 — re-run Prompt 0 to refresh spec-compiled evidence"`. Reset the first-fire marker so the commit-time check re-surfaces the same warning (see below).
+- **Missing** → warn operator (existing behaviour), and reset the first-fire marker.
+
+These are advisory checks. The operator may direct you to proceed without them (e.g., for standalone tasks not tied to a spec).
+
+The same predicate is mirrored at two hook checkpoints:
+- `pre-commit-gates.sh` Gate 3 (commit-time, first-fire suppressed via `.claude/.state/governance-checked` marker).
+- `bash-guard.sh` first-Bash-write check (suppressed via `.claude/.state/governance-bash-fired` marker).
+
+On mismatch or missing at any checkpoint, the corresponding marker is **not** written (and any pre-existing marker is deleted), so the warning surfaces on every subsequent check until the operator re-runs Prompt 0 / Prompt A or accepts the divergence.
 
 ## Phase Model
 
@@ -51,40 +67,77 @@ The phase model tracks session progress in `.claude/.state/phase-state`. Hooks e
 
 **Ephemeral sessions**: When the user's intent is Q&A or exploration (no code changes expected), use `init_phase "ephemeral"` instead of `"standard"`. Ephemeral sessions have a minimal phase sequence (`init → conversation → close`) and skip mode-guard, bash-guard branch gates, and close checks. If the user later requests edits, call `upgrade_session_type` to convert to standard (resets phase to `plan`).
 
+### Drift-Check Phase (Decision 0038)
+
+When the brief came from Prompt T (Brief mode), Prompt T wrote a sealed **handoff bundle** at `.claude/local/handoff-bundle.yaml` (singular) or `.claude/local/task-groups/{group}/briefs/{seq}.bundle.yaml` (task groups). The bundle carries the approved Task Contract, plan, optional Implementation Design, spec snapshot, and Pragmatist verdict — everything the receiving session needs to skip plan re-derivation.
+
+After `init_phase` (and `contract-init` for task groups), advance to `drift-check`. Invoke `drift_check()` from `_phase-helper.sh` via Bash:
+
+```
+source .claude/hooks/_analytics-helper.sh && source .claude/hooks/_phase-helper.sh
+drift_check
+```
+
+Interpret the return code:
+
+| Return | Meaning | Action |
+|--------|---------|--------|
+| 0 | Bundle valid + fresh + no drift | `plan-approved` and `pragmatist-signed` written from bundle. Forward-jump: `advance_phase "build"` (skipping `plan` and `approval`) |
+| 1 | No bundle present | Fall through: `advance_phase "plan"` and run the legacy plan-derivation flow below |
+| 2 | Bundle hard-expired | Same as code 1 (legacy path), with advisory logged |
+| 3 | Bundle soft-expired | Operator advisory only — caller may proceed with code 0 semantics or trigger focused re-approval |
+| 4 | Spec snapshot mismatch | Surface the diff to the operator via `AskUserQuestion` (focused re-approval); on confirm, write state and forward-jump |
+| 5 | Scope-file commits since approval | Same as code 4 (focused re-approval with per-file diff) |
+
+**Bundle-aware init shortcut:** When `drift_check` returns 0, also seed `.claude/local/task-contract.yaml` from `bundle.contract` (use `yq` or `awk` extraction — same content already validated by drift-check). Skip the brief-markdown extraction step in § Task Contract below.
+
 ### Build Sequence — Agent Dispatch
 
 | Phase | Agent | Notes |
 |-------|-------|-------|
-| plan | **Pragmatist** (plan-gating mode) | REQUIRE dispatch before presenting plan to operator. Foreground preferred (ensures verdict available before plan presentation; background supported but may complete during build). Passes plan text inline in Task prompt. GATE_RESULT: BLOCKED (FUNDAMENTAL-MISMATCH) or APPROVED. Findings and verdict presented alongside plan to operator. Auto mode: BLOCKED degrades to advisory-with-warning (Decision 0025). When `implementation_design:` is present in the task contract, Pragmatist operates in alignment-check sub-mode (evaluates plan alignment to approved design, not proportionality — see `pragmatist.md` § Constraints, Implementation Design alignment bullet) |
+| drift-check | **Orchestrator** (deterministic) | Decision 0038 — evaluate the handoff bundle. On bundle valid + fresh: write `plan-approved` + `pragmatist-signed` from bundle and forward-jump to `build` (no Pragmatist dispatch, no AskUserQuestion). On fall-through: continue to `plan` as below |
+| plan (legacy fallback only) | **Pragmatist** (plan-gating mode) | REQUIRE dispatch only when drift-check fell through to the legacy path. Foreground preferred (ensures verdict available before plan presentation; background supported but may complete during build). Passes plan text inline in Task prompt. GATE_RESULT: BLOCKED (FUNDAMENTAL-MISMATCH) or APPROVED. Findings and verdict presented alongside plan to operator. Auto mode: BLOCKED degrades to advisory-with-warning (Decision 0025). When `implementation_design:` is present in the task contract AND a bundle exists, this dispatch is replaced by `deterministic_alignment_check` (see § Pragmatist Alignment below) |
 | build | Builder | Implements changes |
-| review | **Critic** (cohesion mode) + **Critic** (diff-review mode) + **PM Advisory** (spec-drift) + **UX Design Agent** (Mode 2 + Mode 3) | REQUIRE: dispatch both Critic modes before advancing to verify phase. Sequence: (1) Critic cohesion mode (internal coherence); (2) Critic diff-review mode (mechanical bug detection in staged changes); (3) PM Advisory + UX agents in parallel. Cohesion and diff-review can run in parallel. PM is conditional — requires compiled spec or `mvp-scope.yaml` (skipped silently otherwise). PM findings are advisory (not gating). UX Design Agent is conditional — dispatched when the task brief contains design brief content or the implementation includes UI changes; see UX Post-Build Review below |
+| review | **Critic** (combined mode: cohesion + diff-review) + **PM Advisory** (spec-drift) + **UX Design Agent** (Mode 2 + Mode 3) | REQUIRE: dispatch Critic once in combined mode before advancing to verify phase. Combined output has two top-level sections (`## Cohesion Brief` and `## Diff-Review Brief`), each ending with its own `GATE_RESULT:` line; `state-writer.sh` writes both `cohesion-reviewed` and `diff-review-complete` from that single dispatch (Decision 0039). PM Advisory + UX agents run in parallel with Critic. PM is conditional — requires compiled spec or `mvp-scope.yaml` (skipped silently otherwise). PM findings are advisory (not gating). UX Design Agent is conditional — dispatched when the task brief contains design brief content or the implementation includes UI changes; see UX Post-Build Review below. Single-mode Critic dispatches (cohesion only, or diff-review only with `MODE: diff-review` sentinel) remain valid for targeted re-runs after a fix |
 | verify | QA Verifier | REQUIRE: dispatch before advancing to commit phase. Commit blocker (A1–A6, B1–B3) |
 | user-review | User Review Tier agents | Optional — skipped when no User Review in brief |
 | commit | Orchestrator | Commit with trailers |
 
 Loops: `review→build` (cohesion findings), `verify→build` (QA failure).
 
-### Plan Phase — Design Mode Conditional
+### Pragmatist Alignment (Decision 0038 § 7)
 
-At the start of the plan phase, check whether an Implementation Design has been pre-approved at Prompt T:
+When `bundle.implementation_design` (or contract `implementation_design:`) is present, Pragmatist Plan-Gating's alignment sub-mode is replaced by a deterministic Orchestrator-side check. Invoke:
 
-**Condition:** Brief contains a `### Implementation Design` section AND task contract has an `implementation_design:` field.
+```
+deterministic_alignment_check "<plan_text>" "$REPO_ROOT/.claude/local/task-contract.yaml"
+```
+
+- Output `aligned` (return 0) → write `pragmatist-signed` directly (`bundle_to_pragmatist_signed` if bundle is present, else a session-derived equivalent). No Task dispatch.
+- Output `diverged` (return 1) → surface the divergence to the operator. If operator confirms intentional divergence, write `pragmatist-signed`. Otherwise, dispatch full Pragmatist in plan-gating mode as a fallback.
+- Output `missing-design` (return 2) → fall back to full Pragmatist dispatch (current behavior).
+
+### Legacy Plan/Approval Path
+
+When `drift_check` returns non-zero (codes 1–2), use the legacy plan phase:
+
+**Design-mode conditional:** Brief contains a `### Implementation Design` section AND task contract has an `implementation_design:` field.
 
 - **Alignment review mode** (both present): The plan = execution order aligned to the approved design. Do not re-architect. Confirm the implementation follows the approved Components, Key Interfaces, Data Flow, and Error Handling. Present the plan as "executing approved design" — the Pragmatist will validate alignment, not proportionality.
-- **Standard mode** (neither or only one present): Current behavior unchanged — plan the implementation from scratch, dispatch Pragmatist for full proportionality review.
+- **Standard mode** (neither or only one present): Plan the implementation from scratch, dispatch Pragmatist for full proportionality review.
 - **Divergence** (only one present — mismatch between brief and contract): Default to standard mode. Log in plan summary: "Implementation Design mismatch: present in [brief/contract] but not [contract/brief] — treating as standard plan phase."
 
 When in alignment review mode, the Critic's cohesion review also receives the `implementation_design:` contract content as additional context for evaluating whether the build faithfully implements the approved design.
 
 ### Auto/Review Mode
 
-When presenting the plan for approval, include **auto** and **review** as options:
+**Bundle path (default):** mode is set by the operator at Prompt T Step 4 and recorded in `bundle.mode`. `drift_check` writes the mode into `plan-approved` so `phase-state` carries it through the session — no AskUserQuestion is required.
+
+**Legacy path:** When `drift_check` falls through to the legacy plan phase, present the plan via AskUserQuestion with **auto** and **review** options:
 - **Auto** — agent completes through merge autonomously after all gates pass. The `op-review` phase is skipped.
 - **Review** — agent pauses after verify for operator review before commit. Default.
 
 See `orchestrator.md` § Constraints for the canonical AskUserQuestion plan approval template and hook contract annotations.
-
-The mode is set at plan approval and recorded in phase-state.
 
 ### Solo Mode (Decision 0015)
 
@@ -172,7 +225,10 @@ When you discover connections not in the graph, note them for graph update at cl
 As you work, note connections you discover between files — governance relationships, dependencies, data flow, test coverage. These will be written to the knowledge graph at close.
 
 ### At Close (before commit)
-Update the appropriate graph file via shell I/O (Bash redirection — not Edit/Write tools) with:
+
+The write path branches on session type:
+
+**Single-brief, sequential task group, hotfix, editor-live (default path):** Update the appropriate graph file via shell I/O (Bash redirection — not Edit/Write tools) with:
 - New nodes for files you created (type matches: `file`, `decision`, `hook`, `prompt`, `contract`, `concept`, `convention`). Set `layer` to match the graph (`template` or `product`)
 - New edges for connections you discovered (use `source_type: agent-inferred`, `status: active`, `confidence: 0.7` for connections verified during this session)
 - Updated `last_verified` dates for existing edges you traversed and confirmed
@@ -180,13 +236,19 @@ Update the appropriate graph file via shell I/O (Bash redirection — not Edit/W
 
 Use `mkdir`-based locking per Decision 0034 before writing. Template graph uses `.graph-lock`, product graph uses `.product-graph-lock`. Operator-curated edges (`source_type: operator-curated`) are never modified by agents.
 
-REQUIRE: attempt graph writes at close before the final commit. If the write fails (lock contention, parse error), log the failure in the closing summary and proceed to commit — do not block the close sequence. Skipping the attempt entirely is a REQUIRE violation (Decision 0034 Amendment 3).
+**Parallel content brief (`Execution: parallel` in `### Task Group`):** Do NOT write to the shared graph. Instead, author a per-brief KG delta at `$_REPO_OS_ROOT/.claude/.state/tg-{group}-brief-{seq}.kg-delta.yaml` via shell I/O from the worktree's main session. Schema and authoring rules: see `.claude/agents/builder.md` § Knowledge Graph Delta and Decision 0034 Amendment 5. The merge brief aggregates all per-brief deltas in a single locked write — eliminates the N+1 lock contention pattern.
+
+**Merge brief (`taskgroup-merge` session type):** At close, before the final commit:
+1. Author the merge brief's own delta at `$_REPO_OS_ROOT/.claude/.state/tg-{group}-brief-merge.kg-delta.yaml` from cross-session observations only the merge brief can make (integration edges between files owned by different content briefs, cross-cutting relationships visible in the combined diff). Same schema as content-brief deltas.
+2. Run `bash .claude/tools/kg-merge-deltas.sh {group}` — reads all per-brief deltas + the merge-brief delta, dedups (last `authored_at` wins on `last_verified`; max wins on `confidence`; first-seen wins on `status` conflict; operator-curated edges immutable), and applies the union to the shared graph under a single lock.
+3. If `$_REPO_OS_ROOT/.claude/.state/kg-aggregation-conflicts.log` was written, surface those tuples as CRITICAL cohesion findings — do not silently accept.
+
+REQUIRE: attempt graph writes (or delta writes for parallel content briefs) at close before the final commit. If the write fails (lock contention, parse error), log the failure in the closing summary and proceed to commit — do not block the close sequence. Skipping the attempt entirely is a REQUIRE violation (Decision 0034 Amendment 3).
 
 ## Operating Rules
 - REQUIRE: at session start, create a branch from main: `git checkout -b <category>/<description>` (standard: `feature/<description>`, hotfix: `hotfix/<description>`)
 - REQUIRE: extract and write task contract at session init when present in the brief (Decision 0020). Contract serves as cohesion review reference
-- REQUIRE: after Builder signals done, Orchestrator runs a cohesion review (Critic in cohesion mode) before invoking QA. Critical cohesion findings must be resolved before commit. See `quality-gates.md` gate A5.
-- REQUIRE: after cohesion review, Orchestrator dispatches Critic in diff-review mode before advancing to verify phase. Diff-review receives `git diff --cached` (staged changes) and surrounding 20 lines of context per changed function. Critic in diff-review mode emits `MODE: diff-review` before `GATE_RESULT:` so `state-writer.sh` routes the verdict to `diff-review-complete`. Critical diff-review findings must be resolved before commit. See `quality-gates.md` gate A5.
+- REQUIRE: after Builder signals done, Orchestrator dispatches Critic once in combined mode (cohesion + diff-review) before invoking QA. The Task prompt passes both the diff + immediate-neighbor files (cohesion scope) and the staged diff + surrounding 20 lines per changed function (diff-review scope). Critic emits both `## Cohesion Brief` and `## Diff-Review Brief` sections in one response, each ending with its own `GATE_RESULT:`. `state-writer.sh` parses the dual-section output and writes both `cohesion-reviewed` and `diff-review-complete`. Critical findings in either section must be resolved before commit; BLOCKED in either section blocks Gate A5. Targeted re-runs after a fix may use single-mode dispatch (cohesion only, or diff-review only with `MODE: diff-review` sentinel). See `quality-gates.md` gate A5 and Decision 0039.
 - GUIDE: use HVST (see `_agent-glossary.md` § HVST) when debugging or instability appears. When HVST debugging stalls (2+ consecutive failures), Orchestrator dispatches HVST Review Board for multi-agent hypothesis review before further fix attempts. See `_hvst-review.md`
 - REQUIRE: **Task Group Contract** — if the task brief contains a `### Task Group` section, this session is part of a multi-brief group. Read and follow the contract lifecycle in `docs/ai/workflow-appendix/session-type-task-group.md`. See `docs/ai/quality-gates.md` gate A6 for verification requirements
 - BLOCK: **Session Branch Isolation** (Decision 0013) — each session uses a dedicated branch — enforced by bash-guard.sh / write-guard.sh (Section 3). After session close, the branch is sealed and must not be reused. Start a new branch for new work. Task group sessions are exempt (sequential groups share one branch; parallel groups use per-brief worktree branches — see Decision 0032)

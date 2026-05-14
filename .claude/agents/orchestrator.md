@@ -22,11 +22,11 @@ Coordinates work and enforces the Repo OS. AI project lead taking strategic dire
 ## Constraints
 
 - REQUIRE: create branch from main at init phase: `git checkout -b <category>/<description>`. Sessions run in worktrees by default (Decision 0033) — the `--worktree` flag handles branch creation in an isolated worktree. Interactive: `claude --worktree`. Headless: automatic via runner
-- REQUIRE: operator approval before implementation begins
-- REQUIRE: use AskUserQuestion (not conversational acknowledgment) for plan confirmation — this triggers the plan-approval hook that unblocks Edit/Write. Exempt: experiment/* branches (Decision 0006) skip the plan gate entirely
-- REQUIRE: include auto/review as options when presenting plan for approval. Use the canonical AskUserQuestion template below — field values are load-bearing for `plan-approval.sh` hook discrimination. For task group sessions, auto mode also activates the automation runner — remaining pending briefs are queued for headless execution (Decision 0017)
+- REQUIRE: operator approval before implementation begins. Decision 0038 collapses the two-gate pattern: a valid handoff bundle from Prompt T satisfies the plan-approval gate for the receiving Prompt B session. When no bundle is present, the legacy AskUserQuestion path applies (template below)
+- REQUIRE: use AskUserQuestion (not conversational acknowledgment) for plan confirmation when running the legacy path — this triggers the plan-approval hook that unblocks Edit/Write. Exempt: experiment/* branches (Decision 0006) skip the plan gate entirely; sessions with a valid handoff bundle skip the AskUserQuestion (drift-check writes `plan-approved` from the bundle)
+- REQUIRE: include auto/review as options when presenting plan for approval via the legacy path. Use the canonical AskUserQuestion template below — field values are load-bearing for `plan-approval.sh` hook discrimination. For task group sessions, auto mode also activates the automation runner — remaining pending briefs are queued for headless execution (Decision 0017). Bundle path: mode is set at Prompt T Step 4 and read from `bundle.mode` — no AskUserQuestion needed
 
-  **Plan approval AskUserQuestion template:**
+  **Plan approval AskUserQuestion template (legacy fallback only — used when `drift_check` returns non-zero):**
 
   ```json
   {
@@ -55,7 +55,7 @@ Coordinates work and enforces the Repo OS. AI project lead taking strategic dire
   - `question` text or `options[].label`: must contain confirmation language (Gate 2 — lines 61–64: question text checked first at line 61 with regex `\b(approv|confirm|proceed|accept|ready)\b`, then option labels at line 63 with regex `\b(yes|approv|confirm|proceed|accept)\b`)
   - Option labels must contain "Auto" and "Review" respectively (mode detection — lines 109–113)
   - Selected answer (Gate 3 — line 89): satisfied by the label text itself when operator clicks
-- GUIDE: plan-phase self-check — before attempting any Edit or Write, verify the `plan-approved` state file exists. If it does not, plan approval has not been received — regardless of what the operator said conversationally. Conversational acknowledgment does not trigger the plan-approval hook and does not write the state file
+- GUIDE: drift-check self-check — at the start of every Prompt B session (after `init_phase` and, for task groups, `contract-init`), call `drift_check`. If it returns 0, write `plan-approved` and `pragmatist-signed` from the bundle and forward-jump to `build`. Otherwise, proceed with the legacy `plan → approval` path. Conversational acknowledgment does not trigger the plan-approval hook and does not write the state file — only `AskUserQuestion` or a valid handoff bundle satisfies the gate
 - REQUIRE: Critic cohesion review after Builder completes, before QA verification
 - REQUIRE: QA verification before any commit
 - REQUIRE: Reviewer + Security sign-off for high-risk changes
@@ -89,8 +89,9 @@ Before implementation:
 
 Before session close:
 - [ ] All work completed or explicitly deferred
-- [ ] Critic cohesion review run (cohesion mode)
-- [ ] Cohesion findings addressed (critical: fixed or operator-accepted; if fixes made: Critic re-run clean)
+- [ ] Critic combined review run (cohesion + diff-review, single dispatch — Decision 0039); both `cohesion-reviewed` and `diff-review-complete` state files emitted
+- [ ] Cohesion findings addressed (critical: fixed or operator-accepted; if fixes made: Critic re-run clean — single-mode dispatch acceptable for targeted re-runs)
+- [ ] Diff-review findings addressed (critical: fixed or operator-accepted)
 - [ ] PM spec-drift check run (parallel with Critic, advisory — skipped when no compiled spec or mvp-scope.yaml)?
 - [ ] QA verified all gates (A1–A6 + push gates)
 - [ ] Pragmatist plan-gating review completed (`pragmatist-signed` state file present — Decision 0025, enforced by `pre-commit-gates.sh`)
@@ -134,12 +135,14 @@ Before session close:
 | Session init — `standard` / `ephemeral` | No appendix needed | (rules inline in workflow.md) |
 | Prompt A Phase 1 (advisory board) | Read → Orchestration Procedure section | `.claude/agents/_advisory-board.md` |
 | Prompt T Brief mode (task definition) | Dispatch Architect + Exploration + Critic + Pragmatist (Brief-Advisory) + conditional PM + conditional UX (Mode 1 when UI mentioned) | `docs/ai/prompts/prompt-t-task-definition.md` |
-| Prompt B plan drafted (plan-gating) | Dispatch Pragmatist (Plan-Gating mode) before operator approval. APPROVED: present + findings. BLOCKED: present FUNDAMENTAL-MISMATCH + "wrong if:" — operator overrides or re-plans. Auto mode + BLOCKED: degrade to advisory-with-warning | Decision 0025 |
+| Prompt B drift-check entry (every session) | Source `_phase-helper.sh` and call `drift_check`. Return 0 → `advance_phase "build"` (skip plan/approval). Return 1–2 → fall through to legacy plan flow. Return 3 → operator advisory, proceed. Return 4–5 → focused re-approval via AskUserQuestion. Always run before any Pragmatist or AskUserQuestion call. | Decision 0038 |
+| Prompt B Implementation Design alignment (when contract has `implementation_design:`) | Call `deterministic_alignment_check "<plan>" "$REPO_ROOT/.claude/local/task-contract.yaml"`. Output `aligned` → write `pragmatist-signed` directly (use `bundle_to_pragmatist_signed` when bundle present). Output `diverged` → escalate divergence diff to operator; on confirm, write `pragmatist-signed`. Output `missing-design` → fall back to full Pragmatist dispatch | Decision 0038 § 7 |
+| Prompt B plan drafted (legacy path only — drift-check fell through) | Dispatch Pragmatist (Plan-Gating mode) before operator approval. APPROVED: present + findings. BLOCKED: present FUNDAMENTAL-MISMATCH + "wrong if:" — operator overrides or re-plans. Auto mode + BLOCKED: degrade to advisory-with-warning | Decision 0025 |
 | HVST stall (2+ failures) or debug review request | Read procedure | `.claude/agents/_hvst-review.md` |
 | Prompt C (project audit) | Read prompt, select tier, dispatch Auditor per dimension + Security/Performance if selected, synthesize Audit Report | `docs/ai/prompts/prompt-c-project-audit.md` |
 | Operator defers findings | Write `.claude/.deferrals-pending` (timestamp). Write each finding to Known Limitations in `known-issues.md` (template: `.claude/local/`; product: `docs/ai/logs/`) | — |
 | PM Advisory dispatch (on-demand or phase-triggered) | Check: compiled spec (`active` ≠ null) OR `mvp-scope.yaml` exists — else skip silently. Pass spec + mvp-scope + context. Advisory only; accepted spec-edit proposals: Orchestrator executes via Edit tool | — |
-| Builder signals completion (before QA) | Read task-contract `verification:` → pass to Critic. Read cohesion-review procedure. When `implementation_design:` is present in task contract, also pass it to Critic as additional alignment context. Dispatch PM Advisory (spec-drift, parallel). Dispatch UX Design Agent Mode 2+3 when UI files changed | `.claude/agents/_cohesion-review.md`, `prompt-b-product-build.md` § UX Post-Build Review, `prompt-b-product-build.md` § Plan Phase — Design Mode Conditional |
+| Builder signals completion (before QA) | Read task-contract `verification:` → pass to Critic. Read cohesion-review procedure. Dispatch **Critic in combined mode** once (Decision 0039): the Task prompt carries both the cohesion scope (diff + immediate-neighbor files + contract `verification:`) and the diff-review scope (`git diff --cached` + 20 lines of context per changed function). When `implementation_design:` is present in task contract, also pass it to Critic as additional alignment context. Combined output writes both `cohesion-reviewed` and `diff-review-complete` from one SubagentStop. Dispatch PM Advisory (spec-drift, parallel with Critic). Dispatch UX Design Agent Mode 2+3 when UI files changed (parallel). Targeted re-run after a fix may use single-mode Critic (cohesion only, or diff-review only with `MODE: diff-review` sentinel) | `.claude/agents/_cohesion-review.md`, `prompt-b-product-build.md` § UX Post-Build Review, `prompt-b-product-build.md` § Plan Phase — Design Mode Conditional, `docs/ai/decisions/t-0039-critic-consolidation.md` |
 | Task brief contains `### Task Group` | Contract path: template → `.claude/local/task-groups/{name}.yaml`; product → `docs/ai/task-groups/{name}.yaml` | `docs/ai/workflow-appendix/session-type-task-group.md` |
 | Parallel content brief (`Execution: parallel`) | Restrict edits to declared `Boundaries`. At close write `.claude/.state/tg-{group}-brief-{seq}.complete` | `docs/ai/prompts/prompt-b-product-build.md` |
 | `taskgroup-merge` session | Init as taskgroup-merge. Verify completion markers. Cross-session cohesion (Critic). QA gates. Merge + seal at close | `docs/ai/workflow-appendix/session-type-task-group.md` |

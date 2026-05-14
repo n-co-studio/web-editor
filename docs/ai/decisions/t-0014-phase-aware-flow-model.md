@@ -38,14 +38,15 @@ Add a phase-aware flow management system that tracks session progress through an
 3. **Phase sequences** — each session type defines an ordered list of phases with automation tags. Transitions are forward-only except for defined loops. Full sequences:
 
    **Prompt B — Standard Build:**
-   `init[agent] → plan[agent] → approval[operator] → build[agent] → review[agent] → verify[agent] → user-review[agent] → commit[agent] → op-review[operator] → close[agent]`
+   `init[agent] → drift-check[agent] → plan[agent] → approval[operator] → build[agent] → review[agent] → verify[agent] → user-review[agent] → commit[agent] → op-review[operator] → close[agent]`
    Loops: `review→build` (cohesion findings), `verify→build` (QA failure)
    Skippable: `user-review` — forward-jump from `verify` to `commit` permitted when the task brief has no User Review section. Advisory-only phase — no state file written, no gate blocked. See Decision 0021 for system definition.
+   `drift-check` (Decision 0038): when a valid handoff bundle is present, `drift_check()` writes `plan-approved` + `pragmatist-signed` directly from the bundle and the orchestrator forward-jumps to `build` (skipping `plan` and `approval`). When the bundle is absent / hard-expired / spec-drifted, drift-check falls through to the legacy `plan → approval` path with full agent re-derivation. Forward-jump `drift-check → build` is legal whenever `drift_check` returns 0; the `plan` and `approval` phases remain skippable in the same sense as `user-review`/`op-review`.
 
    **Prompt B — Task Group (Brief N of M):**
-   `init[agent] → contract-init[agent] → plan[agent] → approval[operator] → build[agent] → review[agent] → verify[agent] → user-review[agent] → commit[agent] → contract-update[agent] → op-review[operator] → close[agent]`
+   `init[agent] → contract-init[agent] → drift-check[agent] → plan[agent] → approval[operator] → build[agent] → review[agent] → verify[agent] → user-review[agent] → commit[agent] → contract-update[agent] → op-review[operator] → close[agent]`
    Loops: `review→build`, `verify→build`
-   Skippable: `user-review` — same rules as Standard Build.
+   Skippable: `user-review` — same rules as Standard Build. `drift-check` skip semantics match Standard Build (forward-jump to `build` when a per-brief bundle at `.claude/local/task-groups/{group}/briefs/{seq}.bundle.yaml` is valid).
    Notes: `contract-init` covers create (brief 1) and sync (briefs 2+) — same phase, different behavior based on brief number. Non-final close skips merge (branch stays open). Final close merges to main. `contract-init` is intentionally outside the `init|plan` edit block in `write-guard.sh (Section 3)` — edits during contract-init are scoped to contract file creation/update and are permitted by existing path exemptions (`docs/ai/task-groups/`, `.claude/local/`).
 
    **Prompt B — Task Group Merge (Brief M — parallel groups):**
@@ -145,6 +146,12 @@ Add a phase-aware flow management system that tracks session progress through an
     - `set_phase_mode <auto|review>` — updates mode field in phase-state
     - `has_plan_gate <session_type>` — returns 0 if session type has an `approval` phase (requires plan gate enforcement), 1 otherwise
     - `get_post_approval_phase <session_type>` — returns the phase immediately after `approval` in the sequence, or empty string if no approval phase
+    - `bundle_valid [path]` — returns 0 when the handoff bundle at `path` (default `.claude/local/handoff-bundle.yaml`) parses and contains required top-level fields. Decision 0038
+    - `bundle_expired [path]` — returns 1 fresh, 0 soft-expired, 2 hard-expired or unparseable. Decision 0038
+    - `bundle_to_plan_approved [bundle] [sid]` — writes `plan-approved` state file derived from a valid bundle. Decision 0038
+    - `bundle_to_pragmatist_signed [bundle] [sid]` — writes `pragmatist-signed` state file derived from `bundle.pragmatist.verdict`. Decision 0038
+    - `drift_check [bundle]` — top-level drift-check evaluator: writes derived state and returns 0 on success; returns 1–5 with reason on stderr when caller should fall through to the legacy path or trigger focused re-approval. Decision 0038
+    - `deterministic_alignment_check <plan> [contract]` — heuristic plan-vs-design alignment used by the Orchestrator when `implementation_design:` is present; emits `aligned`/`diverged`/`missing-design` on stdout and returns 0/1/2 respectively. Decision 0038
 
 11. **Lifecycle**: Phase-state is session-scoped and agent-initiated — the agent calls `init_phase` at session start, not a hook. Hooks cannot determine session type at launch, so phase-state creation is the agent's responsibility. When phase-state is absent or stale, hooks fail-open (backwards compatible). Cleaned by `cleanup_session()` in `session-close-check.sh` at session close (`rm -f "$state_dir/phase-state"`).
 

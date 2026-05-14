@@ -884,6 +884,15 @@ nodes:
     status: "active"
     layer: "template"
 
+  # --- Decision 0038 — Handoff Bundle (Prompt T → Prompt B) ---
+  - id: "decision-0038"
+    type: "decision"
+    path: "docs/ai/decisions/t-0038-handoff-bundle.md"
+    description: "Handoff Bundle — sealed Prompt T → Prompt B contract; new drift-check phase replaces redundant plan→approval"
+    last_verified: "2026-05-13"
+    status: "active"
+    layer: "template"
+
 edges:
   # --- Decision -> hook governance ---
   - source: "decision-0002"
@@ -2661,5 +2670,71 @@ edges:
     context: "Decision 0036 enforces REQUIRE rule in prompt-h: check daemon before hotfix branch creation"
     source_type: "agent-inferred"
     last_verified: "2026-04-08"
+    status: "active"
+    confidence: 0.9
+
+  # --- t-0038 handoff-bundle edges ---
+  - source: "decision-0038"
+    target: "hook-_phase-helper"
+    relation: "governs"
+    context: "Decision 0038 adds drift_check, bundle_valid, bundle_expired, bundle_to_plan_approved, bundle_to_pragmatist_signed, deterministic_alignment_check; inserts drift-check phase in standard/taskgroup sequences"
+    source_type: "agent-inferred"
+    last_verified: "2026-05-13"
+    status: "active"
+    confidence: 0.9
+  - source: "decision-0038"
+    target: "prompt-t-task-definition"
+    relation: "governs"
+    context: "Decision 0038 Step 4 merges auto/review approval; Step 5 writes handoff bundle to .claude/local/handoff-bundle.yaml"
+    source_type: "agent-inferred"
+    last_verified: "2026-05-13"
+    status: "active"
+    confidence: 0.9
+  - source: "decision-0038"
+    target: "prompt-b-product-build"
+    relation: "governs"
+    context: "Decision 0038 replaces plan→approval with drift-check phase; bundle-aware init reads contract and spec snapshot from bundle"
+    source_type: "agent-inferred"
+    last_verified: "2026-05-13"
+    status: "active"
+    confidence: 0.9
+  - source: "decision-0038"
+    target: "decision-0014"
+    relation: "supersedes"
+    context: "Amends t-0014 — adds drift-check phase to standard/taskgroup sequences; extends advance_phase skippable-set for drift-check forward-jumps"
+    source_type: "agent-inferred"
+    last_verified: "2026-05-13"
+    status: "active"
+    confidence: 0.9
+  - source: "decision-0038"
+    target: "decision-0025"
+    relation: "supersedes"
+    context: "Amends t-0025 — Pragmatist Plan-Gating alignment sub-mode demoted to deterministic Orchestrator check when implementation_design: present"
+    source_type: "agent-inferred"
+    last_verified: "2026-05-13"
+    status: "active"
+    confidence: 0.9
+  - source: "decision-0038"
+    target: "decision-0029"
+    relation: "supersedes"
+    context: "Amends t-0029 — bundle approval at Prompt T is the single operator-ack for receiving Prompt B sessions with a valid bundle"
+    source_type: "agent-inferred"
+    last_verified: "2026-05-13"
+    status: "active"
+    confidence: 0.9
+  - source: "decision-0038"
+    target: "decision-0035"
+    relation: "supersedes"
+    context: "Amends t-0035 — selective spec loading runs once at Prompt T; snapshot sealed into bundle; Prompt B reads snapshot via drift-check"
+    source_type: "agent-inferred"
+    last_verified: "2026-05-13"
+    status: "active"
+    confidence: 0.9
+  - source: "decision-0038"
+    target: "decision-0020"
+    relation: "supersedes"
+    context: "Amends t-0020 — task contract may be loaded from bundle.contract instead of re-parsed from brief markdown"
+    source_type: "agent-inferred"
+    last_verified: "2026-05-13"
     status: "active"
     confidence: 0.9

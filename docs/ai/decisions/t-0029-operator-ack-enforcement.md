@@ -37,3 +37,7 @@ Any future session type that needs operator approval enforcement can use the `ap
 1. **Full generalized `operator-ack` state file**: New state file for all `operator`-tagged phases, new blocking branch in `advance_phase`. Rejected — 11 unresolved architectural concerns (session binding, cleanup, auto-mode deadlock, no recovery path for "revise" at op-review), touches hot path for marginal benefit.
 
 2. **Minimal regex-only fix**: Broaden Gate 1 only, without phase rename. Rejected — would not activate the `advance_phase` substance check, leaving a force-advance path open.
+
+## Amendment (Decision 0038 — Handoff Bundle)
+
+Decision 0038 introduces a handoff bundle written at Prompt T Step 4 approval. For receiving Prompt B sessions with a valid bundle, the bundle's `approved_at` + `approved_by: operator` is the single operator-ack — `drift_check` writes the `plan-approved` state file directly from the bundle, satisfying the substance check this decision installed. The bundle approval at Prompt T fires through the same `plan-approval.sh` hook path (Gate 1 regex still matches `\b(plan|brief|task)\b`), so the mechanical enforcement chain is preserved. The legacy `AskUserQuestion` path remains for sessions without a bundle (no regression).

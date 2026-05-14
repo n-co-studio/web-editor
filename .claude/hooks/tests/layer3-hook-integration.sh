@@ -466,6 +466,88 @@ run_hook_rc "state-writer.sh" \
   "$(fixture_subagentstop "critic" "Review done but no sentinel line")"
 assert_file_not_exists "$STATE_DIR/cohesion-reviewed" "state-writer skips without GATE_RESULT sentinel"
 
+# --- Critic combined output (Decision 0039) → writes BOTH state files ---
+# Combined output has both '## Cohesion Brief' and '## Diff-Review Brief' headers,
+# each terminating with its own GATE_RESULT. state-writer.sh splits at the
+# diff-review header and routes per-section verdicts to separate state files.
+reset_phase "standard"
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "review" 2>/dev/null
+rm -f "$STATE_DIR/cohesion-reviewed" "$STATE_DIR/diff-review-complete"
+_combined_body=$'## Cohesion Brief\n\nFindings: none\nCOMPLETENESS: 2/2 criteria met\nCOMPLETENESS_GATE: APPROVED\n\nGATE_RESULT: APPROVED\n\n## Diff-Review Brief\n\nFindings: none\n\nMODE: diff-review\nGATE_RESULT: APPROVED'
+run_hook_rc "state-writer.sh" \
+  "$(fixture_subagentstop "critic" "$_combined_body")"
+assert_ok "$_LAST_RC" "state-writer exits 0 on combined output"
+assert_file_exists "$STATE_DIR/cohesion-reviewed" "combined output writes cohesion-reviewed"
+assert_file_exists "$STATE_DIR/diff-review-complete" "combined output writes diff-review-complete"
+phase_after=$(get_phase)
+assert_eq "$phase_after" "verify" "combined output (cohesion APPROVED) advances review→verify"
+# Cohesion file captures the cohesion-section GATE_RESULT and completeness sentinels
+grep -q '^GATE_RESULT: APPROVED' "$STATE_DIR/cohesion-reviewed" \
+  && grep -q '^COMPLETENESS_GATE: APPROVED' "$STATE_DIR/cohesion-reviewed" \
+  && _combined_co_ok=1 || _combined_co_ok=0
+assert_eq "$_combined_co_ok" "1" "cohesion-reviewed contains GATE_RESULT + COMPLETENESS_GATE"
+
+# --- Combined output with cohesion BLOCKED → both files written, no phase advance ---
+reset_phase "standard"
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "review" 2>/dev/null
+rm -f "$STATE_DIR/cohesion-reviewed" "$STATE_DIR/diff-review-complete"
+_combined_blocked=$'## Cohesion Brief\n\nFindings: broken ref\n\nGATE_RESULT: BLOCKED reason="broken-ref"\n\n## Diff-Review Brief\n\nFindings: none\n\nMODE: diff-review\nGATE_RESULT: APPROVED'
+run_hook_rc "state-writer.sh" \
+  "$(fixture_subagentstop "critic" "$_combined_blocked")"
+assert_file_exists "$STATE_DIR/cohesion-reviewed" "combined cohesion-BLOCKED still writes cohesion-reviewed"
+assert_file_exists "$STATE_DIR/diff-review-complete" "combined cohesion-BLOCKED still writes diff-review-complete"
+phase_after=$(get_phase)
+assert_eq "$phase_after" "review" "combined cohesion-BLOCKED does NOT advance phase"
+grep -q '^GATE_RESULT: BLOCKED' "$STATE_DIR/cohesion-reviewed" && _combined_block_ok=1 || _combined_block_ok=0
+assert_eq "$_combined_block_ok" "1" "cohesion-reviewed records BLOCKED verdict"
+
+# --- Combined output with diff-review BLOCKED → both files written, cohesion advances ---
+reset_phase "standard"
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "review" 2>/dev/null
+rm -f "$STATE_DIR/cohesion-reviewed" "$STATE_DIR/diff-review-complete"
+_combined_diff_blocked=$'## Cohesion Brief\n\nFindings: none\n\nGATE_RESULT: APPROVED\n\n## Diff-Review Brief\n\nFindings: broken import\n\nMODE: diff-review\nGATE_RESULT: BLOCKED reason="broken-import"'
+run_hook_rc "state-writer.sh" \
+  "$(fixture_subagentstop "critic" "$_combined_diff_blocked")"
+assert_file_exists "$STATE_DIR/cohesion-reviewed" "diff-BLOCKED still writes cohesion-reviewed"
+assert_file_exists "$STATE_DIR/diff-review-complete" "diff-BLOCKED still writes diff-review-complete"
+grep -q '^GATE_RESULT: BLOCKED' "$STATE_DIR/diff-review-complete" && _combined_diff_block_ok=1 || _combined_diff_block_ok=0
+assert_eq "$_combined_diff_block_ok" "1" "diff-review-complete records BLOCKED verdict"
+
+# --- Combined output missing a GATE_RESULT in one section → skip writes ---
+reset_phase "standard"
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "review" 2>/dev/null
+rm -f "$STATE_DIR/cohesion-reviewed" "$STATE_DIR/diff-review-complete"
+_combined_malformed=$'## Cohesion Brief\n\nFindings: none\n\n## Diff-Review Brief\n\nFindings: none\n\nMODE: diff-review\nGATE_RESULT: APPROVED'
+run_hook_rc "state-writer.sh" \
+  "$(fixture_subagentstop "critic" "$_combined_malformed")"
+assert_file_not_exists "$STATE_DIR/cohesion-reviewed" "malformed combined output does not write cohesion-reviewed"
+assert_file_not_exists "$STATE_DIR/diff-review-complete" "malformed combined output does not write diff-review-complete"
+
+# --- Legacy single diff-review mode (MODE: diff-review only) still routes correctly ---
+reset_phase "standard"
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "review" 2>/dev/null
+rm -f "$STATE_DIR/cohesion-reviewed" "$STATE_DIR/diff-review-complete"
+_legacy_diff=$'## Diff-Review Brief\n\nFindings: none\n\nMODE: diff-review\nGATE_RESULT: APPROVED'
+run_hook_rc "state-writer.sh" \
+  "$(fixture_subagentstop "critic" "$_legacy_diff")"
+assert_file_not_exists "$STATE_DIR/cohesion-reviewed" "legacy diff-review output does NOT write cohesion-reviewed"
+assert_file_exists "$STATE_DIR/diff-review-complete" "legacy diff-review output writes diff-review-complete"
+
 # ============================================================
 # L3.5 — pre-commit-gates.sh (PreToolUse Bash git commit)
 # ============================================================

@@ -45,11 +45,11 @@
 
 | File | Gate | Notes |
 |------|------|-------|
-| `plan-approved` | A2 | Required for scope check; reads `large-scope: true` flag |
+| `plan-approved` | A2 | Required for scope check; reads `large-scope: true` flag. Written by `plan-approval.sh` (legacy AskUserQuestion path) OR by `_phase-helper.sh::drift_check` (handoff bundle path — Decision 0038). Both provenances share schema and session_id binding |
 | `cohesion-reviewed` | A5 | Skipped for session types without review phase; GATE_RESULT: BLOCKED now blocks commit |
 | `diff-review-complete` | A5 | New (Brief 3); written by state-writer.sh when Critic runs diff-review mode; GATE_RESULT: BLOCKED blocks commit |
 | `reviewer-signed`, `security-signed` | A4 | Required on high-risk detection |
-| `pragmatist-signed` | Plan-gating | Written by Pragmatist plan-review; checked at commit time |
+| `pragmatist-signed` | Plan-gating | Written by Pragmatist plan-review (legacy dispatch), by `_phase-helper.sh::bundle_to_pragmatist_signed` (handoff bundle path), or by the Orchestrator's `deterministic_alignment_check` (alignment-aligned outcome). Decisions 0025 + 0038. Checked at commit time |
 | `.claude/local/closed-branches` | Session isolation | Persistent ledger (not session-scoped) |
 
 Recovery: `REPO_OS_RECOVER=1` skips all state-dependent checks.

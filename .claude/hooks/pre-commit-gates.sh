@@ -175,7 +175,13 @@ fi
 # Falls back to individual state files if phase-state absent/stale.
 # ============================================================
 if [ "$SKIP_STATE" = false ]; then
-  CURRENT_PHASE=$(get_phase)
+  # Decision 0042: prefer the cached phase verdict when fresh; falls through to
+  # the canonical assert_phase / get_phase reads on cache miss.
+  CURRENT_PHASE=""
+  if read_phase_gates 2>/dev/null; then
+    CURRENT_PHASE="$GATES_CURRENT_PHASE"
+  fi
+  [ -z "$CURRENT_PHASE" ] && CURRENT_PHASE=$(get_phase)
   if [ -n "$CURRENT_PHASE" ]; then
     # Phase-state active — use phase model as primary check
     if ! assert_phase "commit"; then
@@ -288,6 +294,10 @@ _validate_plan_content_hash() {
 
 if [ "$SKIP_STATE" = false ]; then
   # plan-approved: required on all non-experiment branches
+  # Provenance (Decision 0038): file may be written by plan-approval.sh
+  # (legacy AskUserQuestion path) or by drift_check from a valid handoff bundle.
+  # Both write the same schema with a matching session_id; the existing
+  # _validate_state_session_id check covers both provenances uniformly.
   # Override: REPO_OS_SKIP_PLAN_GATE=1 (parity with bash-guard plan gate)
   # editor-live: skip (never has plan gate — no approval phase)
   if [ "$IS_EDITOR_LIVE_CLOSE" = true ]; then
@@ -421,6 +431,12 @@ if [ "$SKIP_STATE" = false ]; then
   # Phase-state-aware: only enforce when phase-state exists (session initialized).
   # Sessions from before this gate was deployed won't have phase-state, providing
   # backward compatibility without a sentinel file.
+  # Provenance (Decision 0038): pragmatist-signed may be written by state-writer.sh
+  # (Pragmatist Plan-Gating dispatch), by bundle_to_pragmatist_signed (drift-check
+  # path), or by the Orchestrator's deterministic alignment check (Implementation
+  # Design alignment-aligned outcome). All three paths write the same schema with
+  # GATE_RESULT and session_id; the existing presence + session_id check covers
+  # all three uniformly.
   if [ "$IS_EDITOR_LIVE_CLOSE" = true ]; then
     : # editor-live never has pragmatist-signed — skip silently
   elif [ "${REPO_OS_SKIP_PRAGMATIST_GATE:-0}" = "1" ]; then
@@ -442,41 +458,90 @@ if [ "$SKIP_STATE" = false ]; then
 fi
 
 # ============================================================
-# Gate 3: Inter-session governance (advisory, first-fire)
+# Gate 3: Inter-session governance (advisory, first-fire, version-aware)
 # Moved from former branch-guard Edit/Write to commit-time.
 # Checks that Prompt 0 (spec-compiled) and Prompt A (advisory-reviewed)
-# governance files exist before committing Prompt B work.
-# Non-blocking: prints warnings, does not block commit.
+# governance files exist AND that their embedded spec_version matches
+# manifest.json `active` (Decision 0041). Non-blocking.
+#
+# Predicate per file:
+#   match  := file exists AND spec_version == manifest.json.active
+#             (null == null is treated as match — template/pre-spec state)
+# On full match (both files match): write governance-checked, suppress
+#   for rest of session.
+# On any mismatch or missing: warn + DELETE governance-checked so the
+#   warning re-fires on subsequent commit-gate runs.
 # ============================================================
 if [ "$SKIP_STATE" = false ]; then
   GOVERNANCE_CHECKED_FILE="$STATE_DIR/governance-checked"
 
   if [ ! -f "$GOVERNANCE_CHECKED_FILE" ]; then
     GOV_DIR="$REPO_ROOT/docs/ai/governance"
+    MANIFEST_PATH="$REPO_ROOT/docs/spec/compiled/manifest.json"
     GOV_WARNINGS=""
+    GOV_ANY_FAIL=false
+    MISSING_FILES=""
+    MISMATCH_FILES=""
 
     case "$CURRENT_BRANCH" in
       feature/*|fix/*|hotfix/*|release/*)
-        if [ ! -f "$GOV_DIR/spec-compiled" ]; then
-          GOV_WARNINGS="${GOV_WARNINGS}Advisory: docs/ai/governance/spec-compiled not found — Prompt 0 may not have completed governance write.\n"
+        # Read manifest active version (empty when null or manifest missing).
+        ACTIVE_VERSION=""
+        if [ -f "$MANIFEST_PATH" ]; then
+          ACTIVE_VERSION=$(jq -r '.active // ""' "$MANIFEST_PATH" 2>/dev/null || echo "")
         fi
-        if [ ! -f "$GOV_DIR/advisory-reviewed" ]; then
-          GOV_WARNINGS="${GOV_WARNINGS}Advisory: docs/ai/governance/advisory-reviewed not found — Prompt A may not have completed governance write.\n"
-        fi
+
+        for _ev in spec-compiled advisory-reviewed; do
+          _evfile="$GOV_DIR/$_ev"
+          if [ "$_ev" = "spec-compiled" ]; then
+            _prompt_name="Prompt 0"
+          else
+            _prompt_name="Prompt A"
+          fi
+          if [ ! -f "$_evfile" ]; then
+            GOV_WARNINGS="${GOV_WARNINGS}Advisory: docs/ai/governance/$_ev not found — $_prompt_name may not have completed governance write.\n"
+            MISSING_FILES="${MISSING_FILES:+$MISSING_FILES,}$_ev"
+            GOV_ANY_FAIL=true
+            continue
+          fi
+          # Extract spec_version (inline awk — strips quotes and trailing whitespace;
+          # null/~/missing/empty all normalised to "" so empty == empty matches in
+          # template-mode / pre-spec repos).
+          _ev_version=$(awk -F': *' '
+            /^spec_version:[[:space:]]*/ {
+              v=$2
+              gsub(/^["'\'']|["'\'']$/, "", v)
+              gsub(/[[:space:]]+$/, "", v)
+              if (v == "null" || v == "~") v=""
+              print v
+              exit
+            }
+          ' "$_evfile")
+          if [ "$_ev_version" != "$ACTIVE_VERSION" ]; then
+            GOV_WARNINGS="${GOV_WARNINGS}Advisory: $_prompt_name not re-run since spec v${_ev_version:-<none>} → v${ACTIVE_VERSION:-<none>} — re-run to refresh docs/ai/governance/$_ev.\n"
+            MISMATCH_FILES="${MISMATCH_FILES:+$MISMATCH_FILES,}$_ev"
+            GOV_ANY_FAIL=true
+          fi
+        done
         ;;
     esac
 
     if [ -n "$GOV_WARNINGS" ]; then
       printf '%b' "$GOV_WARNINGS" >&2
-      MISSING_FILES=""
-      [ ! -f "$GOV_DIR/spec-compiled" ] && MISSING_FILES="spec-compiled"
-      [ ! -f "$GOV_DIR/advisory-reviewed" ] && MISSING_FILES="${MISSING_FILES:+$MISSING_FILES,}advisory-reviewed"
+      _warn_detail=""
+      [ -n "$MISSING_FILES" ] && _warn_detail="missing:$MISSING_FILES"
+      [ -n "$MISMATCH_FILES" ] && _warn_detail="${_warn_detail:+$_warn_detail;}mismatch:$MISMATCH_FILES"
       warn "gate3_gov_warning"
-      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "warn" "$START_MS" "gate3_gov_warning" "$MISSING_FILES"
+      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "warn" "$START_MS" "gate3_gov_warning" "$_warn_detail"
     fi
 
-    mkdir -p "$STATE_DIR" 2>/dev/null || true
-    echo "checked" > "$GOVERNANCE_CHECKED_FILE" 2>/dev/null || true
+    if [ "$GOV_ANY_FAIL" = true ]; then
+      # Reset first-fire so warning re-surfaces on the next gate run.
+      rm -f "$GOVERNANCE_CHECKED_FILE" 2>/dev/null || true
+    else
+      mkdir -p "$STATE_DIR" 2>/dev/null || true
+      echo "checked" > "$GOVERNANCE_CHECKED_FILE" 2>/dev/null || true
+    fi
   fi
 fi
 

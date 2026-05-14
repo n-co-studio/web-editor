@@ -34,11 +34,11 @@ assert_eq "$unknown_phases" "" "get_phases_for_type 'nonexistent-type' returns e
 tap_section "L1.2: get_phases_for_type — expected sequences"
 
 assert_eq "$(get_phases_for_type standard)" \
-  "init plan approval build review verify user-review commit op-review close" \
+  "init drift-check plan approval build review verify user-review commit op-review close" \
   "standard phase sequence"
 
 assert_eq "$(get_phases_for_type taskgroup)" \
-  "init contract-init plan approval build review verify user-review commit contract-update op-review close" \
+  "init contract-init drift-check plan approval build review verify user-review commit contract-update op-review close" \
   "taskgroup phase sequence"
 
 assert_eq "$(get_phases_for_type taskgroup-merge)" \
@@ -215,22 +215,24 @@ done
 # ============================================================
 tap_section "L1.8: get_phase_index — correct ordinals"
 
-# Standard: init=1, plan=2, ..., close=10 (user-review at index 7)
+# Standard: 11 phases — init=1, drift-check=2, plan=3, ..., close=11 (Decision 0038)
 assert_eq "$(get_phase_index standard init)" "1" "standard init = index 1"
-assert_eq "$(get_phase_index standard plan)" "2" "standard plan = index 2"
-assert_eq "$(get_phase_index standard approval)" "3" "standard approval = index 3"
-assert_eq "$(get_phase_index standard build)" "4" "standard build = index 4"
-assert_eq "$(get_phase_index standard review)" "5" "standard review = index 5"
-assert_eq "$(get_phase_index standard verify)" "6" "standard verify = index 6"
-assert_eq "$(get_phase_index standard user-review)" "7" "standard user-review = index 7"
-assert_eq "$(get_phase_index standard commit)" "8" "standard commit = index 8"
-assert_eq "$(get_phase_index standard op-review)" "9" "standard op-review = index 9"
-assert_eq "$(get_phase_index standard close)" "10" "standard close = index 10"
+assert_eq "$(get_phase_index standard drift-check)" "2" "standard drift-check = index 2"
+assert_eq "$(get_phase_index standard plan)" "3" "standard plan = index 3"
+assert_eq "$(get_phase_index standard approval)" "4" "standard approval = index 4"
+assert_eq "$(get_phase_index standard build)" "5" "standard build = index 5"
+assert_eq "$(get_phase_index standard review)" "6" "standard review = index 6"
+assert_eq "$(get_phase_index standard verify)" "7" "standard verify = index 7"
+assert_eq "$(get_phase_index standard user-review)" "8" "standard user-review = index 8"
+assert_eq "$(get_phase_index standard commit)" "9" "standard commit = index 9"
+assert_eq "$(get_phase_index standard op-review)" "10" "standard op-review = index 10"
+assert_eq "$(get_phase_index standard close)" "11" "standard close = index 11"
 
-# Taskgroup: 12 phases (user-review at index 8)
+# Taskgroup: 13 phases — drift-check inserted after contract-init (Decision 0038)
 assert_eq "$(get_phase_index taskgroup contract-init)" "2" "taskgroup contract-init = index 2"
-assert_eq "$(get_phase_index taskgroup contract-update)" "10" "taskgroup contract-update = index 10"
-assert_eq "$(get_phase_index taskgroup close)" "12" "taskgroup close = index 12"
+assert_eq "$(get_phase_index taskgroup drift-check)" "3" "taskgroup drift-check = index 3"
+assert_eq "$(get_phase_index taskgroup contract-update)" "11" "taskgroup contract-update = index 11"
+assert_eq "$(get_phase_index taskgroup close)" "13" "taskgroup close = index 13"
 
 # Editor-live: 7 phases (init, build, commit, review, verify, op-review, close)
 assert_eq "$(get_phase_index editor-live init)" "1" "editor-live init = index 1"

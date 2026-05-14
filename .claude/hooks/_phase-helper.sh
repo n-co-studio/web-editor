@@ -28,10 +28,16 @@ get_phases_for_type() {
   case "$stype" in
     standard)
       # user-review is skippable: forward-jump verify→commit permitted (Decision 0021)
-      echo "init plan approval build review verify user-review commit op-review close" ;;
+      # drift-check evaluates the handoff bundle (Decision 0038); when bundle is
+      # valid the legacy plan/approval phases are skipped via forward-jump.
+      # plan and approval remain in the sequence to preserve the legacy fallback
+      # path (no bundle present) — drift_check falls through to them.
+      echo "init drift-check plan approval build review verify user-review commit op-review close" ;;
     taskgroup)
       # user-review is skippable: forward-jump verify→commit permitted (Decision 0021)
-      echo "init contract-init plan approval build review verify user-review commit contract-update op-review close" ;;
+      # drift-check positioned after contract-init so per-brief bundles are
+      # evaluated against the synchronized contract (Decision 0038).
+      echo "init contract-init drift-check plan approval build review verify user-review commit contract-update op-review close" ;;
     hotfix)
       echo "init plan approval build verify commit close" ;;
     experiment)
@@ -77,10 +83,13 @@ get_write_phases_for_type() {
   local stype="$1"
   case "$stype" in
     standard)
+      # drift-check is read-only — bundle evaluation produces state-file writes
+      # via shell I/O (same pattern as init_phase), not via Edit/Write tools.
       echo "build review verify commit" ;;
     taskgroup)
       # contract-init intentionally excluded: task-group contract writes target
       # docs/ai/task-groups/ which is covered by the path-based exemption.
+      # drift-check excluded for the same reason as standard.
       echo "build review verify commit contract-update" ;;
     taskgroup-merge)
       echo "cohesion verify commit" ;;
@@ -128,6 +137,7 @@ get_tag_for_phase() {
   case "$stype" in
     standard)
       case "$phase" in
+        drift-check)  echo "agent" ;;
         plan)         echo "agent" ;;
         approval)     echo "operator" ;;
         build)        echo "agent" ;;
@@ -142,6 +152,7 @@ get_tag_for_phase() {
     taskgroup)
       case "$phase" in
         contract-init)   echo "agent" ;;
+        drift-check)     echo "agent" ;;
         plan)            echo "agent" ;;
         approval)        echo "operator" ;;
         build)           echo "agent" ;;
@@ -446,6 +457,397 @@ _check_cycle_limit() {
 }
 
 # ============================================================
+# Handoff bundle helpers (Decision 0038)
+# ============================================================
+# These helpers evaluate a sealed handoff bundle written by Prompt T at
+# operator approval. When a valid bundle is present, the standard sequence
+# skips plan/approval via drift-check; when absent or stale, drift-check
+# falls through to the legacy path. All writes are shell I/O — same
+# established pattern as init_phase / advance_phase (Decision 0014 §9).
+
+# --- Bundle path resolution ---
+# Returns absolute path to the singular handoff bundle for the current session.
+# Task groups use per-brief bundles at .claude/local/task-groups/{group}/briefs/{seq}.bundle.yaml
+# which callers resolve directly. This helper returns the singular path only.
+_handoff_bundle_path() {
+  local repo_root="$_REPO_OS_ROOT"
+  printf '%s/.claude/local/handoff-bundle.yaml\n' "$repo_root"
+}
+
+# --- bundle_valid ---
+# Returns 0 if the bundle at $1 (defaults to singular path) exists and contains
+# the required top-level fields: brief_id, approved_at, mode, contract, plan.
+# Performs a structural sanity check only — does not validate spec snapshot.
+# Returns 1 if missing, unreadable, or missing required fields.
+bundle_valid() {
+  local bundle="${1:-$(_handoff_bundle_path)}"
+  [ -f "$bundle" ] || return 1
+  [ -r "$bundle" ] || return 1
+  # Required top-level fields (lightweight grep — full YAML parse not needed
+  # for structural check; field presence is sufficient).
+  grep -q '^brief_id:'    "$bundle" 2>/dev/null || return 1
+  grep -q '^approved_at:' "$bundle" 2>/dev/null || return 1
+  grep -q '^mode:'        "$bundle" 2>/dev/null || return 1
+  grep -q '^contract:'    "$bundle" 2>/dev/null || return 1
+  grep -q '^plan:'        "$bundle" 2>/dev/null || return 1
+  return 0
+}
+
+# --- bundle_expired ---
+# Returns 0 if bundle is past soft_hours threshold (advisory re-approval),
+# returns 2 if past hard_hours threshold (invalidate, fall back to legacy),
+# returns 1 if fresh (within soft window).
+# Defaults: soft_hours=24, hard_hours=168. Read from bundle when present.
+bundle_expired() {
+  local bundle="${1:-$(_handoff_bundle_path)}"
+  [ -f "$bundle" ] || return 2
+  local approved_at soft_hours hard_hours
+  approved_at=$(grep '^approved_at:' "$bundle" 2>/dev/null | head -1 | sed 's/^approved_at: *//' | tr -d '"[:space:]')
+  # Use a wider grep window so blank lines or comments between `expiry:` and
+  # its child keys don't drop hard_hours from the match (cohesion finding #6).
+  soft_hours=$(grep -A8 '^expiry:' "$bundle" 2>/dev/null | grep 'soft_hours:' | head -1 | sed 's/.*soft_hours: *//' | tr -d '[:space:]')
+  hard_hours=$(grep -A8 '^expiry:' "$bundle" 2>/dev/null | grep 'hard_hours:' | head -1 | sed 's/.*hard_hours: *//' | tr -d '[:space:]')
+  : "${soft_hours:=24}"
+  : "${hard_hours:=168}"
+  [ -n "$approved_at" ] || return 2
+  # Normalize fractional seconds (e.g., 2026-05-13T10:30:00.123Z → 2026-05-13T10:30:00Z)
+  # so the BSD `date -j -f "%Y-%m-%dT%H:%M:%SZ"` parser accepts the value.
+  approved_at=$(printf '%s' "$approved_at" | sed -E 's/\.[0-9]+Z$/Z/; s/\.[0-9]+([+-][0-9:]+)$/\1/')
+  local approved_epoch now_epoch age_hours
+  # Portable date parsing: try GNU date first, then BSD/macOS date.
+  approved_epoch=$(date -u -d "$approved_at" +%s 2>/dev/null \
+                || date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$approved_at" +%s 2>/dev/null \
+                || echo "")
+  [ -n "$approved_epoch" ] || return 2
+  now_epoch=$(date -u +%s)
+  age_hours=$(( (now_epoch - approved_epoch) / 3600 ))
+  if [ "$age_hours" -ge "$hard_hours" ]; then
+    return 2
+  elif [ "$age_hours" -ge "$soft_hours" ]; then
+    return 0
+  fi
+  return 1
+}
+
+# --- bundle_to_plan_approved ---
+# Writes the plan-approved state file derived from a valid handoff bundle.
+# Sets large-scope=true (bundles imply pre-approved scope) and mode from bundle.
+# Caller must verify bundle_valid before invoking.
+# Shell I/O — same established pattern as plan-approval.sh.
+bundle_to_plan_approved() {
+  local bundle="${1:-$(_handoff_bundle_path)}"
+  local sid="${2:-$(get_session_id "$_REPO_OS_ROOT")}"
+  local state_dir
+  state_dir="$(get_session_state_dir)"
+  mkdir -p "$state_dir" 2>/dev/null || true
+  local mode
+  mode=$(grep '^mode:' "$bundle" 2>/dev/null | head -1 | sed 's/^mode: *//' | tr -d '"[:space:]')
+  : "${mode:=review}"
+  local approved_at brief_id
+  approved_at=$(grep '^approved_at:' "$bundle" 2>/dev/null | head -1 | sed 's/^approved_at: *//' | tr -d '"[:space:]')
+  brief_id=$(grep '^brief_id:' "$bundle" 2>/dev/null | head -1 | sed 's/^brief_id: *//' | tr -d '"[:space:]')
+  local ts
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  local question_hash=""
+  if type portable_hash >/dev/null 2>&1; then
+    question_hash=$(printf '%s' "${brief_id}-${approved_at}" | portable_hash 2>/dev/null | cut -c1-12)
+  fi
+  # Fall back to a content-derived deterministic string when no hash command
+  # is available — never the literal "bundle" (which would clash with the
+  # _validate_plan_content_hash comparison against any prior resume marker).
+  # Guard against empty/whitespace brief_id producing a useless 2-char hash —
+  # blend in the approved_at timestamp so the fallback retains content addressing.
+  if [ -z "$question_hash" ]; then
+    local _qh_seed="${brief_id}-${approved_at}"
+    # Strip non-alphanumeric (preserving dashes) so the value is shell-safe.
+    question_hash=$(printf 'b-%s' "$_qh_seed" | tr -c 'A-Za-z0-9-' '-' | cut -c1-12)
+    # If brief_id and approved_at were both empty, the result is just "b-" or
+    # a string of dashes — replace with a distinctive marker.
+    case "$question_hash" in
+      b-|b--*|--*) question_hash="bundle-empty" ;;
+    esac
+    : "${question_hash:=bundle-derived}"
+  fi
+  printf 'timestamp: %s\nquestion_hash: %s\nlarge-scope: true\nmode: %s\nsession_id: %s\nsource: handoff-bundle\nbundle_brief_id: %s\nbundle_approved_at: %s\n' \
+    "$ts" "$question_hash" "$mode" "$sid" "$brief_id" "$approved_at" \
+    > "$state_dir/plan-approved" 2>/dev/null || true
+}
+
+# --- bundle_to_pragmatist_signed ---
+# Writes pragmatist-signed state file from bundle.pragmatist.verdict.
+# Caller must verify bundle_valid before invoking.
+# Shell I/O — same pattern as state-writer.sh.
+bundle_to_pragmatist_signed() {
+  local bundle="${1:-$(_handoff_bundle_path)}"
+  local sid="${2:-$(get_session_id "$_REPO_OS_ROOT")}"
+  local state_dir
+  state_dir="$(get_session_state_dir)"
+  mkdir -p "$state_dir" 2>/dev/null || true
+  local verdict
+  verdict=$(grep -A1 '^pragmatist:' "$bundle" 2>/dev/null | grep 'verdict:' | head -1 | sed 's/.*verdict: *//' | tr -d '"[:space:]')
+  : "${verdict:=APPROVED}"
+  local gate_result="APPROVED"
+  # Both OVER-ENGINEERED-NOTED and APPROVED map to APPROVED gate result.
+  # FUNDAMENTAL-MISMATCH would have prevented bundle write at Prompt T.
+  case "$verdict" in
+    BLOCKED|FUNDAMENTAL-MISMATCH) gate_result="BLOCKED" ;;
+  esac
+  printf 'GATE_RESULT: %s\nsession_id: %s\nsource: handoff-bundle\nbundle_verdict: %s\n' \
+    "$gate_result" "$sid" "$verdict" \
+    > "$state_dir/pragmatist-signed" 2>/dev/null || true
+}
+
+# --- _bundle_field ---
+# Extract a top-level scalar field from the bundle (e.g., brief_id, mode).
+# Returns empty string when field is absent.
+_bundle_field() {
+  local bundle="$1" key="$2"
+  [ -f "$bundle" ] || return 0
+  grep "^${key}:" "$bundle" 2>/dev/null | head -1 | sed "s/^${key}: *//" | tr -d '"'
+}
+
+# --- _bundle_has_implementation_design ---
+# Returns 0 if the bundle's contract carries an implementation_design block
+# (presence of any of components/key_interfaces/data_flow/error_handling
+# fields under contract.implementation_design or top-level implementation_design).
+_bundle_has_implementation_design() {
+  local bundle="${1:-$(_handoff_bundle_path)}"
+  [ -f "$bundle" ] || return 1
+  grep -q '^implementation_design:' "$bundle" 2>/dev/null && return 0
+  # Nested under contract: scan for indented "implementation_design:" line.
+  grep -q '^  implementation_design:' "$bundle" 2>/dev/null && return 0
+  return 1
+}
+
+# --- drift_check ---
+# Top-level evaluator: when a valid bundle is present, writes derived state
+# files and returns 0 (caller advances to build). When absent / stale / drifted,
+# returns non-zero with a reason emitted to stderr. Caller is expected to
+# fall through to the legacy plan→approval path on non-zero.
+#
+# Return codes:
+#   0 — bundle valid and fresh; state files written; advance to build
+#   1 — bundle absent; fall through to legacy path
+#   2 — bundle hard-expired; fall through to legacy path with advisory
+#   3 — bundle soft-expired; focused re-approval recommended (caller decides)
+#   4 — spec snapshot mismatch; focused re-approval required
+#   5 — scope-file commits since approval; focused re-approval required
+#
+# Bundle path can be overridden via $1 (defaults to singular bundle path).
+drift_check() {
+  local bundle="${1:-$(_handoff_bundle_path)}"
+  local repo_root="$_REPO_OS_ROOT"
+
+  # Predicate 1: bundle present and structurally valid
+  if ! bundle_valid "$bundle"; then
+    log_override "drift-check" "bundle-absent:fallthrough-to-legacy" 2>/dev/null || true
+    echo "drift-check: no valid handoff bundle at $bundle — falling through to legacy plan→approval path" >&2
+    return 1
+  fi
+
+  # Predicate 2: approval freshness
+  local _bx_status=0
+  local _soft_expired=false
+  bundle_expired "$bundle" || _bx_status=$?
+  if [ "$_bx_status" = "2" ]; then
+    log_override "drift-check" "bundle-hard-expired:fallthrough-to-legacy" 2>/dev/null || true
+    echo "drift-check: bundle hard-expired (past hard_hours) — falling through to legacy plan→approval path" >&2
+    return 2
+  fi
+  if [ "$_bx_status" = "0" ]; then
+    log_override "drift-check" "bundle-soft-expired:advisory" 2>/dev/null || true
+    echo "Advisory: handoff bundle is past soft_hours expiry — operator should reconfirm scope before proceeding." >&2
+    _soft_expired=true
+    # Continue with remaining predicates — emit return 3 at the end (after
+    # spec/scope checks confirm no further drift) so the caller can decide.
+  fi
+
+  # Predicate 3: spec snapshot match
+  local snapshot_block
+  snapshot_block=$(awk '
+    /^spec_snapshot:/ { in_snap=1; next }
+    in_snap && /^[a-zA-Z]/ { in_snap=0 }
+    in_snap { print }
+  ' "$bundle" 2>/dev/null)
+
+  if [ -n "$snapshot_block" ]; then
+    # Robust YAML pair parser: accept either field order (`path:` first or
+    # `sha:` first within a `- ` list entry) and reset state on each new
+    # `- ` marker. Validating the pair only when BOTH path and sha are set
+    # avoids the field-ordering hole flagged in diff-review finding #3.
+    local path="" sha="" mismatch="" hash_unavailable=false
+    _evaluate_pair() {
+      [ -n "$path" ] && [ -n "$sha" ] || return 0
+      if [ -f "$repo_root/$path" ]; then
+        local current_sha=""
+        if type portable_hash >/dev/null 2>&1; then
+          current_sha=$(portable_hash < "$repo_root/$path" 2>/dev/null)
+        fi
+        if [ -z "$current_sha" ]; then
+          hash_unavailable=true
+          return 1
+        fi
+        if [ "$current_sha" != "$sha" ]; then
+          mismatch="${mismatch:+$mismatch }$path"
+        fi
+      fi
+      path=""; sha=""
+    }
+    while IFS= read -r line; do
+      # YAML list item boundary — new entry starts here, flush any partial state.
+      case "$line" in
+        *"- "*)
+          _evaluate_pair || break
+          ;;
+      esac
+      case "$line" in
+        *"path:"*)
+          path="${line#*path: }"; path="${path#\"}"; path="${path%\"}"
+          path="${path## }"; path="${path%% }"
+          _evaluate_pair || break
+          ;;
+        *"sha:"*)
+          sha="${line#*sha: }"; sha="${sha#\"}"; sha="${sha%\"}"
+          sha="${sha## }"; sha="${sha%% }"
+          _evaluate_pair || break
+          ;;
+      esac
+    done <<< "$snapshot_block"
+    # Flush trailing pair after the loop completes.
+    if [ "$hash_unavailable" = false ]; then
+      _evaluate_pair || true
+    fi
+    unset -f _evaluate_pair
+    if [ "$hash_unavailable" = true ]; then
+      log_override "drift-check" "spec-hash-unavailable:focused-reapproval" 2>/dev/null || true
+      echo "drift-check: no portable hash command available — cannot verify spec snapshot. Focused re-approval required." >&2
+      return 4
+    fi
+    if [ -n "$mismatch" ]; then
+      log_override "drift-check" "spec-hash-mismatch:focused-reapproval" 2>/dev/null || true
+      echo "drift-check: spec snapshot mismatch — files changed since approval: $mismatch. Focused re-approval required." >&2
+      return 4
+    fi
+  fi
+
+  # Predicate 4: scope-file stability (no main..HEAD commits touching scope_files since approval)
+  local approved_at scope_files
+  approved_at=$(_bundle_field "$bundle" "approved_at")
+  scope_files=$(awk '
+    /^contract:/ { in_contract=1; next }
+    in_contract && /^[a-zA-Z]/ { in_contract=0 }
+    in_contract && /^  scope_files:/ { in_sf=1; next }
+    in_contract && in_sf && /^  [a-zA-Z]/ { in_sf=0 }
+    in_contract && in_sf && /^    - / { sub(/^    - /, ""); gsub(/"/, ""); print }
+  ' "$bundle" 2>/dev/null)
+  if [ -n "$scope_files" ] && [ -n "$approved_at" ]; then
+    local touched=""
+    local f
+    while IFS= read -r f; do
+      [ -z "$f" ] && continue
+      local recent
+      recent=$(git -C "$repo_root" log --since="$approved_at" --format='%H' --no-merges -- "$f" 2>/dev/null | head -1)
+      if [ -n "$recent" ]; then
+        touched="${touched:+$touched }$f"
+      fi
+    done <<< "$scope_files"
+    if [ -n "$touched" ]; then
+      log_override "drift-check" "scope-file-commits-since-approval:focused-reapproval" 2>/dev/null || true
+      echo "drift-check: scope files modified since approval ($approved_at): $touched. Focused re-approval required." >&2
+      return 5
+    fi
+  fi
+
+  # All predicates passed — write derived state files.
+  # Soft-expired path: state files are still written (operator may choose to
+  # proceed), and the function returns 3 so the caller can elect a focused
+  # re-confirmation flow instead of advancing silently.
+  local sid
+  sid=$(get_session_id "$repo_root")
+  bundle_to_plan_approved "$bundle" "$sid"
+  bundle_to_pragmatist_signed "$bundle" "$sid"
+  if [ "$_soft_expired" = true ]; then
+    log_override "drift-check" "bundle-soft-expired:state-written" 2>/dev/null || true
+    return 3
+  fi
+  log_override "drift-check" "bundle-valid:advancing-to-build" 2>/dev/null || true
+  return 0
+}
+
+# --- deterministic_alignment_check ---
+# Compares a plan-text summary against the contract's implementation_design.
+# Used by the Orchestrator to decide whether Pragmatist alignment dispatch
+# is needed (Decision 0038 §7). Caller passes:
+#   $1 — plan text (or file path)
+#   $2 — contract YAML path (defaults to .claude/local/task-contract.yaml)
+#
+# Heuristic comparison: keyword-presence check against components and
+# key_interfaces. A plan that mentions all components and named interfaces
+# is considered aligned. Ambiguous results fall through to full dispatch.
+#
+# Output: one of "aligned" / "diverged" / "missing-design" on stdout.
+# Return codes: 0=aligned, 1=diverged, 2=missing-design.
+deterministic_alignment_check() {
+  local plan_arg="$1"
+  local contract="${2:-$_REPO_OS_ROOT/.claude/local/task-contract.yaml}"
+
+  [ -f "$contract" ] || { echo "missing-design"; return 2; }
+
+  # Plan text: literal arg or file contents.
+  local plan_text="$plan_arg"
+  if [ -f "$plan_arg" ]; then
+    plan_text=$(cat "$plan_arg" 2>/dev/null || echo "")
+  fi
+  [ -n "$plan_text" ] || { echo "missing-design"; return 2; }
+
+  # Extract implementation_design block from contract.
+  local design
+  design=$(awk '
+    /^implementation_design:/ { in_d=1; next }
+    in_d && /^[a-zA-Z]/ { in_d=0 }
+    in_d { print }
+  ' "$contract" 2>/dev/null)
+  [ -n "$design" ] || { echo "missing-design"; return 2; }
+
+  # Pull the components and key_interfaces summary text.
+  local components key_interfaces
+  components=$(printf '%s\n' "$design" | grep 'components:' | head -1 | sed 's/.*components: *//' | tr -d '"')
+  key_interfaces=$(printf '%s\n' "$design" | grep 'key_interfaces:' | head -1 | sed 's/.*key_interfaces: *//' | tr -d '"')
+
+  # Heuristic: every comma-separated token in components AND key_interfaces
+  # must appear (case-insensitive substring) in the plan text. Ambiguous
+  # short tokens (<=3 chars) are skipped to reduce false negatives.
+  local plan_lower
+  plan_lower=$(printf '%s' "$plan_text" | tr '[:upper:]' '[:lower:]')
+  local missing=""
+  local IFS_BAK="$IFS"
+  IFS=','
+  for tok in $components $key_interfaces; do
+    # Trim whitespace
+    tok=$(printf '%s' "$tok" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    [ -z "$tok" ] && continue
+    [ "${#tok}" -le 3 ] && continue
+    local tok_lower
+    tok_lower=$(printf '%s' "$tok" | tr '[:upper:]' '[:lower:]')
+    case "$plan_lower" in
+      *"$tok_lower"*) ;;
+      *) missing="${missing:+$missing }$tok" ;;
+    esac
+  done
+  IFS="$IFS_BAK"
+
+  if [ -z "$missing" ]; then
+    echo "aligned"
+    log_override "pragmatist-alignment" "deterministic-aligned" 2>/dev/null || true
+    return 0
+  else
+    echo "diverged"
+    log_override "pragmatist-alignment" "deterministic-diverged:$missing" 2>/dev/null || true
+    return 1
+  fi
+}
+
+# ============================================================
 # Ancestry check helper
 # ============================================================
 
@@ -464,6 +866,210 @@ _check_cycle_limit() {
 _check_main_ancestry() {
   git rev-parse --verify main >/dev/null 2>&1 || return 2
   git merge-base --is-ancestor main HEAD 2>/dev/null || return 1
+  return 0
+}
+
+# ============================================================
+# Phase gate cache (Decision 0042 — hook check hoisting)
+# ============================================================
+#
+# Shared expensive checks (session_overlap from _analytics-helper.sh, branch
+# isolation against closed-branches) are computed once per phase transition
+# and serialised to <state_dir>/phase-state.gates as KEY=VALUE pairs that the
+# hooks (bash-guard.sh, write-guard.sh, pre-commit-gates.sh) can `source` and
+# read in a single fork-free step.
+#
+# Invariants:
+#   - The cache is computed in init_phase() and advance_phase() AFTER phase-state
+#     is written. Override env vars (REPO_OS_SKIP_OVERLAP_CHECK,
+#     REPO_OS_SKIP_BRANCH_REUSE) are NOT consulted at compute time — overrides
+#     are per-invocation policy and remain the responsibility of the hooks.
+#   - Hooks always check overrides first; cache reads are a fast path that
+#     replaces the inline expensive checks.
+#   - Cache miss (file absent, session-id mismatch, branch swap, closed-branches
+#     mtime change) falls through to the original inline checks. This is the
+#     backwards-compatibility safety net — no behaviour change on cache miss.
+#
+# Schema (KEY=VALUE, shell-quoted):
+#   GATES_SESSION_ID=<sid>
+#   GATES_COMPUTED_AT=<iso8601>
+#   GATES_CURRENT_PHASE=<phase>
+#   GATES_SESSION_TYPE=<type>
+#   GATES_CURRENT_BRANCH=<branch>
+#   GATES_CLOSED_BRANCHES_MTIME=<epoch_or_empty>
+#   GATES_SESSION_OVERLAP=ok|blocked|advisory
+#   GATES_SESSION_OVERLAP_DETAIL='<message>'
+#   GATES_BRANCH_ISOLATION=ok|blocked
+#   GATES_BRANCH_ISOLATION_DETAIL='<message>'
+#
+# Why epoch mtime for closed-branches: branch sealing rewrites the file at
+# session close; if a parallel session seals a branch mid-phase, the cached
+# verdict for branch_isolation could be stale. Comparing mtime on each cache
+# read is one stat — cheap.
+
+# --- Read closed-branches file mtime (epoch seconds, empty if file absent) ---
+# Portable across BSD (macOS) and GNU stat.
+_closed_branches_mtime() {
+  local repo_root="$_REPO_OS_ROOT"
+  local closed_file="$repo_root/.claude/local/closed-branches"
+  [ -f "$closed_file" ] || { echo ""; return 0; }
+  local m
+  m=$(stat -f '%m' "$closed_file" 2>/dev/null) || \
+  m=$(stat -c '%Y' "$closed_file" 2>/dev/null) || \
+  m=""
+  echo "$m"
+}
+
+# --- Single-quote a value for shell-sourceable cache file output ---
+# Embedded single quotes are escaped via close-quote / escaped-quote / re-open-quote.
+# Top-level helper (avoids namespace leak from a nested function definition).
+_gates_q() {
+  local in="$1"
+  local out
+  out=${in//\'/\'\\\'\'}
+  printf "'%s'" "$out"
+}
+
+# --- Compute and cache phase gate verdicts ---
+# Called from init_phase() and advance_phase() after phase-state is written.
+# Writes <state_dir>/phase-state.gates atomically (write to .tmp, mv).
+# Failures are silent (cache miss falls through to inline checks).
+compute_phase_gates() {
+  local repo_root="$_REPO_OS_ROOT"
+  local state_dir
+  state_dir="$(get_session_state_dir)"
+  [ -d "$state_dir" ] || mkdir -p "$state_dir" 2>/dev/null || return 0
+  local gates_file="$state_dir/phase-state.gates"
+  local tmp_file="${gates_file}.tmp.$$"
+
+  local sid branch stype phase ts cb_mtime
+  sid=$(get_session_id "$repo_root")
+  branch=$(get_branch)
+  stype=$(get_session_type)
+  phase=$(get_phase)
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  cb_mtime=$(_closed_branches_mtime)
+
+  # --- session_overlap verdict (defer to canonical check, capture stderr) ---
+  # check_session_overlap returns 0 (ok or advisory) / 2 (blocked).
+  # Force a fresh evaluation by clearing the per-PID memo cache so we do not
+  # cache a stale "skipped" verdict.
+  local _saved_checked="${_SESSION_OVERLAP_CHECKED:-}"
+  local _saved_pid="${_SESSION_OVERLAP_CHECK_PID:-}"
+  _SESSION_OVERLAP_CHECKED=false
+  _SESSION_OVERLAP_CHECK_PID=""
+  # Override is per-invocation policy (handled by hooks). Temporarily clear
+  # REPO_OS_SKIP_OVERLAP_CHECK during compute so the cached verdict reflects
+  # the unsuppressed reality and avoids a duplicate log_override entry from
+  # check_session_overlap's own override path (Decision 0042).
+  local _saved_skip_overlap="${REPO_OS_SKIP_OVERLAP_CHECK:-}"
+  unset REPO_OS_SKIP_OVERLAP_CHECK
+  local overlap_status=0
+  local overlap_detail=""
+  overlap_detail=$(check_session_overlap 2>&1 1>/dev/null) || overlap_status=$?
+  _SESSION_OVERLAP_CHECKED="$_saved_checked"
+  _SESSION_OVERLAP_CHECK_PID="$_saved_pid"
+  if [ -n "$_saved_skip_overlap" ]; then
+    export REPO_OS_SKIP_OVERLAP_CHECK="$_saved_skip_overlap"
+  fi
+
+  local overlap_verdict="ok"
+  case "$overlap_status" in
+    0)
+      if [ -n "$overlap_detail" ]; then
+        overlap_verdict="advisory"
+      fi
+      ;;
+    *)
+      overlap_verdict="blocked"
+      ;;
+  esac
+
+  # --- branch_isolation verdict (closed-branches grep) ---
+  local closed_file="$repo_root/.claude/local/closed-branches"
+  local isolation_verdict="ok"
+  local isolation_detail=""
+  if [ -f "$closed_file" ] && grep -qxF "$branch" "$closed_file" 2>/dev/null; then
+    isolation_verdict="blocked"
+    isolation_detail="Branch '$branch' sealed by a previous session."
+  fi
+
+  # --- Serialise (single-quoted via top-level _gates_q helper) ---
+  {
+    printf 'GATES_SESSION_ID=%s\n' "$(_gates_q "$sid")"
+    printf 'GATES_COMPUTED_AT=%s\n' "$(_gates_q "$ts")"
+    printf 'GATES_CURRENT_PHASE=%s\n' "$(_gates_q "$phase")"
+    printf 'GATES_SESSION_TYPE=%s\n' "$(_gates_q "$stype")"
+    printf 'GATES_CURRENT_BRANCH=%s\n' "$(_gates_q "$branch")"
+    printf 'GATES_CLOSED_BRANCHES_MTIME=%s\n' "$(_gates_q "$cb_mtime")"
+    printf 'GATES_SESSION_OVERLAP=%s\n' "$(_gates_q "$overlap_verdict")"
+    printf 'GATES_SESSION_OVERLAP_DETAIL=%s\n' "$(_gates_q "$overlap_detail")"
+    printf 'GATES_BRANCH_ISOLATION=%s\n' "$(_gates_q "$isolation_verdict")"
+    printf 'GATES_BRANCH_ISOLATION_DETAIL=%s\n' "$(_gates_q "$isolation_detail")"
+  } > "$tmp_file" 2>/dev/null || { rm -f "$tmp_file" 2>/dev/null; return 0; }
+  mv -f "$tmp_file" "$gates_file" 2>/dev/null || { rm -f "$tmp_file" 2>/dev/null; return 0; }
+  return 0
+}
+
+# --- Read cached phase gates ---
+# Sources <state_dir>/phase-state.gates and validates freshness:
+#   - file exists
+#   - GATES_SESSION_ID matches current session
+#   - GATES_CURRENT_BRANCH matches get_branch (invalidates on git checkout)
+#   - GATES_CLOSED_BRANCHES_MTIME matches current mtime (invalidates on seal)
+# On valid cache, GATES_* vars are exported into caller's scope and returns 0.
+# On any miss, returns 1; caller falls through to inline checks. Silent.
+read_phase_gates() {
+  local repo_root="$_REPO_OS_ROOT"
+  local state_dir
+  state_dir="$(get_session_state_dir)"
+  local gates_file="$state_dir/phase-state.gates"
+  [ -f "$gates_file" ] || return 1
+
+  # Reset to known state so a stale prior `source` cannot leak across calls.
+  # GATES_* vars are intentionally exposed in the caller's scope after sourcing
+  # the gates file — hooks read them directly. shellcheck: disable=SC2034
+  GATES_SESSION_ID=""
+  # shellcheck disable=SC2034
+  GATES_COMPUTED_AT=""
+  # shellcheck disable=SC2034
+  GATES_CURRENT_PHASE=""
+  # shellcheck disable=SC2034
+  GATES_SESSION_TYPE=""
+  GATES_CURRENT_BRANCH=""
+  GATES_CLOSED_BRANCHES_MTIME=""
+  # shellcheck disable=SC2034
+  GATES_SESSION_OVERLAP=""
+  # shellcheck disable=SC2034
+  GATES_SESSION_OVERLAP_DETAIL=""
+  # shellcheck disable=SC2034
+  GATES_BRANCH_ISOLATION=""
+  # shellcheck disable=SC2034
+  GATES_BRANCH_ISOLATION_DETAIL=""
+
+  # shellcheck disable=SC1090
+  . "$gates_file" 2>/dev/null || return 1
+
+  # Validate session ID
+  local current_sid
+  if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
+    current_sid="$REPO_OS_SESSION_ID"
+  else
+    current_sid=$(cat "$repo_root/.claude/.session-id" 2>/dev/null || echo "")
+  fi
+  [ -n "$current_sid" ] || return 1
+  [ "$GATES_SESSION_ID" = "$current_sid" ] || return 1
+
+  # Validate branch (catches mid-phase git checkout)
+  local current_branch
+  current_branch=$(get_branch)
+  [ "$GATES_CURRENT_BRANCH" = "$current_branch" ] || return 1
+
+  # Validate closed-branches mtime (catches mid-phase branch seal)
+  local current_cb_mtime
+  current_cb_mtime=$(_closed_branches_mtime)
+  [ "$GATES_CLOSED_BRANCHES_MTIME" = "$current_cb_mtime" ] || return 1
+
   return 0
 }
 
@@ -622,6 +1228,10 @@ init_phase() {
 
   # Write resume marker (compression recovery)
   write_resume_marker "$stype" "$sid" "init" ""
+
+  # Decision 0042 — compute and cache phase gate verdicts. Silent on failure;
+  # cache miss in hooks falls through to inline checks (BC by construction).
+  compute_phase_gates || true
 
 }
 
@@ -854,6 +1464,10 @@ advance_phase() {
     # Forward-only validation with strict sequential enforcement (adversarial C2/C3/H1).
     # Non-adjacent forward jumps only allowed when every skipped phase is in the
     # skippable set: user-review (Decision 0021), op-review (auto mode skip).
+    # Decision 0038: when current phase is drift-check, plan and approval are
+    # also skippable — drift_check writes plan-approved + pragmatist-signed
+    # from the bundle, so the forward-jump drift-check→build is the canonical
+    # bundle-path advance.
     local current_idx new_idx
     current_idx=$(get_phase_index "$stype" "$current_phase")
     new_idx=$(get_phase_index "$stype" "$new_phase")
@@ -869,7 +1483,8 @@ advance_phase() {
     fi
 
     # Strict adjacency check: if jumping more than 1 step, verify all
-    # intermediate phases are skippable (user-review, op-review).
+    # intermediate phases are skippable (user-review, op-review, and —
+    # when leaving drift-check via the bundle path — plan and approval).
     if [ "$new_idx" -gt $((current_idx + 1)) ]; then
       local phases_list skip_ok
       phases_list=$(get_phases_for_type "$stype")
@@ -880,7 +1495,13 @@ advance_phase() {
         # Check phases strictly between current and target
         if [ "$_idx" -gt "$current_idx" ] && [ "$_idx" -lt "$new_idx" ]; then
           case "$_p" in
-            user-review|op-review) ;; # skippable
+            user-review|op-review) ;; # skippable (Decision 0021)
+            plan|approval)
+              # Decision 0038: skippable only when leaving drift-check
+              if [ "$current_phase" != "drift-check" ]; then
+                skip_ok=false; break
+              fi
+              ;;
             *) skip_ok=false; break ;;
           esac
         fi
@@ -1010,6 +1631,11 @@ advance_phase() {
     _inject_kg_context
     _inject_cross_session_context
   fi
+
+  # Decision 0042 — recompute the phase gate cache after every phase advance so
+  # hook reads see fresh verdicts. Silent on failure; cache miss in hooks falls
+  # through to inline checks (BC by construction).
+  compute_phase_gates || true
 }
 
 # --- Assert current phase meets requirement ---
@@ -1484,4 +2110,146 @@ record_agent_verdict() {
   } > "$temp_file" 2>/dev/null || true
 
   mv "$temp_file" "$resume_file" 2>/dev/null || true
+}
+
+# --- Finish-loop dimension cache (Decision 0040) ---
+# Cache passing finish-loop dimension verdicts keyed by an input-file hash.
+# On cycle N>=2, if a dimension's current input hash matches the cached PASS
+# entry's hash, the verdict is inherited and the dimension is skipped.
+# Cache file: <session_state_dir>/finish-loop-cache.yaml — session-scoped,
+# cleaned by cleanup_session_files() at close.
+#
+# Schema:
+#   session_id: <id>
+#   entries:
+#     - dimension: "<name>"
+#       hash: "<sha256-hex>"
+#       verdict: "PASS"
+#       cycle: <N>
+#       timestamp: "<ISO 8601 UTC>"
+
+_finish_loop_cache_path() {
+  local state_dir
+  state_dir="$(get_session_state_dir)"
+  echo "$state_dir/finish-loop-cache.yaml"
+}
+
+# dimension_input_hash <dimension> <file...>
+# Computes a deterministic sha256 over the input file set. The dimension name
+# is for traceability only — it is NOT part of the hash so the same file set
+# always produces the same hash regardless of which dimension owns it.
+# Per-file content sha via `git hash-object` (working-tree state). Absent
+# files contribute "MISSING" so deletion changes the hash. Files are sorted
+# with LC_ALL=C for OS-independent ordering.
+# Stdout: hex digest (empty when no files passed).
+dimension_input_hash() {
+  local _dimension="$1"
+  shift
+  [ $# -eq 0 ] && return 0
+  local repo_root
+  repo_root="$(get_repo_root)"
+  local sorted
+  sorted=$(printf '%s\n' "$@" | LC_ALL=C sort)
+  local concat="" f abs_f sha
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    case "$f" in
+      /*) abs_f="$f" ;;
+      *)  abs_f="$repo_root/$f" ;;
+    esac
+    if [ -f "$abs_f" ]; then
+      sha=$(git -C "$repo_root" hash-object "$abs_f" 2>/dev/null || true)
+      if [ -z "$sha" ] && type portable_hash >/dev/null 2>&1; then
+        sha=$(portable_hash < "$abs_f")
+      fi
+      concat+="$f:$sha"$'\n'
+    else
+      concat+="$f:MISSING"$'\n'
+    fi
+  done <<< "$sorted"
+  if type portable_hash >/dev/null 2>&1; then
+    printf '%s' "$concat" | portable_hash
+  else
+    echo "ERROR: dimension_input_hash requires portable_hash (source _analytics-helper.sh)" >&2
+    return 1
+  fi
+}
+
+# cached_dimension_verdict <dimension> <current_hash>
+# Returns "PASS" on stdout (exit 0) when the cache contains a PASS entry for
+# the dimension whose hash equals current_hash. Exit 1 on miss or no cache.
+# When multiple PASS entries exist for the dimension, the latest cycle wins.
+cached_dimension_verdict() {
+  local dimension="$1"
+  local current_hash="$2"
+  if [ -z "$dimension" ] || [ -z "$current_hash" ]; then
+    return 1
+  fi
+  local cache_path
+  cache_path="$(_finish_loop_cache_path)"
+  [ -f "$cache_path" ] || return 1
+  awk -v dim="$dimension" -v want_hash="$current_hash" '
+    function strip(s) { gsub(/^"|"$/, "", s); return s }
+    BEGIN { best_c=-1; matched=0; d=""; h=""; v=""; c=-1 }
+    /^  - dimension: / { d=strip($3); h=""; v=""; c=-1; next }
+    /^    hash: /      { h=strip($2); next }
+    /^    verdict: /   { v=strip($2); next }
+    /^    cycle: /     {
+                         c=$2+0
+                         if (d == dim && v == "PASS" && h == want_hash && c > best_c) {
+                           best_c=c; matched=1
+                         }
+                         next
+                       }
+    END { if (matched) { print "PASS"; exit 0 } else { exit 1 } }
+  ' "$cache_path"
+}
+
+# record_dimension_verdict <dimension> <hash> <verdict> <cycle>
+# Appends an entry to the cache file. Creates the file with header on first
+# call. Caller is responsible for cycle numbering.
+record_dimension_verdict() {
+  local dimension="$1"
+  local hash="$2"
+  local verdict="$3"
+  local cycle="$4"
+  if [ -z "$dimension" ] || [ -z "$hash" ] || [ -z "$verdict" ] || [ -z "$cycle" ]; then
+    echo "ERROR: record_dimension_verdict requires dimension, hash, verdict, cycle" >&2
+    return 1
+  fi
+  # Cycle numbering starts at 1; cached_dimension_verdict's AWK uses best_c=-1
+  # initial state so cycle=0 entries can match, but reject <1 defensively so the
+  # cache schema invariant (cycles ≥ 1) is enforced at the write boundary.
+  case "$cycle" in
+    ''|*[!0-9]*) echo "ERROR: cycle must be a positive integer (got: $cycle)" >&2; return 1 ;;
+  esac
+  if [ "$cycle" -lt 1 ]; then
+    echo "ERROR: cycle must be >= 1 (got: $cycle)" >&2
+    return 1
+  fi
+  local cache_path
+  cache_path="$(_finish_loop_cache_path)"
+  local repo_root
+  repo_root="$(get_repo_root)"
+  local sid="${REPO_OS_SESSION_ID:-}"
+  if [ -z "$sid" ] && [ -f "$repo_root/.claude/.session-id" ]; then
+    sid=$(cat "$repo_root/.claude/.session-id" 2>/dev/null || echo unknown)
+  fi
+  [ -z "$sid" ] && sid="unknown"
+  mkdir -p "$(dirname "$cache_path")" 2>/dev/null || true
+  if [ ! -f "$cache_path" ]; then
+    {
+      printf 'session_id: %s\n' "$sid"
+      printf 'entries:\n'
+    } > "$cache_path"
+  fi
+  local ts
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  {
+    printf '  - dimension: "%s"\n' "$dimension"
+    printf '    hash: "%s"\n' "$hash"
+    printf '    verdict: "%s"\n' "$verdict"
+    printf '    cycle: %s\n' "$cycle"
+    printf '    timestamp: "%s"\n' "$ts"
+  } >> "$cache_path"
 }

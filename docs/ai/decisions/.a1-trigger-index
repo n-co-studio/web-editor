@@ -16,10 +16,8 @@
 0011|\.claude/local/task-groups/|task.group, contract, A6, next_brief, pre-approval, one.branch.per.group, parallel, execution, completion_markers, merge_brief, boundaries
 0012|\.claude/hooks/write-guard\.sh|write-guard, mode-guard, REPO_OS_MODE, REPO_OS_UNLOCK_PATH, REPO_OS_SKIP_MODE_GUARD, is_in_repo
 0012|\.claude/repo-mode|write-guard, mode-guard, REPO_OS_MODE, REPO_OS_UNLOCK_PATH, REPO_OS_SKIP_MODE_GUARD, is_in_repo
-0013|\.claude/hooks/(bash-guard|write-guard|session-close-check)\.sh|branch.reuse, session.isolation, closed-branches, one.session.per.branch, concurrent.session
 0014|\.claude/hooks/_phase-helper\.sh|phase, session_type, init_phase, advance_phase, assert_phase, phase-state, get_phase, get_tag, taskgroup-merge, editor-live
 0014|\.claude/\.state/phase-state|phase, session_type, init_phase, advance_phase, assert_phase, phase-state, get_phase, get_tag, taskgroup-merge, editor-live
-0015|\.claude/hooks/(session-close-check|_phase-helper)\.sh|solo, solo.mode, direct.merge, merge.to.main
 0016|\.claude/agents/auditor\.md|auditor, audit, dimension, co-audit, workshop, escalation, tech-debt, cohesion-drift
 0016|docs/ai/prompts/prompt-c-project-audit\.md|auditor, audit, dimension, co-audit, workshop, escalation, tech-debt, cohesion-drift
 0017|\.claude/\.automation/|automation, headless, runner, queue, escalation, blocker, claude -p, enabled, permission-request, allowlist, scope-deviation, scope_classification
@@ -50,13 +48,33 @@
 0028|\.claude/hooks/(state-writer|_analytics-helper)\.sh|is_worktree, worktree_blocked, _CACHED_IS_WORKTREE, git-common-dir
 0029|\.claude/hooks/(_phase-helper|plan-approval)\.sh|approval, has_operator_gate, taskdef-brief, plan-approved
 0030|\.claude/hooks/(state-writer|_analytics-helper|_phase-helper|session-close-check|_cleanup-helper)\.sh|is_full_worktree_session, get_session_state_dir, REPO_OS_SESSION_ID, wt-sessions, merge-lock
+0031|\.claude/hooks/(bash-guard|write-guard|pre-commit-gates|pre-push-gates)\.sh|REPO_OS_RECOVER, recover-signal, recovery bypass
 0032|docs/ai/(workflow-appendix/session-type-task-group|prompts/prompt-t-task-definition|task-groups/_contract-template)\.|parallel, worktree, Execution: parallel, worktree isolation, per-brief branch
 0033|\.claude/(\.automation/runner|hooks/(session-close-check|_phase-helper|_cleanup-helper|_analytics-helper))\.sh|worktree, REPO_OS_WORKTREE_ISOLATE, --worktree, session isolation, concurrent session, .worktrees
-0034|docs/ai/knowledge-graph/|knowledge graph, knowledge-graph, graph.yaml, schema.yaml, kg-seed, kg-relevance, semantic connection, edge type, staleness
-0034|\.claude/tools/kg-|knowledge graph, knowledge-graph, graph.yaml, schema.yaml, kg-seed, kg-relevance, semantic connection, edge type, staleness
-0036|\.claude/\.automation/runner\.sh|daemon, branch switch, daemon-pid, runner.sh --daemon, daemon-safe
-0036|\.claude/\.automation/lib/|daemon, branch switch, daemon-pid, runner.sh --daemon, daemon-safe
-0036|\.claude/hooks/bash-guard\.sh|daemon, branch switch, git checkout, git switch, git reset --hard, daemon-pid, daemon-safe
+0034|docs/ai/knowledge-graph/|knowledge graph, knowledge-graph, graph.yaml, product-graph.yaml, schema.yaml, kg-seed, kg-relevance, semantic connection, edge type, staleness, two-graph
+0034|.claude/tools/kg-|knowledge graph, knowledge-graph, graph.yaml, product-graph.yaml, schema.yaml, kg-seed, kg-relevance, semantic connection, edge type, staleness, two-graph
+0035|docs/spec/compiled/|spec loading, spec digest, DIGEST.md, selective loading, manifest features, spec_digest_sha, feature index, token reduction, specialist dispatch
+0035|.claude/tools/spec-digest.sh|spec loading, spec digest, DIGEST.md, selective loading, manifest features, spec_digest_sha, feature index, token reduction, specialist dispatch
+0035|docs/spec/_templates/|spec loading, spec digest, DIGEST.md, selective loading, manifest features, spec_digest_sha, feature index, token reduction, specialist dispatch
+0036|.claude/.automation/runner.sh|daemon, branch switch, git checkout, git switch, git reset --hard, runner, worktree isolation, hotfix, daemon-pid
+0036|.claude/.automation/lib/|daemon, branch switch, git checkout, git switch, git reset --hard, runner, worktree isolation, hotfix, daemon-pid
+0036|.claude/hooks/bash-guard.sh|daemon, branch switch, git checkout, git switch, git reset --hard, runner, worktree isolation, hotfix, daemon-pid
 0037|\.claude/hooks/.*\.sh|governance packaging, content/enforcement split, hook lifecycle, enforcement standalone, content standalone
 0037|\.claude/\.automation/|governance packaging, content/enforcement split, hook lifecycle, enforcement standalone, content standalone
-0037|\.claude/agents/custom/|governance packaging, content/enforcement split, hook lifecycle, enforcement standalone, content standalone
+0038|docs/ai/prompts/prompt-t-task-definition\.md|handoff bundle, drift-check, drift_check, bundle_valid, bundle_expired, deterministic alignment, handoff-bundle
+0038|docs/ai/prompts/prompt-b-product-build\.md|handoff bundle, drift-check, drift_check, bundle_valid, bundle_expired, deterministic alignment, handoff-bundle
+0038|\.claude/hooks/_phase-helper\.sh|handoff bundle, drift-check, drift_check, bundle_valid, bundle_expired, deterministic alignment, handoff-bundle
+0038|\.claude/local/handoff-bundle\.yaml|handoff bundle, drift-check, drift_check, bundle_valid, bundle_expired, deterministic alignment, handoff-bundle
+0038|\.claude/local/task-groups/.*\.bundle\.yaml|handoff bundle, drift-check, drift_check, bundle_valid, bundle_expired, deterministic alignment, handoff-bundle
+0039|\.claude/agents/critic\.md|critic combined mode, cohesion + diff-review consolidation, dual-section output, review-phase dispatch, MODE: diff-review
+0039|\.claude/hooks/state-writer\.sh|critic combined mode, cohesion + diff-review consolidation, dual-section output, review-phase dispatch, MODE: diff-review
+0040|docs/ai/prompts/prompt-f-finish-loop\.md|finish-loop cache, dimension input hash, cached_dimension_verdict, record_dimension_verdict, INHERITED verdict
+0040|\.claude/hooks/_phase-helper\.sh|finish-loop cache, dimension input hash, cached_dimension_verdict, record_dimension_verdict, INHERITED verdict
+0041|docs/ai/governance/spec-compiled|governance evidence, spec_version, governance-checked, governance-bash-fired, fast-skip predicate, inter-session governance
+0041|docs/ai/governance/advisory-reviewed|governance evidence, spec_version, governance-checked, governance-bash-fired, fast-skip predicate, inter-session governance
+0041|docs/spec/compiled/manifest\.json|governance evidence, spec_version, governance-checked, governance-bash-fired, fast-skip predicate, inter-session governance
+0041|docs/ai/prompts/prompt-0-spec-builder\.md|governance evidence, spec_version, governance-checked, governance-bash-fired, fast-skip predicate, inter-session governance
+0041|docs/ai/prompts/prompt-a-repo-os\.md|governance evidence, spec_version, governance-checked, governance-bash-fired, fast-skip predicate, inter-session governance
+0041|docs/ai/prompts/prompt-b-product-build\.md|governance evidence, spec_version, governance-checked, governance-bash-fired, fast-skip predicate, inter-session governance
+0041|\.claude/hooks/pre-commit-gates\.sh|governance evidence, spec_version, governance-checked, governance-bash-fired, fast-skip predicate, inter-session governance
+0041|\.claude/hooks/bash-guard\.sh|governance evidence, spec_version, governance-checked, governance-bash-fired, fast-skip predicate, inter-session governance

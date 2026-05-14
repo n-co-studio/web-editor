@@ -9,21 +9,23 @@ REQUIRE: every pastable block for a new session must start with a plain-text sho
 See: `.claude/agents/_agent-glossary.md` § Phase Model for phase definitions, automation tags, and session type variants.
 
 Session-specific behavioral rules:
-- **Plan-approval hook**: Only `AskUserQuestion` triggers the `plan-approval.sh` hook that writes the `plan-approved` state file and unblocks Edit/Write. Conversational plan approval does not trigger the hook (see `orchestrator.md` § Constraints).
-- **Transition rules**: Forward-only, except defined loops (`review→build`, `verify→build`). Each loop increments the cycle counter.
+- **Plan-approval hook**: `AskUserQuestion` triggers the `plan-approval.sh` hook that writes the `plan-approved` state file and unblocks Edit/Write. Conversational plan approval does not trigger the hook (see `orchestrator.md` § Constraints). A valid handoff bundle (Decision 0038) also satisfies the gate — `_phase-helper.sh::drift_check` writes the same `plan-approved` schema from `.claude/local/handoff-bundle.yaml`.
+- **Drift-check phase (Decision 0038)**: Standard / taskgroup sessions enter `drift-check` before `plan`. When a bundle is valid + fresh + spec snapshot matches + no scope-file drift, `drift_check` writes derived state files and the session forward-jumps to `build`. Otherwise, falls through to the legacy `plan → approval` flow.
+- **Transition rules**: Forward-only, except defined loops (`review→build`, `verify→build`). Each loop increments the cycle counter. Forward-jump from `drift-check` to `build` (skipping `plan` and `approval`) is permitted when `drift_check` returns 0 — same skippable-phase semantics as `user-review`/`op-review`.
 - **Session ID binding**: Phase-state is invalidated when the session ID changes, preventing stale state from prior sessions.
 
-See Decision 0014 for the canonical phase sequence definitions.
+See Decision 0014 for the canonical phase sequence definitions and Decision 0038 for handoff bundle semantics.
 
 ## Execution Loop
 
 The execution loop maps to phases in the standard build sequence:
 
-1. **Plan** (plan phase) — goal, scope, files, verification steps
-2. **Build** (build phase) — small, reviewable increments
-3. **Verify** (review + verify phases) — cohesion review (Critic checks diff for internal coherence), then gate checks (QA verifies A1–A6 + push gates)
-4. **User Review** (user-review phase, optional) — persona simulation dispatch when task brief defines User Review scenarios. Skipped when no User Review section present
-5. **Commit** (commit phase) — only after all gates pass
+1. **Drift-check** (drift-check phase, Decision 0038) — evaluate handoff bundle. On valid + fresh: skip to build. On absent / stale / drifted: fall through to plan.
+2. **Plan** (plan phase, legacy fallback) — goal, scope, files, verification steps
+3. **Build** (build phase) — small, reviewable increments
+4. **Verify** (review + verify phases) — cohesion review (Critic checks diff for internal coherence), then gate checks (QA verifies A1–A6 + push gates)
+5. **User Review** (user-review phase, optional) — persona simulation dispatch when task brief defines User Review scenarios. Skipped when no User Review section present
+6. **Commit** (commit phase) — only after all gates pass
 
 ## Advisory Board Review
 

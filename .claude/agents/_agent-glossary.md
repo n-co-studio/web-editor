@@ -132,14 +132,14 @@ Governance evidence in `.claude/.state/`. Written by hooks via shell I/O (never 
 | File | Writer | Gate / Purpose |
 |------|--------|----------------|
 | `plan-approved` | `plan-approval.sh` | Branch guard + A2 scope (Decision 0029) |
-| `cohesion-reviewed` | `state-writer.sh` (critic — cohesion mode) | A5 state verification; GATE_RESULT: BLOCKED is now blocking |
-| `diff-review-complete` | `state-writer.sh` (critic — diff-review mode) | A5 state verification; written when Critic output contains `MODE: diff-review` sentinel; GATE_RESULT: BLOCKED blocks commit |
+| `cohesion-reviewed` | `state-writer.sh` (critic — cohesion or combined mode) | A5 state verification; GATE_RESULT: BLOCKED is blocking |
+| `diff-review-complete` | `state-writer.sh` (critic — diff-review or combined mode) | A5 state verification; written when Critic output contains either `MODE: diff-review` sentinel (single-mode) or both `## Cohesion Brief` and `## Diff-Review Brief` headers (combined mode — Decision 0039); GATE_RESULT: BLOCKED blocks commit |
 | `qa-verified` | `state-writer.sh` (qa-verifier) | State verification |
 | `reviewer-signed` | `state-writer.sh` (reviewer) | High-risk detection |
 | `security-signed` | `state-writer.sh` (security-privacy) | High-risk detection |
 | `pragmatist-signed` | `state-writer.sh` (pragmatist) | Plan-review verification |
 
-**Hook-written files** (all cleaned by `cleanup_session_files` unless noted): `phase-state` (`_phase-helper.sh` — phase tracking), `overrides.log` (`_analytics-helper.sh` — override audit, append-only), `high-risk-detected` (`pre-commit-gates.sh` — audit trail), `governance-checked` (`pre-commit-gates.sh` Gate 3 — first-fire inter-session marker), `merge-source-branch` (`_phase-helper.sh` `write_merge_signal` — agent-to-hook merge signal), `brief-has-taskgroup` (`_phase-helper.sh` — session-type validation, Decision 0026), `session-resume.yaml` (`_phase-helper.sh` — compression recovery, updated each phase), `cycle-escalation` (`_phase-helper.sh` — cycle cap at 5+, advisory), `cycle-advisory-N` (`bash-guard.sh` — per-cycle dedup), `kg-relevance-context` (`_phase-helper.sh` — KG pre-computed context at build entry, Decision 0034), `kg-search-advisory-fired` (`bash-guard.sh` — one-shot graph-first advisory dedup), `cross-session-context` (`_phase-helper.sh` via `_cross-session-context.sh` — recent git log + last session log tail injected at build entry), `.stop-attempt-count` (`session-close-check.sh` — safety valve at 3 attempts, not cleaned).
+**Hook-written files** (all cleaned by `cleanup_session_files` unless noted): `phase-state` (`_phase-helper.sh` — phase tracking), `overrides.log` (`_analytics-helper.sh` — override audit, append-only), `high-risk-detected` (`pre-commit-gates.sh` — audit trail), `governance-checked` (`pre-commit-gates.sh` Gate 3 — first-fire inter-session marker, version-aware per Decision 0041), `governance-bash-fired` (`bash-guard.sh` Phase 1d — first-Bash-write inter-session marker, version-aware per Decision 0041), `merge-source-branch` (`_phase-helper.sh` `write_merge_signal` — agent-to-hook merge signal), `brief-has-taskgroup` (`_phase-helper.sh` — session-type validation, Decision 0026), `session-resume.yaml` (`_phase-helper.sh` — compression recovery, updated each phase), `cycle-escalation` (`_phase-helper.sh` — cycle cap at 5+, advisory), `cycle-advisory-N` (`bash-guard.sh` — per-cycle dedup), `kg-relevance-context` (`_phase-helper.sh` — KG pre-computed context at build entry, Decision 0034), `kg-search-advisory-fired` (`bash-guard.sh` — one-shot graph-first advisory dedup), `cross-session-context` (`_phase-helper.sh` via `_cross-session-context.sh` — recent git log + last session log tail injected at build entry), `finish-loop-cache.yaml` (`_phase-helper.sh` `record_dimension_verdict` — finish-loop dimension verdict cache, Decision 0040), `.stop-attempt-count` (`session-close-check.sh` — safety valve at 3 attempts, not cleaned).
 
 **Model-written files** (in `.claude/local/`, not `.state/` — state-guard allows): `task-contract.yaml` (orchestrator — intent + verification for cohesion review, Decision 0020), `scope-risk-gain` (orchestrator — risk/gain for unbriefed-in-scope files, Decision 0017).
 
@@ -170,8 +170,9 @@ Ordered phases tracked in `.claude/.state/phase-state` (Decision 0014). Tags: `a
 | Phase | Description |
 |-------|-------------|
 | init | Setup |
-| plan | Scope + plan |
-| approval | Operator approves |
+| drift-check | Evaluate handoff bundle (Decision 0038). On valid + fresh: forward-jump to build. On absent/stale: fall through to plan |
+| plan | Scope + plan (legacy fallback when drift-check falls through) |
+| approval | Operator approves (legacy fallback when drift-check falls through) |
 | build | Implement |
 | review | Critic cohesion |
 | verify | QA gates |
@@ -187,8 +188,8 @@ Session-type-specific phases (see sequences table): `interview`/`write` (Prompt 
 
 | Session type | Phase sequence | Notes |
 |-------------|----------------|-------|
-| standard | init→plan→approval→build→review→verify→[user-review]→commit→[op-review]→close | op-review skipped in auto |
-| hotfix | init→plan→approval→build→verify→commit→close | Loop: verify→build; A2 relaxed, A5 skip; max 3 cycles |
+| standard | init→[drift-check]→[plan]→[approval]→build→review→verify→[user-review]→commit→[op-review]→close | drift-check (Decision 0038): valid bundle → forward-jump to build (skip plan/approval); otherwise fall through to legacy plan/approval. op-review skipped in auto |
+| hotfix | init→plan→approval→build→verify→commit→close | Loop: verify→build; A2 relaxed, A5 skip; max 3 cycles; bundle handling not applied |
 | editor-live | init→build→commit→review→verify→op-review→close | No plan gate; loop: commit→build; child mode only |
 | finish-loop | init→assess→fix→reassess→commit→close | Loop: reassess→fix; convergent quality assessment; cycle cap 5 |
 | advisory-init | init→tier-select→dispatch→synthesize→op-review→validate→governance→close | Advisory only |

@@ -37,21 +37,22 @@ Evaluate the current state across all 6 assessment dimensions. For each dimensio
 - **PASS** — dimension satisfied
 - **FAIL** — gap identified (include specific description)
 - **SKIP** — dimension not applicable for this brief (include reason)
+- **INHERITED** — dimension inherited from cache (cycle ≥ 2 only; see Assessment Cycle Cache)
 
 **Record assessment results** in a structured block:
 
 ```
 === ASSESSMENT CYCLE <N> ===
-Dimension 1 — Spec Alignment:     [PASS|FAIL|SKIP] <finding>
-Dimension 2 — Completeness:       [PASS|FAIL|SKIP] <finding>
-Dimension 3 — Correctness:        [PASS|FAIL|SKIP] <finding>
-Dimension 4 — Test Gate:          [PASS|FAIL|SKIP] <finding>
-Dimension 5 — Governance:         [PASS|FAIL|SKIP] <finding>
-Dimension 6 — Integration:        [PASS|FAIL|SKIP] <finding>
+Dimension 1 — Spec Alignment:     [PASS|FAIL|SKIP|INHERITED] <finding>
+Dimension 2 — Completeness:       [PASS|FAIL|SKIP|INHERITED] <finding>
+Dimension 3 — Correctness:        [PASS|FAIL|SKIP|INHERITED] <finding>
+Dimension 4 — Test Gate:          [PASS|FAIL|SKIP|INHERITED] <finding>
+Dimension 5 — Governance:         [PASS|FAIL|SKIP|INHERITED] <finding>
+Dimension 6 — Integration:        [PASS|FAIL|SKIP|INHERITED] <finding>
 ```
 
 **After each assessment:**
-- ALL PASS → Converged. Write completion sentinel and advance to commit
+- ALL PASS or INHERITED (no FAIL) → Converged. Write completion sentinel and advance to commit
 - ANY FAIL → `advance_phase "fix"`
 - Cycle ≥ 5 → Write incomplete sentinel and escalate (do not attempt more fixes)
 
@@ -114,6 +115,72 @@ Does the change integrate cleanly without breaking callers or consumers?
 - Check cross-references: docs, index files, import lists, config references
 - FAIL if any caller would break or any reference is dangling
 
+### Dimension Input Sets (Decision 0040)
+
+Each dimension declares the file set whose content determines whether the dimension's
+verdict can be inherited from a prior cycle. The set is the union of the brief's
+declared `scope_files` (from the task contract) plus any dimension-specific extras.
+
+The agent computes the set from the task contract at the start of each cycle.
+
+| Dimension              | Input set                                                                                          |
+|------------------------|----------------------------------------------------------------------------------------------------|
+| 1 — Spec Alignment     | `scope_files` ∪ active spec files (`docs/spec/compiled/{active}/**/*.md`)                          |
+| 2 — Completeness       | `scope_files`                                                                                      |
+| 3 — Correctness        | `scope_files`                                                                                      |
+| 4 — Test Gate          | `scope_files` ∪ test files in same modules (heuristic: matching basename `*.test.*`, `*_test.*`, `test_*.*`) |
+| 5 — Governance         | `scope_files` ∪ working-tree change fingerprint (`git diff --name-only HEAD` — the files that would be staged at commit; fix phases write to the working tree without staging, so this captures the pending change set the governance gates would see) |
+| 6 — Integration        | `scope_files` ∪ caller files identified at first fresh assessment (recorded in the assessment block and reused on subsequent cycles) |
+
+For D6, when the first fresh assessment runs (cycle 1, or first reassessment after FAIL),
+record the list of caller files identified during Downstream Consumer Validation in the
+assessment block (e.g. `D6 callers: path/a, path/b`). On subsequent cycles, those exact
+paths are appended to the input set so the hash captures both the modified files and
+their consumers.
+
+### Assessment Cycle Cache (Decision 0040)
+
+Passing dimension verdicts are cached at `<session_state_dir>/finish-loop-cache.yaml`.
+On cycle N ≥ 2, dimensions whose input hash matches the cached PASS hash are inherited
+instead of re-assessed.
+
+**Cycle 1 (always fresh):**
+After each PASS verdict, record it:
+```bash
+source .claude/hooks/_analytics-helper.sh && source .claude/hooks/_phase-helper.sh
+h=$(dimension_input_hash "<dimension-slug>" <input-file...>)
+record_dimension_verdict "<dimension-slug>" "$h" "PASS" 1
+```
+
+**Cycles N ≥ 2:**
+Before assessing each dimension, decide inherit vs reassess:
+
+1. Compute the **touched-files set** for this cycle: files modified by the previous
+   fix phase. Use `git diff --name-only <prev-cycle-head>` where `<prev-cycle-head>` is
+   the commit-or-snapshot reference captured at the start of the previous cycle, or
+   the working-tree modification list captured by the fix phase.
+
+2. For each dimension D:
+   - Compute `current_hash = dimension_input_hash "D" <D's input files>`
+   - **Force-reassess** if D's input set intersects the touched-files set
+     (regardless of hash). Reassess fully. This is the loop-back-source rule —
+     a belt-and-suspenders guard against touch-and-revert edge cases where the
+     hash alone would not invalidate the cache.
+   - **Otherwise** try `cached_dimension_verdict "D" "$current_hash"`:
+     - Exit 0 with `PASS` on stdout → mark `[INHERITED] PASS — hash <short>` in
+       the assessment block, do not reassess
+     - Exit 1 → reassess fully
+
+3. After each fresh PASS verdict, call `record_dimension_verdict "D" "$current_hash" "PASS" <N>`
+   so subsequent cycles can inherit.
+
+4. FAIL verdicts are not cached. The next cycle's fix phase invalidates the prior
+   hash; if a subsequent cycle re-assesses the same input state, a fresh assessment
+   is required to confirm PASS.
+
+Dimension slug names used in the cache (canonical):
+`spec-alignment`, `completeness`, `correctness`, `test-gate`, `governance`, `integration`.
+
 ### Fix Phase
 
 Apply targeted fixes for each FAIL finding from the most recent assessment.
@@ -128,11 +195,20 @@ After applying all fixes: `advance_phase "reassess"`
 
 ### Reassess Phase
 
-Re-run the full assessment (all 6 dimensions) for assessment cycle N+1.
+Re-run the assessment for cycle N+1 using the Assessment Cycle Cache protocol:
+dimensions whose input hash matches the cached PASS are inherited; the rest are
+reassessed fully.
 
 **Regression check** (mandatory, runs before recording results):
-For every dimension that was PASS in the prior cycle, verify it is still PASS. If a
-previously-passing dimension is now FAIL, this is a regression:
+
+Hash comparison is the regression signal. The invariant is preserved:
+
+- **Hash unchanged** → inputs identical → no regression is possible. Inherit `PASS`.
+- **Hash changed (or force-reassess triggered)** → reassess fully. If the dimension
+  was PASS in a prior cycle and now FAILs, this is a regression — record and
+  escalate per the steps below.
+
+When reassessing a previously-PASS dimension reveals FAIL:
 
 1. Record in the assessment block: `[REGRESSION] <dimension> — previously passed, now fails: <description>`
 2. Write regression sentinel:
@@ -144,7 +220,7 @@ previously-passing dimension is now FAIL, this is a regression:
 3. Escalate: write escalation file and exit
 
 **After reassess (no regression):**
-- ALL PASS → Converged → write completion sentinel (see Convergence Sentinels below) → proceed to Commit Phase
+- ALL PASS or INHERITED (no FAIL) → Converged → write completion sentinel (see Convergence Sentinels below) → proceed to Commit Phase
 - ANY FAIL (cycle < 5) → `advance_phase "fix"` (next cycle)
 - Cycle ≥ 5 → write incomplete sentinel → escalate
 

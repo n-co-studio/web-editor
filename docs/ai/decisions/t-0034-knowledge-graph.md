@@ -37,6 +37,88 @@ Add a persistent knowledge graph that maps semantic connections between codebase
 - Decision 0014 respected: graph read at init, graph write before commit
 - Decision 0030/0033 respected: concurrent write safety via mkdir locking
 
+## Amendment 5 — Parallel Task Group Delta Authoring (2026-05-13)
+
+Replaces the N+1 per-brief direct graph writes in parallel task groups with N per-brief delta files (authored in-context by each content brief) plus one aggregating write performed by the merge brief. Eliminates lock contention on `graph.yaml` / `product-graph.yaml` across parallel worktrees and preserves the authorship context that direct re-authoring from a combined diff would lose.
+
+### When this amendment applies
+
+Only parallel task groups (`Execution: parallel` in `### Task Group`). Single-brief sessions, sequential task groups, hotfix, editor-live, and audit profiles continue to write directly to the shared graph at close — they do not have the N concurrent-writer contention that motivates this change.
+
+### Delta file schema
+
+Each parallel content brief authors one delta at session close. The merge brief authors a second delta from cross-session observations. Path: `$_REPO_OS_ROOT/.claude/.state/tg-{group}-brief-{seq}.kg-delta.yaml` (content brief) and `$_REPO_OS_ROOT/.claude/.state/tg-{group}-brief-merge.kg-delta.yaml` (merge brief). Shared state path is the canonical cross-worktree coordination location per Decision 0032.
+
+```yaml
+# Header
+brief_seq: "1"                        # or "merge"
+group_name: "kg-write-aggregation"
+worktree_branch: "feature/kg-write-aggregation/brief-1"
+authored_at: "2026-05-13T18:32:11Z"   # ISO 8601 — used for stale detection and dedup
+target: "template"                    # template → graph.yaml ; product → product-graph.yaml
+
+# Same node/edge structure as graph.yaml, scoped to one brief's contributions
+nodes:
+  - id: "..."
+    type: "..."
+    path: "..."
+    description: "..."
+    last_verified: "2026-05-13"
+    status: "active"
+    layer: "template"
+edges:
+  - source: "..."
+    target: "..."
+    relation: "..."   # 8-type taxonomy unchanged
+    context: "..."
+    source_type: "agent-inferred"
+    last_verified: "2026-05-13"
+    status: "active"
+    confidence: 0.7
+```
+
+### Authoring split
+
+1. **Content brief Builder (per brief).** Authors its delta from observations made in its own session — files it touched, edges it created or traversed. Writes via shell I/O from the worktree's main session (not from a subagent — Decision 0028 boundary preserved). The delta file is the only KG output from the content brief; the content brief never touches the shared graph.
+
+2. **Merge brief.** Authors a second delta from observations only it can make: integration edges between files owned by different content briefs, cross-cutting relationships visible in the combined diff, edges spanning worktree boundaries. The merge brief never authors edges on behalf of content briefs — it only authors what it can verify directly.
+
+### Aggregation
+
+The merge brief invokes `.claude/tools/kg-merge-deltas.sh <group_name>` after writing its own delta. The aggregator:
+
+1. Reads all `tg-{group_name}-brief-*.kg-delta.yaml` from `$_REPO_OS_ROOT/.claude/.state/`.
+2. Drops stale deltas — `authored_at` older than the merge brief's start time. Logs a warning with the dropped file's path.
+3. Dedups using these rules:
+   - **Nodes by `id`** — union the node set; on attribute conflicts, last `authored_at` wins; non-conflicting attributes are merged.
+   - **Edges by `(source, target, relation)` tuple** — last `authored_at` wins on `last_verified` and attribute updates; max wins on `confidence`.
+   - **Operator-curated edges (`source_type: operator-curated`) are never overwritten** — if any delta carries an edge whose tuple matches an operator-curated edge in the existing graph, the delta's version is dropped with a warning. Aggregation never demotes an operator-curated edge to agent-inferred.
+   - **Conflicting `status`** — when two deltas contribute the same `(source, target, relation)` tuple but with different `status` values (e.g., one marks the edge `active`, another marks it `stale`), the aggregator does not silently resolve. The conflict is recorded to `$_REPO_OS_ROOT/.claude/.state/kg-aggregation-conflicts.log` for the merge brief's Critic to surface as a CRITICAL cohesion finding. The first-seen value is kept in the aggregated output so the write does not block.
+4. Acquires the appropriate graph lock once (`.graph-lock` for template, `.product-graph-lock` for product — separation per Amendment 2).
+5. Splices the aggregated nodes and edges into the target graph file.
+6. Releases the lock.
+
+### Cleanup
+
+`cleanup_session_files()` removes the group's `tg-{group}-brief-*.kg-delta.yaml` files and the conflict log when a `taskgroup-merge` session closes. Mirrors the existing completion-marker cleanup pattern. Stale delta files from crashed parallel sessions that were not aggregated (because the merge brief detected them as stale) are also swept by the same cleanup.
+
+### Constraints carried forward
+
+- Edge taxonomy unchanged (8 types from §5).
+- Operator-curated immutability (§6) — strengthened: aggregator must never overwrite operator-curated edges and must never demote them.
+- Decision 0028 worktree state isolation preserved: deltas are written from the worktree's main session via shell I/O, not from a subagent's `state-writer.sh` invocation.
+- Decision 0032 shared state path is the canonical cross-worktree coordination location — same path family as `tg-*-brief-*.complete` markers.
+
+### Authorization
+
+This behavioral change is authorized under §2 (write authority — adds a session-boundary delta-staging step before the existing locked write) and §8 (concurrent write safety — replaces N+1 contended writes with one). No new node types, edge types, or schema fields — §3 amendment not triggered.
+
+### Rationale
+
+The single-locked-write alternative (file-lock-with-retry on each per-brief direct write) was rejected because it serialises but does not reduce write count, and conflict-resolution logic ends up duplicated per brief. Re-authoring all edges in the merge brief from the combined diff was rejected because it strips authorship intent — the Builder in the content brief knew *why* it created an edge; the merge brief would be reverse-engineering intent. Centralising authoring at the merge brief and centralising aggregation at the merge brief are different problems; this amendment separates them.
+
+---
+
 ## Amendment 4 — Mechanical Schema Validation (2026-04-09)
 
 Adds mechanical enforcement of KG schema constraints at three points: write time (inline in `add_edge()`), post-seed (after graph write, before lock release), and commit time (blocking pre-commit gate). Closes a recurring defect class where agents invent relations outside the 8-type taxonomy.

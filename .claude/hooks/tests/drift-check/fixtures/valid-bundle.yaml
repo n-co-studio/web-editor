@@ -1,0 +1,39 @@
+brief_id: "test-handoff-bundle-fixture"
+approved_at: "2099-12-31T00:00:00Z"
+approved_by: "operator"
+mode: "review"
+contract:
+  goal: "Test fixture for drift-check predicates"
+  scope_files:
+    - ".claude/hooks/tests/drift-check/fixtures/test-target.txt"
+  scope_modules:
+    - "test-fixture"
+  approach:
+    - "Provide a structurally valid bundle for drift_check tests"
+  verification:
+    - "drift_check returns 0 when bundle is fresh and snapshot matches"
+  spec_references: []
+  constraints: []
+  implementation_design:
+    components: "drift_check, bundle_valid, bundle_expired"
+    key_interfaces: "drift_check, bundle_valid"
+    data_flow: "bundle file → predicates → state-file writes"
+    error_handling: "Non-zero exit on each predicate failure"
+  lifecycle: task-scoped
+plan:
+  - "Step 1: define schema"
+  - "Step 2: implement helpers"
+implementation_design:
+  components: "drift_check, bundle_valid, bundle_expired"
+  key_interfaces: "drift_check, bundle_valid"
+  data_flow: "bundle file → predicates → state-file writes"
+  error_handling: "Non-zero exit on each predicate failure"
+spec_snapshot:
+  version: "v1"
+  files: []
+pragmatist:
+  verdict: "APPROVED"
+  findings: ""
+expiry:
+  soft_hours: 24
+  hard_hours: 168

@@ -102,6 +102,8 @@ status: complete
 
 This file is committed and read by subsequent Prompt B sessions as inter-session governance proof.
 
+**`spec_version` is load-bearing** (Decision 0041): Prompt B, `pre-commit-gates.sh` Gate 3, and `bash-guard.sh` Phase 1d evaluate `spec_version == manifest.json.active` to fast-skip the governance warning. Write the literal active version string, not a placeholder. When `manifest.json.active` is `null` (template-mode / pre-spec state), write `spec_version: null` so the predicate matches.
+
 ## Rules
 
 - REQUIRE: **never use the Agent tool with write-capable subagent types** (builder, qa-verifier, security-privacy, general-purpose, reviewer) or request worktree isolation. Only read-only advisory agents are permitted.

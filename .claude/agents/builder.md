@@ -46,6 +46,49 @@ Implements scoped changes exactly as planned. Executes with precision, flags pro
 
 ---
 
+## Knowledge Graph Delta (Parallel Task Group)
+
+When the task brief has `Execution: parallel` in `### Task Group`, the Builder writes a per-brief KG **delta** at session close instead of locking and writing the shared `graph.yaml` / `product-graph.yaml` directly. The merge brief aggregates all per-brief deltas (plus its own) and performs a single locked write. See Decision 0034 Amendment 5.
+
+**Path:** `$_REPO_OS_ROOT/.claude/.state/tg-{group}-brief-{seq}.kg-delta.yaml` — shared state path, not the per-session state directory (Decision 0032).
+
+**Authoring rules:**
+- Write from the worktree's main session via shell I/O (Bash redirection). Do NOT write the delta from a subagent — Decision 0028 worktree state isolation must be preserved.
+- Author only what this brief observed in its own session: nodes for files this brief created, edges for connections this brief verified or created. The merge brief separately authors its own delta from cross-session observations — do not pre-empt it.
+- Use `source_type: "agent-inferred"`, `confidence: 0.7` for connections verified during this session, unless you have a stronger signal.
+
+**Schema:**
+
+```yaml
+brief_seq: "{seq}"                         # the brief's seq from the contract
+group_name: "{group}"
+worktree_branch: "{git rev-parse --abbrev-ref HEAD}"
+authored_at: "<ISO 8601>"
+target: "template" | "product"             # template files → graph.yaml ; product files → product-graph.yaml
+
+nodes:
+  - id: "..."
+    type: "..."                            # 7-type taxonomy (Decision 0034 §4)
+    path: "..."
+    description: "..."
+    last_verified: "<YYYY-MM-DD>"
+    status: "active"
+    layer: "template" | "product"
+edges:
+  - source: "..."
+    target: "..."
+    relation: "..."                         # 8-type taxonomy (Decision 0034 §5)
+    context: "..."
+    source_type: "agent-inferred"
+    last_verified: "<YYYY-MM-DD>"
+    status: "active"
+    confidence: 0.7
+```
+
+**Single-brief, sequential task group, hotfix, editor-live:** unchanged. The Builder still writes directly to the shared graph at close (existing path documented in `prompt-b-product-build.md` § Knowledge Graph Integration).
+
+---
+
 ## Local Checks
 
 Run before signaling completion:

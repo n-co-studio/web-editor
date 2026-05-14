@@ -26,6 +26,11 @@ _delete_if_owned() {
   if [ -n "$closing_sid" ]; then
     local file_sid
     file_sid=$(grep '^session_id: ' "$file" 2>/dev/null | sed 's/^session_id: *//')
+    # Decision 0042: phase-state.gates uses shell-sourceable KEY=VALUE format.
+    # Fall back to the GATES_SESSION_ID='<sid>' line when the YAML field is absent.
+    if [ -z "$file_sid" ]; then
+      file_sid=$(grep "^GATES_SESSION_ID=" "$file" 2>/dev/null | sed -E "s/^GATES_SESSION_ID='?([^']*)'?$/\1/")
+    fi
     if [ -n "$file_sid" ] && [ "$file_sid" != "$closing_sid" ]; then
       # Owned by another session — skip
       return 0
@@ -94,6 +99,7 @@ cleanup_session_files() {
     _delete_if_owned "$state_dir/security-signed" "$closing_sid"
     _delete_if_owned "$state_dir/pragmatist-signed" "$closing_sid"
     _delete_if_owned "$state_dir/phase-state" "$closing_sid"
+    _delete_if_owned "$state_dir/phase-state.gates" "$closing_sid"
 
     # Non-session-bound files: unconditional delete.
     # governance-checked and high-risk-detected are idempotent commit-gate
@@ -102,6 +108,7 @@ cleanup_session_files() {
     rm -f "$state_dir/scope-risk-gain"
     rm -f "$state_dir/high-risk-detected"
     rm -f "$state_dir/governance-checked"
+    rm -f "$state_dir/governance-bash-fired"
     rm -f "$state_dir/overrides.log"
     rm -f "$repo_root/.claude/local/task-contract.yaml"
     rm -f "$state_dir/merge-source-branch"
@@ -109,14 +116,22 @@ cleanup_session_files() {
     rm -f "$state_dir/brief-has-taskgroup"
     rm -f "$state_dir/cycle-escalation"
     rm -f "$state_dir"/cycle-advisory-*
+    rm -f "$state_dir/finish-loop-cache.yaml"
     rm -f "$repo_root/.claude/.state/kg-relevance-context"
     rm -f "$repo_root/.claude/.state/kg-search-advisory-fired"
     rm -f "$repo_root/.claude/.state/cross-session-context"
     _delete_if_owned "$state_dir/session-resume.yaml" "$closing_sid"
     # Clean completion markers when merge brief closes (parallel groups)
     # Markers are cross-session: written by content briefs in their per-session dirs.
+    # Delta files (Decision 0034 Amendment 5) are also cross-session — content
+    # briefs write per-brief deltas to the shared state path, the merge brief
+    # writes its own delta and aggregates them. Clean both classes after
+    # aggregation has been applied (the merge brief is closing — aggregation
+    # already ran during its close phase or was attempted and logged).
     if [ "$close_stype" = "taskgroup-merge" ]; then
       clean_cross_session_markers "tg-*-brief-*.complete"
+      clean_cross_session_markers "tg-*-brief-*.kg-delta.yaml"
+      rm -f "$repo_root/.claude/.state/kg-aggregation-conflicts.log"
     fi
 
     # Remove per-session state directory if now empty (all sessions use per-session dirs)

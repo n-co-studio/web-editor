@@ -6,13 +6,14 @@ Read by the Orchestrator after Builder signals completion, before invoking QA.
 
 ## Procedure
 
-1. **Gather context** — Run `git diff` to capture the changes. Identify files touched and their immediate neighbors (files that import from or are imported by the changed files). Read `.claude/local/task-contract.yaml` (singular builds) or the `intent:` block from the task group contract (groups) if present.
-2. **Invoke Critic** — Dispatch Critic as subagent via Task with mode=cohesion. Pass the diff output and list of files to review in the Task prompt. If a task contract is present, also pass the contract's `verification:` criteria and instruct Critic to evaluate each criterion (see Contract Verification in `critic.md`).
-3. **Review findings** — Read the Cohesion Brief. Categorize each finding:
-   - **Clear fix**: Unambiguous broken reference or inconsistency → delegate to Builder
+1. **Gather context** — Run `git diff` to capture the changes. Identify files touched and their immediate neighbors (files that import from or are imported by the changed files). Capture the staged diff (`git diff --cached`) and surrounding context (20 lines per changed function) for the diff-review side. Read `.claude/local/task-contract.yaml` (singular builds) or the `intent:` block from the task group contract (groups) if present.
+2. **Invoke Critic** — Dispatch Critic as subagent via Task with **mode=combined** (Decision 0039). Pass both the cohesion context (diff + files-touched + immediate neighbors) and the diff-review context (`git diff --cached` + surrounding 20 lines per changed function) in the Task prompt. If a task contract is present, also pass the contract's `verification:` criteria and instruct Critic to evaluate each criterion (see Contract Verification in `critic.md`). Combined output emits both `## Cohesion Brief` and `## Diff-Review Brief` sections, each with its own `GATE_RESULT:`; `state-writer.sh` writes both `cohesion-reviewed` and `diff-review-complete` from the single SubagentStop event.
+3. **Review findings** — Read the Cohesion Brief and (when combined mode was used) the Diff-Review Brief. Apply the same triage to each finding in each brief:
+   - **Clear fix**: Unambiguous broken reference, inconsistency, or mechanical bug → delegate to Builder
    - **Ambiguous**: Could be intentional or could be a problem → surface to operator for decision
+   - Critical findings in either brief block the review-phase advance until resolved (or operator-accepted)
 4. **Resolve** — If clear fixes exist, delegate to Builder with specific instructions. If ambiguous findings exist, pause and present to operator.
-5. **Re-run** — If Builder made fixes, invoke Critic (cohesion mode) again to verify resolution. GUIDE: cap at 2 rounds — after that, escalate remaining findings to operator for accept/defer.
+5. **Re-run** — If Builder made fixes, re-invoke Critic. A targeted single-mode re-run (cohesion only, or diff-review only with `MODE: diff-review`) is acceptable when only one section had findings; combined re-run is preferred when fixes touched both surfaces. GUIDE: cap at 2 rounds — after that, escalate remaining findings to operator for accept/defer.
 6. **Completeness pass** — After the cohesion review is clean (or findings resolved), evaluate whether the task contract's verification criteria are satisfied:
    a. Read `.claude/local/task-contract.yaml` (already loaded in step 1). If no contract or no `verification:` field exists, skip this pass silently.
    b. For each `verification:` criterion, evaluate the current codebase state (read files, check diffs) and produce a verdict:
@@ -52,7 +53,7 @@ Use `git diff main...HEAD` to capture the combined diff from all parallel conten
 
 ### Invocation
 
-Dispatch Critic as subagent via Task with mode=cohesion. Pass the `git diff main...HEAD` output and the full list of files changed on the branch. The Critic's scope is the entire branch diff, not a single brief's changes.
+Dispatch Critic as subagent via Task with **mode=cohesion** (not combined). Merge-brief cohesion reviews operate cross-session over the full branch diff; the diff-review surface (mechanical bug detection on staged changes) is already covered by each content brief's own review phase and is not re-run on the merge. Pass the `git diff main...HEAD` output and the full list of files changed on the branch. The Critic's scope is the entire branch diff, not a single brief's changes. Only `cohesion-reviewed` is written by this dispatch.
 
 ---
 

@@ -34,6 +34,8 @@ Introduce persistent task contracts that capture task-level intent (verification
 
 8. **Automation layer**: Headless runners (Decision 0017) include the full brief text (which contains the `### Task Contract` section inline) in the assembled prompt. The agent extracts the contract YAML and writes it to `.claude/local/task-contract.yaml` during init. No separate parsing step is needed — the contract is part of the brief.
 
+9. **Handoff bundle path (Decision 0038, amendment)**: When a valid handoff bundle exists at `.claude/local/handoff-bundle.yaml` (singular) or `.claude/local/task-groups/{group}/briefs/{seq}.bundle.yaml` (task groups), Prompt B may seed `.claude/local/task-contract.yaml` directly from `bundle.contract` instead of re-parsing the brief markdown. The bundle is sealed at Prompt T approval; the embedded contract is the source of truth for the receiving session. The fallback chain (brief embed → sidecar → group `Contract:` field → no contract) is unchanged for sessions without a bundle.
+
 ## Contract Schema
 
 ```yaml

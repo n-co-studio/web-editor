@@ -15,6 +15,7 @@ cycle limit is reached (escalation).
 - **Convergence signal**: `FINISH_LOOP_RESULT: COMPLETE` in `cohesion-reviewed` state file
 - **Incomplete signal**: `FINISH_LOOP_RESULT: INCOMPLETE` → runner routes to `review:finish-incomplete`
 - **Regression signal**: `FINISH_LOOP_REGRESSION: <dim>/<desc>` → runner routes to `review:scope-deviation`
+- **Cycle cache** (Decision 0040): passing dimension verdicts are cached at `<session_state_dir>/finish-loop-cache.yaml` keyed by an input-file SHA-256. On cycle N ≥ 2, dimensions whose input hash matches the cached PASS hash are inherited; the rest are reassessed. Hash comparison is the regression signal. Loop-back-source files force-reassess. Cache is session-scoped, cleaned by `cleanup_session_files()` at close. See `docs/ai/prompts/prompt-f-finish-loop.md` § Dimension Input Sets, Assessment Cycle Cache.
 - **Session mode**: headless automation (runner-invoked). Interactive operator not present.
 
 **Assessment dimensions (6):**

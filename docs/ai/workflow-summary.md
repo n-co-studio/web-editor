@@ -8,7 +8,8 @@
 
 | Phase | Action |
 |-------|--------|
-| **Plan** | Goal, scope, files, verification steps |
+| **Drift-check** | Evaluate handoff bundle. Valid + fresh → forward-jump to Build (skip Plan/Approval). Absent / stale → fall through to legacy Plan. Decision 0038 |
+| **Plan** | (Legacy fallback) Goal, scope, files, verification steps |
 | **Build** | Small, reviewable increments |
 | **Verify** | Cohesion review (Critic), then gate checks (QA: A1-A6 + B) |
 | **User Review** | Persona simulation dispatch (optional — when brief defines scenarios) |

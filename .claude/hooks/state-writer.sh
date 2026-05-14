@@ -8,6 +8,13 @@
 # Phase advancement: advances phase on APPROVED results for critic and qa-verifier.
 # critic APPROVED: advance review → verify. qa-verifier APPROVED: advance verify → commit.
 # BLOCKED results: no phase advance (orchestrator handles loop-back).
+#
+# Critic routing:
+#   - Combined output (both '## Cohesion Brief' and '## Diff-Review Brief' headers):
+#     parse both sections, write cohesion-reviewed AND diff-review-complete from
+#     one SubagentStop event. Phase advance follows the cohesion GATE_RESULT.
+#   - Single cohesion mode (no diff-review header): write cohesion-reviewed.
+#   - Single diff-review mode ('MODE: diff-review' sentinel): write diff-review-complete.
 
 set -euo pipefail
 
@@ -51,17 +58,25 @@ esac
 # --- Extract last assistant message ---
 LAST_MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty')
 
-# --- Critic diff-review mode routing ---
-# When critic runs in diff-review mode, it emits 'MODE: diff-review' before GATE_RESULT.
-# Route to 'diff-review-complete' instead of 'cohesion-reviewed' for correct gate tracking.
-if [ "$AGENT_TYPE" = "critic" ] && echo "$LAST_MESSAGE" | grep -q '^MODE: diff-review'; then
-  STATE_FILE="diff-review-complete"
-fi
-
 if [ -z "$LAST_MESSAGE" ]; then
   echo "WARNING: $AGENT_TYPE completed with empty output — state file not written" >&2
   log_hook_event "state-writer" "SubagentStop" "$AGENT_TYPE" "skip" "$START_MS" "no_message"
   exit 0
+fi
+
+# --- Critic routing (single-mode legacy + combined dual-section) ---
+# Combined output has BOTH '## Cohesion Brief' and '## Diff-Review Brief' headers
+# at column 0. When detected, both state files are written from one SubagentStop
+# event (see "Combined output write" block below). Single-mode dispatches remain
+# valid: cohesion-only → cohesion-reviewed; 'MODE: diff-review' → diff-review-complete.
+CRITIC_COMBINED=false
+if [ "$AGENT_TYPE" = "critic" ]; then
+  if echo "$LAST_MESSAGE" | grep -q '^## Cohesion Brief' && \
+     echo "$LAST_MESSAGE" | grep -q '^## Diff-Review Brief'; then
+    CRITIC_COMBINED=true
+  elif echo "$LAST_MESSAGE" | grep -q '^MODE: diff-review'; then
+    STATE_FILE="diff-review-complete"
+  fi
 fi
 
 # --- Extract last non-empty line ---
@@ -119,6 +134,51 @@ if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
 else
   STATE_SID=$(cat "$REPO_ROOT/.claude/.session-id" 2>/dev/null || echo "")
 fi
+
+# --- Combined output write (critic dual-section) ---
+# When CRITIC_COMBINED=true, split LAST_MESSAGE at the '## Diff-Review Brief'
+# header, validate each section ends with GATE_RESULT, and write both
+# cohesion-reviewed and diff-review-complete from this single SubagentStop
+# event. Single-mode output falls through to the standard single-file write below.
+if [ "$CRITIC_COMBINED" = true ]; then
+  COHESION_PART=$(echo "$LAST_MESSAGE" | awk '/^## Diff-Review Brief/{exit} {print}')
+  DIFF_REVIEW_PART=$(echo "$LAST_MESSAGE" | awk '/^## Diff-Review Brief/{found=1} found{print}')
+  COHESION_LAST=$(echo "$COHESION_PART" | awk 'NF{line=$0} END{print line}')
+  DIFF_REVIEW_LAST=$(echo "$DIFF_REVIEW_PART" | awk 'NF{line=$0} END{print line}')
+
+  if [[ "$COHESION_LAST" != GATE_RESULT:* ]] || [[ "$DIFF_REVIEW_LAST" != GATE_RESULT:* ]]; then
+    echo "WARNING: critic combined output missing GATE_RESULT in one or both sections — state files not written" >&2
+    log_hook_event "state-writer" "SubagentStop" "$AGENT_TYPE" "skip" "$START_MS" "combined_no_sentinel"
+    exit 0
+  fi
+
+  printf 'timestamp: %s\nagent: %s\nsession_id: %s\n%s\n' \
+    "$TIMESTAMP" "$AGENT_TYPE" "$STATE_SID" "$COHESION_LAST" \
+    > "$STATE_DIR/cohesion-reviewed" 2>/dev/null || true
+
+  COMBINED_COMPLETENESS_LINE=$(echo "$COHESION_PART" | grep -E '^COMPLETENESS: ' | tail -1 || true)
+  COMBINED_COMPLETENESS_GATE_LINE=$(echo "$COHESION_PART" | grep -E '^COMPLETENESS_GATE: ' | tail -1 || true)
+  if [ -n "$COMBINED_COMPLETENESS_LINE" ]; then
+    printf '%s\n' "$COMBINED_COMPLETENESS_LINE" >> "$STATE_DIR/cohesion-reviewed" 2>/dev/null || true
+  fi
+  if [ -n "$COMBINED_COMPLETENESS_GATE_LINE" ]; then
+    printf '%s\n' "$COMBINED_COMPLETENESS_GATE_LINE" >> "$STATE_DIR/cohesion-reviewed" 2>/dev/null || true
+  fi
+
+  printf 'timestamp: %s\nagent: %s\nsession_id: %s\n%s\n' \
+    "$TIMESTAMP" "$AGENT_TYPE" "$STATE_SID" "$DIFF_REVIEW_LAST" \
+    > "$STATE_DIR/diff-review-complete" 2>/dev/null || true
+
+  COHESION_GATE_VALUE=$(echo "$COHESION_LAST" | sed 's/^GATE_RESULT: *//' | awk '{print $1}')
+  if [ -n "$(get_phase)" ] && [ "$COHESION_GATE_VALUE" = "APPROVED" ]; then
+    advance_phase "verify" 2>/dev/null || true
+  fi
+
+  COMBINED_DETAIL=$(printf 'cohesion=%.20s diff=%.20s' "$COHESION_LAST" "$DIFF_REVIEW_LAST" | tr -d '\n' | cut -c1-64)
+  log_hook_event "state-writer" "SubagentStop" "$AGENT_TYPE" "write" "$START_MS" "cohesion-reviewed+diff-review-complete" "$COMBINED_DETAIL"
+  exit 0
+fi
+
 printf 'timestamp: %s\nagent: %s\nsession_id: %s\n%s\n' "$TIMESTAMP" "$AGENT_TYPE" "$STATE_SID" "$LAST_LINE" \
   > "$STATE_DIR/$STATE_FILE" 2>/dev/null || true
 

@@ -185,6 +185,83 @@ if [ "$_DAEMON_BRANCH_BLOCK" = true ]; then
   exit 2
 fi
 
+# --- Phase 1d: Inter-session governance version check (Decision 0041) ---
+# Fires on first Bash-write call of session. Predicate: governance evidence
+# files exist AND embedded spec_version matches manifest.json `active`.
+# Marker-first-fire: once predicate matches, marker suppresses subsequent
+# runs. On predicate fail (mismatch or missing), marker is NOT written (and
+# any pre-existing marker is deleted), so the warning re-surfaces on the
+# next Bash-write call until the operator re-runs Prompt 0 / Prompt A.
+# Advisory only — does not block. Gated to feature/fix/hotfix/release branches.
+_GV_IS_WRITE=false
+if [[ "$INPUT" == *'"file_path"'* ]] || [[ "$INPUT" == *'>'* ]] || [[ "$INPUT" == *'tee '* ]]; then
+  _GV_IS_WRITE=true
+fi
+# Skip Phase 1d entirely on recover, taskgroup-merge block, or when jq is
+# absent (the JSON parse of manifest.json is mandatory — without jq we cannot
+# evaluate the predicate, so do nothing rather than risk a false-positive
+# match that would suppress legitimate warnings).
+if [ "$_GV_IS_WRITE" = true ] \
+   && [ "$_TG_MERGE_BLOCK" = false ] \
+   && [ "${REPO_OS_RECOVER:-0}" != "1" ] \
+   && [ "$_RECOVER_VIA_SIGNAL" != true ] \
+   && command -v jq >/dev/null 2>&1; then
+  case "$CURRENT_BRANCH" in
+    feature/*|fix/*|hotfix/*|release/*)
+      _GV_HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+      _GV_REPO_ROOT="$(cd "$_GV_HOOK_DIR/../.." && pwd)"
+      _GV_STATE_DIR="$_GV_REPO_ROOT/.claude/.state"
+      _GV_MARKER="$_GV_STATE_DIR/governance-bash-fired"
+      if [ ! -f "$_GV_MARKER" ]; then
+        _GV_MANIFEST="$_GV_REPO_ROOT/docs/spec/compiled/manifest.json"
+        _GV_GOV_DIR="$_GV_REPO_ROOT/docs/ai/governance"
+        _GV_ACTIVE=""
+        if [ -f "$_GV_MANIFEST" ]; then
+          _GV_ACTIVE=$(jq -r '.active // ""' "$_GV_MANIFEST" 2>/dev/null || echo "")
+        fi
+        _GV_ANY_FAIL=false
+        _GV_WARN=""
+        for _GV_EV in spec-compiled advisory-reviewed; do
+          _GV_EVFILE="$_GV_GOV_DIR/$_GV_EV"
+          if [ "$_GV_EV" = "spec-compiled" ]; then
+            _GV_PROMPT="Prompt 0"
+          else
+            _GV_PROMPT="Prompt A"
+          fi
+          if [ ! -f "$_GV_EVFILE" ]; then
+            _GV_WARN="${_GV_WARN}Advisory: docs/ai/governance/$_GV_EV not found — $_GV_PROMPT may not have completed governance write.\n"
+            _GV_ANY_FAIL=true
+            continue
+          fi
+          _GV_EVVER=$(awk -F': *' '
+            /^spec_version:[[:space:]]*/ {
+              v=$2
+              gsub(/^["'\'']|["'\'']$/, "", v)
+              gsub(/[[:space:]]+$/, "", v)
+              if (v == "null" || v == "~") v=""
+              print v
+              exit
+            }
+          ' "$_GV_EVFILE")
+          if [ "$_GV_EVVER" != "$_GV_ACTIVE" ]; then
+            _GV_WARN="${_GV_WARN}Advisory: $_GV_PROMPT not re-run since spec v${_GV_EVVER:-<none>} → v${_GV_ACTIVE:-<none>} — re-run to refresh docs/ai/governance/$_GV_EV.\n"
+            _GV_ANY_FAIL=true
+          fi
+        done
+        if [ -n "$_GV_WARN" ]; then
+          printf '%b' "$_GV_WARN" >&2
+        fi
+        if [ "$_GV_ANY_FAIL" = false ]; then
+          mkdir -p "$_GV_STATE_DIR" 2>/dev/null || true
+          printf 'fired\n' > "$_GV_MARKER" 2>/dev/null || true
+        else
+          rm -f "$_GV_MARKER" 2>/dev/null || true
+        fi
+      fi
+      ;;
+  esac
+fi
+
 # --- Combined pre-source fast-exit ---
 # When no Gate 7 match AND no write patterns → exit 0 without sourcing.
 # Saves ~14ms sourcing overhead for the majority of Bash calls (~56%).
@@ -539,6 +616,11 @@ if [ "$CURRENT_BRANCH" = "main" ] && [ "${REPO_OS_ALLOW_MAIN:-0}" = "1" ]; then
 fi
 
 # --- Gate 2: Phase gate / plan approval (blocking) ---
+# Provenance note (Decision 0038): the `plan-approved` state file may be written
+# by either plan-approval.sh (legacy AskUserQuestion path) or by drift_check
+# from a valid handoff bundle (bundle path). Both write the same schema with a
+# matching session_id, so this gate's presence check covers both provenances
+# uniformly — no code change needed here.
 if [ "$ALLOW_REASON" = "pass" ]; then
   if [[ "$CURRENT_BRANCH" == experiment/* ]]; then
     ALLOW_REASON="experiment_branch"
@@ -566,7 +648,12 @@ if [ "$ALLOW_REASON" = "pass" ]; then
           # When phase is plan/approval but plan-approved file is absent, the
           # plan-approval.sh PostToolUse hook likely failed to fire after
           # AskUserQuestion (known VS Code extension issue — see R13).
-          if [ ! -f "$(get_session_state_dir)/plan-approved" ] && \
+          if [ "$CURRENT_PHASE" = "drift-check" ]; then
+            # Decision 0038: drift-check phase must call drift_check before
+            # any Bash writes that aren't path-exempt. Direct the agent to
+            # the bundle path, not the legacy AskUserQuestion flow.
+            echo "GATE-RECOVERABLE: Session in 'drift-check' phase — Bash writes blocked. NEXT: source .claude/hooks/_analytics-helper.sh and _phase-helper.sh, then call drift_check. On return 0: advance_phase \"build\" (skips plan/approval). On non-zero return: advance_phase \"plan\" and use the legacy AskUserQuestion flow. (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
+          elif [ ! -f "$(get_session_state_dir)/plan-approved" ] && \
              { [ "$CURRENT_PHASE" = "plan" ] || [ "$CURRENT_PHASE" = "approval" ]; }; then
             echo "GATE-RECOVERABLE: Session in '$CURRENT_PHASE' phase and plan-approved state file is missing — plan-approval.sh hook may not have fired after AskUserQuestion (see known-issues.md R13). NEXT: Create recovery signal (touch .claude/.state/.recover-signal) or set REPO_OS_SKIP_PLAN_GATE=1." >&2
           else
@@ -595,21 +682,57 @@ fi
 # Blocks if brief contains ### Task Group but session type is not taskgroup/taskgroup-merge.
 check_taskgroup_brief_mismatch "$START_MS"
 
+# --- Gates 5 + 6: Session overlap + branch isolation (Decision 0013) ---
+# Decision 0042: read pre-computed verdicts from <state_dir>/phase-state.gates
+# when the cache is fresh. Cache miss falls through to inline checks. Override
+# env vars are checked first in each branch (overrides are per-invocation policy).
+_GATES_CACHE_HIT=0
+if [ "${REPO_OS_SKIP_OVERLAP_CHECK:-0}" != "1" ] || [ "${REPO_OS_SKIP_BRANCH_REUSE:-0}" != "1" ]; then
+  if read_phase_gates; then
+    _GATES_CACHE_HIT=1
+  fi
+fi
+
 # --- Gate 6: Session overlap check (Decision 0013) ---
-if ! check_session_overlap; then
-  log_hook_event "branch-guard" "PreToolUse" "Bash" "block" "$START_MS" "session_overlap"
-  exit 2
+if [ "$_GATES_CACHE_HIT" = "1" ]; then
+  if [ "${REPO_OS_SKIP_OVERLAP_CHECK:-0}" = "1" ]; then
+    log_override "branch-guard" "REPO_OS_SKIP_OVERLAP_CHECK"
+  elif [ "$GATES_SESSION_OVERLAP" = "blocked" ]; then
+    [ -n "$GATES_SESSION_OVERLAP_DETAIL" ] && echo "$GATES_SESSION_OVERLAP_DETAIL" >&2
+    log_hook_event "branch-guard" "PreToolUse" "Bash" "block" "$START_MS" "session_overlap" "cache:hit"
+    exit 2
+  elif [ "$GATES_SESSION_OVERLAP" = "advisory" ] && [ -n "$GATES_SESSION_OVERLAP_DETAIL" ]; then
+    # Surface advisory message — parity with check_session_overlap inline path.
+    echo "$GATES_SESSION_OVERLAP_DETAIL" >&2
+  fi
+else
+  if ! check_session_overlap; then
+    log_hook_event "branch-guard" "PreToolUse" "Bash" "block" "$START_MS" "session_overlap"
+    exit 2
+  fi
 fi
 
 # --- Gate 5: Session branch isolation (Decision 0013) ---
-CLOSED_BRANCHES_FILE="$REPO_ROOT/.claude/local/closed-branches"
-if [ -f "$CLOSED_BRANCHES_FILE" ] && grep -qxF "$CURRENT_BRANCH" "$CLOSED_BRANCHES_FILE" 2>/dev/null; then
-  if [ "${REPO_OS_SKIP_BRANCH_REUSE:-0}" = "1" ]; then
-    log_override "branch-guard" "REPO_OS_SKIP_BRANCH_REUSE"
-  else
-    log_hook_event "branch-guard" "PreToolUse" "Bash" "block" "$START_MS" "branch_reused"
-    echo "GATE-RECOVERABLE: Branch '$CURRENT_BRANCH' sealed by a previous session. NEXT: Create a new branch with git checkout -b <category>/<description>. (override: REPO_OS_SKIP_BRANCH_REUSE=1)" >&2
-    exit 2
+if [ "$_GATES_CACHE_HIT" = "1" ]; then
+  if [ "$GATES_BRANCH_ISOLATION" = "blocked" ]; then
+    if [ "${REPO_OS_SKIP_BRANCH_REUSE:-0}" = "1" ]; then
+      log_override "branch-guard" "REPO_OS_SKIP_BRANCH_REUSE"
+    else
+      log_hook_event "branch-guard" "PreToolUse" "Bash" "block" "$START_MS" "branch_reused" "cache:hit"
+      echo "GATE-RECOVERABLE: Branch '$CURRENT_BRANCH' sealed by a previous session. NEXT: Create a new branch with git checkout -b <category>/<description>. (override: REPO_OS_SKIP_BRANCH_REUSE=1)" >&2
+      exit 2
+    fi
+  fi
+else
+  CLOSED_BRANCHES_FILE="$REPO_ROOT/.claude/local/closed-branches"
+  if [ -f "$CLOSED_BRANCHES_FILE" ] && grep -qxF "$CURRENT_BRANCH" "$CLOSED_BRANCHES_FILE" 2>/dev/null; then
+    if [ "${REPO_OS_SKIP_BRANCH_REUSE:-0}" = "1" ]; then
+      log_override "branch-guard" "REPO_OS_SKIP_BRANCH_REUSE"
+    else
+      log_hook_event "branch-guard" "PreToolUse" "Bash" "block" "$START_MS" "branch_reused"
+      echo "GATE-RECOVERABLE: Branch '$CURRENT_BRANCH' sealed by a previous session. NEXT: Create a new branch with git checkout -b <category>/<description>. (override: REPO_OS_SKIP_BRANCH_REUSE=1)" >&2
+      exit 2
+    fi
   fi
 fi
 
