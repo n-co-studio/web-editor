@@ -13,34 +13,45 @@ briefs:
     next_brief: "Brief 2 (consumer of formatSourceContext helper)"
     boundaries:
       - packages/chrome-extension/src/content/batching/prompt-serializer.ts
-  - title: "Brief 2 (consumer of formatSourceContext helper)"
+  - title: "Multi-breakpoint inspection end-to-end"
     sequence: 2
-    session: null
+    session: 149
     branch: feature/breakpoint-awareness
-    status: pending
+    status: complete
     next_brief: ""
     boundaries: []
 
 intent:
   goal: >-
-    Make the copy-prompt markdown carry breakpoint context (active breakpoint
-    on element heading, per-property [@ mediaQuery] annotation when a rule
-    diverges from the active breakpoint, and a blockquote instruction when
-    any breakpoint metadata is present) so the receiving AI knows which
-    viewport / media-query the edits target.
+    Capture viewport-bound non-active @media rules during inspection and
+    propagate end-to-end (diff → MCP → copy-prompt) as additive
+    `allBreakpointSources` on `PropertyChange`, so the receiving AI can
+    reason about responsive rules at other breakpoints without switching
+    viewports. Active-viewport behaviour of the existing inspection path is
+    unchanged — new context is additive and opt-in at the inspection layer.
   verification:
-    - Edit at viewport 1280 with a `lg` design token shows `— @ lg (1280px)` on the element heading
-    - Edit at a viewport with no design token loaded shows no breakpoint annotation
-    - Per-property `[@ <conditionText>]` appears only when source.mediaQuery differs from active breakpoint
-    - Active-breakpoint rules emit no per-property annotation
-    - Instruction blockquote appears only when at least one diff carries breakpoint or mediaQuery metadata
-    - Raw-JSON HTML comment is byte-identical to pre-change output
+    - getAllBreakpointRules returns viewport-bound inactive rules only (matchesCurrentViewport flag set per rule)
+    - CrossBreakpointRuleSource extends RuleSource with matchesCurrentViewport
+    - PropertyChange.allBreakpointSources is additive optional; existing callers unaffected
+    - @media print, hover, prefers-*, orientation NOT returned; CSSContainerRule skipped
+    - CORS-tainted sheet → accessLevel partial; ceiling hit → partial, no throw
+    - Copy-prompt renders cross-breakpoint sub-bullet only when populated
+    - MCP get_pending_visual_changes description appended (not rewritten)
+    - feature-002 Edge Cases bullet updated per PM proposal
   scope_files:
+    - packages/shared/src/diff.ts
+    - packages/chrome-extension/src/content/inspection/css-rules.ts
+    - packages/chrome-extension/src/shared/css-types.ts
     - packages/chrome-extension/src/content/batching/prompt-serializer.ts
+    - packages/chrome-extension/src/content/batching/diff-builder.ts
+    - packages/chrome-extension/src/content/index.ts
+    - packages/mcp-server/src/server.ts
+    - docs/spec/compiled/v1/features/feature-002-visual-property-editing.md
   spec_references:
     - docs/spec/compiled/v1/data-contracts.md
     - docs/spec/compiled/v1/features/feature-002-visual-property-editing.md
     - docs/spec/compiled/v1/features/feature-005-mcp-server-bridge.md
+    - docs/spec/compiled/v1/architecture.md
 
 conventions:
   naming:
@@ -57,11 +68,15 @@ conventions:
   boundaries:
     - module: packages/chrome-extension/src/content/batching/prompt-serializer.ts
       owner_brief: "Surface breakpoint context in copy-prompt markdown"
+    - module: packages/chrome-extension/src/content/inspection/css-rules.ts
+      owner_brief: "Multi-breakpoint inspection end-to-end"
+    - module: packages/shared/src/diff.ts
+      owner_brief: "Multi-breakpoint inspection end-to-end"
 
 integration_points:
   - name: formatSourceContext helper
     producer: "Surface breakpoint context in copy-prompt markdown"
-    consumer: "Brief 2 (consumer of formatSourceContext helper)"
+    consumer: "Multi-breakpoint inspection end-to-end"
     artifact: packages/chrome-extension/src/content/batching/prompt-serializer.ts
 
 session_decisions:
@@ -71,6 +86,21 @@ session_decisions:
   - session: 148
     decision: "Heading annotation handles all four combinations of {breakpoint, breakpointValue} symmetrically"
     rationale: "Cohesion review caught that the original two-branch form silently dropped the token-only case; symmetric handling avoids surprising the receiving AI when only one of the fields is populated"
+  - session: 149
+    decision: "Two narrow resolver callbacks on DiffBuilder (RuleSourceResolver + CrossBreakpointSourcesResolver) instead of widening RuleSourceResolver into a compound return type"
+    rationale: "Pragmatist (plan-gating) flagged the widened compound return as over-engineering — single-implementation interface. Two narrow resolvers preserve the existing contract additively and read cleaner at the callsites in index.ts"
+  - session: 149
+    decision: "Cross-breakpoint walk DORMANT_MEDIA_RULE_CEILING = 2000, separate from the existing RULE_COUNT_CEILING = 5000 on the active cascade path"
+    rationale: "Walking dormant @media branches visits rules normally skipped by matchMedia, so total rule count is higher on Tailwind-style design systems. Brief specified 2000 as a starting estimate; instrumentation for tuning is deferred"
+  - session: 149
+    decision: "Viewport-bound media-query allow-list uses substring match on (width|height|aspect-ratio):"
+    rationale: "Naturally excludes print, hover, pointer, prefers-*, forced-colors, and orientation per brief; whitelist approach matches the intent and is more robust than a hand-maintained denylist"
+  - session: 149
+    decision: "CSSContainerRule is explicitly skipped (deferred)"
+    rationale: "Container queries cannot be evaluated by matchMedia; surfacing them as cross-breakpoint context without ancestor-size evaluation would be misleading. A follow-on brief should add containerQuery handling"
+  - session: 149
+    decision: "buildPageContext unit-stripping bug (em/rem tokens) deferred as KL-1 in known-issues.md"
+    rationale: "Diff-review surfaced a real pre-existing bug in buildPageContext but the code is on main (commit dfd7a68) and out of this brief's scope. A correct fix requires unit-aware breakpoint resolution and warrants its own brief"
 
 governance:
   - brief_sequence: 1
@@ -85,3 +115,16 @@ governance:
       B1: pass
     timestamp: 2026-05-13T23:10:00Z
     notes: "Cohesion review BLOCKED on first pass (formatBreakpointHeading missing breakpoint-only branch); fixed and re-reviewed APPROVED. Diff-review APPROVED on first pass. QA APPROVED."
+  - brief_sequence: 2
+    gates_a:
+      A1: pass
+      A2: pass
+      A3: pass
+      A4: pass
+      A5: pass
+      A6: pass
+    gates_b:
+      B1: pass
+    overrides: []
+    timestamp: 2026-05-14T00:05:00Z
+    notes: "Pragmatist plan-gating APPROVED with one OVER-ENGINEERED advisory (compound return type); plan adopted the two-narrow-resolver alternative. Cohesion APPROVED 8/8 with 4 recommendations addressed (sub-bullet dedup, getMatchedRules memoization in index.ts, layerName in isSameRule). Diff-review re-issued with scope clarification (initial run misattributed a pre-existing buildPageContext bug to the brief diff) — APPROVED. One finding (KL-1) deferred to known-issues.md as out-of-scope. QA APPROVED."

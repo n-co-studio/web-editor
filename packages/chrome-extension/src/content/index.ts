@@ -13,7 +13,7 @@ import { SpacingEditor } from './editing/spacing';
 import { PositionEditor } from './editing/position';
 import { KeyboardHandler } from './editing/keyboard';
 import { DiffBuilder } from './batching/diff-builder';
-import { getMatchedRules, findOwningRule, toRuleSource } from './inspection/css-rules';
+import { getMatchedRules, findOwningRule, toRuleSource, getAllBreakpointRules, toCrossBreakpointSources } from './inspection/css-rules';
 import { PendingQueue } from './batching/queue';
 import { BadgeUpdater } from './batching/badge';
 import { ReviewPanel } from './batching/review-panel';
@@ -131,19 +131,52 @@ export async function activate(): Promise<void> {
   await queue.restore();
 
   badge = new BadgeUpdater(queue);
-  diffBuilder = new DiffBuilder(tabId, tokenStore, (element, property) => {
-    // Best-effort source resolution. Excludes the extension's own shadow-DOM
-    // styles via excludeHost. The toggle-manager override sheet (if any) is
-    // owned by PropertiesPane; in practice it's empty at edit time, so the
-    // extra precision isn't worth threading the dependency.
-    try {
-      const result = getMatchedRules(element, undefined, host ?? undefined);
-      const owning = findOwningRule(result.rules, property);
-      return owning ? toRuleSource(owning) : undefined;
-    } catch {
-      return undefined;
-    }
-  });
+  // Per-element memo for getMatchedRules — both resolver closures call it for
+  // the same (element, property) pair during a single enrich() pass. A tiny
+  // last-element cache avoids re-walking every stylesheet twice per property
+  // and keeps the cascade winner identity stable between the two resolvers.
+  let activeRulesMemo: { element: Element; result: ReturnType<typeof getMatchedRules> } | null = null;
+  const activeRulesFor = (element: Element): ReturnType<typeof getMatchedRules> => {
+    if (activeRulesMemo && activeRulesMemo.element === element) return activeRulesMemo.result;
+    const result = getMatchedRules(element, undefined, host ?? undefined);
+    activeRulesMemo = { element, result };
+    return result;
+  };
+
+  diffBuilder = new DiffBuilder(
+    tabId,
+    tokenStore,
+    (element, property) => {
+      // Best-effort source resolution. Excludes the extension's own shadow-DOM
+      // styles via excludeHost. The toggle-manager override sheet (if any) is
+      // owned by PropertiesPane; in practice it's empty at edit time, so the
+      // extra precision isn't worth threading the dependency.
+      try {
+        const result = activeRulesFor(element);
+        const owning = findOwningRule(result.rules, property);
+        return owning ? toRuleSource(owning) : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    (element, property) => {
+      // Best-effort cross-breakpoint context. Walks viewport-bound @media
+      // branches regardless of current match so the diff carries rules at
+      // dormant breakpoints as additive context. Dedups against the cascade
+      // winner already in `source` so the receiving agent doesn't see the
+      // same rule twice.
+      try {
+        const dormant = getAllBreakpointRules(element, { excludeHost: host ?? undefined });
+        if (dormant.rules.length === 0) return undefined;
+        const active = activeRulesFor(element);
+        const owning = findOwningRule(active.rules, property);
+        const cross = toCrossBreakpointSources(dormant.rules, property, owning);
+        return cross.length > 0 ? cross : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+  );
   snapping = new SnappingEngine(tokenStore);
   preview = new PreviewManager();
   staleDetector = new StaleDetector();

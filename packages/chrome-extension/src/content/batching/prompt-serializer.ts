@@ -3,6 +3,7 @@ import type {
   NoteEntry,
   CompoundChildDescriptor,
   RuleSource,
+  CrossBreakpointRuleSource,
 } from '@frontend-editor/shared';
 
 /**
@@ -62,11 +63,14 @@ export function serializeToPrompt(
       sections.push(`### \`${diff.element.selector}\`${lineInfo}${breakpointInfo}\n`);
 
       // Property changes
+      const activeBreakpointLabel = formatActiveBreakpointLabel(diff.context);
       for (const c of diff.changes) {
         const tokenInfo = formatTokenInfo(c.fromToken, c.toToken);
         const sourceContext = formatSourceContext(
           c.source,
           diff.context.breakpointValue,
+          c.allBreakpointSources,
+          activeBreakpointLabel,
         );
         sections.push(
           `- \`${c.property}\`: ${c.fromValue} \u2192 ${c.toValue}${tokenInfo}${sourceContext}`,
@@ -300,6 +304,17 @@ function formatBreakpointHeading(
 export function formatSourceContext(
   source: RuleSource | undefined,
   activeBreakpointValue: string | undefined,
+  allBreakpointSources?: readonly CrossBreakpointRuleSource[],
+  activeBreakpointLabel?: string,
+): string {
+  const inline = formatInlineSourceAnnotation(source, activeBreakpointValue);
+  const subBullet = formatCrossBreakpointSubBullet(allBreakpointSources, activeBreakpointLabel);
+  return inline + subBullet;
+}
+
+function formatInlineSourceAnnotation(
+  source: RuleSource | undefined,
+  activeBreakpointValue: string | undefined,
 ): string {
   if (!source || !source.mediaQuery) return '';
   const normSource = normaliseMediaQuery(source.mediaQuery);
@@ -310,19 +325,54 @@ export function formatSourceContext(
   return ` [@ ${source.mediaQuery}]`;
 }
 
+function formatCrossBreakpointSubBullet(
+  allBreakpointSources: readonly CrossBreakpointRuleSource[] | undefined,
+  activeBreakpointLabel: string | undefined,
+): string {
+  if (!allBreakpointSources || allBreakpointSources.length === 0) return '';
+  // Dedup mediaQuery strings — multiple selectors under the same @media block
+  // should appear once. Preserves first-seen order for readability.
+  const seen = new Set<string>();
+  const queries: string[] = [];
+  for (const s of allBreakpointSources) {
+    if (!s.mediaQuery || seen.has(s.mediaQuery)) continue;
+    seen.add(s.mediaQuery);
+    queries.push(s.mediaQuery);
+  }
+  if (queries.length === 0) return '';
+  const label = activeBreakpointLabel ?? 'the active viewport';
+  return `\n  - Also defined at: ${queries.join(', ')}. Do not modify these; the active edit applies only to ${label}.`;
+}
+
+/**
+ * Human-readable label for the active breakpoint to embed in the cross-
+ * breakpoint sub-bullet. Mirrors the heading annotation precedence:
+ * token name (when present) > breakpoint value > generic fallback.
+ */
+function formatActiveBreakpointLabel(context: VisualDiff['context']): string {
+  if (context.breakpoint && context.breakpointValue) {
+    return `${context.breakpoint} (${context.breakpointValue})`;
+  }
+  if (context.breakpoint) return context.breakpoint;
+  if (context.breakpointValue) return context.breakpointValue;
+  return 'the active viewport';
+}
+
 function normaliseMediaQuery(value: string): string {
   return value.replace(/\s+/g, '').toLowerCase();
 }
 
 /**
  * True when any diff carries breakpoint metadata on its context or a
- * source.mediaQuery on any property change.
+ * source.mediaQuery on any property change, or any allBreakpointSources
+ * are present.
  */
 function hasResponsiveContext(diffs: readonly VisualDiff[]): boolean {
   for (const d of diffs) {
     if (d.context.breakpoint || d.context.breakpointValue) return true;
     for (const c of d.changes) {
       if (c.source?.mediaQuery) return true;
+      if (c.allBreakpointSources && c.allBreakpointSources.length > 0) return true;
     }
   }
   return false;

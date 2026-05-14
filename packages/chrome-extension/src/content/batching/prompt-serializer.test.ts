@@ -4,6 +4,7 @@ import type {
   VisualDiff,
   PropertyChange,
   RuleSource,
+  CrossBreakpointRuleSource,
   PageContext,
 } from '@frontend-editor/shared';
 import { serializeToPrompt, formatSourceContext } from './prompt-serializer.js';
@@ -17,12 +18,14 @@ function makeDiff(opts: {
   context?: Partial<PageContext>;
   change?: Partial<PropertyChange>;
   source?: RuleSource;
+  allBreakpointSources?: readonly CrossBreakpointRuleSource[];
 }): VisualDiff {
   const change: PropertyChange = {
     property: 'padding-top',
     fromValue: '8px',
     toValue: '12px',
     ...(opts.source ? { source: opts.source } : {}),
+    ...(opts.allBreakpointSources ? { allBreakpointSources: opts.allBreakpointSources } : {}),
     ...opts.change,
   };
   return {
@@ -178,5 +181,85 @@ describe('formatSourceContext helper', () => {
       formatSourceContext({ ...baseSource, mediaQuery: '(min-width: 768px)' }, undefined),
       ' [@ (min-width: 768px)]',
     );
+  });
+});
+
+describe('formatSourceContext cross-breakpoint sub-bullet', () => {
+  const baseSource: RuleSource = {
+    selector: '.card',
+    sourceHref: null,
+    sourceIndex: 0,
+    specificity: [0, 1, 0],
+    isInline: false,
+  };
+
+  const crossLg: CrossBreakpointRuleSource = {
+    ...baseSource,
+    sourceIndex: 1,
+    mediaQuery: '(min-width: 1024px)',
+    matchesCurrentViewport: false,
+  };
+  const crossMd: CrossBreakpointRuleSource = {
+    ...baseSource,
+    sourceIndex: 2,
+    mediaQuery: '(min-width: 768px)',
+    matchesCurrentViewport: false,
+  };
+
+  it('emits sub-bullet when allBreakpointSources is populated', () => {
+    const out = formatSourceContext(undefined, '375px', [crossLg, crossMd], 'sm (375px)');
+    assert.match(out, /\n {2}- Also defined at: \(min-width: 1024px\), \(min-width: 768px\)\. /);
+    assert.match(out, /the active edit applies only to sm \(375px\)\./);
+  });
+
+  it('dedups repeated mediaQuery strings — multiple selectors under one @media render once', () => {
+    const dupLg: CrossBreakpointRuleSource = {
+      ...baseSource,
+      selector: '.card .label',
+      sourceIndex: 3,
+      mediaQuery: '(min-width: 1024px)',
+      matchesCurrentViewport: false,
+    };
+    const out = formatSourceContext(undefined, '375px', [crossLg, dupLg, crossMd], 'sm (375px)');
+    assert.match(out, /Also defined at: \(min-width: 1024px\), \(min-width: 768px\)\./);
+    assert.doesNotMatch(out, /1024px\), \(min-width: 1024px\)/);
+  });
+
+  it('emits no sub-bullet when allBreakpointSources is absent', () => {
+    assert.equal(formatSourceContext(undefined, '1280px', undefined, 'lg (1280px)'), '');
+  });
+
+  it('emits no sub-bullet when allBreakpointSources is an empty array', () => {
+    assert.equal(formatSourceContext(undefined, '1280px', [], 'lg (1280px)'), '');
+  });
+
+  it('combines inline source annotation and cross-breakpoint sub-bullet', () => {
+    const source: RuleSource = { ...baseSource, mediaQuery: '(min-width: 375px)' };
+    const out = formatSourceContext(source, '1280px', [crossLg], 'lg (1280px)');
+    assert.match(out, /^ \[@ \(min-width: 375px\)\]\n {2}- Also defined at: \(min-width: 1024px\)\./);
+  });
+
+  it('full-pipeline: serializeToPrompt renders sub-bullet beneath property line', () => {
+    const diff = makeDiff({
+      context: { breakpoint: 'sm', breakpointValue: '375px' },
+      allBreakpointSources: [crossLg],
+    });
+    const out = serializeToPrompt([diff]);
+    assert.match(
+      out,
+      /^- `padding-top`: 8px → 12px\n {2}- Also defined at: \(min-width: 1024px\)\. Do not modify these; the active edit applies only to sm \(375px\)\./m,
+    );
+  });
+
+  it('full-pipeline: omits sub-bullet when allBreakpointSources absent', () => {
+    const diff = makeDiff({ context: { breakpoint: 'sm', breakpointValue: '375px' } });
+    const out = serializeToPrompt([diff]);
+    assert.doesNotMatch(out, /Also defined at:/);
+  });
+
+  it('hasResponsiveContext triggers blockquote when only allBreakpointSources is set', () => {
+    const diff = makeDiff({ allBreakpointSources: [crossLg] });
+    const out = serializeToPrompt([diff]);
+    assert.match(out, /^> Scope edits to the active breakpoint/m);
   });
 });

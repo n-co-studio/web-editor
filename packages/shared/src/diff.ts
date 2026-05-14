@@ -68,6 +68,22 @@ export interface RuleSource {
 }
 
 /**
+ * A RuleSource collected by the cross-breakpoint walk that captures rules
+ * defined under viewport-bound `@media` blocks regardless of whether the
+ * block currently matches the viewport. `matchesCurrentViewport` distinguishes
+ * the active subset from the dormant subset so a downstream agent can reason
+ * about responsive rules without switching viewports.
+ *
+ * `allBreakpointSources` is context-only. The active edit applies only to the
+ * breakpoint identified by `PageContext.breakpoint` / `breakpointValue`; rules
+ * at other breakpoints must not be modified unless the operator's instruction
+ * explicitly requests it.
+ */
+export interface CrossBreakpointRuleSource extends RuleSource {
+  readonly matchesCurrentViewport: boolean;
+}
+
+/**
  * A single CSS property change.
  * Property is always a CSS longhand name — shorthand expansion
  * happens at the extension layer before diff creation.
@@ -84,6 +100,7 @@ export interface PropertyChange {
   readonly toToken?: string;
   readonly unit?: string;
   readonly source?: RuleSource;
+  readonly allBreakpointSources?: readonly CrossBreakpointRuleSource[];
 }
 
 /**

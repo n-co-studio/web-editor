@@ -12,6 +12,7 @@ import type {
   RelatedChange,
   PageContext,
   RuleSource,
+  CrossBreakpointRuleSource,
 } from '@frontend-editor/shared';
 import type { TokenStore } from '../tokens/store';
 
@@ -24,6 +25,16 @@ export type RuleSourceResolver = (
   element: Element,
   property: string,
 ) => RuleSource | undefined;
+
+/**
+ * Resolves rules at non-active viewport breakpoints that declare a property
+ * on an element. Returns undefined or an empty array when no such rules
+ * exist (or when the resolver cannot run, e.g. CORS-tainted sheets).
+ */
+export type CrossBreakpointSourcesResolver = (
+  element: Element,
+  property: string,
+) => readonly CrossBreakpointRuleSource[] | undefined;
 
 /**
  * Assembles complete VisualDiff objects from editing results.
@@ -41,6 +52,7 @@ export class DiffBuilder {
     private readonly tabId: string,
     private readonly tokenStore: TokenStore,
     private readonly resolveRuleSource?: RuleSourceResolver,
+    private readonly resolveCrossBreakpointSources?: CrossBreakpointSourcesResolver,
   ) {}
 
   /** Build a VisualDiff from an element and its property changes. */
@@ -190,14 +202,27 @@ export class DiffBuilder {
    * Resolve tokens and stamp source provenance onto a property change.
    * Source resolution is best-effort: silently skipped if the resolver is
    * absent, the element is absent, or the caller already supplied a source.
+   * Cross-breakpoint sources are resolved independently and attached as
+   * additive context when present.
    */
   private enrich(change: PropertyChange, element: Element | undefined): PropertyChange {
     const tokenResolved = this.resolveTokens(change);
-    if (tokenResolved.source != null || element == null || this.resolveRuleSource == null) {
-      return tokenResolved;
+    if (element == null) return tokenResolved;
+
+    const next: { source?: RuleSource; allBreakpointSources?: readonly CrossBreakpointRuleSource[] } = {};
+
+    if (tokenResolved.source == null && this.resolveRuleSource != null) {
+      const source = this.resolveRuleSource(element, change.property);
+      if (source) next.source = source;
     }
-    const source = this.resolveRuleSource(element, change.property);
-    return source ? { ...tokenResolved, source } : tokenResolved;
+
+    if (tokenResolved.allBreakpointSources == null && this.resolveCrossBreakpointSources != null) {
+      const cross = this.resolveCrossBreakpointSources(element, change.property);
+      if (cross && cross.length > 0) next.allBreakpointSources = cross;
+    }
+
+    if (next.source == null && next.allBreakpointSources == null) return tokenResolved;
+    return { ...tokenResolved, ...next };
   }
 
   /** Resolve fromToken and toToken using the client-side token store. */

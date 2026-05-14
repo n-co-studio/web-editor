@@ -5,6 +5,7 @@ export type {
   NoteEntry,
   PropertyChange,
   RuleSource,
+  CrossBreakpointRuleSource,
   ReorderChange,
   GroupChange,
   ReparentChange,

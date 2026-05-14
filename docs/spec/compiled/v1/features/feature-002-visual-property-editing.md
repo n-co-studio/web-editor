@@ -51,7 +51,7 @@ Live preview applies via CSS custom property mutation (`element.style.setPropert
 ## Edge Cases
 - Flexbox/Grid children: flag that parent layout may need editing, include parent ElementInfo in diff
 - Percentage-based values: maintain unit type, do not convert to px
-- Responsive: changes apply to current viewport only, breakpoint is recorded in diff's PageContext
+- Responsive: changes apply to current viewport only, breakpoint is recorded in diff's PageContext; rules at other viewport-bound `@media` breakpoints may be surfaced on each PropertyChange's `allBreakpointSources` as context-only metadata for the diff consumer (not edit targets)
 - Token snapping active: values constrain to token stops (see feature-003 for details)
 - Token snapping inactive: freeform values accepted, sent as raw CSS
 - CSS custom properties (`var(--x)`) as computed values: `getComputedStyle` returns the resolved value, not the variable reference. Diff records the resolved value — Claude Code must identify and update the variable source if applicable.

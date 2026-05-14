@@ -3,11 +3,19 @@
 // ---------------------------------------------------------------------------
 
 import type { MatchedRule, AccessLevel, MatchResult } from '../../shared/css-types';
-import type { RuleSource } from '@frontend-editor/shared';
+import type { RuleSource, CrossBreakpointRuleSource } from '@frontend-editor/shared';
 import { computeSpecificity, compareSpecificity } from './specificity';
 
 const RULE_COUNT_CEILING = 5_000;
 const ASYNC_CHUNK_SIZE = 500;
+
+/**
+ * Separate ceiling for the cross-breakpoint walk. Smaller than the active
+ * cascade ceiling because the dormant walk visits rules that would normally
+ * be skipped by matchMedia, so total rule count is typically higher on a
+ * Tailwind-style design system.
+ */
+export const DORMANT_MEDIA_RULE_CEILING = 2_000;
 
 /**
  * Find all CSS rules that match a given element.
@@ -244,6 +252,312 @@ export function toRuleSource(rule: MatchedRule): RuleSource {
     mediaQuery: rule.mediaQuery,
     layerName: rule.layerName,
   };
+}
+
+/**
+ * Viewport-bound media-query allow-list: include only queries that gate on
+ * a viewport dimension. Implemented as a substring match on `width:`,
+ * `height:`, or `aspect-ratio:` as feature keys (the trailing colon
+ * disambiguates from incidental occurrences inside selectors or values).
+ *
+ * This naturally excludes:
+ *   - `print` (media type, no feature key)
+ *   - `(hover: ...)`, `(any-hover: ...)`, `(pointer: ...)`, `(any-pointer: ...)`
+ *   - `(prefers-color-scheme: ...)`, `(prefers-reduced-motion: ...)`, other `prefers-*`
+ *   - `(forced-colors: ...)`
+ *   - `(orientation: portrait|landscape)`
+ *
+ * Compound queries like `screen and (min-width: 768px)` are included because
+ * they contain `width:`. Compound queries mixing viewport + non-viewport
+ * features (e.g. `(min-width: 768px) and (hover: hover)`) are also included
+ * — they still scope to a viewport range.
+ */
+function isViewportBoundMediaQuery(conditionText: string): boolean {
+  return /\b(width|height|aspect-ratio)\s*:/i.test(conditionText);
+}
+
+/**
+ * Sibling to `getMatchedRules` for cross-breakpoint context. Walks the same
+ * stylesheets but recurses into `@media` bodies regardless of whether the
+ * query currently matches the viewport. Each emitted rule carries
+ * `matchesCurrentViewport: boolean` so the consumer can distinguish the
+ * active subset from the dormant subset.
+ *
+ * Filters:
+ *   - Only viewport-bound `@media` blocks (see `isViewportBoundMediaQuery`)
+ *   - `@container` blocks are explicitly skipped (deferred — `matchMedia`
+ *     cannot evaluate container queries; surfacing them as cross-breakpoint
+ *     context would be misleading without ancestor-size evaluation)
+ *   - Non-`@media` top-level rules are NOT collected (the cascade path
+ *     already covers them and they have no breakpoint scope)
+ *
+ * CORS handling mirrors `getMatchedRules`: cross-origin sheets contribute
+ * to `accessLevel: 'partial'`. Ceiling is `DORMANT_MEDIA_RULE_CEILING`.
+ */
+export function getAllBreakpointRules(
+  el: Element,
+  opts?: {
+    ceiling?: number;
+    excludeSheets?: Set<CSSStyleSheet>;
+    excludeHost?: Element;
+  },
+): MatchResult {
+  const ceiling = opts?.ceiling ?? DORMANT_MEDIA_RULE_CEILING;
+  const matched: MatchedRule[] = [];
+  let accessLevel: AccessLevel = 'full';
+  let accessMessage: string | undefined;
+  let totalRuleCount = 0;
+  let sourceIndex = 0;
+  let hitCeiling = false;
+
+  const allSheets = collectStyleSheets(opts?.excludeSheets, opts?.excludeHost);
+
+  for (const sheet of allSheets) {
+    if (hitCeiling) break;
+
+    let rules: CSSRuleList;
+    try {
+      rules = sheet.cssRules;
+    } catch {
+      accessLevel = accessLevel === 'none' ? 'none' : 'partial';
+      if (!accessMessage) {
+        accessMessage = 'One or more cross-origin stylesheets could not be inspected';
+      }
+      continue;
+    }
+
+    const result = processDormantRuleList(
+      rules,
+      el,
+      sheet.href,
+      sourceIndex,
+      totalRuleCount,
+      ceiling,
+      undefined,
+      undefined,
+      undefined,
+    );
+
+    matched.push(...result.matched);
+    totalRuleCount = result.totalCount;
+    sourceIndex = result.nextSourceIndex;
+
+    if (totalRuleCount >= ceiling) {
+      hitCeiling = true;
+      accessLevel = 'partial';
+      accessMessage = `Large stylesheet — cross-breakpoint walk truncated at ${ceiling} rules`;
+    }
+  }
+
+  if (allSheets.length === 0) {
+    accessLevel = 'none';
+  }
+
+  return {
+    rules: matched,
+    accessLevel: hitCeiling ? 'partial' : accessLevel,
+    accessMessage,
+  };
+}
+
+interface DormantProcessResult {
+  matched: MatchedRule[];
+  totalCount: number;
+  nextSourceIndex: number;
+}
+
+function processDormantRuleList(
+  rules: CSSRuleList,
+  el: Element,
+  href: string | null,
+  sourceIndex: number,
+  totalCount: number,
+  ceiling: number,
+  mediaQuery: string | undefined,
+  layerName: string | undefined,
+  matchesCurrentViewport: boolean | undefined,
+): DormantProcessResult {
+  const matched: MatchedRule[] = [];
+
+  for (let i = 0; i < rules.length; i++) {
+    if (totalCount >= ceiling) break;
+
+    const result = processDormantSingleRule(
+      rules[i],
+      el,
+      href,
+      sourceIndex,
+      totalCount,
+      ceiling,
+      mediaQuery,
+      layerName,
+      matchesCurrentViewport,
+    );
+    matched.push(...result.matched);
+    totalCount = result.totalCount;
+    sourceIndex = result.nextSourceIndex;
+  }
+
+  return { matched, totalCount, nextSourceIndex: sourceIndex };
+}
+
+function processDormantSingleRule(
+  rule: CSSRule,
+  el: Element,
+  href: string | null,
+  sourceIndex: number,
+  totalCount: number,
+  ceiling: number,
+  mediaQuery: string | undefined,
+  layerName: string | undefined,
+  matchesCurrentViewport: boolean | undefined,
+): DormantProcessResult {
+  const matched: MatchedRule[] = [];
+
+  if (rule instanceof CSSStyleRule) {
+    // Only collect style rules nested inside a viewport-bound @media — the
+    // cascade path (getMatchedRules) already covers non-@media rules.
+    if (mediaQuery !== undefined) {
+      totalCount++;
+      try {
+        if (el.matches(rule.selectorText)) {
+          matched.push({
+            selectorText: rule.selectorText,
+            specificity: computeSpecificity(rule.selectorText),
+            sourceHref: href,
+            sourceIndex,
+            declarations: extractDeclarations(rule.style),
+            isInline: false,
+            mediaQuery,
+            layerName,
+            matchesCurrentViewport: matchesCurrentViewport === true,
+          });
+        }
+      } catch {
+        // Invalid selector — skip
+      }
+      sourceIndex++;
+    }
+  } else if (rule instanceof CSSMediaRule) {
+    // Recurse into viewport-bound media queries regardless of current match.
+    // Compose nested condition with parent for accurate matchMedia evaluation.
+    const condition = rule.conditionText || '';
+    if (!isViewportBoundMediaQuery(condition)) {
+      return { matched, totalCount, nextSourceIndex: sourceIndex };
+    }
+    const composed = mediaQuery
+      ? `${mediaQuery} and ${condition}`
+      : condition;
+    let matches: boolean;
+    try {
+      matches = window.matchMedia(composed).matches;
+    } catch {
+      // Unparseable condition — surface the rule with matchesCurrentViewport: false
+      // rather than skipping, since the condition string itself is still informative.
+      matches = false;
+    }
+    const nested = processDormantRuleList(
+      rule.cssRules,
+      el,
+      href,
+      sourceIndex,
+      totalCount,
+      ceiling,
+      composed,
+      layerName,
+      matches,
+    );
+    matched.push(...nested.matched);
+    totalCount = nested.totalCount;
+    sourceIndex = nested.nextSourceIndex;
+  } else if (rule instanceof CSSSupportsRule) {
+    // @supports is orthogonal to viewport — recurse, preserving outer media state.
+    const nested = processDormantRuleList(
+      rule.cssRules,
+      el,
+      href,
+      sourceIndex,
+      totalCount,
+      ceiling,
+      mediaQuery,
+      layerName,
+      matchesCurrentViewport,
+    );
+    matched.push(...nested.matched);
+    totalCount = nested.totalCount;
+    sourceIndex = nested.nextSourceIndex;
+  } else if (isContainerRule(rule)) {
+    // container queries deferred — see Risks. matchMedia cannot evaluate
+    // them; surfacing them here without ancestor-size evaluation would be
+    // misleading. A follow-on brief should add `containerQuery` to RuleSource.
+    return { matched, totalCount, nextSourceIndex: sourceIndex };
+  } else if ('name' in rule && 'cssRules' in rule) {
+    // CSSLayerBlockRule — recurse, preserving outer media state.
+    const layerRule = rule as CSSRule & { name: string; cssRules: CSSRuleList };
+    const nested = processDormantRuleList(
+      layerRule.cssRules,
+      el,
+      href,
+      sourceIndex,
+      totalCount,
+      ceiling,
+      mediaQuery,
+      layerRule.name || layerName,
+      matchesCurrentViewport,
+    );
+    matched.push(...nested.matched);
+    totalCount = nested.totalCount;
+    sourceIndex = nested.nextSourceIndex;
+  }
+
+  return { matched, totalCount, nextSourceIndex: sourceIndex };
+}
+
+/**
+ * `CSSContainerRule` may not be present in older lib.dom typings. Duck-type
+ * via the union of properties unique to container rules.
+ */
+function isContainerRule(rule: CSSRule): boolean {
+  const ctor = (globalThis as { CSSContainerRule?: { prototype: object } }).CSSContainerRule;
+  if (ctor && rule instanceof (ctor as unknown as { new (): CSSRule })) return true;
+  return (
+    'containerName' in rule &&
+    'containerQuery' in rule &&
+    'cssRules' in rule
+  );
+}
+
+/**
+ * Build the `allBreakpointSources` set for a PropertyChange: filter the
+ * cross-breakpoint walk to rules that declare the same property, drop the
+ * cascade winner (already carried in `source`), and convert to the
+ * cross-package shape.
+ */
+export function toCrossBreakpointSources(
+  dormantRules: readonly MatchedRule[],
+  property: string,
+  owning: MatchedRule | null,
+): CrossBreakpointRuleSource[] {
+  const out: CrossBreakpointRuleSource[] = [];
+  for (const rule of dormantRules) {
+    if (!rule.declarations.has(property)) continue;
+    if (owning && isSameRule(rule, owning)) continue;
+    out.push({
+      ...toRuleSource(rule),
+      matchesCurrentViewport: rule.matchesCurrentViewport === true,
+    });
+  }
+  return out;
+}
+
+function isSameRule(a: MatchedRule, b: MatchedRule): boolean {
+  return (
+    a.selectorText === b.selectorText &&
+    a.sourceHref === b.sourceHref &&
+    a.mediaQuery === b.mediaQuery &&
+    a.layerName === b.layerName &&
+    a.isInline === b.isInline
+  );
 }
 
 // ---------------------------------------------------------------------------

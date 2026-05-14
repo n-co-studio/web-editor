@@ -108,6 +108,20 @@ function registerTools(server: McpServer, bridge: Bridge): void {
         'original image, or public/images/ as fallback) and the toValue will be a ' +
         'project-relative file path (e.g. /public/images/uploaded-xyz.png). ' +
         'Update the source code to reference this path. ' +
+        'Each PropertyChange may also carry an `allBreakpointSources` array of ' +
+        'rules that define the same property at OTHER viewport breakpoints — ' +
+        'rules collected by walking @media bodies regardless of whether they ' +
+        'match the current viewport. Each entry carries the same fields as ' +
+        '`source` plus `matchesCurrentViewport: boolean` to distinguish the ' +
+        'active subset (true) from the dormant subset (false). The cascade ' +
+        'winner already in `source` is excluded so the same rule never appears ' +
+        'twice. `allBreakpointSources` is context-only: the active edit applies ' +
+        'ONLY to the breakpoint identified by `context.breakpoint` / ' +
+        '`context.breakpointValue` and the rule in `source`. Do NOT modify ' +
+        "rules listed in `allBreakpointSources` unless the operator's " +
+        'instruction explicitly asks for changes at those other breakpoints — ' +
+        'they are surfaced so you can reason about responsive variants without ' +
+        'switching viewports, not as edit targets. ' +
         'Optionally filter by tab session ID.',
       inputSchema: z.object({
         tabId: z

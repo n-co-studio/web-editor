@@ -15,6 +15,13 @@ export interface MatchedRule {
   readonly isInline: boolean;
   readonly mediaQuery?: string;
   readonly layerName?: string;
+  /**
+   * Set by `getAllBreakpointRules`: true when the enclosing viewport-bound
+   * `@media` query currently matches the viewport, false when the rule is
+   * surfaced for cross-breakpoint context only. Left undefined by the
+   * existing `getMatchedRules` cascade path.
+   */
+  readonly matchesCurrentViewport?: boolean;
 }
 
 /**
