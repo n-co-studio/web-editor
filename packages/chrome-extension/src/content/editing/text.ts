@@ -29,6 +29,12 @@ const TEXT_TAGS = new Set([
   'SUMMARY', 'LEGEND', 'OPTION',
 ]);
 
+// Tags whose native key handling synthesizes a click on Space — left to the
+// browser, that click fires document-level handlers that re-select the
+// element and tear down the editor mid-edit. We swallow the default and
+// insert a space manually so typing continues normally.
+const ACTIVATE_ON_SPACE = new Set(['BUTTON', 'SUMMARY']);
+
 /**
  * Returns a human-readable reason why text editing is blocked for this element,
  * or null if the element supports text editing.
@@ -104,6 +110,12 @@ export class TextEditor {
       } else if (e.key === 'Escape') {
         e.preventDefault();
         this.cancelEditing();
+      } else if (e.key === ' ' && ACTIVATE_ON_SPACE.has(element.tagName)) {
+        // Suppress the browser's default click synthesis on Space, then
+        // insert the literal space ourselves so the operator's typing
+        // continues uninterrupted.
+        e.preventDefault();
+        document.execCommand('insertText', false, ' ');
       }
     };
 
