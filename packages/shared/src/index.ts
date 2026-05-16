@@ -22,6 +22,8 @@ export type {
   VisualDiff,
   TokenCategory,
   DesignToken,
+  PropDefault,
+  ComponentInsertDescriptor,
 } from './diff.js';
 
 export { PROTOCOL_VERSION, MessageType } from './protocol.js';
@@ -40,6 +42,10 @@ export type {
   StatusResponsePayload,
   DiffServerStatus,
   ErrorPayload,
+  ProjectComponent,
+  ComponentSourceStatus,
+  ComponentDataPayload,
+  ComponentUpdatePayload,
   ExtensionHelloMessage,
   ServerHelloMessage,
   VisualDiffBatchMessage,
@@ -47,6 +53,8 @@ export type {
   DiffAppliedMessage,
   TokenDataMessage,
   TokenUpdateMessage,
+  ComponentDataMessage,
+  ComponentUpdateMessage,
   KeepaliveMessage,
   StatusRequestMessage,
   StatusResponseMessage,

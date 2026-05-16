@@ -13,13 +13,18 @@ import {
   INSERT_PANEL_WIDTH,
   INSERT_PANEL_MAX_HEIGHT,
 } from "../../shared/constants";
-import type { PropertyChange } from "@frontend-editor/shared";
+import type {
+  PropertyChange,
+  ComponentInsertDescriptor,
+} from "@frontend-editor/shared";
 import {
   INSERT_CATEGORIES,
   CATEGORY_LABELS,
   filterCatalog,
   getDefaultEntry,
+  isProjectComponentEntry,
   type InsertCatalogEntry,
+  type ProjectComponentEntry,
   type SizingPreset,
   type CompoundChild,
 } from "./insert-catalog";
@@ -34,11 +39,33 @@ export interface InsertPanelConfig {
   readonly initialStyles: readonly PropertyChange[];
   readonly compoundChildren?: readonly CompoundChild[];
   readonly attributes?: readonly { name: string; value: string }[];
+  readonly componentInsert?: ComponentInsertDescriptor;
 }
+
+type ActiveTab = 'html' | 'components';
 
 // ---------------------------------------------------------------------------
 // InsertPanel
 // ---------------------------------------------------------------------------
+
+/**
+ * Per-instance project component registry — shared across all InsertPanel
+ * instances because component data is pushed once per WebSocket connection
+ * but the panel is constructed each time the operator enters CONFIGURING.
+ */
+let projectComponentEntries: readonly ProjectComponentEntry[] = [];
+const componentRegistryListeners = new Set<() => void>();
+
+export function setPanelProjectComponents(
+  entries: readonly ProjectComponentEntry[],
+): void {
+  projectComponentEntries = entries;
+  for (const listener of componentRegistryListeners) listener();
+}
+
+export function getPanelProjectComponents(): readonly ProjectComponentEntry[] {
+  return projectComponentEntries;
+}
 
 export class InsertPanel {
   // --- DOM refs ---
@@ -47,6 +74,10 @@ export class InsertPanel {
   private confirmBtn: HTMLButtonElement | null = null;
   private widthControls: HTMLDivElement | null = null;
   private heightControls: HTMLDivElement | null = null;
+  private sizingSectionEl: HTMLDivElement | null = null;
+  private searchInputEl: HTMLInputElement | null = null;
+  private htmlTabBtn: HTMLButtonElement | null = null;
+  private componentsTabBtn: HTMLButtonElement | null = null;
 
   // --- State ---
   private selectedEntry: InsertCatalogEntry = getDefaultEntry();
@@ -57,13 +88,28 @@ export class InsertPanel {
   private fixedWidth: number = getDefaultEntry().defaultFixedWidth ?? 100;
   private fixedHeight: number = getDefaultEntry().defaultFixedHeight ?? 40;
   private searchQuery: string = "";
+  private activeTab: ActiveTab = 'html';
+  private readonly onRegistryChange = () => this.handleRegistryChange();
 
   // --- Callbacks ---
   private changeCb: ((entry: InsertCatalogEntry) => void) | null = null;
   private confirmCb: (() => void) | null = null;
   private cancelCb: (() => void) | null = null;
 
-  constructor(private readonly shadow: ShadowRoot) {}
+  constructor(private readonly shadow: ShadowRoot) {
+    // Registry listener is registered in render() (after cleanup()) so a
+    // re-render on the same instance does not leave the panel deaf to
+    // setPanelProjectComponents calls.
+  }
+
+  /**
+   * Mutate the shared project-component registry. Static helper preserved on
+   * the class for callers that hold the panel reference; routes to the
+   * module-level setter so multiple panel instances stay in sync.
+   */
+  setProjectComponents(entries: readonly ProjectComponentEntry[]): void {
+    setPanelProjectComponents(entries);
+  }
 
   // -------------------------------------------------------------------------
   // Public API
@@ -88,6 +134,7 @@ export class InsertPanel {
   /** Render the panel, anchored to phantomRect. Returns the container element. */
   render(phantomRect: DOMRect): HTMLDivElement {
     this.cleanup();
+    componentRegistryListeners.add(this.onRegistryChange);
 
     const pos = computeInsertPanelPosition(
       phantomRect,
@@ -124,10 +171,13 @@ export class InsertPanel {
     container.addEventListener("mousedown", (e) => e.stopPropagation());
     container.addEventListener("pointerdown", (e) => e.stopPropagation());
 
-    // 1. Search input
+    // 1. Tab bar (HTML / Components)
+    container.appendChild(this.buildTabBar());
+
+    // 2. Search input
     container.appendChild(this.buildSearchArea());
 
-    // 2. Catalog list (scrollable)
+    // 3. Catalog list (scrollable)
     this.catalogListEl = createElement(
       "div",
       {},
@@ -140,10 +190,12 @@ export class InsertPanel {
     this.renderCatalogList();
     container.appendChild(this.catalogListEl);
 
-    // 3. Sizing section
-    container.appendChild(this.buildSizingSection());
+    // 4. Sizing section (hidden when a project component is selected)
+    this.sizingSectionEl = this.buildSizingSection();
+    container.appendChild(this.sizingSectionEl);
+    this.applySizingVisibility();
 
-    // 4. Action row
+    // 5. Action row
     container.appendChild(this.buildActionRow());
 
     this.container = container;
@@ -164,6 +216,24 @@ export class InsertPanel {
 
   /** Get current configuration for commit. */
   getConfig(): InsertPanelConfig {
+    if (isProjectComponentEntry(this.selectedEntry)) {
+      // Project component insert: no sizing styles, no attributes, no compound
+      // children — the JSX usage emits the component's own defaults.
+      // tagName: 'div' is the phantom-DOM placeholder; the diff carries the
+      // real component identity in componentInsert.
+      const entry = this.selectedEntry;
+      return {
+        tagName: 'div',
+        label: entry.label,
+        initialStyles: [],
+        componentInsert: {
+          componentName: entry.componentName,
+          importPath: entry.importPath,
+          props: [],
+        },
+      };
+    }
+
     const styles: PropertyChange[] = [];
 
     if (this.widthPreset === "stretch") {
@@ -202,12 +272,122 @@ export class InsertPanel {
 
   /** Clean up DOM. */
   cleanup(): void {
+    componentRegistryListeners.delete(this.onRegistryChange);
     this.container?.remove();
     this.container = null;
     this.catalogListEl = null;
     this.confirmBtn = null;
     this.widthControls = null;
     this.heightControls = null;
+    this.sizingSectionEl = null;
+    this.searchInputEl = null;
+    this.htmlTabBtn = null;
+    this.componentsTabBtn = null;
+  }
+
+  // -------------------------------------------------------------------------
+  // Tab bar
+  // -------------------------------------------------------------------------
+
+  private buildTabBar(): HTMLDivElement {
+    const bar = createElement(
+      "div",
+      { role: "tablist", "aria-label": "Insert panel category" },
+      {
+        flexShrink: "0",
+        display: "flex",
+        borderBottom: `1px solid ${OVERLAY.border}`,
+      },
+    );
+
+    this.htmlTabBtn = this.buildTab("html", "HTML", true);
+    this.componentsTabBtn = this.buildTab(
+      "components",
+      "Components",
+      projectComponentEntries.length > 0,
+    );
+
+    bar.appendChild(this.htmlTabBtn);
+    bar.appendChild(this.componentsTabBtn);
+    return bar;
+  }
+
+  private buildTab(tab: ActiveTab, label: string, enabled: boolean): HTMLButtonElement {
+    const isActive = this.activeTab === tab;
+    const btn = createElement(
+      "button",
+      { role: "tab", "aria-selected": String(isActive) },
+      {
+        flex: "1",
+        padding: "8px 10px",
+        fontSize: "11px",
+        fontFamily: OVERLAY.fontFamily,
+        fontWeight: isActive ? "600" : "500",
+        border: "none",
+        background: isActive ? "rgba(255, 255, 255, 0.06)" : "transparent",
+        borderBottom: `2px solid ${isActive ? INSERT_INDICATOR.color : "transparent"}`,
+        color: enabled ? (isActive ? OVERLAY.text : OVERLAY.textMuted) : "rgba(255,255,255,0.25)",
+        cursor: enabled ? "pointer" : "not-allowed",
+        pointerEvents: "auto",
+        textAlign: "center",
+        transition: "background 0.1s, color 0.1s, border-bottom-color 0.1s",
+      },
+    ) as HTMLButtonElement;
+    btn.textContent = label;
+
+    if (enabled) {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.switchTab(tab);
+      });
+    }
+
+    return btn;
+  }
+
+  private switchTab(tab: ActiveTab): void {
+    if (this.activeTab === tab) return;
+    this.activeTab = tab;
+    // Reset search so a Components-tab query doesn't bleed into HTML and vice versa
+    this.searchQuery = "";
+    if (this.searchInputEl) {
+      this.searchInputEl.value = "";
+      this.searchInputEl.placeholder = this.searchPlaceholder();
+    }
+    this.refreshTabStyles();
+    this.renderCatalogList();
+  }
+
+  private refreshTabStyles(): void {
+    const apply = (btn: HTMLButtonElement | null, tab: ActiveTab, enabled: boolean) => {
+      if (!btn) return;
+      const isActive = this.activeTab === tab;
+      btn.setAttribute("aria-selected", String(isActive));
+      btn.style.fontWeight = isActive ? "600" : "500";
+      btn.style.background = isActive ? "rgba(255, 255, 255, 0.06)" : "transparent";
+      btn.style.borderBottom = `2px solid ${isActive ? INSERT_INDICATOR.color : "transparent"}`;
+      btn.style.color = enabled
+        ? (isActive ? OVERLAY.text : OVERLAY.textMuted)
+        : "rgba(255,255,255,0.25)";
+      btn.style.cursor = enabled ? "pointer" : "not-allowed";
+    };
+    apply(this.htmlTabBtn, "html", true);
+    apply(this.componentsTabBtn, "components", projectComponentEntries.length > 0);
+  }
+
+  private handleRegistryChange(): void {
+    // If our enabling premise vanished, fall back to the HTML tab
+    if (this.activeTab === "components" && projectComponentEntries.length === 0) {
+      this.activeTab = "html";
+    }
+    this.refreshTabStyles();
+    if (this.activeTab === "components") this.renderCatalogList();
+  }
+
+  private searchPlaceholder(): string {
+    return this.activeTab === "components"
+      ? "Search components..."
+      : "Search elements...";
   }
 
   // -------------------------------------------------------------------------
@@ -228,7 +408,7 @@ export class InsertPanel {
       "input",
       {
         type: "text",
-        placeholder: "Search elements...",
+        placeholder: this.searchPlaceholder(),
       },
       {
         width: "100%",
@@ -252,6 +432,7 @@ export class InsertPanel {
     });
 
     wrapper.appendChild(input);
+    this.searchInputEl = input;
     return wrapper;
   }
 
@@ -323,7 +504,7 @@ export class InsertPanel {
     );
 
     const confirmBtn = createButton(
-      `Insert <${this.selectedEntry.tag}>`,
+      this.confirmButtonLabel(),
       "primary",
       () => {
         this.confirmCb?.();
@@ -355,9 +536,15 @@ export class InsertPanel {
     if (!this.catalogListEl) return;
     this.catalogListEl.innerHTML = "";
 
+    if (this.activeTab === "components") {
+      this.renderComponentsList();
+      return;
+    }
+
     const filtered = filterCatalog(this.searchQuery);
 
     for (const category of INSERT_CATEGORIES) {
+      if (category === "components") continue; // rendered in its own tab
       const entries = filtered.filter((e) => e.category === category);
       if (entries.length === 0) continue;
 
@@ -394,6 +581,165 @@ export class InsertPanel {
 
       this.catalogListEl.appendChild(grid);
     }
+  }
+
+  private renderComponentsList(): void {
+    if (!this.catalogListEl) return;
+
+    const q = this.searchQuery.trim().toLowerCase();
+    const entries = q
+      ? projectComponentEntries.filter(
+          (e) =>
+            e.componentName.toLowerCase().includes(q) ||
+            e.importPath.toLowerCase().includes(q),
+        )
+      : projectComponentEntries;
+
+    if (entries.length === 0) {
+      const empty = createElement(
+        "div",
+        {},
+        {
+          padding: "16px 8px",
+          fontSize: "11px",
+          color: OVERLAY.textMuted,
+          textAlign: "center",
+          fontFamily: OVERLAY.fontFamily,
+        },
+      );
+      empty.textContent =
+        projectComponentEntries.length === 0
+          ? "No project components discovered."
+          : "No components match your search.";
+      this.catalogListEl.appendChild(empty);
+      return;
+    }
+
+    const list = createElement(
+      "div",
+      {},
+      {
+        display: "flex",
+        flexDirection: "column",
+        gap: "2px",
+        paddingTop: "4px",
+      },
+    );
+
+    for (const entry of entries) {
+      list.appendChild(this.buildComponentEntryRow(entry));
+    }
+    this.catalogListEl.appendChild(list);
+  }
+
+  private buildComponentEntryRow(
+    entry: ProjectComponentEntry,
+  ): HTMLButtonElement {
+    const isSelected = this.isEntrySelected(entry);
+
+    const row = createElement(
+      "button",
+      {},
+      {
+        display: "flex",
+        alignItems: "center",
+        gap: "8px",
+        padding: "6px 8px",
+        border: `1px solid ${isSelected ? INSERT_INDICATOR.color : "transparent"}`,
+        borderRadius: OVERLAY.radiusSm,
+        background: isSelected ? "rgba(16, 185, 129, 0.12)" : "transparent",
+        color: OVERLAY.text,
+        cursor: "pointer",
+        fontFamily: OVERLAY.fontFamily,
+        textAlign: "left",
+        width: "100%",
+        boxSizing: "border-box",
+        pointerEvents: "auto",
+        transition: "background 0.1s, border-color 0.1s",
+      },
+    ) as HTMLButtonElement;
+
+    const iconSpan = createElement(
+      "span",
+      {},
+      {
+        display: "flex",
+        width: "16px",
+        height: "16px",
+        flexShrink: "0",
+        color: OVERLAY.textMuted,
+      },
+    );
+    iconSpan.innerHTML = entry.icon;
+    row.appendChild(iconSpan);
+
+    const textCol = createElement(
+      "span",
+      {},
+      {
+        display: "flex",
+        flexDirection: "column",
+        minWidth: "0",
+        flex: "1",
+      },
+    );
+
+    const nameSpan = createElement(
+      "span",
+      {},
+      {
+        fontSize: "11px",
+        fontWeight: "600",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+      },
+    );
+    nameSpan.textContent = entry.componentName;
+    textCol.appendChild(nameSpan);
+
+    const pathSpan = createElement(
+      "span",
+      {},
+      {
+        fontFamily: OVERLAY.monoFamily,
+        fontSize: "10px",
+        color: OVERLAY.textMuted,
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+        direction: "rtl",
+        textAlign: "left",
+      },
+    );
+    pathSpan.textContent = entry.importPath;
+    textCol.appendChild(pathSpan);
+
+    row.appendChild(textCol);
+
+    row.addEventListener("mouseenter", () => {
+      if (!this.isEntrySelected(entry)) {
+        row.style.background = "rgba(255, 255, 255, 0.08)";
+      }
+    });
+    row.addEventListener("mouseleave", () => {
+      if (!this.isEntrySelected(entry)) {
+        row.style.background = "transparent";
+      }
+    });
+    row.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.selectEntry(entry);
+    });
+
+    return row;
+  }
+
+  private applySizingVisibility(): void {
+    if (!this.sizingSectionEl) return;
+    this.sizingSectionEl.style.display = isProjectComponentEntry(this.selectedEntry)
+      ? "none"
+      : "block";
   }
 
   private buildEntryButton(entry: InsertCatalogEntry): HTMLButtonElement {
@@ -472,6 +818,15 @@ export class InsertPanel {
   }
 
   private isEntrySelected(entry: InsertCatalogEntry): boolean {
+    if (isProjectComponentEntry(entry) && isProjectComponentEntry(this.selectedEntry)) {
+      return (
+        entry.componentName === this.selectedEntry.componentName &&
+        entry.importPath === this.selectedEntry.importPath
+      );
+    }
+    if (isProjectComponentEntry(entry) || isProjectComponentEntry(this.selectedEntry)) {
+      return false;
+    }
     return (
       entry.tag === this.selectedEntry.tag &&
       entry.label === this.selectedEntry.label
@@ -497,13 +852,21 @@ export class InsertPanel {
       this.heightControls.innerHTML = "";
       this.renderHeightRow();
     }
+    this.applySizingVisibility();
 
     // Update confirm button label
     if (this.confirmBtn) {
-      this.confirmBtn.textContent = `Insert <${this.selectedEntry.tag}>`;
+      this.confirmBtn.textContent = this.confirmButtonLabel();
     }
 
     this.changeCb?.(entry);
+  }
+
+  private confirmButtonLabel(): string {
+    if (isProjectComponentEntry(this.selectedEntry)) {
+      return `Insert ${this.selectedEntry.componentName}`;
+    }
+    return `Insert <${this.selectedEntry.tag}>`;
   }
 
   // -------------------------------------------------------------------------

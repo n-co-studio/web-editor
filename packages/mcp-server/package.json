@@ -25,6 +25,7 @@
     "@frontend-editor/shared": "0.1.0",
     "@modelcontextprotocol/sdk": "^1.25.0",
     "chokidar": "^4.0.0",
+    "react-docgen": "^7.0.0",
     "ws": "^8.18.0",
     "zod": "^3.23.0"
   },

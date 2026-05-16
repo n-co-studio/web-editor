@@ -173,8 +173,37 @@ export interface ReparentChange {
 }
 
 /**
+ * A prop's default value extracted from a component's signature.
+ * v1 always emits an empty array on ComponentInsertDescriptor; PropDefault is
+ * reserved for the v1.1 prop editor and shipped now to avoid a contract migration.
+ */
+export interface PropDefault {
+  readonly name: string;
+  readonly type: 'string' | 'number' | 'boolean' | 'string-union' | 'unknown';
+  readonly defaultValue?: string;
+  readonly unionValues?: readonly string[];
+  readonly tokenCategory?: TokenCategory;
+}
+
+/**
+ * Descriptor for inserting a project-local React component instead of a plain
+ * HTML element. The receiving agent uses `componentName` + `importPath` to add
+ * the JSX usage and the matching import at the source insertion point.
+ */
+export interface ComponentInsertDescriptor {
+  readonly componentName: string;
+  readonly importPath: string;
+  readonly props: readonly PropDefault[];
+}
+
+/**
  * An insert operation — creates a new element within a container.
  * Stored as a parallel array on VisualDiff (separate from PropertyChange[]).
+ *
+ * When `componentInsert` is present, the insert refers to a project-local
+ * React component; `tagName` carries the phantom DOM placeholder (typically
+ * `'div'`) and the receiving agent inserts the component identified by
+ * `componentInsert` instead of a literal element.
  */
 export interface InsertChange {
   readonly type: 'insert';
@@ -188,6 +217,7 @@ export interface InsertChange {
   readonly initialStyles: readonly PropertyChange[];
   readonly childSnapshot?: readonly ChildSnapshotEntry[];
   readonly compoundChildren?: readonly CompoundChildDescriptor[];
+  readonly componentInsert?: ComponentInsertDescriptor;
 }
 
 /**

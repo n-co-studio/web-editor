@@ -9,6 +9,8 @@ import type {
   DiffAppliedPayload,
   TokenDataPayload,
   TokenUpdatePayload,
+  ComponentDataPayload,
+  ComponentUpdatePayload,
   StatusResponsePayload,
   ErrorPayload,
   ExtensionToServerMessage,
@@ -38,6 +40,8 @@ export interface WebSocketClientCallbacks {
   onDiffApplied(payload: DiffAppliedPayload): void;
   onTokenData(payload: TokenDataPayload): void;
   onTokenUpdate(payload: TokenUpdatePayload): void;
+  onComponentData(payload: ComponentDataPayload): void;
+  onComponentUpdate(payload: ComponentUpdatePayload): void;
   onStatusResponse(payload: StatusResponsePayload): void;
   onError(payload: ErrorPayload): void;
 }
@@ -231,6 +235,12 @@ export class WebSocketClient {
         break;
       case MessageType.TOKEN_UPDATE:
         this.cb.onTokenUpdate(typed.payload);
+        break;
+      case MessageType.COMPONENT_DATA:
+        this.cb.onComponentData(typed.payload);
+        break;
+      case MessageType.COMPONENT_UPDATE:
+        this.cb.onComponentUpdate(typed.payload);
         break;
       case MessageType.STATUS_RESPONSE:
         this.cb.onStatusResponse(typed.payload);

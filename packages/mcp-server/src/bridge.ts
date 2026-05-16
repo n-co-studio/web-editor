@@ -11,6 +11,8 @@ import type {
   VisualDiffBatchPayload,
   DesignToken,
   TokenSourceStatus,
+  ProjectComponent,
+  ComponentSourceStatus,
   ExtensionToServerMessage,
   ServerToExtensionMessage,
 } from '@frontend-editor/shared';
@@ -31,6 +33,8 @@ export class Bridge {
   private readonly processedIds = new Set<string>();
   private tokenRegistry = new Map<string, DesignToken[]>();
   private tokenSources: TokenSourceStatus[] = [];
+  private componentRegistry = new Map<string, ProjectComponent[]>();
+  private componentSources: ComponentSourceStatus[] = [];
   private readonly driftMap = new Map<string, DriftEntry>();
   private driftTotalEdits = 0;
   private driftTokenMatches = 0;
@@ -277,6 +281,83 @@ export class Bridge {
   }
 
   // -----------------------------------------------------------------------
+  // Component registry operations
+  // -----------------------------------------------------------------------
+
+  /** Set the full component registry (called at startup after discovery). */
+  setComponentRegistry(
+    components: Map<string, ProjectComponent[]>,
+    sources: ComponentSourceStatus[],
+  ): void {
+    this.componentRegistry = components;
+    this.componentSources = sources;
+  }
+
+  /**
+   * Update a single component source — replaces (or removes when the file
+   * was unlinked) that file's entries — and broadcasts COMPONENT_UPDATE to
+   * every connected extension. Always sends the full current registry as
+   * per the spec (per-file delta deferred).
+   */
+  updateComponents(
+    sourceFile: string,
+    components: ProjectComponent[],
+    status: ComponentSourceStatus | null,
+  ): void {
+    if (status === null) {
+      this.componentRegistry.delete(sourceFile);
+      this.componentSources = this.componentSources.filter((s) => s.file !== sourceFile);
+    } else {
+      this.componentRegistry.set(sourceFile, components);
+      const idx = this.componentSources.findIndex((s) => s.file === status.file);
+      if (idx >= 0) {
+        this.componentSources[idx] = status;
+      } else {
+        this.componentSources.push(status);
+      }
+    }
+
+    const flat = this.getAllComponentsFlat();
+    const { sourceCount, failedCount } = this.getComponentCounts();
+
+    this.broadcast({
+      type: MessageType.COMPONENT_UPDATE,
+      version: PROTOCOL_VERSION,
+      payload: { components: flat, sourceCount, failedCount },
+    });
+  }
+
+  /** Get components, optionally filtered by a name substring (case-insensitive). */
+  getComponents(nameFilter?: string): {
+    components: ProjectComponent[];
+    sourceCount: number;
+    failedCount: number;
+  } {
+    let components = this.getAllComponentsFlat();
+    if (nameFilter) {
+      const needle = nameFilter.toLowerCase();
+      components = components.filter((c) => c.componentName.toLowerCase().includes(needle));
+    }
+    const { sourceCount, failedCount } = this.getComponentCounts();
+    return { components, sourceCount, failedCount };
+  }
+
+  private getAllComponentsFlat(): ProjectComponent[] {
+    const all: ProjectComponent[] = [];
+    for (const components of this.componentRegistry.values()) {
+      all.push(...components);
+    }
+    return all;
+  }
+
+  private getComponentCounts(): { sourceCount: number; failedCount: number } {
+    return {
+      sourceCount: this.componentSources.length,
+      failedCount: this.componentSources.filter((s) => s.status === 'error').length,
+    };
+  }
+
+  // -----------------------------------------------------------------------
   // Drift tracking
   // -----------------------------------------------------------------------
 
@@ -487,6 +568,18 @@ export class Bridge {
       payload: {
         tokens: this.getAllTokensFlat(),
         sources: [...this.tokenSources],
+      },
+    });
+
+    // Send full project-component registry
+    const { sourceCount, failedCount } = this.getComponentCounts();
+    this.send(ws, {
+      type: MessageType.COMPONENT_DATA,
+      version: PROTOCOL_VERSION,
+      payload: {
+        components: this.getAllComponentsFlat(),
+        sourceCount,
+        failedCount,
       },
     });
   }

@@ -31,6 +31,8 @@ import type { ReorderCommitCallback } from './editing/reorder';
 import { ReparentEditor, getReparentBlockReason } from './editing/reparent';
 import type { ReparentCommitCallback } from './editing/reparent';
 import { InsertEditor, getInsertBlockReason } from './editing/insert';
+import { setPanelProjectComponents } from './editing/insert-panel';
+import { buildProjectComponentEntry } from './editing/insert-catalog';
 import { TextEditor, getTextBlockReason } from './editing/text';
 import { MediaEditor } from './editing/media';
 import { EffectsEditor } from './editing/effects';
@@ -210,6 +212,34 @@ export async function activate(): Promise<void> {
     onTokenUpdate: (payload) => {
       tokenStore!.update(payload.tokens, payload.sources);
       devtoolsPanel?.log(`Token update: ${payload.tokens.length} tokens`);
+    },
+    onComponentData: (payload) => {
+      const entries = payload.components.map((c) =>
+        buildProjectComponentEntry({
+          componentName: c.componentName,
+          importPath: c.importPath,
+          exportType: c.exportType,
+        }),
+      );
+      setPanelProjectComponents(entries);
+      devtoolsPanel?.log(
+        `Received ${payload.components.length} project component(s) from ${payload.sourceCount} file(s)` +
+          (payload.failedCount > 0 ? ` (${payload.failedCount} failed)` : ''),
+      );
+    },
+    onComponentUpdate: (payload) => {
+      const entries = payload.components.map((c) =>
+        buildProjectComponentEntry({
+          componentName: c.componentName,
+          importPath: c.importPath,
+          exportType: c.exportType,
+        }),
+      );
+      setPanelProjectComponents(entries);
+      devtoolsPanel?.log(
+        `Project components updated: ${payload.components.length} total` +
+          (payload.failedCount > 0 ? ` (${payload.failedCount} failed)` : ''),
+      );
     },
     onStatusResponse: (payload) => {
       queue!.updateFromServerStatus(payload.perDiff);
@@ -1333,7 +1363,12 @@ function makeInsertCommit(_containerEl: Element): InsertCommitCallback {
     const initialStyles = config?.initialStyles ?? [];
 
     const insertChange = buildInsertChange(
-      container, insertIndex, tagName, initialStyles, config?.compoundChildren,
+      container,
+      insertIndex,
+      tagName,
+      initialStyles,
+      config?.compoundChildren,
+      config?.componentInsert,
     );
 
     const diff = diffBuilder!.buildInsert(containerInfo, insertChange);

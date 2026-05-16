@@ -8,6 +8,11 @@ import {
   resolveToToken,
   parseTokenSource,
 } from './tokens.js';
+import {
+  discoverComponents,
+  parseComponentFile,
+  watchComponentSources,
+} from './components.js';
 
 /**
  * Create and start the MCP server with WebSocket bridge.
@@ -30,16 +35,28 @@ export async function createServer(): Promise<void> {
     bridge.updateTokens(file, result.tokens, result.status);
   });
 
-  // 4. Create MCP server
+  // 4. Discover and parse project-local React components, then start watcher
+  const componentResult = await discoverComponents(cwd);
+  bridge.setComponentRegistry(componentResult.components, componentResult.statuses);
+  const componentWatcher = watchComponentSources(cwd, componentResult.roots, async (event) => {
+    if (event.kind === 'unlink') {
+      bridge.updateComponents(event.file, [], null);
+      return;
+    }
+    const result = await parseComponentFile(cwd, event.file);
+    bridge.updateComponents(event.file, result.components, result.status);
+  });
+
+  // 5. Create MCP server
   const server = new McpServer({
     name: 'frontend-editor',
     version: '0.1.0',
   });
 
-  // 5. Register all tools
+  // 6. Register all tools
   registerTools(server, bridge);
 
-  // 6. Connect stdio transport
+  // 7. Connect stdio transport
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
@@ -49,6 +66,7 @@ export async function createServer(): Promise<void> {
   const shutdown = async () => {
     await bridge.writeShutdownStatus();
     await watcher.close();
+    await componentWatcher.close();
     await bridge.stop();
     process.exit(0);
   };
@@ -327,6 +345,37 @@ function registerTools(server: McpServer, bridge: Bridge): void {
       const result = await bridge.importSession(inputPath);
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+      };
+    },
+  );
+
+  // 10. get_project_components
+  server.registerTool(
+    'get_project_components',
+    {
+      title: 'Get Project Components',
+      description:
+        "Returns the project's discovered local React components (JSX/TSX) — " +
+        'each entry includes componentName, workspace-relative importPath, ' +
+        'exportType (named or default), and props ([] in v1; prop schema is ' +
+        'reserved for v1.1). Components are discovered from convention-gated ' +
+        'roots (src/components, src/ui, components — overridable via ' +
+        'frontend-editor.componentRoots in the target project package.json). ' +
+        'Optionally filter by a case-insensitive substring of componentName. ' +
+        'Used to resolve InsertChange.componentInsert descriptors emitted by ' +
+        'the extension into source-level JSX usages + imports.',
+      inputSchema: z.object({
+        nameFilter: z
+          .string()
+          .optional()
+          .describe('Case-insensitive substring filter on componentName'),
+      }),
+    },
+    async ({ nameFilter }) => {
+      bridge.recordToolCall();
+      const result = bridge.getComponents(nameFilter);
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
       };
     },
   );

@@ -17,7 +17,8 @@ export type InsertCategory =
   | 'media'
   | 'form'
   | 'interactive'
-  | 'table';
+  | 'table'
+  | 'components';
 
 export type SizingPreset = 'auto' | 'stretch' | 'fixed';
 
@@ -36,6 +37,25 @@ export interface InsertCatalogEntry {
   readonly defaultStyles?: readonly { property: string; value: string }[];
   readonly compoundChildren?: readonly CompoundChild[];
   readonly attributes?: readonly { name: string; value: string }[];
+}
+
+/**
+ * A project-local React component surfaced in the Insert panel's Components
+ * tab. The DOM phantom always uses `tag: 'div'` as a placeholder; on commit
+ * the diff carries `componentInsert` with the real component identity so
+ * the receiving agent can rewrite to a JSX usage + import.
+ */
+export interface ProjectComponentEntry extends InsertCatalogEntry {
+  readonly category: 'components';
+  readonly componentName: string;
+  readonly importPath: string;
+  readonly exportType: 'named' | 'default';
+}
+
+export function isProjectComponentEntry(
+  entry: InsertCatalogEntry,
+): entry is ProjectComponentEntry {
+  return entry.category === 'components';
 }
 
 // ---------------------------------------------------------------------------
@@ -222,6 +242,11 @@ const ICON_DIALOG = svg(
 // 3×3 grid — table
 const ICON_TABLE = svg(
   '<rect x="2" y="2" width="12" height="12" rx="1"/><line x1="6" y1="2" x2="6" y2="14"/><line x1="10" y1="2" x2="10" y2="14"/><line x1="2" y1="6" x2="14" y2="6"/><line x1="2" y1="10" x2="14" y2="10"/>',
+);
+
+// 4-quadrant rectangle — generic project component glyph
+export const ICON_PROJECT_COMPONENT = svg(
+  '<rect x="2" y="2" width="12" height="12" rx="1"/><line x1="8" y1="2" x2="8" y2="14"/><line x1="2" y1="8" x2="14" y2="8"/>',
 );
 
 // ---------------------------------------------------------------------------
@@ -618,6 +643,7 @@ export const INSERT_CATEGORIES: readonly InsertCategory[] = [
   'form',
   'interactive',
   'table',
+  'components',
 ];
 
 export const CATEGORY_LABELS: Record<InsertCategory, string> = {
@@ -628,7 +654,31 @@ export const CATEGORY_LABELS: Record<InsertCategory, string> = {
   form: 'Form',
   interactive: 'Interactive',
   table: 'Table',
+  components: 'Components',
 };
+
+/**
+ * Build a ProjectComponentEntry from a discovered ProjectComponent (mcp-server side).
+ * The catalog entry inserts a phantom `<div>` placeholder; the diff carries
+ * the real component identity via `componentInsert`.
+ */
+export function buildProjectComponentEntry(args: {
+  componentName: string;
+  importPath: string;
+  exportType: 'named' | 'default';
+}): ProjectComponentEntry {
+  return {
+    tag: 'div',
+    label: args.componentName,
+    category: 'components',
+    icon: ICON_PROJECT_COMPONENT,
+    defaultWidthPreset: 'auto',
+    defaultHeightPreset: 'auto',
+    componentName: args.componentName,
+    importPath: args.importPath,
+    exportType: args.exportType,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Utility functions

@@ -15,7 +15,7 @@ import { detectContainerLayout, computeGapZones, type ContainerLayout, type GapZ
 import type { InsertState } from '../../shared/types';
 import { InsertPanel } from './insert-panel';
 import type { InsertPanelConfig } from './insert-panel';
-import type { CompoundChild } from './insert-catalog';
+import { isProjectComponentEntry, type CompoundChild } from './insert-catalog';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -441,7 +441,9 @@ export class InsertEditor {
 
     this.panel.onChange((entry) => {
       if (this.phantomLabel) {
-        this.phantomLabel.textContent = `<${entry.tag}>`;
+        this.phantomLabel.textContent = isProjectComponentEntry(entry)
+          ? `<${entry.componentName} />`
+          : `<${entry.tag}>`;
       }
     });
 
@@ -479,7 +481,9 @@ export class InsertEditor {
   private syncPanelToPhantom(): void {
     if (this.phantomLabel && this.panel) {
       const config = this.panel.getConfig();
-      this.phantomLabel.textContent = `<${config.tagName}>`;
+      this.phantomLabel.textContent = config.componentInsert
+        ? `<${config.componentInsert.componentName} />`
+        : `<${config.tagName}>`;
     }
     if (this.panel && this.phantomEl) {
       this.panel.reposition(this.phantomEl.getBoundingClientRect());
@@ -519,6 +523,16 @@ export class InsertEditor {
       for (const child of config.compoundChildren) {
         newElement.appendChild(createCompoundChild(child));
       }
+    }
+
+    // Project component inserts: tag the phantom element so the pending
+    // changes panel and any inspector can identify it before Claude Code
+    // applies the source-level rewrite.
+    if (config?.componentInsert) {
+      newElement.setAttribute(
+        'data-frontend-editor-pending-component',
+        config.componentInsert.componentName,
+      );
     }
 
     // 3. Fire commit callback BEFORE DOM insertion so buildInsertChange

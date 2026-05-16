@@ -9,6 +9,7 @@ import type {
   SiblingAnchor,
   ChildSnapshotEntry,
   CompoundChildDescriptor,
+  ComponentInsertDescriptor,
   InsertChange,
   PropertyChange,
 } from '@frontend-editor/shared';
@@ -106,6 +107,10 @@ export function collectChildSnapshot(container: HTMLElement): ChildSnapshotEntry
 /**
  * Build a complete InsertChange from the container and insert position.
  * Pass `compoundChildren` when inserting compound elements (ul+li, table, etc.).
+ * Pass `componentInsert` when inserting a project-local React component;
+ * the descriptor is threaded into `InsertChange.componentInsert` so the
+ * receiving agent can resolve to a JSX usage + import at the source-level
+ * insertion point.
  */
 export function buildInsertChange(
   container: HTMLElement,
@@ -113,13 +118,14 @@ export function buildInsertChange(
   tagName: string,
   initialStyles: readonly PropertyChange[],
   compoundChildren?: readonly CompoundChildDescriptor[],
+  componentInsert?: ComponentInsertDescriptor,
 ): InsertChange {
   const { prev, next } = collectSiblingBracket(container, insertIndex);
   const sameSiblingSource = detectSameSiblingSource(container);
   const crossFileInsertion = detectCrossFileInsertion(container, prev, next);
   const childSnapshot = collectChildSnapshot(container);
 
-  const change: InsertChange = {
+  let change: InsertChange = {
     type: 'insert',
     tagName,
     insertIndex,
@@ -133,7 +139,10 @@ export function buildInsertChange(
   };
 
   if (compoundChildren?.length) {
-    return { ...change, compoundChildren };
+    change = { ...change, compoundChildren };
+  }
+  if (componentInsert) {
+    change = { ...change, componentInsert };
   }
   return change;
 }

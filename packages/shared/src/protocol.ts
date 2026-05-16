@@ -1,7 +1,7 @@
-import type { VisualDiff, DesignToken } from './diff.js';
+import type { VisualDiff, DesignToken, PropDefault } from './diff.js';
 
 /** Current protocol version. */
-export const PROTOCOL_VERSION = '0.3.0' as const;
+export const PROTOCOL_VERSION = '0.4.0' as const;
 
 export const MessageType = {
   EXTENSION_HELLO: 'EXTENSION_HELLO',
@@ -11,6 +11,8 @@ export const MessageType = {
   DIFF_APPLIED: 'DIFF_APPLIED',
   TOKEN_DATA: 'TOKEN_DATA',
   TOKEN_UPDATE: 'TOKEN_UPDATE',
+  COMPONENT_DATA: 'COMPONENT_DATA',
+  COMPONENT_UPDATE: 'COMPONENT_UPDATE',
   KEEPALIVE: 'KEEPALIVE',
   STATUS_REQUEST: 'STATUS_REQUEST',
   STATUS_RESPONSE: 'STATUS_RESPONSE',
@@ -57,6 +59,38 @@ export interface TokenUpdatePayload {
   readonly sources?: readonly TokenSourceStatus[];
 }
 
+/**
+ * A project-local React component discovered by the MCP server.
+ * Pushed to extensions via COMPONENT_DATA / COMPONENT_UPDATE and returned
+ * by the `get_project_components` MCP tool.
+ */
+export interface ProjectComponent {
+  readonly componentName: string;
+  readonly importPath: string;
+  readonly exportType: 'named' | 'default';
+  readonly props: readonly PropDefault[];
+  readonly source: 'local';
+}
+
+export interface ComponentSourceStatus {
+  readonly file: string;
+  readonly status: 'parsed' | 'error';
+  readonly error?: string;
+  readonly componentCount: number;
+}
+
+export interface ComponentDataPayload {
+  readonly components: readonly ProjectComponent[];
+  readonly sourceCount: number;
+  readonly failedCount: number;
+}
+
+export interface ComponentUpdatePayload {
+  readonly components: readonly ProjectComponent[];
+  readonly sourceCount: number;
+  readonly failedCount: number;
+}
+
 export interface KeepalivePayload {}
 
 export interface ErrorPayload {
@@ -94,6 +128,8 @@ export type VisualDiffBatchMessage = BaseMessage<typeof MessageType.VISUAL_DIFF_
 export type DiffAckMessage = BaseMessage<typeof MessageType.DIFF_ACK, DiffAckPayload>;
 export type TokenDataMessage = BaseMessage<typeof MessageType.TOKEN_DATA, TokenDataPayload>;
 export type TokenUpdateMessage = BaseMessage<typeof MessageType.TOKEN_UPDATE, TokenUpdatePayload>;
+export type ComponentDataMessage = BaseMessage<typeof MessageType.COMPONENT_DATA, ComponentDataPayload>;
+export type ComponentUpdateMessage = BaseMessage<typeof MessageType.COMPONENT_UPDATE, ComponentUpdatePayload>;
 export type KeepaliveMessage = BaseMessage<typeof MessageType.KEEPALIVE, KeepalivePayload>;
 export type ErrorMessage = BaseMessage<typeof MessageType.ERROR, ErrorPayload>;
 export type DiffAppliedMessage = BaseMessage<typeof MessageType.DIFF_APPLIED, DiffAppliedPayload>;
@@ -109,6 +145,8 @@ export type WebSocketMessage =
   | DiffAppliedMessage
   | TokenDataMessage
   | TokenUpdateMessage
+  | ComponentDataMessage
+  | ComponentUpdateMessage
   | KeepaliveMessage
   | StatusRequestMessage
   | StatusResponseMessage
@@ -129,5 +167,7 @@ export type ServerToExtensionMessage =
   | DiffAppliedMessage
   | TokenDataMessage
   | TokenUpdateMessage
+  | ComponentDataMessage
+  | ComponentUpdateMessage
   | StatusResponseMessage
   | ErrorMessage;
