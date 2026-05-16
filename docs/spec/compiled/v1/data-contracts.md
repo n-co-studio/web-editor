@@ -85,6 +85,50 @@
 | cssProperties | string[] | yes | Which CSS properties this token applies to — required for resolve_to_token to filter by property before comparing values |
 | source | string | yes | File the token was parsed from |
 
+### InsertChange
+
+The existing `InsertChange` shape (defined in `packages/shared/src/diff.ts`) is extended with a single optional field for component-aware inserts. All other fields are unchanged.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| componentInsert | ComponentInsertDescriptor | no | When present, the insert resolves to a project component rather than a raw HTML element. `tagName` becomes a placeholder used for the phantom DOM render only; Claude Code substitutes the rendered tag for the actual component JSX on application. When absent (existing flow), the insert is a plain HTML element identified by `tagName`. |
+
+The discriminator is presence: `componentInsert` present → component insert; absent → HTML element insert.
+
+### ProjectComponent
+
+A discovered project-local React component. The MCP server maintains a registry of these and pushes them to the extension over WebSocket on connect and on file change.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| componentName | string | yes | Display name. For named exports, the exported identifier; for default exports without a detectable name, the PascalCased file basename. |
+| importPath | string | yes | Workspace-relative path from target project root (e.g., `src/components/Button.tsx`). No alias resolution in v1 — Claude Code resolves the alias on application. |
+| exportType | "named" \| "default" | yes | Discriminates the import syntax Claude Code emits. |
+| props | PropDefault[] | yes | Prop schema. **v1 always emits `[]`** regardless of file contents. Populated in feature-008.1 by the prop-extraction parser. |
+| source | "local" | yes | Origin discriminator. v1 only emits `"local"`. Reserved value `"npm"` is a v2 extension hook for external library discovery (see boundaries.md Future Considerations); not used in v1. |
+
+### ComponentInsertDescriptor
+
+Carried on `InsertChange.componentInsert` to describe a component insert at the diff layer. The shape is intentionally narrower than `ProjectComponent` — only the fields Claude Code needs to write the JSX usage and import.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| componentName | string | yes | Identifier to render in JSX. |
+| importPath | string | yes | Workspace-relative path Claude Code resolves to the project's import alias. |
+| props | PropDefault[] | yes | Props to emit. **v1 always emits `[]`**. feature-008.1 populates from the prop editor. |
+
+### PropDefault
+
+Prop value descriptor. Present in v1 data contracts so the v1.1 prop editor can land without schema migration, but **v1 emits no PropDefault entries** — `ProjectComponent.props` and `ComponentInsertDescriptor.props` are always empty in v1.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| name | string | yes | Prop name (e.g., `variant`, `size`). |
+| type | "string" \| "number" \| "boolean" \| "string-union" \| "unknown" | yes | Coarse type bucket. Components using `forwardRef`, generics, or derived prop types may map to `"unknown"`. |
+| defaultValue | string | no | Stringified default literal extracted from the component source (e.g., `"primary"`, `"16"`, `"true"`). Absent when no default is declared. |
+| unionValues | string[] | no | When `type === "string-union"`, the allowed string literals (e.g., `["primary", "secondary", "ghost"]`). Absent otherwise. |
+| tokenCategory | TokenCategory | no | When the prop semantically aligns with a design token category (e.g., a `color` prop), the matched `TokenCategory` (`spacing`, `typography`, `colors`, `radii`, `shadows`, `breakpoints`). Drives token-snapping for prop values in feature-008.1. Absent when no alignment is inferred. |
+
 ---
 
 ## API Endpoints
@@ -119,8 +163,12 @@ All WebSocket messages use the following envelope structure:
 | DIFF_ACK | server → ext | `{ diffIds: string[] }` |
 | TOKEN_DATA | server → ext | `{ tokens: DesignToken[], sources: TokenSourceStatus[] }` |
 | TOKEN_UPDATE | server → ext | Delta tokens (partial TOKEN_DATA payload) |
+| COMPONENT_DATA | server → ext | `{ components: ProjectComponent[], sourceCount: number, failedCount: number }` — pushed on extension connect with the full current component registry |
+| COMPONENT_UPDATE | server → ext | `{ components: ProjectComponent[], sourceCount: number, failedCount: number }` — pushed on every registry change with the full updated registry (per-file delta deferred) |
 | KEEPALIVE | ext → server | `{}` |
 | ERROR | bidirectional | `{ code: string, message: string }` |
+
+`WS_PROTOCOL_VERSION` is bumped from `0.3.0` (pre-feature-008 baseline, defined in `packages/shared/src/protocol.ts`) to `0.4.0` to introduce `COMPONENT_DATA` and `COMPONENT_UPDATE`. Extensions on `< 0.4.0` are rejected at the existing `EXTENSION_HELLO` / `SERVER_HELLO` handshake.
 
 ### TokenSourceStatus
 
@@ -167,6 +215,11 @@ interface TokenSourceStatus {
 - **Parameters**: none
 - **Returns**: `{ escapes: { property: string, value: string, count: number, nearestToken?: string }[], summary: { totalEdits: number, tokenMatches: number, customValues: number } }`
 
+#### get_queue_status
+- **Purpose**: Returns lightweight queue status (active/closed, pending count, last update timestamp). Use instead of `get_pending_visual_changes` when only the queue state is needed (not full diff bodies).
+- **Parameters**: `{}` (no input)
+- **Returns**: `{ status: 'active' | 'closed', pending_count: number, updated_at: string }`
+
 #### export_session
 - **Purpose**: Writes the pending queue to a JSON file for archival or handoff
 - **Parameters**: `{ outputPath?: string }` (defaults to `.frontend-editor/session-export.json`)
@@ -177,6 +230,12 @@ interface TokenSourceStatus {
 - **Parameters**: `{ inputPath: string }`
 - **Returns**: `{ imported: number, skipped: number, warnings: string[] }`
 
+#### get_project_components
+- **Purpose**: Returns the project-local component registry discovered by the MCP server
+- **Parameters**: `{ nameFilter?: string }` (optional substring match on `componentName`, case-insensitive)
+- **Returns**: `{ components: ProjectComponent[], sourceCount: number, failedCount: number }`
+- **Notes**: Editor-agnostic — uses only generic working-directory contracts; no Claude Code or VS Code-specific assumptions. Component discovery is driven by `frontend-editor.componentRoots` in the target project's `package.json` (or the default convention-gated roots). See feature-008 for full discovery semantics.
+
 ---
 
 ## State Management
@@ -185,6 +244,7 @@ interface TokenSourceStatus {
 - **Key state shapes:**
   - Pending queue: `VisualDiff[]` — checkpointed to `.frontend-editor/pending-queue.json` on each update, cleared when all diffs acknowledged
   - Token registry: `Map<string, DesignToken[]>` — rebuilt on file change, pushed to extensions
+  - Component registry: `Map<string, ProjectComponent>` keyed by `importPath` — built at MCP server startup from convention-gated scan, rebuilt per-file on chokidar file change (300ms debounce), full registry pushed to all connected extensions on connect (`COMPONENT_DATA`) and on update (`COMPONENT_UPDATE`). Not persisted across server restarts (re-derived on next startup).
   - Token drift counters: session-scoped Map tracking custom value usage, reset on server restart
   - Connection state: WebSocket client tracking with tab IDs
   - Extension-side persistence: queue persisted to `chrome.storage.session` — survives page reloads and service worker suspension, cleared on browser close

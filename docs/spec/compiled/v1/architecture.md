@@ -27,6 +27,7 @@ frontend-editor/
 │   │   │   ├── server.ts          # MCP server entry, tool definitions
 │   │   │   ├── bridge.ts          # WebSocket server, extension communication
 │   │   │   ├── tokens.ts          # Design token parser and resolver
+│   │   │   ├── components.ts      # Project-local component discovery and registry (feature-008)
 │   │   │   └── types.ts           # Visual diff schema
 │   │   ├── bin/
 │   │   │   └── cli.ts             # npx entry point
@@ -57,15 +58,16 @@ N/A — communication is WebSocket (extension ↔ server) + MCP JSON-RPC 2.0 (se
 - Shadow DOM isolation for all extension overlay UI
 - Content script owns the WebSocket connection (not the service worker) — avoids MV3 service worker termination risk. Keepalive ping every 20s.
 - MCP server auto-discovers design tokens at startup
+- MCP server auto-discovers project components from convention-gated paths (`src/components/**`, `src/ui/**`, `components/**`, configurable via `frontend-editor.componentRoots` in the target project's `package.json`) — see feature-008
 - All inter-package communication uses typed protocol definitions from shared package
 - Dev-plugin is automatically disabled in production builds
 - Error isolation: token discovery/parsing wrapped in try/catch — failures degrade to 'no tokens' mode without crashing WebSocket or MCP transport
-- Protocol versioning: extension sends protocolVersion on connect, server rejects or warns on mismatch
+- Protocol versioning: extension sends protocolVersion on connect, server rejects or warns on mismatch. Current `WS_PROTOCOL_VERSION` is `0.4.0` (bumped in feature-008 to introduce `COMPONENT_DATA` / `COMPONENT_UPDATE`).
 - Dev-plugin published as a standalone source-mapping primitive — Frontend Editor is a first-party consumer
 
 ## Shared Package Scope
 
-Types that cross the WebSocket boundary (used by both extension and MCP server) live in the root `shared` package: VisualDiff, ElementInfo, PropertyChange, PageContext, DesignToken, WebSocket message types. Types used only within the extension (overlay components, UI state) live in `chrome-extension/src/shared/`. Types used only within the MCP server (internal queue management, file watcher state) live in `mcp-server/src/types.ts`.
+Types that cross the WebSocket boundary (used by both extension and MCP server) live in the root `shared` package: VisualDiff, ElementInfo, PropertyChange, PageContext, DesignToken, ProjectComponent, ComponentInsertDescriptor, PropDefault, WebSocket message types. Types used only within the extension (overlay components, UI state) live in `chrome-extension/src/shared/`. Types used only within the MCP server (internal queue management, file watcher state) live in `mcp-server/src/types.ts`.
 
 ## Shadow DOM Constraints
 

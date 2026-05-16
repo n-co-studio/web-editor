@@ -32,7 +32,9 @@ N/A — headless server process. Status is communicated to the extension via Web
   - `get_token_drift_report` — returns a report of design token drift across pending diffs
   - `export_session` — exports the current session state (pending queue, token registry) to a file
   - `import_session` — restores session state from a previously exported file
+  - `get_project_components` — returns the project-local component registry (feature-008; editor-agnostic)
 - Token data pushed to extension via WebSocket on connect and on file change
+- Component registry pushed to extension via WebSocket on connect (`COMPONENT_DATA`) and on file change (`COMPONENT_UPDATE`) — feature-008
 
 ## Error Isolation
 Token discovery and parsing are wrapped in try/catch. A parse failure in any token source (e.g., malformed tailwind.config.ts) degrades to "no tokens" mode for that source without crashing the WebSocket server or MCP transport. The server logs the error and includes it in the TokenSourceStatus array pushed to the extension.

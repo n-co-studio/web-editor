@@ -20,7 +20,8 @@
         "features/feature-004-change-batching.md",
         "features/feature-005-mcp-server-bridge.md",
         "features/feature-006-dev-plugin.md",
-        "features/feature-007-css-visual-effects.md"
+        "features/feature-007-css-visual-effects.md",
+        "features/feature-008-component-awareness.md"
       ]
     }
   ],

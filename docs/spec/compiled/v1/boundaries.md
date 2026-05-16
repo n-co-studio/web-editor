@@ -26,6 +26,7 @@ These expand specific boundary restrictions for well-scoped operations:
 - **CSS visual effects editing is in scope**: Editing CSS `filter`, `mix-blend-mode`, and basic `clip-path` shapes (`circle()`, `inset()`) via the extension overlay is supported. These produce standard `PropertyChange` objects in the diff pipeline.
 - **Asset-level image processing is out of scope**: Pixel-level manipulation (crop, resize, color correction on image files) is deferred to the desktop app. The extension edits CSS properties applied to elements, not the underlying asset data.
 - **Complex clip-path shapes are out of scope for v1**: `polygon()` and SVG-based `clip-path` editing require vertex manipulation UI unsuitable for an overlay. Deferred to desktop app.
+- **Project-local component awareness is in scope**: The MCP server may discover the target project's local React components (JSX/TSX under `src/components/**`, `src/ui/**`, `components/**`, or operator-configured roots) and surface them as insertable elements in the insert panel. The extension does not author components — it only references existing project components via workspace-relative import paths in `InsertChange.componentInsert` descriptors. See feature-008.
 
 ## Future Considerations
 
@@ -36,6 +37,8 @@ These are out of scope for v1 but may be revisited in later versions:
 - **Mobile app companion** — dedicated app for editing mobile app UIs
 - **Multi-editor support beyond Claude Code** (Cursor, Windsurf — MCP protocol already compatible)
 - **MCP resources for design tokens** (currently exposed as tools only)
+- **Prop editing for inserted components** — surface prop schemas and token-snap prop values (deferred to feature-008.1). v1 emits empty `props: []` on every `ProjectComponent` and `ComponentInsertDescriptor`; the `PropDefault` shape lives in v1 data contracts so feature-008.1 can land without schema migration.
+- **External library component discovery (shadcn, Radix, MUI)** — gated behind `source: 'npm'` filter on `ProjectComponent` (deferred to v2). v1 only discovers project-local components (`source: 'local'`); the `'npm'` reservation is an extension hook with no v1 surface.
 
 ## Accepted Limitations
 
