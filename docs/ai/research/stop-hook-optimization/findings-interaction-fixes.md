@@ -133,6 +133,8 @@ When the stop hook exits 2, the following cycle occurs:
 
 **Stderr to context cost:** The failure report (lines 557-568 of `session-close-check.sh`) is a structured multi-line message:
 
+> **Historical snapshot — the quoted error message below is preserved verbatim from the time of this research finding.** At that time the hook reported the rolling single-file path. The current hook resolves the per-session path (`docs/ai/logs/sessions/session-{id}.md` or `.claude/local/sessions/session-{id}.md`) — see `session-close-check.sh` path-resolution block. Treat the quote as a frozen snapshot, not live hook output.
+
 ```
 BLOCKED: N issue(s) must be resolved before closing:
 1. Session log not updated — update docs/ai/logs/session-log.md (override: SKIP_SESSION_LOG=1)
