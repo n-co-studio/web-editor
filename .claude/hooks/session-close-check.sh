@@ -129,18 +129,26 @@ fi
 
 # --- Paths and state files ---
 REPO_ROOT="$_REPO_OS_ROOT"
-# In template mode, session log lives locally; in product mode, it's committed.
-# Three-tier resolution: REPO_OS_MODE env var > .claude/repo-mode file > default "child"
+# Per-session log file: docs/ai/logs/sessions/session-{id}.md (product, tracked) or
+# .claude/local/sessions/session-{id}.md (template, gitignored). Eliminates merge
+# conflicts when multiple automation sessions complete concurrently.
+#
+# Template mode accepts EITHER path: the gitignored local default, or the tracked
+# product path when the operator prefers worktree session logs to be committed on
+# the feature branch (so the log travels with the merge). Child/autonomous modes
+# use the product path exclusively. SESSION_LOG is the primary (mkdir + error
+# message) target; SESSION_LOG_ALT is the additional candidate in template mode.
 IS_TEMPLATE=false
 [ "$(get_mode)" = "template" ] && IS_TEMPLATE=true
-# Per-session log file: docs/ai/logs/sessions/session-{id}.md (product) or
-# .claude/local/sessions/session-{id}.md (template). Eliminates merge conflicts
-# when multiple automation sessions complete concurrently.
 _SESSION_LOG_ID=$(get_session_id "$REPO_ROOT")
+SESSION_LOG_TRACKED="$REPO_ROOT/docs/ai/logs/sessions/session-${_SESSION_LOG_ID}.md"
+SESSION_LOG_LOCAL="$REPO_ROOT/.claude/local/sessions/session-${_SESSION_LOG_ID}.md"
 if [ "$IS_TEMPLATE" = true ]; then
-  SESSION_LOG="$REPO_ROOT/.claude/local/sessions/session-${_SESSION_LOG_ID}.md"
+  SESSION_LOG="$SESSION_LOG_LOCAL"
+  SESSION_LOG_ALT="$SESSION_LOG_TRACKED"
 else
-  SESSION_LOG="$REPO_ROOT/docs/ai/logs/sessions/session-${_SESSION_LOG_ID}.md"
+  SESSION_LOG="$SESSION_LOG_TRACKED"
+  SESSION_LOG_ALT=""
 fi
 BASELINE_SHA_FILE="$REPO_ROOT/.claude/.session-baseline-sha"
 COUNTER_FILE="$REPO_ROOT/.claude/.hvst-fail-count"
@@ -698,6 +706,8 @@ mkdir -p "$(dirname "$SESSION_LOG")" 2>/dev/null || true
 SESSION_LOG_MODIFIED=false
 if [ -f "$SESSION_LOG" ] && [ "$(wc -c < "$SESSION_LOG")" -gt 100 ]; then
   SESSION_LOG_MODIFIED=true
+elif [ -n "$SESSION_LOG_ALT" ] && [ -f "$SESSION_LOG_ALT" ] && [ "$(wc -c < "$SESSION_LOG_ALT")" -gt 100 ]; then
+  SESSION_LOG_MODIFIED=true
 fi
 
 # --- Session weight check ---
@@ -849,7 +859,12 @@ add_failure() {
 # 1. Session log check (exempt for spec/prototype session types)
 if [ "$SESSION_LOG_MODIFIED" = false ] && [ "$SESSION_LOG_EXEMPT" = false ]; then
   SESSION_LOG_REL="${SESSION_LOG#"$REPO_ROOT/"}"
-  add_failure "Session log not updated — update $SESSION_LOG_REL (override: SKIP_SESSION_LOG=1)"
+  if [ -n "$SESSION_LOG_ALT" ]; then
+    SESSION_LOG_ALT_REL="${SESSION_LOG_ALT#"$REPO_ROOT/"}"
+    add_failure "Session log not updated — update $SESSION_LOG_REL or $SESSION_LOG_ALT_REL (override: SKIP_SESSION_LOG=1)"
+  else
+    add_failure "Session log not updated — update $SESSION_LOG_REL (override: SKIP_SESSION_LOG=1)"
+  fi
 fi
 
 # 2. Uncommitted changes check
@@ -1051,7 +1066,7 @@ if [ "$SOLO" = "true" ] && [ "$BRANCH_SEALED" = false ]; then
   SHOULD_MERGE=true
 
   case "$MERGE_BRANCH" in
-    feature/*|fix/*|hotfix/*)
+    feature/*|fix/*|hotfix/*|live-editor-[0-9]*)
       # Check for non-final task group brief — if so, skip merge
       if [ "$SESSION_TYPE_PHASE" = "taskgroup" ]; then
         IS_FINAL=$(is_final_brief)

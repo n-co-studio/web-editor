@@ -21,7 +21,7 @@ Phase-state is managed automatically by hooks. See Decision 0014 for canonical d
 
 ### Init
 
-1. Create a branch from main: `git checkout -b feature/<description>`
+1. Create a branch from main via the live-editor helper, capturing the resulting branch name: `BRANCH=$(.claude/hooks/next-live-editor-branch.sh)`. The helper computes the next `live-editor-{N}` (monotonic across the repo lifetime — see `docs/ai/workflow-appendix/session-type-editor-live.md`) and runs `git checkout -b` for you. If the current branch already matches `live-editor-N`, the helper reuses it (no new branch created).
 2. Initialize phase state: `init_phase "editor-live"`
 3. **Pre-flight: watcher availability** — check whether `fswatch` or `inotifywait` is available:
    ```
@@ -155,7 +155,7 @@ No mid-cycle graph interaction. The close-time write captures product-layer node
 ## Rules
 
 - BLOCK: **child mode only** — `editor-live` sessions require product code access. Template mode (no product code) and autonomous mode (no operator) are excluded. Enforced by `write-guard.sh` mode guard.
-- BLOCK: **main branch protection** — no direct commits to main. Work on `feature/*` branch. Enforced by `write-guard.sh` / `bash-guard.sh`.
+- BLOCK: **main branch protection** — no direct commits to main. Work on `live-editor-*` branch. Enforced by `write-guard.sh` / `bash-guard.sh`.
 - BLOCK: **A4 safety on every commit** — secrets scanning runs on all commits including per-loop commits. Enforced by `pre-commit-gates.sh`.
 - REQUIRE: **"close session" keyword** — the only way to end the session and trigger review/verify/close. The agent must not infer close from conversational context (Decision 0004 mechanical enforcement).
 - REQUIRE: **cycle number in commit messages** — every commit carries the cycle number for traceability: `feat: <description> (editor-live cycle N)`.

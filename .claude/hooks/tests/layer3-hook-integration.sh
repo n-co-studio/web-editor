@@ -1324,6 +1324,17 @@ switch_sandbox_branch "experiment/spike"
 run_hook_rc "pre-push-gates.sh" "$(fixture_stop)"
 assert_ok "$_LAST_RC" "pre-push-gates allows experiment/* branch"
 
+# --- Valid branch: live-editor-N → allow ---
+switch_sandbox_branch "live-editor-7"
+run_hook_rc "pre-push-gates.sh" "$(fixture_stop)"
+assert_ok "$_LAST_RC" "pre-push-gates allows live-editor-N branch"
+
+# --- Invalid live-editor branch (non-digit suffix) → block ---
+switch_sandbox_branch "live-editor-foo"
+run_hook_rc "pre-push-gates.sh" "$(fixture_stop)" > "$_L3_OUT"
+assert_fail "$_LAST_RC" "pre-push-gates blocks live-editor branch with non-digit suffix"
+assert_contains "$(cat "$_L3_OUT")" "live-editor-N" "pre-push-gates B1 error names live-editor-N as valid form"
+
 # --- main → allow (skips naming check) ---
 switch_sandbox_branch "main"
 run_hook_rc "pre-push-gates.sh" "$(fixture_stop)"

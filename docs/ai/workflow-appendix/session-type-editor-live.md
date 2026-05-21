@@ -2,6 +2,7 @@
 
 Continuous visual-development session type for operator-driven editing workflows (Decision 0023). The operator edits files in an external editor and the agent responds to each saved change. Child mode only.
 
+- **Branch naming**: `live-editor-{N}` where N is monotonic across the repo lifetime. Counter never resets; the `.claude/hooks/next-live-editor-branch.sh` helper skips past any existing local or remote `live-editor-N`. Replaces `feature/<description>` for this session type only
 - **Phase sequence**: `init → build → commit → review → verify → op-review → close`
 - **Loops**: `commit→build` (next change iteration), `verify→build` (QA failure)
 - **No plan gate**: The operator's live edits are the plan. `has_plan_gate("editor-live")` returns false

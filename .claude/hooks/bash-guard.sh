@@ -207,7 +207,7 @@ if [ "$_GV_IS_WRITE" = true ] \
    && [ "$_RECOVER_VIA_SIGNAL" != true ] \
    && command -v jq >/dev/null 2>&1; then
   case "$CURRENT_BRANCH" in
-    feature/*|fix/*|hotfix/*|release/*)
+    feature/*|fix/*|hotfix/*|release/*|live-editor-*)
       _GV_HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
       _GV_REPO_ROOT="$(cd "$_GV_HOOK_DIR/../.." && pwd)"
       _GV_STATE_DIR="$_GV_REPO_ROOT/.claude/.state"

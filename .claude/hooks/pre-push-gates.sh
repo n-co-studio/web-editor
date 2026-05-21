@@ -36,12 +36,13 @@ fi
 # B1: Process — Branch Naming Convention (blocking)
 # ============================================================
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-VALID_PATTERNS="^(main|feature/|fix/|hotfix/|release/|experiment/).+$"
+# live-editor-N uses anchored alternation (digits only) so 'live-editor-foo' is rejected.
+VALID_PATTERNS="^(main|feature/.+|fix/.+|hotfix/.+|release/.+|experiment/.+|live-editor-[0-9]+)$"
 
 if [ -n "$CURRENT_BRANCH" ] && [ "$CURRENT_BRANCH" != "main" ]; then
   if [[ ! "$CURRENT_BRANCH" =~ $VALID_PATTERNS ]]; then
-    echo "GATE B1 FAILED: Branch '$CURRENT_BRANCH' — expected: <category>/<description>" >&2
-    echo "  Valid categories: feature/, fix/, hotfix/, release/, experiment/" >&2
+    echo "GATE B1 FAILED: Branch '$CURRENT_BRANCH' — expected: <category>/<description> or live-editor-N" >&2
+    echo "  Valid categories: feature/, fix/, hotfix/, release/, experiment/, live-editor-N (digits only)" >&2
     FAILED=1
   fi
 fi
