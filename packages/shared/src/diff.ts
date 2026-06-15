@@ -137,6 +137,8 @@ export interface ChildSnapshotEntry {
 export interface CompoundChildDescriptor {
   readonly tagName: string;
   readonly textContent?: string;
+  /** Inline styles applied to this child (e.g. flex weights for layout presets). */
+  readonly styles?: readonly { property: string; value: string }[];
   readonly children?: readonly CompoundChildDescriptor[];
 }
 
@@ -218,6 +220,13 @@ export interface InsertChange {
   readonly childSnapshot?: readonly ChildSnapshotEntry[];
   readonly compoundChildren?: readonly CompoundChildDescriptor[];
   readonly componentInsert?: ComponentInsertDescriptor;
+  /**
+   * Full serialized HTML of the inserted element, including its entire subtree.
+   * Carried for clone/paste/duplicate inserts where the new element reproduces
+   * an existing element verbatim — the receiving agent recreates the exact
+   * markup rather than an empty `<tagName>`.
+   */
+  readonly outerHTML?: string;
 }
 
 /**

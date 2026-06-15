@@ -119,6 +119,7 @@ export function buildInsertChange(
   initialStyles: readonly PropertyChange[],
   compoundChildren?: readonly CompoundChildDescriptor[],
   componentInsert?: ComponentInsertDescriptor,
+  outerHTML?: string,
 ): InsertChange {
   const { prev, next } = collectSiblingBracket(container, insertIndex);
   const sameSiblingSource = detectSameSiblingSource(container);
@@ -143,6 +144,9 @@ export function buildInsertChange(
   }
   if (componentInsert) {
     change = { ...change, componentInsert };
+  }
+  if (outerHTML) {
+    change = { ...change, outerHTML };
   }
   return change;
 }

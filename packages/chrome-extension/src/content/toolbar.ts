@@ -151,6 +151,11 @@ const ICONS: Record<string, string> = {
     <line x1="9.5" y1="7" x2="9.5" y2="11.5"/>
   </svg>`,
 
+  duplicate: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/>
+    <path d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"/>
+  </svg>`,
+
   camera: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
     <rect x="2" y="4.5" width="12" height="9" rx="1.5"/>
     <path d="M5.5 4.5L6.5 2.5h3l1 2"/>
@@ -228,6 +233,8 @@ export class FloatingToolbar {
   private gridSettingsToggleCb: VoidCallback | null = null;
   private deleteCb: VoidCallback | null = null;
   private deleteBtn: HTMLButtonElement | null = null;
+  private duplicateCb: VoidCallback | null = null;
+  private duplicateBtn: HTMLButtonElement | null = null;
 
   private reviewOpen = false;
   private contentWrapper: HTMLDivElement | null = null;
@@ -338,6 +345,17 @@ export class FloatingToolbar {
     if (!this.deleteBtn) return;
     this.deleteBtn.style.opacity = enabled ? '1' : '0.3';
     this.deleteBtn.style.cursor = enabled ? 'pointer' : 'not-allowed';
+  }
+
+  onDuplicate(cb: VoidCallback): void {
+    this.duplicateCb = cb;
+  }
+
+  /** Enable/disable the duplicate button based on whether an element is selected. */
+  setDuplicateEnabled(enabled: boolean): void {
+    if (!this.duplicateBtn) return;
+    this.duplicateBtn.style.opacity = enabled ? '1' : '0.3';
+    this.duplicateBtn.style.cursor = enabled ? 'pointer' : 'not-allowed';
   }
 
   /** Update the notes count badge on the notes button. */
@@ -528,6 +546,7 @@ export class FloatingToolbar {
     this.screenshotBtn = null;
     this.screenshotBusy = false;
     this.deleteBtn = null;
+    this.duplicateBtn = null;
     this.visible = false;
     this.activeMode = null;
     this.collapsed = false;
@@ -550,6 +569,7 @@ export class FloatingToolbar {
     this.rulersToggleCb = null;
     this.screenshotCb = null;
     this.deleteCb = null;
+    this.duplicateCb = null;
   }
 
   // -----------------------------------------------------------------------
@@ -819,6 +839,14 @@ export class FloatingToolbar {
       this.showResetConfirmation();
     });
     toolsSection.appendChild(this.resetBtn);
+
+    // Duplicate element button
+    this.duplicateBtn = this.buildIconButton('duplicate', 'Duplicate element (⌘D)', () => {
+      if (this.duplicateBtn?.style.opacity !== '0.3') this.duplicateCb?.();
+    });
+    this.duplicateBtn.style.color = OVERLAY.textMuted;
+    toolsSection.appendChild(this.duplicateBtn);
+    this.setDuplicateEnabled(false);
 
     // Delete element button
     this.deleteBtn = this.buildIconButton('delete', 'Delete element (Del)', () => {

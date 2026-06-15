@@ -263,3 +263,63 @@ describe('formatSourceContext cross-breakpoint sub-bullet', () => {
     assert.match(out, /^> Scope edits to the active breakpoint/m);
   });
 });
+
+describe('prompt-serializer insert changes', () => {
+  function makeInsertDiff(insertChange: VisualDiff['insertChanges']): VisualDiff {
+    return {
+      id: 'ins1',
+      timestamp: '2026-05-13T00:00:00Z',
+      element: {
+        selector: '.container',
+        tagName: 'div',
+        sourceFile: 'src/App.tsx',
+        sourceLine: 5,
+        attributes: {},
+        boundingRect: baseRect,
+      },
+      changes: [],
+      insertChanges: insertChange,
+      context: { url: 'http://localhost', viewport: { width: 1280, height: 800 }, tabId: 't1' },
+      status: 'pending',
+      sourceVerified: true,
+    };
+  }
+
+  it('emits full outerHTML verbatim for clone/duplicate inserts', () => {
+    const diff = makeInsertDiff([{
+      type: 'insert',
+      tagName: 'div',
+      insertIndex: 1,
+      containerSelector: '.container',
+      prevSibling: null,
+      nextSibling: null,
+      sameSiblingSource: false,
+      crossFileInsertion: false,
+      initialStyles: [],
+      outerHTML: '<div class="card"><span>Hi</span></div>',
+    }]);
+    const out = serializeToPrompt([diff]);
+    assert.match(out, /Full HTML \(reproduce exactly\):/);
+    assert.match(out, /<div class="card"><span>Hi<\/span><\/div>/);
+  });
+
+  it('renders per-child styles for compound (layout preset) inserts', () => {
+    const diff = makeInsertDiff([{
+      type: 'insert',
+      tagName: 'div',
+      insertIndex: 0,
+      containerSelector: '.container',
+      prevSibling: null,
+      nextSibling: null,
+      sameSiblingSource: false,
+      crossFileInsertion: false,
+      initialStyles: [],
+      compoundChildren: [
+        { tagName: 'div', styles: [{ property: 'flex', value: '2' }] },
+        { tagName: 'div', styles: [{ property: 'flex', value: '1' }] },
+      ],
+    }]);
+    const out = serializeToPrompt([diff]);
+    assert.match(out, /Children: <div> \{flex: 2\}, <div> \{flex: 1\}/);
+  });
+});

@@ -625,6 +625,11 @@ function createCompoundChild(descriptor: CompoundChild): HTMLElement {
   if (descriptor.textContent) {
     el.textContent = descriptor.textContent;
   }
+  if (descriptor.styles) {
+    for (const style of descriptor.styles) {
+      el.style.setProperty(style.property, style.value);
+    }
+  }
   if (descriptor.children) {
     for (const child of descriptor.children) {
       el.appendChild(createCompoundChild(child));

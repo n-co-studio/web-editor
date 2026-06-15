@@ -41,6 +41,7 @@ import { captureFullPage } from './screenshot';
 import type { InsertCommitCallback } from './editing/insert';
 import { buildInsertChange } from './editing/insert-source';
 import { groupElements, getGroupBlockReason } from './editing/group';
+import { duplicateElement, getDuplicateBlockReason } from './editing/duplicate';
 import { GridSettingsPanel } from './grid-settings';
 import { MeasureOverlay } from './selection/measure-overlay';
 import { MultiSelectManager } from './selection/multi-select';
@@ -295,6 +296,7 @@ export async function activate(): Promise<void> {
   multiSelect = new MultiSelectManager(shadow, host);
   multiSelectToolbar = new MultiSelectToolbar(shadow, tokenStore, preview);
   multiSelectToolbar.onGroup((elements) => makeGroupCommit(elements));
+  multiSelectToolbar.onDuplicate((elements) => duplicateElements(elements));
 
   // Wire hover click → selection
   hover.onClick((el) => selection!.select(el));
@@ -386,6 +388,7 @@ export async function activate(): Promise<void> {
       devtoolsPanel!.updateElement(element, info);
     }
     toolbar!.setDeleteEnabled(true);
+    toolbar!.setDuplicateEnabled(getDuplicateBlockReason(element) === null);
     handles!.hideHandles();
     typographyEditor!.cleanup();
     colorEditor!.cleanup();
@@ -441,6 +444,7 @@ export async function activate(): Promise<void> {
     }
     devtoolsPanel?.clearElement();
     toolbar!.setDeleteEnabled(false);
+    toolbar!.setDuplicateEnabled(false);
     handles!.hideHandles();
     typographyEditor!.cleanup();
     colorEditor!.cleanup();
@@ -854,6 +858,11 @@ export async function activate(): Promise<void> {
   // Wire delete element
   toolbar.onDelete(() => {
     deleteSelectedElement();
+  });
+
+  // Wire duplicate element
+  toolbar.onDuplicate(() => {
+    duplicateSelectedElement();
   });
 
   // Push pending count to toolbar badge (only unsent items)
@@ -1562,10 +1571,13 @@ function pasteElement(): void {
   const clone = template.content.firstElementChild as HTMLElement;
   if (!clone) return;
 
-  // Build diff before DOM insertion (sibling bracket reads pre-insert state)
+  // Build diff before DOM insertion (sibling bracket reads pre-insert state).
+  // Carry the full clipboard markup as outerHTML so the source rewrite
+  // reproduces the entire subtree, not an empty <tag>.
   const containerInfo = buildElementInfo(container);
   const insertChange = buildInsertChange(
     container, insertIndex, clone.tagName.toLowerCase(), [],
+    undefined, undefined, elementClipboard.html,
   );
   const diff = diffBuilder!.buildInsert(containerInfo, insertChange);
 
@@ -1588,6 +1600,85 @@ function pasteElement(): void {
 
   // Select the pasted element
   queueMicrotask(() => selection?.select(clone));
+}
+
+// ---------------------------------------------------------------------------
+// Duplicate element helpers — clone an element (full subtree) in place
+// ---------------------------------------------------------------------------
+
+/**
+ * Duplicate a single element: deep-clone it, insert the copy immediately after
+ * the original, record history + queue, and select the clone. The clone's
+ * outerHTML is captured BEFORE insertion so the diff reproduces the exact
+ * subtree at the source level.
+ */
+function duplicateElementWithHistory(el: Element): HTMLElement | null {
+  if (!(el instanceof HTMLElement)) return null;
+  if (getDuplicateBlockReason(el) !== null) return null;
+
+  const container = el.parentElement!;
+  const insertIndex = Array.from(container.children).indexOf(el) + 1;
+
+  // Build the diff BEFORE the DOM mutation so the sibling bracket reads the
+  // pre-insert child list (mirrors pasteElement). outerHTML carries the
+  // verbatim subtree for source reproduction.
+  const containerInfo = buildElementInfo(container);
+  const insertChange = buildInsertChange(
+    container, insertIndex, el.tagName.toLowerCase(), [],
+    undefined, undefined, el.outerHTML,
+  );
+  const diff = diffBuilder!.buildInsert(containerInfo, insertChange);
+
+  const result = duplicateElement(el);
+
+  queue!.add(diff);
+  editHistory!.push({
+    type: 'insertion',
+    element: result.clone,
+    container,
+    insertIndex: result.insertIndex,
+    diff,
+  });
+  return result.clone;
+}
+
+/** Duplicate the currently-selected element and select the clone. */
+function duplicateSelectedElement(): void {
+  const el = selection?.getSelectedElement();
+  if (!el) return;
+
+  const clone = duplicateElementWithHistory(el);
+  if (!clone) {
+    devtoolsPanel?.log(`Cannot duplicate <${el.tagName.toLowerCase()}>`);
+    return;
+  }
+
+  badge!.update();
+  reviewPanel!.refresh();
+  devtoolsPanel?.log(`Duplicated <${el.tagName.toLowerCase()}>`);
+  queueMicrotask(() => selection?.select(clone));
+}
+
+/**
+ * Duplicate every element in `elements` (multi-select "Duplicate all").
+ * Each duplication is its own diff + history entry. Processed in DOM order so
+ * clones land in a predictable sequence.
+ */
+function duplicateElements(elements: Element[]): void {
+  const ordered = [...elements].sort((a, b) => {
+    if (a === b) return 0;
+    return a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+  });
+
+  let count = 0;
+  for (const el of ordered) {
+    if (duplicateElementWithHistory(el)) count++;
+  }
+  if (count === 0) return;
+
+  badge!.update();
+  reviewPanel!.refresh();
+  devtoolsPanel?.log(`Duplicated ${count} element${count === 1 ? '' : 's'}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -1843,6 +1934,23 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
         : [primary];
       if (!getGroupBlockReason(allElements)) {
         makeGroupCommit(allElements);
+      }
+    }
+    return;
+  }
+
+  // Cmd+D / Ctrl+D — duplicate selected element(s) in place.
+  // Only suppress the browser's native bookmark shortcut when there is a
+  // selection to act on (mirrors the Cmd+C guard).
+  if (e.key === 'd' && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
+    const primary = selection?.getSelectedElement();
+    if (primary) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (multiSelect?.isActive()) {
+        duplicateElements(multiSelect.getAllElements(primary));
+      } else {
+        duplicateSelectedElement();
       }
     }
     return;
