@@ -6,6 +6,7 @@ import { computeMeasurements } from '../selection/measure-overlay';
 import type { TokenStore } from '../tokens/store';
 import type { PreviewManager } from './preview';
 import { getGroupBlockReason } from './group';
+import { getDuplicateBlockReason } from './duplicate';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -13,6 +14,7 @@ import { getGroupBlockReason } from './group';
 
 type CommitCallback = (element: Element, changes: PropertyChange[]) => void;
 type GroupCallback = (elements: Element[]) => void;
+type DuplicateCallback = (elements: Element[]) => void;
 
 function extractUnit(value: string): string | undefined {
   const match = value.match(/[\d.]+(.+)$/);
@@ -96,6 +98,7 @@ export class MultiSelectToolbar {
   private elements: Element[] = [];
   private onCommit: CommitCallback | null = null;
   private onGroupCb: GroupCallback | null = null;
+  private onDuplicateCb: DuplicateCallback | null = null;
   private groupPreview: HTMLDivElement | null = null;
 
   constructor(
@@ -110,6 +113,10 @@ export class MultiSelectToolbar {
 
   onGroup(cb: GroupCallback): void {
     this.onGroupCb = cb;
+  }
+
+  onDuplicate(cb: DuplicateCallback): void {
+    this.onDuplicateCb = cb;
   }
 
   render(
@@ -194,6 +201,7 @@ export class MultiSelectToolbar {
     }
 
     this.buildGroupSection(body);
+    this.buildDuplicateSection(body);
 
     container.appendChild(body);
 
@@ -626,6 +634,44 @@ export class MultiSelectToolbar {
       btn.title = 'Wrap selected elements in a flex container (⌘G)';
       btn.addEventListener('mouseenter', () => this.showGroupPreview());
       btn.addEventListener('mouseleave', () => this.removeGroupPreview());
+    }
+
+    section.appendChild(btn);
+    parent.appendChild(section);
+  }
+
+  private buildDuplicateSection(parent: HTMLDivElement): void {
+    // Disabled only when NO selected element can be duplicated; if some are
+    // blocked (e.g. direct children of <body>), the valid ones still duplicate
+    // and the blocked ones are skipped by the handler.
+    const allBlocked =
+      this.elements.length > 0 &&
+      this.elements.every((el) => getDuplicateBlockReason(el) !== null);
+
+    const section = createElement('div', {}, {
+      borderTop: `1px solid ${OVERLAY.border}`,
+      paddingTop: '8px',
+    });
+
+    const btn = createButton('Duplicate all', 'ghost', () => {
+      if (!allBlocked && this.onDuplicateCb) {
+        this.onDuplicateCb([...this.elements]);
+      }
+    });
+    btn.style.width = '100%';
+    btn.style.justifyContent = 'center';
+    btn.style.fontSize = '11px';
+    btn.style.padding = '5px 0';
+    btn.style.border = `1px solid ${OVERLAY.border}`;
+    btn.style.borderRadius = OVERLAY.radiusSm;
+
+    if (allBlocked) {
+      btn.style.opacity = '0.4';
+      btn.style.cursor = 'not-allowed';
+      btn.style.pointerEvents = 'none';
+      btn.title = 'These elements cannot be duplicated';
+    } else {
+      btn.title = 'Duplicate each selected element in place (⌘D)';
     }
 
     section.appendChild(btn);

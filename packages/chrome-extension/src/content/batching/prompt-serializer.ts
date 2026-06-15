@@ -155,6 +155,15 @@ export function serializeToPrompt(
           const styleDesc = ic.initialStyles.map(s => `${s.property}: ${s.toValue}`).join(', ');
           sections.push(`  Initial styles: ${styleDesc}`);
         }
+        // Clone/paste/duplicate inserts carry the full subtree markup — emit it
+        // verbatim so the source rewrite reproduces the exact element, not an
+        // empty `<tag>`.
+        if (ic.outerHTML) {
+          sections.push('  Full HTML (reproduce exactly):');
+          sections.push('  ```html');
+          sections.push(ic.outerHTML);
+          sections.push('  ```');
+        }
       }
     }
     sections.push('');
@@ -251,6 +260,10 @@ function describeCompoundChildren(
 ): string {
   return children.map(c => {
     let desc = `<${c.tagName}>`;
+    if (c.styles && c.styles.length > 0) {
+      const styleDesc = c.styles.map(s => `${s.property}: ${s.value}`).join('; ');
+      desc += ` {${styleDesc}}`;
+    }
     if (c.textContent) desc += ` "${c.textContent}"`;
     if (c.children && c.children.length > 0) {
       desc += ` [${describeCompoundChildren(c.children)}]`;

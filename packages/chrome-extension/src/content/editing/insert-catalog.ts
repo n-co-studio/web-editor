@@ -12,6 +12,7 @@ import type { CompoundChildDescriptor } from '@frontend-editor/shared';
 
 export type InsertCategory =
   | 'layout'
+  | 'layouts'
   | 'text'
   | 'list'
   | 'media'
@@ -250,10 +251,113 @@ export const ICON_PROJECT_COMPONENT = svg(
 );
 
 // ---------------------------------------------------------------------------
+// Layout presets
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a proportional preview icon for a layout preset: partitions the icon
+ * box into cells sized by `weights` along the given axis, so a "2/3 + 1/3"
+ * preset reads as a wide cell next to a narrow one.
+ */
+function buildLayoutIcon(
+  direction: 'row' | 'column',
+  weights: readonly number[],
+): string {
+  const total = weights.reduce((s, w) => s + w, 0);
+  const gap = 1;
+  const n = weights.length;
+  const ox = 2;
+  const oy = 3;
+  const boxW = 12;
+  const boxH = 10;
+  const span = direction === 'row' ? boxW : boxH;
+  const cellSpan = span - gap * (n - 1);
+
+  let cursor = direction === 'row' ? ox : oy;
+  const rects: string[] = [];
+  for (const w of weights) {
+    const size = (w / total) * cellSpan;
+    if (direction === 'row') {
+      rects.push(`<rect x="${cursor.toFixed(1)}" y="${oy}" width="${size.toFixed(1)}" height="${boxH}" rx="0.5"/>`);
+    } else {
+      rects.push(`<rect x="${ox}" y="${cursor.toFixed(1)}" width="${boxW}" height="${size.toFixed(1)}" rx="0.5"/>`);
+    }
+    cursor += size + gap;
+  }
+  return svg(rects.join(''));
+}
+
+/**
+ * Build a layout-preset catalog entry: a flex container in the given direction
+ * with one child div per weight. Each child carries `flex: <weight>` so the
+ * columns/rows render at the intended ratio, plus a min-size so empty cells
+ * remain visible and clickable for further insertion. Per-child styles flow
+ * through CompoundChildDescriptor.styles into both the live DOM and the diff.
+ */
+/** Gap between columns/rows in a layout preset container. */
+const LAYOUT_PRESET_GAP = '16px';
+/** Min size on each cell so empty columns/rows stay visible and clickable. */
+const LAYOUT_PRESET_CELL_MIN = '40px';
+
+function layoutPreset(
+  label: string,
+  direction: 'row' | 'column',
+  weights: readonly number[],
+): InsertCatalogEntry {
+  const minProp = direction === 'row' ? 'min-height' : 'min-width';
+  return {
+    tag: 'div',
+    label: `${label} (${direction === 'row' ? 'row' : 'column'})`,
+    category: 'layouts',
+    icon: buildLayoutIcon(direction, weights),
+    defaultWidthPreset: 'stretch',
+    defaultHeightPreset: 'auto',
+    defaultStyles: [
+      { property: 'display', value: 'flex' },
+      { property: 'flex-direction', value: direction },
+      { property: 'gap', value: LAYOUT_PRESET_GAP },
+    ],
+    compoundChildren: weights.map((w) => ({
+      tagName: 'div',
+      styles: [
+        { property: 'flex', value: String(w) },
+        { property: minProp, value: LAYOUT_PRESET_CELL_MIN },
+      ],
+    })),
+  };
+}
+
+/**
+ * Ratio presets for the Insert panel's "Layouts" category. Each ratio is
+ * available in both row (side-by-side columns) and column (stacked rows)
+ * orientation. Ratios use integer flex weights — `[2, 1]` renders 2/3 + 1/3.
+ */
+const LAYOUT_RATIOS: readonly { label: string; weights: number[] }[] = [
+  // Halves
+  { label: '50 / 50', weights: [1, 1] },
+  // Thirds
+  { label: '1/3 · 1/3 · 1/3', weights: [1, 1, 1] },
+  { label: '2/3 + 1/3', weights: [2, 1] },
+  { label: '1/3 + 2/3', weights: [1, 2] },
+  // Fourths
+  { label: '1/4 × 4', weights: [1, 1, 1, 1] },
+  { label: '1/2 + 1/4 + 1/4', weights: [2, 1, 1] },
+  { label: '3/4 + 1/4', weights: [3, 1] },
+];
+
+const LAYOUT_PRESETS: readonly InsertCatalogEntry[] = LAYOUT_RATIOS.flatMap(
+  ({ label, weights }) => [
+    layoutPreset(label, 'row', weights),
+    layoutPreset(label, 'column', weights),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // Catalog
 // ---------------------------------------------------------------------------
 
 export const INSERT_CATALOG: readonly InsertCatalogEntry[] = [
+  ...LAYOUT_PRESETS,
   // --- Layout ---
   // All layout elements default to display:flex so they immediately accept
   // child insertions and reparent drops without manual styling.
@@ -637,6 +741,7 @@ export const INSERT_CATALOG: readonly InsertCatalogEntry[] = [
 
 export const INSERT_CATEGORIES: readonly InsertCategory[] = [
   'layout',
+  'layouts',
   'text',
   'list',
   'media',
@@ -648,6 +753,7 @@ export const INSERT_CATEGORIES: readonly InsertCategory[] = [
 
 export const CATEGORY_LABELS: Record<InsertCategory, string> = {
   layout: 'Layout',
+  layouts: 'Layout Presets',
   text: 'Text',
   list: 'List',
   media: 'Media',
