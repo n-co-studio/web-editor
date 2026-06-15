@@ -317,11 +317,16 @@ function layoutPreset(
       { property: 'flex-direction', value: direction },
       { property: 'gap', value: LAYOUT_PRESET_GAP },
     ],
+    // Each cell is itself a flex column so the Insert tool treats it as a valid
+    // drop target — content goes INSIDE the cell rather than adding another
+    // sibling column to the container (same rationale as the "Container" entry).
     compoundChildren: weights.map((w) => ({
       tagName: 'div',
       styles: [
         { property: 'flex', value: String(w) },
         { property: minProp, value: LAYOUT_PRESET_CELL_MIN },
+        { property: 'display', value: 'flex' },
+        { property: 'flex-direction', value: 'column' },
       ],
     })),
   };
