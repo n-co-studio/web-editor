@@ -1,6 +1,7 @@
 import { WebSocketServer, type WebSocket } from 'ws';
-import { readFile, writeFile, unlink, mkdir, rename, stat } from 'node:fs/promises';
+import { readFile, writeFile, unlink, mkdir, rename, stat, readdir } from 'node:fs/promises';
 import { join, dirname, resolve, relative, extname } from 'node:path';
+import { createHash } from 'node:crypto';
 import {
   PROTOCOL_VERSION,
   MessageType,
@@ -839,6 +840,12 @@ export class Bridge {
     'video/ogg': '.ogg',
   };
 
+  /** Extensions considered when scanning an asset directory for an existing identical file. */
+  private static readonly DEDUP_EXTS = new Set([
+    '.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.svg', '.ico',
+    '.mp4', '.webm', '.ogg',
+  ]);
+
   /**
    * Process a diff's attribute changes — if any `toValue` is a data URL,
    * decode it, save it as a file, and replace the data URL with the file path.
@@ -873,6 +880,12 @@ export class Bridge {
   /**
    * Decode a data URL, save the binary to the project, return a project-relative path.
    * Infers the target directory from the original src path (fromValue).
+   *
+   * Deduplication: if a byte-identical file already exists in the target asset
+   * directory (e.g. the user picked an image already committed to the repo via the
+   * media file picker, which always re-reads it as a data URL), reference that file
+   * instead of writing a duplicate. New files are named by content hash so that
+   * re-selecting the same image is idempotent.
    */
   private async saveDataUrl(dataUrl: string, fromValue: string): Promise<string> {
     // Parse data URL: data:[<mime>][;base64],<data>
@@ -889,19 +902,84 @@ export class Bridge {
     // Determine target directory from the original src path
     const targetDir = await this.resolveAssetDir(fromValue);
 
-    // Generate unique filename
-    const timestamp = Date.now().toString(36);
-    const rand = Math.random().toString(36).slice(2, 6);
-    const filename = `uploaded-${timestamp}-${rand}${ext}`;
+    // Content hash drives both dedup matching and stable (idempotent) naming.
+    const hash = createHash('sha256').update(buffer).digest('hex');
 
-    // Write file
+    // If a byte-identical file already exists in the target directory, reuse it.
+    // The scan is best-effort — any failure falls back to writing a new file.
+    try {
+      const existing = await this.findExistingAsset(buffer, hash, targetDir);
+      if (existing) {
+        console.error(`[frontend-editor] Reusing existing asset ${existing} (content match — no duplicate written)`);
+        return existing;
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[frontend-editor] Asset dedup scan failed (${msg}) — writing new file`);
+    }
+
+    // Name the file by content hash so re-uploading the same image is idempotent.
+    const filename = `uploaded-${hash.slice(0, 12)}${ext}`;
     const absDir = resolve(this.cwd, targetDir);
     await mkdir(absDir, { recursive: true });
     const absPath = join(absDir, filename);
+    const relPath = '/' + relative(this.cwd, absPath).replace(/\\/g, '/');
+
+    // Idempotent: the filename is the content hash, so a file already present at
+    // this path is the same image — skip the write. (size check is a sanity guard.)
+    try {
+      const s = await stat(absPath);
+      if (s.isFile() && s.size === buffer.length) return relPath;
+    } catch {
+      // not present — fall through to write
+    }
+
     await writeFile(absPath, buffer);
 
     // Return project-relative path with leading slash (web-style)
-    return '/' + relative(this.cwd, absPath).replace(/\\/g, '/');
+    return relPath;
+  }
+
+  /**
+   * Scan a single asset directory (non-recursive) for a file whose content is
+   * byte-identical to `buffer`. Returns its project-relative web path, or null.
+   * A cheap size pre-filter avoids hashing files that cannot match.
+   */
+  private async findExistingAsset(
+    buffer: Buffer,
+    hash: string,
+    targetDir: string,
+  ): Promise<string | null> {
+    const absDir = resolve(this.cwd, targetDir);
+
+    let entries;
+    try {
+      entries = await readdir(absDir, { withFileTypes: true });
+    } catch {
+      return null; // directory doesn't exist yet — nothing to dedup against
+    }
+
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      if (!Bridge.DEDUP_EXTS.has(extname(entry.name).toLowerCase())) continue;
+
+      const absPath = join(absDir, entry.name);
+      let candidate: Buffer;
+      try {
+        const s = await stat(absPath);
+        if (s.size !== buffer.length) continue; // cheap pre-filter before hashing
+        candidate = await readFile(absPath);
+      } catch {
+        continue; // unreadable / removed mid-scan — skip
+      }
+
+      const candidateHash = createHash('sha256').update(candidate).digest('hex');
+      if (candidateHash === hash) {
+        return '/' + relative(this.cwd, absPath).replace(/\\/g, '/');
+      }
+    }
+
+    return null;
   }
 
   /**
