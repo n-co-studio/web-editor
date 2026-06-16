@@ -189,6 +189,9 @@ export interface ComputedStyleSnapshot {
   alignItems: string;
   flexWrap: string;
   gap: string;
+  rowGap: string;
+  columnGap: string;
+  padding: string;
   gridTemplateColumns: string;
   gridTemplateRows: string;
   gridAutoFlow: string;
@@ -249,6 +252,9 @@ export function createStyleSnapshot(el: Element): ComputedStyleSnapshot {
     alignItems: cs.getPropertyValue('align-items').trim(),
     flexWrap: cs.getPropertyValue('flex-wrap').trim(),
     gap: cs.getPropertyValue('gap').trim(),
+    rowGap: cs.getPropertyValue('row-gap').trim(),
+    columnGap: cs.getPropertyValue('column-gap').trim(),
+    padding: cs.getPropertyValue('padding').trim(),
     gridTemplateColumns: cs.getPropertyValue('grid-template-columns').trim(),
     gridTemplateRows: cs.getPropertyValue('grid-template-rows').trim(),
     gridAutoFlow: cs.getPropertyValue('grid-auto-flow').trim(),

@@ -77,7 +77,20 @@ interface TextHistoryEntry {
   readonly diff: VisualDiff;
 }
 
-export type HistoryEntry = CssHistoryEntry | RemovalHistoryEntry | ReorderHistoryEntry | InsertionHistoryEntry | GroupHistoryEntry | ReparentHistoryEntry | AttributeHistoryEntry | TextHistoryEntry;
+/**
+ * In-place element swap (e.g. parallax conversion: <img> ⇄ <div>).
+ * `oldEl` was replaced by `newEl` within `parent`. Reversed via replaceChild.
+ */
+interface ReplaceHistoryEntry {
+  readonly type: 'replace';
+  readonly element: HTMLElement; // the new element (current in DOM after the edit)
+  readonly parent: HTMLElement;
+  readonly oldEl: HTMLElement;
+  readonly newEl: HTMLElement;
+  readonly diff: VisualDiff;
+}
+
+export type HistoryEntry = CssHistoryEntry | RemovalHistoryEntry | ReorderHistoryEntry | InsertionHistoryEntry | GroupHistoryEntry | ReparentHistoryEntry | AttributeHistoryEntry | TextHistoryEntry | ReplaceHistoryEntry;
 
 type HistoryCallback = () => void;
 
@@ -157,6 +170,12 @@ export class EditHistory {
       case 'text':
         entry.element.textContent = entry.fromText;
         break;
+      case 'replace':
+        // Undo: put the original element back in place of the new one.
+        if (entry.newEl.parentNode === entry.parent) {
+          entry.parent.replaceChild(entry.oldEl, entry.newEl);
+        }
+        break;
     }
 
     this.redoStack.push(entry);
@@ -223,6 +242,12 @@ export class EditHistory {
         break;
       case 'text':
         entry.element.textContent = entry.toText;
+        break;
+      case 'replace':
+        // Redo: re-apply the swap (old → new).
+        if (entry.oldEl.parentNode === entry.parent) {
+          entry.parent.replaceChild(entry.newEl, entry.oldEl);
+        }
         break;
     }
 
@@ -297,6 +322,11 @@ export class EditHistory {
           break;
         case 'text':
           entry.element.textContent = entry.fromText;
+          break;
+        case 'replace':
+          if (entry.newEl.parentNode === entry.parent) {
+            entry.parent.replaceChild(entry.oldEl, entry.newEl);
+          }
           break;
       }
       diffIds.push(entry.diff.id);

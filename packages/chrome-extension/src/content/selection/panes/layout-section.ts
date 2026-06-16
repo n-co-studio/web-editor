@@ -14,10 +14,12 @@ interface LayoutContext {
   isGridChild: boolean;
 }
 
-const FLEX_CONTAINER_PROPS = ['flex-direction', 'justify-content', 'align-items', 'flex-wrap', 'gap'];
-const GRID_CONTAINER_PROPS = ['grid-template-columns', 'grid-template-rows', 'gap', 'grid-auto-flow'];
+const FLEX_CONTAINER_PROPS = ['flex-direction', 'justify-content', 'align-items', 'flex-wrap'];
+const GRID_CONTAINER_PROPS = ['grid-template-columns', 'grid-template-rows', 'grid-auto-flow'];
 const FLEX_CHILD_PROPS = ['align-self', 'flex-grow', 'flex-shrink', 'flex-basis', 'order'];
 const GRID_CHILD_PROPS = ['grid-column', 'grid-row', 'align-self', 'order'];
+// Gutters / spacing for any flex or grid container (auto-layout group).
+const CONTAINER_SPACING_PROPS = ['gap', 'row-gap', 'column-gap', 'padding'];
 
 /**
  * Conditional layout property group that appears in the Edit tab
@@ -80,6 +82,10 @@ export class LayoutSection {
     title.style.marginBottom = '4px';
     section.appendChild(title);
 
+    // Spacing / gutters first — the most common container adjustment.
+    if (ctx.isFlexContainer || ctx.isGridContainer) {
+      section.appendChild(this.buildSubGroup('Spacing', CONTAINER_SPACING_PROPS, element, snapshot));
+    }
     if (ctx.isFlexContainer) {
       section.appendChild(this.buildSubGroup('Flex Container', FLEX_CONTAINER_PROPS, element, snapshot));
     }

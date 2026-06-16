@@ -114,6 +114,30 @@ export class DiffBuilder {
     };
   }
 
+  /**
+   * Build a VisualDiff for an in-place element replacement (e.g. parallax:
+   * <img> → fixed-background <div>). Carries both the remove of the old element
+   * and the insert of the new one (with full outerHTML) in a single diff, so it
+   * has one id for queue/undo and serializes as a coherent replace instruction.
+   */
+  buildReplace(
+    elementInfo: ElementInfo,
+    removeChange: RemoveChange,
+    insertChange: InsertChange,
+  ): VisualDiff {
+    return {
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      element: elementInfo,
+      changes: [],
+      removeChanges: [removeChange],
+      insertChanges: [insertChange],
+      context: this.buildPageContext(),
+      status: 'pending',
+      sourceVerified: Boolean(elementInfo.sourceFile),
+    };
+  }
+
   /** Build a VisualDiff for attribute changes (src, alt, etc.) with optional CSS changes. */
   buildAttribute(
     elementInfo: ElementInfo,

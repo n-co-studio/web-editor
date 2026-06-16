@@ -3,6 +3,7 @@ import { createElement, createText, createButton, makeDraggable } from '../../sh
 import { getComputedProperty } from '../../shared/dom-utils';
 import { OVERLAY, TOOLBAR_WIDTH } from '../../shared/constants';
 import type { PreviewManager } from './preview';
+import { isParallaxBlock, getParallaxBlockReason } from './parallax';
 
 // File System Access API types (not in standard TS lib)
 declare global {
@@ -48,6 +49,7 @@ export class MediaEditor {
     anchorPos: { x: number; y: number },
     onCommit: ChangeCallback,
     onAttributeCommit: AttributeCallback,
+    onParallaxToggle?: (element: Element) => void,
   ): HTMLDivElement {
     this.cleanup();
 
@@ -106,6 +108,12 @@ export class MediaEditor {
     });
 
     const isMediaElement = this.isMediaElement(element);
+
+    // Parallax toggle — convert an <img> to a fixed-background block (and back).
+    // Shown for images and for existing parallax blocks (to revert).
+    if (onParallaxToggle && getParallaxBlockReason(element) === null) {
+      body.appendChild(this.buildParallaxToggle(element, onParallaxToggle));
+    }
 
     // Source URL (only for img, video, source elements)
     if (isMediaElement) {
@@ -253,6 +261,41 @@ export class MediaEditor {
   private extractUrl(bgImage: string): string {
     const match = bgImage.match(/url\(["']?([^"')]+)["']?\)/);
     return match?.[1] ?? '';
+  }
+
+  private buildParallaxToggle(
+    element: Element,
+    onParallaxToggle: (element: Element) => void,
+  ): HTMLDivElement {
+    const row = createElement('div', {}, {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '4px',
+    });
+
+    const label = createText('div', 'Parallax', 'mono');
+    label.style.color = OVERLAY.textMuted;
+    label.style.fontSize = '10px';
+    row.appendChild(label);
+
+    const isParallax = isParallaxBlock(element);
+    const btn = createButton(
+      isParallax ? 'Revert to image' : 'Convert to parallax',
+      'ghost',
+      () => onParallaxToggle(element),
+    );
+    btn.style.width = '100%';
+    btn.style.justifyContent = 'center';
+    btn.style.fontSize = '11px';
+    btn.style.padding = '5px 0';
+    btn.style.border = `1px solid ${OVERLAY.border}`;
+    btn.style.borderRadius = OVERLAY.radiusSm;
+    btn.title = isParallax
+      ? 'Revert this parallax block back to an <img>'
+      : 'Convert this image to a full-width fixed-background parallax block — set its height with the dimensions tool';
+    row.appendChild(btn);
+
+    return row;
   }
 
   private buildTextInput(
