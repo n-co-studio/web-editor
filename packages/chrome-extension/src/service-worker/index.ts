@@ -32,6 +32,55 @@ const ICON_TITLES: Record<IconStatus, string> = {
   red: 'Frontend Editor — connection error',
 };
 
+// Toolbar icon sizes Chrome requests. We rasterize the source PNG to these via
+// OffscreenCanvas and hand setIcon ImageData — chrome.action.setIcon({ path })
+// from an MV3 service worker is unreliable, whereas { imageData } always applies
+// (and downscaling here is sharper than letting Chrome scale one large PNG).
+const ICON_SIZES = [16, 32, 48, 128];
+
+/** Cache of rasterized ImageData per status (keyed by size). */
+const iconImageDataCache = new Map<IconStatus, Record<number, ImageData>>();
+
+async function getIconImageData(status: IconStatus): Promise<Record<number, ImageData>> {
+  const cached = iconImageDataCache.get(status);
+  if (cached) return cached;
+
+  const url = chrome.runtime.getURL(ICON_PATHS[status]);
+  const blob = await (await fetch(url)).blob();
+  const bitmap = await createImageBitmap(blob);
+
+  const imageData: Record<number, ImageData> = {};
+  for (const size of ICON_SIZES) {
+    const canvas = new OffscreenCanvas(size, size);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) continue;
+    ctx.clearRect(0, 0, size, size);
+    ctx.drawImage(bitmap, 0, 0, size, size);
+    imageData[size] = ctx.getImageData(0, 0, size, size);
+  }
+  bitmap.close();
+
+  // If no canvas context was available, don't cache an empty result — throw so
+  // the caller falls back to the path-based setIcon.
+  if (Object.keys(imageData).length === 0) {
+    throw new Error('icon rasterization produced no image data');
+  }
+
+  iconImageDataCache.set(status, imageData);
+  return imageData;
+}
+
+/** Apply the status icon to a tab, preferring ImageData with a path fallback. */
+async function applyStatusIcon(status: IconStatus, tabId: number | undefined): Promise<void> {
+  try {
+    const imageData = await getIconImageData(status);
+    await chrome.action.setIcon({ imageData, tabId });
+  } catch {
+    // Fallback: best-effort path-based set (and ignore navigated-away tabs).
+    chrome.action.setIcon({ path: ICON_PATHS[status], tabId }).catch(() => {});
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Toolbar icon click
 // ---------------------------------------------------------------------------
@@ -89,9 +138,7 @@ chrome.runtime.onMessage.addListener(
     if (msg.type === 'UPDATE_ICON') {
       const status: IconStatus = msg.payload?.status ?? 'disabled';
       const tabId = sender.tab?.id;
-      chrome.action.setIcon({ path: ICON_PATHS[status], tabId }).catch(() => {
-        // Tab may have navigated away — non-fatal
-      });
+      void applyStatusIcon(status, tabId);
       void Promise.resolve(chrome.action.setTitle({ title: ICON_TITLES[status], tabId })).catch(() => {
         // Tab may have navigated away — non-fatal
       });
