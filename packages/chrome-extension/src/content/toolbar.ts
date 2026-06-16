@@ -33,6 +33,11 @@ const ICONS: Record<string, string> = {
     <polyline points="9,13.5 13.5,13.5 13.5,9"/>
   </svg>`,
 
+  layout: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/>
+    <line x1="8.5" y1="2.5" x2="8.5" y2="13.5"/>
+  </svg>`,
+
   typography: `<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
     <path d="M3 3h10v2.5h-1.5V4.5H9V12h1.5v1.5h-5V12H7V4.5H4.5V5.5H3V3z"/>
   </svg>`,
@@ -176,6 +181,7 @@ const ICONS: Record<string, string> = {
 const TOOL_LABELS: Record<EditMode, string> = {
   cursor: 'Select',
   spacing: 'Spacing',
+  layout: 'Layout',
   dimensions: 'Size',
   typography: 'Type',
   colors: 'Colors',
@@ -195,6 +201,7 @@ const TOOLBAR_STORAGE_KEY = 'frontend-editor-toolbar-position';
 const TOOL_ORDER: EditMode[] = [
   'cursor',
   'spacing',
+  'layout',
   'dimensions',
   'typography',
   'colors',
