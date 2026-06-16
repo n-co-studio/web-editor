@@ -48,11 +48,13 @@ import {
   toParallaxBlock,
   fromParallaxBlock,
 } from './editing/parallax';
+import { LayoutEditor } from './editing/layout-editor';
+import { detectContainerLayout } from './editing/gap-math';
 import { GridSettingsPanel } from './grid-settings';
 import { MeasureOverlay } from './selection/measure-overlay';
 import { MultiSelectManager } from './selection/multi-select';
 import { MultiSelectToolbar } from './editing/multi-select-toolbar';
-import { buildElementInfo, getTopElementAt, generateSelector } from '../shared/dom-utils';
+import { buildElementInfo, getTopElementAt, generateSelector, getComputedProperty } from '../shared/dom-utils';
 import type { VisualDiff, PropertyChange, AttributeChange, TextChange, ReorderChange, ReparentChange, GroupChange, RemoveChange } from '@frontend-editor/shared';
 import type { ExtensionMode, ConnectionStatus, EditMode, IconStatus } from '../shared/types';
 
@@ -84,6 +86,7 @@ let typographyEditor: TypographyEditor | null = null;
 let colorEditor: ColorEditor | null = null;
 let dimensionsEditor: DimensionsEditor | null = null;
 let spacingEditor: SpacingEditor | null = null;
+let layoutEditor: LayoutEditor | null = null;
 let positionEditor: PositionEditor | null = null;
 let editHistory: EditHistory | null = null;
 let notesStore: NotesStore | null = null;
@@ -315,6 +318,7 @@ export async function activate(): Promise<void> {
   colorEditor = new ColorEditor(tokenStore, snapping, preview);
   dimensionsEditor = new DimensionsEditor(preview);
   spacingEditor = new SpacingEditor(tokenStore, preview);
+  layoutEditor = new LayoutEditor(tokenStore, preview);
   positionEditor = new PositionEditor(shadow, preview);
   notesEditor = new NotesEditor(notesStore, shadow);
   gridOverlay = new GridOverlay(shadow, tokenStore);
@@ -430,6 +434,7 @@ export async function activate(): Promise<void> {
     colorEditor!.cleanup();
     dimensionsEditor!.cleanup();
     spacingEditor!.cleanup();
+    layoutEditor!.cleanup();
     positionEditor!.cleanup();
     reorderEditor!.cleanup();
     reparentEditor!.cleanup();
@@ -486,6 +491,7 @@ export async function activate(): Promise<void> {
     colorEditor!.cleanup();
     dimensionsEditor!.cleanup();
     spacingEditor!.cleanup();
+    layoutEditor!.cleanup();
     positionEditor!.cleanup();
     reorderEditor!.cleanup();
     reparentEditor!.cleanup();
@@ -565,6 +571,7 @@ export async function activate(): Promise<void> {
       colorEditor!.cleanup();
       dimensionsEditor!.cleanup();
       spacingEditor!.cleanup();
+      layoutEditor!.cleanup();
       positionEditor!.cleanup();
       reorderEditor!.cleanup();
     reparentEditor!.cleanup();
@@ -620,6 +627,7 @@ export async function activate(): Promise<void> {
     colorEditor!.reposition(toolbar!.getButtonPosition('colors'));
     dimensionsEditor!.reposition(toolbar!.getButtonPosition('dimensions'));
     spacingEditor!.reposition(toolbar!.getButtonPosition('spacing'));
+    layoutEditor!.reposition(toolbar!.getButtonPosition('layout'));
     positionEditor!.reposition(toolbar!.getButtonPosition('position'));
     if (notesEditor!.getPositionMode() === 'toolbar') {
       notesEditor!.reposition(toolbar!.getButtonPosition('notes'));
@@ -652,6 +660,12 @@ export async function activate(): Promise<void> {
     else { toolbar!.setActiveMode('cursor'); }
   });
   spacingEditor.onClose(() => {
+    handles!.hideHandles();
+    const el = selection?.getSelectedElement();
+    if (el) { activateToolForElement(el, 'cursor'); }
+    else { toolbar!.setActiveMode('cursor'); }
+  });
+  layoutEditor.onClose(() => {
     handles!.hideHandles();
     const el = selection?.getSelectedElement();
     if (el) { activateToolForElement(el, 'cursor'); }
@@ -996,6 +1010,7 @@ export function deactivate(): void {
   colorEditor?.cleanup();
   dimensionsEditor?.cleanup();
   spacingEditor?.cleanup();
+  layoutEditor?.cleanup();
   positionEditor?.cleanup();
   reorderEditor?.cleanup();
   insertEditor?.cleanup();
@@ -1055,6 +1070,7 @@ export function deactivate(): void {
   colorEditor = null;
   dimensionsEditor = null;
   spacingEditor = null;
+  layoutEditor = null;
   positionEditor = null;
   editHistory = null;
   notesStore = null;
@@ -1098,6 +1114,7 @@ function activateToolForElement(el: Element, mode: EditMode): void {
   colorEditor!.cleanup();
   dimensionsEditor!.cleanup();
   spacingEditor!.cleanup();
+  layoutEditor!.cleanup();
   positionEditor!.cleanup();
   reorderEditor!.cleanup();
   reparentEditor!.cleanup();
@@ -1156,6 +1173,28 @@ function activateToolForElement(el: Element, mode: EditMode): void {
     });
     shadow!.appendChild(controls);
     toolbar!.setActiveMode('spacing');
+  } else if (mode === 'layout') {
+    handles!.showHandles(el, 'dimensions');
+    const pos = toolbar!.getButtonPosition('layout');
+    const controls = layoutEditor!.render(
+      el,
+      pos,
+      (changes) => {
+        // Container gutter changes (gap/row-gap/column-gap) on the element itself.
+        const info = buildElementInfo(el);
+        const diff = diffBuilder!.build(info, changes, el);
+        commitEdit(el, changes, diff);
+        selection!.refreshHighlight();
+        handles!.refreshHandles();
+      },
+      (weights) => {
+        makeProportionsCommit(el, weights);
+        // Re-render so the active ratio highlights and gutter values refresh.
+        activateToolForElement(el, 'layout');
+      },
+    );
+    shadow!.appendChild(controls);
+    toolbar!.setActiveMode('layout');
   } else if (mode === 'position') {
     const pos = toolbar!.getButtonPosition('position');
     const controls = positionEditor!.render(el, pos, (changes) => {
@@ -1786,6 +1825,63 @@ function makeParallaxCommit(el: Element): void {
 }
 
 // ---------------------------------------------------------------------------
+// Layout proportions — re-weight a container's children (content-preserving)
+// ---------------------------------------------------------------------------
+
+/**
+ * Apply a ratio to a flex/grid container's children, preserving their content.
+ * Flex: set each child's `flex` weight (one queued CSS change per child).
+ * Grid: set the container's grid-template-columns/-rows to `fr` weights
+ * (one queued change). No DOM is moved — only sizing changes.
+ */
+function makeProportionsCommit(container: Element, weights: number[]): void {
+  if (!(container instanceof HTMLElement)) return;
+  const display = getComputedStyle(container).display;
+  const isFlex = display.includes('flex');
+  const isGrid = display.includes('grid');
+  if (!isFlex && !isGrid) return;
+
+  if (isGrid) {
+    const layout = detectContainerLayout(container);
+    const prop = layout.direction === 'column' ? 'grid-template-rows' : 'grid-template-columns';
+    const fromValue = getComputedProperty(container, prop);
+    const toValue = weights.map((w) => `${w}fr`).join(' ');
+    if (fromValue === toValue) return;
+    const change: PropertyChange = { property: prop, fromValue, toValue };
+    container.style.setProperty(prop, toValue);
+    const diff = diffBuilder!.build(buildElementInfo(container), [change], container);
+    commitEdit(container, [change], diff);
+    selection!.refreshHighlight();
+    handles!.refreshHandles();
+    return;
+  }
+
+  // Flex: weight each direct child. `flex: <n>` resolves to `<n> 1 0%`, so
+  // children size purely by weight regardless of their content.
+  const children = Array.from(container.children).filter(
+    (c): c is HTMLElement => c instanceof HTMLElement,
+  );
+  const n = Math.min(weights.length, children.length);
+  for (let i = 0; i < n; i++) {
+    const child = children[i];
+    // Skip children already proportioned to this weight (grow matches + basis 0)
+    // to avoid redundant queued changes.
+    const grow = parseFloat(getComputedProperty(child, 'flex-grow'));
+    const basis = getComputedProperty(child, 'flex-basis');
+    if (Math.round(grow) === weights[i] && (basis === '0px' || basis === '0%')) continue;
+
+    const fromValue = getComputedProperty(child, 'flex');
+    const toValue = String(weights[i]);
+    const change: PropertyChange = { property: 'flex', fromValue, toValue };
+    child.style.setProperty('flex', toValue);
+    const diff = diffBuilder!.build(buildElementInfo(child), [change], child);
+    commitEdit(child, [change], diff);
+  }
+  selection!.refreshHighlight();
+  handles!.refreshHandles();
+}
+
+// ---------------------------------------------------------------------------
 // Status & focus
 // ---------------------------------------------------------------------------
 
@@ -1941,6 +2037,7 @@ function enterMultiSelectMode(): void {
   colorEditor?.cleanup();
   dimensionsEditor?.cleanup();
   spacingEditor?.cleanup();
+  layoutEditor?.cleanup();
   positionEditor?.cleanup();
   reorderEditor?.cleanup();
   toolbar?.setActiveMode('cursor');

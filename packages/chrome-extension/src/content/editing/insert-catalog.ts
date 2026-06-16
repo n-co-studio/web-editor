@@ -337,7 +337,7 @@ function layoutPreset(
  * available in both row (side-by-side columns) and column (stacked rows)
  * orientation. Ratios use integer flex weights — `[2, 1]` renders 2/3 + 1/3.
  */
-const LAYOUT_RATIOS: readonly { label: string; weights: number[] }[] = [
+export const LAYOUT_RATIOS: readonly { label: string; weights: number[] }[] = [
   // Halves
   { label: '50 / 50', weights: [1, 1] },
   // Thirds

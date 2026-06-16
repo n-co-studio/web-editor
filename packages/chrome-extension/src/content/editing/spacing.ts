@@ -4,6 +4,7 @@ import { getComputedProperty } from '../../shared/dom-utils';
 import { OVERLAY, TOOLBAR_WIDTH, HANDLE_COLORS } from '../../shared/constants';
 import type { TokenStore } from '../tokens/store';
 import type { PreviewManager } from './preview';
+import { buildTokenSelect, extractUnit } from './token-select';
 
 type ChangeCallback = (changes: PropertyChange[]) => void;
 
@@ -54,11 +55,6 @@ export function buildSpacingChanges(
   }
 
   return changes;
-}
-
-function extractUnit(value: string): string | undefined {
-  const match = value.match(/[\d.]+(.+)$/);
-  return match?.[1] || undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -284,78 +280,13 @@ export class SpacingEditor {
     const currentValue = getComputedProperty(element, property);
 
     if (tokens.length > 0) {
-      cell.appendChild(this.buildTokenSelect(property, tokens, currentValue, element, onCommit));
+      cell.appendChild(buildTokenSelect(property, tokens, currentValue, element, this.preview, onCommit));
     } else {
       // Fallback: editable text input
       cell.appendChild(this.buildValueInput(property, currentValue, element, onCommit));
     }
 
     return cell;
-  }
-
-  private buildTokenSelect(
-    property: string,
-    tokens: Array<{ name: string; value: string }>,
-    currentValue: string,
-    element: Element,
-    onCommit: ChangeCallback,
-  ): HTMLSelectElement {
-    const select = createElement('select', {}, {
-      background: 'rgba(255, 255, 255, 0.1)',
-      color: OVERLAY.text,
-      border: `1px solid ${OVERLAY.border}`,
-      borderRadius: OVERLAY.radiusSm,
-      padding: '2px 3px',
-      fontSize: '10px',
-      fontFamily: OVERLAY.monoFamily,
-      pointerEvents: 'auto',
-      cursor: 'pointer',
-      flex: '1',
-      minWidth: '0',
-    }) as HTMLSelectElement;
-
-    // "auto" is valid for margin and browsers accept it for padding; offer it up-front.
-    const autoOpt = document.createElement('option');
-    autoOpt.value = 'auto';
-    autoOpt.textContent = 'auto';
-    if (currentValue === 'auto') autoOpt.selected = true;
-    select.appendChild(autoOpt);
-
-    // Check if current value matches a token or auto
-    const hasMatch =
-      currentValue === 'auto' || tokens.some((t) => t.value === currentValue);
-    if (!hasMatch) {
-      const opt = document.createElement('option');
-      opt.value = currentValue;
-      opt.textContent = currentValue;
-      select.appendChild(opt);
-    }
-
-    for (const token of tokens) {
-      const opt = document.createElement('option');
-      opt.value = token.value;
-      opt.textContent = `${token.value} (${token.name})`;
-      if (token.value === currentValue) opt.selected = true;
-      select.appendChild(opt);
-    }
-
-    select.addEventListener('change', () => {
-      const fromValue = getComputedProperty(element, property);
-      const toValue = select.value;
-      const token = tokens.find((t) => t.value === toValue);
-      this.preview.begin(element as HTMLElement);
-      this.preview.apply(property, toValue);
-      this.preview.commit();
-      onCommit([{
-        property,
-        fromValue,
-        toValue,
-        unit: extractUnit(toValue),
-        toToken: token?.name,
-      }]);
-    });
-
-    return select;
   }
 
   private buildValueInput(
