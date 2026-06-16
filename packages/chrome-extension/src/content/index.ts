@@ -42,13 +42,19 @@ import type { InsertCommitCallback } from './editing/insert';
 import { buildInsertChange } from './editing/insert-source';
 import { groupElements, getGroupBlockReason } from './editing/group';
 import { duplicateElement, getDuplicateBlockReason } from './editing/duplicate';
+import {
+  getParallaxBlockReason,
+  wouldEnableParallax,
+  toParallaxBlock,
+  fromParallaxBlock,
+} from './editing/parallax';
 import { GridSettingsPanel } from './grid-settings';
 import { MeasureOverlay } from './selection/measure-overlay';
 import { MultiSelectManager } from './selection/multi-select';
 import { MultiSelectToolbar } from './editing/multi-select-toolbar';
 import { buildElementInfo, getTopElementAt, generateSelector } from '../shared/dom-utils';
 import type { VisualDiff, PropertyChange, AttributeChange, TextChange, ReorderChange, ReparentChange, GroupChange, RemoveChange } from '@frontend-editor/shared';
-import type { ExtensionMode, ConnectionStatus, EditMode } from '../shared/types';
+import type { ExtensionMode, ConnectionStatus, EditMode, IconStatus } from '../shared/types';
 
 // ---------------------------------------------------------------------------
 // State
@@ -112,6 +118,29 @@ let preservedToolMode: EditMode | null = null;
 
 // Tab session ID — stable for the tab's lifetime
 let tabId: string | null = null;
+
+// --- Status icon state (drives chrome.action.setIcon via the service worker) ---
+let lastConnectionStatus: ConnectionStatus = 'disconnected';
+let lastDiffApplied = false; // a queued change was applied successfully → green
+let lastErrorActive = false; // a server/apply error is outstanding → red
+
+/** Map current editor + connection + queue state to a toolbar icon status. */
+function computeIconStatus(): IconStatus {
+  if (mode === 'inactive') return 'disabled';
+  if (lastConnectionStatus === 'error' || lastErrorActive) return 'red';
+  if (queue && queue.pendingCount > 0) return 'orange';
+  if (lastDiffApplied) return 'green';
+  return 'active';
+}
+
+/** Push the computed icon status to the service worker (fire-and-forget). */
+function refreshExtensionIcon(): void {
+  chrome.runtime
+    .sendMessage({ type: 'UPDATE_ICON', payload: { status: computeIconStatus() } })
+    .catch(() => {
+      // Service worker may be asleep — non-fatal
+    });
+}
 
 // ---------------------------------------------------------------------------
 // Lifecycle
@@ -196,14 +225,19 @@ export async function activate(): Promise<void> {
     },
     onDiffAck: (payload) => {
       queue!.acknowledge(payload.diffIds);
+      lastErrorActive = false;
       badge!.update();
       reviewPanel?.refresh();
+      refreshExtensionIcon();
       devtoolsPanel?.log(`${payload.diffIds.length} diff(s) acknowledged`);
     },
     onDiffApplied: (payload) => {
       queue!.markApplied(payload.diffIds);
+      lastDiffApplied = true;
+      lastErrorActive = false;
       badge!.update();
       reviewPanel?.refresh();
+      refreshExtensionIcon();
       devtoolsPanel?.log(`${payload.diffIds.length} diff(s) applied`);
     },
     onTokenData: (payload) => {
@@ -249,6 +283,8 @@ export async function activate(): Promise<void> {
       devtoolsPanel?.log(`Status: ${payload.pendingCount} pending, last activity: ${payload.lastToolCallAt ?? 'none'}`);
     },
     onError: (payload) => {
+      lastErrorActive = true;
+      refreshExtensionIcon();
       devtoolsPanel?.log(`Server error: ${payload.code} — ${payload.message}`, 'error');
     },
   });
@@ -868,6 +904,9 @@ export async function activate(): Promise<void> {
   // Push pending count to toolbar badge (only unsent items)
   queue.onChange(() => {
     toolbar?.setPendingCount(queue!.pendingCount);
+    // New pending work supersedes a prior "applied" (green) state.
+    if (queue!.pendingCount > 0) lastDiffApplied = false;
+    refreshExtensionIcon();
   });
   // Initialize count from any restored queue items
   toolbar.setPendingCount(queue.pendingCount);
@@ -933,6 +972,7 @@ export async function activate(): Promise<void> {
   document.addEventListener('scroll', handleScroll, true);
 
   badge.update();
+  refreshExtensionIcon();
   devtoolsPanel.log('Extension activated');
   devtoolsPanel.log(`WebSocket connecting to localhost…`);
 }
@@ -993,6 +1033,9 @@ export function deactivate(): void {
   gridVisibleBeforeCollapse = false;
   rulersVisibleBeforeCollapse = false;
   mode = 'inactive';
+  lastDiffApplied = false;
+  lastErrorActive = false;
+  refreshExtensionIcon();
   wsClient = null;
   hover = null;
   selection = null;
@@ -1149,6 +1192,8 @@ function activateToolForElement(el: Element, mode: EditMode): void {
       const info = buildElementInfo(el);
       const diff = diffBuilder!.buildAttribute(info, attrChanges, undefined, el);
       commitAttributeEdit(el, attrChanges, diff);
+    }, (target) => {
+      makeParallaxCommit(target);
     });
     shadow!.appendChild(controls);
     toolbar!.setActiveMode('media');
@@ -1682,13 +1727,81 @@ function duplicateElements(elements: Element[]): void {
 }
 
 // ---------------------------------------------------------------------------
+// Parallax — convert an <img> to a fixed-background block (and back)
+// ---------------------------------------------------------------------------
+
+/**
+ * Toggle parallax on the given element. Enabling converts an `<img>` to a
+ * full-width fixed-background `<div>`; disabling reverts the block to an `<img>`.
+ * Recorded as a single 'replace' diff (remove old + insert new with outerHTML)
+ * and a single reversible history entry.
+ */
+function makeParallaxCommit(el: Element): void {
+  if (!(el instanceof HTMLElement)) return;
+  if (getParallaxBlockReason(el) !== null) {
+    devtoolsPanel?.log('Cannot toggle parallax on this element', 'warn');
+    return;
+  }
+
+  const parent = el.parentElement!;
+  const enabling = wouldEnableParallax(el);
+  const newEl = enabling
+    ? toParallaxBlock(el as HTMLImageElement)
+    : fromParallaxBlock(el);
+  const oldIndex = Array.from(parent.children).indexOf(el);
+
+  // Build the diff BEFORE the swap (sibling bracket reads the pre-swap DOM);
+  // outerHTML carries the full replacement markup for the source rewrite.
+  const oldInfo = buildElementInfo(el);
+  const removeChange: RemoveChange = {
+    type: 'remove',
+    tagName: el.tagName.toLowerCase(),
+    containerSelector: buildElementInfo(parent).selector,
+    removedIndex: oldIndex,
+  };
+  const insertChange = buildInsertChange(
+    parent, oldIndex, newEl.tagName.toLowerCase(), [],
+    undefined, undefined, newEl.outerHTML,
+  );
+  const diff = diffBuilder!.buildReplace(oldInfo, removeChange, insertChange);
+
+  parent.replaceChild(newEl, el);
+
+  queue!.add(diff);
+  editHistory!.push({
+    type: 'replace',
+    element: newEl,
+    parent,
+    oldEl: el,
+    newEl,
+    diff,
+  });
+  badge!.update();
+  reviewPanel!.refresh();
+  devtoolsPanel?.log(enabling ? 'Converted image to parallax' : 'Reverted parallax to image');
+
+  // Reselect the new element so the toggle label flips and the operator can
+  // immediately set the banner height with the dimensions tool.
+  queueMicrotask(() => selection?.select(newEl));
+}
+
+// ---------------------------------------------------------------------------
 // Status & focus
 // ---------------------------------------------------------------------------
 
 let savedFocus: HTMLElement | null = null;
 
 function handleStatusChange(status: ConnectionStatus): void {
+  lastConnectionStatus = status;
+  if (status === 'connected') {
+    lastErrorActive = false;
+  } else {
+    // A drop/reconnect cycle clears any prior "applied" (green) state so the
+    // icon doesn't show stale green after reconnecting.
+    lastDiffApplied = false;
+  }
   reviewPanel?.updateConnectionStatus(status);
+  refreshExtensionIcon();
   if (status === 'connected') {
     devtoolsPanel?.log('WebSocket connected');
   } else if (status === 'disconnected') {

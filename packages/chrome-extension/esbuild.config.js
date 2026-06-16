@@ -43,6 +43,9 @@ const entries = [
 mkdirSync(resolve(__dirname, 'dist/icons'), { recursive: true });
 cpSync(resolve(__dirname, 'manifest.json'), resolve(__dirname, 'dist/manifest.json'));
 cpSync(resolve(__dirname, 'assets/icons'), resolve(__dirname, 'dist/icons'), { recursive: true });
+// Operator-provided status icons (repo root /icon) → dist/icons/status — used by
+// chrome.action.setIcon to reflect editor/connection state.
+cpSync(resolve(__dirname, '../../icon'), resolve(__dirname, 'dist/icons/status'), { recursive: true });
 
 if (isWatch) {
   for (const entry of entries) {

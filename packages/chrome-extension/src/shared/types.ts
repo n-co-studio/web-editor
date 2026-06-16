@@ -63,9 +63,19 @@ export interface PendingEdit {
 // Chrome messaging (content ↔ service-worker)
 // ---------------------------------------------------------------------------
 
-export type ChromeMessageType = 'TOGGLE_EXTENSION' | 'GET_STATE' | 'UPDATE_BADGE' | 'CAPTURE_VIEWPORT';
+export type ChromeMessageType = 'TOGGLE_EXTENSION' | 'GET_STATE' | 'UPDATE_BADGE' | 'CAPTURE_VIEWPORT' | 'UPDATE_ICON';
 
 export interface ChromeMessage {
   readonly type: ChromeMessageType;
   readonly payload?: unknown;
 }
+
+/**
+ * Toolbar action icon state, surfaced via chrome.action.setIcon.
+ * - `disabled`: editor is off on the tab
+ * - `active`:   editor on + connected, nothing pending
+ * - `orange`:   pending unsent changes in the queue
+ * - `green`:    queued changes applied successfully
+ * - `red`:      connection error or a change failed to apply
+ */
+export type IconStatus = 'disabled' | 'active' | 'orange' | 'green' | 'red';
