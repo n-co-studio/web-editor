@@ -61,13 +61,20 @@ briefs:
       - "docs/privacy-policy.md"
       - "docs/store-listing.md"
 
-  - title: "Chrome Extension Polish & WebStore Prep"
+  - title: "Onboarding & Showcase"
     sequence: 4
-    session: null
+    session: 4
     branch: "feature/nco-studio-launch"
-    status: pending
+    status: complete
     next_brief: "Launch Checklist & Operator Guide"
-    boundaries: []
+    boundaries:
+      - "QUICKSTART.md"
+      - "COMPATIBILITY.md"
+      - "README.md"
+      - "examples/demo-app/**"
+      - ".github/ISSUE_TEMPLATE/bug_report.yml"
+      - ".github/ISSUE_TEMPLATE/config.yml"
+      - "package.json"
 
   - title: "Launch Checklist & Operator Guide"
     sequence: 5
@@ -163,6 +170,23 @@ integration_points:
     consumer: "Brief 4 — Chrome Extension Polish & WebStore Prep"
     artifact: "packages/dev-plugin/tsup.config.ts + dist/"
 
+  - brief_sequence: 4
+    gates_a:
+      A1: "pass"
+      A2: "pass"
+      A3: "n/a"
+      A4: "pass"
+      A5: "pass"
+      A6: "pass"
+    gates_b:
+      B1: "pass"
+      B2: "pass"
+      B3: "pass"
+    overrides_used:
+      - "REPO_OS_SKIP_PRAGMATIST_GATE (auto mode — runner pre-approved)"
+      - "REPO_OS_SKIP_MODE_GUARD (child mode .github/* not carved-out — product issue templates)"
+    timestamp: "2026-06-17T23:30:00Z"
+
 session_decisions:
   - session: 1
     decision: "Bundle shared into mcp-server via tsup noExternal rather than publishing as 3rd package"
@@ -170,6 +194,12 @@ session_decisions:
   - session: 1
     decision: "Clean rename with no back-compat shims"
     rationale: "Zero existing users — pre-release; shims add dead code"
+  - session: 4
+    decision: "Replace Repo OS generic issue templates with product-specific NCO Studio templates"
+    rationale: "The .github/ISSUE_TEMPLATE/ files were Repo OS governance templates; brief scope explicitly lists these as product files to create for user-facing support"
+  - session: 4
+    decision: "Demo app uses workspace star resolution (*) for web-editor-plugin version"
+    rationale: "Pre-publish: plugin is a workspace package; * resolves to the local workspace version so post-publish Brief 5 can replace with a real published version"
 
 governance:
   - brief_sequence: 3

@@ -1,0 +1,63 @@
+/* Design tokens — match docs/spec/compiled/v1/design-system.md */
+/* These are the obvious edit targets for the NCO Studio demo. */
+
+:root {
+  /* ── Colors ─────────────────────────────────────────────── */
+  --color-bg:          #ffffff;
+  --color-surface:     #f4f4f5;       /* gray-100 */
+  --color-border:      #e4e4e7;       /* gray-200 */
+  --color-text:        #18181b;       /* gray-900 */
+  --color-text-muted:  #71717a;       /* gray-500 */
+  --color-primary:     #06b6d4;       /* cyan-500 — brand */
+  --color-primary-hover: #0891b2;     /* cyan-600 */
+  --color-accent:      #fb7185;       /* rose-400 */
+  --color-success:     #22c55e;
+  --color-warning:     #f59e0b;
+
+  /* ── Spacing (4px base) ──────────────────────────────────── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* ── Typography ──────────────────────────────────────────── */
+  --font-sans: system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+
+  --text-display:  2.25rem;  /* 36px */
+  --text-h1:       1.875rem; /* 30px */
+  --text-h2:       1.5rem;   /* 24px */
+  --text-h3:       1.25rem;  /* 20px */
+  --text-body:     1rem;     /* 16px */
+  --text-body-sm:  0.875rem; /* 14px */
+  --text-caption:  0.75rem;  /* 12px */
+
+  /* ── Border radius ───────────────────────────────────────── */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 9999px;
+
+  /* ── Shadows ─────────────────────────────────────────────── */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow-md: 0 4px 6px rgba(0,0,0,0.07);
+  --shadow-lg: 0 10px 15px rgba(0,0,0,0.10);
+}
+
+/* Base reset */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  color: var(--color-text);
+  background: var(--color-bg);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
