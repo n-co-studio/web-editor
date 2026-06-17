@@ -63,7 +63,7 @@ export interface PendingEdit {
 // Chrome messaging (content ↔ service-worker)
 // ---------------------------------------------------------------------------
 
-export type ChromeMessageType = 'TOGGLE_EXTENSION' | 'GET_STATE' | 'UPDATE_BADGE' | 'CAPTURE_VIEWPORT' | 'UPDATE_ICON';
+export type ChromeMessageType = 'TOGGLE_EXTENSION' | 'TOGGLE_QUEUE_PANEL' | 'GET_STATE' | 'UPDATE_BADGE' | 'CAPTURE_VIEWPORT' | 'UPDATE_ICON';
 
 export interface ChromeMessage {
   readonly type: ChromeMessageType;

@@ -1,6 +1,13 @@
 import type { VisualDiff, NoteEntry } from '@frontend-editor/shared';
-import { createElement, createText, createButton, makeDraggable } from '../../shared/ui-utils';
-import { OVERLAY, SELECTOR_TRUNCATE_LENGTH, BATCH_CONFIRM_THRESHOLD, TOOLBAR_WIDTH } from '../../shared/constants';
+import { createElement, createText, createButton } from '../../shared/ui-utils';
+import {
+  OVERLAY,
+  SELECTOR_TRUNCATE_LENGTH,
+  BATCH_CONFIRM_THRESHOLD,
+  QUEUE_PANEL_DEFAULT_WIDTH,
+  QUEUE_PANEL_MIN_WIDTH,
+  QUEUE_PANEL_MAX_WIDTH_RATIO,
+} from '../../shared/constants';
 import type { ConnectionStatus, DiffLifecycle } from '../../shared/types';
 import type { PendingQueue } from './queue';
 import type { WebSocketClient } from '../websocket-client';
@@ -10,10 +17,15 @@ import { serializeToPrompt } from './prompt-serializer';
 
 type VoidCallback = () => void;
 
+const STORAGE_KEY_WIDTH = 'frontend-editor-queue-width';
+
 /**
  * Review panel for pending changes. Renders inside the shadow DOM.
- * Shows changes grouped by element, with individual removal/restore,
- * "Apply Changes" button, and WebSocket status banners.
+ * Docks full-height to the right edge of the viewport (mirroring the
+ * bottom-docked DevTools panel), resizable via a left-edge handle with
+ * width persisted to chrome.storage.session. Shows changes grouped by
+ * element, with individual removal/restore, "Apply Changes" button, and
+ * WebSocket status banners.
  */
 export class ReviewPanel {
   private container: HTMLDivElement | null = null;
@@ -21,8 +33,7 @@ export class ReviewPanel {
   private connectionStatus: ConnectionStatus = 'disconnected';
   private sending = false;
   private closeCb: VoidCallback | null = null;
-  private anchorPos: { x: number; y: number } = { x: 16, y: 16 };
-  private userDragged = false;
+  private panelWidth = QUEUE_PANEL_DEFAULT_WIDTH;
 
   constructor(
     private readonly shadow: ShadowRoot,
@@ -39,10 +50,12 @@ export class ReviewPanel {
     notesStore.onChange(() => {
       if (this.visible) this.refresh();
     });
+
+    // Restore persisted width (async, non-blocking)
+    void this.restoreWidth();
   }
 
-  show(anchorPos?: { x: number; y: number }): void {
-    if (anchorPos) this.anchorPos = anchorPos;
+  show(): void {
     this.visible = true;
     this.render();
   }
@@ -51,7 +64,6 @@ export class ReviewPanel {
     this.container?.remove();
     this.container = null;
     this.visible = false;
-    this.userDragged = false;
   }
 
   refresh(): void {
@@ -73,23 +85,69 @@ export class ReviewPanel {
     return this.visible;
   }
 
-  /** Reposition the panel relative to a new toolbar anchor. */
-  reposition(anchorPos: { x: number; y: number }): void {
-    this.anchorPos = anchorPos;
-    if (this.userDragged) return;
-    if (!this.container) return;
-    const panelLeft = Math.min(
-      anchorPos.x + TOOLBAR_WIDTH + 8,
-      window.innerWidth - 368,
-    );
-    const panelTop = Math.max(8, anchorPos.y);
-    this.container.style.left = `${panelLeft}px`;
-    this.container.style.top = `${panelTop}px`;
-  }
-
   /** Get the current batch note from the notes store. */
   getSessionNote(): string {
     return this.notesStore.toBatchNote() ?? '';
+  }
+
+  // -----------------------------------------------------------------------
+  // Width drag + persistence (left-edge resize, mirrors DevTools panel)
+  // -----------------------------------------------------------------------
+
+  private clampWidth(width: number): number {
+    const max = Math.floor(window.innerWidth * QUEUE_PANEL_MAX_WIDTH_RATIO);
+    return Math.max(QUEUE_PANEL_MIN_WIDTH, Math.min(width, Math.max(QUEUE_PANEL_MIN_WIDTH, max)));
+  }
+
+  private initWidthDrag(handle: HTMLDivElement, panel: HTMLDivElement): void {
+    let startX = 0;
+    let startWidth = 0;
+
+    const onPointerDown = (e: PointerEvent) => {
+      e.preventDefault();
+      handle.setPointerCapture(e.pointerId);
+      startX = e.clientX;
+      startWidth = this.panelWidth;
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+      if (!handle.hasPointerCapture(e.pointerId)) return;
+      // Dragging the left edge leftwards (decreasing clientX) widens the panel.
+      const dx = startX - e.clientX;
+      this.panelWidth = this.clampWidth(startWidth + dx);
+      panel.style.width = `${this.panelWidth}px`;
+    };
+
+    const onPointerUp = (e: PointerEvent) => {
+      if (!handle.hasPointerCapture(e.pointerId)) return;
+      handle.releasePointerCapture(e.pointerId);
+      void this.saveWidth(this.panelWidth);
+    };
+
+    handle.addEventListener('pointerdown', onPointerDown);
+    handle.addEventListener('pointermove', onPointerMove);
+    handle.addEventListener('pointerup', onPointerUp);
+  }
+
+  private async restoreWidth(): Promise<void> {
+    try {
+      const result = await chrome.storage.session.get([STORAGE_KEY_WIDTH]);
+      const saved = result[STORAGE_KEY_WIDTH] as number | undefined;
+      if (typeof saved === 'number' && saved >= QUEUE_PANEL_MIN_WIDTH) {
+        this.panelWidth = this.clampWidth(saved);
+        if (this.visible) this.render();
+      }
+    } catch {
+      // Non-fatal — use default width
+    }
+  }
+
+  private async saveWidth(width: number): Promise<void> {
+    try {
+      await chrome.storage.session.set({ [STORAGE_KEY_WIDTH]: width });
+    } catch {
+      // Non-fatal
+    }
   }
 
   // -----------------------------------------------------------------------
@@ -99,35 +157,58 @@ export class ReviewPanel {
   private render(): void {
     this.container?.remove();
 
-    const panelLeft = Math.min(
-      this.anchorPos.x + TOOLBAR_WIDTH + 8,
-      window.innerWidth - 368,
-    );
-    const panelTop = Math.max(8, this.anchorPos.y);
+    const width = this.clampWidth(this.panelWidth);
+    this.panelWidth = width;
 
-    const panel = createElement('div', { role: 'dialog', 'aria-label': 'Review changes' }, {
+    const panel = createElement('div', { role: 'dialog', 'aria-label': 'Change request queue' }, {
       position: 'fixed',
-      left: `${panelLeft}px`,
-      top: `${panelTop}px`,
-      width: '360px',
-      maxHeight: '50vh',
-      overflowY: 'auto',
+      top: '0',
+      right: '0',
+      bottom: '0',
+      width: `${width}px`,
+      overflow: 'hidden',
       background: OVERLAY.bg,
-      border: `1px solid ${OVERLAY.border}`,
-      borderRadius: OVERLAY.radiusMd,
-      boxShadow: OVERLAY.shadowLg,
+      borderLeft: `1px solid ${OVERLAY.border}`,
+      boxShadow: '-4px 0 12px rgba(0, 0, 0, 0.15)',
       pointerEvents: 'auto',
       zIndex: '200',
       fontFamily: OVERLAY.fontFamily,
+      display: 'flex',
+      flexDirection: 'column',
     });
 
-    // Header
+    // Left-edge resize handle (mirrors the DevTools panel's top handle).
+    // Transparent by default; a subtle accent appears on hover so the
+    // affordance is discoverable.
+    const resizeHandle = createElement('div', { 'aria-hidden': 'true' }, {
+      position: 'absolute',
+      top: '0',
+      left: '0',
+      bottom: '0',
+      width: '5px',
+      cursor: 'ew-resize',
+      background: 'transparent',
+      zIndex: '2',
+    });
+    resizeHandle.addEventListener('mouseenter', () => { resizeHandle.style.background = OVERLAY.border; });
+    resizeHandle.addEventListener('mouseleave', () => { resizeHandle.style.background = 'transparent'; });
+    resizeHandle.title = 'Drag to resize · double-click to reset';
+    resizeHandle.addEventListener('dblclick', () => {
+      this.panelWidth = QUEUE_PANEL_DEFAULT_WIDTH;
+      panel.style.width = `${this.panelWidth}px`;
+      void this.saveWidth(this.panelWidth);
+    });
+    this.initWidthDrag(resizeHandle, panel);
+    panel.appendChild(resizeHandle);
+
+    // Header (pinned to the top of the column)
     const header = createElement('div', {}, {
       display: 'flex',
       justifyContent: 'space-between',
       alignItems: 'center',
       padding: '8px 12px',
       borderBottom: `1px solid ${OVERLAY.border}`,
+      flexShrink: '0',
     });
     const notes = this.notesStore.getAll();
     const active = this.queue.getActive();
@@ -175,54 +256,60 @@ export class ReviewPanel {
     header.appendChild(closeBtn);
     panel.appendChild(header);
 
-    makeDraggable(header, panel, undefined, () => { this.userDragged = true; });
+    // Scrollable body — the only region that scrolls, so the header and the
+    // action bar stay pinned in the full-height docked column.
+    const body = createElement('div', {}, {
+      flex: '1 1 auto',
+      minHeight: '0',
+      overflowY: 'auto',
+    });
 
     // Connection warning
     if (this.connectionStatus !== 'connected') {
-      panel.appendChild(this.renderConnectionWarning());
+      body.appendChild(this.renderConnectionWarning());
     }
 
     // Source unverified warning (if any diffs lack sourceVerified)
     const hasUnverified = active.some((d) => !d.sourceVerified);
     if (hasUnverified) {
-      panel.appendChild(this.renderSourceWarning());
+      body.appendChild(this.renderSourceWarning());
     }
 
     // Notes as change requests
     for (let i = 0; i < notes.length; i++) {
-      panel.appendChild(this.renderNoteCard(notes[i], i));
+      body.appendChild(this.renderNoteCard(notes[i], i));
     }
 
     // Grouped CSS changes (pending)
     const groups = this.groupByElement(active);
     for (const [selector, diffs] of groups) {
-      panel.appendChild(this.renderGroup(selector, diffs));
+      body.appendChild(this.renderGroup(selector, diffs));
     }
 
     // Sent changes section
     if (sent.length > 0) {
-      panel.appendChild(this.renderSectionHeader('Sent to Server', sent.length, OVERLAY.warning));
+      body.appendChild(this.renderSectionHeader('Sent to Server', sent.length, OVERLAY.warning));
       const sentDiffs = sent.map((s) => s.diff);
       const sentGroups = this.groupByElement(sentDiffs);
       for (const [selector, diffs] of sentGroups) {
-        panel.appendChild(this.renderGroup(selector, diffs, 'sent'));
+        body.appendChild(this.renderGroup(selector, diffs, 'sent'));
       }
       // Stale indicator
       const staleCount = sent.filter(
         (s) => s.sentAt && Date.now() - s.sentAt > 24 * 60 * 60 * 1000,
       ).length;
       if (staleCount > 0) {
-        panel.appendChild(this.renderStaleNotice(staleCount));
+        body.appendChild(this.renderStaleNotice(staleCount));
       }
     }
 
     // Applied changes section
     if (applied.length > 0) {
-      panel.appendChild(this.renderSectionHeader('Applied', applied.length, '#10b981'));
+      body.appendChild(this.renderSectionHeader('Applied', applied.length, '#10b981'));
       const appliedDiffs = applied.map((a) => a.diff);
       const appliedGroups = this.groupByElement(appliedDiffs);
       for (const [selector, diffs] of appliedGroups) {
-        panel.appendChild(this.renderGroup(selector, diffs, 'applied'));
+        body.appendChild(this.renderGroup(selector, diffs, 'applied'));
       }
       // Clear applied link
       const clearLink = createElement('button', {}, {
@@ -237,7 +324,7 @@ export class ReviewPanel {
       });
       clearLink.textContent = `Clear ${applied.length} applied`;
       clearLink.addEventListener('click', () => this.queue.clearApplied());
-      panel.appendChild(clearLink);
+      body.appendChild(clearLink);
     }
 
     // Empty state
@@ -246,17 +333,22 @@ export class ReviewPanel {
       empty.style.padding = '16px 12px';
       empty.style.color = OVERLAY.textMuted;
       empty.style.textAlign = 'center';
-      panel.appendChild(empty);
+      body.appendChild(empty);
     }
 
     // Removed section
     const removed = this.queue.getRemoved();
     if (removed.length > 0) {
-      panel.appendChild(this.renderRemovedSection(removed));
+      body.appendChild(this.renderRemovedSection(removed));
     }
 
-    // Action bar
-    panel.appendChild(this.renderActionBar(active, notes.length, sent.length));
+    panel.appendChild(body);
+
+    // Action bar (pinned to the bottom of the column)
+    const actionBar = this.renderActionBar(active, notes.length, sent.length);
+    actionBar.style.flexShrink = '0';
+    actionBar.style.borderTop = `1px solid ${OVERLAY.border}`;
+    panel.appendChild(actionBar);
 
     this.container = panel;
     this.shadow.appendChild(panel);

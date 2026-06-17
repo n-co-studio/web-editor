@@ -28,6 +28,13 @@ const entries = [
     outfile: resolve(__dirname, 'dist/service-worker.js'),
   },
   {
+    // Toolbar icon popup (default_popup). IIFE so popup.html can load it via a
+    // plain <script src> tag.
+    entryPoints: [resolve(__dirname, 'src/popup/popup.ts')],
+    outfile: resolve(__dirname, 'dist/popup.js'),
+    format: 'iife',
+  },
+  {
     // Web-embed bundle for the portfolio site. IIFE so a <script> tag can
     // execute it immediately; chrome.* APIs are shimmed at runtime via
     // installChromeShim() in web-env.ts.
@@ -42,6 +49,7 @@ const entries = [
 // Copy static assets to dist
 mkdirSync(resolve(__dirname, 'dist/icons'), { recursive: true });
 cpSync(resolve(__dirname, 'manifest.json'), resolve(__dirname, 'dist/manifest.json'));
+cpSync(resolve(__dirname, 'src/popup/popup.html'), resolve(__dirname, 'dist/popup.html'));
 cpSync(resolve(__dirname, 'assets/icons'), resolve(__dirname, 'dist/icons'), { recursive: true });
 // Operator-provided status icons (repo root /icon) → dist/icons/status — used by
 // chrome.action.setIcon to reflect editor/connection state.

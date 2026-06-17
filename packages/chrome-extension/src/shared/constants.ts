@@ -42,6 +42,11 @@ export const DEVTOOLS_MAX_HEIGHT_RATIO = 0.6;
 export const DEVTOOLS_DEFAULT_LEFT_RATIO = 0.30;
 export const DEVTOOLS_DEFAULT_MIDDLE_RATIO = 0.40;
 
+// Change Request Queue — right-docked side panel
+export const QUEUE_PANEL_DEFAULT_WIDTH = 340;
+export const QUEUE_PANEL_MIN_WIDTH = 260;
+export const QUEUE_PANEL_MAX_WIDTH_RATIO = 0.5;
+
 // ---------------------------------------------------------------------------
 // Overlay design tokens (px, not rem — isolated in Shadow DOM)
 // ---------------------------------------------------------------------------

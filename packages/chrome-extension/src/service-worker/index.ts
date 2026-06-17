@@ -4,10 +4,14 @@
  * connection to avoid MV3 service worker termination risk.
  *
  * Responsibilities:
- * 1. Toolbar icon click → send TOGGLE_EXTENSION to content script
- * 2. Badge text updates from content script
- * 3. Status icon updates from content script (chrome.action.setIcon)
- * 4. Viewport capture for full-page screenshots
+ * 1. Badge text updates from content script
+ * 2. Status icon updates from content script (chrome.action.setIcon)
+ * 3. Viewport capture for full-page screenshots
+ *
+ * The toolbar icon uses a default_popup (popup.html) for its menu, so there is
+ * no chrome.action.onClicked handler here — setting default_popup suppresses the
+ * onClicked event in MV3. The popup messages the content script directly
+ * (TOGGLE_EXTENSION / TOGGLE_QUEUE_PANEL), injecting content.js if needed.
  */
 
 import type { IconStatus } from '../shared/types';
@@ -80,29 +84,6 @@ async function applyStatusIcon(status: IconStatus, tabId: number | undefined): P
     chrome.action.setIcon({ path: ICON_PATHS[status], tabId }).catch(() => {});
   }
 }
-
-// ---------------------------------------------------------------------------
-// Toolbar icon click
-// ---------------------------------------------------------------------------
-
-chrome.action.onClicked.addListener(async (tab) => {
-  if (!tab.id) return;
-  try {
-    // Try sending to already-injected content script (localhost auto-inject)
-    await chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_EXTENSION' });
-  } catch {
-    // Content script not present — inject programmatically, then toggle
-    try {
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        files: ['content.js'],
-      });
-      await chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_EXTENSION' });
-    } catch {
-      // Injection failed (chrome://, web store, etc.) — silently ignore
-    }
-  }
-});
 
 // ---------------------------------------------------------------------------
 // Badge updates from content script

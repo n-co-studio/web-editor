@@ -639,7 +639,7 @@ export async function activate(): Promise<void> {
     appearanceEditor!.reposition(toolbar!.getButtonPosition('appearance'));
     gridSettingsPanel!.reposition(toolbar!.getButtonPosition('grid'));
     multiSelectToolbar!.reposition(toolbar!.getPosition());
-    reviewPanel!.reposition(toolbar!.getButtonPosition('review'));
+    // The review panel is docked to the viewport edge — it does not follow the toolbar.
   });
 
   // Wire editor close buttons → fall back to cursor tool
@@ -698,7 +698,7 @@ export async function activate(): Promise<void> {
       reviewPanel!.hide();
       toolbar!.setReviewPanelOpen(false);
     } else {
-      reviewPanel!.show(toolbar!.getButtonPosition('review'));
+      reviewPanel!.show();
       toolbar!.setReviewPanelOpen(true);
     }
   });
@@ -1100,6 +1100,25 @@ function toggleActive(): void {
     activate();
   } else {
     deactivate();
+  }
+}
+
+/**
+ * Open/close the docked Change Request Queue panel. Triggered from the toolbar
+ * icon popup (TOGGLE_QUEUE_PANEL). Activates the editor first if it is off, so
+ * the popup's "Open Queue" works even when the extension is currently inactive.
+ */
+async function toggleQueuePanel(): Promise<void> {
+  if (mode === 'inactive') {
+    await activate();
+  }
+  if (!reviewPanel) return;
+  if (reviewPanel.isOpen()) {
+    reviewPanel.hide();
+    toolbar?.setReviewPanelOpen(false);
+  } else {
+    reviewPanel.show();
+    toolbar?.setReviewPanelOpen(true);
   }
 }
 
@@ -2185,7 +2204,7 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
     e.preventDefault();
     e.stopPropagation();
     if (!reviewPanel!.isOpen()) {
-      reviewPanel!.show(toolbar!.getButtonPosition('review'));
+      reviewPanel!.show();
       toolbar!.setReviewPanelOpen(true);
     }
     reviewPanel!.triggerSend();
@@ -2475,6 +2494,12 @@ chrome.runtime.onMessage.addListener(
     if (msg.type === 'TOGGLE_EXTENSION') {
       toggleActive();
       sendResponse({ active: mode !== 'inactive' });
+    } else if (msg.type === 'GET_STATE') {
+      sendResponse({ active: mode !== 'inactive', queueOpen: reviewPanel?.isOpen() ?? false });
+    } else if (msg.type === 'TOGGLE_QUEUE_PANEL') {
+      void toggleQueuePanel().then(() => {
+        sendResponse({ active: mode !== 'inactive', queueOpen: reviewPanel?.isOpen() ?? false });
+      });
     }
     return true; // keep sendResponse channel open for async
   },

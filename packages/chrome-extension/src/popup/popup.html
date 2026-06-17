@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Frontend Editor</title>
+  <style>
+    :root {
+      --bg: #18181b;
+      --text: #ffffff;
+      --muted: #a1a1aa;
+      --border: rgba(255, 255, 255, 0.15);
+      --hover: rgba(255, 255, 255, 0.08);
+      --primary: #06b6d4;
+      --accent: #fb7185;
+      --on: #22c55e;
+      --off: #71717a;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      width: 248px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 13px;
+      -webkit-font-smoothing: antialiased;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 14px 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .header .title {
+      font-size: 13px;
+      font-weight: 600;
+      flex: 1;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--off);
+      flex-shrink: 0;
+    }
+    .status-dot.on { background: var(--on); }
+    .menu { padding: 6px; }
+    .item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      padding: 9px 10px;
+      border: none;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--text);
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+    .item:hover { background: var(--hover); }
+    .item:disabled { opacity: 0.45; cursor: default; }
+    .item .icon {
+      width: 16px;
+      text-align: center;
+      flex-shrink: 0;
+      color: var(--muted);
+    }
+    .item .label { flex: 1; }
+    .item .state {
+      font-size: 11px;
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+    .item .state.active { color: var(--primary); }
+    .hint {
+      padding: 4px 14px 12px;
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <span class="status-dot" id="status-dot"></span>
+    <span class="title">Frontend Editor</span>
+  </div>
+  <div class="menu">
+    <button class="item" id="toggle-extension">
+      <span class="icon">&#9211;</span>
+      <span class="label">Extension</span>
+      <span class="state" id="extension-state">Off</span>
+    </button>
+    <button class="item" id="toggle-queue">
+      <span class="icon">&#9776;</span>
+      <span class="label" id="queue-label">Open Change Queue</span>
+      <span class="state" id="queue-state"></span>
+    </button>
+  </div>
+  <div class="hint" id="hint">Works on localhost dev pages.</div>
+  <script src="popup.js"></script>
+</body>
+</html>
