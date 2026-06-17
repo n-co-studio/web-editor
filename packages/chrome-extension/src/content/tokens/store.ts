@@ -2,7 +2,7 @@ import type {
   DesignToken,
   TokenCategory,
   TokenSourceStatus,
-} from '@frontend-editor/shared';
+} from '@nco-studio/shared';
 
 /**
  * Client-side token registry. Receives tokens from the MCP server

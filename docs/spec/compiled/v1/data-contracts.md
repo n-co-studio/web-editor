@@ -222,7 +222,7 @@ interface TokenSourceStatus {
 
 #### export_session
 - **Purpose**: Writes the pending queue to a JSON file for archival or handoff
-- **Parameters**: `{ outputPath?: string }` (defaults to `.frontend-editor/session-export.json`)
+- **Parameters**: `{ outputPath?: string }` (defaults to `.nco-web-editor/session-export.json`)
 - **Returns**: `{ path: string, diffCount: number }`
 
 #### import_session
@@ -234,7 +234,7 @@ interface TokenSourceStatus {
 - **Purpose**: Returns the project-local component registry discovered by the MCP server
 - **Parameters**: `{ nameFilter?: string }` (optional substring match on `componentName`, case-insensitive)
 - **Returns**: `{ components: ProjectComponent[], sourceCount: number, failedCount: number }`
-- **Notes**: Editor-agnostic — uses only generic working-directory contracts; no Claude Code or VS Code-specific assumptions. Component discovery is driven by `frontend-editor.componentRoots` in the target project's `package.json` (or the default convention-gated roots). See feature-008 for full discovery semantics.
+- **Notes**: Editor-agnostic — uses only generic working-directory contracts; no Claude Code or VS Code-specific assumptions. Component discovery is driven by `nco-web-editor.componentRoots` in the target project's `package.json` (or the default convention-gated roots). See feature-008 for full discovery semantics.
 
 ---
 
@@ -242,7 +242,7 @@ interface TokenSourceStatus {
 
 - **Approach**: In-memory state in MCP server process with light file-based persistence
 - **Key state shapes:**
-  - Pending queue: `VisualDiff[]` — checkpointed to `.frontend-editor/pending-queue.json` on each update, cleared when all diffs acknowledged
+  - Pending queue: `VisualDiff[]` — checkpointed to `.nco-web-editor/pending-queue.json` on each update, cleared when all diffs acknowledged
   - Token registry: `Map<string, DesignToken[]>` — rebuilt on file change, pushed to extensions
   - Component registry: `Map<string, ProjectComponent>` keyed by `importPath` — built at MCP server startup from convention-gated scan, rebuilt per-file on chokidar file change (300ms debounce), full registry pushed to all connected extensions on connect (`COMPONENT_DATA`) and on update (`COMPONENT_UPDATE`). Not persisted across server restarts (re-derived on next startup).
   - Token drift counters: session-scoped Map tracking custom value usage, reset on server restart

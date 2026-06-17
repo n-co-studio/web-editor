@@ -1,6 +1,6 @@
-import type { NoteElementRef, NoteEntry } from '@frontend-editor/shared';
+import type { NoteElementRef, NoteEntry } from '@nco-studio/shared';
 
-const NOTES_STORAGE_KEY = 'frontend-editor-session-notes';
+const NOTES_STORAGE_KEY = 'nco-web-editor-session-notes';
 
 type NotesChangeCallback = () => void;
 

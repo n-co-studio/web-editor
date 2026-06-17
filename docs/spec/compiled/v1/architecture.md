@@ -5,14 +5,14 @@
 - **Frontend**: TypeScript, Chrome Extension Manifest V3
 - **Styling**: Shadow DOM overlay (avoids style conflicts with host page)
 - **Backend**: Node.js, TypeScript (MCP Server)
-- **Database**: N/A — light file-based persistence for crash recovery (.frontend-editor/pending-queue.json)
+- **Database**: N/A — light file-based persistence for crash recovery (.nco-web-editor/pending-queue.json)
 - **Auth**: N/A — fully local, no accounts
 - **Hosting**: N/A — Chrome Web Store (extension) + npm registry (MCP server)
 
 ## Project Structure
 
 ```
-frontend-editor/
+nco-studio-web-editor/
 ├── packages/
 │   ├── chrome-extension/
 │   │   ├── manifest.json
@@ -58,7 +58,7 @@ N/A — communication is WebSocket (extension ↔ server) + MCP JSON-RPC 2.0 (se
 - Shadow DOM isolation for all extension overlay UI
 - Content script owns the WebSocket connection (not the service worker) — avoids MV3 service worker termination risk. Keepalive ping every 20s.
 - MCP server auto-discovers design tokens at startup
-- MCP server auto-discovers project components from convention-gated paths (`src/components/**`, `src/ui/**`, `components/**`, configurable via `frontend-editor.componentRoots` in the target project's `package.json`) — see feature-008
+- MCP server auto-discovers project components from convention-gated paths (`src/components/**`, `src/ui/**`, `components/**`, configurable via `nco-web-editor.componentRoots` in the target project's `package.json`) — see feature-008
 - All inter-package communication uses typed protocol definitions from shared package
 - Dev-plugin is automatically disabled in production builds
 - Error isolation: token discovery/parsing wrapped in try/catch — failures degrade to 'no tokens' mode without crashing WebSocket or MCP transport
@@ -80,8 +80,8 @@ Types that cross the WebSocket boundary (used by both extension and MCP server) 
 ## Deployment Target
 
 - Chrome extension → Chrome Web Store (public listing)
-- MCP server → npm registry (`@frontend-editor/mcp-server`, invoked via `npx`). Invocation should use `npx --yes @frontend-editor/mcp-server` to skip install prompts. Alternative: `npm install -g @frontend-editor/mcp-server` for faster startup.
-- Dev plugin → npm registry (`@frontend-editor/dev-plugin`, installed as devDependency)
+- MCP server → npm registry (`@nco-studio/web-editor-mcp`, invoked via `npx`). Invocation should use `npx --yes @nco-studio/web-editor-mcp` to skip install prompts. Alternative: `npm install -g @nco-studio/web-editor-mcp` for faster startup.
+- Dev plugin → npm registry (`@nco-studio/web-editor-plugin`, installed as devDependency)
 - No CI/CD for runtime — these are developer tools with manual publish
 
 ## Constraints

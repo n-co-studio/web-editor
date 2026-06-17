@@ -1,4 +1,4 @@
-import type { ElementInfo, VisualDiff } from '@frontend-editor/shared';
+import type { ElementInfo, VisualDiff } from '@nco-studio/shared';
 
 // ---------------------------------------------------------------------------
 // Extension state

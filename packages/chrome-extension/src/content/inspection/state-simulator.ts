@@ -260,7 +260,7 @@ export class StateSimulator {
             }
           } catch {
             // Invalid selector after stripping — skip
-            console.debug('[frontend-editor] Skipped invalid stripped selector:', stripped, '(from:', selectorText, ')');
+            console.debug('[nco-web-editor] Skipped invalid stripped selector:', stripped, '(from:', selectorText, ')');
           }
         }
 

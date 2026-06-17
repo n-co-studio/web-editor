@@ -15,7 +15,7 @@ import { LayoutSection } from './layout-section';
 import { RulesSection } from './rules-section';
 import { AccessibilitySection } from './accessibility-section';
 
-const STORAGE_KEY_TAB = 'frontend-editor-devtools-tab';
+const STORAGE_KEY_TAB = 'nco-web-editor-devtools-tab';
 
 type PropertyChangeCb = (property: string, fromValue: string, toValue: string, token?: string) => void;
 type MultiPropertyChangeCb = (changes: Array<{ element: Element; property: string; fromValue: string; toValue: string; token?: string }>) => void;

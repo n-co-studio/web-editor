@@ -5,11 +5,11 @@ import type { JSXOpeningElement, Program } from '@babel/types';
 import type { DevPluginOptions } from './types.js';
 
 /**
- * Babel plugin for @frontend-editor/dev-plugin.
+ * Babel plugin for @nco-studio/web-editor-plugin.
  *
- * Usage: `{ "plugins": ["@frontend-editor/dev-plugin/babel"] }`
+ * Usage: `{ "plugins": ["@nco-studio/web-editor-plugin/babel"] }`
  */
-export default function frontendEditorBabel(
+export default function ncoWebEditorBabel(
   api: { types: typeof import('@babel/types') },
   options: DevPluginOptions,
 ): PluginObj {
@@ -17,7 +17,7 @@ export default function frontendEditorBabel(
 
   // Production no-op (inline guard — not reliant on build tool)
   if (process.env.NODE_ENV === 'production') {
-    return { name: 'frontend-editor-dev-plugin', visitor: {} };
+    return { name: 'nco-web-editor-plugin', visitor: {} };
   }
 
   const projectRoot = options?.root ?? process.cwd();
@@ -25,7 +25,7 @@ export default function frontendEditorBabel(
   const exclude = options?.exclude ?? [];
 
   return {
-    name: 'frontend-editor-dev-plugin',
+    name: 'nco-web-editor-plugin',
     visitor: {
       Program: {
         enter(programPath: NodePath<Program>, state: PluginPass) {

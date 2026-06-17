@@ -530,7 +530,7 @@ export class InsertEditor {
     // applies the source-level rewrite.
     if (config?.componentInsert) {
       newElement.setAttribute(
-        'data-frontend-editor-pending-component',
+        'data-nco-web-editor-pending-component',
         config.componentInsert.componentName,
       );
     }

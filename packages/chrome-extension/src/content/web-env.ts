@@ -14,13 +14,13 @@
  *   - chrome.runtime.onMessage        → registry-backed dispatch (broadcast()
  *                                        fires all listeners synchronously)
  *
- * The shim also sets `window.__FRONTEND_EDITOR_DEMO__ = true` so other
+ * The shim also sets `window.__NCO_WEB_EDITOR_DEMO__ = true` so other
  * modules (WebSocket client, Apply-Changes button) can behave differently
  * when persistence / MCP submission would make no sense.
  */
 
 type StorageBag = Record<string, unknown>;
-const LS_PREFIX = 'frontend-editor-demo:';
+const LS_PREFIX = 'nco-web-editor-demo:';
 
 const memoryStore = new Map<string, unknown>();
 
@@ -96,14 +96,14 @@ export function broadcastRuntimeMessage(msg: unknown): Promise<unknown> {
     try {
       listener(msg, { id: 'web-embed-demo' }, (resp) => { responses.push(resp); });
     } catch (e) {
-      console.error('[frontend-editor][demo] listener threw', e);
+      console.error('[nco-web-editor][demo] listener threw', e);
     }
   }
   return Promise.resolve(responses[0]);
 }
 
 export function isDemoMode(): boolean {
-  return (globalThis as any).__FRONTEND_EDITOR_DEMO__ === true;
+  return (globalThis as any).__NCO_WEB_EDITOR_DEMO__ === true;
 }
 
 /**
@@ -112,9 +112,9 @@ export function isDemoMode(): boolean {
  */
 export function installChromeShim(): void {
   const w = globalThis as any;
-  w.__FRONTEND_EDITOR_DEMO__ = true;
+  w.__NCO_WEB_EDITOR_DEMO__ = true;
 
-  if (w.chrome && w.chrome.__FRONTEND_EDITOR_SHIM__) return;
+  if (w.chrome && w.chrome.__NCO_WEB_EDITOR_SHIM__) return;
 
   // Clear any leftover keys from an older shim build that persisted to
   // localStorage; the current shim is in-memory only.
@@ -123,7 +123,7 @@ export function installChromeShim(): void {
   const existing = w.chrome || {};
   w.chrome = {
     ...existing,
-    __FRONTEND_EDITOR_SHIM__: true,
+    __NCO_WEB_EDITOR_SHIM__: true,
     storage: {
       ...(existing.storage || {}),
       session: {
@@ -139,7 +139,7 @@ export function installChromeShim(): void {
         addListener: addMessageListener,
         removeListener: removeMessageListener,
       },
-      id: 'frontend-editor-demo',
+      id: 'nco-web-editor-demo',
     },
   };
 }

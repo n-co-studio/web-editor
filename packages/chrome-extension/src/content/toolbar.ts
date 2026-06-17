@@ -196,7 +196,7 @@ const TOOL_LABELS: Record<EditMode, string> = {
   appearance: 'Appearance',
 };
 
-const TOOLBAR_STORAGE_KEY = 'frontend-editor-toolbar-position';
+const TOOLBAR_STORAGE_KEY = 'nco-web-editor-toolbar-position';
 
 const TOOL_ORDER: EditMode[] = [
   'cursor',

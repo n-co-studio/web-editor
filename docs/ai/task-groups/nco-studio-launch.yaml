@@ -1,0 +1,175 @@
+identity:
+  group_name: "nco-studio-launch"
+  created_by_session: 1
+  created_date: "2026-06-17"
+  execution: sequential
+
+briefs:
+  - title: "Identity & Release-Engineering Foundation"
+    sequence: 1
+    session: 1
+    branch: "feature/nco-studio-launch"
+    status: in_progress
+    next_brief: "Visual Identity & Extension Branding"
+    boundaries:
+      - "LICENSE"
+      - "package.json"
+      - "packages/mcp-server/package.json"
+      - "packages/mcp-server/tsup.config.ts"
+      - "packages/mcp-server/tsconfig.json"
+      - "packages/mcp-server/src/**"
+      - "packages/dev-plugin/package.json"
+      - "packages/dev-plugin/tsup.config.ts"
+      - "packages/dev-plugin/src/**"
+      - "packages/shared/package.json"
+      - "packages/chrome-extension/package.json"
+      - "packages/chrome-extension/esbuild.config.js"
+      - "packages/chrome-extension/src/**/*.ts"
+      - "docs/spec/compiled/v1/product.md"
+      - "docs/spec/compiled/v1/architecture.md"
+      - "docs/spec/compiled/v1/integrations.md"
+      - "docs/spec/compiled/v1/data-contracts.md"
+      - "docs/spec/compiled/v1/features/feature-005-mcp-server-bridge.md"
+      - "docs/spec/compiled/v1/features/feature-006-dev-plugin.md"
+
+  - title: "Visual Identity & Extension Branding"
+    sequence: 2
+    session: null
+    branch: "feature/nco-studio-launch"
+    status: pending
+    next_brief: "MCP Server Hardening & Test Coverage"
+    boundaries: []
+
+  - title: "MCP Server Hardening & Test Coverage"
+    sequence: 3
+    session: null
+    branch: "feature/nco-studio-launch"
+    status: pending
+    next_brief: "Chrome Extension Polish & WebStore Prep"
+    boundaries: []
+
+  - title: "Chrome Extension Polish & WebStore Prep"
+    sequence: 4
+    session: null
+    branch: "feature/nco-studio-launch"
+    status: pending
+    next_brief: "Launch Checklist & Operator Guide"
+    boundaries: []
+
+  - title: "Launch Checklist & Operator Guide"
+    sequence: 5
+    session: null
+    branch: "feature/nco-studio-launch"
+    status: pending
+    next_brief: ""
+    boundaries: []
+
+intent:
+  goal: >
+    Rebrand the entire monorepo from @frontend-editor/* to @nco-studio/*,
+    bundle the shared package into the MCP server, give dev-plugin dual ESM/CJS output,
+    and make both public packages structurally publish-ready with a green npm pack --dry-run.
+  verification:
+    - "grep -rn '@frontend-editor|frontend-editor-mcp|FRONTEND_EDITOR_PORT|\\.frontend-editor|frontend-editor\\.componentRoots|data-frontend-editor|__frontendEditor' packages/ docs/spec/compiled/ returns ZERO matches"
+    - "packages/mcp-server published package.json has NO @nco-studio/shared in dependencies"
+    - "cd packages/mcp-server && npm pack --dry-run lists dist/** + LICENSE + README + package.json, NOT src/**"
+    - "dev-plugin emits dist/index.js (ESM) + dist/index.cjs (CJS) + .d.ts"
+    - "bin name is nco-web-editor-mcp, shebang #!/usr/bin/env node intact"
+    - "cd packages/chrome-extension && npm run build succeeds; content.js bundles @nco-studio/shared"
+    - "MIT LICENSE at root and in each published package"
+    - "tsc --noEmit passes monorepo-wide"
+  scope_files:
+    - "LICENSE"
+    - "package.json"
+    - "packages/*/package.json"
+    - "packages/mcp-server/tsup.config.ts"
+    - "packages/mcp-server/tsconfig.json"
+    - "packages/mcp-server/src/**"
+    - "packages/dev-plugin/tsup.config.ts"
+    - "packages/dev-plugin/src/**"
+    - "packages/chrome-extension/esbuild.config.js"
+    - "packages/chrome-extension/src/**/*.ts"
+    - "docs/spec/compiled/v1/{product,architecture,integrations,data-contracts}.md"
+    - "docs/spec/compiled/v1/features/feature-005-mcp-server-bridge.md"
+    - "docs/spec/compiled/v1/features/feature-006-dev-plugin.md"
+  spec_references:
+    - "docs/spec/compiled/v1/architecture.md"
+    - "docs/spec/compiled/v1/integrations.md"
+    - "docs/spec/compiled/v1/features/feature-005-mcp-server-bridge.md"
+    - "docs/spec/compiled/v1/features/feature-006-dev-plugin.md"
+
+conventions:
+  naming:
+    - pattern: "@nco-studio/*"
+      scope: "npm package scopes for all workspace packages"
+    - pattern: "nco-web-editor"
+      scope: "MCP server name, settings key, persist dir prefix, config key prefix"
+    - pattern: "NCO_WEB_EDITOR_PORT"
+      scope: "Environment variable for WebSocket port"
+    - pattern: "data-nco-web-editor*"
+      scope: "DOM data attributes in chrome-extension"
+    - pattern: "__ncoWebEditorContent / __ncoWebEditorBundle"
+      scope: "esbuild globalName identifiers"
+    - pattern: "nco-web-editor-demo:"
+      scope: "localStorage prefix in web-env.ts"
+    - pattern: "ncoWebEditor"
+      scope: "dev-plugin named export (vite plugin function)"
+    - pattern: "[nco-web-editor]"
+      scope: "log prefixes in mcp-server and chrome-extension"
+  patterns:
+    - pattern: "shared package is bundled into mcp-server via tsup noExternal, NOT published separately"
+      rationale: "Operator decision — pre-release, zero users, avoids lockstep-version burden"
+    - pattern: "dev-plugin uses tsup for dual ESM/CJS output"
+      rationale: "Consumer compatibility — both bundler-ESM and CommonJS require patterns"
+    - pattern: "No back-compat shims or migration code — clean rename only"
+      rationale: "Pre-release, zero existing users"
+  decisions:
+    - "Decision 0020"
+    - "Decision 0038"
+  boundaries:
+    - module: "Identity renaming (all packages)"
+      owner_brief: "Brief 1 — Identity & Release-Engineering Foundation"
+    - module: "Build tooling (tsup configs)"
+      owner_brief: "Brief 1 — Identity & Release-Engineering Foundation"
+    - module: "Package metadata (LICENSE, publishConfig)"
+      owner_brief: "Brief 1 — Identity & Release-Engineering Foundation"
+    - module: "Compiled spec reconciliation"
+      owner_brief: "Brief 1 — Identity & Release-Engineering Foundation"
+
+integration_points:
+  - name: "Renamed @nco-studio/* workspace packages"
+    producer: "Brief 1 — Identity & Release-Engineering Foundation"
+    consumer: "Briefs 2–5"
+    artifact: "packages/*/package.json (name field)"
+  - name: "mcp-server tsup build output"
+    producer: "Brief 1 — Identity & Release-Engineering Foundation"
+    consumer: "Brief 3 — MCP Server Hardening & Test Coverage"
+    artifact: "packages/mcp-server/tsup.config.ts + dist/"
+  - name: "dev-plugin dual ESM/CJS exports"
+    producer: "Brief 1 — Identity & Release-Engineering Foundation"
+    consumer: "Brief 4 — Chrome Extension Polish & WebStore Prep"
+    artifact: "packages/dev-plugin/tsup.config.ts + dist/"
+
+session_decisions:
+  - session: 1
+    decision: "Bundle shared into mcp-server via tsup noExternal rather than publishing as 3rd package"
+    rationale: "Pre-release, operator decision — avoids lockstep versioning; users never use shared directly"
+  - session: 1
+    decision: "Clean rename with no back-compat shims"
+    rationale: "Zero existing users — pre-release; shims add dead code"
+
+governance:
+  - brief_sequence: 1
+    gates_a:
+      A1: "pending"
+      A2: "pending"
+      A3: "pending"
+      A4: "pending"
+      A5: "pending"
+      A6: "pending"
+    gates_b:
+      B1: "pending"
+      B2: "pending"
+      B3: "pending"
+    overrides_used: []
+    timestamp: ""

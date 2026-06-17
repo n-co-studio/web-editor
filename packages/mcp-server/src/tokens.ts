@@ -5,7 +5,7 @@ import type {
   DesignToken,
   TokenCategory,
   TokenSourceStatus,
-} from '@frontend-editor/shared';
+} from '@nco-studio/shared';
 import type { TokenSourceType } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -180,7 +180,7 @@ async function findCssFiles(cwd: string, maxFiles = 200): Promise<string[]> {
   await walkDir(srcDir, results, maxFiles);
 
   if (results.length >= maxFiles) {
-    console.error(`[frontend-editor] Warning: truncated CSS file discovery at ${maxFiles} files`);
+    console.error(`[nco-web-editor] Warning: truncated CSS file discovery at ${maxFiles} files`);
   }
   return results;
 }
@@ -248,7 +248,7 @@ export async function parseTokenSource(
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`[frontend-editor] Token parse error (${type}): ${filePath}: ${message}`);
+    console.error(`[nco-web-editor] Token parse error (${type}): ${filePath}: ${message}`);
     return {
       tokens: [],
       status: { file: relPath, status: 'error', error: message, tokenCount: 0 },
@@ -419,7 +419,7 @@ function isTokenCategory(val: string | undefined): val is TokenCategory {
 async function parseTailwindConfig(filePath: string): Promise<DesignToken[]> {
   if (filePath.endsWith('.ts')) {
     console.error(
-      `[frontend-editor] Tailwind TS config not supported in v1 — skipping ${filePath}`,
+      `[nco-web-editor] Tailwind TS config not supported in v1 — skipping ${filePath}`,
     );
     return [];
   }
@@ -484,7 +484,7 @@ async function parseTailwindConfig(filePath: string): Promise<DesignToken[]> {
     }
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`[frontend-editor] Tailwind config import failed: ${message}`);
+    console.error(`[nco-web-editor] Tailwind config import failed: ${message}`);
   }
 
   return tokens;
@@ -515,7 +515,7 @@ export async function discoverTokens(cwd: string): Promise<{
   }
 
   const totalTokens = Array.from(tokenMap.values()).reduce((sum, t) => sum + t.length, 0);
-  console.error(`[frontend-editor] Discovered ${totalTokens} tokens from ${discovered.length} sources`);
+  console.error(`[nco-web-editor] Discovered ${totalTokens} tokens from ${discovered.length} sources`);
 
   return { tokens: tokenMap, sources: statuses, discovered };
 }
@@ -630,7 +630,7 @@ export function watchTokenSources(
   watcher.on('change', (changedPath: string) => {
     const type = typeMap.get(changedPath);
     if (type) {
-      console.error(`[frontend-editor] Token source changed: ${changedPath}`);
+      console.error(`[nco-web-editor] Token source changed: ${changedPath}`);
       onChange(changedPath, type);
     }
   });

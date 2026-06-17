@@ -5,7 +5,7 @@ import { parse as docgenParse } from 'react-docgen';
 import type {
   ProjectComponent,
   ComponentSourceStatus,
-} from '@frontend-editor/shared';
+} from '@nco-studio/shared';
 
 // ---------------------------------------------------------------------------
 // Discovery roots — convention-gated, project-scoped
@@ -21,14 +21,14 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.cache', '.git']);
 
 /**
  * Resolve component scan roots — operator override via target project's
- * `package.json` `frontend-editor.componentRoots` replaces defaults entirely.
+ * `package.json` `nco-web-editor.componentRoots` replaces defaults entirely.
  */
 async function resolveRoots(cwd: string): Promise<string[]> {
   const pkgPath = resolve(cwd, 'package.json');
   try {
     const raw = await readFile(pkgPath, 'utf-8');
     const pkg = JSON.parse(raw) as Record<string, unknown>;
-    const editorCfg = pkg['frontend-editor'];
+    const editorCfg = pkg['nco-web-editor'];
     if (
       editorCfg &&
       typeof editorCfg === 'object' &&
@@ -188,7 +188,7 @@ export async function parseComponentFile(
     };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`[frontend-editor] Component parse error: ${relFile}: ${message}`);
+    console.error(`[nco-web-editor] Component parse error: ${relFile}: ${message}`);
     return {
       components: [],
       status: { file: relFile, status: 'error', error: message, componentCount: 0 },
@@ -225,7 +225,7 @@ export async function discoverComponents(cwd: string): Promise<ComponentDiscover
 
   const total = Array.from(components.values()).reduce((sum, list) => sum + list.length, 0);
   console.error(
-    `[frontend-editor] Discovered ${total} components from ${discovered.length} files (roots: ${roots.join(', ')})`,
+    `[nco-web-editor] Discovered ${total} components from ${discovered.length} files (roots: ${roots.join(', ')})`,
   );
 
   return {
@@ -265,7 +265,7 @@ export function watchComponentSources(
   });
 
   const handler = (kind: ComponentWatchEvent['kind']) => (changedPath: string) => {
-    console.error(`[frontend-editor] Component source ${kind}: ${changedPath}`);
+    console.error(`[nco-web-editor] Component source ${kind}: ${changedPath}`);
     onChange({ kind, file: changedPath });
   };
 

@@ -1,8 +1,8 @@
-import type { VisualDiff, DiffServerStatus } from '@frontend-editor/shared';
+import type { VisualDiff, DiffServerStatus } from '@nco-studio/shared';
 import { MAX_DIFFS_PER_BATCH } from '../../shared/constants';
 import type { PendingEdit, DiffLifecycle } from '../../shared/types';
 
-const STORAGE_KEY = 'frontend-editor-pending-queue';
+const STORAGE_KEY = 'nco-web-editor-pending-queue';
 
 /**
  * Manages the pending edit queue with chrome.storage.session persistence.
@@ -266,7 +266,7 @@ export class PendingQueue {
 
   private persist(): void {
     this.persistAsync().catch((err) => {
-      console.error('[frontend-editor] Failed to persist queue:', err);
+      console.error('[nco-web-editor] Failed to persist queue:', err);
     });
   }
 

@@ -42,7 +42,7 @@ export class ConsolePane {
   }
 
   log(text: string, level: 'info' | 'warn' | 'error' = 'info'): void {
-    const prefix = '[frontend-editor]';
+    const prefix = '[nco-web-editor]';
     if (level === 'error') console.error(prefix, text);
     else if (level === 'warn') console.warn(prefix, text);
     else console.log(prefix, text);

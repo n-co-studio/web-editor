@@ -16,7 +16,7 @@ export interface BoundingRect {
 /**
  * Identifies the DOM element that was visually edited.
  * sourceFile and sourceLine come from data-source-file / data-source-line
- * attributes injected by @frontend-editor/dev-plugin.
+ * attributes injected by @nco-studio/web-editor-plugin.
  */
 export interface ElementInfo {
   readonly selector: string;

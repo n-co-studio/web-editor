@@ -5,8 +5,8 @@
  */
 export function mountShadowHost(): { host: HTMLDivElement; shadow: ShadowRoot } {
   const host = document.createElement('div');
-  host.id = 'frontend-editor-overlay';
-  host.setAttribute('data-frontend-editor', 'true');
+  host.id = 'nco-web-editor-overlay';
+  host.setAttribute('data-nco-web-editor', 'true');
 
   Object.assign(host.style, {
     position: 'fixed',

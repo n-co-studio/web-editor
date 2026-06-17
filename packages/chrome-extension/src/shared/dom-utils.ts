@@ -1,4 +1,4 @@
-import type { BoundingRect, ElementInfo } from '@frontend-editor/shared';
+import type { BoundingRect, ElementInfo } from '@nco-studio/shared';
 import { TEXT_CONTENT_TRUNCATE_LENGTH } from './constants';
 
 // ---------------------------------------------------------------------------
@@ -63,7 +63,7 @@ export interface SourceAttrs {
   readonly index?: number;
 }
 
-/** Read data-source-* attributes injected by @frontend-editor/dev-plugin. */
+/** Read data-source-* attributes injected by @nco-studio/web-editor-plugin. */
 export function readSourceAttributes(el: Element): SourceAttrs | null {
   const file = el.getAttribute('data-source-file');
   const line = el.getAttribute('data-source-line');

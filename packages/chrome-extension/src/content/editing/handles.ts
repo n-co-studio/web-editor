@@ -1,4 +1,4 @@
-import type { ElementInfo, PropertyChange } from '@frontend-editor/shared';
+import type { ElementInfo, PropertyChange } from '@nco-studio/shared';
 import { createElement } from '../../shared/ui-utils';
 import { getComputedProperty, buildElementInfo } from '../../shared/dom-utils';
 import {

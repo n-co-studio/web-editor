@@ -6,21 +6,21 @@ import type { Plugin } from 'vite';
 const DEFAULT_INCLUDE = ['.jsx', '.tsx'];
 
 /**
- * Vite plugin for @frontend-editor/dev-plugin.
+ * Vite plugin for @nco-studio/web-editor-plugin.
  *
  * ```ts
- * import { frontendEditor } from '@frontend-editor/dev-plugin'
- * export default defineConfig({ plugins: [frontendEditor()] })
+ * import { ncoWebEditor } from '@nco-studio/web-editor-plugin'
+ * export default defineConfig({ plugins: [ncoWebEditor()] })
  * ```
  */
-export function frontendEditor(options?: DevPluginOptions): Plugin {
+export function ncoWebEditor(options?: DevPluginOptions): Plugin {
   let projectRoot: string;
   let disabled = false;
   const include = options?.include ?? DEFAULT_INCLUDE;
   const exclude = options?.exclude ?? [];
 
   return {
-    name: 'frontend-editor-dev-plugin',
+    name: 'nco-web-editor-plugin',
     enforce: 'pre',
 
     configResolved(config) {

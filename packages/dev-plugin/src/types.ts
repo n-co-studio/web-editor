@@ -1,5 +1,5 @@
 /**
- * Options for @frontend-editor/dev-plugin.
+ * Options for @nco-studio/web-editor-plugin.
  */
 export interface DevPluginOptions {
   /**

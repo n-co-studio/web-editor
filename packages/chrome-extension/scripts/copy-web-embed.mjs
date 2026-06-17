@@ -5,12 +5,12 @@
  * Expected layout:
  *   /Users/Mark/Developer/
  *     markpreston/                       ← portfolio site
- *     _tools/_extensions/repo-os-frontend-editor/
+ *     _tools/_extensions/repo-os-nco-web-editor/
  *       packages/chrome-extension/
  *         dist/web-embed.js              ← built artifact
  *         scripts/copy-web-embed.mjs     ← this file
  *
- * Destination: markpreston/public/frontend-editor/web-embed.js
+ * Destination: markpreston/public/nco-web-editor/web-embed.js
  */
 import { copyFileSync, mkdirSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
@@ -22,7 +22,7 @@ const distPath = resolve(extensionRoot, 'dist/web-embed.js');
 const distMapPath = resolve(extensionRoot, 'dist/web-embed.js.map');
 
 const portfolioRoot = resolve(extensionRoot, '../../../../../markpreston');
-const destDir = resolve(portfolioRoot, 'public/frontend-editor');
+const destDir = resolve(portfolioRoot, 'public/nco-web-editor');
 const destPath = resolve(destDir, 'web-embed.js');
 const destMapPath = resolve(destDir, 'web-embed.js.map');
 

@@ -49,7 +49,7 @@ export async function createServer(): Promise<void> {
 
   // 5. Create MCP server
   const server = new McpServer({
-    name: 'frontend-editor',
+    name: 'nco-web-editor',
     version: '0.1.0',
   });
 
@@ -60,7 +60,7 @@ export async function createServer(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  console.error(`[frontend-editor] MCP server running (WebSocket port: ${port})`);
+  console.error(`[nco-web-editor] MCP server running (WebSocket port: ${port})`);
 
   // Graceful shutdown
   const shutdown = async () => {
@@ -295,7 +295,7 @@ function registerTools(server: McpServer, bridge: Bridge): void {
           .string()
           .optional()
           .describe(
-            'Output file path (defaults to .frontend-editor/session-export.json)',
+            'Output file path (defaults to .nco-web-editor/session-export.json)',
           ),
       }),
     },
@@ -360,7 +360,7 @@ function registerTools(server: McpServer, bridge: Bridge): void {
         'exportType (named or default), and props ([] in v1; prop schema is ' +
         'reserved for v1.1). Components are discovered from convention-gated ' +
         'roots (src/components, src/ui, components — overridable via ' +
-        'frontend-editor.componentRoots in the target project package.json). ' +
+        'nco-web-editor.componentRoots in the target project package.json). ' +
         'Optionally filter by a case-insensitive substring of componentName. ' +
         'Used to resolve InsertChange.componentInsert descriptors emitted by ' +
         'the extension into source-level JSX usages + imports.',

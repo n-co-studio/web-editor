@@ -4,7 +4,7 @@ import type {
   CompoundChildDescriptor,
   RuleSource,
   CrossBreakpointRuleSource,
-} from '@frontend-editor/shared';
+} from '@nco-studio/shared';
 
 /**
  * Serialize active diffs and notes into a clipboard-ready prompt.
@@ -249,7 +249,7 @@ export function serializeToPrompt(
 
   // Raw JSON in HTML comment for machine parsing
   const raw = JSON.stringify({ diffs, notes: activeNotes });
-  sections.push(`<!-- frontend-editor-raw: ${raw} -->`);
+  sections.push(`<!-- nco-web-editor-raw: ${raw} -->`);
 
   return sections.join('\n');
 }

@@ -4,7 +4,7 @@
 Discover the target project's local React components (JSX/TSX) and surface them as insertable elements in the insert panel. The MCP server scans convention-gated source roots, parses component signatures (name, import path, prop schema), and pushes the resulting registry to the extension over WebSocket. When the operator picks a project component from the insert panel, the resulting `InsertChange` carries a `componentInsert` descriptor — Claude Code resolves the descriptor into a JSX usage with the correct import. v1 scope is discovery + insert only; prop UI and token-snapping for prop values are deferred to feature-008.1.
 
 ## User Flow
-1. Operator activates extension on a project with local components under conventional roots (`src/components/**`, `src/ui/**`, `components/**`, or operator-configured roots via `frontend-editor.componentRoots` in the target project's `package.json`)
+1. Operator activates extension on a project with local components under conventional roots (`src/components/**`, `src/ui/**`, `components/**`, or operator-configured roots via `nco-web-editor.componentRoots` in the target project's `package.json`)
 2. MCP server scans the configured roots at startup, parses each component, and assembles a `ProjectComponent[]` registry
 3. MCP server pushes `COMPONENT_DATA` to the extension over the existing WebSocket
 4. Operator opens the insert panel — a new "Project Components" section appears above the standard HTML element catalog
@@ -22,7 +22,7 @@ Same convention-gated, project-scoped scan pattern as token discovery (feature-0
 The set can be overridden in the target project's `package.json` via:
 ```json
 {
-  "frontend-editor": {
+  "nco-web-editor": {
     "componentRoots": ["src/blocks", "app/components"]
   }
 }
@@ -42,11 +42,11 @@ File watcher uses chokidar with 300ms debounce. Granularity: per-source rebuild 
 - **Components loaded**: Insert panel renders a "Project Components" section above the HTML catalog. Each entry shows: display name (component name), workspace-relative import path (always visible, secondary text), and a generic component glyph.
 - **Component scan in progress**: Section header shows "Project Components — scanning…" (initial scan only; subsequent file-change rebuilds happen silently in the background).
 - **Component scan partial failure**: Section header shows "Project Components (N failed)" when `failedCount > 0`. Failed files are silently omitted from the registry; successful entries remain selectable.
-- **Inserted**: Operator picks a project component → drop target accepts → phantom `<div>` renders at the drop target with a `data-frontend-editor-pending-component="<componentName>"` attribute. The pending changes panel shows the entry as a component insert with the import path.
+- **Inserted**: Operator picks a project component → drop target accepts → phantom `<div>` renders at the drop target with a `data-nco-web-editor-pending-component="<componentName>"` attribute. The pending changes panel shows the entry as a component insert with the import path.
 
 ## Inputs
 - Target project file tree (read from disk by the MCP server)
-- Target project `package.json` `frontend-editor.componentRoots` (optional)
+- Target project `package.json` `nco-web-editor.componentRoots` (optional)
 - `COMPONENT_DATA` / `COMPONENT_UPDATE` payloads (extension-side)
 - Operator's drop target (container + insert index) from the insert panel
 - Selected `ProjectComponent` from the insert panel (extension-side)
@@ -73,7 +73,7 @@ File watcher uses chokidar with 300ms debounce. Granularity: per-source rebuild 
 
 ## Acceptance Criteria
 - [ ] MCP server auto-discovers project components from `src/components/**`, `src/ui/**`, and `components/**` at startup
-- [ ] `frontend-editor.componentRoots` in target project's `package.json` overrides default roots
+- [ ] `nco-web-editor.componentRoots` in target project's `package.json` overrides default roots
 - [ ] `ProjectComponent` entries include `componentName`, `importPath` (workspace-relative), `exportType` (`'named' | 'default'`), `props: []` (v1 always empty), and `source: 'local'`
 - [ ] `get_project_components` MCP tool returns `{ components, sourceCount, failedCount }` over JSON-RPC 2.0 stdio, with optional `nameFilter` input
 - [ ] WebSocket `COMPONENT_DATA` is pushed on extension connect with the full current registry
@@ -84,7 +84,7 @@ File watcher uses chokidar with 300ms debounce. Granularity: per-source rebuild 
 - [ ] Insert panel renders a "Project Components" section when the registry is non-empty
 - [ ] Each "Project Components" entry shows the workspace-relative import path beneath the component name
 - [ ] Operator can drop a project component into a valid container → an `InsertChange` is produced with `componentInsert: { componentName, importPath, props: [] }`
-- [ ] Phantom DOM render uses `tagName: 'div'` with `data-frontend-editor-pending-component` attribute for inspection
+- [ ] Phantom DOM render uses `tagName: 'div'` with `data-nco-web-editor-pending-component` attribute for inspection
 - [ ] No `data-source-*` attributes are required on the existing target element to perform a component insert (the descriptor itself locates the component)
 
 ## Accepted Limitations

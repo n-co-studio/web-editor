@@ -1,4 +1,4 @@
-import type { PropertyChange } from '@frontend-editor/shared';
+import type { PropertyChange } from '@nco-studio/shared';
 import { createElement } from '../../shared/ui-utils';
 import { getComputedProperty } from '../../shared/dom-utils';
 import { OVERLAY } from '../../shared/constants';

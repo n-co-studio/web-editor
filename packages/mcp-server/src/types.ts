@@ -1,4 +1,4 @@
-import type { VisualDiff } from '@frontend-editor/shared';
+import type { VisualDiff } from '@nco-studio/shared';
 import type { WebSocket } from 'ws';
 
 /** A connected Chrome extension tab. */
@@ -13,7 +13,7 @@ export interface PendingNote {
   readonly receivedAt: string;
 }
 
-/** Serializable shape for .frontend-editor/pending-queue.json. */
+/** Serializable shape for .nco-web-editor/pending-queue.json. */
 export interface PersistedQueue {
   readonly version: string;
   readonly diffs: readonly VisualDiff[];

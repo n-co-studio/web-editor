@@ -1,4 +1,4 @@
-import type { VisualDiff, AttributeChange } from '@frontend-editor/shared';
+import type { VisualDiff, AttributeChange } from '@nco-studio/shared';
 
 /**
  * Tracks committed edits for undo/redo/reset.

@@ -1,4 +1,4 @@
-import type { VisualDiff } from '@frontend-editor/shared';
+import type { VisualDiff } from '@nco-studio/shared';
 import { createElement, createText } from '../../../shared/ui-utils';
 import { OVERLAY } from '../../../shared/constants';
 import { getComputedProperty, generateSelector, createStyleSnapshot, snapshotGet } from '../../../shared/dom-utils';

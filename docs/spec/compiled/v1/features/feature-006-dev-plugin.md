@@ -4,7 +4,7 @@
 Build plugin that injects `data-source-file` and `data-source-line` attributes onto every rendered DOM element during development. This is the deterministic source mapping layer that enables precise file:line references in visual diffs. Published as a standalone source-mapping primitive — Frontend Editor is a first-party consumer.
 
 ## User Flow
-1. Operator installs `@frontend-editor/dev-plugin` as a devDependency
+1. Operator installs `@nco-studio/web-editor-plugin` as a devDependency
 2. Operator adds plugin to their build config (Vite or Babel)
 3. Dev server starts — plugin activates in development mode
 4. At build time, plugin visits every JSX/TSX element in the AST
@@ -16,14 +16,14 @@ Build plugin that injects `data-source-file` and `data-source-line` attributes o
 
 ### Installation
 ```bash
-npm install -D @frontend-editor/dev-plugin
+npm install -D @nco-studio/web-editor-plugin
 ```
 
 ```ts
 // vite.config.ts
-import { frontendEditor } from '@frontend-editor/dev-plugin'
+import { ncoWebEditor } from '@nco-studio/web-editor-plugin'
 export default defineConfig({
-  plugins: [frontendEditor()]
+  plugins: [ncoWebEditor()]
 })
 ```
 

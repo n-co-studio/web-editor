@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import type { MatchedRule, AccessLevel, MatchResult } from '../../shared/css-types';
-import type { RuleSource, CrossBreakpointRuleSource } from '@frontend-editor/shared';
+import type { RuleSource, CrossBreakpointRuleSource } from '@nco-studio/shared';
 import { computeSpecificity, compareSpecificity } from './specificity';
 
 const RULE_COUNT_CEILING = 5_000;

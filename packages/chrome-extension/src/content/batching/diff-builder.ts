@@ -13,7 +13,7 @@ import type {
   PageContext,
   RuleSource,
   CrossBreakpointRuleSource,
-} from '@frontend-editor/shared';
+} from '@nco-studio/shared';
 import type { TokenStore } from '../tokens/store';
 
 /**

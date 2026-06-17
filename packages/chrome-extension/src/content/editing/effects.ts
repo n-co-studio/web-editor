@@ -1,4 +1,4 @@
-import type { PropertyChange, RelatedChange, ElementInfo } from '@frontend-editor/shared';
+import type { PropertyChange, RelatedChange, ElementInfo } from '@nco-studio/shared';
 import { createElement, createText, createButton, makeDraggable } from '../../shared/ui-utils';
 import { getComputedProperty, buildElementInfo } from '../../shared/dom-utils';
 import { OVERLAY, TOOLBAR_WIDTH } from '../../shared/constants';

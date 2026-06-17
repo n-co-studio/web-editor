@@ -1,4 +1,4 @@
-import type { NoteElementRef, NoteEntry } from '@frontend-editor/shared';
+import type { NoteElementRef, NoteEntry } from '@nco-studio/shared';
 import { createElement, createText, createButton, makeDraggable } from '../../shared/ui-utils';
 import { OVERLAY, TOOLBAR_WIDTH, NOTES_PANEL_MAX_HEIGHT, NOTES_PANEL_WIDTH } from '../../shared/constants';
 import type { PanelPosition } from '../../shared/types';

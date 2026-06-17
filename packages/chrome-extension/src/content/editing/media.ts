@@ -1,4 +1,4 @@
-import type { PropertyChange, AttributeChange } from '@frontend-editor/shared';
+import type { PropertyChange, AttributeChange } from '@nco-studio/shared';
 import { createElement, createText, createButton, makeDraggable } from '../../shared/ui-utils';
 import { getComputedProperty } from '../../shared/dom-utils';
 import { OVERLAY, TOOLBAR_WIDTH } from '../../shared/constants';
@@ -438,7 +438,7 @@ export class MediaEditor {
 
   /** Persist the last file handle to IndexedDB (keyed by origin). */
   private static persistHandle(handle: FileSystemFileHandle): void {
-    const dbReq = indexedDB.open('frontend-editor-media', 1);
+    const dbReq = indexedDB.open('nco-web-editor-media', 1);
     dbReq.onupgradeneeded = () => {
       const db = dbReq.result;
       if (!db.objectStoreNames.contains('handles')) {
@@ -454,7 +454,7 @@ export class MediaEditor {
 
   /** Restore the last file handle from IndexedDB on first use. */
   static restoreHandle(): void {
-    const dbReq = indexedDB.open('frontend-editor-media', 1);
+    const dbReq = indexedDB.open('nco-web-editor-media', 1);
     dbReq.onupgradeneeded = () => {
       const db = dbReq.result;
       if (!db.objectStoreNames.contains('handles')) {

@@ -21,11 +21,11 @@ import type { IconStatus } from '../shared/types';
 // ---------------------------------------------------------------------------
 
 const ICON_PATHS: Record<IconStatus, string> = {
-  disabled: 'icons/status/frontend-editor-icon-disabled.png',
-  active: 'icons/status/frontend-editor-icon-active.png',
-  orange: 'icons/status/frontend-editor-icon-orange.png',
-  green: 'icons/status/frontend-editor-icon-green.png',
-  red: 'icons/status/frontend-editor-icon-red.png',
+  disabled: 'icons/status/nco-web-editor-icon-disabled.png',
+  active: 'icons/status/nco-web-editor-icon-active.png',
+  orange: 'icons/status/nco-web-editor-icon-orange.png',
+  green: 'icons/status/nco-web-editor-icon-green.png',
+  red: 'icons/status/nco-web-editor-icon-red.png',
 };
 
 const ICON_TITLES: Record<IconStatus, string> = {
@@ -134,5 +134,5 @@ chrome.runtime.onMessage.addListener(
 // ---------------------------------------------------------------------------
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('[frontend-editor] Extension installed');
+  console.log('[nco-web-editor] Extension installed');
 });

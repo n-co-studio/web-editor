@@ -1,4 +1,4 @@
-import type { PropertyChange } from '@frontend-editor/shared';
+import type { PropertyChange } from '@nco-studio/shared';
 import { getComputedProperty } from '../../shared/dom-utils';
 
 /** Border radius corner properties. */

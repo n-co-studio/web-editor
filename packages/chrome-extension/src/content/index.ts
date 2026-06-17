@@ -55,7 +55,7 @@ import { MeasureOverlay } from './selection/measure-overlay';
 import { MultiSelectManager } from './selection/multi-select';
 import { MultiSelectToolbar } from './editing/multi-select-toolbar';
 import { buildElementInfo, getTopElementAt, generateSelector, getComputedProperty } from '../shared/dom-utils';
-import type { VisualDiff, PropertyChange, AttributeChange, TextChange, ReorderChange, ReparentChange, GroupChange, RemoveChange } from '@frontend-editor/shared';
+import type { VisualDiff, PropertyChange, AttributeChange, TextChange, ReorderChange, ReparentChange, GroupChange, RemoveChange } from '@nco-studio/shared';
 import type { ExtensionMode, ConnectionStatus, EditMode, IconStatus } from '../shared/types';
 
 // ---------------------------------------------------------------------------
@@ -849,7 +849,7 @@ export async function activate(): Promise<void> {
     try {
       await captureFullPage(host);
     } catch (err) {
-      console.error('[frontend-editor] Screenshot failed:', err);
+      console.error('[nco-web-editor] Screenshot failed:', err);
     } finally {
       toolbar!.setScreenshotBusy(false);
     }
@@ -1092,7 +1092,7 @@ export function deactivate(): void {
   notePickMode = null;
 
   // Panel is already destroyed at this point, so use console directly
-  console.log('[frontend-editor] Extension deactivated');
+  console.log('[nco-web-editor] Extension deactivated');
 }
 
 function toggleActive(): void {
@@ -2466,7 +2466,7 @@ document.addEventListener(
 // Tab ID management
 // ---------------------------------------------------------------------------
 
-const TAB_ID_KEY = 'frontend-editor-tab-id';
+const TAB_ID_KEY = 'nco-web-editor-tab-id';
 
 async function getOrCreateTabId(): Promise<string> {
   try {
@@ -2505,4 +2505,4 @@ chrome.runtime.onMessage.addListener(
   },
 );
 
-console.log('[frontend-editor] Content script loaded');
+console.log('[nco-web-editor] Content script loaded');

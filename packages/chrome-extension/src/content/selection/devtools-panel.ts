@@ -1,4 +1,4 @@
-import type { ElementInfo } from '@frontend-editor/shared';
+import type { ElementInfo } from '@nco-studio/shared';
 import { createElement, createText, createButton } from '../../shared/ui-utils';
 import { buildElementInfo, createStyleSnapshot } from '../../shared/dom-utils';
 import {
@@ -23,8 +23,8 @@ type ElementSelectCallback = (element: Element) => void;
 type PropertyChangeCallback = (property: string, fromValue: string, toValue: string, token?: string) => void;
 type MultiPropertyChangeCallback = (changes: Array<{ element: Element; property: string; fromValue: string; toValue: string; token?: string }>) => void;
 
-const STORAGE_KEY_HEIGHT = 'frontend-editor-devtools-height';
-const STORAGE_KEY_SPLIT = 'frontend-editor-devtools-split';
+const STORAGE_KEY_HEIGHT = 'nco-web-editor-devtools-height';
+const STORAGE_KEY_SPLIT = 'nco-web-editor-devtools-split';
 const MIN_PANE_WIDTH = 200;
 
 /**

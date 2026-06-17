@@ -1,9 +1,10 @@
 {
-  "name": "@frontend-editor/mcp-server",
+  "name": "@nco-studio/web-editor-mcp",
   "version": "0.1.0",
+  "description": "MCP server bridge for NCO Studio Web Editor — connects Claude Code to your browser via WebSocket",
   "type": "module",
   "bin": {
-    "frontend-editor-mcp": "./dist/bin/cli.js"
+    "nco-web-editor-mcp": "./dist/bin/cli.js"
   },
   "exports": {
     ".": {
@@ -15,14 +16,15 @@
   "types": "./dist/server.d.ts",
   "files": [
     "dist",
-    "src"
+    "LICENSE"
   ],
   "scripts": {
-    "build": "tsc --build",
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@frontend-editor/shared": "0.1.0",
     "@modelcontextprotocol/sdk": "^1.25.0",
     "chokidar": "^4.0.0",
     "react-docgen": "^7.0.0",
@@ -30,11 +32,36 @@
     "zod": "^3.23.0"
   },
   "devDependencies": {
+    "@nco-studio/shared": "0.1.0",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.5.0",
+    "tsup": "^8.0.0",
     "typescript": "~5.7.0"
   },
   "engines": {
     "node": ">=20"
+  },
+  "license": "MIT",
+  "author": "NCO Studio (Mark Preston) <hello@markpreston.co>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/markpreston2/frontend-editor.git",
+    "directory": "packages/mcp-server"
+  },
+  "homepage": "https://github.com/markpreston2/frontend-editor/tree/main/packages/mcp-server#readme",
+  "bugs": {
+    "url": "https://github.com/markpreston2/frontend-editor/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "visual-editing",
+    "frontend",
+    "claude",
+    "nco-studio"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

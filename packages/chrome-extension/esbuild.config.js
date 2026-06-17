@@ -21,7 +21,7 @@ const entries = [
     entryPoints: [resolve(__dirname, 'src/content/index.ts')],
     outfile: resolve(__dirname, 'dist/content.js'),
     format: 'iife',
-    globalName: '__frontendEditorContent',
+    globalName: '__ncoWebEditorContent',
   },
   {
     entryPoints: [resolve(__dirname, 'src/service-worker/index.ts')],
@@ -41,7 +41,7 @@ const entries = [
     entryPoints: [resolve(__dirname, 'src/content/web-embed.ts')],
     outfile: resolve(__dirname, 'dist/web-embed.js'),
     format: 'iife',
-    globalName: '__frontendEditorBundle',
+    globalName: '__ncoWebEditorBundle',
     minify: !isWatch,
   },
 ];
@@ -60,7 +60,7 @@ if (isWatch) {
     const ctx = await context({ ...shared, ...entry });
     await ctx.watch();
   }
-  console.log('[frontend-editor] Watching for changes...');
+  console.log('[nco-web-editor] Watching for changes...');
 } else {
   await Promise.all(entries.map((entry) => build({ ...shared, ...entry })));
 }

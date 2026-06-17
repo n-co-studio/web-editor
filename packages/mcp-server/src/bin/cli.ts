@@ -2,6 +2,6 @@
 import { createServer } from '../server.js';
 
 createServer().catch((error: unknown) => {
-  console.error('[frontend-editor] Fatal error:', error);
+  console.error('[nco-web-editor] Fatal error:', error);
   process.exit(1);
 });

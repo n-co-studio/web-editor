@@ -12,7 +12,7 @@ import type {
   ComponentInsertDescriptor,
   InsertChange,
   PropertyChange,
-} from '@frontend-editor/shared';
+} from '@nco-studio/shared';
 import { generateSelector } from '../../shared/dom-utils';
 
 // ---------------------------------------------------------------------------

@@ -6,7 +6,7 @@ import type {
   RuleSource,
   CrossBreakpointRuleSource,
   PageContext,
-} from '@frontend-editor/shared';
+} from '@nco-studio/shared';
 import { serializeToPrompt, formatSourceContext } from './prompt-serializer.js';
 
 const baseRect = {
@@ -137,7 +137,7 @@ describe('prompt-serializer breakpoint context', () => {
       context: { breakpoint: 'lg', breakpointValue: '1280px' },
     });
     const out = serializeToPrompt([diff]);
-    const m = out.match(/<!-- frontend-editor-raw: (.*?) -->/);
+    const m = out.match(/<!-- nco-web-editor-raw: (.*?) -->/);
     assert.ok(m, 'raw comment present');
     const parsed = JSON.parse(m![1]);
     assert.equal(parsed.diffs.length, 1);

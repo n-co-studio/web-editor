@@ -1,4 +1,4 @@
-import type { DesignToken } from '@frontend-editor/shared';
+import type { DesignToken } from '@nco-studio/shared';
 import { createElement } from '../../shared/ui-utils';
 import { OVERLAY, SNAP_EASE_MS } from '../../shared/constants';
 import type { TokenStore } from './store';

@@ -1,4 +1,4 @@
-import type { ElementInfo } from '@frontend-editor/shared';
+import type { ElementInfo } from '@nco-studio/shared';
 import { buildElementInfo, readSourceAttributes } from '../../shared/dom-utils';
 import { createElement } from '../../shared/ui-utils';
 import { OVERLAY } from '../../shared/constants';

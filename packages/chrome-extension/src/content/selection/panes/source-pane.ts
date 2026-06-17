@@ -1,4 +1,4 @@
-import type { ElementInfo } from '@frontend-editor/shared';
+import type { ElementInfo } from '@nco-studio/shared';
 import { createElement, createText } from '../../../shared/ui-utils';
 import { OVERLAY, SELECTOR_TRUNCATE_LENGTH } from '../../../shared/constants';
 

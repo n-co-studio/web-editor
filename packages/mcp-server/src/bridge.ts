@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import {
   PROTOCOL_VERSION,
   MessageType,
-} from '@frontend-editor/shared';
+} from '@nco-studio/shared';
 import type {
   VisualDiff,
   AttributeChange,
@@ -16,11 +16,11 @@ import type {
   ComponentSourceStatus,
   ExtensionToServerMessage,
   ServerToExtensionMessage,
-} from '@frontend-editor/shared';
+} from '@nco-studio/shared';
 import { resolveToToken } from './tokens.js';
 import type { ConnectedClient, PendingNote, PersistedQueue, SessionExport, DriftEntry } from './types.js';
 
-const PERSIST_DIR = '.frontend-editor';
+const PERSIST_DIR = '.nco-web-editor';
 const PERSIST_FILE = 'pending-queue.json';
 const LOCK_FILE = 'server.lock';
 
@@ -66,12 +66,12 @@ export class Bridge {
   async start(): Promise<number> {
     if (!(await this.acquireLock())) {
       throw new Error(
-        'Another frontend-editor MCP server is already running in this project directory',
+        'Another nco-web-editor MCP server is already running in this project directory',
       );
     }
 
     try {
-      const basePort = parseInt(process.env.FRONTEND_EDITOR_PORT ?? '7890', 10);
+      const basePort = parseInt(process.env.NCO_WEB_EDITOR_PORT ?? '7890', 10);
 
       for (let port = basePort; port < basePort + 10; port++) {
         const bound = await this.tryPort(port);
@@ -79,7 +79,7 @@ export class Bridge {
           await this.restoreQueue();
           // Initialize status file — reflects restored queue state or clean start
           await this.writeStatusFile(this.pendingQueue.length > 0 ? 'active' : 'closed');
-          console.error(`[frontend-editor] WebSocket server listening on port ${port}`);
+          console.error(`[nco-web-editor] WebSocket server listening on port ${port}`);
           return port;
         }
       }
@@ -140,14 +140,14 @@ export class Bridge {
         isPidAlive(holderPid)
       ) {
         console.error(
-          `[frontend-editor] Another server is already running (PID ${holderPid}) ` +
+          `[nco-web-editor] Another server is already running (PID ${holderPid}) ` +
             `in ${this.cwd}. Exiting. If you believe this is stale, delete ${this.lockPath}.`,
         );
         return false;
       }
 
       console.error(
-        `[frontend-editor] Removing stale lock file (PID ${holderPid || 'unknown'} not alive)`,
+        `[nco-web-editor] Removing stale lock file (PID ${holderPid || 'unknown'} not alive)`,
       );
       try {
         await unlink(this.lockPath);
@@ -213,7 +213,7 @@ export class Bridge {
     if (idx === -1) return false;
 
     const diff = this.pendingQueue[idx];
-    console.error(`[frontend-editor] Diff ${diffId} rejected: ${reason}`);
+    console.error(`[nco-web-editor] Diff ${diffId} rejected: ${reason}`);
     this.pendingQueue.splice(idx, 1);
     this.processedIds.add(diffId);
     this.safePersistQueue();
@@ -471,7 +471,7 @@ export class Bridge {
   }
 
   private handleConnection(ws: WebSocket): void {
-    console.error('[frontend-editor] Extension connected');
+    console.error('[nco-web-editor] Extension connected');
 
     ws.on('message', (data: Buffer) => {
       this.handleMessage(ws, data);
@@ -482,14 +482,14 @@ export class Bridge {
       for (const [tabId, client] of this.clients) {
         if (client.ws === ws) {
           this.clients.delete(tabId);
-          console.error(`[frontend-editor] Extension disconnected (tab: ${tabId})`);
+          console.error(`[nco-web-editor] Extension disconnected (tab: ${tabId})`);
           break;
         }
       }
     });
 
     ws.on('error', (error: Error) => {
-      console.error(`[frontend-editor] WebSocket error: ${error.message}`);
+      console.error(`[nco-web-editor] WebSocket error: ${error.message}`);
     });
   }
 
@@ -498,7 +498,7 @@ export class Bridge {
     try {
       msg = JSON.parse(data.toString());
     } catch {
-      console.error('[frontend-editor] Invalid WebSocket message — not JSON');
+      console.error('[nco-web-editor] Invalid WebSocket message — not JSON');
       return;
     }
 
@@ -508,7 +508,7 @@ export class Bridge {
       !('type' in msg) || !('payload' in msg) ||
       (msg as Record<string, unknown>).payload == null
     ) {
-      console.error('[frontend-editor] Invalid WebSocket message — missing type or payload');
+      console.error('[nco-web-editor] Invalid WebSocket message — missing type or payload');
       return;
     }
 
@@ -533,12 +533,12 @@ export class Bridge {
 
       case MessageType.ERROR:
         console.error(
-          `[frontend-editor] Extension error: ${typed.payload.code} — ${typed.payload.message}`,
+          `[nco-web-editor] Extension error: ${typed.payload.code} — ${typed.payload.message}`,
         );
         break;
 
       default:
-        console.error(`[frontend-editor] Unknown message type: ${(typed as { type: string }).type}`);
+        console.error(`[nco-web-editor] Unknown message type: ${(typed as { type: string }).type}`);
     }
   }
 
@@ -550,7 +550,7 @@ export class Bridge {
 
     // Register or update client
     this.clients.set(tabId, { ws, tabId });
-    console.error(`[frontend-editor] Extension hello from tab: ${tabId}`);
+    console.error(`[nco-web-editor] Extension hello from tab: ${tabId}`);
 
     // Respond with SERVER_HELLO — split pending and applied IDs
     // so the extension can distinguish server queue state from completed diffs
@@ -600,7 +600,7 @@ export class Bridge {
     // Process asynchronously (data URL extraction may involve disk writes)
     this.processDiffBatch(payload).catch((err) => {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[frontend-editor] Error processing diff batch: ${msg}`);
+      console.error(`[nco-web-editor] Error processing diff batch: ${msg}`);
     });
   }
 
@@ -623,7 +623,7 @@ export class Bridge {
     // Store batch note if provided
     if (batchNote) {
       this.pendingNotes.push({ text: batchNote, receivedAt: new Date().toISOString() });
-      console.error(`[frontend-editor] Received batch note (${batchNote.length} chars)`);
+      console.error(`[nco-web-editor] Received batch note (${batchNote.length} chars)`);
     }
 
     if (newDiffs.length > 0 || batchNote) {
@@ -635,7 +635,7 @@ export class Bridge {
     }
 
     console.error(
-      `[frontend-editor] Received ${diffs.length} diffs (${newDiffs.length} new, ${diffs.length - newDiffs.length} already known)`,
+      `[nco-web-editor] Received ${diffs.length} diffs (${newDiffs.length} new, ${diffs.length - newDiffs.length} already known)`,
     );
   }
 
@@ -746,7 +746,7 @@ export class Bridge {
   private safeWriteStatusFile(status: 'active' | 'closed'): void {
     this.writeStatusFile(status).catch((error: unknown) => {
       const msg = error instanceof Error ? error.message : String(error);
-      console.error(`[frontend-editor] Failed to write status file: ${msg}`);
+      console.error(`[nco-web-editor] Failed to write status file: ${msg}`);
     });
   }
 
@@ -758,7 +758,7 @@ export class Bridge {
   private safePersistQueue(): void {
     this.persistQueue().catch((error: unknown) => {
       const msg = error instanceof Error ? error.message : String(error);
-      console.error(`[frontend-editor] Failed to persist queue: ${msg}`);
+      console.error(`[nco-web-editor] Failed to persist queue: ${msg}`);
     });
   }
 
@@ -793,12 +793,12 @@ export class Bridge {
         this.pendingQueue = valid;
         if (valid.length < data.diffs.length) {
           console.error(
-            `[frontend-editor] Skipped ${data.diffs.length - valid.length} invalid entries from persisted queue`,
+            `[nco-web-editor] Skipped ${data.diffs.length - valid.length} invalid entries from persisted queue`,
           );
         }
         if (valid.length > 0) {
           console.error(
-            `[frontend-editor] Restored ${valid.length} pending diffs from disk`,
+            `[nco-web-editor] Restored ${valid.length} pending diffs from disk`,
           );
         }
       }
@@ -809,7 +809,7 @@ export class Bridge {
         );
         if (this.pendingNotes.length > 0) {
           console.error(
-            `[frontend-editor] Restored ${this.pendingNotes.length} pending notes from disk`,
+            `[nco-web-editor] Restored ${this.pendingNotes.length} pending notes from disk`,
           );
         }
       }
@@ -863,10 +863,10 @@ export class Bridge {
           const savedPath = await this.saveDataUrl(ac.toValue, ac.fromValue);
           updated.push({ ...ac, toValue: savedPath });
           changed = true;
-          console.error(`[frontend-editor] Saved data URL as ${savedPath}`);
+          console.error(`[nco-web-editor] Saved data URL as ${savedPath}`);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          console.error(`[frontend-editor] Failed to save data URL: ${msg}`);
+          console.error(`[nco-web-editor] Failed to save data URL: ${msg}`);
           updated.push(ac); // keep original data URL as fallback
         }
       } else {
@@ -910,12 +910,12 @@ export class Bridge {
     try {
       const existing = await this.findExistingAsset(buffer, hash, targetDir);
       if (existing) {
-        console.error(`[frontend-editor] Reusing existing asset ${existing} (content match — no duplicate written)`);
+        console.error(`[nco-web-editor] Reusing existing asset ${existing} (content match — no duplicate written)`);
         return existing;
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[frontend-editor] Asset dedup scan failed (${msg}) — writing new file`);
+      console.error(`[nco-web-editor] Asset dedup scan failed (${msg}) — writing new file`);
     }
 
     // Name the file by content hash so re-uploading the same image is idempotent.

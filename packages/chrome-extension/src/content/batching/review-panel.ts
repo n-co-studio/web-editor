@@ -1,4 +1,4 @@
-import type { VisualDiff, NoteEntry } from '@frontend-editor/shared';
+import type { VisualDiff, NoteEntry } from '@nco-studio/shared';
 import { createElement, createText, createButton } from '../../shared/ui-utils';
 import {
   OVERLAY,
@@ -17,7 +17,7 @@ import { serializeToPrompt } from './prompt-serializer';
 
 type VoidCallback = () => void;
 
-const STORAGE_KEY_WIDTH = 'frontend-editor-queue-width';
+const STORAGE_KEY_WIDTH = 'nco-web-editor-queue-width';
 
 /**
  * Review panel for pending changes. Renders inside the shadow DOM.
@@ -355,7 +355,7 @@ export class ReviewPanel {
   }
 
   private renderConnectionWarning(): HTMLDivElement {
-    const demoMode = (globalThis as any).__FRONTEND_EDITOR_DEMO__ === true;
+    const demoMode = (globalThis as any).__NCO_WEB_EDITOR_DEMO__ === true;
 
     const banner = createElement('div', {}, {
       background: demoMode ? 'rgba(255, 255, 255, 0.06)' : 'rgba(245, 158, 11, 0.15)',
@@ -370,7 +370,7 @@ export class ReviewPanel {
 
     banner.textContent = demoMode
       ? 'Demo mode — this is a public embed, so change-request funnels are disconnected. Play around freely; a page refresh resets everything.'
-      : 'Not connected to MCP server \u2014 check that Claude Code is running with the frontend-editor MCP configured (port 7890).';
+      : 'Not connected to MCP server \u2014 check that Claude Code is running with the nco-web-editor MCP configured (port 7890).';
 
     if (!demoMode) {
       const retryBtn = createButton('Retry', 'ghost', () => {
@@ -962,7 +962,7 @@ export class ReviewPanel {
     }
 
     // "Apply Changes" — requires connection, only counts pending items
-    const demoMode = (globalThis as any).__FRONTEND_EDITOR_DEMO__ === true;
+    const demoMode = (globalThis as any).__NCO_WEB_EDITOR_DEMO__ === true;
     const sendDisabled =
       demoMode || pendingTotal === 0 || this.connectionStatus !== 'connected' || this.sending;
 
@@ -1001,7 +1001,7 @@ export class ReviewPanel {
     // Confirm large batches
     if (diffs.length >= BATCH_CONFIRM_THRESHOLD) {
       console.log(
-        `[frontend-editor] Sending batch of ${diffs.length} changes`,
+        `[nco-web-editor] Sending batch of ${diffs.length} changes`,
       );
     }
 
@@ -1010,7 +1010,7 @@ export class ReviewPanel {
 
     const success = this.wsClient.sendDiffBatch(diffs, note);
     if (!success) {
-      console.error('[frontend-editor] Failed to send batch — WebSocket not connected');
+      console.error('[nco-web-editor] Failed to send batch — WebSocket not connected');
       this.sending = false;
       this.refresh();
       return;

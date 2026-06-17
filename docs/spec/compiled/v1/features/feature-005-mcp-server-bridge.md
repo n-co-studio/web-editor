@@ -20,7 +20,7 @@ N/A — headless server process. Status is communicated to the extension via Web
 ## Inputs
 - `VisualDiff[]` from Chrome extension via WebSocket
 - Project files for token discovery (tailwind.config, tokens.json, design-system.md, CSS files)
-- `FRONTEND_EDITOR_PORT` environment variable (optional, default 7890)
+- `NCO_WEB_EDITOR_PORT` environment variable (optional, default 7890)
 
 ## Outputs
 - MCP tools exposed to Claude Code:
@@ -46,26 +46,26 @@ Token discovery and parsing are wrapped in try/catch. A parse failure in any tok
 - Multiple Chrome tabs → all connect, diffs tagged with source tab/URL
 - Claude Code not running → diffs queue in server memory, delivered when Claude Code connects
 - Token source file changes while running → rebuild token registry, push update to all connected extensions
-- Server process crashes → Claude Code's MCP client restarts it on next tool call (dependency on Claude Code behavior — documented assumption). Pending queue restored from `.frontend-editor/pending-queue.json` on restart.
+- Server process crashes → Claude Code's MCP client restarts it on next tool call (dependency on Claude Code behavior — documented assumption). Pending queue restored from `.nco-web-editor/pending-queue.json` on restart.
 - Page reload → extension content script reinitializes, restores pending queue from chrome.storage.session, reconnects WebSocket, sends EXTENSION_HELLO for reconciliation
 
 ## Persistence
-MCP server writes pending queue to `.frontend-editor/pending-queue.json` on each queue update (add/acknowledge/reject). File is deleted when queue is empty. On crash and restart, queue is restored from this file. Extension persists queue to chrome.storage.session — survives page reloads and service worker suspension, cleared on browser close.
+MCP server writes pending queue to `.nco-web-editor/pending-queue.json` on each queue update (add/acknowledge/reject). File is deleted when queue is empty. On crash and restart, queue is restored from this file. Extension persists queue to chrome.storage.session — survives page reloads and service worker suspension, cleared on browser close.
 
 ## Configuration
 
 ```json
 {
   "mcpServers": {
-    "frontend-editor": {
+    "nco-web-editor": {
       "command": "npx",
-      "args": ["--yes", "@frontend-editor/mcp-server"]
+      "args": ["--yes", "@nco-studio/web-editor-mcp"]
     }
   }
 }
 ```
 
-> **Alternative:** `npm install -g @frontend-editor/mcp-server` for faster startup (avoids npx registry check)
+> **Alternative:** `npm install -g @nco-studio/web-editor-mcp` for faster startup (avoids npx registry check)
 
 ## Acceptance Criteria
 - [ ] WebSocket server accepts connections from the Chrome extension
@@ -84,5 +84,5 @@ MCP server writes pending queue to `.frontend-editor/pending-queue.json` on each
 - [ ] Port fallback works when default port is in use
 - [ ] Multiple tabs supported with diffs tagged by source tab/URL
 - [ ] Diffs queue in memory when Claude Code is not connected
-- [ ] Pending queue persisted to `.frontend-editor/pending-queue.json` and restored on crash/restart
+- [ ] Pending queue persisted to `.nco-web-editor/pending-queue.json` and restored on crash/restart
 - [ ] Page reload recovery: content script reinitializes, restores queue, reconnects, and reconciles via EXTENSION_HELLO

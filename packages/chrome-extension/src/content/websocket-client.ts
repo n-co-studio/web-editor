@@ -1,7 +1,7 @@
 import {
   PROTOCOL_VERSION,
   MessageType,
-} from '@frontend-editor/shared';
+} from '@nco-studio/shared';
 import type {
   VisualDiff,
   ServerHelloPayload,
@@ -15,7 +15,7 @@ import type {
   ErrorPayload,
   ExtensionToServerMessage,
   ServerToExtensionMessage,
-} from '@frontend-editor/shared';
+} from '@nco-studio/shared';
 import {
   WS_PORT_BASE,
   WS_PORT_RANGE,
@@ -161,7 +161,7 @@ export class WebSocketClient {
     this.retryCount = 0;
     this.setStatus('connected');
 
-    console.log(`[frontend-editor] Connected to WebSocket on port ${port}`);
+    console.log(`[nco-web-editor] Connected to WebSocket on port ${port}`);
 
     // Send EXTENSION_HELLO
     this.send({
@@ -185,7 +185,7 @@ export class WebSocketClient {
     ws.addEventListener('message', (event) => this.handleMessage(event));
 
     ws.addEventListener('close', () => {
-      console.log('[frontend-editor] WebSocket connection closed');
+      console.log('[nco-web-editor] WebSocket connection closed');
       this.ws = null;
       this.clearTimers();
       if (!this.destroyed) {
@@ -195,7 +195,7 @@ export class WebSocketClient {
     });
 
     ws.addEventListener('error', (event) => {
-      console.error('[frontend-editor] WebSocket error:', event);
+      console.error('[nco-web-editor] WebSocket error:', event);
     });
   }
 
@@ -204,7 +204,7 @@ export class WebSocketClient {
     try {
       msg = JSON.parse(String(event.data));
     } catch {
-      console.error('[frontend-editor] Invalid WebSocket message — not JSON');
+      console.error('[nco-web-editor] Invalid WebSocket message — not JSON');
       return;
     }
 
@@ -214,7 +214,7 @@ export class WebSocketClient {
       !('type' in msg) ||
       !('payload' in msg)
     ) {
-      console.error('[frontend-editor] Invalid WebSocket message — missing type or payload');
+      console.error('[nco-web-editor] Invalid WebSocket message — missing type or payload');
       return;
     }
 
@@ -250,7 +250,7 @@ export class WebSocketClient {
         break;
       default:
         console.warn(
-          `[frontend-editor] Unknown message type: ${(typed as { type: string }).type}`,
+          `[nco-web-editor] Unknown message type: ${(typed as { type: string }).type}`,
         );
     }
   }
@@ -266,7 +266,7 @@ export class WebSocketClient {
     // WS_MAX_RETRIES === 0 means unlimited retries
     if (WS_MAX_RETRIES > 0 && this.retryCount > WS_MAX_RETRIES) {
       console.error(
-        `[frontend-editor] Failed to connect after ${WS_MAX_RETRIES} attempts`,
+        `[nco-web-editor] Failed to connect after ${WS_MAX_RETRIES} attempts`,
       );
       this.setStatus('error');
       return;
@@ -277,7 +277,7 @@ export class WebSocketClient {
       WS_BACKOFF_MAX_MS,
     );
     console.log(
-      `[frontend-editor] Reconnecting in ${delay}ms (attempt ${this.retryCount})`,
+      `[nco-web-editor] Reconnecting in ${delay}ms (attempt ${this.retryCount})`,
     );
 
     this.retryTimer = setTimeout(() => {

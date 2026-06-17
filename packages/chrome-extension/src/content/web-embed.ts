@@ -14,21 +14,21 @@
 import './demo-bootstrap';
 import { activate, deactivate } from './index';
 
-type FrontendEditorGlobal = {
+type NcoWebEditorGlobal = {
   readonly version: string;
   mount: () => Promise<void>;
   unmount: () => void;
 };
 
-const api: FrontendEditorGlobal = {
+const api: NcoWebEditorGlobal = {
   version: '0.1.0-embed',
   mount: () => activate(),
   unmount: () => deactivate(),
 };
 
-(globalThis as any).__frontendEditor = api;
+(globalThis as any).__ncoWebEditor = api;
 
 // Signal readiness so the site-side loader can resolve its promise.
 try {
-  window.dispatchEvent(new CustomEvent('frontend-editor:ready'));
+  window.dispatchEvent(new CustomEvent('nco-web-editor:ready'));
 } catch { /* non-fatal */ }

@@ -16,7 +16,7 @@ import {
 import type {
   PropertyChange,
   ComponentInsertDescriptor,
-} from "@frontend-editor/shared";
+} from "@nco-studio/shared";
 import {
   INSERT_CATEGORIES,
   CATEGORY_LABELS,

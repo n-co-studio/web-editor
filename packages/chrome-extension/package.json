@@ -1,5 +1,5 @@
 {
-  "name": "@frontend-editor/chrome-extension",
+  "name": "@nco-studio/chrome-extension",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -13,7 +13,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@frontend-editor/shared": "0.1.0"
+    "@nco-studio/shared": "0.1.0"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.287",

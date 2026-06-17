@@ -12,7 +12,7 @@
  * auto-focus for immediate text input.
  */
 
-import type { TextChange } from '@frontend-editor/shared';
+import type { TextChange } from '@nco-studio/shared';
 
 type TextCommitCallback = (change: TextChange) => void;
 

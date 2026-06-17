@@ -4,7 +4,7 @@
  * Defines all HTML elements a user can insert, organized by category.
  */
 
-import type { CompoundChildDescriptor } from '@frontend-editor/shared';
+import type { CompoundChildDescriptor } from '@nco-studio/shared';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -23,7 +23,7 @@ export type InsertCategory =
 
 export type SizingPreset = 'auto' | 'stretch' | 'fixed';
 
-/** Alias — single source of truth is CompoundChildDescriptor in @frontend-editor/shared. */
+/** Alias — single source of truth is CompoundChildDescriptor in @nco-studio/shared. */
 export type CompoundChild = CompoundChildDescriptor;
 
 export interface InsertCatalogEntry {

@@ -7,9 +7,9 @@
   "permissions": ["activeTab", "storage", "scripting"],
   "action": {
     "default_icon": {
-      "16": "icons/status/frontend-editor-icon-disabled.png",
-      "48": "icons/status/frontend-editor-icon-disabled.png",
-      "128": "icons/status/frontend-editor-icon-disabled.png"
+      "16": "icons/status/nco-web-editor-icon-disabled.png",
+      "48": "icons/status/nco-web-editor-icon-disabled.png",
+      "128": "icons/status/nco-web-editor-icon-disabled.png"
     },
     "default_title": "Frontend Editor",
     "default_popup": "popup.html"

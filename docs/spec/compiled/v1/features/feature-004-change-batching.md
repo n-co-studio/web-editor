@@ -50,7 +50,7 @@ The pending-count badge still overlays the toolbar icon. The popup reflects live
 - Removed items go to a "Removed" section (collapsed by default) — items can be restored from there
 
 ## Error Message Content
-- **WebSocket disconnected**: "Not connected to MCP server — check that Claude Code is running with the frontend-editor MCP configured (port 7890). [Retry]" — uses warning token (#f59e0b), not destructive
+- **WebSocket disconnected**: "Not connected to MCP server — check that Claude Code is running with the nco-web-editor MCP configured (port 7890). [Retry]" — uses warning token (#f59e0b), not destructive
 - **Source unverified edits in batch**: "Some changes have unverified source mapping — install the dev-plugin for precise file targeting. Changes will be sent with CSS selector only." — inline warning, not modal
 - Manual retry button attempts immediate reconnect outside the backoff schedule
 
