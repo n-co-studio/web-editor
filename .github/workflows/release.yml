@@ -1,0 +1,109 @@
+# Release workflow — publishes @nco-studio/web-editor-mcp and @nco-studio/web-editor-plugin
+# to the npm registry via OIDC Trusted Publishing (no stored token required).
+#
+# Triggered by: push of a tag matching v* (e.g. v0.2.0)
+#
+# OPERATOR SETUP REQUIRED (one-time, before first use):
+#   1. Go to npmjs.com -> your org (@nco-studio) -> Packages -> each package
+#      -> Settings -> Publish Access -> New Trusted Publisher
+#   2. Set:
+#        Repository: markpreston2/frontend-editor
+#        Workflow:   .github/workflows/release.yml
+#        Environment: release
+#   Repeat for both packages (@nco-studio/web-editor-mcp, @nco-studio/web-editor-plugin).
+#   Until this is configured the publish job will fail with "401 Unauthorized".
+#   See RELEASING.md -> "OIDC Trusted Publishing setup" for the full walkthrough.
+#
+# This workflow is publish-only -- it does NOT replace the test/lint CI pipeline.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  # -- Verify ----------------------------------------------------------------
+  verify:
+    name: Build & verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check (monorepo)
+        run: npm run typecheck --workspaces --if-present
+
+      - name: Build packages
+        run: npm run build --workspaces --if-present
+
+      - name: Smoke test (tarball install)
+        run: node scripts/smoke-test.mjs
+
+      - name: Dry-run publish assertion
+        run: node scripts/publish-dry-run.mjs
+
+      # Upload built artifacts for the publish job.
+      # upload-artifact@v4 preserves full workspace-relative paths, so the
+      # artifact contains entries under packages/mcp-server/dist/ and
+      # packages/dev-plugin/dist/. Omitting path on download restores them
+      # to the workspace root — no path: override needed.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-artifacts
+          path: |
+            packages/mcp-server/dist/
+            packages/dev-plugin/dist/
+          retention-days: 1
+
+  # -- Publish ---------------------------------------------------------------
+  publish:
+    name: Publish to npm (OIDC)
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Restores to workspace root — preserves packages/mcp-server/dist/ structure.
+      - name: Restore built artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-artifacts
+
+      - name: Verify dist artifacts exist
+        run: |
+          test -d packages/mcp-server/dist   || (echo "ERROR: mcp-server/dist missing" && exit 1)
+          test -d packages/dev-plugin/dist    || (echo "ERROR: dev-plugin/dist missing"  && exit 1)
+
+      - name: Publish @nco-studio/web-editor-mcp
+        run: npm publish --provenance --access public
+        working-directory: packages/mcp-server
+
+      - name: Publish @nco-studio/web-editor-plugin
+        run: npm publish --provenance --access public
+        working-directory: packages/dev-plugin
