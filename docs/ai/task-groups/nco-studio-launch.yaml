@@ -32,13 +32,19 @@ briefs:
       - "docs/spec/compiled/v1/features/feature-005-mcp-server-bridge.md"
       - "docs/spec/compiled/v1/features/feature-006-dev-plugin.md"
 
-  - title: "Visual Identity & Extension Branding"
+  - title: "npm Publish-Readiness & Verification"
     sequence: 2
-    session: null
+    session: 2
     branch: "feature/nco-studio-launch"
-    status: pending
-    next_brief: "MCP Server Hardening & Test Coverage"
-    boundaries: []
+    status: in_progress
+    next_brief: "Visual Identity & Extension Branding"
+    boundaries:
+      - "packages/mcp-server/src/bin/cli.ts"
+      - "packages/mcp-server/README.md"
+      - "packages/dev-plugin/README.md"
+      - "SECURITY.md"
+      - "CHANGELOG.md"
+      - "scripts/smoke-test.mjs"
 
   - title: "MCP Server Hardening & Test Coverage"
     sequence: 3
