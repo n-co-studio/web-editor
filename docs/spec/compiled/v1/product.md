@@ -18,7 +18,7 @@ Operators working on projects inspect the front end and identify visual adjustme
 
 ### Flow 1: Visual Edit → Code Change
 1. Operator opens their project's dev server in Chrome
-2. Activates Frontend Editor - Repo OS extension (toolbar icon or keyboard shortcut)
+2. Activates Frontend Editor - Repo OS extension (toolbar-icon popup → toggle on, or keyboard shortcut)
 3. Overlay appears — elements become selectable on hover
 4. Operator clicks an element → selection highlight + property panel appears
 5. Operator adjusts a property (drag to resize, pick a color, change font size)
@@ -31,7 +31,7 @@ Operators working on projects inspect the front end and identify visual adjustme
 
 ### Flow 2: Batch Edits
 1. Operator makes multiple visual edits across different elements
-2. Each edit appears in a "pending changes" panel with before/after values
+2. Each edit is added to the docked review panel (right edge) with before/after values
 3. Operator reviews the batch, removes any unwanted changes
 4. Operator sends the full batch at once
 5. Claude Code applies all changes sequentially
