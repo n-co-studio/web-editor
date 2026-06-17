@@ -46,13 +46,20 @@ briefs:
       - "CHANGELOG.md"
       - "scripts/smoke-test.mjs"
 
-  - title: "MCP Server Hardening & Test Coverage"
+  - title: "Extension Build + Chrome Web Store Submission Package"
     sequence: 3
-    session: null
+    session: 3
     branch: "feature/nco-studio-launch"
-    status: pending
+    status: in_progress
     next_brief: "Chrome Extension Polish & WebStore Prep"
-    boundaries: []
+    boundaries:
+      - "packages/chrome-extension/esbuild.config.js"
+      - "packages/chrome-extension/scripts/package-extension.mjs"
+      - "packages/chrome-extension/src/content/protocol-mismatch-banner.ts"
+      - "packages/chrome-extension/src/content/index.ts"
+      - "packages/chrome-extension/manifest.json"
+      - "docs/privacy-policy.md"
+      - "docs/store-listing.md"
 
   - title: "Chrome Extension Polish & WebStore Prep"
     sequence: 4

@@ -1,4 +1,5 @@
 import { mountShadowHost, unmountShadowHost } from './shadow-host';
+import { showProtocolMismatchBanner } from './protocol-mismatch-banner';
 import { WebSocketClient } from './websocket-client';
 import { HoverHighlight } from './selection/hover';
 import { SelectionManager } from './selection/select';
@@ -55,6 +56,7 @@ import { MeasureOverlay } from './selection/measure-overlay';
 import { MultiSelectManager } from './selection/multi-select';
 import { MultiSelectToolbar } from './editing/multi-select-toolbar';
 import { buildElementInfo, getTopElementAt, generateSelector, getComputedProperty } from '../shared/dom-utils';
+import { PROTOCOL_VERSION } from '@nco-studio/shared';
 import type { VisualDiff, PropertyChange, AttributeChange, TextChange, ReorderChange, ReparentChange, GroupChange, RemoveChange } from '@nco-studio/shared';
 import type { ExtensionMode, ConnectionStatus, EditMode, IconStatus } from '../shared/types';
 
@@ -222,6 +224,16 @@ export async function activate(): Promise<void> {
     getPendingDiffIds: () => queue!.getDiffIds(),
     onStatusChange: handleStatusChange,
     onServerHello: (payload) => {
+      if (payload.protocolVersion !== PROTOCOL_VERSION) {
+        console.error(
+          `[nco-web-editor] Protocol version mismatch — extension expects ${PROTOCOL_VERSION}, server sent ${payload.protocolVersion}. Closing connection.`,
+        );
+        wsClient!.destroy();
+        if (shadow) {
+          showProtocolMismatchBanner(shadow, payload.protocolVersion, PROTOCOL_VERSION);
+        }
+        return;
+      }
       queue!.reconcile(payload.pendingDiffIds, payload.appliedDiffIds);
       badge!.update();
       reviewPanel?.refresh();
