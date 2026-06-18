@@ -1,81 +1,67 @@
-import TaskBoard from './components/TaskBoard';
+import Logo from './components/Logo';
+import Hero from './components/Hero';
+import HowItWorks from './components/HowItWorks';
+import Walkthrough from './components/Walkthrough';
+import SetupGuide from './components/SetupGuide';
+import SiteFooter from './components/SiteFooter';
+
+const NAV: ReadonlyArray<[string, string]> = [
+  ['The loop', '#loop'],
+  ['Using the editor', '#walkthrough'],
+  ['Setup', '#setup'],
+];
 
 export default function App() {
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        background: 'var(--color-bg)',
-        display: 'flex',
-        flexDirection: 'column',
-      }}
-    >
+    <div style={{ minHeight: '100vh', background: 'var(--color-bg)', display: 'flex', flexDirection: 'column' }}>
       <header
         style={{
-          borderBottom: '1px solid var(--color-border)',
+          position: 'sticky',
+          top: 0,
+          zIndex: 30,
+          borderBottom: '1px solid var(--color-divider)',
           padding: 'var(--space-4) var(--space-6)',
           display: 'flex',
           alignItems: 'center',
-          gap: 'var(--space-3)',
-          background: 'var(--color-bg)',
-          boxShadow: 'var(--shadow-sm)',
+          gap: 'var(--space-6)',
+          background: 'color-mix(in srgb, var(--color-bg) 90%, transparent)',
+          backdropFilter: 'blur(8px)',
         }}
       >
-        <div
-          style={{
-            width: 32,
-            height: 32,
-            borderRadius: 'var(--radius-md)',
-            background: 'var(--color-primary)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-            <rect x="2" y="2" width="6" height="6" rx="1.5" fill="white" />
-            <rect x="10" y="2" width="6" height="6" rx="1.5" fill="white" opacity="0.6" />
-            <rect x="2" y="10" width="6" height="6" rx="1.5" fill="white" opacity="0.6" />
-            <rect x="10" y="10" width="6" height="6" rx="1.5" fill="white" opacity="0.8" />
-          </svg>
-        </div>
-        <span
-          style={{
-            fontWeight: 700,
-            fontSize: 'var(--text-h3)',
-            color: 'var(--color-text)',
-            letterSpacing: '-0.01em',
-          }}
-        >
-          Project Tasks
-        </span>
-        <span
-          style={{
-            marginLeft: 'auto',
-            fontSize: 'var(--text-caption)',
-            color: 'var(--color-text-muted)',
-            fontFamily: 'var(--font-mono)',
-            background: 'var(--color-surface)',
-            padding: 'var(--space-1) var(--space-2)',
-            borderRadius: 'var(--radius-sm)',
-            border: '1px solid var(--color-border)',
-          }}
-        >
-          NCO Studio Demo
-        </span>
+        <a href="#top" aria-label="NCO Studio" style={{ color: 'var(--color-ink)', display: 'flex' }}>
+          <Logo height={20} />
+        </a>
+
+        <nav style={{ marginLeft: 'auto', display: 'flex', gap: 'var(--space-6)' }}>
+          {NAV.map(([label, href]) => (
+            <a
+              key={label}
+              href={href}
+              style={{ fontFamily: 'var(--font-sans)', fontWeight: 'var(--fw-book)', fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)', textDecoration: 'none' }}
+            >
+              {label}
+            </a>
+          ))}
+        </nav>
       </header>
 
       <main
+        id="top"
         style={{
           flex: 1,
-          padding: 'var(--space-6)',
-          maxWidth: 1280,
+          padding: 'var(--space-12) var(--space-6) var(--space-16)',
+          maxWidth: 'var(--container-max)',
           margin: '0 auto',
           width: '100%',
         }}
       >
-        <TaskBoard />
+        <Hero />
+        <HowItWorks />
+        <Walkthrough />
+        <SetupGuide />
       </main>
+
+      <SiteFooter />
     </div>
   );
 }

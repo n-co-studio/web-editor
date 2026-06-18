@@ -1,20 +1,56 @@
-/* Design tokens — match docs/spec/compiled/v1/design-system.md */
-/* These are the obvious edit targets for the NCO Studio demo. */
+/* ---------------------------------------------------------------------------
+ * Demo-app design tokens — aligned to the Mark Preston brand system.
+ *
+ * This file IS the token set the NCO Studio Web Editor discovers for this
+ * project: the MCP server scans src/ CSS custom properties (see
+ * packages/mcp-server/src/tokens.ts). Edit any value here with the extension —
+ * there is no competing default set; these page tokens are authoritative.
+ *
+ * Aesthetic (per markpreston.co): ink-on-paper, two Adobe Typekit faces
+ * (minion-3-display serif + hero-new sans), thin/light weights, SHARP corners
+ * (no border-radius), NO shadows, generous whitespace, hairline dividers.
+ * ------------------------------------------------------------------------- */
 
 :root {
-  /* ── Colors ─────────────────────────────────────────────── */
-  --color-bg:          #ffffff;
-  --color-surface:     #f4f4f5;       /* gray-100 */
-  --color-border:      #e4e4e7;       /* gray-200 */
-  --color-text:        #18181b;       /* gray-900 */
-  --color-text-muted:  #71717a;       /* gray-500 */
-  --color-primary:     #06b6d4;       /* cyan-500 — brand */
-  --color-primary-hover: #0891b2;     /* cyan-600 */
-  --color-accent:      #fb7185;       /* rose-400 */
-  --color-success:     #22c55e;
-  --color-warning:     #f59e0b;
+  /* ── Colors — monochrome ──────────────────────────────────── */
+  --color-ink:           #0f0f0f;   /* primary text, headings, links, dark surfaces */
+  --color-primary:       #0f0f0f;   /* alias */
+  --color-secondary:     #767676;   /* secondary text (AA 4.5:1 on white) */
+  --color-bg:            #ffffff;   /* page background */
+  --color-surface:       #ffffff;   /* surfaces are flat white; structure via borders */
+  --color-divider:       #cacaca;   /* section dividers */
+  --color-border:        #e2e2e2;   /* hairline card borders (lighter than divider) */
 
-  /* ── Spacing (4px base) ──────────────────────────────────── */
+  --color-on-ink:        #ffffff;
+  --color-on-ink-muted:  rgba(255,255,255,0.6);
+  --color-hover-dark:    #333333;
+
+  /* ── Typography — Adobe Typekit (kit ivy7roo) ────────────── */
+  --font-sans:  'hero-new', 'Roboto', system-ui, -apple-system, sans-serif;
+  --font-serif: 'minion-3-display', 'Playfair Display', Georgia, serif;
+  --font-mono:  'JetBrains Mono', ui-monospace, Consolas, monospace;
+
+  --fw-thin: 100;     /* hero / h1 */
+  --fw-light: 200;    /* h2 / h3 */
+  --fw-book: 300;     /* body, UI, nav */
+  --fw-regular: 400;  /* labels, emphasis */
+
+  --text-display: 4rem;     /* 64px — hero (serif) */
+  --text-h1:      2.75rem;  /* 44px */
+  --text-h2:      2rem;     /* 32px */
+  --text-h3:      1.375rem; /* 22px */
+  --text-body:    1.0625rem;/* 17px */
+  --text-body-sm: 0.9375rem;/* 15px */
+  --text-label:   0.875rem; /* 14px */
+  --text-caption: 0.8125rem;/* 13px */
+
+  --leading-tight: 1.1;
+  --leading-snug:  1.2;
+  --leading-body:  1.6;
+  --tracking-tight: -0.01em;
+  --tracking-wide:  0.04em;
+
+  /* ── Spacing (4px base) — generous editorial rhythm ──────── */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -24,40 +60,60 @@
   --space-8: 32px;
   --space-10: 40px;
   --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+  --space-24: 96px;
 
-  /* ── Typography ──────────────────────────────────────────── */
-  --font-sans: system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  /* ── Border radius — sharp throughout (MP) ───────────────── */
+  --radius-none: 0;
+  --radius-full: 9999px;   /* dots / circular marks only */
 
-  --text-display:  2.25rem;  /* 36px */
-  --text-h1:       1.875rem; /* 30px */
-  --text-h2:       1.5rem;   /* 24px */
-  --text-h3:       1.25rem;  /* 20px */
-  --text-body:     1rem;     /* 16px */
-  --text-body-sm:  0.875rem; /* 14px */
-  --text-caption:  0.75rem;  /* 12px */
+  /* ── Layering (z-index) ──────────────────────────────────── */
+  --z-base: 1;
+  --z-raised: 10;
+  --z-float: 20;
+  --z-overlay: 30;
 
-  /* ── Border radius ───────────────────────────────────────── */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
-  --radius-full: 9999px;
+  /* ── Layout ──────────────────────────────────────────────── */
+  --container-max: 1052px;  /* MP .cc container */
+  --measure: 600px;         /* prose measure */
 
-  /* ── Shadows ─────────────────────────────────────────────── */
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
-  --shadow-md: 0 4px 6px rgba(0,0,0,0.07);
-  --shadow-lg: 0 10px 15px rgba(0,0,0,0.10);
+  /* ── Easing ──────────────────────────────────────────────── */
+  --ease-link: cubic-bezier(0, 0.56, 0.26, 0.88);
 }
 
 /* Base reset */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+html { scroll-behavior: smooth; background: var(--color-bg); }
+
 body {
   font-family: var(--font-sans);
   font-size: var(--text-body);
-  color: var(--color-text);
+  font-weight: var(--fw-book);
+  color: var(--color-ink);
   background: var(--color-bg);
-  line-height: 1.6;
+  line-height: var(--leading-body);
   -webkit-font-smoothing: antialiased;
+}
+
+/* Animated underline links (monochrome accent treatment) */
+.nco-link {
+  color: var(--color-ink);
+  text-decoration: none;
+  background-image: linear-gradient(currentColor, currentColor);
+  background-position: 0 100%;
+  background-repeat: no-repeat;
+  background-size: 100% 1px;
+  padding-bottom: 1px;
+  transition: background-size 0.3s var(--ease-link);
+}
+.nco-link:hover { background-size: 0 1px; background-position: 100% 100%; }
+
+/* Hairline card hover — no shadows, border emphasis only (MP is flat) */
+.nco-lift { transition: border-color 0.2s ease, background-color 0.2s ease; }
+.nco-lift:hover { border-color: var(--color-ink); }
+
+@media (prefers-reduced-motion: reduce) {
+  .nco-link, .nco-lift { transition: none; }
 }
