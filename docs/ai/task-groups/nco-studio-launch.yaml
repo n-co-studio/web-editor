@@ -110,6 +110,15 @@ briefs:
       - "packages/mcp-server/package.json"
       - "packages/dev-plugin/package.json"
 
+  - title: "Remediation & Re-Verification (conditional)"
+    sequence: 8
+    session: 8
+    branch: "feature/nco-studio-launch"
+    status: complete
+    next_brief: ""
+    boundaries:
+      - ".claude/.automation/reports/prepublish-verification-*.md"
+
 intent:
   goal: >
     Rebrand the entire monorepo from @frontend-editor/* to @nco-studio/*,
@@ -271,8 +280,27 @@ session_decisions:
   - session: 7
     decision: "Rename sweep scope must include package.json root metadata fields (repository/homepage/bugs URLs)"
     rationale: "Initial Check 2 grep only covered src/dist/compiled-spec; cohesion review found markpreston2/frontend-editor in repository.url, homepage, bugs.url of both published packages. Corrected in this brief. Future rename verification should always include all package.json files."
+  - session: 8
+    decision: "Brief 8 is a clean confirmation pass — no remediations required when Brief 7 is already GO"
+    rationale: "All 8 verification checks re-ran with fresh captured output and confirmed the GO state from Brief 7. The re-verification report is force-added despite .gitignore (consistent with Brief 7 precedent) to track the final automated GO verdict as governance evidence."
 
 governance:
+  - brief_sequence: 8
+    gates_a:
+      A1: "pass"
+      A2: "pass"
+      A3: "n/a"
+      A4: "pass"
+      A5: "pass"
+      A6: "pass"
+    gates_b:
+      B1: "pass"
+      B2: "pass"
+      B3: "n/a"
+    overrides_used:
+      - "REPO_OS_SKIP_PRAGMATIST_GATE (auto mode — runner pre-approved)"
+    timestamp: "2026-06-18T01:05:00Z"
+
   - brief_sequence: 7
     gates_a:
       A1: "pass"
