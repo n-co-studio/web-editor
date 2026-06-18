@@ -273,6 +273,22 @@ session_decisions:
     rationale: "Initial Check 2 grep only covered src/dist/compiled-spec; cohesion review found markpreston2/frontend-editor in repository.url, homepage, bugs.url of both published packages. Corrected in this brief. Future rename verification should always include all package.json files."
 
 governance:
+  - brief_sequence: 8
+    gates_a:
+      A1: "pass"
+      A2: "pass"
+      A3: "pass"
+      A4: "pass"
+      A5: "pass"
+      A6: "pass"
+    gates_b:
+      B1: "pass"
+      B2: "pass"
+      B3: "pass"
+    overrides_used: []
+    notes: "Remediation & re-verification. Operator-cleared a FORCE-HALT (queue-cli resume) before the sweep. Full sweep re-run GO. Fixed an old-brand icon leak into the store zip (esbuild + package-extension non-pruning copy/append) — Pragmatist/Critic/QA all real-dispatched APPROVED, no gate overrides. Open: dist-zip/ not gitignored (GATE-FINAL, operator-mode edit required)."
+    timestamp: "2026-06-18T04:51:19Z"
+
   - brief_sequence: 7
     gates_a:
       A1: "pass"
