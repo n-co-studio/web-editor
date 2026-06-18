@@ -75,10 +75,22 @@ if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
   _ZC_SID="${_ZC_SID//\.\./_}"
   _ZC_STATE_DIR="$_EARLY_ROOT/.claude/.state/wt-sessions/$_ZC_SID"
 else
-  # Interactive session: derive SID from .session-id file
-  _ZC_SID_FILE="$_EARLY_ROOT/.claude/.session-id"
-  if [ -f "$_ZC_SID_FILE" ]; then
-    _ZC_SID=$(cat "$_ZC_SID_FILE" 2>/dev/null)
+  # Interactive session: derive SID from this process's per-process identity.
+  # get_session_id is not sourced yet in this pre-source fast path, so mirror its
+  # resolution with builtins: prefer the per-process sidecar .session-id.<dpid>
+  # (dpid = durable claude $PPID, $$ fallback) over the shared flat .session-id,
+  # so a concurrent window resolves its OWN state dir rather than a peer's id.
+  _ZC_DPID="${PPID:-0}"
+  if [ "$_ZC_DPID" -le 1 ] 2>/dev/null || ! kill -0 "$_ZC_DPID" 2>/dev/null; then
+    _ZC_DPID="$$"
+  fi
+  _ZC_SID=""
+  if [ -f "$_EARLY_ROOT/.claude/.session-id.$_ZC_DPID" ]; then
+    _ZC_SID=$(cat "$_EARLY_ROOT/.claude/.session-id.$_ZC_DPID" 2>/dev/null)
+  elif [ -f "$_EARLY_ROOT/.claude/.session-id" ]; then
+    _ZC_SID=$(cat "$_EARLY_ROOT/.claude/.session-id" 2>/dev/null)
+  fi
+  if [ -n "$_ZC_SID" ]; then
     _ZC_SID="${_ZC_SID//\//_}"
     _ZC_SID="${_ZC_SID//\.\./_}"
     _ZC_PER_SESSION="$_EARLY_ROOT/.claude/.state/wt-sessions/$_ZC_SID"
@@ -565,6 +577,42 @@ _emit_kpi_summary() {
     "blocks:${block_count},retries:${retry_depth},valve:${_kpi_valve},tokens:${_kpi_tokens}" \
     "${stype:-unknown}" "$START_MS" || true
 }
+
+# --- Foreign-state guard (identity-churn safety) ---
+# Interactive sessions (REPO_OS_SESSION_ID unset) resolve their per-session state
+# dir via the shared repo-global .claude/.session-id file (first-writer-wins in
+# get_session_id). When a SECOND session co-resides in the same working copy — a
+# concurrent headless/daemon build, or a second interactive window — both
+# processes read the same .session-id and therefore alias to one session id, so
+# get_session_state_dir()/get_session_type()/is_session_closing() resolve to the
+# OTHER session's phase-state. Enforcing close checks (session log, uncommitted
+# changes) against another LIVE session's state produces a spurious block loop:
+# the foreign session's in-flight work looks like unsaved changes, and this
+# session's own ephemeral/queue-triage exemption is bypassed (the resolved type is
+# the foreign one). Guard: if the resolved phase-state is owned by a DIFFERENT,
+# independently-live process, do not enforce its close here.
+#
+# Discriminator vs. legitimate context-window turnover (which ALSO makes the live
+# harness stdin sid differ from the resolved state's session_id): a turned-over
+# session's state still belongs to THIS claude process. register_session() stores
+# the durable claude PID ($PPID) as the session's pid, so the resolved state's
+# registry pid == our $PPID and the guard does NOT fire. Only a genuinely
+# separate, live process (pid != $PPID, still alive) trips it. A dead/orphaned
+# foreign state (owner not live) is intentionally NOT caught here — it falls
+# through to the existing zero-change / no-session-type exit paths below.
+if [ -z "${REPO_OS_SESSION_ID:-}" ] && [ -n "${_REPO_OS_STDIN_SID:-}" ]; then
+  _FS_STATE_SID=$(_read_phase_field "session_id" "$_SESSION_STATE_DIR/phase-state" 2>/dev/null || true)
+  if [ -n "$_FS_STATE_SID" ] && [ "$_FS_STATE_SID" != "$_REPO_OS_STDIN_SID" ]; then
+    _FS_REG="$REPO_ROOT/.claude/.state/sessions/${_FS_STATE_SID}.yaml"
+    if [ -f "$_FS_REG" ]; then
+      _FS_PID=$(grep '^pid: ' "$_FS_REG" 2>/dev/null | sed 's/^pid: *//' | tr -d '[:space:]')
+      if [ -n "$_FS_PID" ] && [ "$_FS_PID" != "${PPID:-0}" ] && kill -0 "$_FS_PID" 2>/dev/null; then
+        log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "foreign_state_skip" "$_FS_STATE_SID" || true
+        exit 0
+      fi
+    fi
+  fi
+fi
 
 # --- Pause vs close detection for interactive sessions ---
 # Interactive sessions (REPO_OS_SESSION_ID unset) Stop for two reasons:

@@ -724,12 +724,41 @@ printf 'timestamp: test\nsession_id: %s\nGATE_RESULT: APPROVED\n' "$TEST_SID" > 
 printf 'timestamp: test\nsession_id: %s\nGATE_RESULT: APPROVED\n' "$TEST_SID" > "$STATE_DIR/diff-review-complete"
 printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/qa-verified"
 # Create package.json with a test script that exits non-zero
-printf '{"name":"test-pkg","scripts":{"test":"node -e \'process.exit(1)\'"}}\n' > "$SB/package.json"
+printf '{"name":"test-pkg","scripts":{"test":"node -e '\''process.exit(1)'\''"}}\n' > "$SB/package.json"
 (cd "$SB" && git add package.json 2>/dev/null || true)
 stage_sandbox_file "src/a34skip.ts" "export const a34s = 1;"
 SKIP_FUNC_CHECK=1 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "a34 skip test")"
 assert_ok "$_LAST_RC" "pre-commit-gates: SKIP_FUNC_CHECK=1 bypasses A3.4 even with failing package.json scripts"
 (cd "$SB" && git rm --cached package.json 2>/dev/null; rm -f "$SB/package.json") || true
+
+# --- A3.4: CLAUDE_HEADLESS=1 + SKIP_FUNC_CHECK=1 → ignored, gate still blocks ---
+# Amendment 1 (Decision t-0044): SKIP_FUNC_CHECK=1 is interactive-only; headless ignores it.
+reset_phase "standard"
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "review" 2>/dev/null
+_advance "verify" 2>/dev/null
+_advance "commit" 2>/dev/null
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
+printf 'timestamp: test\nsession_id: %s\nGATE_RESULT: APPROVED\n' "$TEST_SID" > "$STATE_DIR/cohesion-reviewed"
+printf 'timestamp: test\nsession_id: %s\nGATE_RESULT: APPROVED\n' "$TEST_SID" > "$STATE_DIR/diff-review-complete"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/qa-verified"
+# Create package.json with a test script that exits non-zero
+printf '{"name":"test-pkg","scripts":{"test":"node -e '\''process.exit(1)'\''"}}' > "$SB/package.json"
+(cd "$SB" && git add package.json 2>/dev/null || true)
+stage_sandbox_file "src/a34hls.ts" "export const a34h = 3;"
+# Remove escalation dir first so we can detect it was created by the hook
+rm -rf "$SB/.claude/.automation/escalations"
+CLAUDE_HEADLESS=1 SKIP_FUNC_CHECK=1 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "a34 headless skip ignored")"
+assert_fail "$_LAST_RC" "pre-commit-gates: CLAUDE_HEADLESS=1 + SKIP_FUNC_CHECK=1 — gate NOT bypassed (Amendment 1)"
+if ls "$SB/.claude/.automation/escalations/"a34-skip-ignored-* >/dev/null 2>&1; then
+  _tap_pass "pre-commit-gates: headless SKIP_FUNC_CHECK=1 ignored — escalation file written"
+else
+  _tap_fail "pre-commit-gates: headless SKIP_FUNC_CHECK=1 ignored — escalation file MISSING"
+fi
+(cd "$SB" && git rm --cached package.json 2>/dev/null; rm -f "$SB/package.json") || true
+rm -rf "$SB/.claude/.automation/escalations"
 
 # --- A3.4: no package.json in headless → _A34_APPLICABLE=false → binding gate skipped ---
 reset_phase "standard"

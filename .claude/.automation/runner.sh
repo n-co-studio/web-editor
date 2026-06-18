@@ -897,8 +897,15 @@ _run_single_entry() {
   # With REPO_OS_SESSION_ID set, cleanup routes to the per-session state dir.
   runner_external_cleanup "$REPO_ROOT" "$brief_id" "close" "$_RESULT_BASELINE"
 
-  # Clear per-session ID after cleanup
-  unset REPO_OS_SESSION_ID
+  # Clear the per-brief session ID after cleanup. In daemon mode, restore the
+  # daemon's own pinned identity so subsequent daemon-loop get_session_id calls
+  # (e.g. the outcome-transition block) stay env-pinned and never write the shared
+  # .claude/.session-id; in single brief-id mode there is no daemon id, so unset.
+  if [ -n "${_DAEMON_SESSION_ID:-}" ]; then
+    export REPO_OS_SESSION_ID="$_DAEMON_SESSION_ID"
+  else
+    unset REPO_OS_SESSION_ID
+  fi
 
   # Clean up stderr temp file
   [ -n "$stderr_file" ] && rm -f "$stderr_file" 2>/dev/null || true
@@ -1234,6 +1241,18 @@ _check_same_filesystem
 
 _DAEMON_START_EPOCH=$(date +%s)
 
+# --- Pin a stable daemon-level identity (per-process session identity) ---
+# The daemon's own loop calls get_session_id/get_session_state_dir (startup
+# sweeps, review-item scoring, cleanup). Without REPO_OS_SESSION_ID those hit
+# get_session_id's no-stdin fallback and write a SHARED flat .claude/.session-id,
+# which an interactive window can then ADOPT (no sidecar exists to trigger a mint)
+# — re-aliasing the very thing the per-process identity scheme fixes. Pinning an
+# env id here makes the daemon's get_session_id return it and write neither the
+# flat file nor a sidecar. Per-brief processing overrides this with its own
+# isolated daemon-<ts> id (+ worktree); the loop re-asserts this id each iteration.
+_DAEMON_SESSION_ID="daemon-main-${_DAEMON_START_EPOCH}-$$"
+export REPO_OS_SESSION_ID="$_DAEMON_SESSION_ID"
+
 # --- Startup crash recovery ---
 _startup_crash_recovery
 
@@ -1249,6 +1268,12 @@ _IDLE_CYCLE_COUNT=0
 _CLEANUP_INTERVAL=10  # Run cleanup every 10 idle cycles
 
 while true; do
+  # Re-assert the daemon's own identity. Per-brief processing overrides
+  # REPO_OS_SESSION_ID with an isolated daemon-<ts> id (and uses it for post-brief
+  # cleanup); restoring it here keeps the daemon loop's own get_session_id calls
+  # env-pinned so they never touch the shared .claude/.session-id.
+  export REPO_OS_SESSION_ID="$_DAEMON_SESSION_ID"
+
   # --- Shutdown check ---
   if [ "$_SHUTDOWN_REQUESTED" = true ]; then
     echo "Shutdown: exiting daemon loop (graceful)" >&2

@@ -226,7 +226,7 @@ All overrides logged via `log_override()`.
 | `REPO_OS_RECOVER=1` | pre-commit-gates | All state checks | Emergency recovery — skip plan-approved, cohesion-reviewed, diff-review-complete, qa-verified, pragmatist-signed |
 | `REPO_OS_SKIP_PLAN_GATE=1` | pre-commit-gates / bash-guard | plan-approved | Bypass plan-approved check |
 | `REPO_OS_SKIP_PRAGMATIST_GATE=1` | pre-commit-gates | pragmatist-signed | Bypass pragmatist-signed check (Decision 0025) |
-| `SKIP_FUNC_CHECK=1` | pre-commit-gates | A3.4 functional-verified | Bypass A3.4 functional verification (build/pack/test scripts). Env override for repos without applicable scripts or broken tooling. |
+| `SKIP_FUNC_CHECK=1` | pre-commit-gates | A3.4 functional-verified | Bypass A3.4 functional verification (build/pack/test scripts). **Interactive mode only** — ignored in headless/auto (IS_NO_REVIEW_BACKSTOP=true); writes governance-block escalation and continues. Use `REPO_OS_RECOVER=1` to bypass in headless/auto (Decision t-0044 Amendment 1). |
 | `REPO_OS_FUNC_CHECK_TIMEOUT` | pre-commit-gates | A3.4 functional-verified | Per-command timeout in seconds for A3.4 script execution (default: 120). |
 | `REPO_OS_ALLOW_REINIT=1` | _phase-helper | double-init guard | Allow re-init of phase state (crash recovery) |
 

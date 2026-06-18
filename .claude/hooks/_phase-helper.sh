@@ -469,7 +469,10 @@ _validate_phase_session() {
   if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
     current_sid="$REPO_OS_SESSION_ID"
   else
-    current_sid=$(cat "$_REPO_OS_ROOT/.claude/.session-id" 2>/dev/null)
+    # Resolve via get_session_id (per-process identity) rather than reading the
+    # shared flat .session-id directly: a concurrent window holds a distinct id
+    # and must validate its own phase-state, not the flat file's bootstrapper id.
+    current_sid=$(get_session_id "$_REPO_OS_ROOT")
   fi
   if [ -n "$_PS_SESSION_ID" ] && [ "$_PS_SESSION_ID" = "$current_sid" ]; then
     _PS_VALIDATED=true
@@ -1178,7 +1181,9 @@ read_phase_gates() {
   if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
     current_sid="$REPO_OS_SESSION_ID"
   else
-    current_sid=$(cat "$repo_root/.claude/.session-id" 2>/dev/null || echo "")
+    # Per-process identity (not the shared flat .session-id) so a concurrent
+    # window validates its own gates cache rather than the flat bootstrapper id.
+    current_sid=$(get_session_id "$repo_root")
   fi
   [ -n "$current_sid" ] || return 1
   [ "$GATES_SESSION_ID" = "$current_sid" ] || return 1
@@ -1219,7 +1224,10 @@ init_phase() {
     if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
       _current_sid="$REPO_OS_SESSION_ID"
     else
-      _current_sid=$(cat "$repo_root/.claude/.session-id" 2>/dev/null || echo "")
+      # Per-process identity: state_dir is sidecar-aware (get_session_state_dir),
+      # so the double-init guard must compare against this process's own id, not
+      # the shared flat .session-id (which may hold a concurrent peer's id).
+      _current_sid=$(get_session_id "$repo_root")
     fi
     if [ -n "$_existing_sid" ] && [ "$_existing_sid" = "$_current_sid" ]; then
       if [ "${REPO_OS_ALLOW_REINIT:-0}" = "1" ]; then
@@ -2376,10 +2384,11 @@ record_dimension_verdict() {
   cache_path="$(_finish_loop_cache_path)"
   local repo_root
   repo_root="$(get_repo_root)"
-  local sid="${REPO_OS_SESSION_ID:-}"
-  if [ -z "$sid" ] && [ -f "$repo_root/.claude/.session-id" ]; then
-    sid=$(cat "$repo_root/.claude/.session-id" 2>/dev/null || echo unknown)
-  fi
+  # Per-process identity via get_session_id (handles REPO_OS_SESSION_ID, the
+  # per-process sidecar, and the flat-file fallback) rather than reading the
+  # shared flat .session-id directly, which a concurrent window does not own.
+  local sid
+  sid=$(get_session_id "$repo_root" 2>/dev/null || echo "")
   [ -z "$sid" ] && sid="unknown"
   mkdir -p "$(dirname "$cache_path")" 2>/dev/null || true
   if [ ! -f "$cache_path" ]; then

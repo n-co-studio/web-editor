@@ -10,7 +10,7 @@
 #   A3.3 Build verification — tsc --noEmit --incremental (skips if no tsconfig.json; SKIP_BUILD_CHECK=1)
 #   A3.4 Functional verification — build/pack/test scripts from package.json
 #            (headless/auto: blocking; interactive: advisory; skips when no package.json;
-#             SKIP_FUNC_CHECK=1; per-command timeout: REPO_OS_FUNC_CHECK_TIMEOUT, default 120s)
+#             SKIP_FUNC_CHECK=1 (interactive only); REPO_OS_RECOVER=1 (headless); per-command timeout: REPO_OS_FUNC_CHECK_TIMEOUT, default 120s)
 #   State verification — plan-approved, cohesion-reviewed, diff-review-complete, qa-verified,
 #                        pragmatist-signed (always blocking)
 #   A5  Cohesion — cohesion-reviewed + diff-review-complete both APPROVED required (blocking);
@@ -26,7 +26,7 @@
 #   REPO_OS_RECOVER=1    — skip all state-dependent checks (emergency recovery)
 #   SKIP_CONTRACT_CHECK=1 — skip A6 contract checks (existence, staging, A6.3 integration points)
 #   SKIP_BUILD_CHECK=1    — skip A3.3 TypeScript type-check
-#   SKIP_FUNC_CHECK=1     — skip A3.4 functional verification (build/pack/test scripts)
+#   SKIP_FUNC_CHECK=1     — skip A3.4 functional verification (interactive only — ignored in headless/auto; Decision t-0044 Amendment 1)
 #   REPO_OS_FUNC_CHECK_TIMEOUT — per-command timeout in seconds for A3.4 (default: 120)
 #
 # Branch profiles:
@@ -78,6 +78,13 @@ RECOVER_SIGNAL_FILE="$REPO_ROOT/.claude/.state/.recover-signal"
 if [ "${REPO_OS_RECOVER:-0}" = "1" ]; then
   log_override "pre-commit-gates" "REPO_OS_RECOVER"
   echo "REPO_OS_RECOVER=1 — skipping all state-dependent checks" >&2
+  if [ "${CLAUDE_HEADLESS:-0}" = "1" ]; then
+    _RECOVER_ESC_DIR="$REPO_ROOT/.claude/.automation/escalations"
+    mkdir -p "$_RECOVER_ESC_DIR" 2>/dev/null || true
+    printf 'type: governance-block\ngate: A3.4\nreason: REPO_OS_RECOVER_used_in_headless\nmessage: REPO_OS_RECOVER=1 bypass in headless mode -- A3.4 checks were skipped\ntimestamp: %s\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      > "$_RECOVER_ESC_DIR/recover-bypass-$(date -u +%Y%m%d-%H%M%S).yaml" 2>/dev/null || true
+  fi
   SKIP_STATE=true
 elif [ -f "$RECOVER_SIGNAL_FILE" ]; then
   log_override "pre-commit-gates" "recover-signal-file"
@@ -375,12 +382,24 @@ if [ "$SKIP_STATE" = false ]; then
   # A3.4: Functional Verification Gate (blocking in headless/auto — advisory otherwise)
   # Replaces the human op-review checkpoint that is skipped in auto/solo mode (Decision 0017).
   # Reads package.json to infer build/pack/test commands; skips silently when no package.json.
-  # Override: SKIP_FUNC_CHECK=1
+  # Override: SKIP_FUNC_CHECK=1 (interactive only — ignored in headless/auto; Decision t-0044 Amendment 1)
   # Per-command timeout: REPO_OS_FUNC_CHECK_TIMEOUT (default 120s)
   if [ -n "$STAGED_FILES" ]; then
+    _A34_SKIP_EFFECTIVE=false
     if [ "${SKIP_FUNC_CHECK:-0}" = "1" ]; then
-      log_override "pre-commit-gates" "SKIP_FUNC_CHECK"
-    elif [ -f "$REPO_ROOT/package.json" ]; then
+      if [ "$IS_NO_REVIEW_BACKSTOP" = false ]; then
+        log_override "pre-commit-gates" "SKIP_FUNC_CHECK"
+        _A34_SKIP_EFFECTIVE=true
+      else
+        log_override "pre-commit-gates" "SKIP_FUNC_CHECK_IGNORED_HEADLESS"
+        _A34_ESC_DIR_SKIP="$REPO_ROOT/.claude/.automation/escalations"
+        mkdir -p "$_A34_ESC_DIR_SKIP" 2>/dev/null || true
+        printf 'type: governance-block\ngate: A3.4\nreason: SKIP_FUNC_CHECK_ignored_in_headless\nmessage: SKIP_FUNC_CHECK=1 was set but is not honored in headless/auto mode (Decision t-0044 Amendment 1) -- A3.4 checks will run\ntimestamp: %s\n' \
+          "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          > "$_A34_ESC_DIR_SKIP/a34-skip-ignored-$(date -u +%Y%m%d-%H%M%S).yaml" 2>/dev/null || true
+      fi
+    fi
+    if [ "$_A34_SKIP_EFFECTIVE" = false ] && [ -f "$REPO_ROOT/package.json" ]; then
       _A34_TIMEOUT="${REPO_OS_FUNC_CHECK_TIMEOUT:-120}"
       _A34_CMDS=()
       # Infer applicable scripts from package.json
@@ -400,7 +419,7 @@ if [ "$SKIP_STATE" = false ]; then
         # npm presence guard (analogous to jq guard at top of file)
         if ! command -v npm &>/dev/null; then
           if [ "$IS_NO_REVIEW_BACKSTOP" = true ]; then
-            echo "GATE-RECOVERABLE: A3.4 functional verification requires npm but npm was not found. NEXT: Install npm or set SKIP_FUNC_CHECK=1 to bypass." >&2
+            echo "GATE-RECOVERABLE: A3.4 functional verification requires npm but npm was not found. NEXT: Install npm or set REPO_OS_RECOVER=1 to bypass in headless/auto mode." >&2
             block "A3.4_npm_missing"
             log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A3.4_npm_missing"
           else
@@ -443,7 +462,7 @@ if [ "$SKIP_STATE" = false ]; then
         else
           # Blocking in headless/auto; advisory otherwise
           if [ "$IS_NO_REVIEW_BACKSTOP" = true ]; then
-            echo "GATE-RECOVERABLE: A3.4 functional verification failed — build/pack/test scripts did not pass. NEXT: Fix failures below, or set SKIP_FUNC_CHECK=1 to override." >&2
+            echo "GATE-RECOVERABLE: A3.4 functional verification failed — build/pack/test scripts did not pass. NEXT: Fix failures below, or set REPO_OS_RECOVER=1 to bypass in headless/auto mode." >&2
             printf '%b' "$_A34_FAIL_DETAIL" >&2
             _A34_ESC_DIR="$REPO_ROOT/.claude/.automation/escalations"
             if [ -d "$_A34_ESC_DIR" ]; then
@@ -545,13 +564,13 @@ if [ "$SKIP_STATE" = false ]; then
   # Catches the edge case where functional-verified was not written (e.g., state was reset
   # between the A3.4 check and the qa-verified check in a crash-recovery scenario).
   if [ "$IS_NO_REVIEW_BACKSTOP" = true ] && [ "$_A34_APPLICABLE" = true ] && \
-     [ "${SKIP_FUNC_CHECK:-0}" != "1" ] && [ "$FAILED" -eq 0 ]; then
+     [ "$FAILED" -eq 0 ]; then
     if [ ! -f "$STATE_DIR/functional-verified" ]; then
-      echo "GATE-RECOVERABLE: A3.4 functional-verified state file missing in headless/auto mode — check for earlier A3.4 failure. (override: SKIP_FUNC_CHECK=1)" >&2
+      echo "GATE-RECOVERABLE: A3.4 functional-verified state file missing in headless/auto mode — check for earlier A3.4 failure. (override: REPO_OS_RECOVER=1)" >&2
       block "state_func_verified_missing"
       log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_func_verified_missing"
     elif ! _validate_state_session_id "$STATE_DIR/functional-verified"; then
-      echo "GATE-RECOVERABLE: functional-verified state file has stale session_id. NEXT: Re-run commit gate in this session (A3.4 re-runs automatically). (override: SKIP_FUNC_CHECK=1)" >&2
+      echo "GATE-RECOVERABLE: functional-verified state file has stale session_id. NEXT: Re-run commit gate in this session (A3.4 re-runs automatically). (override: REPO_OS_RECOVER=1)" >&2
       block "state_func_verified_stale_session"
       log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_func_verified_stale_session"
     fi

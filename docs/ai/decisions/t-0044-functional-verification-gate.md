@@ -110,6 +110,49 @@ same as `cohesion-reviewed` and `qa-verified`.
 3. **Require explicit script configuration in repo config.** Rejected — inferring
    from `package.json` scripts is zero-config and works for the common case.
 
+## Amendment 1 — SKIP_FUNC_CHECK Interactive-Only (2026-06-18)
+
+### Problem
+
+The original decision listed `SKIP_FUNC_CHECK=1` as a general override with no
+mode restriction. A headless runner could silently set `SKIP_FUNC_CHECK=1` and
+nullify Gate A3.4 entirely, defeating its purpose as the automated backstop for
+the missing op-review phase.
+
+### Change
+
+`SKIP_FUNC_CHECK=1` is now **interactive-only**:
+
+- **Interactive mode** (`IS_NO_REVIEW_BACKSTOP=false`): `SKIP_FUNC_CHECK=1`
+  works as before — `log_override` fires, `_A34_SKIP_EFFECTIVE=true`, A3.4
+  checks are skipped. Human at op-review is the backstop.
+
+- **Headless/auto mode** (`IS_NO_REVIEW_BACKSTOP=true`): `SKIP_FUNC_CHECK=1`
+  is **ignored**. `log_override` fires with `SKIP_FUNC_CHECK_IGNORED_HEADLESS`,
+  a `governance-block` escalation YAML is written to
+  `.claude/.automation/escalations/a34-skip-ignored-<ts>.yaml`, and A3.4 checks
+  proceed as normal.
+
+- **`REPO_OS_RECOVER=1`** remains the legitimate headless emergency bypass. When
+  used in headless mode it now also writes a `governance-block` escalation to
+  `.claude/.automation/escalations/recover-bypass-<ts>.yaml` (best-effort).
+
+The **binding gate** (`IS_NO_REVIEW_BACKSTOP=true && _A34_APPLICABLE=true &&
+FAILED -eq 0`) no longer has a `SKIP_FUNC_CHECK != "1"` short-circuit — it is
+active whenever A3.4 was applicable, and the override hint in both its messages
+points to `REPO_OS_RECOVER=1`.
+
+### Files Changed
+
+- `.claude/hooks/pre-commit-gates.sh`: SKIP_FUNC_CHECK block replaced with
+  mode-aware structure; REPO_OS_RECOVER block gains headless escalation write;
+  npm/failure error hints updated; binding gate condition and hints updated.
+- `docs/ai/decisions/t-0044-functional-verification-gate.md`: this amendment.
+- `AI.md`: hook table row updated to note interactive-only scope.
+- `.claude/agents/_agent-glossary.md`: SKIP_FUNC_CHECK row updated.
+- `.claude/hooks/tests/layer3-hook-integration.sh`: new headless-ignored tests.
+
+
 ## References
 
 - Decision 0017: Operator Automation Layer (headless mode, auto phase mode).

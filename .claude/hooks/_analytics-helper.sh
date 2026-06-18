@@ -222,6 +222,53 @@ get_analytics_dir() {
   echo "$HOME/.local/share/repo-os-analytics/$repo_name/events"
 }
 
+# --- Durable per-process id (per-process session identity) ---
+# The long-lived `claude` process that spawns each hook subprocess is identified
+# by $PPID: stable across a window's turns (so identity survives context-window
+# turnover) and distinct per concurrent window (so two windows don't alias). We
+# key interactive identity on it via per-process sidecar files (.session-id.<dpid>)
+# rather than the single shared .session-id, which collapses concurrent processes.
+# Tests inject _REPO_OS_DURABLE_PID because the hook test harness runs hooks in a
+# subshell pipeline, giving them an ephemeral, unpredictable $PPID (see L4.9c).
+# Fall back to $$ when $PPID is 0/1/unavailable (mirrors register_session).
+_resolve_durable_pid() {
+  if [ -n "${_REPO_OS_DURABLE_PID:-}" ]; then
+    echo "$_REPO_OS_DURABLE_PID"
+    return
+  fi
+  local p="${PPID:-0}"
+  if [ "$p" -le 1 ] 2>/dev/null || ! kill -0 "$p" 2>/dev/null; then
+    p="$$"
+  fi
+  echo "$p"
+}
+
+# --- Is a given session id already claimed by a DIFFERENT, LIVE process? ---
+# Scans the per-process sidecars .claude/.session-id.<pid>. Returns 0 (true) iff
+# some sidecar for a pid != our dpid, whose process is still alive, holds the id.
+# Sidecar presence is written synchronously inside get_session_id (bootstrap/mint),
+# so it is a race-safe concurrency signal independent of register_session timing.
+# Intentionally does NOT consult the session registry: a registry-only "foreign"
+# owner (no sidecar) is treated as adoptable, so the close-time foreign-state guard
+# in session-close-check.sh remains the safety net for that case (keeps L4.9a green).
+_sid_claimed_by_live_foreign() {
+  local claim_id="$1" dpid="$2" repo_root="$3"
+  local f base fpid content
+  for f in "$repo_root"/.claude/.session-id.*; do
+    [ -f "$f" ] || continue
+    base="${f##*/}"            # .session-id.<pid>
+    fpid="${base##*.}"         # <pid>
+    case "$fpid" in
+      ''|*[!0-9]*) continue ;;  # skip non-numeric suffixes
+    esac
+    [ "$fpid" = "$dpid" ] && continue
+    kill -0 "$fpid" 2>/dev/null || continue
+    content=$(cat "$f" 2>/dev/null)
+    [ "$content" = "$claim_id" ] && return 0
+  done
+  return 1
+}
+
 # --- Session ID (created on first hook fire, cleaned by Stop hook) ---
 _CACHED_SESSION_ID=""
 get_session_id() {
@@ -248,24 +295,60 @@ get_session_id() {
   # the stdin value. (Cross-session bleed is prevented by close-gated deletion
   # of .session-id, not by overwriting it mid-session.)
   if [ -n "${_REPO_OS_STDIN_SID:-}" ]; then
-    local sid_file_wt="$repo_root/.claude/.session-id"
-    if [ -f "$sid_file_wt" ]; then
-      # Durable identity already exists — file wins; never overwrite. A mismatch
-      # is benign (a harness UUID rotation across a context-window turnover — the
-      # file value is the correct, stable identity), so the advisory is gated
-      # behind REPO_OS_DEBUG to avoid a per-turn stderr nag. Default: silent.
-      _CACHED_SESSION_ID=$(cat "$sid_file_wt")
+    local dpid pp_file flat_file
+    dpid="$(_resolve_durable_pid)"
+    pp_file="$repo_root/.claude/.session-id.$dpid"
+    flat_file="$repo_root/.claude/.session-id"
+
+    # (a) This process already has a durable per-process identity — it wins.
+    # Stable across context-window turnover (same $PPID maps back to the same
+    # id even when the harness rotates the stdin SID); distinct per window
+    # (a second window has a different $PPID, hence a different sidecar). The
+    # turnover mismatch is benign, so the advisory is REPO_OS_DEBUG-gated to
+    # avoid a per-turn stderr nag. Default: silent.
+    if [ -f "$pp_file" ]; then
+      _CACHED_SESSION_ID=$(cat "$pp_file" 2>/dev/null)
       if [ "${REPO_OS_DEBUG:-0}" = "1" ] && [ "$_CACHED_SESSION_ID" != "$_REPO_OS_STDIN_SID" ]; then
         echo "Warning: session-id mismatch: file=$_CACHED_SESSION_ID, stdin=$_REPO_OS_STDIN_SID. Using file value." >&2
       fi
       echo "$_CACHED_SESSION_ID"
       return
     fi
-    # No durable identity yet — the hook is the first initializer. Seed the
-    # file from the harness stdin SID so downstream file-path consumers (state
-    # dir, session log) share the same id from here on.
+
+    # (b) No per-process file yet, but a flat .session-id exists. ADOPT it as
+    # the durable identity (a prior turn whose $PPID is now unknowable — e.g. the
+    # test harness, an in-flight pre-sidecar session, or a legacy/orphan file)
+    # UNLESS a DIFFERENT, currently-live process already claims it. In that case
+    # this is a concurrent peer (second window / in-place daemon on main): we must
+    # NOT alias onto its identity — MINT a fresh per-process id from the harness
+    # stdin SID and claim it via our sidecar. Adoption is cache-only (does not
+    # write a sidecar) so it never disturbs the flat-file path the integration
+    # tests and pre-sidecar sessions resolve through.
+    if [ -f "$flat_file" ]; then
+      local flat_id
+      flat_id=$(cat "$flat_file" 2>/dev/null)
+      if [ -n "$flat_id" ] && _sid_claimed_by_live_foreign "$flat_id" "$dpid" "$repo_root"; then
+        _CACHED_SESSION_ID="$_REPO_OS_STDIN_SID"
+        echo "$_CACHED_SESSION_ID" > "$pp_file" 2>/dev/null || true
+        echo "$_CACHED_SESSION_ID"
+        return
+      fi
+      _CACHED_SESSION_ID="$flat_id"
+      if [ "${REPO_OS_DEBUG:-0}" = "1" ] && [ "$_CACHED_SESSION_ID" != "$_REPO_OS_STDIN_SID" ]; then
+        echo "Warning: session-id mismatch: file=$_CACHED_SESSION_ID, stdin=$_REPO_OS_STDIN_SID. Using file value." >&2
+      fi
+      echo "$_CACHED_SESSION_ID"
+      return
+    fi
+
+    # (c) Neither per-process nor flat file — this hook is the first initializer.
+    # Seed BOTH: the per-process sidecar (durable identity for this window) and
+    # the flat file (legacy/compat anchor and the stable anchor that hook fires
+    # with an unknowable $PPID resolve through). Cross-session bleed is prevented
+    # by close-gated deletion of both, not by overwriting them mid-session.
     _CACHED_SESSION_ID="$_REPO_OS_STDIN_SID"
-    echo "$_CACHED_SESSION_ID" > "$sid_file_wt" 2>/dev/null || true
+    echo "$_CACHED_SESSION_ID" > "$pp_file" 2>/dev/null || true
+    echo "$_CACHED_SESSION_ID" > "$flat_file" 2>/dev/null || true
     echo "$_CACHED_SESSION_ID"
     return
   fi
@@ -456,7 +539,10 @@ get_session_type() {
     if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
       current_sid="$REPO_OS_SESSION_ID"
     else
-      current_sid=$(cat "$repo_root/.claude/.session-id" 2>/dev/null)
+      # Per-process identity (not the shared flat .session-id): state_file is
+      # resolved via get_session_state_dir (sidecar-aware), so a concurrent
+      # window must validate against its OWN id or it loses its session type.
+      current_sid=$(get_session_id "$repo_root")
     fi
     if [ -n "$sid" ] && [ "$sid" = "$current_sid" ]; then
       result=$(grep '^session_type:' "$state_file" 2>/dev/null | sed 's/^session_type: *//')
@@ -750,6 +836,25 @@ sweep_stale_sessions() {
   local exclude_sid="${1:-}"
   local repo_root
   repo_root="$_REPO_OS_ROOT"
+
+  # Clean per-process identity sidecars (.session-id.<pid>) whose owning process
+  # is dead. These are written synchronously by get_session_id (bootstrap/mint);
+  # a crash before close leaves one behind. Sweeping dead-pid sidecars caps
+  # accumulation and shrinks the (already narrow) PID-reuse aliasing window. Live
+  # sidecars — including the current session's — are preserved by the kill -0
+  # check, so no exclude_sid handling is needed here. Runs BEFORE the registry-dir
+  # guard below so sidecars are reaped even when no session registry dir exists.
+  local sidecar base scpid
+  for sidecar in "$repo_root"/.claude/.session-id.*; do
+    [ -f "$sidecar" ] || continue
+    base="${sidecar##*/}"        # .session-id.<pid>
+    scpid="${base##*.}"          # <pid>
+    case "$scpid" in
+      ''|*[!0-9]*) continue ;;    # skip non-numeric suffixes (defensive)
+    esac
+    kill -0 "$scpid" 2>/dev/null || rm -f "$sidecar" 2>/dev/null || true
+  done
+
   local sessions_dir="$repo_root/.claude/.state/sessions"
   [ -d "$sessions_dir" ] || return 0
 
@@ -854,6 +959,18 @@ unregister_session() {
 
   # Remove this session's file
   rm -f "$sessions_dir/${sid}.yaml" 2>/dev/null || true
+
+  # Remove this session's per-process identity sidecar(s) by content-match. The
+  # owning process (this window) is still alive, so the dead-pid sweep below will
+  # NOT reap it; without this, the same window's next session would fast-path onto
+  # the closed id and bleed identity across sessions. Mirrors the close-gated
+  # deletion of the flat .session-id in cleanup_session_files.
+  local _us_sidecar _us_content
+  for _us_sidecar in "$repo_root"/.claude/.session-id.*; do
+    [ -f "$_us_sidecar" ] || continue
+    _us_content=$(cat "$_us_sidecar" 2>/dev/null)
+    [ "$_us_content" = "$sid" ] && rm -f "$_us_sidecar" 2>/dev/null || true
+  done
 
   # Sweep remaining stale entries. Exclude the current session id: although its
   # registry file was just removed above, the orphan-state-dir loop in
