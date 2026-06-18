@@ -138,6 +138,7 @@ Governance evidence in `.claude/.state/`. Written by hooks via shell I/O (never 
 | `reviewer-signed` | `state-writer.sh` (reviewer) | High-risk detection |
 | `security-signed` | `state-writer.sh` (security-privacy) | High-risk detection |
 | `pragmatist-signed` | `state-writer.sh` (pragmatist) | Plan-review verification |
+| `functional-verified` | `pre-commit-gates.sh` (A3.4 inline) | A3.4 functional verification — written on script pass in headless/auto mode; required by binding gate when `_A34_APPLICABLE=true` and `IS_NO_REVIEW_BACKSTOP=true`. Decision 0044. |
 
 **Hook-written files** (all cleaned by `cleanup_session_files` unless noted): `phase-state` (`_phase-helper.sh` — phase tracking), `overrides.log` (`_analytics-helper.sh` — override audit, append-only), `high-risk-detected` (`pre-commit-gates.sh` — audit trail), `governance-checked` (`pre-commit-gates.sh` Gate 3 — first-fire inter-session marker, version-aware per Decision 0041), `governance-bash-fired` (`bash-guard.sh` Phase 1d — first-Bash-write inter-session marker, version-aware per Decision 0041), `merge-source-branch` (`_phase-helper.sh` `write_merge_signal` — agent-to-hook merge signal), `brief-has-taskgroup` (`_phase-helper.sh` — session-type validation, Decision 0026), `session-resume.yaml` (`_phase-helper.sh` — compression recovery, updated each phase), `cycle-escalation` (`_phase-helper.sh` — cycle cap at 5+, advisory), `cycle-advisory-N` (`bash-guard.sh` — per-cycle dedup), `kg-relevance-context` (`_phase-helper.sh` — KG pre-computed context at build entry, Decision 0034), `kg-search-advisory-fired` (`bash-guard.sh` — one-shot graph-first advisory dedup), `cross-session-context` (`_phase-helper.sh` via `_cross-session-context.sh` — recent git log + last session log tail injected at build entry), `finish-loop-cache.yaml` (`_phase-helper.sh` `record_dimension_verdict` — finish-loop dimension verdict cache, Decision 0040), `.stop-attempt-count` (`session-close-check.sh` — safety valve at 3 attempts, not cleaned).
 
@@ -225,6 +226,8 @@ All overrides logged via `log_override()`.
 | `REPO_OS_RECOVER=1` | pre-commit-gates | All state checks | Emergency recovery — skip plan-approved, cohesion-reviewed, diff-review-complete, qa-verified, pragmatist-signed |
 | `REPO_OS_SKIP_PLAN_GATE=1` | pre-commit-gates / bash-guard | plan-approved | Bypass plan-approved check |
 | `REPO_OS_SKIP_PRAGMATIST_GATE=1` | pre-commit-gates | pragmatist-signed | Bypass pragmatist-signed check (Decision 0025) |
+| `SKIP_FUNC_CHECK=1` | pre-commit-gates | A3.4 functional-verified | Bypass A3.4 functional verification (build/pack/test scripts). Env override for repos without applicable scripts or broken tooling. |
+| `REPO_OS_FUNC_CHECK_TIMEOUT` | pre-commit-gates | A3.4 functional-verified | Per-command timeout in seconds for A3.4 script execution (default: 120). |
 | `REPO_OS_ALLOW_REINIT=1` | _phase-helper | double-init guard | Allow re-init of phase state (crash recovery) |
 
 ### Decision Naming Convention

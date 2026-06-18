@@ -46,7 +46,7 @@ Verification methods:
 | A2: Small scope | Check scope thresholds (<100 lines, ≤3 files). If exceeded → **advisory warning** (not a block). Large scope requires documented operator approval. |
 | A3: Format | Run `format:check` or equivalent |
 | A3: Lint | Run `lint` or equivalent |
-| A3: Build | Run `build` or equivalent |
+| A3: Build | Run `build` or equivalent. **A3.4 (headless/auto)**: mechanically enforced by `pre-commit-gates.sh` at commit time — verify `functional-verified` state file exists with matching `session_id`. Override: `SKIP_FUNC_CHECK=1`. Decision 0044. |
 | A4: Secrets | Scan diff for keys, tokens, credentials |
 | A4: PII | Review added content for sensitive data |
 | A5: Cohesion | Verify Critic (cohesion mode) was invoked, cohesion brief produced, critical findings resolved. If fixes were applied, verify Critic was re-run clean. |

@@ -269,12 +269,23 @@ Do not finalize without explicit operator approval.
 **This step runs for both `Approve — review` and `Approve — auto`.** When the operator selected `Approve & queue (*)`, the brief, sidecar contract, and bundle were already written to disk and queued in Step 4 — skip the display half of this step entirely.
 
 **Bundle Write (mandatory on every `Approve — *` path):** Write the handoff bundle to disk before displaying the brief. Path:
-- **Singular brief:** `.claude/local/handoff-bundle.yaml` (overwrites any prior bundle from a crashed session — same single-file pattern as `task-contract.yaml`).
+- **Singular brief:** `.claude/local/handoff-bundles/<brief_id>.yaml` — one file per brief, keyed on the bundle's `brief_id` (Decision t-0043, supersedes t-0038 §1). Per-brief paths are collision-safe: approving multiple briefs back-to-back no longer overwrites earlier bundles. The legacy single fixed slot `.claude/local/handoff-bundle.yaml` is **DEPRECATED** (read-only fallback for one release cycle — do not write it).
 - **Task group:** `.claude/local/task-groups/{group}/briefs/{seq}.bundle.yaml` (one per brief in the group).
 
-Use shell I/O (a single `printf > path` line) — the path sits under `.claude/local/` and is exempt from the state-guard. Populate the bundle from the synthesized brief content (Step 3) and the operator's selection in Step 4 (`mode`). Compute `spec_snapshot.files[].sha` by `sha256sum`-ing each file in `contract.spec_references` at the working-copy state at approval time. Set `expiry.soft_hours: 24` and `expiry.hard_hours: 168` (defaults from Decision 0038 — operators who want non-default expiry can override at queue time).
+Write the singular bundle **atomically** via the `_atomic_write_bundle` helper in `_phase-helper.sh` (temp file + atomic rename) so concurrent Prompt T writers can neither interleave nor be read mid-write:
 
-After writing the bundle, display the finalized task brief in a self-contained fenced code block. Follow the Session Handoff Convention (see `workflow.md`): first line is a plain-text short title that becomes the VS Code tab label. **For phased briefs (Narrow path):** display each brief in its own separate fenced code block so the operator can copy-paste them individually. Do not bundle multiple briefs into a single block. The displayed handoff block ends with a note: `Bundle: .claude/local/handoff-bundle.yaml` so the receiving session can find it.
+```
+source .claude/hooks/_analytics-helper.sh && source .claude/hooks/_phase-helper.sh
+_atomic_write_bundle "<brief_id>" <<'BUNDLE'
+brief_id: "<brief_id>"
+approved_at: "<ISO 8601 UTC>"
+...rest of bundle...
+BUNDLE
+```
+
+The helper creates `.claude/local/handoff-bundles/` and prints the final path. The directory sits under `.claude/local/`, exempt from the state-guard. Populate the bundle from the synthesized brief content (Step 3) and the operator's selection in Step 4 (`mode`). The `brief_id` is the `<YYYYMMDD-HHMMSS>-<slug>` value from the brief's `### Task Contract` — the timestamp prefix guarantees filename uniqueness. Compute `spec_snapshot.files[].sha` by `sha256sum`-ing each file in `contract.spec_references` at the working-copy state at approval time. Set `expiry.soft_hours: 24` and `expiry.hard_hours: 168` (defaults from Decision 0038 — operators who want non-default expiry can override at queue time).
+
+After writing the bundle, display the finalized task brief in a self-contained fenced code block. Follow the Session Handoff Convention (see `workflow.md`): first line is a plain-text short title that becomes the VS Code tab label. **For phased briefs (Narrow path):** display each brief in its own separate fenced code block so the operator can copy-paste them individually. Do not bundle multiple briefs into a single block. The displayed handoff block ends with a note: `Bundle: .claude/local/handoff-bundles/<brief_id>.yaml` so the receiving session can find it.
 
 ~~~
 [Short Title] — Task Brief
@@ -355,6 +366,7 @@ Follow docs/ai/prompts/prompt-b-product-build.md.
 ### Task Contract
 
 ```yaml
+brief_id: "<YYYYMMDD-HHMMSS>-<slug>"  # required for the per-brief handoff bundle path (Decision t-0043); timestamp prefix guarantees filename uniqueness
 goal: "[1-2 sentences from the Goal section]"
 scope_files:
   - "[file paths from Scope section — files to create or edit]"
@@ -405,11 +417,11 @@ lifecycle: task-scoped
 - **Consumes:** [...]
 ```
 
-After displaying the brief, instruct: "Copy the block above and paste it into a new session to begin implementation. The handoff bundle at `.claude/local/handoff-bundle.yaml` carries the approved plan — the new session's `drift-check` phase will read it and forward-jump to `build` automatically (Decision 0038)." For phased briefs, instruct: "Copy each block into its own new session. Run them in order. Each brief's bundle lives at `.claude/local/task-groups/{group}/briefs/{seq}.bundle.yaml`." For parallel briefs, instruct: "Copy each block into its own new session. Launch Briefs 1–N in parallel using `claude --worktree` with a unique `REPO_OS_SESSION_ID` per brief. Run the merge brief (Brief M) after all others complete — it will combine the per-brief branches."
+After displaying the brief, instruct: "Copy the block above and paste it into a new session to begin implementation. The handoff bundle at `.claude/local/handoff-bundles/<brief_id>.yaml` carries the approved plan — the new session's `drift-check` phase resolves it by `brief_id` from the task contract and forward-jumps to `build` automatically (Decision 0038, Decision t-0043)." For phased briefs, instruct: "Copy each block into its own new session. Run them in order. Each brief's bundle lives at `.claude/local/task-groups/{group}/briefs/{seq}.bundle.yaml`." For parallel briefs, instruct: "Copy each block into its own new session. Launch Briefs 1–N in parallel using `claude --worktree` with a unique `REPO_OS_SESSION_ID` per brief. Run the merge brief (Brief M) after all others complete — it will combine the per-brief branches."
 
 #### Bundle Schema
 
-See Decision 0038 § 1 for the full handoff bundle YAML schema. Required top-level fields: `brief_id`, `approved_at`, `approved_by`, `mode`, `contract`, `plan`. Optional: `implementation_design` (top-level mirror — present when the brief has an `### Implementation Design` section), `spec_snapshot`, `pragmatist`, `expiry`. Singular bundles live at `.claude/local/handoff-bundle.yaml`; task group bundles live at `.claude/local/task-groups/{group}/briefs/{seq}.bundle.yaml`.
+See Decision 0038 § 1 for the full handoff bundle YAML schema. Required top-level fields: `brief_id`, `approved_at`, `approved_by`, `mode`, `contract`, `plan`. Optional: `implementation_design` (top-level mirror — present when the brief has an `### Implementation Design` section), `spec_snapshot`, `pragmatist`, `expiry`. Singular bundles live at `.claude/local/handoff-bundles/<brief_id>.yaml` (per-brief, Decision t-0043); task group bundles live at `.claude/local/task-groups/{group}/briefs/{seq}.bundle.yaml`.
 
 ## Rules
 

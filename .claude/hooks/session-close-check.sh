@@ -41,6 +41,14 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # --- Read stdin early (needed for stop_hook_active parsing after sourcing) ---
 INPUT=$(cat)
 
+# --- Harness session_id plumbing (must precede first get_session_id call) ---
+# Extracts session_id from the Stop hook JSON payload. The harness embeds the
+# live session id here; exporting it allows get_session_id() (in
+# _analytics-helper.sh) to prefer this over the .session-id file, keeping
+# identity stable across turns without relying on file persistence alone.
+export _REPO_OS_STDIN_SID
+_REPO_OS_STDIN_SID="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)"
+
 # --- Zero-change fast exit (before library sourcing — builtins + git only) ---
 # Compute repo root using same logic as _analytics-helper.sh (including test seam).
 # Avoids ~14ms sourcing cost for zero-change sessions with no pending state.
@@ -140,7 +148,19 @@ REPO_ROOT="$_REPO_OS_ROOT"
 # message) target; SESSION_LOG_ALT is the additional candidate in template mode.
 IS_TEMPLATE=false
 [ "$(get_mode)" = "template" ] && IS_TEMPLATE=true
-_SESSION_LOG_ID=$(get_session_id "$REPO_ROOT")
+# Decouple the session-log filename from the live session id. Prefer the
+# session_log_id persisted in phase-state at init_phase — this is stable across
+# turns and robust against any future identity drift, not just the 9b6ec01
+# regression. Fall back to get_session_id() for pre-fix sessions whose
+# phase-state predates the field, or when phase-state is absent entirely.
+_SESSION_LOG_ID=""
+_SLI_STATE_DIR=$(get_session_state_dir 2>/dev/null || true)
+if [ -n "$_SLI_STATE_DIR" ] && [ -f "$_SLI_STATE_DIR/phase-state" ]; then
+  _SESSION_LOG_ID=$(_read_phase_field "session_log_id" "$_SLI_STATE_DIR/phase-state" 2>/dev/null || true)
+fi
+if [ -z "$_SESSION_LOG_ID" ]; then
+  _SESSION_LOG_ID=$(get_session_id "$REPO_ROOT")
+fi
 SESSION_LOG_TRACKED="$REPO_ROOT/docs/ai/logs/sessions/session-${_SESSION_LOG_ID}.md"
 SESSION_LOG_LOCAL="$REPO_ROOT/.claude/local/sessions/session-${_SESSION_LOG_ID}.md"
 if [ "$IS_TEMPLATE" = true ]; then
@@ -471,7 +491,13 @@ infer_session_type() {
 # Session-bind (Decision 0013): passes closing session ID so cleanup only
 # deletes files owned by this session.
 # Audit C5: shared cleanup eliminates divergence risk with state-manager.sh.
+# Arguments:
+#   $1 — is_closing (true|false, default true). Pass false on pause Stop paths
+#         so .session-id/.session-type are preserved (belt-and-suspenders with
+#         the pause guard above — the guard exits before calling cleanup_session,
+#         but explicit gating here prevents accidental id churn if paths diverge).
 cleanup_session() {
+  local is_closing="${1:-true}"
   # Capture session type and ID before cleaning state files (phase-state is deleted below)
   local close_stype
   close_stype=$(get_session_type)
@@ -479,8 +505,8 @@ cleanup_session() {
   close_sid=$(get_session_id "$REPO_ROOT")
   # Unregister from session registry (before .session-id removal — needs session ID)
   unregister_session || true
-  # Delegate to shared cleanup with session-bind
-  cleanup_session_files "$REPO_ROOT" "$close_stype" "$close_sid"
+  # Delegate to shared cleanup with session-bind and closing verdict
+  cleanup_session_files "$REPO_ROOT" "$close_stype" "$close_sid" "$is_closing"
 }
 
 # --- Advisory accumulator (Phase 2a/2b) ---
@@ -539,6 +565,43 @@ _emit_kpi_summary() {
     "blocks:${block_count},retries:${retry_depth},valve:${_kpi_valve},tokens:${_kpi_tokens}" \
     "${stype:-unknown}" "$START_MS" || true
 }
+
+# --- Pause vs close detection for interactive sessions ---
+# Interactive sessions (REPO_OS_SESSION_ID unset) Stop for two reasons:
+#   (a) Pause — context window turnover, operator interjection, watcher timeout.
+#       Close sequence (cleanup, seal, solo merge) must NOT run: it would churn
+#       .session-id, prematurely merge, or lock the branch.
+#   (b) Close — agent has advanced into review/verify/op-review/close phases.
+#       Full close sequence should run.
+#
+# Worktree/headless sessions (REPO_OS_SESSION_ID set) are unaffected — they use
+# env-var identity and already follow the existing close path below.
+#
+# The generalized is_session_closing() predicate (in _phase-helper.sh) covers
+# ALL interactive session types (standard, taskdef, editor-live, etc.).
+# Editor-live is a strict subset: same predicate, same outcome as before.
+#
+# Placed before the 3-attempt counter so pauses never accumulate toward the
+# safety valve, and before any cleanup/seal/merge exit path.
+_IC_STYPE=$(get_session_type)
+if [ -z "${REPO_OS_SESSION_ID:-}" ]; then
+  _IC_CLOSING=false
+  if is_session_closing 2>/dev/null; then
+    _IC_CLOSING=true
+  fi
+  if [ "$_IC_CLOSING" = false ]; then
+    # Pause Stop — preserve identity, branch, and attempt counter; no close work.
+    # Use editor_live_pause reason for editor-live (parity/observability); use
+    # interactive_pause for all other interactive session types.
+    _IC_PAUSE_PHASE=$(_read_phase_field "current_phase" "$_SESSION_STATE_DIR/phase-state" 2>/dev/null || true)
+    if [ "$_IC_STYPE" = "editor-live" ]; then
+      log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "editor_live_pause" "$_IC_PAUSE_PHASE" || true
+    else
+      log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "interactive_pause" "$_IC_PAUSE_PHASE" || true
+    fi
+    exit 0
+  fi
+fi
 
 # --- 3-attempt counter guard ---
 # When the Stop hook blocks (exit 2), Claude continues working and fires Stop
@@ -1050,7 +1113,32 @@ if [ -f "$MERGE_STATE_FILE" ]; then
     record_closed_branch "$AGENT_MERGED_BRANCH"
     BRANCH_SEALED=true
     advisory_push_to_remote
+    # Editor-live close (Decision 0023 Amendment 2): the live-editor-N branch is
+    # now merged + sealed — delete the redundant ref. No-op for other branch types.
+    delete_merged_editor_live_branch "$AGENT_MERGED_BRANCH"
     log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "agent_merged" "" "$AGENT_MERGED_BRANCH" || true
+  fi
+fi
+
+# --- Editor-live fallback: seal orphaned merged live-editor branch (Decision 0023 Amendment 2) ---
+# If an editor-live session merged to main manually but did NOT call
+# write_merge_signal, the agent-merge detection above found no signal and the
+# live-editor-N branch is still unsealed while HEAD is on main (where
+# record_closed_branch skips main). Seal + delete the merged ref so the close
+# never silently strands it. Editor-live-scoped, and only when no merge signal
+# was recorded (BRANCH_SEALED still false) — the normal signal path is untouched.
+if [ "$BRANCH_SEALED" = false ]; then
+  _EL_CLOSE_STYPE=$(get_session_type)
+  if [ "$_EL_CLOSE_STYPE" = "editor-live" ]; then
+    if is_full_worktree_session; then
+      seal_orphaned_editor_live_branches "$_REPO_OS_ROOT"
+    else
+      seal_orphaned_editor_live_branches
+    fi
+    # The orphaned merged live-editor-N branch (if any) is now sealed; the
+    # session is closing on main, so mark sealing handled — keeps the downstream
+    # seal_branch_if_applicable a deliberate no-op rather than a coincidental one.
+    BRANCH_SEALED=true
   fi
 fi
 
@@ -1171,6 +1259,13 @@ if [ "$SOLO" = "true" ] && [ "$BRANCH_SEALED" = false ]; then
       record_closed_branch "$MERGE_BRANCH"
       BRANCH_SEALED=true
       advisory_push_to_remote
+      # Editor-live close (Decision 0023 Amendment 2): delete the merged
+      # live-editor-N ref after seal. No-op for other branch types.
+      if is_full_worktree_session; then
+        delete_merged_editor_live_branch "$MERGE_BRANCH" "$_REPO_OS_ROOT"
+      else
+        delete_merged_editor_live_branch "$MERGE_BRANCH"
+      fi
       log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "solo_merge_success" "" "$MERGE_BRANCH" || true
     elif is_full_worktree_session; then
       # Worktree merge failed or skipped — seal branch (Leak Point 2)

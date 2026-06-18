@@ -69,9 +69,11 @@ The phase model tracks session progress in `.claude/.state/phase-state`. Hooks e
 
 ### Drift-Check Phase (Decision 0038)
 
-When the brief came from Prompt T (Brief mode), Prompt T wrote a sealed **handoff bundle** at `.claude/local/handoff-bundle.yaml` (singular) or `.claude/local/task-groups/{group}/briefs/{seq}.bundle.yaml` (task groups). The bundle carries the approved Task Contract, plan, optional Implementation Design, spec snapshot, and Pragmatist verdict — everything the receiving session needs to skip plan re-derivation.
+When the brief came from Prompt T (Brief mode), Prompt T wrote a sealed **handoff bundle** at `.claude/local/handoff-bundles/<brief_id>.yaml` (singular, per-brief — Decision t-0043) or `.claude/local/task-groups/{group}/briefs/{seq}.bundle.yaml` (task groups). The bundle carries the approved Task Contract, plan, optional Implementation Design, spec snapshot, and Pragmatist verdict — everything the receiving session needs to skip plan re-derivation. The singular path is resolved by `brief_id` read from the task contract; when no `brief_id` is present (legacy briefs), `drift_check` falls back to the deprecated legacy fixed path `.claude/local/handoff-bundle.yaml`.
 
-After `init_phase` (and `contract-init` for task groups), advance to `drift-check`. Invoke `drift_check()` from `_phase-helper.sh` via Bash:
+**Init ordering (REQUIRE — Decision t-0043):** `drift_check` resolves the per-brief bundle path by reading `brief_id` from `.claude/local/task-contract.yaml`. For **standard sessions there is no `contract-init` phase**, so you MUST write the task contract (including its `brief_id` field, sourced from the pasted brief's `### Task Contract`) to `.claude/local/task-contract.yaml` **before** invoking `drift_check`. If `drift_check` runs first, `_resolve_brief_id` returns empty, the per-brief bundle is never found, and the session silently falls through to the legacy plan→approval path (logged as `no-brief-id:fallthrough`). Task groups already satisfy this ordering via the `contract-init → drift-check` sequence.
+
+After `init_phase` and the task-contract write (and `contract-init` for task groups), advance to `drift-check`. Invoke `drift_check()` from `_phase-helper.sh` via Bash:
 
 ```
 source .claude/hooks/_analytics-helper.sh && source .claude/hooks/_phase-helper.sh

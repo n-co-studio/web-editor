@@ -3,6 +3,8 @@
 ## Status
 Accepted
 
+> **Note (Decision t-0043):** §1 path resolution is **superseded by t-0043**. The singular interactive bundle now lives at the per-brief path `.claude/local/handoff-bundles/<brief_id>.yaml` (keyed on `brief_id`), not the single fixed slot below. The legacy fixed path `.claude/local/handoff-bundle.yaml` is **DEPRECATED** — read-only fallback for one release cycle. All other sections of this decision stand unchanged.
+
 ## Triggers
 
 - type: file
@@ -66,11 +68,18 @@ expiry:
   hard_hours: 168                 # hard expiry — bundle invalid, falls through to legacy path
 ```
 
-**Path resolution:**
-- **Singular brief:** `.claude/local/handoff-bundle.yaml` (singular, session-scoped)
-- **Task group:** `.claude/local/task-groups/{group}/briefs/{seq}.bundle.yaml` (per-brief, group-scoped)
+**Path resolution** (superseded by t-0043 — see below for the current scheme):
 
-Both paths sit under `.claude/local/`, which is outside the hook-managed `.state/` perimeter — write via shell I/O or Write tool (no state-guard interference).
+The three handoff-bundle paths across the system:
+
+| Path | Scope | Status |
+|------|-------|--------|
+| `.claude/local/handoff-bundles/<brief_id>.yaml` | Singular interactive brief, per-brief (keyed on `brief_id`) | **Current** (Decision t-0043) |
+| `.claude/local/handoff-bundle.yaml` | Singular interactive brief, single fixed slot | **DEPRECATED** — read-only legacy fallback for one release cycle; do not write |
+| `.claude/local/task-groups/{group}/briefs/{seq}.bundle.yaml` | Task group, per-brief (group-scoped) | Current |
+| `.claude/.automation/briefs/<YYYYMMDD-HHMMSS>-<slug>.bundle.yaml` | Queue intake (headless), per-brief | Current |
+
+All paths sit under `.claude/local/` or `.claude/.automation/`, outside the hook-managed `.state/` perimeter — write via shell I/O or Write tool (no state-guard interference). The singular interactive path is resolved by `_handoff_bundle_path()` from `brief_id` (Decision t-0043); when no `brief_id` is present it falls back to the deprecated fixed slot.
 
 ### 2. Prompt T Step 4 — Merged Auto/Review Approval
 

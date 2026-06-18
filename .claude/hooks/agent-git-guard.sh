@@ -9,6 +9,10 @@ START_MS=$(now_ms)
 
 INPUT=$(cat)
 
+# --- Harness session_id plumbing (must precede first get_session_id call) ---
+export _REPO_OS_STDIN_SID
+_REPO_OS_STDIN_SID="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)"
+
 # --- jq presence guard (fail-closed) ---
 if [ "$_REPO_OS_HAS_JQ" = false ]; then
   echo "GATE-FINAL: jq is required for agent-git-guard but was not found. Install jq (https://jqlang.github.io/jq/download/) and retry. (no override)" >&2

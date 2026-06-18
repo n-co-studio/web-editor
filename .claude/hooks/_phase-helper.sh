@@ -367,6 +367,10 @@ get_loops_for_type() {
 # Returns 1 if the file is missing.
 _PS_SESSION_TYPE="" _PS_SESSION_ID="" _PS_MODE="" _PS_CURRENT_PHASE=""
 _PS_CYCLE="" _PS_PHASES_COMPLETED="" _PS_SOLO="" _PS_TAG="" _PS_TIMESTAMP=""
+# session_log_id: the identity resolved at init_phase, persisted so the
+# session-log filename is decoupled from the live id (robust against any future
+# identity drift). Threaded through every phase-state rewrite below.
+_PS_SESSION_LOG_ID=""
 # Audit C8: validation cache sentinel — avoids redundant file reads per invocation
 _PS_VALIDATED=false
 # Cached current session ID — avoids re-reading .session-id from disk on validated fast path
@@ -376,12 +380,14 @@ _load_phase_state() {
   local state_file="$1"
   _PS_SESSION_TYPE="" _PS_SESSION_ID="" _PS_MODE="" _PS_CURRENT_PHASE=""
   _PS_CYCLE="" _PS_PHASES_COMPLETED="" _PS_SOLO="" _PS_TAG="" _PS_TIMESTAMP=""
+  _PS_SESSION_LOG_ID=""
   [ -f "$state_file" ] || return 1
   local _line
   while IFS= read -r _line || [ -n "$_line" ]; do
     case "$_line" in
       "session_type: "*)       _PS_SESSION_TYPE="${_line#session_type: }" ;;
       "session_id: "*)         _PS_SESSION_ID="${_line#session_id: }" ;;
+      "session_log_id: "*)     _PS_SESSION_LOG_ID="${_line#session_log_id: }" ;;
       "mode: "*)               _PS_MODE="${_line#mode: }" ;;
       "current_phase: "*)      _PS_CURRENT_PHASE="${_line#current_phase: }" ;;
       "cycle: "*)              _PS_CYCLE="${_line#cycle: }" ;;
@@ -400,6 +406,44 @@ _read_phase_field() {
   local key="$1"
   local state_file="$2"
   grep "^${key}:" "$state_file" 2>/dev/null | sed "s/^${key}: *//"
+}
+
+# --- Generalized session-closing predicate ---
+# Determines whether the current interactive session is in a closing state
+# (i.e., review phase has begun or the current phase is one of the close-sequence
+# phases). Used by session-close-check.sh and pre-commit-gates.sh to distinguish
+# a pause Stop from a genuine close Stop, without hard-coding editor-live checks.
+#
+# Decision: placed in _phase-helper.sh because both session-close-check.sh and
+# pre-commit-gates.sh source it, and _phase-helper.sh provides the phase-reading
+# primitives (_read_phase_field, get_session_state_dir) this predicate relies on.
+#
+# Returns: 0 (closing) iff review is in phases_completed OR current_phase is one
+#          of: review, verify, op-review, close.
+#          1 (not closing / safe-default pause) when phase-state is absent or empty.
+#
+# Arguments: none (reads state dir via get_session_state_dir).
+is_session_closing() {
+  local state_dir
+  state_dir=$(get_session_state_dir 2>/dev/null) || return 1
+  local phase_file="$state_dir/phase-state"
+  [ -f "$phase_file" ] || return 1
+
+  local current_phase phases_completed
+  current_phase=$(_read_phase_field "current_phase" "$phase_file")
+  phases_completed=$(_read_phase_field "phases_completed" "$phase_file")
+
+  # review in phases_completed → close sequence has begun
+  case ",$phases_completed," in
+    *",review,"*) return 0 ;;
+  esac
+
+  # current phase is a close-sequence phase
+  case "$current_phase" in
+    review|verify|op-review|close) return 0 ;;
+  esac
+
+  return 1
 }
 
 # --- Session ID validation ---
@@ -465,13 +509,75 @@ _check_cycle_limit() {
 # falls through to the legacy path. All writes are shell I/O — same
 # established pattern as init_phase / advance_phase (Decision 0014 §9).
 
+# --- _resolve_brief_id ---
+# Extracts brief_id from the task contract (.claude/local/task-contract.yaml by
+# default, overridable via $1). Returns the empty string (not an error) when the
+# file or the field is absent — callers treat empty as "no per-brief identity"
+# and fall back to the legacy fixed path. Decision t-0043.
+# The value is sanitized to the path-safe set [A-Za-z0-9._-] (which strips
+# surrounding quotes and whitespace and, defensively, any path separator a
+# malformed slug might carry) so the resolved value can be embedded directly in
+# a filesystem path without escaping its directory. brief_id is specified as
+# <YYYYMMDD-HHMMSS>-<slug> (kebab-case), which already lives in this set.
+_resolve_brief_id() {
+  local contract="${1:-$_REPO_OS_ROOT/.claude/local/task-contract.yaml}"
+  [ -f "$contract" ] || return 0
+  grep '^brief_id:' "$contract" 2>/dev/null | head -1 | sed 's/^brief_id: *//' | tr -cd 'A-Za-z0-9._-'
+}
+
 # --- Bundle path resolution ---
 # Returns absolute path to the singular handoff bundle for the current session.
-# Task groups use per-brief bundles at .claude/local/task-groups/{group}/briefs/{seq}.bundle.yaml
-# which callers resolve directly. This helper returns the singular path only.
+# Per-brief paths (Decision t-0043, supersedes t-0038 §1): when a brief_id is
+# determinable — passed as $1, else resolved from the task contract via
+# _resolve_brief_id — the bundle lives at a per-brief path keyed on brief_id:
+#   .claude/local/handoff-bundles/<brief_id>.yaml
+# This matches the already-per-brief queue (.claude/.automation/briefs/) and
+# task-group (.claude/local/task-groups/{group}/briefs/{seq}.bundle.yaml) paths,
+# so concurrent approvals can no longer clobber each other's bundle.
+# When no brief_id is determinable (legacy / pre-t-0043 briefs that carry no
+# brief_id in their contract), this falls back to the legacy singular fixed path
+# .claude/local/handoff-bundle.yaml — retained read-only for one release cycle.
+# Task groups continue to resolve their per-brief bundle path directly.
 _handoff_bundle_path() {
   local repo_root="$_REPO_OS_ROOT"
-  printf '%s/.claude/local/handoff-bundle.yaml\n' "$repo_root"
+  local brief_id="${1:-}"
+  [ -z "$brief_id" ] && brief_id="$(_resolve_brief_id)"
+  if [ -n "$brief_id" ]; then
+    printf '%s/.claude/local/handoff-bundles/%s.yaml\n' "$repo_root" "$brief_id"
+  else
+    printf '%s/.claude/local/handoff-bundle.yaml\n' "$repo_root"
+  fi
+}
+
+# --- _atomic_write_bundle ---
+# Writes a per-brief handoff bundle atomically (temp file + rename) so concurrent
+# Prompt T writers can neither interleave nor be read mid-write. Reads the bundle
+# body from stdin; $1 is the required brief_id. Creates the handoff-bundles/
+# directory, writes a temp file in the same directory (so `mv` is a same-filesystem
+# atomic rename), then renames into place. Prints the final bundle path on success.
+# Used by Prompt T Step 5. Decision t-0043.
+_atomic_write_bundle() {
+  local brief_id="$1"
+  if [ -z "$brief_id" ]; then
+    echo "ERROR: _atomic_write_bundle requires a brief_id" >&2
+    return 1
+  fi
+  local repo_root="$_REPO_OS_ROOT"
+  local dir="$repo_root/.claude/local/handoff-bundles"
+  mkdir -p "$dir" 2>/dev/null || true
+  local final="$dir/$brief_id.yaml"
+  local tmp="$dir/.$brief_id.$$.tmp"
+  if ! cat > "$tmp"; then
+    rm -f "$tmp" 2>/dev/null || true
+    echo "ERROR: _atomic_write_bundle failed to write temp file" >&2
+    return 1
+  fi
+  if ! mv -f "$tmp" "$final"; then
+    rm -f "$tmp" 2>/dev/null || true
+    echo "ERROR: _atomic_write_bundle failed to rename into place" >&2
+    return 1
+  fi
+  printf '%s\n' "$final"
 }
 
 # --- bundle_valid ---
@@ -635,13 +741,30 @@ _bundle_has_implementation_design() {
 #
 # Bundle path can be overridden via $1 (defaults to singular bundle path).
 drift_check() {
-  local bundle="${1:-$(_handoff_bundle_path)}"
+  # Resolve the per-brief identity up front (Decision t-0043). When no bundle
+  # path is passed explicitly, the path is keyed on brief_id from the task
+  # contract; brief_id also selects the distinct fallthrough log below so a
+  # failed drift-check is diagnosable.
+  local brief_id
+  brief_id="$(_resolve_brief_id)"
+  local bundle="${1:-$(_handoff_bundle_path "$brief_id")}"
   local repo_root="$_REPO_OS_ROOT"
 
-  # Predicate 1: bundle present and structurally valid
+  # Predicate 1: bundle present and structurally valid.
+  # Two distinct fallthrough reasons (Decision t-0043):
+  #   - brief_id present but the per-brief file is absent → bundle-file-absent
+  #     (the contract names a brief, but its bundle was never written / was
+  #     pruned — a real "missing bundle", not a legacy paste).
+  #   - brief_id absent → no-brief-id:fallthrough (legacy / pre-t-0043 brief
+  #     with no per-brief identity; the legacy fixed path was probed instead).
   if ! bundle_valid "$bundle"; then
-    log_override "drift-check" "bundle-absent:fallthrough-to-legacy" 2>/dev/null || true
-    echo "drift-check: no valid handoff bundle at $bundle — falling through to legacy plan→approval path" >&2
+    if [ -n "$brief_id" ]; then
+      log_override "drift-check" "bundle-file-absent:fallthrough-to-legacy" 2>/dev/null || true
+      echo "drift-check: no handoff bundle for brief_id '$brief_id' at $bundle (bundle-file-absent) — falling through to legacy plan→approval path" >&2
+    else
+      log_override "drift-check" "no-brief-id:fallthrough-to-legacy" 2>/dev/null || true
+      echo "drift-check: no brief_id in task contract; no valid legacy bundle at $bundle (no-brief-id:fallthrough) — falling through to legacy plan→approval path" >&2
+    fi
     return 1
   fi
 
@@ -1149,8 +1272,12 @@ init_phase() {
   mkdir -p "$state_dir" 2>/dev/null || true
 
   # Shell I/O — bypasses write-guard.sh (established pattern, see Decision 0014)
-  printf 'session_type: %s\nsession_id: %s\nmode: review\ncurrent_phase: init\ncycle: 1\nphases_completed: \nsolo: false\ntag: %s\ntimestamp: %s\n' \
-    "$stype" "$sid" "$tag" "$ts" \
+  # session_log_id is seeded from the init-time id and threaded through every
+  # subsequent phase-state rewrite so session-close-check.sh can resolve the
+  # session-log filename from it instead of recomputing the (possibly drifted)
+  # live id at close.
+  printf 'session_type: %s\nsession_id: %s\nsession_log_id: %s\nmode: review\ncurrent_phase: init\ncycle: 1\nphases_completed: \nsolo: false\ntag: %s\ntimestamp: %s\n' \
+    "$stype" "$sid" "$sid" "$tag" "$ts" \
     > "$state_dir/phase-state" 2>/dev/null || true
 
   # Invalidate validation cache — file contents changed (audit C8)
@@ -1162,7 +1289,9 @@ init_phase() {
 
   # Sweep stale registry entries (dead PID or age >24h) — two cleanup
   # opportunities per lifecycle: here at init and in unregister_session at close.
-  sweep_stale_sessions || true
+  # Pass the current session id so the sweep does not evict itself (the durable
+  # PPID may appear dead when the hook runs inside a subprocess).
+  sweep_stale_sessions "$sid" || true
 
   # --- Main-branch ancestry check (single check at init, not per-write) ---
   # Blocks write sessions on branches not rooted at main to prevent cascading
@@ -1225,6 +1354,15 @@ init_phase() {
   fi
   # Append ancestry result to phase-state (immutable audit record)
   printf "main_ancestry: %s\n" "$_ac_result" >> "$state_dir/phase-state" 2>/dev/null || true
+
+  # Prune expired per-brief handoff bundles (Decision t-0043): remove
+  # .claude/local/handoff-bundles/*.yaml older than the hard_hours default
+  # (168h ≈ 7 days). This is a single-line GC against the fixed default floor —
+  # by design it does not read each bundle's own expiry.hard_hours (t-0043 §7:
+  # one age-prune line, not a subsystem). A bundle that overrides hard_hours
+  # beyond 7 days is still pruned here; drift_check's bundle_expired remains the
+  # authoritative per-bundle expiry check. Advisory housekeeping — failures ignored.
+  find "$repo_root/.claude/local/handoff-bundles" -name '*.yaml' -type f -mtime +7 -delete 2>/dev/null || true
 
   # Write resume marker (compression recovery)
   write_resume_marker "$stype" "$sid" "init" ""
@@ -1430,6 +1568,9 @@ advance_phase() {
   local mode="$_PS_MODE"
   local solo="$_PS_SOLO"
   local sid="$_PS_SESSION_ID"
+  # Preserve the init-time session_log_id across the rewrite. Pre-fix sessions
+  # (phase-state written before this field existed) fall back to the live id.
+  local session_log_id="${_PS_SESSION_LOG_ID:-$sid}"
 
   # Defaults
   cycle="${cycle:-1}"
@@ -1613,8 +1754,8 @@ advance_phase() {
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
   # Shell I/O — bypasses write-guard.sh
-  printf 'session_type: %s\nsession_id: %s\nmode: %s\ncurrent_phase: %s\ncycle: %s\nphases_completed: %s\nsolo: %s\ntag: %s\ntimestamp: %s\n' \
-    "$stype" "$sid" "$mode" "$new_phase" "$cycle" "$phases_completed" "$solo" "$tag" "$ts" \
+  printf 'session_type: %s\nsession_id: %s\nsession_log_id: %s\nmode: %s\ncurrent_phase: %s\ncycle: %s\nphases_completed: %s\nsolo: %s\ntag: %s\ntimestamp: %s\n' \
+    "$stype" "$sid" "$session_log_id" "$mode" "$new_phase" "$cycle" "$phases_completed" "$solo" "$tag" "$ts" \
     > "$state_file" 2>/dev/null || true
 
   # Invalidate validation cache — file contents changed (audit C8)
@@ -1780,13 +1921,14 @@ set_solo() {
   # Read all fields from cache (zero forks), replace solo, rewrite atomically
   local cycle="${_PS_CYCLE:-1}"
   local mode="${_PS_MODE:-review}"
+  local session_log_id="${_PS_SESSION_LOG_ID:-$_PS_SESSION_ID}"
 
   local ts
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
   # Shell I/O — bypasses write-guard.sh
-  printf 'session_type: %s\nsession_id: %s\nmode: %s\ncurrent_phase: %s\ncycle: %s\nphases_completed: %s\nsolo: %s\ntag: %s\ntimestamp: %s\n' \
-    "$_PS_SESSION_TYPE" "$_PS_SESSION_ID" "$mode" "$_PS_CURRENT_PHASE" "$cycle" "$_PS_PHASES_COMPLETED" "$new_solo" "$_PS_TAG" "$ts" \
+  printf 'session_type: %s\nsession_id: %s\nsession_log_id: %s\nmode: %s\ncurrent_phase: %s\ncycle: %s\nphases_completed: %s\nsolo: %s\ntag: %s\ntimestamp: %s\n' \
+    "$_PS_SESSION_TYPE" "$_PS_SESSION_ID" "$session_log_id" "$mode" "$_PS_CURRENT_PHASE" "$cycle" "$_PS_PHASES_COMPLETED" "$new_solo" "$_PS_TAG" "$ts" \
     > "$state_file" 2>/dev/null || true
 
   # Invalidate validation cache — file contents changed (audit C8)
@@ -1821,13 +1963,14 @@ set_phase_mode() {
   # Read all fields from cache (zero forks), replace mode, rewrite atomically
   local cycle="${_PS_CYCLE:-1}"
   local solo="${_PS_SOLO:-false}"
+  local session_log_id="${_PS_SESSION_LOG_ID:-$_PS_SESSION_ID}"
 
   local ts
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
   # Shell I/O — bypasses write-guard.sh
-  printf 'session_type: %s\nsession_id: %s\nmode: %s\ncurrent_phase: %s\ncycle: %s\nphases_completed: %s\nsolo: %s\ntag: %s\ntimestamp: %s\n' \
-    "$_PS_SESSION_TYPE" "$_PS_SESSION_ID" "$new_mode" "$_PS_CURRENT_PHASE" "$cycle" "$_PS_PHASES_COMPLETED" "$solo" "$_PS_TAG" "$ts" \
+  printf 'session_type: %s\nsession_id: %s\nsession_log_id: %s\nmode: %s\ncurrent_phase: %s\ncycle: %s\nphases_completed: %s\nsolo: %s\ntag: %s\ntimestamp: %s\n' \
+    "$_PS_SESSION_TYPE" "$_PS_SESSION_ID" "$session_log_id" "$new_mode" "$_PS_CURRENT_PHASE" "$cycle" "$_PS_PHASES_COMPLETED" "$solo" "$_PS_TAG" "$ts" \
     > "$state_file" 2>/dev/null || true
 
   # Invalidate validation cache — file contents changed (audit C8)
@@ -1858,8 +2001,10 @@ upgrade_session_type() {
     return 1
   fi
 
-  local sid mode solo cycle
+  local sid mode solo cycle session_log_id
   sid=$(grep '^session_id:' "$state_file" 2>/dev/null | sed 's/^session_id: *//')
+  session_log_id=$(grep '^session_log_id:' "$state_file" 2>/dev/null | sed 's/^session_log_id: *//')
+  : "${session_log_id:=$sid}"
   mode=$(grep '^mode:' "$state_file" 2>/dev/null | sed 's/^mode: *//')
   solo=$(grep '^solo:' "$state_file" 2>/dev/null | sed 's/^solo: *//')
   cycle=$(grep '^cycle:' "$state_file" 2>/dev/null | sed 's/^cycle: *//')
@@ -1869,8 +2014,8 @@ upgrade_session_type() {
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
   # Shell I/O — bypasses write-guard.sh
-  printf 'session_type: %s\nsession_id: %s\nmode: %s\ncurrent_phase: %s\ncycle: %s\nphases_completed: %s\nsolo: %s\ntag: %s\ntimestamp: %s\n' \
-    "standard" "$sid" "${mode:-default}" "plan" "${cycle:-1}" "init" "${solo:-false}" "$tag" "$ts" \
+  printf 'session_type: %s\nsession_id: %s\nsession_log_id: %s\nmode: %s\ncurrent_phase: %s\ncycle: %s\nphases_completed: %s\nsolo: %s\ntag: %s\ntimestamp: %s\n' \
+    "standard" "$sid" "$session_log_id" "${mode:-default}" "plan" "${cycle:-1}" "init" "${solo:-false}" "$tag" "$ts" \
     > "$state_file" 2>/dev/null || true
 
   # Invalidate caches

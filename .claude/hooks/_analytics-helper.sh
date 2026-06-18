@@ -236,6 +236,39 @@ get_session_id() {
     echo "$_CACHED_SESSION_ID"
     return
   fi
+  # Harness stdin contract: hook entrypoints extract session_id from the JSON
+  # payload into _REPO_OS_STDIN_SID before sourcing libraries. The stdin SID is
+  # used for validation/analytics only — it is NOT authoritative for file-path
+  # keying. First-writer-wins (fix for the editor-live identity drift regressed
+  # by 9b6ec01): the on-disk .session-id is the durable identity once written,
+  # so it keys the per-session state dir, session-log filename, and cycle
+  # counter stably across turns even when the harness rotates session_id on a
+  # context-window turnover. We therefore write-through ONLY when no durable
+  # identity file exists yet; when the file is present it wins, regardless of
+  # the stdin value. (Cross-session bleed is prevented by close-gated deletion
+  # of .session-id, not by overwriting it mid-session.)
+  if [ -n "${_REPO_OS_STDIN_SID:-}" ]; then
+    local sid_file_wt="$repo_root/.claude/.session-id"
+    if [ -f "$sid_file_wt" ]; then
+      # Durable identity already exists — file wins; never overwrite. A mismatch
+      # is benign (a harness UUID rotation across a context-window turnover — the
+      # file value is the correct, stable identity), so the advisory is gated
+      # behind REPO_OS_DEBUG to avoid a per-turn stderr nag. Default: silent.
+      _CACHED_SESSION_ID=$(cat "$sid_file_wt")
+      if [ "${REPO_OS_DEBUG:-0}" = "1" ] && [ "$_CACHED_SESSION_ID" != "$_REPO_OS_STDIN_SID" ]; then
+        echo "Warning: session-id mismatch: file=$_CACHED_SESSION_ID, stdin=$_REPO_OS_STDIN_SID. Using file value." >&2
+      fi
+      echo "$_CACHED_SESSION_ID"
+      return
+    fi
+    # No durable identity yet — the hook is the first initializer. Seed the
+    # file from the harness stdin SID so downstream file-path consumers (state
+    # dir, session log) share the same id from here on.
+    _CACHED_SESSION_ID="$_REPO_OS_STDIN_SID"
+    echo "$_CACHED_SESSION_ID" > "$sid_file_wt" 2>/dev/null || true
+    echo "$_CACHED_SESSION_ID"
+    return
+  fi
   local sid_file="$repo_root/.claude/.session-id"
   if [ -f "$sid_file" ]; then
     _CACHED_SESSION_ID=$(cat "$sid_file")
@@ -654,7 +687,18 @@ register_session() {
   local stype="${1:-}"
   local branch
   branch="$(get_branch)"
-  local pid="$$"
+  # Durable PID: prefer $PPID (the long-lived claude process that spawns the hook
+  # subprocess) over $$ (the short-lived hook process itself). Using $PPID means
+  # the registry entry reflects a PID that survives multiple hook invocations,
+  # making is_session_active / sweep_stale_sessions correct for interactive sessions.
+  # Fall back to $$ if $PPID is 0/1/unavailable (edge case in some environments).
+  # Liveness has an age-based backstop in sweep_stale_sessions, so an imperfect
+  # PID degrades gracefully.
+  local pid
+  pid="${PPID:-0}"
+  if [ "$pid" -le 1 ] 2>/dev/null || ! kill -0 "$pid" 2>/dev/null; then
+    pid="$$"
+  fi
   local started_at
   started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
@@ -695,8 +739,15 @@ register_session() {
 # Called at session init, close, and daemon startup crash recovery.
 # Fail-silent: sweep failures never block session operations.
 #
+# Arguments:
+#   $1 — exclude_sid (optional). When provided, skip the registry entry AND
+#         per-session state dir for this session ID. Used by init_phase to
+#         prevent the current session from evicting itself during its own sweep
+#         (the durable PPID may appear dead if the hook runs from a subprocess).
+#
 # Configurable: SESSION_MAX_TTL env var (seconds, default 21600 = 6h).
 sweep_stale_sessions() {
+  local exclude_sid="${1:-}"
   local repo_root
   repo_root="$_REPO_OS_ROOT"
   local sessions_dir="$repo_root/.claude/.state/sessions"
@@ -709,6 +760,13 @@ sweep_stale_sessions() {
   local stale_file
   for stale_file in "$sessions_dir"/*.yaml; do
     [ -f "$stale_file" ] || continue
+
+    # Skip the current session — do not evict ourselves during our own sweep
+    local _sw_sid
+    _sw_sid=$(basename "$stale_file" .yaml)
+    if [ -n "$exclude_sid" ] && [ "$_sw_sid" = "$exclude_sid" ]; then
+      continue
+    fi
 
     local file_pid
     file_pid=$(grep '^pid: ' "$stale_file" 2>/dev/null | sed 's/^pid: *//')
@@ -769,6 +827,10 @@ sweep_stale_sessions() {
       [ -d "$state_subdir" ] || continue
       local dir_sid
       dir_sid=$(basename "$state_subdir")
+      # Skip the current session — do not evict our own state dir
+      if [ -n "$exclude_sid" ] && [ "$dir_sid" = "$exclude_sid" ]; then
+        continue
+      fi
       # Check if a registry entry exists for this session
       if [ ! -f "$sessions_dir/${dir_sid}.yaml" ]; then
         # No registry entry — orphaned state dir, remove
@@ -793,8 +855,13 @@ unregister_session() {
   # Remove this session's file
   rm -f "$sessions_dir/${sid}.yaml" 2>/dev/null || true
 
-  # Sweep remaining stale entries
-  sweep_stale_sessions
+  # Sweep remaining stale entries. Exclude the current session id: although its
+  # registry file was just removed above, the orphan-state-dir loop in
+  # sweep_stale_sessions would otherwise see the now-registry-less per-session
+  # state dir and rm it out from under cleanup_session_files (which runs after
+  # this and performs the ordered governance-file cleanup + rmdir). Passing
+  # exclude_sid keeps that teardown ordering intact.
+  sweep_stale_sessions "$sid"
 }
 
 # --- Check if another session is active on a given branch ---

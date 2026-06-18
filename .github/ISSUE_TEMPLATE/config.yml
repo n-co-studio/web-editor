@@ -1,11 +1,5 @@
-blank_issues_enabled: false
+blank_issues_enabled: true
 contact_links:
-  - name: Bug Report
-    url: https://github.com/{owner}/{repo}/issues/new?template=bug_report.yml
-    about: Report a bug in the extension, MCP server, or dev plugin
-  - name: Questions & Discussion
-    url: https://github.com/{owner}/{repo}/discussions
-    about: Ask questions, share ideas, or get help with setup
-  - name: Security Issue
-    url: https://github.com/{owner}/{repo}/blob/main/SECURITY.md
-    about: For security vulnerabilities — please read SECURITY.md before opening an issue
+  - name: Repo OS Workflow
+    url: https://github.com/{owner}/{repo}/blob/main/docs/ai/workflow.md
+    about: Internal work tracking uses the Repo OS session log (see workflow.md). GitHub Issues are for external bug reports and feature requests.

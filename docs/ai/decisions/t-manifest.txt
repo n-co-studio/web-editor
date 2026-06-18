@@ -48,3 +48,4 @@ t-0037-governance-runtime-packaging.md
 t-0038-handoff-bundle.md
 t-0039-critic-consolidation.md
 t-0040-finish-loop-cache.md
+t-0044-functional-verification-gate.md

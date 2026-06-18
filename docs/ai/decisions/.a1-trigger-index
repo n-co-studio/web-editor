@@ -78,3 +78,16 @@
 0041|docs/ai/prompts/prompt-b-product-build\.md|governance evidence, spec_version, governance-checked, governance-bash-fired, fast-skip predicate, inter-session governance
 0041|\.claude/hooks/pre-commit-gates\.sh|governance evidence, spec_version, governance-checked, governance-bash-fired, fast-skip predicate, inter-session governance
 0041|\.claude/hooks/bash-guard\.sh|governance evidence, spec_version, governance-checked, governance-bash-fired, fast-skip predicate, inter-session governance
+0042|\.claude/hooks/_phase-helper\.sh|compute_phase_gates, read_phase_gates, phase-state.gates, hook hoist, GATES_SESSION_OVERLAP, GATES_BRANCH_ISOLATION
+0042|\.claude/hooks/bash-guard\.sh|compute_phase_gates, read_phase_gates, phase-state.gates, hook hoist, GATES_SESSION_OVERLAP, GATES_BRANCH_ISOLATION
+0042|\.claude/hooks/write-guard\.sh|compute_phase_gates, read_phase_gates, phase-state.gates, hook hoist, GATES_SESSION_OVERLAP, GATES_BRANCH_ISOLATION
+0042|\.claude/hooks/pre-commit-gates\.sh|compute_phase_gates, read_phase_gates, phase-state.gates, hook hoist, GATES_SESSION_OVERLAP, GATES_BRANCH_ISOLATION
+0042|\.claude/hooks/_cleanup-helper\.sh|compute_phase_gates, read_phase_gates, phase-state.gates, hook hoist, GATES_SESSION_OVERLAP, GATES_BRANCH_ISOLATION
+0043|\.claude/hooks/_phase-helper\.sh|handoff-bundles, per-brief bundle, _resolve_brief_id, _atomic_write_bundle, brief_id, handoff bundle path
+0043|\.claude/local/handoff-bundles/.*\.yaml|handoff-bundles, per-brief bundle, _resolve_brief_id, _atomic_write_bundle, brief_id, handoff bundle path
+0043|\.claude/local/handoff-bundle\.yaml|handoff-bundles, per-brief bundle, _resolve_brief_id, _atomic_write_bundle, brief_id, handoff bundle path
+0043|docs/ai/prompts/prompt-t-task-definition\.md|handoff-bundles, per-brief bundle, _resolve_brief_id, _atomic_write_bundle, brief_id, handoff bundle path
+0043|docs/ai/prompts/prompt-b-product-build\.md|handoff-bundles, per-brief bundle, _resolve_brief_id, _atomic_write_bundle, brief_id, handoff bundle path
+0044|\.claude/hooks/pre-commit-gates\.sh|functional-verified, SKIP_FUNC_CHECK, REPO_OS_FUNC_CHECK_TIMEOUT, IS_NO_REVIEW_BACKSTOP, A3.4
+0044|\.claude/hooks/_cleanup-helper\.sh|functional-verified, SKIP_FUNC_CHECK, REPO_OS_FUNC_CHECK_TIMEOUT, IS_NO_REVIEW_BACKSTOP, A3.4
+0044|\.claude/.state/functional-verified|functional-verified, SKIP_FUNC_CHECK, REPO_OS_FUNC_CHECK_TIMEOUT, IS_NO_REVIEW_BACKSTOP, A3.4

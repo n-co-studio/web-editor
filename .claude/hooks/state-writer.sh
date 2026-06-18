@@ -22,6 +22,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # --- Read SubagentStop payload (before sourcing — cat/jq need no libraries) ---
 INPUT=$(cat)
+
+# --- Harness session_id plumbing (must precede first get_session_id call) ---
+export _REPO_OS_STDIN_SID
+_REPO_OS_STDIN_SID="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)"
+
 AGENT_TYPE=$(echo "$INPUT" | jq -r '.agent_type // empty')
 
 # --- Non-governance agent fast exit (Phase 2c — no sourcing needed) ---

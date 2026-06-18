@@ -133,9 +133,17 @@ fixture_subagentstop() {
 
 # --- Stop ---
 # Consumer: session-close-check.sh
-# Hook reads stdin (INPUT=$(cat)) but does not parse it with jq.
+# Fields parsed:
+#   .session_id  (optional; harness embeds live session id for identity resolution)
 fixture_stop() {
-  printf '{}'
+  local session_id="${1:-}"
+  if [ -n "$session_id" ]; then
+    local sid
+    sid=$(_json_escape "$session_id")
+    printf '{"session_id":"%s"}' "$sid"
+  else
+    printf '{}'
+  fi
 }
 
 # --- HVST event (PostToolUse / PostToolUseFailure) ---

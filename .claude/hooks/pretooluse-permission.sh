@@ -29,6 +29,10 @@ START_MS=$(now_ms)
 # --- Read PreToolUse payload from stdin ---
 INPUT=$(cat)
 
+# --- Harness session_id plumbing (must precede first get_session_id call) ---
+export _REPO_OS_STDIN_SID
+_REPO_OS_STDIN_SID="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)"
+
 # --- jq presence guard ---
 if [ "$_REPO_OS_HAS_JQ" = false ]; then
   if [ "${CLAUDE_HEADLESS:-0}" = "1" ]; then

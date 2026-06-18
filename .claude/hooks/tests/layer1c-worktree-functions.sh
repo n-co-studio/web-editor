@@ -113,12 +113,14 @@ init_phase "standard" 2>/dev/null
 _init_phase=$(get_phase)
 assert_eq "$_init_phase" "init" "init_phase sets phase to init with env var session ID"
 
-# Advance to plan
+# Advance through drift-check (Decision 0038) then to plan
+advance_phase "drift-check" 2>/dev/null
 advance_phase "plan" 2>/dev/null
 _plan_phase=$(get_phase)
 assert_eq "$_plan_phase" "plan" "advance_phase to plan works with env var session ID"
 
-# Advance to approval
+# Advance to approval (Decision 0025 substance gate: pragmatist-signed required)
+printf 'GATE_RESULT: APPROVED\nsession_id: %s\n' "$REPO_OS_SESSION_ID" > "$(get_session_state_dir)/pragmatist-signed"
 advance_phase "approval" 2>/dev/null
 _approval_phase=$(get_phase)
 assert_eq "$_approval_phase" "approval" "advance_phase to approval works with env var session ID"

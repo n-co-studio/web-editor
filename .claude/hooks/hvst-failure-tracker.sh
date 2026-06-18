@@ -25,6 +25,11 @@ fi
 
 # Read JSON payload from stdin
 INPUT=$(cat)
+
+# --- Harness session_id plumbing (must precede first get_session_id call) ---
+export _REPO_OS_STDIN_SID
+_REPO_OS_STDIN_SID="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)"
+
 EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // empty' 2>/dev/null || echo "")
 
 # Fast-exit: PostToolUse with no counter file — nothing to reset
