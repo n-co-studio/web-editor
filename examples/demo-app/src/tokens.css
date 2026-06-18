@@ -110,12 +110,16 @@ body {
 }
 .nco-link:hover { background-size: 0 1px; background-position: 100% 100%; }
 
-/* Hairline card hover — no shadows, border emphasis only (MP is flat) */
-.nco-lift { transition: border-color 0.2s ease, background-color 0.2s ease; }
-.nco-lift:hover { border-color: var(--color-ink); }
+/* Hairline card — no shadows, border emphasis on hover (MP is flat). Owns its
+   border so the :hover color isn't overridden by an inline border shorthand. */
+.nco-card {
+  border: 1px solid var(--color-border);
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+.nco-card:hover { border-color: var(--color-ink); }
 
 @media (prefers-reduced-motion: reduce) {
-  .nco-link, .nco-lift { transition: none; }
+  .nco-link, .nco-card { transition: none; }
 }
 
 /* Walkthrough rows — alternating image / text, collapsing to a single column.
@@ -136,4 +140,36 @@ body {
   .nco-step-row { grid-template-columns: 1fr; gap: var(--space-6); }
   .nco-step-row > .nco-step-figure,
   .nco-step-row > .nco-step-text { grid-column: 1; grid-row: auto; }
+}
+
+/* Hero — text + image panel; stacks on mobile (text first) */
+.nco-hero {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: var(--space-12);
+  align-items: center;
+}
+@media (max-width: 720px) {
+  .nco-hero { grid-template-columns: 1fr; gap: var(--space-10); }
+}
+
+/* Pure-CSS scroll-driven parallax (no JS). The clip box hides the overflow; the
+   inner layer is taller than the box and drifts on scroll. Degrades to static
+   where scroll-driven animations aren't supported, and honors reduced-motion. */
+.nco-parallax { overflow: hidden; }
+.nco-parallax-layer { height: 100%; }
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .nco-parallax-layer {
+      height: 128%;
+      animation: nco-drift linear both;
+      animation-timeline: view();
+      animation-range: cover;
+      will-change: transform;
+    }
+  }
+}
+@keyframes nco-drift {
+  from { transform: translateY(-14%); }
+  to   { transform: translateY(8%); }
 }

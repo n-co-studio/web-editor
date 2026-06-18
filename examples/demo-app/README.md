@@ -39,7 +39,9 @@ Edit one with the extension → review in the panel → send to Claude Code.
 
 ## Sections
 
-`Hero` · `Walkthrough` (the six tour steps as alternating image/text rows + edit-mode grid) · `SetupGuide` · `SiteFooter` — each a separate component under `src/components/`, plus `Logo`. The `data-source-file` mapping points at a focused file per section.
+`Hero` (text + a pure-CSS scroll-parallax image panel — placeholder line-art) · `Benefits` (4-tile visual overview) · `Walkthrough` (the six tour steps as alternating image/text rows + edit-mode grid) · `SetupGuide` · `SiteFooter` — each a separate component under `src/components/`, plus `Logo`. The `data-source-file` mapping points at a focused file per section.
+
+The hero parallax uses CSS scroll-driven animation (`animation-timeline: view()` in `tokens.css`) — no JS; it degrades to static where unsupported and honors `prefers-reduced-motion`. Swap the `.nco-parallax-layer` contents (currently `HeroPlaceholder` line-art) for a real `<img>` when you have one.
 
 ### Screenshots
 

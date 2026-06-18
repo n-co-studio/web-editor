@@ -1,5 +1,6 @@
 import Logo from './components/Logo';
 import Hero from './components/Hero';
+import Benefits from './components/Benefits';
 import Walkthrough from './components/Walkthrough';
 import SetupGuide from './components/SetupGuide';
 import SiteFooter from './components/SiteFooter';
@@ -54,6 +55,7 @@ export default function App() {
         }}
       >
         <Hero />
+        <Benefits />
         <Walkthrough />
         <SetupGuide />
       </main>
