@@ -1,53 +1,41 @@
 /**
  * Footer — the one ink section. NCO Studio wordmark (inherits paper via
- * currentColor) over a flat ink field, with a multi-column link grid. Sharp,
- * no shadows.
+ * currentColor) over a flat ink field. No nav columns: every link there would
+ * have been a dead "#" placeholder, so the footer is just brand + the one real
+ * command. Sharp, no shadows.
  */
 
 import Logo from './Logo';
-
-type LinkGroup = { heading: string; links: string[] };
-
-const GROUPS: LinkGroup[] = [
-  { heading: 'Product', links: ['Overview', 'Edit modes', 'Setup', 'Changelog'] },
-  { heading: 'Resources', links: ['Quickstart', 'MCP server', 'Dev plugin', 'Compatibility'] },
-  { heading: 'Community', links: ['GitHub', 'Issues', 'Discussions', 'Security'] },
-];
 
 export default function SiteFooter() {
   return (
     <footer style={{ background: 'var(--color-ink)', color: 'var(--color-on-ink)', padding: 'var(--space-16) var(--space-10)' }}>
       <div
         style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(220px, 1.4fr) repeat(3, minmax(120px, 1fr))',
-          gap: 'var(--space-10)',
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 'var(--space-8)',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
         }}
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', maxWidth: 360 }}>
           <span style={{ color: 'var(--color-on-ink)' }}>
             <Logo height={26} />
           </span>
-          <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-on-ink-muted)', maxWidth: 280 }}>
+          <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-on-ink-muted)' }}>
             A visual editing overlay for local dev pages that feeds structured diffs to Claude Code.
           </p>
-          <code style={{ fontSize: 'var(--text-caption)', fontFamily: 'var(--font-mono)', color: 'var(--color-on-ink-muted)' }}>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+          <span style={{ fontSize: 'var(--text-caption)', textTransform: 'uppercase', letterSpacing: 'var(--tracking-wide)', color: 'var(--color-on-ink-muted)' }}>
+            Run the server
+          </span>
+          <code style={{ fontSize: 'var(--text-body-sm)', fontFamily: 'var(--font-mono)', color: 'var(--color-on-ink)' }}>
             npx @nco-studio/web-editor-mcp
           </code>
         </div>
-
-        {GROUPS.map((g) => (
-          <nav key={g.heading} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-            <span style={{ fontSize: 'var(--text-caption)', textTransform: 'uppercase', letterSpacing: 'var(--tracking-wide)', color: 'var(--color-on-ink-muted)' }}>
-              {g.heading}
-            </span>
-            {g.links.map((l) => (
-              <a key={l} href="#" style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-on-ink)', textDecoration: 'none' }}>
-                {l}
-              </a>
-            ))}
-          </nav>
-        ))}
       </div>
 
       <div

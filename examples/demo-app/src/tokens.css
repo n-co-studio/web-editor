@@ -117,3 +117,23 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .nco-link, .nco-lift { transition: none; }
 }
+
+/* Walkthrough rows — alternating image / text, collapsing to a single column.
+   Figure comes first in the DOM (so it stacks on top on mobile); on wide
+   viewports, --reverse rows flip the figure to the right. */
+.nco-step-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-12);
+  align-items: center;
+}
+.nco-step-row > .nco-step-figure { grid-column: 1; grid-row: 1; }
+.nco-step-row > .nco-step-text   { grid-column: 2; grid-row: 1; }
+.nco-step-row--reverse > .nco-step-figure { grid-column: 2; grid-row: 1; }
+.nco-step-row--reverse > .nco-step-text   { grid-column: 1; grid-row: 1; }
+
+@media (max-width: 720px) {
+  .nco-step-row { grid-template-columns: 1fr; gap: var(--space-6); }
+  .nco-step-row > .nco-step-figure,
+  .nco-step-row > .nco-step-text { grid-column: 1; grid-row: auto; }
+}

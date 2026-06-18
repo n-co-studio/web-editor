@@ -39,7 +39,11 @@ Edit one with the extension → review in the panel → send to Claude Code.
 
 ## Sections
 
-`Hero` · `HowItWorks` (the loop) · `Walkthrough` (the six tour steps + edit-mode grid) · `SetupGuide` · `SiteFooter` — each a separate component under `src/components/`, plus `Logo`. The `data-source-file` mapping points at a focused file per section.
+`Hero` · `Walkthrough` (the six tour steps as alternating image/text rows + edit-mode grid) · `SetupGuide` · `SiteFooter` — each a separate component under `src/components/`, plus `Logo`. The `data-source-file` mapping points at a focused file per section.
+
+### Screenshots
+
+The walkthrough rows render labeled placeholder frames (e.g. `screenshot · toolbar.png`). To use real captures, swap `StepFigure`'s placeholder for an `<img>` (the expected shot name is on each `Step`). Placeholder links are avoided throughout — the only links on the page resolve to real sections (`#walkthrough`, `#setup`, `#top`).
 
 ## What is installed
 

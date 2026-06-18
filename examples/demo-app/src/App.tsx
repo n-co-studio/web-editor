@@ -1,12 +1,10 @@
 import Logo from './components/Logo';
 import Hero from './components/Hero';
-import HowItWorks from './components/HowItWorks';
 import Walkthrough from './components/Walkthrough';
 import SetupGuide from './components/SetupGuide';
 import SiteFooter from './components/SiteFooter';
 
 const NAV: ReadonlyArray<[string, string]> = [
-  ['The loop', '#loop'],
   ['Using the editor', '#walkthrough'],
   ['Setup', '#setup'],
 ];
@@ -56,7 +54,6 @@ export default function App() {
         }}
       >
         <Hero />
-        <HowItWorks />
         <Walkthrough />
         <SetupGuide />
       </main>
