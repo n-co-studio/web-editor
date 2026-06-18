@@ -41,6 +41,12 @@ export default function App() {
               {label}
             </a>
           ))}
+          <a
+            href="/motion"
+            style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-caption)', color: 'var(--color-ink)', textDecoration: 'none', borderBottom: '1px solid var(--color-ink)', paddingBottom: 1 }}
+          >
+            motion ↗
+          </a>
         </nav>
       </header>
 
