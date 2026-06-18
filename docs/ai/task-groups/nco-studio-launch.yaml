@@ -88,6 +88,17 @@ briefs:
       - "scripts/publish-dry-run.mjs"
       - "CHANGELOG.md"
 
+  - title: "Finalize Package Builds & Dependency Hygiene (Brief 1 correction)"
+    sequence: 6
+    session: 6
+    branch: "feature/nco-studio-launch"
+    status: complete
+    next_brief: ""
+    boundaries:
+      - "packages/dev-plugin/tsconfig.json"
+      - "tsconfig.json"
+      - "package-lock.json"
+
 intent:
   goal: >
     Rebrand the entire monorepo from @frontend-editor/* to @nco-studio/*,
@@ -208,6 +219,22 @@ integration_points:
       - "REPO_OS_SKIP_MODE_GUARD (child mode — .github/workflows/release.yml is product release infrastructure)"
     timestamp: "2026-06-17T23:58:00Z"
 
+  - brief_sequence: 6
+    gates_a:
+      A1: "pass"
+      A2: "pass"
+      A3: "pass"
+      A4: "pass"
+      A5: "pass"
+      A6: "pass"
+    gates_b:
+      B1: "pass"
+      B2: "pass"
+      B3: "pass"
+    overrides_used:
+      - "REPO_OS_SKIP_PRAGMATIST_GATE (auto mode — runner pre-approved)"
+    timestamp: "2026-06-18T00:21:00Z"
+
 session_decisions:
   - session: 1
     decision: "Bundle shared into mcp-server via tsup noExternal rather than publishing as 3rd package"
@@ -227,6 +254,9 @@ session_decisions:
   - session: 5
     decision: "CHANGELOG version header corrected from [1.0.0] to [0.1.0]"
     rationale: "Cross-session fix — packages are at 0.1.0 (pre-release); the initial changelog entry from Brief 2 used 1.0.0 incorrectly"
+  - session: 6
+    decision: "Remove composite:true from dev-plugin tsconfig and drop dev-plugin from root references"
+    rationale: "tsup DTS generation creates an in-memory TypeScript project that only lists entry files; composite:true causes TS6307 for transitively-imported files. dev-plugin uses tsup (not tsc --build) so composite:true has no benefit. Root reference dropped for the same reason — tsc --build at root requires composite:true in referenced projects."
 
 governance:
   - brief_sequence: 3
