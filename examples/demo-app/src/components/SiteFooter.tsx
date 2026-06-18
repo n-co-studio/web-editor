@@ -24,7 +24,7 @@ export default function SiteFooter() {
             <Logo height={26} />
           </span>
           <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-on-ink-muted)' }}>
-            A visual editing overlay for local dev pages that feeds structured diffs to Claude Code.
+            A visual editing overlay for local dev pages that feeds structured diffs to your AI coding agent over MCP.
           </p>
         </div>
 

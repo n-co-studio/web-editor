@@ -44,7 +44,7 @@ const STEPS: Step[] = [
     body: (
       <>
         <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
-          It scans your project for design tokens and bridges the editor to Claude Code:
+          It scans your project for design tokens and bridges the editor to your AI coding agent (any MCP client, e.g. Claude Code):
         </p>
         <Code>{`npx @nco-studio/web-editor-mcp@latest`}</Code>
       </>

@@ -19,7 +19,7 @@ const BENEFITS: Benefit[] = [
   },
   {
     title: 'Any agent, over MCP',
-    body: 'AI-agnostic: send structured diffs to any LLM connected over MCP — Claude or otherwise.',
+    body: 'AI-agnostic: built on the open MCP protocol, so it pairs with any MCP-compatible coding agent — Claude Code, Cursor, Windsurf.',
     icon: (
       <>
         <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" strokeWidth="1.6" />

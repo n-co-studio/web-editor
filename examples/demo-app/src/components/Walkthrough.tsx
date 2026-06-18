@@ -131,8 +131,8 @@ const STEPS: Step[] = [
     title: 'Review & submit',
     shot: 'review-panel.png',
     body: (
-      <>Batch your edits in the review panel, then submit them as a single structured diff to Claude
-      Code through the local MCP server, which writes the real code changes.</>
+      <>Batch your edits in the review panel, then submit them as a single structured diff to your AI
+      coding agent through the local MCP server, which writes the real code changes.</>
     ),
   },
   {

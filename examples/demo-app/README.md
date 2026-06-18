@@ -35,7 +35,7 @@ Token-driven edit targets, spread across the sections (full set in `src/tokens.c
 | Spacing | `--space-8` / `--space-16` / `--space-20` | Step padding, section rhythm |
 | Display size | `--text-display` | Hero headline |
 
-Edit one with the extension → review in the panel → send to Claude Code.
+Edit one with the extension → review in the panel → send to your AI coding agent over MCP.
 
 ## Sections
 
