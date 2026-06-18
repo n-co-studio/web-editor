@@ -99,6 +99,17 @@ briefs:
       - "tsconfig.json"
       - "package-lock.json"
 
+  - title: "Pre-Publish Verification Sweep & Remediation"
+    sequence: 7
+    session: 7
+    branch: "feature/nco-studio-launch"
+    status: complete
+    next_brief: ""
+    boundaries:
+      - ".claude/.automation/reports/prepublish-verification-*.md"
+      - "packages/mcp-server/package.json"
+      - "packages/dev-plugin/package.json"
+
 intent:
   goal: >
     Rebrand the entire monorepo from @frontend-editor/* to @nco-studio/*,
@@ -257,8 +268,27 @@ session_decisions:
   - session: 6
     decision: "Remove composite:true from dev-plugin tsconfig and drop dev-plugin from root references"
     rationale: "tsup DTS generation creates an in-memory TypeScript project that only lists entry files; composite:true causes TS6307 for transitively-imported files. dev-plugin uses tsup (not tsc --build) so composite:true has no benefit. Root reference dropped for the same reason — tsc --build at root requires composite:true in referenced projects."
+  - session: 7
+    decision: "Rename sweep scope must include package.json root metadata fields (repository/homepage/bugs URLs)"
+    rationale: "Initial Check 2 grep only covered src/dist/compiled-spec; cohesion review found markpreston2/frontend-editor in repository.url, homepage, bugs.url of both published packages. Corrected in this brief. Future rename verification should always include all package.json files."
 
 governance:
+  - brief_sequence: 7
+    gates_a:
+      A1: "pass"
+      A2: "pass"
+      A3: "n/a"
+      A4: "pass"
+      A5: "pass"
+      A6: "pass"
+    gates_b:
+      B1: "pass"
+      B2: "pass"
+      B3: "pass"
+    overrides_used:
+      - "REPO_OS_SKIP_PRAGMATIST_GATE (auto mode — runner pre-approved)"
+    timestamp: "2026-06-18T00:45:21Z"
+
   - brief_sequence: 3
     gates_a:
       A1: "pass"
