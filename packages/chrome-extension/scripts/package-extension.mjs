@@ -155,6 +155,12 @@ mkdirSync(OUT_DIR, { recursive: true });
 const ZIP_NAME = `nco-studio-web-editor-${version}.zip`;
 const ZIP_PATH = join(OUT_DIR, ZIP_NAME);
 
+// Remove any pre-existing archive first — `zip -r` ADDS to an existing zip
+// rather than replacing it, so a stale archive would retain entries no longer
+// staged (e.g. old-brand icons from a prior build), leaking them into the store
+// package. Deleting guarantees the zip mirrors the freshly-verified staging dir.
+rmSync(ZIP_PATH, { force: true });
+
 // Use system zip (available on macOS/Linux). Paths relative to staging dir.
 execSync(`zip -r "${ZIP_PATH}" .`, {
   cwd: STAGING,

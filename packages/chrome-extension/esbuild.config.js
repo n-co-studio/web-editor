@@ -1,5 +1,5 @@
 import { build, context } from 'esbuild';
-import { cpSync, mkdirSync } from 'node:fs';
+import { cpSync, mkdirSync, rmSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -62,6 +62,10 @@ cpSync(resolve(__dirname, 'src/popup/popup.html'), resolve(__dirname, 'dist/popu
 cpSync(resolve(__dirname, 'assets/icons'), resolve(__dirname, 'dist/icons'), { recursive: true });
 // Operator-provided status icons (repo root /icon) → dist/icons/status — used by
 // chrome.action.setIcon to reflect editor/connection state.
+// Prune first so the staged set always mirrors the (clean) source; cpSync alone
+// adds/overwrites but never removes stale files (e.g. old-brand icons from a
+// pre-rename build), which would otherwise leak into the store zip.
+rmSync(resolve(__dirname, 'dist/icons/status'), { recursive: true, force: true });
 cpSync(resolve(__dirname, '../../icon'), resolve(__dirname, 'dist/icons/status'), { recursive: true });
 
 // Strip internal metadata fields before passing to esbuild
