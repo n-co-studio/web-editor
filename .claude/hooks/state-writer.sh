@@ -120,8 +120,11 @@ if [ -n "$CURRENT_PHASE" ]; then
       [ "$CURRENT_PHASE" != "verify" ] && PHASE_OK=false
       ;;
     pragmatist)
-      # pragmatist writes during plan, review, or build phase (background dispatch from plan may complete during build)
-      [ "$CURRENT_PHASE" != "plan" ] && [ "$CURRENT_PHASE" != "review" ] && [ "$CURRENT_PHASE" != "build" ] && PHASE_OK=false
+      # pragmatist writes during plan, review, or build phase (background dispatch from plan may complete during build).
+      # Also allowed in synthesize phase: taskdef-brief dispatches pragmatist during synthesize for the
+      # approval gate — without this, the gate is unsatisfiable in that session type.
+      # plan/review/build covers Prompt B (product build); synthesize covers taskdef-brief only.
+      [ "$CURRENT_PHASE" != "plan" ] && [ "$CURRENT_PHASE" != "review" ] && [ "$CURRENT_PHASE" != "build" ] && [ "$CURRENT_PHASE" != "synthesize" ] && PHASE_OK=false
       ;;
   esac
 fi

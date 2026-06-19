@@ -867,16 +867,20 @@ drift_check() {
     in_contract && in_sf && /^    - / { sub(/^    - /, ""); gsub(/"/, ""); print }
   ' "$bundle" 2>/dev/null)
   if [ -n "$scope_files" ] && [ -n "$approved_at" ]; then
+    # Single bulk git log — replaces N+1 per-file calls (hot-path optimization).
+    # Mirrors the bulk approach used in check_graph_staleness: one git log call,
+    # then intersect the modified-files set against scope_files in awk.
+    local all_modified
+    all_modified=$(git -C "$repo_root" log --since="$approved_at" --name-only \
+      --format='' --no-merges 2>/dev/null | sort -u)
     local touched=""
-    local f
-    while IFS= read -r f; do
-      [ -z "$f" ] && continue
-      local recent
-      recent=$(git -C "$repo_root" log --since="$approved_at" --format='%H' --no-merges -- "$f" 2>/dev/null | head -1)
-      if [ -n "$recent" ]; then
-        touched="${touched:+$touched }$f"
-      fi
-    done <<< "$scope_files"
+    if [ -n "$all_modified" ]; then
+      touched=$(printf '%s\n' "$scope_files" | awk -v mods="$all_modified" '
+        BEGIN { n=split(mods, m, "\n"); for (i=1;i<=n;i++) mod_set[m[i]]=1 }
+        NF && ($0 in mod_set) { found=found (found?" ":"") $0 }
+        END { print found }
+      ')
+    fi
     if [ -n "$touched" ]; then
       log_override "drift-check" "scope-file-commits-since-approval:focused-reapproval" 2>/dev/null || true
       echo "drift-check: scope files modified since approval ($approved_at): $touched. Focused re-approval required." >&2

@@ -56,3 +56,26 @@ None. Extends Decision 0030 (worktree infrastructure) and Decision 0032 (paralle
 
 ## Override
 `REPO_OS_WORKTREE_ISOLATE=0` — disables `--worktree` flag in runner. Interactive sessions: omit `--worktree` from CLI invocation.
+
+---
+
+## Implementation Note (Amendment — 2026-06-19)
+
+**Implementation point #1 above is partially inaccurate.** The decision text says `runner.sh` passes `--worktree` to `claude -p`. The actual implementation uses `git worktree add "$dir" "$branch"` followed by `cd "$launch_dir"` instead of the `--worktree` flag. This is intentional and correct.
+
+**Rationale for `git worktree add` over `--worktree`:**
+
+The `--worktree` Claude Code flag creates a temporary worktree from the invoking process's HEAD (i.e., `main`), not from the target feature branch. This would cause every daemon session to start on `main` regardless of the target branch, which would break branch targeting entirely.
+
+`git worktree add "$dir" "$branch"` explicitly checks out the target branch into the worktree directory, so the session starts on the correct branch. See `runner.sh` lines 750–757:
+
+```bash
+# Worktree isolation (Decision 0033): create a worktree targeting the feature
+# branch so the session runs in isolation. Manual git worktree add is used
+# instead of --worktree flag because --worktree creates from the invoking
+# process's HEAD (main), not the target branch.
+local worktree_dir="${REPO_ROOT}/.worktrees/${REPO_OS_SESSION_ID}"
+if git worktree add "$worktree_dir" "$_SETUP_BRANCH" 2>/dev/null; then
+```
+
+The code is correct. This note reconciles the decision text with the implementation.

@@ -187,21 +187,24 @@ is_in_repo() {
 }
 
 # --- Extract write targets from a Bash command string ---
-# Parses redirect (>, >>), file-descriptor redirects ([0-9]>, [0-9]>>), and
-# tee patterns from a command.
+# Parses redirect (>, >>), file-descriptor redirects ([0-9]>, [0-9]>>), tee,
+# and cp/mv destination (last positional token via awk '{print $NF}') from a command.
 # Applies filter set: skip /dev/*, skip tokens with < > =, skip tokens without / or .
 # Outputs one path per line. Callers handle resolve_path/is_in_repo.
 #
 # Known limitations (residual gaps — not detectable via regex):
 #   - Here-documents (<<EOF ... EOF)
 #   - Process substitution (>(cmd), <(cmd))
-#   - Positional write commands (cp, mv, curl -o, install, python -c open())
+#   - Multi-source cp: cp -r a b dest/ — only the destination (last token) is captured
+#   - curl -o, install, python -c open() — not detected
 extract_write_targets() {
   local cmd="$1"
-  local redir tee_targets
+  local redir tee_targets cp_mv_dest
   # Match [N]> and [N]>> redirects (standard + file-descriptor)
   redir=$(echo "$cmd" | grep -oE '[0-9]?[>]{1,2}\s*[^ |;&]+' | sed 's/^[0-9]//' | sed 's/[>]*//' | sed 's/^[[:space:]]*//' || true)
   tee_targets=$(echo "$cmd" | grep -oE 'tee\s+(-a\s+)?[^ |;&]+' | sed 's/tee\s*//' | sed 's/-a\s*//' || true)
+  # cp/mv destination: last positional token of any cp or mv segment
+  cp_mv_dest=$(echo "$cmd" | grep -oE '(^|[;&|] *)(cp|mv) [^;&|]+' | awk '{print $NF}' || true)
   local wt
   while IFS= read -r wt; do
     [ -z "$wt" ] && continue
@@ -209,7 +212,7 @@ extract_write_targets() {
     [[ "$wt" == *"<"* || "$wt" == *">"* || "$wt" == *"="* ]] && continue
     [[ "$wt" != *"/"* && "$wt" != *"."* ]] && continue
     echo "$wt"
-  done < <(printf '%s\n%s\n' "$redir" "$tee_targets")
+  done < <(printf '%s\n%s\n%s\n' "$redir" "$tee_targets" "$cp_mv_dest")
 }
 
 # --- Centralized analytics directory for this repo ---

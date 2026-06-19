@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Knowledge Graph Bootstrap Seeder
 # Decision 0034 — Knowledge Graph Data Layer
+# REMINDER: After accepting a decision, add its decision-NNNN node to graph.yaml.
 #
 # Generates the initial graph from existing governance metadata:
 # - Parses DIGEST.md trigger annotations for decision -> code path edges

@@ -61,6 +61,21 @@ _log_audit() {
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   # Truncate command to first 120 chars for audit readability
   local cmd_prefix="${TOOL_COMMAND:0:120}"
+  # Size-capped rotation — tunable constants:
+  #   _AUDIT_CAP_BYTES : rotate when file exceeds this size (default: 2 MB)
+  #   _AUDIT_KEEP_LINES: lines to retain after rotation (default: 500)
+  local _AUDIT_CAP_BYTES=2097152
+  local _AUDIT_KEEP_LINES=500
+  if [ -f "$AUDIT_LOG" ]; then
+    local _audit_size
+    _audit_size=$(wc -c < "$AUDIT_LOG" 2>/dev/null || echo 0)
+    if [ "${_audit_size:-0}" -gt "$_AUDIT_CAP_BYTES" ] 2>/dev/null; then
+      local _audit_tmp
+      _audit_tmp="${AUDIT_LOG}.tmp.$$"
+      tail -n "$_AUDIT_KEEP_LINES" "$AUDIT_LOG" > "$_audit_tmp" 2>/dev/null && \
+        mv "$_audit_tmp" "$AUDIT_LOG" 2>/dev/null || true
+    fi
+  fi
   printf '%s | %s | %s | %s | %s\n' "$ts" "$TOOL_NAME" "$cmd_prefix" "$decision" "$detail" \
     >> "$AUDIT_LOG" 2>/dev/null || true
 }

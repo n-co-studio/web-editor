@@ -315,6 +315,19 @@ fi
 if [ "${REPO_OS_RECOVER:-0}" = "1" ]; then
   log_override "state-guard" "REPO_OS_RECOVER"
   log_hook_event "state-guard" "PreToolUse" "Bash" "allow" "$START_MS" "recovery_bypass"
+  # Durable audit trail for headless/auto recovery use (security hardening).
+  # Written to a TRACKED path so recovery events are visible in git history.
+  # || true ensures audit write never blocks recovery.
+  if [ "${CLAUDE_HEADLESS:-0}" = "1" ]; then
+    _AUDIT_LOG="$REPO_ROOT/docs/ai/logs/recovery-audit.log"
+    _AUDIT_CMD=$(printf '%s' "${COMMAND:-}" | head -c 60 | tr '\n' ' ')
+    _AUDIT_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "unknown")
+    _AUDIT_SID=$(get_session_id "$REPO_ROOT" 2>/dev/null || echo "unknown")
+    _AUDIT_BR=$(get_branch 2>/dev/null || echo "unknown")
+    printf '%s | session=%s | branch=%s | cmd=%s\n' \
+      "$_AUDIT_TS" "$_AUDIT_SID" "$_AUDIT_BR" "$_AUDIT_CMD" \
+      >> "$_AUDIT_LOG" 2>/dev/null || true
+  fi
 fi
 if [ "$_RECOVER_VIA_SIGNAL" = true ]; then
   log_override "state-guard" "recover-signal-file"
