@@ -82,12 +82,17 @@ const STEPS: Step[] = [
       <p style={{ fontSize: '0.9375rem', color: 'var(--m-fg-dim)' }}>
         Edit visually, <strong style={{ color: 'var(--m-fg)', fontWeight: 400 }}>Add to Queue</strong>, review,
         and hit <strong style={{ color: 'var(--m-fg)', fontWeight: 400 }}>Send</strong>. A connected agent applies
-        the diff from there; if it doesn’t act on its own, tell it:
+        the diff from there. Without an integrated setup, give it an explicit instruction that names the server
+        and tools — it reads their descriptions and applies each diff to the right file:
       </p>
-      <Code>{`Apply my pending NCO Studio edits.`}</Code>
+      <Code>{`Check my nco-web-editor MCP server for pending visual edits
+from the browser. Apply each diff to the source file it points
+to, then mark it done — using the get_pending_visual_changes
+and acknowledge_visual_change tools.`}</Code>
       <p style={{ fontSize: '0.9375rem', color: 'var(--m-fg-dim)' }}>
-        It calls <code style={{ fontFamily: 'var(--m-mono)', color: 'var(--m-fg)' }}>get_pending_visual_changes</code>,
-        applies each change to your source, and acknowledges it. Everything stays local.
+        <code style={{ fontFamily: 'var(--m-mono)', color: 'var(--m-fg)' }}>nco-web-editor</code> is the{' '}
+        <code style={{ fontFamily: 'var(--m-mono)', color: 'var(--m-fg)' }}>mcpServers</code> key from step 2 —
+        swap in whatever you named it. Everything stays local.
       </p>
     </>
   ) },
