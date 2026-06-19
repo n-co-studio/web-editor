@@ -779,9 +779,9 @@ _se_cleanup() {
   done
 }
 
-# --- Clean up eval-based parallel arrays from queue_dequeue ---
-# Retained for backward compatibility — queue_dequeue now uses _se_* arrays
-# via _sort_entries_by_ts; this cleanup is an alias for _se_cleanup.
+# --- Legacy cleanup alias (backward compatibility) ---
+# queue_dequeue now uses the temp-file sort idiom instead of _se_* parallel arrays.
+# _dq_cleanup is retained as an alias in case external callers depend on it.
 _dq_cleanup() {
   _se_cleanup "$@"
 }
@@ -800,33 +800,30 @@ queue_dequeue() {
   local qdir
   qdir=$(_queue_dir)
 
-  # Collect approved entries into shared _se_ts_N/_se_fp_N parallel arrays.
+  # Collect approved entries into a temp file for sort-based dequeue.
+  # Format per line: <zero-padded-priority>_<created_at><TAB><file_path>
   # Sort contract: priority ASC first, then created_at ASC as tiebreaker.
-  # Composite key: zero-padded priority prefix + timestamp, keeping
-  # _sort_entries_by_ts unchanged (Pragmatist finding 2).
-  # See _sort_entries_by_ts() for the shared sort implementation used by
-  # both queue_dequeue and queue_list (sort contract parity guarantee).
-  local _se_count=0
+  # Avoids eval on queue-entry data; uses the temp-file sort idiom (security hardening).
+  # ISO-8601 validation on _QE_CREATED_AT guards against malformed sort keys.
+  local _dq_sort_file
+  _dq_sort_file=$(mktemp)
   local f _pri
   for f in "$qdir/approved"/*.yaml; do
     [ -f "$f" ] || continue
     _load_queue_entry "$f"
     _pri="${_QE_PRIORITY:-0}"
-    eval "_se_ts_${_se_count}=\"\$(printf '%05d_%s' \"\$_pri\" \"\$_QE_CREATED_AT\")\""
-    eval "_se_fp_${_se_count}=\"\$f\""
-    _se_count=$(( _se_count + 1 ))
-  done
+    # ISO-8601 validation: reject entries with malformed created_at timestamps
+    if ! printf '%s' "$_QE_CREATED_AT" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}'; then
+      echo "WARNING: queue entry '$f' has invalid created_at '$_QE_CREATED_AT' — skipped in sort" >&2
+      continue
+    fi
+    printf '%05d_%s\t%s\n' "$_pri" "$_QE_CREATED_AT" "$f"
+  done | sort > "$_dq_sort_file"
 
-  [ "$_se_count" -gt 0 ] || return 1
-
-  # Sort by composite key ASC (priority ASC, then created_at ASC).
-  _sort_entries_by_ts "$_se_count" "asc"
-
-  # Iterate sorted candidates, skip any blocked by task group sequencing.
-  local i cand_file my_seq entry_id
-  i=0
-  while [ "$i" -lt "$_se_count" ]; do
-    eval "cand_file=\"\$_se_fp_${i}\""
+  # Iterate sorted candidates (ASC), skip any blocked by task group sequencing.
+  local _dq_key cand_file my_seq entry_id
+  while IFS=$'\t' read -r _dq_key cand_file; do
+    [ -f "$cand_file" ] || continue
     _load_queue_entry "$cand_file"
 
     # Task group sequencing check (Decision 0017)
@@ -836,21 +833,20 @@ queue_dequeue() {
       my_seq=$(_parse_brief_sequence "$_QE_BRIEF_PATH")
       if [ -n "$my_seq" ] && [ "$my_seq" -gt 1 ]; then
         if _has_prior_taskgroup_entry "$_QE_WORK_ORDER_ID" "$my_seq" "$cand_file"; then
-          i=$(( i + 1 ))
           continue  # Skip — prior brief still approved or running
         fi
       fi
     fi
 
-    # This entry is eligible — clean up parallel arrays before returning
+    # This entry is eligible
     entry_id=$(basename "$cand_file" .yaml)
     _transition "$entry_id" "approved" "running"
     printf '%s' "$qdir/running/${entry_id}.yaml"
-    _se_cleanup "$_se_count"
+    rm -f "$_dq_sort_file"
     return 0
-  done
+  done < "$_dq_sort_file"
 
-  _se_cleanup "$_se_count"
+  rm -f "$_dq_sort_file"
   return 1
 }
 

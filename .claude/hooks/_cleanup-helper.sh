@@ -25,11 +25,16 @@ _delete_if_owned() {
   [ -f "$file" ] || return 0
   if [ -n "$closing_sid" ]; then
     local file_sid
-    file_sid=$(grep '^session_id: ' "$file" 2>/dev/null | sed 's/^session_id: *//')
+    # set -euo pipefail safe (P1): grep exits 1 on no-match; with pipefail the
+    # command-substitution assignment propagates that 1 and trips set -e,
+    # aborting the close hook for any state file that lacks a session_id: line
+    # (e.g. phase-state.gates, which uses GATES_SESSION_ID=). `|| true` absorbs
+    # the no-match exit so the GATES_SESSION_ID fallback below stays reachable.
+    file_sid=$(grep '^session_id: ' "$file" 2>/dev/null | sed 's/^session_id: *//' || true)
     # Decision 0042: phase-state.gates uses shell-sourceable KEY=VALUE format.
     # Fall back to the GATES_SESSION_ID='<sid>' line when the YAML field is absent.
     if [ -z "$file_sid" ]; then
-      file_sid=$(grep "^GATES_SESSION_ID=" "$file" 2>/dev/null | sed -E "s/^GATES_SESSION_ID='?([^']*)'?$/\1/")
+      file_sid=$(grep "^GATES_SESSION_ID=" "$file" 2>/dev/null | sed -E "s/^GATES_SESSION_ID='?([^']*)'?$/\1/" || true)
     fi
     if [ -n "$file_sid" ] && [ "$file_sid" != "$closing_sid" ]; then
       # Owned by another session — skip
@@ -48,10 +53,15 @@ _delete_if_owned() {
 #   $1 — repo_root (absolute path)
 #   $2 — close_stype (session type captured before phase-state deletion)
 #   $3 — closing_sid (session ID of the closing session; optional for backward compat)
+#   $4 — is_closing (true|false, default true). When false, identity files
+#         (.session-id, .session-type) are preserved — used by pause Stop paths
+#         to keep session identity stable across turns (belt-and-suspenders with
+#         the pause guard in session-close-check.sh).
 cleanup_session_files() {
   local repo_root="$1"
   local close_stype="${2:-}"
   local closing_sid="${3:-}"
+  local is_closing="${4:-true}"
 
   # Clean session-scoped marker files (no session_id field — unconditional)
   rm -f "$repo_root/.claude/.hvst-fail-count"
@@ -59,9 +69,12 @@ cleanup_session_files() {
   cleanup_old_analytics "$repo_root"
 
   # Session-bound identity files: only delete if content matches closing session
+  # AND the caller has confirmed this is a genuine close (not a pause Stop).
   # Sessions with REPO_OS_SESSION_ID (worktree/daemon) use env var, not file (Decision 0030)
   if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
     : # No .session-id file to delete — identity is via REPO_OS_SESSION_ID env var
+  elif [ "$is_closing" = "false" ]; then
+    : # Pause Stop — preserve identity files to keep session stable across turns
   elif [ -n "$closing_sid" ]; then
     local sid_file="$repo_root/.claude/.session-id"
     local sid_was_ours=false
@@ -98,6 +111,7 @@ cleanup_session_files() {
     _delete_if_owned "$state_dir/reviewer-signed" "$closing_sid"
     _delete_if_owned "$state_dir/security-signed" "$closing_sid"
     _delete_if_owned "$state_dir/pragmatist-signed" "$closing_sid"
+    _delete_if_owned "$state_dir/functional-verified" "$closing_sid"
     _delete_if_owned "$state_dir/phase-state" "$closing_sid"
     _delete_if_owned "$state_dir/phase-state.gates" "$closing_sid"
 
@@ -121,18 +135,6 @@ cleanup_session_files() {
     rm -f "$repo_root/.claude/.state/kg-search-advisory-fired"
     rm -f "$repo_root/.claude/.state/cross-session-context"
     _delete_if_owned "$state_dir/session-resume.yaml" "$closing_sid"
-    # Clean completion markers when merge brief closes (parallel groups)
-    # Markers are cross-session: written by content briefs in their per-session dirs.
-    # Delta files (Decision 0034 Amendment 5) are also cross-session — content
-    # briefs write per-brief deltas to the shared state path, the merge brief
-    # writes its own delta and aggregates them. Clean both classes after
-    # aggregation has been applied (the merge brief is closing — aggregation
-    # already ran during its close phase or was attempted and logged).
-    if [ "$close_stype" = "taskgroup-merge" ]; then
-      clean_cross_session_markers "tg-*-brief-*.complete"
-      clean_cross_session_markers "tg-*-brief-*.kg-delta.yaml"
-      rm -f "$repo_root/.claude/.state/kg-aggregation-conflicts.log"
-    fi
 
     # Remove per-session state directory if now empty (all sessions use per-session dirs)
     # Only rmdir if it's a per-session subdir, not the flat .claude/.state/ root
@@ -142,6 +144,29 @@ cleanup_session_files() {
         ;;
     esac
   fi
+
+  # Clean completion markers when merge brief closes (parallel groups).
+  # P2: kept OUTSIDE the `[ -d "$state_dir" ]` gate above — these markers are
+  # cross-session (written by content briefs into THEIR per-session dirs) and
+  # clean_cross_session_markers scans every per-session dir itself; it has no
+  # dependency on the closing session's own state_dir. Gating it on the closing
+  # session's state_dir was a latent bug: when state_dir mis-resolves (identity
+  # file already deleted above and no env/stdin id to re-resolve from), the
+  # markers in other sessions' dirs would survive. Delta files (Decision 0034
+  # Amendment 5) are likewise cross-session — content briefs write per-brief
+  # deltas to the shared state path, the merge brief aggregates them. Clean both
+  # classes after aggregation has been applied (the merge brief is closing —
+  # aggregation already ran during its close phase or was attempted and logged).
+  if [ "$close_stype" = "taskgroup-merge" ]; then
+    clean_cross_session_markers "tg-*-brief-*.complete"
+    clean_cross_session_markers "tg-*-brief-*.kg-delta.yaml"
+    rm -f "$repo_root/.claude/.state/kg-aggregation-conflicts.log"
+  fi
+
+  # P3: cleanup is best-effort — return success explicitly so a falsey trailing
+  # command (e.g. a no-match `[ -d ]` test) cannot propagate rc=1 to the close
+  # hook under set -euo pipefail.
+  return 0
 }
 
 # --- Record closed branch (Decision 0013: session isolation) ---
@@ -179,4 +204,74 @@ record_closed_branch() {
       echo "$branch" >> "$closed_file"
     fi
   fi
+}
+
+# --- Delete a merged editor-live branch (Decision 0023 Amendment 2) ---
+# Editor-live-scoped close cleanup: once a live-editor-N branch has been merged
+# to main AND recorded in the closed-branches ledger, delete the now-redundant
+# local branch ref so live-editor branches do not accumulate. Uses
+# `git branch -d` (merged-only — never force) so an unmerged branch is never
+# deleted; a no-op if the branch is the current HEAD or not fully merged.
+# Strictly scoped to live-editor-N names: feature/fix/hotfix/taskgroup branches
+# are never touched, so their close/seal behavior is unchanged. This does NOT
+# alter record_closed_branch (shared contract, 13 call sites).
+# Arguments:
+#   $1 — branch name (required)
+#   $2 — optional repo dir (worktree close paths; defaults to current repo)
+delete_merged_editor_live_branch() {
+  local branch="${1:-}"
+  local repo_dir="${2:-}"
+  [ -z "$branch" ] && return 0
+  case "$branch" in
+    live-editor-[0-9]*) ;;
+    *) return 0 ;;
+  esac
+  if [ -n "$repo_dir" ]; then
+    git -C "$repo_dir" branch -d "$branch" > /dev/null 2>&1 || true
+  else
+    git branch -d "$branch" > /dev/null 2>&1 || true
+  fi
+}
+
+# --- Seal orphaned merged editor-live branches (Decision 0023 Amendment 2 — fallback) ---
+# Fallback for the editor-live close path. The normal close has the agent merge
+# the live-editor-N branch to main and then call write_merge_signal, which the
+# Stop hook reads to seal the branch. If the agent omits write_merge_signal, the
+# Stop hook fires while HEAD is on main, where record_closed_branch skips main —
+# so the branch would never be sealed (a silent gap; editor-live is solo=false,
+# so the hook's own solo-merge block does not fire either).
+# This scans for live-editor-N branches already merged into main, seals each in
+# the closed-branches ledger (record_closed_branch — shared contract, CALLED not
+# modified), and deletes the redundant ref (git branch -d, merged-only/safe).
+# Idempotent: record_closed_branch dedups and `-d` no-ops on an already-deleted
+# branch. Strictly scoped to live-editor-N names AND only invoked on the
+# editor-live close path (session-close-check.sh) when no merge signal was
+# recorded, so feature/fix/hotfix/taskgroup branches are never affected.
+# Arguments:
+#   $1 — optional repo dir (worktree close paths; defaults to current repo)
+seal_orphaned_editor_live_branches() {
+  local repo_dir="${1:-}"
+  local cur merged b
+  if [ -n "$repo_dir" ]; then
+    cur=$(git -C "$repo_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+  else
+    cur=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+  fi
+  # Only meaningful once on main (the post-manual-merge state).
+  [ "$cur" = "main" ] || return 0
+  if [ -n "$repo_dir" ]; then
+    merged=$(git -C "$repo_dir" branch --merged main 2>/dev/null | tr -d ' *' | grep -E '^live-editor-[0-9]+$' || true)
+  else
+    merged=$(git branch --merged main 2>/dev/null | tr -d ' *' | grep -E '^live-editor-[0-9]+$' || true)
+  fi
+  [ -z "$merged" ] && return 0
+  while IFS= read -r b; do
+    [ -z "$b" ] && continue
+    record_closed_branch "$b"
+    if [ -n "$repo_dir" ]; then
+      git -C "$repo_dir" branch -d "$b" > /dev/null 2>&1 || true
+    else
+      git branch -d "$b" > /dev/null 2>&1 || true
+    fi
+  done <<< "$merged"
 }

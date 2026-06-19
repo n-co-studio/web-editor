@@ -22,6 +22,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # --- Read SubagentStop payload (before sourcing — cat/jq need no libraries) ---
 INPUT=$(cat)
+
+# --- Harness session_id plumbing (must precede first get_session_id call) ---
+export _REPO_OS_STDIN_SID
+_REPO_OS_STDIN_SID="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)"
+
 AGENT_TYPE=$(echo "$INPUT" | jq -r '.agent_type // empty')
 
 # --- Non-governance agent fast exit (Phase 2c — no sourcing needed) ---
@@ -115,8 +120,11 @@ if [ -n "$CURRENT_PHASE" ]; then
       [ "$CURRENT_PHASE" != "verify" ] && PHASE_OK=false
       ;;
     pragmatist)
-      # pragmatist writes during plan, review, or build phase (background dispatch from plan may complete during build)
-      [ "$CURRENT_PHASE" != "plan" ] && [ "$CURRENT_PHASE" != "review" ] && [ "$CURRENT_PHASE" != "build" ] && PHASE_OK=false
+      # pragmatist writes during plan, review, or build phase (background dispatch from plan may complete during build).
+      # Also allowed in synthesize phase: taskdef-brief dispatches pragmatist during synthesize for the
+      # approval gate — without this, the gate is unsatisfiable in that session type.
+      # plan/review/build covers Prompt B (product build); synthesize covers taskdef-brief only.
+      [ "$CURRENT_PHASE" != "plan" ] && [ "$CURRENT_PHASE" != "review" ] && [ "$CURRENT_PHASE" != "build" ] && [ "$CURRENT_PHASE" != "synthesize" ] && PHASE_OK=false
       ;;
   esac
 fi

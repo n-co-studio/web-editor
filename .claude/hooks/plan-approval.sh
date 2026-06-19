@@ -26,6 +26,10 @@ START_MS=$(now_ms)
 # --- Read PostToolUse payload ---
 INPUT=$(cat)
 
+# --- Harness session_id plumbing (must precede first get_session_id call) ---
+export _REPO_OS_STDIN_SID
+_REPO_OS_STDIN_SID="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)"
+
 # --- Debug logging (R13 investigation) ---
 # When REPO_OS_DEBUG=1, dump full payload to /tmp for diagnosing
 # VS Code extension hook dispatch timing issues.
@@ -58,9 +62,9 @@ fi
 OPTION_LABELS=$(echo "$INPUT" | jq -r '[.tool_input.questions[]?.options[]?.label // empty] | join(" ")' 2>/dev/null)
 IS_CONFIRMATION=false
 
-if echo "$QUESTIONS_TEXT" | grep -iqE '\b(approv|confirm|proceed|accept|ready)\b'; then
+if echo "$QUESTIONS_TEXT" | grep -iqE '\b(approv[a-z]*|confirm|proceed|accept|ready)\b'; then
   IS_CONFIRMATION=true
-elif echo "$OPTION_LABELS" | grep -iqE '\b(yes|approv|confirm|proceed|accept)\b'; then
+elif echo "$OPTION_LABELS" | grep -iqE '\b(yes|approv[a-z]*|confirm|proceed|accept)\b'; then
   IS_CONFIRMATION=true
 fi
 
@@ -74,6 +78,13 @@ fi
 #   1. tool_input.answers (primary — matches AskUserQuestion tool schema)
 #   2. tool_response.answers (legacy — kept for backward compatibility)
 #   3. tool_output (CLI fallback)
+#
+# The canonical plan-approval template (Prompt B, orchestrator.md) offers the
+# options "Auto" and "Review" — BOTH are approvals (the operator chooses how to
+# proceed, not whether). So "auto"/"review" answers count as affirmative here.
+# This is safe: Gates 1+2 above have already scoped this to a plan-confirmation
+# question, so a bare "Auto"/"Review" answer in this context can only mean
+# approval. The DETECTED_MODE block below distinguishes which mode was chosen.
 TOOL_OUTPUT=$(echo "$INPUT" | jq -r '(.tool_input.answers // {}) | to_entries[].value' 2>/dev/null || true)
 if [ -z "$TOOL_OUTPUT" ]; then
   TOOL_OUTPUT=$(echo "$INPUT" | jq -r '(.tool_response.answers // {}) | to_entries[].value' 2>/dev/null || true)
@@ -86,7 +97,7 @@ if [ -z "$TOOL_OUTPUT" ]; then
 fi
 APPROVED=false
 
-if echo "$TOOL_OUTPUT" | grep -iqE '\b(yes|approve[d]?|confirm(ed)?|proceed|go ahead|looks good|lgtm|accept(ed)?)\b'; then
+if echo "$TOOL_OUTPUT" | grep -iqE '\b(yes|approv[a-z]*|confirm(ed)?|proceed|go ahead|looks good|lgtm|accept(ed)?|auto|review)\b'; then
   APPROVED=true
 fi
 

@@ -74,6 +74,28 @@ validate_hmac() {
 }
 
 # ============================================================
+# Startup check — hmac_secret placement guard
+# ============================================================
+# Emits a GATE-style error if hmac_secret is found in the tracked config.yaml
+# rather than config.local.yaml (which is gitignored). Committing hmac_secret
+# to a tracked file exposes it in git history.
+# Called at module source time when CONFIG_FILE is available.
+_check_hmac_secret_placement() {
+  if [ -z "${CONFIG_FILE:-}" ] || [ ! -f "$CONFIG_FILE" ]; then
+    return 0
+  fi
+  if grep -qE '^\s*hmac_secret\s*:' "$CONFIG_FILE" 2>/dev/null; then
+    echo "GATE-FINAL: hmac_secret found in tracked config file '$CONFIG_FILE'." >&2
+    echo "  NEXT: Move hmac_secret to config.local.yaml (gitignored). Committing secrets exposes them in git history." >&2
+    return 1
+  fi
+  return 0
+}
+
+# Run the placement guard immediately (fails if CONFIG_FILE is set and contains the secret)
+_check_hmac_secret_placement || true
+
+# ============================================================
 # Public API
 # ============================================================
 

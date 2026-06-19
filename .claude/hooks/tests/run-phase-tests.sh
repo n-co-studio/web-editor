@@ -92,6 +92,24 @@ bash "$SCRIPT_DIR/layer3-hook-integration.sh" || l3_exit=$?
 
 printf "\n"
 
+# --- Run Layer 4 ---
+printf '%s\n' "${BOLD}Layer 4: Session Identity + Bundle Carve-out Tests${RESET}"
+printf '%s\n' "---------------------------------------------------"
+
+l4_exit=0
+bash "$SCRIPT_DIR/layer4-session-identity-bundle.sh" || l4_exit=$?
+
+printf "\n"
+
+# --- Run Layer 5 ---
+printf '%s\n' "${BOLD}Layer 5: Editor-Live Durable Counter Tests${RESET}"
+printf '%s\n' "------------------------------------------"
+
+l5_exit=0
+bash "$SCRIPT_DIR/layer5-live-editor-numbering.sh" || l5_exit=$?
+
+printf "\n"
+
 # --- Phase matrix visualization ---
 printf "${BOLD}Phase Matrix${RESET}\n"
 printf "============\n\n"
@@ -243,6 +261,20 @@ if [ "$l3_exit" -eq 0 ]; then
   printf "Layer 3 (Hook Integration):  ${GREEN}PASS${RESET}\n"
 else
   printf "Layer 3 (Hook Integration):  ${RED}FAIL${RESET}\n"
+  overall=1
+fi
+
+if [ "$l4_exit" -eq 0 ]; then
+  printf "Layer 4 (Identity + Bundle): ${GREEN}PASS${RESET}\n"
+else
+  printf "Layer 4 (Identity + Bundle): ${RED}FAIL${RESET}\n"
+  overall=1
+fi
+
+if [ "$l5_exit" -eq 0 ]; then
+  printf "Layer 5 (Editor-Live Counter): ${GREEN}PASS${RESET}\n"
+else
+  printf "Layer 5 (Editor-Live Counter): ${RED}FAIL${RESET}\n"
   overall=1
 fi
 

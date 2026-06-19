@@ -210,6 +210,10 @@ _PERMISSION_DENY_BASH=(
   '(^|[;&|] *)/bin/bash( |$)'
   '(^|[;&|] *)/usr/bin/env sh( |$)'
   '(^|[;&|] *)/usr/bin/env bash( |$)'
+  # Homebrew and /usr/local bash (same bypass vector as /bin/bash).
+  # Accepted gap: Nix /nix/store/<hash>/bash — hash is variable, cannot anchor reliably.
+  '(^|[;&|] *)/opt/homebrew/bin/bash( |$)'
+  '(^|[;&|] *)/usr/local/bin/bash( |$)'
 
   # --- Supplementary: context-specific anchors ---
   '(^|[;&|] *)xargs .*kill -9'

@@ -44,7 +44,7 @@ The project defines a status file path (e.g., `src/editor-status.json`) that the
 
 ### Watch Loop
 
-The core loop repeats: **watch → detect → build → commit → acknowledge → watch**.
+The core loop repeats: **watch → detect → build → commit → acknowledge → check queue**, restarting the watcher only when the queue is empty (a non-empty queue feeds straight back into build).
 
 1. **Watch**: Call the watcher wrapper via Bash:
    ```
@@ -75,11 +75,15 @@ The core loop repeats: **watch → detect → build → commit → acknowledge �
 
 7. **Advance phase**: `advance_phase "commit"` then `advance_phase "build"` (uses the `commit:build` loop — increments cycle counter).
 
-8. **Repeat**: Go to step 1.
+8. **Check the queue, then watch**: After acknowledging and advancing phase, call `get_pending_visual_changes` *before* restarting the watcher, to catch edits the operator saved while the previous cycle was building and committing:
+   - **Queue non-empty** → treat this result as the detected change list for a new cycle (it stands in for step 3 — do not call `get_pending_visual_changes` again). Run the full cycle from step 4 onward (Build → Commit → Acknowledge → Advance phase), then return here to step 8 to re-check the queue. Do not restart the watcher.
+   - **Queue empty** → go to step 1 (Watch) to restart the watcher and wait for the next change. (In `no_watcher` fallback mode, step 1 resolves to the operator-message trigger as usual.)
 
 ### Close Signal
 
 The operator sends the structural keyword **"close session"** to signal the end of the editor-live session. The agent checks every incoming operator message for this keyword (case-insensitive exact match, Decision 0004 mechanical enforcement).
+
+**Pause vs close (Decision 0023 Amendment 1):** Every turn end fires the Stop hook, but a Stop mid-session is a **pause**, not a close. The Stop hook recognizes editor-live pauses (close sequence not yet begun) and exits without running cleanup, branch seal, or solo merge — so the session identity (`.claude/.session-id`), per-session state, and cycle counter persist across pauses, and cycle commits are not merged to main until close. You do not need to do anything special on a pause; just continue the watch loop. The close sequence below runs only after "close session" advances you into the close phases.
 
 When "close session" is detected:
 

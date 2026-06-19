@@ -54,6 +54,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 INPUT=$(cat)
 
+# --- Harness session_id plumbing (must precede first get_session_id call) ---
+export _REPO_OS_STDIN_SID
+_REPO_OS_STDIN_SID="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)"
+
 # --- Override pre-checks (before sourcing — for potential fast exit) ---
 SKIP_STATE_GUARD=false
 _RECOVER_VIA_SIGNAL=false
@@ -155,9 +159,19 @@ if [ "${REPO_OS_RECOVER:-0}" != "1" ] && [ "$_RECOVER_VIA_SIGNAL" != true ]; the
     # Exempt: command run from within a worktree context (git dir path contains "worktrees")
     _D_GIT_DIR=$(git rev-parse --git-dir 2>/dev/null || echo "")
     if [[ "$_D_GIT_DIR" != *"worktrees"* ]]; then
-      # Locate repo root relative to this hook (self-referential — no sourced deps)
+      # Locate repo root relative to this hook (self-referential — no sourced deps).
+      # Honour the test seam (same dual-guard as _analytics-helper.sh) so the
+      # daemon guard reads the sandbox's runner.pid / repo path under test mode,
+      # not the real repo's (hooks always live in the real repo tree).
       _D_HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
-      _D_REPO_ROOT="$(cd "$_D_HOOK_DIR/../.." && pwd)"
+      if [ "${REPO_OS_TEST_MODE:-0}" = "1" ] && [ -n "${_REPO_OS_TEST_ROOT:-}" ]; then
+        case "$_REPO_OS_TEST_ROOT" in
+          /tmp/*|/private/tmp/*) _D_REPO_ROOT="$_REPO_OS_TEST_ROOT" ;;
+          *)                     _D_REPO_ROOT="$(cd "$_D_HOOK_DIR/../.." && pwd)" ;;
+        esac
+      else
+        _D_REPO_ROOT="$(cd "$_D_HOOK_DIR/../.." && pwd)"
+      fi
       _D_PID_FILE="$_D_REPO_ROOT/.claude/.automation/runner.pid"
       _DAEMON_ACTIVE=false
       # Check PID file first (no subprocess required)
@@ -167,9 +181,18 @@ if [ "${REPO_OS_RECOVER:-0}" != "1" ] && [ "$_RECOVER_VIA_SIGNAL" != true ]; the
           _DAEMON_ACTIVE=true
         fi
       fi
-      # Fallback: pgrep check when PID file absent or stale
+      # Fallback: pgrep check when PID file absent or stale.
+      # Repo-scoped: match only THIS repo's daemon by its absolute argv path.
+      # ($_D_REPO_ROOT is a normalized cd/pwd path used as a pgrep -f regex; the
+      # only realistic metachar is '.', whose any-char match is a harmless
+      # over-match given the rest of the path is fully specified.)
+      # queue-cli.sh launches the daemon as `nohup "$AUTOMATION_DIR/runner.sh"
+      # --daemon` with AUTOMATION_DIR absolute, so the repo path is in the
+      # process argv. An unscoped `runner.sh --daemon` pattern would match a
+      # daemon belonging to ANY repo on the machine and false-positive-block
+      # branch ops here.
       if [ "$_DAEMON_ACTIVE" = false ] && command -v pgrep >/dev/null 2>&1; then
-        if pgrep -f "runner.sh --daemon" >/dev/null 2>&1; then
+        if pgrep -f "$_D_REPO_ROOT/.claude/.automation/runner.sh --daemon" >/dev/null 2>&1; then
           _DAEMON_ACTIVE=true
         fi
       fi
@@ -292,6 +315,19 @@ fi
 if [ "${REPO_OS_RECOVER:-0}" = "1" ]; then
   log_override "state-guard" "REPO_OS_RECOVER"
   log_hook_event "state-guard" "PreToolUse" "Bash" "allow" "$START_MS" "recovery_bypass"
+  # Durable audit trail for headless/auto recovery use (security hardening).
+  # Written to a TRACKED path so recovery events are visible in git history.
+  # || true ensures audit write never blocks recovery.
+  if [ "${CLAUDE_HEADLESS:-0}" = "1" ]; then
+    _AUDIT_LOG="$REPO_ROOT/docs/ai/logs/recovery-audit.log"
+    _AUDIT_CMD=$(printf '%s' "${COMMAND:-}" | head -c 60 | tr '\n' ' ')
+    _AUDIT_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "unknown")
+    _AUDIT_SID=$(get_session_id "$REPO_ROOT" 2>/dev/null || echo "unknown")
+    _AUDIT_BR=$(get_branch 2>/dev/null || echo "unknown")
+    printf '%s | session=%s | branch=%s | cmd=%s\n' \
+      "$_AUDIT_TS" "$_AUDIT_SID" "$_AUDIT_BR" "$_AUDIT_CMD" \
+      >> "$_AUDIT_LOG" 2>/dev/null || true
+  fi
 fi
 if [ "$_RECOVER_VIA_SIGNAL" = true ]; then
   log_override "state-guard" "recover-signal-file"

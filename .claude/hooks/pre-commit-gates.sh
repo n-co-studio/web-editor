@@ -8,6 +8,9 @@
 #   A4  Safety — secret scanning (always, blocking)
 #   A3  Quality — design token enforcement (progressive; advisory when no tooling, blocking with ESLint)
 #   A3.3 Build verification — tsc --noEmit --incremental (skips if no tsconfig.json; SKIP_BUILD_CHECK=1)
+#   A3.4 Functional verification — build/pack/test scripts from package.json
+#            (headless/auto: blocking; interactive: advisory; skips when no package.json;
+#             SKIP_FUNC_CHECK=1 (interactive only); REPO_OS_RECOVER=1 (headless); per-command timeout: REPO_OS_FUNC_CHECK_TIMEOUT, default 120s)
 #   State verification — plan-approved, cohesion-reviewed, diff-review-complete, qa-verified,
 #                        pragmatist-signed (always blocking)
 #   A5  Cohesion — cohesion-reviewed + diff-review-complete both APPROVED required (blocking);
@@ -23,6 +26,8 @@
 #   REPO_OS_RECOVER=1    — skip all state-dependent checks (emergency recovery)
 #   SKIP_CONTRACT_CHECK=1 — skip A6 contract checks (existence, staging, A6.3 integration points)
 #   SKIP_BUILD_CHECK=1    — skip A3.3 TypeScript type-check
+#   SKIP_FUNC_CHECK=1     — skip A3.4 functional verification (interactive only — ignored in headless/auto; Decision t-0044 Amendment 1)
+#   REPO_OS_FUNC_CHECK_TIMEOUT — per-command timeout in seconds for A3.4 (default: 120)
 #
 # Branch profiles:
 #   experiment/*  — A4 only (all state checks skipped)
@@ -61,6 +66,11 @@ warn()  { WARN_REASONS="${WARN_REASONS:+$WARN_REASONS }$1"; }
 
 # --- Read hook payload (PreToolUse JSON on stdin) ---
 INPUT=$(cat)
+
+# --- Harness session_id plumbing (must precede first get_session_id call) ---
+export _REPO_OS_STDIN_SID
+_REPO_OS_STDIN_SID="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)"
+
 COMMIT_CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null || true)
 
 # --- REPO_OS_RECOVER override (env var or file-based signal) ---
@@ -68,6 +78,13 @@ RECOVER_SIGNAL_FILE="$REPO_ROOT/.claude/.state/.recover-signal"
 if [ "${REPO_OS_RECOVER:-0}" = "1" ]; then
   log_override "pre-commit-gates" "REPO_OS_RECOVER"
   echo "REPO_OS_RECOVER=1 — skipping all state-dependent checks" >&2
+  if [ "${CLAUDE_HEADLESS:-0}" = "1" ]; then
+    _RECOVER_ESC_DIR="$REPO_ROOT/.claude/.automation/escalations"
+    mkdir -p "$_RECOVER_ESC_DIR" 2>/dev/null || true
+    printf 'type: governance-block\ngate: A3.4\nreason: REPO_OS_RECOVER_used_in_headless\nmessage: REPO_OS_RECOVER=1 bypass in headless mode -- A3.4 checks were skipped\ntimestamp: %s\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      > "$_RECOVER_ESC_DIR/recover-bypass-$(date -u +%Y%m%d-%H%M%S).yaml" 2>/dev/null || true
+  fi
   SKIP_STATE=true
 elif [ -f "$RECOVER_SIGNAL_FILE" ]; then
   log_override "pre-commit-gates" "recover-signal-file"
@@ -137,22 +154,20 @@ if [ "$IS_EXPERIMENT" = true ]; then
   exit 0
 fi
 
-# --- Editor-live session type detection ---
-# Per-loop commits (review NOT in phases_completed): A4 only, skip state checks.
-# Close commits (review IS in phases_completed): full gates minus plan-approved.
+# --- Editor-live session type detection (uses shared is_session_closing predicate) ---
+# Per-loop commits (not closing): A4 only, skip state checks.
+# Close commits (closing): full gates minus plan-approved.
+# is_session_closing() (from _phase-helper.sh) provides the same predicate used
+# by session-close-check.sh, ensuring consistent pause vs close classification.
 IS_EDITOR_LIVE_LOOP=false
 IS_EDITOR_LIVE_CLOSE=false
 if [ "$SKIP_STATE" = false ]; then
   _EL_STYPE=$(get_session_type)
   if [ "$_EL_STYPE" = "editor-live" ]; then
-    _EL_STATE_FILE="$STATE_DIR/phase-state"
-    if [ -f "$_EL_STATE_FILE" ] && _validate_phase_session "$_EL_STATE_FILE"; then
-      case ",$_PS_PHASES_COMPLETED," in
-        *",review,"*) IS_EDITOR_LIVE_CLOSE=true ;;
-        *)            IS_EDITOR_LIVE_LOOP=true ;;
-      esac
+    if is_session_closing 2>/dev/null; then
+      IS_EDITOR_LIVE_CLOSE=true
     else
-      # No phase-state or stale session — treat as per-loop (safe default: A4 only)
+      # Not closing (or phase-state absent — safe default: A4 only)
       IS_EDITOR_LIVE_LOOP=true
     fi
   fi
@@ -225,6 +240,18 @@ fi
 # --- Headless mode detection (adversarial 4.2) ---
 IS_HEADLESS=false
 [ "${CLAUDE_HEADLESS:-0}" = "1" ] && IS_HEADLESS=true
+
+# --- No-review-backstop detection (A3.4 — Decision 0044) ---
+# Tracks whether a human can catch missed build/test failures at op-review.
+# True when: (1) running headless (no human in loop at all), OR
+# (2) phase mode is 'auto' (operator has delegated review to automation).
+IS_NO_REVIEW_BACKSTOP=false
+[ "$IS_HEADLESS" = true ] && IS_NO_REVIEW_BACKSTOP=true
+if [ "$IS_NO_REVIEW_BACKSTOP" = false ] && [ -f "$STATE_DIR/phase-state" ]; then
+  _A34_MODE=$(grep '^mode: ' "$STATE_DIR/phase-state" 2>/dev/null | sed 's/^mode: *//' | tr -d '[:space:]' | head -1 || echo "")
+  [ "$_A34_MODE" = "auto" ] && IS_NO_REVIEW_BACKSTOP=true
+fi
+_A34_APPLICABLE=false
 
 # --- Session-id validation helper (adversarial C1/C4/H4) ---
 # Returns 0 if state file contains matching session_id, 1 otherwise.
@@ -352,6 +379,111 @@ if [ "$SKIP_STATE" = false ]; then
     fi
   fi
 
+  # A3.4: Functional Verification Gate (blocking in headless/auto — advisory otherwise)
+  # Replaces the human op-review checkpoint that is skipped in auto/solo mode (Decision 0017).
+  # Reads package.json to infer build/pack/test commands; skips silently when no package.json.
+  # Override: SKIP_FUNC_CHECK=1 (interactive only — ignored in headless/auto; Decision t-0044 Amendment 1)
+  # Per-command timeout: REPO_OS_FUNC_CHECK_TIMEOUT (default 120s)
+  if [ -n "$STAGED_FILES" ]; then
+    _A34_SKIP_EFFECTIVE=false
+    if [ "${SKIP_FUNC_CHECK:-0}" = "1" ]; then
+      if [ "$IS_NO_REVIEW_BACKSTOP" = false ]; then
+        log_override "pre-commit-gates" "SKIP_FUNC_CHECK"
+        _A34_SKIP_EFFECTIVE=true
+      else
+        log_override "pre-commit-gates" "SKIP_FUNC_CHECK_IGNORED_HEADLESS"
+        _A34_ESC_DIR_SKIP="$REPO_ROOT/.claude/.automation/escalations"
+        mkdir -p "$_A34_ESC_DIR_SKIP" 2>/dev/null || true
+        printf 'type: governance-block\ngate: A3.4\nreason: SKIP_FUNC_CHECK_ignored_in_headless\nmessage: SKIP_FUNC_CHECK=1 was set but is not honored in headless/auto mode (Decision t-0044 Amendment 1) -- A3.4 checks will run\ntimestamp: %s\n' \
+          "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          > "$_A34_ESC_DIR_SKIP/a34-skip-ignored-$(date -u +%Y%m%d-%H%M%S).yaml" 2>/dev/null || true
+      fi
+    fi
+    if [ "$_A34_SKIP_EFFECTIVE" = false ] && [ -f "$REPO_ROOT/package.json" ]; then
+      _A34_TIMEOUT="${REPO_OS_FUNC_CHECK_TIMEOUT:-120}"
+      _A34_CMDS=()
+      # Infer applicable scripts from package.json
+      _A34_HAS_BUILD=$(jq -r '.scripts.build // empty' "$REPO_ROOT/package.json" 2>/dev/null || echo "")
+      _A34_HAS_BUILD_PACK=$(jq -r '.scripts["build:pack"] // empty' "$REPO_ROOT/package.json" 2>/dev/null || echo "")
+      _A34_HAS_TEST=$(jq -r '.scripts.test // empty' "$REPO_ROOT/package.json" 2>/dev/null || echo "")
+      _A34_HAS_VERIFY=$(jq -r '.scripts.verify // empty' "$REPO_ROOT/package.json" 2>/dev/null || echo "")
+      _A34_PKG_NAME=$(jq -r '.name // empty' "$REPO_ROOT/package.json" 2>/dev/null || echo "")
+      [ -n "$_A34_HAS_BUILD" ] && _A34_CMDS+=("build")
+      [ -n "$_A34_HAS_BUILD_PACK" ] && _A34_CMDS+=("build:pack")
+      [ -n "$_A34_HAS_TEST" ] && _A34_CMDS+=("test")
+      [ -n "$_A34_HAS_VERIFY" ] && _A34_CMDS+=("verify")
+      if [ ${#_A34_CMDS[@]} -gt 0 ] || [ -n "$_A34_PKG_NAME" ]; then
+        _A34_APPLICABLE=true
+      fi
+      if [ "$_A34_APPLICABLE" = true ]; then
+        # npm presence guard (analogous to jq guard at top of file)
+        if ! command -v npm &>/dev/null; then
+          if [ "$IS_NO_REVIEW_BACKSTOP" = true ]; then
+            echo "GATE-RECOVERABLE: A3.4 functional verification requires npm but npm was not found. NEXT: Install npm or set REPO_OS_RECOVER=1 to bypass in headless/auto mode." >&2
+            block "A3.4_npm_missing"
+            log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A3.4_npm_missing"
+          else
+            echo "Advisory: A3.4 functional verification — npm not found; skipping script execution (human review backstop active)." >&2
+            warn "A3.4_npm_missing_advisory"
+          fi
+        else
+        _A34_FAIL=false
+        _A34_FAIL_DETAIL=""
+        for _A34_CMD in "${_A34_CMDS[@]}"; do
+          _A34_OUT=""
+          _A34_RC=0
+          _A34_OUT=$(cd "$REPO_ROOT" && timeout "$_A34_TIMEOUT" npm run "$_A34_CMD" 2>&1) || _A34_RC=$?
+          if [ "$_A34_RC" -ne 0 ]; then
+            _A34_FAIL=true
+            _A34_FAIL_DETAIL="${_A34_FAIL_DETAIL}[npm run ${_A34_CMD} exit=${_A34_RC}]\n${_A34_OUT}\n"
+          fi
+        done
+        # npm pack --dry-run structural sanity check (when package has a name and no script failures yet)
+        if [ -n "$_A34_PKG_NAME" ] && [ "$_A34_FAIL" = false ]; then
+          _A34_PACK_OUT=""
+          _A34_PACK_RC=0
+          _A34_PACK_OUT=$(cd "$REPO_ROOT" && timeout "$_A34_TIMEOUT" npm pack --dry-run 2>&1) || _A34_PACK_RC=$?
+          if [ "$_A34_PACK_RC" -ne 0 ]; then
+            _A34_FAIL=true
+            _A34_FAIL_DETAIL="${_A34_FAIL_DETAIL}[npm pack --dry-run exit=${_A34_PACK_RC}]\n${_A34_PACK_OUT}\n"
+          fi
+        fi
+        if [ "$_A34_FAIL" = false ]; then
+          # Write functional-verified state file on pass
+          _A34_CURRENT_SID=""
+          if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
+            _A34_CURRENT_SID="$REPO_OS_SESSION_ID"
+          else
+            _A34_CURRENT_SID=$(cat "$REPO_ROOT/.claude/.session-id" 2>/dev/null || echo "")
+          fi
+          printf 'timestamp: %s\nsession_id: %s\nresult: PASSED\n' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_A34_CURRENT_SID" \
+            > "$STATE_DIR/functional-verified"
+        else
+          # Blocking in headless/auto; advisory otherwise
+          if [ "$IS_NO_REVIEW_BACKSTOP" = true ]; then
+            echo "GATE-RECOVERABLE: A3.4 functional verification failed — build/pack/test scripts did not pass. NEXT: Fix failures below, or set REPO_OS_RECOVER=1 to bypass in headless/auto mode." >&2
+            printf '%b' "$_A34_FAIL_DETAIL" >&2
+            _A34_ESC_DIR="$REPO_ROOT/.claude/.automation/escalations"
+            if [ -d "$_A34_ESC_DIR" ]; then
+              printf 'type: gate-failure\ngate: A3.4\nreason: functional_verification_failed\ntimestamp: %s\n' \
+                "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                > "$_A34_ESC_DIR/a34-func-fail-$(date -u +%Y%m%d-%H%M%S).yaml"
+            fi
+            block "A3.4_func_verification_failed"
+            log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A3.4_func_verification_failed"
+          else
+            echo "Advisory: A3.4 functional verification — build/pack/test scripts failed (human review backstop active; not blocking in interactive mode). Fix before merging to main." >&2
+            printf '%b' "$_A34_FAIL_DETAIL" >&2
+            warn "A3.4_func_verification_advisory"
+            log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "warn" "$START_MS" "A3.4_func_verification_advisory"
+          fi
+        fi  # end: _A34_FAIL check
+        fi  # end: npm present (else branch of npm guard)
+      fi  # end: _A34_APPLICABLE
+    fi  # end: package.json present
+  fi  # end: STAGED_FILES
+
   # A5: Cohesion + Diff-Review Gate (blocking)
   # Session-type-aware: only enforce for session types whose phase sequence includes 'review'.
   # hotfix/* is always exempt (IS_HOTFIX). Other session types without review phase also exempt.
@@ -425,6 +557,23 @@ if [ "$SKIP_STATE" = false ]; then
     echo "GATE-RECOVERABLE: qa-verified state file has stale session_id. NEXT: Re-run QA verification in this session. (override: REPO_OS_RECOVER=1)" >&2
     block "state_qa_stale_session"
     log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_qa_stale_session"
+  fi
+
+  # A3.4 functional-verified binding gate (defense-in-depth for headless/auto)
+  # Only fires when A3.4 found applicable scripts AND no earlier gate has already blocked.
+  # Catches the edge case where functional-verified was not written (e.g., state was reset
+  # between the A3.4 check and the qa-verified check in a crash-recovery scenario).
+  if [ "$IS_NO_REVIEW_BACKSTOP" = true ] && [ "$_A34_APPLICABLE" = true ] && \
+     [ "$FAILED" -eq 0 ]; then
+    if [ ! -f "$STATE_DIR/functional-verified" ]; then
+      echo "GATE-RECOVERABLE: A3.4 functional-verified state file missing in headless/auto mode — check for earlier A3.4 failure. (override: REPO_OS_RECOVER=1)" >&2
+      block "state_func_verified_missing"
+      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_func_verified_missing"
+    elif ! _validate_state_session_id "$STATE_DIR/functional-verified"; then
+      echo "GATE-RECOVERABLE: functional-verified state file has stale session_id. NEXT: Re-run commit gate in this session (A3.4 re-runs automatically). (override: REPO_OS_RECOVER=1)" >&2
+      block "state_func_verified_stale_session"
+      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_func_verified_stale_session"
+    fi
   fi
 
   # pragmatist-signed: required on session types with an approval phase (Decision 0025)

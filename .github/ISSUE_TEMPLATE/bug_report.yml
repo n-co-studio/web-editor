@@ -1,108 +1,96 @@
 name: Bug Report
-description: Report a bug in NCO Studio Web Editor (extension, MCP server, or dev plugin)
+description: Report a bug in Repo OS governance, hooks, or prompts
 title: "[Bug] "
-labels: ["bug"]
+labels: []
 body:
-  - type: markdown
+  - type: dropdown
+    id: affected-area
     attributes:
-      value: |
-        Thank you for reporting a bug. Please fill out the sections below to help us reproduce and fix the issue quickly.
-        For security issues, see [SECURITY.md](https://github.com/{owner}/{repo}/blob/main/SECURITY.md) — do not open a public issue.
-
-  - type: input
-    id: extension-version
-    attributes:
-      label: Extension version
-      description: "Found in chrome://extensions → NCO Studio Web Editor → Details. Example: 0.2.0"
-      placeholder: "0.2.0"
+      label: Affected Area
+      options:
+        - Hook (enforcement script)
+        - Prompt (session prompt)
+        - Agent (subagent definition)
+        - Gate (quality gate logic)
+        - Decision (decision record)
+        - Workflow (GitHub Actions)
+        - Mode Guard (file restrictions)
+        - Template Sync
+        - Other
     validations:
       required: true
-
-  - type: input
-    id: chrome-version
-    attributes:
-      label: Chrome version
-      description: "Found in chrome://version → Google Chrome. Example: 120.0.6099.130"
-      placeholder: "120.0.6099.130"
-    validations:
-      required: true
-
-  - type: input
-    id: mcp-server-version
-    attributes:
-      label: MCP server version (@nco-studio/web-editor-mcp)
-      description: "Run: npx @nco-studio/web-editor-mcp --version"
-      placeholder: "0.1.0"
-    validations:
-      required: true
-
-  - type: input
-    id: dev-plugin-version
-    attributes:
-      label: Dev plugin version (@nco-studio/web-editor-plugin)
-      description: "Run: npm ls @nco-studio/web-editor-plugin in your project"
-      placeholder: "0.1.0"
-    validations:
-      required: false
 
   - type: dropdown
-    id: affected-component
+    id: operating-mode
     attributes:
-      label: Affected component
+      label: Operating Mode
+      description: Which mode was active when the bug occurred?
       options:
-        - Chrome extension (overlay / selection / property panel)
-        - Chrome extension (queue panel)
-        - Chrome extension (toolbar icon / popup)
-        - MCP server (connection / WebSocket)
-        - MCP server (MCP tools / Claude Code integration)
-        - Dev plugin (data-source-* attributes)
-        - Protocol mismatch / version banner
-        - Other
+        - template
+        - child
+        - autonomous
+        - "Unknown / N/A"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: branch-type
+    attributes:
+      label: Branch Type
+      options:
+        - "feature/*"
+        - "fix/*"
+        - "hotfix/*"
+        - "experiment/*"
+        - "release/*"
+        - main
     validations:
       required: true
 
   - type: textarea
     id: steps
     attributes:
-      label: Steps to reproduce
+      label: Steps to Reproduce
       description: Minimal steps to trigger the bug.
       placeholder: |
-        1. Start the dev server with `npm run dev`
-        2. Open http://localhost:5173 in Chrome with the extension enabled
-        3. Click an element
-        4. Observe that ...
+        1. Start a session on branch feature/...
+        2. Run Prompt B with task brief...
+        3. Builder completes, commit attempted...
+        4. Hook output shows...
     validations:
       required: true
 
   - type: textarea
     id: expected
     attributes:
-      label: Expected behavior
+      label: Expected Behavior
     validations:
       required: true
 
   - type: textarea
     id: actual
     attributes:
-      label: Actual behavior
-      description: Include error messages, console output, and screenshots if relevant.
+      label: Actual Behavior
+      description: Include the full hook output or error message if available.
     validations:
       required: true
 
   - type: textarea
-    id: console-output
+    id: overrides
     attributes:
-      label: Console output
-      description: "Paste any errors from: (1) Chrome DevTools Console on your dev page, (2) chrome://extensions → NCO Studio Web Editor → service worker console."
-      render: text
+      label: Override Environment Variables
+      description: List any REPO_OS_* or SKIP_* env vars that were set.
+      placeholder: |
+        REPO_OS_RECOVER=1
+        SKIP_SESSION_LOG=1
     validations:
       required: false
 
   - type: textarea
-    id: mcp-server-output
+    id: analytics
     attributes:
-      label: MCP server output
-      description: Paste any error lines from the MCP server terminal output.
-      render: text
+      label: Analytics Event
+      description: Paste the relevant NDJSON event line from ~/.local/share/repo-os-analytics/<repo>/events/ if available.
+      render: json
     validations:
       required: false

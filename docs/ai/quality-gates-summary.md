@@ -9,7 +9,7 @@
 |------|---------|-----------|
 | **A1 Decision Compliance** | All applicable decisions followed; conflicts → new decision record first. Trigger parser enforces mechanically (sentinel: `docs/ai/decisions/.a1-triggers-enforced`). | — (trigger index: `docs/ai/decisions/.a1-trigger-index`) |
 | **A2 Process** | Plan before code. Session log updated at close. Scope >100 lines requires `large-scope: true` in `plan-approved`. Hotfix: scope limit relaxed. | `plan-approved` |
-| **A3 Quality** | Formatter, lint, build/compile pass (when tooling exists). **A3.3**: `tsc --noEmit --incremental` passes (skips without `tsconfig.json`; override: `SKIP_BUILD_CHECK=1`). | — |
+| **A3 Quality** | Formatter, lint, build/compile pass (when tooling exists). **A3.3**: `tsc --noEmit --incremental` passes (skips without `tsconfig.json`; override: `SKIP_BUILD_CHECK=1`). **A3.4**: In headless/auto, runs `package.json` scripts (`build`, `build:pack`, `test`, `verify`) + `npm pack --dry-run`; blocking when no human backstop, advisory otherwise; writes `functional-verified`; override: `SKIP_FUNC_CHECK=1`; Decision 0044. | `functional-verified` (headless/auto only) |
 | **A4 Safety** | No secrets/PII. High-risk path/content detection → Reviewer + Security sign-off. Automation-specific: no unbriefed network calls, new deps, or out-of-repo writes. | `reviewer-signed`, `security-signed` |
 | **A5 Cohesion** _(session types with review phase only)_ | Two parallel checks — both APPROVED required. **Cohesion**: Critic (cohesion mode) clean; `GATE_RESULT: APPROVED` in `cohesion-reviewed`. **Diff-review**: Critic (diff-review mode) clean; `GATE_RESULT: APPROVED` in `diff-review-complete`. Contract `verification:` criteria evaluated (advisory). Completeness pass: each criterion scored COMPLETE/INCOMPLETE/PARTIAL; INCOMPLETE triggers loop-back to Builder (advisory, 2-round cap). Session-type-aware: skips for hotfix and other types without review phase. | `cohesion-reviewed`, `diff-review-complete` |
 | **A6 Task Group** _(taskgroup only)_ | **A6.1**: Contract with `status: in_progress` exists. **A6.2**: Modified contract YAML staged. **A6.3**: Each `integration_points[].artifact` in contract exists in working tree (file-existence check). | — (contract file check) |
@@ -50,6 +50,7 @@
 | `diff-review-complete` | A5 | New (Brief 3); written by state-writer.sh when Critic runs diff-review mode; GATE_RESULT: BLOCKED blocks commit |
 | `reviewer-signed`, `security-signed` | A4 | Required on high-risk detection |
 | `pragmatist-signed` | Plan-gating | Written by Pragmatist plan-review (legacy dispatch), by `_phase-helper.sh::bundle_to_pragmatist_signed` (handoff bundle path), or by the Orchestrator's `deterministic_alignment_check` (alignment-aligned outcome). Decisions 0025 + 0038. Checked at commit time |
+| `functional-verified` | A3.4 (headless/auto only) | Written by `pre-commit-gates.sh` inline on script pass; required by binding gate when `_A34_APPLICABLE=true` and `IS_NO_REVIEW_BACKSTOP=true`. Decision 0044. |
 | `.claude/local/closed-branches` | Session isolation | Persistent ledger (not session-scoped) |
 
 Recovery: `REPO_OS_RECOVER=1` skips all state-dependent checks.

@@ -340,14 +340,35 @@ stage_sandbox_file() {
 # from blocking re-init within the same test process (same PID appears alive).
 reset_phase() {
   local stype="${1:-standard}"
-  # Clear per-session state dir if cached (new session will get new dir)
+  # Deterministically remove the per-session state dir for the CURRENT session
+  # id — not just the cached one. init_phase resolves/writes the per-session dir
+  # (wt-sessions/{sid}/phase-state) and its double-init guard returns 1 if that
+  # file already exists for the same session. Relying only on
+  # _CACHED_SESSION_STATE_DIR left the dir behind whenever the cache was empty
+  # (e.g. after upgrade_session_type invalidates it), so the next init_phase hit
+  # the guard and aborted the whole layer under set -e. Computing the dir from
+  # the live session id makes teardown deterministic and also clears any leaked
+  # gate files (plan-approved, cohesion-reviewed, ...) for real per-test isolation.
+  local _rp_sid
+  _rp_sid=$(get_session_id "$_REPO_OS_ROOT" 2>/dev/null || true)
+  if [ -z "$_rp_sid" ]; then
+    _rp_sid=$(cat "$_SANDBOX_DIR/.claude/.session-id" 2>/dev/null || echo "")
+  fi
+  _rp_sid="${_rp_sid//\//_}"
+  _rp_sid="${_rp_sid//\.\./_}"
+  if [ -n "$_rp_sid" ]; then
+    rm -rf "$_SANDBOX_DIR/.claude/.state/wt-sessions/$_rp_sid" 2>/dev/null || true
+  fi
+  # Also clear any cached dir and the flat (pre-migration) path.
   if [ -n "$_CACHED_SESSION_STATE_DIR" ] && [ -d "$_CACHED_SESSION_STATE_DIR" ]; then
     rm -rf "$_CACHED_SESSION_STATE_DIR" 2>/dev/null || true
   fi
   _CACHED_SESSION_STATE_DIR=""
   rm -f "$_SANDBOX_DIR/.claude/.state/phase-state"
   rm -f "$_SANDBOX_DIR/.claude/.state/sessions"/*.yaml 2>/dev/null || true
-  init_phase "$stype"
+  # reset_phase is an intentional re-init between test cases — bypass the
+  # double-init guard explicitly (precisely what the override exists for).
+  REPO_OS_ALLOW_REINIT=1 init_phase "$stype"
 }
 
 # --- Assert a file exists ---

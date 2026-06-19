@@ -14,6 +14,22 @@ source "$SCRIPT_DIR/test-helpers.sh"
 
 setup_sandbox
 
+# Seed the substance file(s) advance_phase's gate requires for <phase>, in the
+# per-session state dir (Decision 0030). Defensive: extra files are ignored by
+# ungated phases. Mirrors the inline pattern used in L2.2.
+_l2_seed() {
+  local _sd _sid
+  _sd="$(get_session_state_dir)"
+  _sid=$(get_session_id "$_REPO_OS_ROOT" 2>/dev/null)
+  [ -z "$_sid" ] && _sid=$(cat "$(get_sandbox)/.claude/.session-id" 2>/dev/null)
+  case "$1" in
+    approval) printf 'GATE_RESULT: APPROVED\nsession_id: %s\n' "$_sid" > "$_sd/pragmatist-signed"
+              printf 'session_id: %s\nmode: auto\n' "$_sid" > "$_sd/plan-approved" ;;
+    verify)   printf 'GATE_RESULT: APPROVED\nsession_id: %s\n' "$_sid" > "$_sd/cohesion-reviewed" ;;
+    commit)   printf 'GATE_RESULT: APPROVED\nsession_id: %s\n' "$_sid" > "$_sd/qa-verified" ;;
+  esac
+}
+
 # ============================================================
 # L2.1 — init_phase creates correct state for all 14 types
 # ============================================================
@@ -21,13 +37,13 @@ tap_section "L2.1: init_phase — creates correct state for all types"
 
 for stype in $SESSION_TYPES; do
   # Reset phase-state for each type
-  rm -f "$(get_sandbox)/.claude/.state/phase-state"
+  rm -f "$(get_session_state_dir)/phase-state"
 
   init_phase "$stype"
   rc=$?
   assert_ok "$rc" "init_phase '$stype' succeeds"
 
-  state_file="$(get_sandbox)/.claude/.state/phase-state"
+  state_file="$(get_session_state_dir)/phase-state"
 
   # Verify fields
   assert_file_contains "$state_file" "^session_type: ${stype}$" "init '$stype' sets session_type"
@@ -46,7 +62,7 @@ done
 tap_section "L2.2: advance_phase — full forward walk for all types"
 
 for stype in $SESSION_TYPES; do
-  rm -f "$(get_sandbox)/.claude/.state/phase-state"
+  rm -f "$(get_session_state_dir)/phase-state"
   init_phase "$stype"
 
   phases=$(get_phases_for_type "$stype")
@@ -113,7 +129,7 @@ done
 tap_section "L2.3: assert_phase — correct pass/fail at each point"
 
 # Use standard as representative test
-rm -f "$(get_sandbox)/.claude/.state/phase-state"
+rm -f "$(get_session_state_dir)/phase-state"
 init_phase "standard"
 
 # At init, assert_phase init should pass, plan should fail
@@ -124,7 +140,9 @@ assert_phase "plan" && rc=0 || rc=$?
 assert_fail "$rc" "assert_phase 'plan' fails when at init"
 
 # Advance to build
+advance_phase "drift-check" 2>/dev/null
 advance_phase "plan" 2>/dev/null
+_l2_seed approval
 advance_phase "approval" 2>/dev/null
 advance_phase "build" 2>/dev/null
 
@@ -151,9 +169,11 @@ assert_fail "$rc" "assert_phase 'verify' fails when at build"
 tap_section "L2.4: advance_phase — illegal backward transitions blocked"
 
 # Standard: at review, cannot go back to plan or approval (not in loop set)
-rm -f "$(get_sandbox)/.claude/.state/phase-state"
+rm -f "$(get_session_state_dir)/phase-state"
 init_phase "standard"
+advance_phase "drift-check" 2>/dev/null
 advance_phase "plan" 2>/dev/null
+_l2_seed approval
 advance_phase "approval" 2>/dev/null
 advance_phase "build" 2>/dev/null
 advance_phase "review" 2>/dev/null
@@ -168,16 +188,17 @@ advance_phase "init" 2>/dev/null && rc=0 || rc=$?
 assert_fail "$rc" "standard: cannot go back from review to init"
 
 # Experiment: at commit, cannot go back to build (no loops defined)
-rm -f "$(get_sandbox)/.claude/.state/phase-state"
+rm -f "$(get_session_state_dir)/phase-state"
 init_phase "experiment"
 advance_phase "build" 2>/dev/null
+_l2_seed commit
 advance_phase "commit" 2>/dev/null
 
 advance_phase "build" 2>/dev/null && rc=0 || rc=$?
 assert_fail "$rc" "experiment: cannot go back from commit to build (no loops)"
 
 # advisory-init: at synthesize, cannot go back to dispatch
-rm -f "$(get_sandbox)/.claude/.state/phase-state"
+rm -f "$(get_session_state_dir)/phase-state"
 init_phase "advisory-init"
 advance_phase "tier-select" 2>/dev/null
 advance_phase "dispatch" 2>/dev/null
@@ -192,15 +213,17 @@ assert_fail "$rc" "advisory-init: cannot go back from synthesize to dispatch"
 tap_section "L2.5: advance_phase — legal loops increment cycle"
 
 # Standard: review→build loop
-rm -f "$(get_sandbox)/.claude/.state/phase-state"
+rm -f "$(get_session_state_dir)/phase-state"
 init_phase "standard"
+advance_phase "drift-check" 2>/dev/null
 advance_phase "plan" 2>/dev/null
+_l2_seed approval
 advance_phase "approval" 2>/dev/null
 advance_phase "build" 2>/dev/null
 advance_phase "review" 2>/dev/null
 
 # Check cycle is 1 before loop
-state_file="$(get_sandbox)/.claude/.state/phase-state"
+state_file="$(get_session_state_dir)/phase-state"
 cycle=$(grep '^cycle:' "$state_file" | sed 's/^cycle: *//')
 assert_eq "$cycle" "1" "standard cycle = 1 before review→build loop"
 
@@ -226,6 +249,7 @@ assert_eq "$cycle" "3" "standard: cycle incremented to 3 after second loop"
 
 # Standard: verify→build loop
 advance_phase "review" 2>/dev/null
+_l2_seed verify
 advance_phase "verify" 2>/dev/null
 advance_phase "build" 2>/dev/null
 rc=$?
@@ -235,10 +259,12 @@ cycle=$(grep '^cycle:' "$state_file" | sed 's/^cycle: *//')
 assert_eq "$cycle" "4" "standard: cycle incremented to 4 after verify→build"
 
 # Taskgroup: review→build loop
-rm -f "$(get_sandbox)/.claude/.state/phase-state"
+rm -f "$(get_session_state_dir)/phase-state"
 init_phase "taskgroup"
 advance_phase "contract-init" 2>/dev/null
+advance_phase "drift-check" 2>/dev/null
 advance_phase "plan" 2>/dev/null
+_l2_seed approval
 advance_phase "approval" 2>/dev/null
 advance_phase "build" 2>/dev/null
 advance_phase "review" 2>/dev/null
@@ -250,11 +276,13 @@ cycle=$(grep '^cycle:' "$state_file" | sed 's/^cycle: *//')
 assert_eq "$cycle" "2" "taskgroup: cycle incremented to 2"
 
 # Hotfix: verify→build loop (only loop available)
-rm -f "$(get_sandbox)/.claude/.state/phase-state"
+rm -f "$(get_session_state_dir)/phase-state"
 init_phase "hotfix"
 advance_phase "plan" 2>/dev/null
+_l2_seed approval
 advance_phase "approval" 2>/dev/null
 advance_phase "build" 2>/dev/null
+_l2_seed verify
 advance_phase "verify" 2>/dev/null
 advance_phase "build" 2>/dev/null
 rc=$?
@@ -271,8 +299,9 @@ assert_eq "$cycle" "2" "hotfix: cycle incremented to 2"
 # ============================================================
 tap_section "L2.6: session-ID mismatch — stale state detection"
 
-rm -f "$(get_sandbox)/.claude/.state/phase-state"
+rm -f "$(get_session_state_dir)/phase-state"
 init_phase "standard"
+advance_phase "drift-check" 2>/dev/null
 advance_phase "plan" 2>/dev/null
 
 # Verify current phase works with matching session ID
@@ -315,13 +344,17 @@ set_test_session_id "test-session-$(date +%s)"
 tap_section "L2.7: auto mode — forward jump past op-review"
 
 # Standard: jump from commit directly to close (skipping op-review)
-rm -f "$(get_sandbox)/.claude/.state/phase-state"
+rm -f "$(get_session_state_dir)/phase-state"
 init_phase "standard"
+advance_phase "drift-check" 2>/dev/null
 advance_phase "plan" 2>/dev/null
+_l2_seed approval
 advance_phase "approval" 2>/dev/null
 advance_phase "build" 2>/dev/null
 advance_phase "review" 2>/dev/null
+_l2_seed verify
 advance_phase "verify" 2>/dev/null
+_l2_seed commit
 advance_phase "commit" 2>/dev/null
 
 # Skip op-review, go directly to close
@@ -333,14 +366,18 @@ current=$(get_phase)
 assert_eq "$current" "close" "standard: phase is close after skipping op-review"
 
 # Taskgroup: same forward jump
-rm -f "$(get_sandbox)/.claude/.state/phase-state"
+rm -f "$(get_session_state_dir)/phase-state"
 init_phase "taskgroup"
 advance_phase "contract-init" 2>/dev/null
+advance_phase "drift-check" 2>/dev/null
 advance_phase "plan" 2>/dev/null
+_l2_seed approval
 advance_phase "approval" 2>/dev/null
 advance_phase "build" 2>/dev/null
 advance_phase "review" 2>/dev/null
+_l2_seed verify
 advance_phase "verify" 2>/dev/null
+_l2_seed commit
 advance_phase "commit" 2>/dev/null
 advance_phase "contract-update" 2>/dev/null
 
@@ -350,7 +387,7 @@ rc=$?
 assert_ok "$rc" "taskgroup: contract-update→close (skipping op-review) succeeds"
 
 # advisory-init: synthesize→validate (skipping op-review)
-rm -f "$(get_sandbox)/.claude/.state/phase-state"
+rm -f "$(get_session_state_dir)/phase-state"
 init_phase "advisory-init"
 advance_phase "tier-select" 2>/dev/null
 advance_phase "dispatch" 2>/dev/null
@@ -361,7 +398,7 @@ rc=$?
 assert_ok "$rc" "advisory-init: synthesize→validate (skipping op-review) succeeds"
 
 # audit: synthesize→close (skipping op-review)
-rm -f "$(get_sandbox)/.claude/.state/phase-state"
+rm -f "$(get_session_state_dir)/phase-state"
 init_phase "audit"
 advance_phase "scope" 2>/dev/null
 advance_phase "dispatch" 2>/dev/null
@@ -372,18 +409,19 @@ rc=$?
 assert_ok "$rc" "audit: synthesize→close (skipping op-review) succeeds"
 
 # taskdef-brief: synthesize→approval→output (approval is now a gated phase, Decision 0029)
-rm -f "$(get_sandbox)/.claude/.state/phase-state"
+rm -f "$(get_session_state_dir)/phase-state"
 init_phase "taskdef-brief"
 advance_phase "dispatch" 2>/dev/null
 advance_phase "synthesize" 2>/dev/null
 
 # approval phase requires plan-approved state file (substance check)
+_l2_seed approval
 advance_phase "approval" 2>/dev/null
 rc=$?
 assert_ok "$rc" "taskdef-brief: synthesize→approval succeeds"
 
 # output requires plan-approved (post-approval gate)
-printf 'timestamp: test\nsession_id: %s\n' "$(get_test_session_id)" > "$(get_sandbox)/.claude/.state/plan-approved"
+printf 'timestamp: test\nsession_id: %s\n' "$(get_test_session_id)" > "$(get_session_state_dir)/plan-approved"
 advance_phase "output" 2>/dev/null
 rc=$?
 assert_ok "$rc" "taskdef-brief: approval→output succeeds (with plan-approved)"
@@ -394,7 +432,7 @@ assert_ok "$rc" "taskdef-brief: approval→output succeeds (with plan-approved)"
 tap_section "L2.8: error paths"
 
 # Empty phase-state (no file)
-rm -f "$(get_sandbox)/.claude/.state/phase-state"
+rm -f "$(get_session_state_dir)/phase-state"
 
 current=$(get_phase)
 assert_eq "$current" "" "get_phase returns empty when no phase-state exists"
@@ -410,7 +448,7 @@ init_phase "unknown-type" 2>/dev/null && rc=0 || rc=$?
 assert_fail "$rc" "init_phase rejects unknown session type"
 
 # Invalid phase for the session type
-rm -f "$(get_sandbox)/.claude/.state/phase-state"
+rm -f "$(get_session_state_dir)/phase-state"
 init_phase "experiment"
 advance_phase "plan" 2>/dev/null && rc=0 || rc=$?
 assert_fail "$rc" "advance_phase rejects invalid phase 'plan' for experiment"
@@ -419,7 +457,7 @@ advance_phase "review" 2>/dev/null && rc=0 || rc=$?
 assert_fail "$rc" "advance_phase rejects invalid phase 'review' for experiment"
 
 # Missing session-id file
-rm -f "$(get_sandbox)/.claude/.state/phase-state"
+rm -f "$(get_session_state_dir)/phase-state"
 init_phase "standard"
 
 # Remove session-id file
@@ -441,43 +479,47 @@ echo "test-restore-$(date +%s)" > "$(get_sandbox)/.claude/.session-id"
 # ============================================================
 tap_section "L2.9: phases_completed — accumulates through walk"
 
-rm -f "$(get_sandbox)/.claude/.state/phase-state"
+rm -f "$(get_session_state_dir)/phase-state"
 init_phase "standard"
 
-state_file="$(get_sandbox)/.claude/.state/phase-state"
+state_file="$(get_session_state_dir)/phase-state"
 
 # After init, phases_completed should be empty
 completed=$(grep '^phases_completed:' "$state_file" | sed 's/^phases_completed: *//')
 assert_eq "$completed" "" "phases_completed empty after init"
 
 # Advance through several phases
+advance_phase "drift-check" 2>/dev/null
 advance_phase "plan" 2>/dev/null
 completed=$(grep '^phases_completed:' "$state_file" | sed 's/^phases_completed: *//')
-assert_eq "$completed" "init" "phases_completed = 'init' after advancing to plan"
+assert_eq "$completed" "init,drift-check" "phases_completed = 'init,drift-check' after advancing to plan"
 
+_l2_seed approval
 advance_phase "approval" 2>/dev/null
 completed=$(grep '^phases_completed:' "$state_file" | sed 's/^phases_completed: *//')
-assert_eq "$completed" "init,plan" "phases_completed = 'init,plan' after advancing to approval"
+assert_eq "$completed" "init,drift-check,plan" "phases_completed = 'init,drift-check,plan' after advancing to approval"
 
 advance_phase "build" 2>/dev/null
 completed=$(grep '^phases_completed:' "$state_file" | sed 's/^phases_completed: *//')
-assert_eq "$completed" "init,plan,approval" "phases_completed accumulates through build"
+assert_eq "$completed" "init,drift-check,plan,approval" "phases_completed accumulates through build"
 
 # ============================================================
 # L2.10 — Tag updates on advance
 # ============================================================
 tap_section "L2.10: tag updates correctly on advance"
 
-rm -f "$(get_sandbox)/.claude/.state/phase-state"
+rm -f "$(get_session_state_dir)/phase-state"
 init_phase "standard"
 
 tag=$(get_tag)
 assert_eq "$tag" "agent" "tag = agent at init"
 
+advance_phase "drift-check" 2>/dev/null
 advance_phase "plan" 2>/dev/null
 tag=$(get_tag)
 assert_eq "$tag" "agent" "tag = agent at plan"
 
+_l2_seed approval
 advance_phase "approval" 2>/dev/null
 tag=$(get_tag)
 assert_eq "$tag" "operator" "tag = operator at approval"
@@ -487,7 +529,9 @@ tag=$(get_tag)
 assert_eq "$tag" "agent" "tag = agent at build"
 
 advance_phase "review" 2>/dev/null
+_l2_seed verify
 advance_phase "verify" 2>/dev/null
+_l2_seed commit
 advance_phase "commit" 2>/dev/null
 advance_phase "op-review" 2>/dev/null
 tag=$(get_tag)
@@ -502,7 +546,7 @@ assert_eq "$tag" "agent" "tag = agent at close"
 # ============================================================
 tap_section "L2.11: set_phase_mode and set_solo"
 
-rm -f "$(get_sandbox)/.claude/.state/phase-state"
+rm -f "$(get_session_state_dir)/phase-state"
 init_phase "standard"
 
 # Default mode is review

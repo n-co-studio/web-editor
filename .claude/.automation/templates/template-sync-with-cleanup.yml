@@ -50,6 +50,11 @@ jobs:
         env:
           SOURCE_REPO_TOKEN: ${{ secrets.SOURCE_REPO_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Security: move workflow input out of run: block to prevent injection.
+          # Reference "$SOURCE_REPO" in shell; never interpolate ${{ ... }} inside run:.
+          # NOTE: child repos must copy this fix manually — template-sync cannot push
+          # workflow files (GITHUB_TOKEN lacks workflow scope).
+          SOURCE_REPO: ${{ github.event.inputs.source_repo }}
         run: |
           # Configure git for commit
           git config user.name "github-actions[bot]"
@@ -61,7 +66,7 @@ jobs:
 
           # Determine template repo URL
           # Priority: workflow input > hardcoded default
-          TEMPLATE_REPO="${{ github.event.inputs.source_repo }}"
+          TEMPLATE_REPO="$SOURCE_REPO"
           if [ -z "$TEMPLATE_REPO" ]; then
             # Set your template repo here (owner/name format)
             TEMPLATE_REPO="markpreston2/repo-OS-template"

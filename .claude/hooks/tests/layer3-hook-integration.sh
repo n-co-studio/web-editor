@@ -26,7 +26,10 @@ _fixtures_self_test
 
 # Shorthand for sandbox paths
 SB="$(get_sandbox)"
-STATE_DIR="$SB/.claude/.state"
+# Per-session state dir (Decision 0030): state files live under
+# wt-sessions/{sid}/, not the flat .claude/.state/. The sid is stable across
+# reset_phase, so this resolves once and stays valid for the whole layer.
+STATE_DIR="$(get_session_state_dir)"
 TEST_SID="$(get_test_session_id)"
 
 # --- Substance-aware _advance wrapper ---
@@ -39,12 +42,32 @@ _advance() {
   local sid
   sid=$(cat "$SB/.claude/.session-id")
   case "$phase" in
+    plan)
+      # Decision 0038: a drift-check phase sits immediately before plan in
+      # standard (after init) and taskgroup (after contract-init). Walk through
+      # it first whenever the sequence places it directly before plan and we are
+      # not already on it.
+      case " $(get_phases_for_type "$(get_session_type)") " in
+        *" drift-check plan "*)
+          if [ "$(get_phase)" != "drift-check" ]; then
+            advance_phase "drift-check" 2>/dev/null || true
+          fi
+          ;;
+      esac
+      # Pragmatist sign-off precedes operator approval (Decision 0025), so seed
+      # it: the plan-approval hook advances approval->build, and the approval
+      # step is gated on pragmatist-signed.
+      printf 'timestamp: test\nagent: pragmatist\nsession_id: %s\nGATE_RESULT: APPROVED\n' "$sid" > "$sd/pragmatist-signed"
+      ;;
     approval)
       printf 'timestamp: test\nagent: pragmatist\nsession_id: %s\nGATE_RESULT: APPROVED\n' "$sid" > "$sd/pragmatist-signed"
       printf 'timestamp: test\nsession_id: %s\nmode: auto\n' "$sid" > "$sd/plan-approved"
       ;;
     verify)
+      # Critic combined mode (Decision 0039) writes BOTH cohesion-reviewed and
+      # diff-review-complete; the A5 commit gate requires both. Seed both.
       printf 'timestamp: test\nagent: critic\nsession_id: %s\nGATE_RESULT: APPROVED\n' "$sid" > "$sd/cohesion-reviewed"
+      printf 'timestamp: test\nagent: critic\nsession_id: %s\nMODE: diff-review\nGATE_RESULT: APPROVED\n' "$sid" > "$sd/diff-review-complete"
       ;;
     commit)
       printf 'timestamp: test\nagent: qa-verifier\nsession_id: %s\nGATE_RESULT: APPROVED\n' "$sid" > "$sd/qa-verified"
@@ -350,11 +373,55 @@ run_hook_rc "plan-approval.sh" \
 mode_after=$(get_phase_mode)
 assert_eq "$mode_after" "review" "plan-approval sets mode to review when both auto and review in answer"
 
+# --- Regression: "Approve"-only wording (no "yes"/"proceed") still confirms ---
+# Guards the fix for the Gate 2 regex bug where the trailing word boundary in
+# `approv\b` prevented "approve"/"approval"/"approved" from ever matching, so a
+# question/options worded only with "Approve" silently failed to write state.
+# The fixture question keeps the word "plan" so Gate 1 (plan|brief|task) passes
+# and execution actually reaches the Gate 2 path under test.
+reset_phase "standard"
+_advance "plan" 2>/dev/null
+rm -f "$STATE_DIR/plan-approved"
+run_hook_rc "plan-approval.sh" \
+  "$(fixture_posttooluse_ask "Approve this plan?" "Approve,Adjust" "Approve")"
+assert_ok "$_LAST_RC" "plan-approval exits 0 on Approve-only wording (PostToolUse never blocks)"
+assert_file_exists "$STATE_DIR/plan-approved" "plan-approval writes state on Approve-only wording (no 'yes'/'proceed')"
+phase_after=$(get_phase)
+assert_eq "$phase_after" "build" "plan-approval advances to build on Approve-only wording"
+
+# --- Regression: bare "Auto"/"Review" option selection counts as affirmative ---
+# The canonical plan-approval template (Prompt B / orchestrator.md) offers the
+# options "Auto" and "Review" — both are approvals. Guards the fix for the bug
+# where the affirmative-answer regex matched only yes/approve/proceed/etc, so a
+# bare "Auto" or "Review" selection silently failed to write plan-approved and
+# blocked advance_phase build. The question keeps "plan"+"Approve" so Gates 1+2
+# pass and execution reaches the Gate 3 affirmative check under test.
+reset_phase "standard"
+_advance "plan" 2>/dev/null
+rm -f "$STATE_DIR/plan-approved"
+run_hook_rc "plan-approval.sh" \
+  "$(fixture_posttooluse_ask "Approve this plan?" "Auto,Review" "Auto")"
+assert_file_exists "$STATE_DIR/plan-approved" "plan-approval writes state on bare 'Auto' selection"
+assert_eq "$(get_phase_mode)" "auto" "plan-approval sets auto mode on bare 'Auto' selection"
+assert_eq "$(get_phase)" "build" "plan-approval advances to build on bare 'Auto' selection"
+
+reset_phase "standard"
+_advance "plan" 2>/dev/null
+rm -f "$STATE_DIR/plan-approved"
+run_hook_rc "plan-approval.sh" \
+  "$(fixture_posttooluse_ask "Approve this plan?" "Auto,Review" "Review")"
+assert_file_exists "$STATE_DIR/plan-approved" "plan-approval writes state on bare 'Review' selection"
+assert_eq "$(get_phase_mode)" "review" "plan-approval sets review mode on bare 'Review' selection"
+
 # --- Spec session: approval advances to governance ---
 reset_phase "spec-fresh"
 _advance "interview" 2>/dev/null
 _advance "write" 2>/dev/null
 rm -f "$STATE_DIR/plan-approved"
+# Pragmatist sign-off precedes operator approval (Decision 0025); spec-fresh
+# reaches approval via write (not the standard plan phase), so seed it here so
+# plan-approval's internal approval->governance advance is not gate-blocked.
+printf 'GATE_RESULT: APPROVED\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/pragmatist-signed"
 run_hook_rc "plan-approval.sh" \
   "$(fixture_posttooluse_ask "Do you approve this plan?" "Yes approve,No revise" "Yes approve")"
 phase_after=$(get_phase)
@@ -644,6 +711,72 @@ stage_sandbox_file "src/recover.ts" "export const r = 8;"
 REPO_OS_RECOVER=1 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "recover commit")"
 assert_ok "$_LAST_RC" "pre-commit-gates allows commit with REPO_OS_RECOVER=1"
 
+# --- A3.4: SKIP_FUNC_CHECK=1 bypasses functional verification ---
+reset_phase "standard"
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "review" 2>/dev/null
+_advance "verify" 2>/dev/null
+_advance "commit" 2>/dev/null
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
+printf 'timestamp: test\nsession_id: %s\nGATE_RESULT: APPROVED\n' "$TEST_SID" > "$STATE_DIR/cohesion-reviewed"
+printf 'timestamp: test\nsession_id: %s\nGATE_RESULT: APPROVED\n' "$TEST_SID" > "$STATE_DIR/diff-review-complete"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/qa-verified"
+# Create package.json with a test script that exits non-zero
+printf '{"name":"test-pkg","scripts":{"test":"node -e '\''process.exit(1)'\''"}}\n' > "$SB/package.json"
+(cd "$SB" && git add package.json 2>/dev/null || true)
+stage_sandbox_file "src/a34skip.ts" "export const a34s = 1;"
+SKIP_FUNC_CHECK=1 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "a34 skip test")"
+assert_ok "$_LAST_RC" "pre-commit-gates: SKIP_FUNC_CHECK=1 bypasses A3.4 even with failing package.json scripts"
+(cd "$SB" && git rm --cached package.json 2>/dev/null; rm -f "$SB/package.json") || true
+
+# --- A3.4: CLAUDE_HEADLESS=1 + SKIP_FUNC_CHECK=1 → ignored, gate still blocks ---
+# Amendment 1 (Decision t-0044): SKIP_FUNC_CHECK=1 is interactive-only; headless ignores it.
+reset_phase "standard"
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "review" 2>/dev/null
+_advance "verify" 2>/dev/null
+_advance "commit" 2>/dev/null
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
+printf 'timestamp: test\nsession_id: %s\nGATE_RESULT: APPROVED\n' "$TEST_SID" > "$STATE_DIR/cohesion-reviewed"
+printf 'timestamp: test\nsession_id: %s\nGATE_RESULT: APPROVED\n' "$TEST_SID" > "$STATE_DIR/diff-review-complete"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/qa-verified"
+# Create package.json with a test script that exits non-zero
+printf '{"name":"test-pkg","scripts":{"test":"node -e '\''process.exit(1)'\''"}}' > "$SB/package.json"
+(cd "$SB" && git add package.json 2>/dev/null || true)
+stage_sandbox_file "src/a34hls.ts" "export const a34h = 3;"
+# Remove escalation dir first so we can detect it was created by the hook
+rm -rf "$SB/.claude/.automation/escalations"
+CLAUDE_HEADLESS=1 SKIP_FUNC_CHECK=1 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "a34 headless skip ignored")"
+assert_fail "$_LAST_RC" "pre-commit-gates: CLAUDE_HEADLESS=1 + SKIP_FUNC_CHECK=1 — gate NOT bypassed (Amendment 1)"
+if ls "$SB/.claude/.automation/escalations/"a34-skip-ignored-* >/dev/null 2>&1; then
+  _tap_pass "pre-commit-gates: headless SKIP_FUNC_CHECK=1 ignored — escalation file written"
+else
+  _tap_fail "pre-commit-gates: headless SKIP_FUNC_CHECK=1 ignored — escalation file MISSING"
+fi
+(cd "$SB" && git rm --cached package.json 2>/dev/null; rm -f "$SB/package.json") || true
+rm -rf "$SB/.claude/.automation/escalations"
+
+# --- A3.4: no package.json in headless → _A34_APPLICABLE=false → binding gate skipped ---
+reset_phase "standard"
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "review" 2>/dev/null
+_advance "verify" 2>/dev/null
+_advance "commit" 2>/dev/null
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
+printf 'timestamp: test\nsession_id: %s\nGATE_RESULT: APPROVED\n' "$TEST_SID" > "$STATE_DIR/cohesion-reviewed"
+printf 'timestamp: test\nsession_id: %s\nGATE_RESULT: APPROVED\n' "$TEST_SID" > "$STATE_DIR/diff-review-complete"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/qa-verified"
+rm -f "$SB/package.json"
+stage_sandbox_file "src/a34nopkg.ts" "export const a34n = 2;"
+CLAUDE_HEADLESS=1 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "a34 no pkg test")"
+assert_ok "$_LAST_RC" "pre-commit-gates: headless + no package.json → A3.4 _A34_APPLICABLE=false, binding gate skipped, commit allowed"
+
 # --- A4: Secret scanning blocks ---
 reset_phase "standard"
 _advance "plan" 2>/dev/null
@@ -775,10 +908,11 @@ assert_file_exists "$STATE_DIR/plan-approved" "lifecycle: plan-approved state fi
 # Agent does build work, then advances to review
 _advance "review" 2>/dev/null
 
-# Critic fires (SubagentStop)
-rm -f "$STATE_DIR/cohesion-reviewed"
+# Critic fires (SubagentStop) — combined mode writes cohesion-reviewed AND
+# diff-review-complete (Decision 0039), both required by the A5 commit gate.
+rm -f "$STATE_DIR/cohesion-reviewed" "$STATE_DIR/diff-review-complete"
 run_hook_rc "state-writer.sh" \
-  "$(fixture_subagentstop "critic" $'No issues found.\nGATE_RESULT: APPROVED')"
+  "$(fixture_subagentstop "critic" $'## Cohesion Brief\n\nNo issues found.\n\nGATE_RESULT: APPROVED\n\n## Diff-Review Brief\n\nNo bugs found.\n\nMODE: diff-review\nGATE_RESULT: APPROVED')"
 phase_after=$(get_phase)
 assert_eq "$phase_after" "verify" "lifecycle: critic APPROVED advances review→verify"
 
@@ -1058,6 +1192,18 @@ _reinit_close_sandbox() {
   reset_phase "standard"
 }
 
+# Force the current session into a closing phase so session-close-check runs the
+# FULL close sequence. The interactive pause-Stop guard (Decision 0023 Amdt 1)
+# otherwise treats an init-phase Stop as a pause and exits before the
+# zero-change / session-log output these tests assert on. (Direct phase-state
+# edit avoids walking the gated sequence just to reach a closing phase.)
+_mark_closing() {
+  local _cs
+  _cs="$(get_session_state_dir)/phase-state"
+  [ -f "$_cs" ] || return 0
+  sed 's/^current_phase: .*/current_phase: close/' "$_cs" > "$_cs.tmp" && mv "$_cs.tmp" "$_cs"
+}
+
 # Create per-session log directory (template mode uses .claude/local/sessions/).
 mkdir -p "$SB/.claude/local/sessions"
 
@@ -1066,6 +1212,7 @@ switch_sandbox_branch "feature/test"
 
 # --- Test 1: Zero-change session → allow ---
 _reinit_close_sandbox
+_mark_closing
 # Store current HEAD as baseline (no new commits = zero-change)
 git -C "$SB" rev-parse HEAD > "$SB/.claude/.session-baseline-sha"
 # Set hash to current value (not modified)
@@ -1076,6 +1223,7 @@ assert_contains "$(cat "$_L3_OUT")" "zero-change" "session-close-check emits zer
 
 # --- Test 2: Commits + session log modified → allow ---
 _reinit_close_sandbox
+_mark_closing
 # Set a stale hash so current content differs (= modified)
 _write_session_log  # creates per-session file with >100 bytes
 # Invalid baseline SHA → treated as non-zero session (baseline-missing)
@@ -1085,6 +1233,7 @@ assert_ok "$_LAST_RC" "session-close-check allows when session log modified and 
 
 # --- Test 3: Commits + session log NOT modified → block ---
 _reinit_close_sandbox
+_mark_closing
 # Hash matches current (not modified)
 # (no per-session log file written — simulates unmodified state)
 # Invalid baseline = non-zero session
@@ -1171,6 +1320,7 @@ briefs:
     next_brief: ""
 YAML
 rm -f "$SB/.claude/local/closed-branches"
+_mark_closing
 run_hook_rc "session-close-check.sh" "$(fixture_stop)"
 assert_ok "$_LAST_RC" "session-close-check allows taskgroup final brief"
 assert_file_contains "$SB/.claude/local/closed-branches" "feature/test" \
@@ -1185,30 +1335,50 @@ rm -f "$SB/.claude/local/closed-branches"
 # ============================================================
 tap_section "L3.10b: session-close-check.sh — early-exit branch seal"
 
+# The no-init fast-exit SEAL path is a headless/automation behavior. An
+# interactive no-init Stop (no REPO_OS_SESSION_ID) is correctly treated as a
+# pause (Decision 0023 Amdt 1) and exits before the seal ever runs, so these
+# two tests run headless: REPO_OS_SESSION_ID set to the on-disk .session-id
+# (env- and file-resolution then key the SAME per-session state dir) plus an
+# invalid baseline SHA (non-zero session) so the early zero-change fast-exit is
+# not taken and control reaches the no-init seal block.
+
 # --- Test 1: No-init fast exit seals non-taskgroup branch ---
 _reinit_close_sandbox
-rm -f "$SB/.claude/.state/phase-state"
+export REPO_OS_SESSION_ID="$(cat "$SB/.claude/.session-id")"
+rm -f "$(get_session_state_dir)/phase-state"
 rm -f "$SB/.claude/local/closed-branches"
+echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 run_hook_rc "session-close-check.sh" "$(fixture_stop)"
+unset REPO_OS_SESSION_ID
 assert_ok "$_LAST_RC" "no-init fast exit allows close"
 assert_file_contains "$SB/.claude/local/closed-branches" "feature/test" \
   "no-init fast exit seals branch"
 
 # --- Test 2: No-init fast exit detects agent merge signal ---
 _reinit_close_sandbox
-rm -f "$SB/.claude/.state/phase-state"
+export REPO_OS_SESSION_ID="$(cat "$SB/.claude/.session-id")"
+rm -f "$(get_session_state_dir)/phase-state"
 rm -f "$SB/.claude/local/closed-branches"
-mkdir -p "$SB/.claude/.state"
-echo "feature/merged-source" > "$SB/.claude/.state/merge-source-branch"
+echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
+mkdir -p "$(get_session_state_dir)"
+echo "feature/merged-source" > "$(get_session_state_dir)/merge-source-branch"
 run_hook_rc "session-close-check.sh" "$(fixture_stop)"
+unset REPO_OS_SESSION_ID
 assert_ok "$_LAST_RC" "no-init fast exit allows close with agent merge"
 assert_file_contains "$SB/.claude/local/closed-branches" "feature/merged-source" \
   "no-init fast exit records agent-merged branch"
 
 # --- Test 3: No-init fast exit skips seal for active taskgroup branch ---
+# Headless (like Tests 1+2) so the no-init seal block actually runs and the seal
+# is skipped by its own active-contract guard — not merely by the interactive
+# pause-Stop short-circuit (which would skip the seal regardless of contract,
+# testing nothing about the taskgroup guard).
 _reinit_close_sandbox
-rm -f "$SB/.claude/.state/phase-state"
+export REPO_OS_SESSION_ID="$(cat "$SB/.claude/.session-id")"
+rm -f "$(get_session_state_dir)/phase-state"
 rm -f "$SB/.claude/local/closed-branches"
+echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 mkdir -p "$SB/.claude/local/task-groups"
 cat > "$SB/.claude/local/task-groups/active-group.yaml" <<'YAML'
 identity:
@@ -1223,6 +1393,7 @@ briefs:
     next_brief: ""
 YAML
 run_hook_rc "session-close-check.sh" "$(fixture_stop)"
+unset REPO_OS_SESSION_ID
 assert_ok "$_LAST_RC" "no-init fast exit allows close for active taskgroup branch"
 if [ -f "$SB/.claude/local/closed-branches" ] && grep -qxF "feature/test" "$SB/.claude/local/closed-branches" 2>/dev/null; then
   _tap_fail "no-init fast exit skips seal for active taskgroup branch" "branch found in closed-branches"
@@ -1236,6 +1407,7 @@ _reinit_close_sandbox
 git -C "$SB" rev-parse HEAD > "$SB/.claude/.session-baseline-sha"
 # (no per-session log file written — simulates unmodified state)
 rm -f "$SB/.claude/local/closed-branches"
+_mark_closing
 run_hook_rc "session-close-check.sh" "$(fixture_stop)" > "$_L3_OUT"
 assert_ok "$_LAST_RC" "zero-change session allows close with seal"
 assert_file_contains "$SB/.claude/local/closed-branches" "feature/test" \
@@ -1247,7 +1419,8 @@ git -C "$SB" rev-parse HEAD > "$SB/.claude/.session-baseline-sha"
 # (no per-session log file written — simulates unmodified state)
 rm -f "$SB/.claude/local/closed-branches"
 mkdir -p "$SB/.claude/.state"
-echo "feature/zero-merged" > "$SB/.claude/.state/merge-source-branch"
+echo "feature/zero-merged" > "$(get_session_state_dir)/merge-source-branch"
+_mark_closing
 run_hook_rc "session-close-check.sh" "$(fixture_stop)" > "$_L3_OUT"
 assert_ok "$_LAST_RC" "zero-change session allows close with agent merge"
 assert_file_contains "$SB/.claude/local/closed-branches" "feature/zero-merged" \
@@ -1540,6 +1713,7 @@ if [ -f "$SESSIONS_DIR/${SID_L314}.yaml" ]; then
 else
   _tap_fail "session file exists before close" "not found: $SESSIONS_DIR/${SID_L314}.yaml"
 fi
+_mark_closing
 run_hook_rc "session-close-check.sh" "$(fixture_stop)" > /dev/null 2>&1
 assert_file_not_exists "$SESSIONS_DIR/${SID_L314}.yaml" "session-close-check unregisters session"
 
@@ -1648,6 +1822,56 @@ else
 fi
 
 # ============================================================
+# L3.10c2 — session-close-check.sh editor-live pause-Stop (Decision 0023 Amdt 1)
+# ============================================================
+tap_section "L3.10c2: session-close-check.sh — editor-live pause vs close Stop"
+
+# Editor-live Stops mid-loop are pauses, not closes. The guard must exit early
+# WITHOUT running cleanup/seal/merge, so .session-id (identity), the branch, and
+# phase-state all survive across pauses. This sandbox uses file-based identity
+# (.session-id, no REPO_OS_SESSION_ID) — the exact interactive scenario the bug
+# manifested in. Guards the fix for the "every Stop = close" identity-churn bug.
+switch_sandbox_branch "feature/test"
+
+# --- Pause Stop (current_phase=build, review NOT completed) → no close work ---
+_reinit_close_sandbox
+reset_phase "editor-live"
+_advance "build" 2>/dev/null
+_el_sd="$(get_session_state_dir)"
+rm -f "$SB/.claude/local/closed-branches" "$_el_sd/.stop-attempt-count"
+run_hook_rc "session-close-check.sh" "$(fixture_stop)" > /dev/null 2>&1
+assert_ok "$_LAST_RC" "editor-live pause Stop allows (no block)"
+assert_file_exists "$SB/.claude/.session-id" \
+  "editor-live pause Stop preserves .session-id (no identity churn)"
+assert_file_exists "$_el_sd/phase-state" \
+  "editor-live pause Stop preserves phase-state (cleanup not run)"
+assert_file_not_exists "$_el_sd/.stop-attempt-count" \
+  "editor-live pause Stop exits before the 3-attempt counter"
+if [ -f "$SB/.claude/local/closed-branches" ] && grep -qxF "feature/test" "$SB/.claude/local/closed-branches" 2>/dev/null; then
+  _tap_fail "editor-live pause Stop does not seal branch" "branch found in closed-branches"
+else
+  _tap_pass "editor-live pause Stop does not seal branch"
+fi
+
+# --- Close Stop (review in phases_completed) → falls through past the guard ---
+# Advancing build→commit→review marks the close sequence begun. The guard must
+# NOT short-circuit; the hook runs into the close path and increments the
+# 3-attempt counter (written immediately after the guard).
+_reinit_close_sandbox
+reset_phase "editor-live"
+_advance "build" 2>/dev/null
+_advance "commit" 2>/dev/null
+_advance "review" 2>/dev/null
+_el_sd="$(get_session_state_dir)"
+rm -f "$_el_sd/.stop-attempt-count"
+run_hook_rc "session-close-check.sh" "$(fixture_stop)" > /dev/null 2>&1
+assert_file_exists "$_el_sd/.stop-attempt-count" \
+  "editor-live close Stop falls through the pause guard into close logic"
+
+# Clean up any seal from the close-path test
+rm -f "$SB/.claude/local/closed-branches"
+
+# ============================================================
 # L3.10d — session-close-check.sh spec/prototype session log exemption
 # ============================================================
 tap_section "L3.10d: session-close-check.sh — spec/prototype session log exemption"
@@ -1695,6 +1919,7 @@ reset_phase "standard"
 _advance "plan" 2>/dev/null
 _advance "approval" 2>/dev/null
 _advance "build" 2>/dev/null
+_mark_closing
 run_hook_rc "session-close-check.sh" "$(fixture_stop)" > "$_L3_OUT"
 assert_ok "$_LAST_RC" "session-close-check blocks standard session (JSON exit 0)"
 assert_contains "$(cat "$_L3_OUT")" "block" "standard session emits block for missing session log"
@@ -1710,6 +1935,7 @@ _advance "write" 2>/dev/null
 # Create uncommitted changes (use repo root — src/ may not exist in sandbox)
 echo "uncommitted content" > "$SB/uncommitted-file.txt"
 (cd "$SB" && git add uncommitted-file.txt 2>/dev/null)
+_mark_closing
 run_hook_rc "session-close-check.sh" "$(fixture_stop)" > "$_L3_OUT"
 assert_ok "$_LAST_RC" "spec-fresh with uncommitted changes returns (JSON exit 0)"
 assert_contains "$(cat "$_L3_OUT")" "block" "spec-fresh blocks on uncommitted changes"
@@ -1776,6 +2002,7 @@ mkdir -p "$_TSD"
 echo "2026-01-01T00:00:00Z" > "$_TSD/tg-parallel-group-brief-1.complete"
 echo "2026-01-01T00:00:00Z" > "$_TSD/tg-parallel-group-brief-2.complete"
 rm -f "$SB/.claude/local/closed-branches"
+_mark_closing
 run_hook_rc "session-close-check.sh" "$(fixture_stop)"
 assert_ok "$_LAST_RC" "session-close-check allows merge brief with markers"
 assert_file_contains "$SB/.claude/local/closed-branches" "feature/test" \
@@ -1808,6 +2035,7 @@ _TSD="$(get_session_state_dir)"
 mkdir -p "$_TSD"
 echo "2026-01-01T00:00:00Z" > "$_TSD/tg-test-group-brief-1.complete"
 echo "2026-01-01T00:00:00Z" > "$_TSD/tg-test-group-brief-2.complete"
+_mark_closing
 run_hook_rc "session-close-check.sh" "$(fixture_stop)" > /dev/null 2>&1
 assert_ok "$_LAST_RC" "session-close-check completes for taskgroup-merge cleanup test"
 # Markers should be cleaned up (per-session dir may also be removed)

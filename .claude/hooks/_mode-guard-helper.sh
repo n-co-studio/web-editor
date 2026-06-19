@@ -81,6 +81,13 @@ is_carved_out() {
         .claude/local/known-issues.md) return 0 ;;
         .claude/local/task-groups/*) return 0 ;;
         .claude/local/task-contract.yaml) return 0 ;;
+        # Handoff bundle paths (Decision t-0043: per-brief; legacy deprecated fallback).
+        # Scoped to the dedicated handoff-bundles/ directory (the * matches the
+        # per-brief <brief_id>.yaml files, same directory-scoped pattern as the
+        # sessions/* and task-groups/* carve-outs above) plus the single legacy
+        # fixed path — not a broad .claude/local/* opening (Decision 0012 discipline).
+        .claude/local/handoff-bundles/*) return 0 ;;
+        .claude/local/handoff-bundle.yaml) return 0 ;;
         .gitignore) return 0 ;;
         docs/ai/prompts/*) return 0 ;;
         docs/ai/decisions/*) return 0 ;;

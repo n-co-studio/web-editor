@@ -29,6 +29,7 @@ dist-zip/
 # Session-scoped state files (stop hook baselines)
 .claude/.session-baseline-sha
 .claude/.session-id
+.claude/.session-id.*
 .claude/.session-type
 
 # Governance state files (session-scoped, written by SubagentStop hook)

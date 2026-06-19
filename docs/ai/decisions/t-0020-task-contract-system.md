@@ -34,13 +34,16 @@ Introduce persistent task contracts that capture task-level intent (verification
 
 8. **Automation layer**: Headless runners (Decision 0017) include the full brief text (which contains the `### Task Contract` section inline) in the assembled prompt. The agent extracts the contract YAML and writes it to `.claude/local/task-contract.yaml` during init. No separate parsing step is needed — the contract is part of the brief.
 
-9. **Handoff bundle path (Decision 0038, amendment)**: When a valid handoff bundle exists at `.claude/local/handoff-bundle.yaml` (singular) or `.claude/local/task-groups/{group}/briefs/{seq}.bundle.yaml` (task groups), Prompt B may seed `.claude/local/task-contract.yaml` directly from `bundle.contract` instead of re-parsing the brief markdown. The bundle is sealed at Prompt T approval; the embedded contract is the source of truth for the receiving session. The fallback chain (brief embed → sidecar → group `Contract:` field → no contract) is unchanged for sessions without a bundle.
+9. **Handoff bundle path (Decision 0038, amendment)**: When a valid handoff bundle exists at `.claude/local/handoff-bundles/<brief_id>.yaml` (singular, per-brief — Decision t-0043; legacy fixed `.claude/local/handoff-bundle.yaml` as deprecated fallback) or `.claude/local/task-groups/{group}/briefs/{seq}.bundle.yaml` (task groups), Prompt B may seed `.claude/local/task-contract.yaml` directly from `bundle.contract` instead of re-parsing the brief markdown. The bundle is sealed at Prompt T approval; the embedded contract is the source of truth for the receiving session. The fallback chain (brief embed → sidecar → group `Contract:` field → no contract) is unchanged for sessions without a bundle.
+
+10. **Optional `brief_id` field (Decision t-0043, amendment)**: The Task Contract may carry an optional `brief_id: "<YYYYMMDD-HHMMSS>-<slug>"`. It is the resolution key for the per-brief singular handoff-bundle path: `drift_check` reads `brief_id` from `.claude/local/task-contract.yaml` to locate `.claude/local/handoff-bundles/<brief_id>.yaml`. For standard sessions (no `contract-init` phase), Prompt B writes the contract — including `brief_id` — before invoking `drift_check`. Legacy/pre-t-0043 contracts omit `brief_id` and fall back to the deprecated fixed bundle path.
 
 ## Contract Schema
 
 ```yaml
 # Task Contract — written to .claude/local/task-contract.yaml (singular)
 # or embedded as intent: block in task group contract (groups)
+brief_id: ""                # optional — "<YYYYMMDD-HHMMSS>-<slug>"; keys the per-brief handoff bundle path (Decision t-0043). Absent for legacy/pre-t-0043 briefs.
 goal: ""                    # what this task accomplishes (1-2 sentences)
 scope_files:                # files likely affected
   - ""
