@@ -18,15 +18,7 @@ function HeroPlaceholder() {
       aria-label="Placeholder: visual editing illustration"
       style={{ display: 'block', color: 'var(--color-secondary)' }}
     >
-      {/* faint dot grid */}
-      <defs>
-        <pattern id="hero-grid" width="24" height="24" patternUnits="userSpaceOnUse">
-          <circle cx="1.5" cy="1.5" r="1.5" fill="currentColor" opacity="0.18" />
-        </pattern>
-      </defs>
-      <rect width="480" height="600" fill="url(#hero-grid)" />
-
-      {/* stacked "cards" being edited */}
+      {/* stacked "cards" being edited (the page itself now carries the dot grid) */}
       <rect x="70" y="96" width="340" height="120" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.5" />
       <rect x="70" y="240" width="160" height="220" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.5" />
 
@@ -124,7 +116,7 @@ export default function Hero() {
         {/* Parallax image panel */}
         <div
           className="nco-parallax"
-          style={{ border: '1px solid var(--color-divider)', height: 420, background: 'var(--color-surface)' }}
+          style={{ border: '1px solid var(--color-divider)', height: 420, background: 'var(--color-bg)' }}
         >
           <div className="nco-parallax-layer">
             <HeroPlaceholder />

@@ -12,7 +12,7 @@ const NAV: ReadonlyArray<[string, string]> = [
 
 export default function App() {
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--color-bg)', display: 'flex', flexDirection: 'column' }}>
+    <div className="nco-paper" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <header
         style={{
           position: 'sticky',
