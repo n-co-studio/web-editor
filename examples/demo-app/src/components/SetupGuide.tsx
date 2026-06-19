@@ -92,6 +92,22 @@ const STEPS: Step[] = [
       </p>
     ),
   },
+  {
+    title: 'Run the loop',
+    body: (
+      <>
+        <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
+          Edit visually, <strong>Add to Queue</strong>, review, and hit <strong>Send</strong>. A connected agent
+          applies the diff from there; if it doesn’t act on its own, tell it:
+        </p>
+        <Code>{`Apply my pending NCO Studio edits.`}</Code>
+        <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
+          It calls <code style={{ fontFamily: 'var(--font-mono)' }}>get_pending_visual_changes</code>, applies
+          each change to your source, and acknowledges it. Everything stays local.
+        </p>
+      </>
+    ),
+  },
 ];
 
 export default function SetupGuide() {
