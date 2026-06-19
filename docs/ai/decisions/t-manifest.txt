@@ -52,3 +52,4 @@ t-0041-governance-evidence-versioning.md
 t-0042-hook-check-hoisting.md
 t-0043-handoff-bundle-per-brief-paths.md
 t-0044-functional-verification-gate.md
+t-0045-merged-branch-cleanup.md

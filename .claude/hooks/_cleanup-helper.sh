@@ -206,32 +206,39 @@ record_closed_branch() {
   fi
 }
 
-# --- Delete a merged editor-live branch (Decision 0023 Amendment 2) ---
-# Editor-live-scoped close cleanup: once a live-editor-N branch has been merged
-# to main AND recorded in the closed-branches ledger, delete the now-redundant
-# local branch ref so live-editor branches do not accumulate. Uses
-# `git branch -d` (merged-only — never force) so an unmerged branch is never
-# deleted; a no-op if the branch is the current HEAD or not fully merged.
-# Strictly scoped to live-editor-N names: feature/fix/hotfix/taskgroup branches
-# are never touched, so their close/seal behavior is unchanged. This does NOT
-# alter record_closed_branch (shared contract, 13 call sites).
+# --- Delete a merged session branch (Decision 0045) ---
+# Close cleanup: once a session branch has been merged to main AND recorded in
+# the closed-branches ledger, delete the now-redundant local branch ref so
+# branches do not accumulate. Uses `git branch -d` (merged-only — never force)
+# so an unmerged branch is never deleted; a no-op if the branch is the current
+# HEAD or not fully merged. An `git merge-base --is-ancestor` precheck provides
+# an explicit merged-status log signal before attempting the delete.
+# Scoped to session branch prefixes only: other refs (taskgroup merge branches,
+# maintenance branches, etc.) are never touched, so their close/seal behavior
+# is unchanged. This does NOT alter record_closed_branch (shared contract).
 # Arguments:
 #   $1 — branch name (required)
 #   $2 — optional repo dir (worktree close paths; defaults to current repo)
-delete_merged_editor_live_branch() {
+delete_merged_session_branch() {
   local branch="${1:-}"
   local repo_dir="${2:-}"
   [ -z "$branch" ] && return 0
   case "$branch" in
-    live-editor-[0-9]*) ;;
+    feature/*|fix/*|hotfix/*|experiment/*|live-editor-[0-9]*) ;;
     *) return 0 ;;
   esac
+  # Ancestor precheck — explicit merged-status verification before delete
   if [ -n "$repo_dir" ]; then
+    git -C "$repo_dir" merge-base --is-ancestor "$branch" main > /dev/null 2>&1 || return 0
     git -C "$repo_dir" branch -d "$branch" > /dev/null 2>&1 || true
   else
+    git merge-base --is-ancestor "$branch" main > /dev/null 2>&1 || return 0
     git branch -d "$branch" > /dev/null 2>&1 || true
   fi
+  return 0
 }
+# Backward-compat alias (Decision 0023 Amendment 2 callers)
+delete_merged_editor_live_branch() { delete_merged_session_branch "$@"; }
 
 # --- Seal orphaned merged editor-live branches (Decision 0023 Amendment 2 — fallback) ---
 # Fallback for the editor-live close path. The normal close has the agent merge

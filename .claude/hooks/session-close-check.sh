@@ -724,6 +724,7 @@ if [ ! -f "$_SESSION_STATE_DIR/phase-state" ]; then
     if [ -n "$_noinit_merged" ]; then
       record_closed_branch "$_noinit_merged"
       advisory_push_to_remote
+      delete_merged_session_branch "$_noinit_merged"
       log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "agent_merged" "" "$_noinit_merged" || true
     fi
   fi
@@ -858,6 +859,7 @@ if [ -z "$UNCOMMITTED" ] && [ -z "$STAGED" ] && [ -z "$RECENT_COMMITS" ]; then
     if [ -n "$_zc_merged" ]; then
       record_closed_branch "$_zc_merged"
       advisory_push_to_remote
+      delete_merged_session_branch "$_zc_merged"
       log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "agent_merged" "" "$_zc_merged" || true
     fi
   fi
@@ -1161,9 +1163,8 @@ if [ -f "$MERGE_STATE_FILE" ]; then
     record_closed_branch "$AGENT_MERGED_BRANCH"
     BRANCH_SEALED=true
     advisory_push_to_remote
-    # Editor-live close (Decision 0023 Amendment 2): the live-editor-N branch is
-    # now merged + sealed — delete the redundant ref. No-op for other branch types.
-    delete_merged_editor_live_branch "$AGENT_MERGED_BRANCH"
+    # Merged branch cleanup (Decision 0045): delete the now-redundant local ref.
+    delete_merged_session_branch "$AGENT_MERGED_BRANCH"
     log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "agent_merged" "" "$AGENT_MERGED_BRANCH" || true
   fi
 fi
@@ -1307,12 +1308,11 @@ if [ "$SOLO" = "true" ] && [ "$BRANCH_SEALED" = false ]; then
       record_closed_branch "$MERGE_BRANCH"
       BRANCH_SEALED=true
       advisory_push_to_remote
-      # Editor-live close (Decision 0023 Amendment 2): delete the merged
-      # live-editor-N ref after seal. No-op for other branch types.
+      # Merged branch cleanup (Decision 0045): delete the now-redundant local ref.
       if is_full_worktree_session; then
-        delete_merged_editor_live_branch "$MERGE_BRANCH" "$_REPO_OS_ROOT"
+        delete_merged_session_branch "$MERGE_BRANCH" "$_REPO_OS_ROOT"
       else
-        delete_merged_editor_live_branch "$MERGE_BRANCH"
+        delete_merged_session_branch "$MERGE_BRANCH"
       fi
       log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "solo_merge_success" "" "$MERGE_BRANCH" || true
     elif is_full_worktree_session; then

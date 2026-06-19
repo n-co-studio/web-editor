@@ -97,12 +97,14 @@ These apply identically in both modes (same hooks fire during `claude -p`):
 | 54 | Crash stale-branch escalation | N/A | `runner_external_cleanup()` writes `stale-branch` escalation with branch name, session ID, and last commit SHA when crash cleanup runs on a non-main branch | Branch left unsealed for investigation; operator reviews via escalation |
 | 55 | Worktree isolation (Decision 0033) | Interactive: operator launches `claude --worktree` | Runner passes `--worktree` to all `claude -p` invocations (opt-out: `REPO_OS_WORKTREE_ISOLATE=0`) | Both modes use Claude Code's native worktree lifecycle management |
 | 56 | Completion report output path | N/A — agents write reports during session | `write_blocker_report()` in `blocker-reporter.sh` writes to `.claude/.automation/reports/`. Agents must also use this path for any runtime report artifacts (completion, health, escalation) | Canonical path: `.claude/.automation/reports/`. Governed by `_agent-glossary.md` § Reserved Directories. `.gitignore` covers both `reports/` and `review-items/` (defense-in-depth) |
+| 57 | Merged branch deletion | `delete_merged_session_branch()` at 4 confirmed-merge-success sites in `session-close-check.sh` (no-init agent-merge, zero-change agent-merge, main agent-merge detection, solo-merge success block) | `delete_merged_session_branch()` called after `record_closed_branch()` in `_solo_merge_if_needed()` `_merge_ok=true` block, gated by `_is_final_taskgroup_entry` | Decision 0045: `git branch -d` (merged-only, never force) with `merge-base --is-ancestor` precheck; covers `feature/*`, `fix/*`, `hotfix/*`, `experiment/*`, `live-editor-[0-9]*` |
 
 ## Shared Code
 
 Both paths source `_cleanup-helper.sh` for:
 - `cleanup_session_files()` — state file removal (includes `pragmatist-signed`, `scope-risk-gain`)
 - `record_closed_branch()` — branch seal ledger
+- `delete_merged_session_branch()` — merged branch ref deletion (Decision 0045)
 
 Additional shared infrastructure:
 - `_solo_merge_if_needed()` — extracted from `_run_single_entry()` into standalone function (runner.sh)
