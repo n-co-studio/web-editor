@@ -40,10 +40,10 @@ function HeroPlaceholder() {
 export default function Hero() {
   return (
     <section
+      className="nco-section"
       style={{
         paddingTop: 'var(--space-8)',
         paddingBottom: 'var(--space-16)',
-        borderBottom: '1px solid var(--color-divider)',
         marginBottom: 'var(--space-16)',
       }}
     >

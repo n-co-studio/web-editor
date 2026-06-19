@@ -58,7 +58,7 @@ const BENEFITS: Benefit[] = [
 
 export default function Benefits() {
   return (
-    <section style={{ marginBottom: 'var(--space-20)' }}>
+    <section className="nco-section" style={{ marginBottom: 'var(--space-20)' }}>
       <div
         style={{
           display: 'grid',

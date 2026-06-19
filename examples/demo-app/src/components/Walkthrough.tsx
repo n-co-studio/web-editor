@@ -147,7 +147,7 @@ const STEPS: Step[] = [
 
 export default function Walkthrough() {
   return (
-    <section id="walkthrough" style={{ marginBottom: 'var(--space-20)', scrollMarginTop: 'var(--space-12)' }}>
+    <section id="walkthrough" className="nco-section" style={{ marginBottom: 'var(--space-20)', scrollMarginTop: 'var(--space-12)' }}>
       <h2 style={{ fontFamily: 'var(--font-serif)', fontWeight: 'var(--fw-light)', fontSize: 'var(--text-h2)', letterSpacing: 'var(--tracking-tight)' }}>
         Using the editor
       </h2>

@@ -104,6 +104,24 @@ body {
   background-color: var(--color-bg);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Ccircle cx='1.5' cy='1.5' r='1.5' fill='%230f0f0f' fill-opacity='0.06'/%3E%3C/svg%3E");
   background-position: -1px -1px;
+  /* `clip` (not `hidden`) so the full-bleed section rules below don't add a
+     horizontal scrollbar, without creating a scroll container (sticky header safe). */
+  overflow-x: clip;
+}
+
+/* Full-viewport-width dividing rule at a section's bottom edge. The section sits
+   in a centered max-width column; the ::after breaks out to 100vw so the line
+   spans the whole viewport. */
+.nco-section { position: relative; }
+.nco-section::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100vw;
+  height: 1px;
+  background: var(--color-divider);
 }
 
 /* Animated underline links (monochrome accent treatment) */
