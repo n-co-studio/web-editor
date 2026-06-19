@@ -12,7 +12,10 @@
 # Node.js / TypeScript build artifacts
 node_modules/
 dist/
+dist-zip/
 *.tsbuildinfo
+*.tgz
+
 
 # Claude Code personal settings
 .claude/settings.local.json

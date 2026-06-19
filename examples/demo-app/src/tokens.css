@@ -1,20 +1,56 @@
-/* Design tokens — match docs/spec/compiled/v1/design-system.md */
-/* These are the obvious edit targets for the NCO Studio demo. */
+/* ---------------------------------------------------------------------------
+ * Demo-app design tokens — aligned to the Mark Preston brand system.
+ *
+ * This file IS the token set the NCO Studio Web Editor discovers for this
+ * project: the MCP server scans src/ CSS custom properties (see
+ * packages/mcp-server/src/tokens.ts). Edit any value here with the extension —
+ * there is no competing default set; these page tokens are authoritative.
+ *
+ * Aesthetic (per markpreston.co): ink-on-paper, two Adobe Typekit faces
+ * (minion-3-display serif + hero-new sans), thin/light weights, SHARP corners
+ * (no border-radius), NO shadows, generous whitespace, hairline dividers.
+ * ------------------------------------------------------------------------- */
 
 :root {
-  /* ── Colors ─────────────────────────────────────────────── */
-  --color-bg:          #ffffff;
-  --color-surface:     #f4f4f5;       /* gray-100 */
-  --color-border:      #e4e4e7;       /* gray-200 */
-  --color-text:        #18181b;       /* gray-900 */
-  --color-text-muted:  #71717a;       /* gray-500 */
-  --color-primary:     #06b6d4;       /* cyan-500 — brand */
-  --color-primary-hover: #0891b2;     /* cyan-600 */
-  --color-accent:      #fb7185;       /* rose-400 */
-  --color-success:     #22c55e;
-  --color-warning:     #f59e0b;
+  /* ── Colors — monochrome ──────────────────────────────────── */
+  --color-ink:           #0f0f0f;   /* primary text, headings, links, dark surfaces */
+  --color-primary:       #0f0f0f;   /* alias */
+  --color-secondary:     #767676;   /* secondary text (AA 4.5:1 on white) */
+  --color-bg:            #ffffff;   /* page background */
+  --color-surface:       #ffffff;   /* surfaces are flat white; structure via borders */
+  --color-divider:       #cacaca;   /* section dividers */
+  --color-border:        #e2e2e2;   /* hairline card borders (lighter than divider) */
 
-  /* ── Spacing (4px base) ──────────────────────────────────── */
+  --color-on-ink:        #ffffff;
+  --color-on-ink-muted:  rgba(255,255,255,0.6);
+  --color-hover-dark:    #333333;
+
+  /* ── Typography — Adobe Typekit (kit ivy7roo) ────────────── */
+  --font-sans:  'hero-new', 'Roboto', system-ui, -apple-system, sans-serif;
+  --font-serif: 'minion-3-display', 'Playfair Display', Georgia, serif;
+  --font-mono:  'JetBrains Mono', ui-monospace, Consolas, monospace;
+
+  --fw-thin: 100;     /* hero / h1 */
+  --fw-light: 200;    /* h2 / h3 */
+  --fw-book: 300;     /* body, UI, nav */
+  --fw-regular: 400;  /* labels, emphasis */
+
+  --text-display: 4rem;     /* 64px — hero (serif) */
+  --text-h1:      2.75rem;  /* 44px */
+  --text-h2:      2rem;     /* 32px */
+  --text-h3:      1.375rem; /* 22px */
+  --text-body:    1.0625rem;/* 17px */
+  --text-body-sm: 0.9375rem;/* 15px */
+  --text-label:   0.875rem; /* 14px */
+  --text-caption: 0.8125rem;/* 13px */
+
+  --leading-tight: 1.1;
+  --leading-snug:  1.2;
+  --leading-body:  1.6;
+  --tracking-tight: -0.01em;
+  --tracking-wide:  0.04em;
+
+  /* ── Spacing (4px base) — generous editorial rhythm ──────── */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -24,40 +60,143 @@
   --space-8: 32px;
   --space-10: 40px;
   --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+  --space-24: 96px;
 
-  /* ── Typography ──────────────────────────────────────────── */
-  --font-sans: system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  /* ── Border radius — sharp throughout (MP) ───────────────── */
+  --radius-none: 0;
+  --radius-full: 9999px;   /* dots / circular marks only */
 
-  --text-display:  2.25rem;  /* 36px */
-  --text-h1:       1.875rem; /* 30px */
-  --text-h2:       1.5rem;   /* 24px */
-  --text-h3:       1.25rem;  /* 20px */
-  --text-body:     1rem;     /* 16px */
-  --text-body-sm:  0.875rem; /* 14px */
-  --text-caption:  0.75rem;  /* 12px */
+  /* ── Layering (z-index) ──────────────────────────────────── */
+  --z-base: 1;
+  --z-raised: 10;
+  --z-float: 20;
+  --z-overlay: 30;
 
-  /* ── Border radius ───────────────────────────────────────── */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
-  --radius-full: 9999px;
+  /* ── Layout ──────────────────────────────────────────────── */
+  --container-max: 1052px;  /* MP .cc container */
+  --measure: 600px;         /* prose measure */
 
-  /* ── Shadows ─────────────────────────────────────────────── */
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
-  --shadow-md: 0 4px 6px rgba(0,0,0,0.07);
-  --shadow-lg: 0 10px 15px rgba(0,0,0,0.10);
+  /* ── Easing ──────────────────────────────────────────────── */
+  --ease-link: cubic-bezier(0, 0.56, 0.26, 0.88);
 }
 
 /* Base reset */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+html { scroll-behavior: smooth; background: var(--color-bg); }
+
 body {
   font-family: var(--font-sans);
   font-size: var(--text-body);
-  color: var(--color-text);
+  font-weight: var(--fw-book);
+  color: var(--color-ink);
   background: var(--color-bg);
-  line-height: 1.6;
+  line-height: var(--leading-body);
   -webkit-font-smoothing: antialiased;
+}
+
+/* Subtle dot-grid "paper" texture for the page background — a quiet nod to
+   drafting/graph paper. SVG pattern (not a color gradient) so it stays crisp at
+   any zoom and matches the line-art elsewhere. 24px grid, ~6% ink. */
+.nco-paper {
+  background-color: var(--color-bg);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Ccircle cx='1.5' cy='1.5' r='1.5' fill='%230f0f0f' fill-opacity='0.06'/%3E%3C/svg%3E");
+  background-position: -1px -1px;
+  /* `clip` (not `hidden`) so the full-bleed section rules below don't add a
+     horizontal scrollbar, without creating a scroll container (sticky header safe). */
+  overflow-x: clip;
+}
+
+/* Full-viewport-width dividing rule at a section's bottom edge. The section sits
+   in a centered max-width column; the ::after breaks out to 100vw so the line
+   spans the whole viewport. */
+.nco-section { position: relative; padding-bottom: var(--space-16); }
+.nco-section::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100vw;
+  height: 1px;
+  background: var(--color-divider);
+}
+
+/* Animated underline links (monochrome accent treatment) */
+.nco-link {
+  color: var(--color-ink);
+  text-decoration: none;
+  background-image: linear-gradient(currentColor, currentColor);
+  background-position: 0 100%;
+  background-repeat: no-repeat;
+  background-size: 100% 1px;
+  padding-bottom: 1px;
+  transition: background-size 0.3s var(--ease-link);
+}
+.nco-link:hover { background-size: 0 1px; background-position: 100% 100%; }
+
+/* Hairline card — no shadows, border emphasis on hover (MP is flat). Owns its
+   border so the :hover color isn't overridden by an inline border shorthand. */
+.nco-card {
+  border: 1px solid var(--color-border);
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+.nco-card:hover { border-color: var(--color-ink); }
+
+@media (prefers-reduced-motion: reduce) {
+  .nco-link, .nco-card { transition: none; }
+}
+
+/* Walkthrough rows — alternating image / text, collapsing to a single column.
+   Figure comes first in the DOM (so it stacks on top on mobile); on wide
+   viewports, --reverse rows flip the figure to the right. */
+.nco-step-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-12);
+  align-items: center;
+}
+.nco-step-row > .nco-step-figure { grid-column: 1; grid-row: 1; }
+.nco-step-row > .nco-step-text   { grid-column: 2; grid-row: 1; }
+.nco-step-row--reverse > .nco-step-figure { grid-column: 2; grid-row: 1; }
+.nco-step-row--reverse > .nco-step-text   { grid-column: 1; grid-row: 1; }
+
+@media (max-width: 720px) {
+  .nco-step-row { grid-template-columns: 1fr; gap: var(--space-6); }
+  .nco-step-row > .nco-step-figure,
+  .nco-step-row > .nco-step-text { grid-column: 1; grid-row: auto; }
+}
+
+/* Hero — text + image panel; stacks on mobile (text first) */
+.nco-hero {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: var(--space-12);
+  align-items: center;
+}
+@media (max-width: 720px) {
+  .nco-hero { grid-template-columns: 1fr; gap: var(--space-10); }
+}
+
+/* Pure-CSS scroll-driven parallax (no JS). The clip box hides the overflow; the
+   inner layer is taller than the box and drifts on scroll. Degrades to static
+   where scroll-driven animations aren't supported, and honors reduced-motion. */
+.nco-parallax { overflow: hidden; }
+.nco-parallax-layer { height: 100%; }
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .nco-parallax-layer {
+      height: 128%;
+      animation: nco-drift linear both;
+      animation-timeline: view();
+      animation-range: cover;
+      will-change: transform;
+    }
+  }
+}
+@keyframes nco-drift {
+  from { transform: translateY(-14%); }
+  to   { transform: translateY(8%); }
 }

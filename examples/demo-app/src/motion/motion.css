@@ -1,0 +1,108 @@
+/* ---------------------------------------------------------------------------
+ * "/motion" page theme — a dark kinetic-blueprint variant of the guide.
+ * Scoped under .nco-motion so it never touches the default (light) page tokens.
+ * No purple, no color gradients — flat fills + strokes + hairline grids only.
+ * Animation is CSS-only (scroll-driven + keyframes), all reduced-motion guarded.
+ * Fonts reuse the Typekit kit already loaded in index.html.
+ * ------------------------------------------------------------------------- */
+
+.nco-motion {
+  /* surfaces */
+  --m-bg:        #0c0e0f;   /* near-black canvas */
+  --m-bg-2:      #14181a;   /* raised panel */
+  --m-line:      rgba(244, 242, 236, 0.12);  /* hairline */
+  --m-line-2:    rgba(244, 242, 236, 0.26);  /* emphasized hairline */
+
+  /* ink */
+  --m-fg:        #f4f2ec;   /* off-white */
+  --m-fg-dim:    #8c938f;   /* muted */
+
+  /* single flat signal accent (+ a sparse warm second) — NO gradients */
+  --m-accent:    #ff5a36;   /* coral */
+  --m-accent-2:  #f5a623;   /* amber, used sparingly */
+
+  /* type (Typekit faces from index.html) */
+  --m-serif: var(--font-serif);   /* minion-3-display */
+  --m-sans:  var(--font-sans);    /* hero-new */
+  --m-mono:  var(--font-mono);
+
+  background: var(--m-bg);
+  color: var(--m-fg);
+  font-family: var(--m-sans);
+  font-weight: 300;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+.nco-motion ::selection { background: var(--m-accent); color: var(--m-bg); }
+
+/* Hairline blueprint grid as a tiling SVG (no CSS color-gradient). */
+.nco-motion-grid {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Cpath d='M48 0H0V48' fill='none' stroke='%23f4f2ec' stroke-opacity='0.06' stroke-width='1'/%3E%3C/svg%3E");
+  background-position: center top;
+}
+
+/* --- Scroll-triggered reveal (content stays visible if unsupported) --- */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .m-reveal {
+      animation: m-reveal-kf linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 55%;
+    }
+  }
+}
+@keyframes m-reveal-kf {
+  from { opacity: 0; transform: translateY(26px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* --- SVG self-drawing strokes (stroked paths set pathLength="1"); the opacity
+   fade also gives a clean reveal to fill-only shapes that carry .m-draw. --- */
+.m-draw {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  opacity: 0;
+  animation: m-draw-kf 1.4s cubic-bezier(0.6, 0, 0.2, 1) forwards;
+}
+@keyframes m-draw-kf { to { stroke-dashoffset: 0; opacity: 1; } }
+
+/* --- Pulsing selection ring --- */
+.m-pulse { transform-box: fill-box; transform-origin: center; animation: m-pulse-kf 2.4s ease-in-out infinite; }
+@keyframes m-pulse-kf {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.55; transform: scale(1.04); }
+}
+
+/* --- A dash/packet travelling a path (path sets pathLength="1") --- */
+.m-travel {
+  stroke-dasharray: 0.12 0.88;
+  animation: m-travel-kf 2.6s linear infinite;
+}
+@keyframes m-travel-kf { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+
+/* --- Soft idle float --- */
+.m-float { animation: m-float-kf 6s ease-in-out infinite; }
+@keyframes m-float-kf { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .m-draw   { stroke-dashoffset: 0; opacity: 1; animation: none; }
+  .m-pulse, .m-travel, .m-float { animation: none; }
+  .m-reveal { opacity: 1; transform: none; }
+}
+
+/* Two-column rows collapse on narrow viewports */
+@media (max-width: 760px) {
+  .nco-motion-hero,
+  .nco-motion-row { grid-template-columns: 1fr !important; gap: var(--space-8) !important; }
+}
+
+/* Animated link underline */
+.m-link {
+  color: var(--m-fg);
+  text-decoration: none;
+  border-bottom: 1px solid var(--m-accent);
+  padding-bottom: 1px;
+  transition: color 0.2s ease;
+}
+.m-link:hover { color: var(--m-accent); }
