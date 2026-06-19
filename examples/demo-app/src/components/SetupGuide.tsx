@@ -40,13 +40,34 @@ const STEPS: Step[] = [
     ),
   },
   {
-    title: 'Run the MCP server',
+    title: 'Connect your agent',
     body: (
       <>
         <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
-          It scans your project for design tokens and bridges the editor to your AI coding agent (any MCP client, e.g. Claude Code):
+          It’s a standard MCP server — the same config works with any MCP-compatible agent. Add it wherever your
+          agent reads MCP servers (your agent launches it, and it also serves the extension over WebSocket):
         </p>
-        <Code>{`npx @nco-studio/web-editor-mcp@latest`}</Code>
+        <Code>{`{
+  "mcpServers": {
+    "nco-web-editor": {
+      "command": "npx",
+      "args": ["--yes", "@nco-studio/web-editor-mcp@^1"]
+    }
+  }
+}`}</Code>
+        <ul style={{ listStyle: 'none', margin: 'var(--space-4) 0 0', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+          {([
+            ['Claude Code', '.claude/settings.json'],
+            ['Cursor', '.cursor/mcp.json'],
+            ['Windsurf', '~/.codeium/windsurf/mcp_config.json'],
+            ['Any MCP client', 'its own mcpServers config'],
+          ] as ReadonlyArray<readonly [string, string]>).map(([name, path]) => (
+            <li key={name} style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-3)', fontSize: 'var(--text-body-sm)' }}>
+              <span style={{ minWidth: 116, color: 'var(--color-ink)', fontWeight: 'var(--fw-regular)' }}>{name}</span>
+              <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-secondary)' }}>{path}</code>
+            </li>
+          ))}
+        </ul>
       </>
     ),
   },
@@ -75,12 +96,12 @@ const STEPS: Step[] = [
 
 export default function SetupGuide() {
   return (
-    <section id="setup" style={{ marginBottom: 'var(--space-20)', scrollMarginTop: 'var(--space-12)' }}>
+    <section id="setup" style={{ paddingBottom: 'var(--space-16)', marginBottom: 'var(--space-20)', scrollMarginTop: 'var(--space-12)' }}>
       <h2 style={{ fontFamily: 'var(--font-serif)', fontWeight: 'var(--fw-light)', fontSize: 'var(--text-h2)', letterSpacing: 'var(--tracking-tight)' }}>
         Set it up
       </h2>
       <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)', maxWidth: 'var(--measure)', marginTop: 'var(--space-3)', marginBottom: 'var(--space-10)' }}>
-        Three commands and a click. Everything runs locally — no data leaves your machine.
+        Install it, point your agent at it, and activate. Everything runs locally — no data leaves your machine.
       </p>
 
       <div style={{ position: 'relative' }}>

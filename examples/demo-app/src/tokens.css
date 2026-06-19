@@ -112,7 +112,7 @@ body {
 /* Full-viewport-width dividing rule at a section's bottom edge. The section sits
    in a centered max-width column; the ::after breaks out to 100vw so the line
    spans the whole viewport. */
-.nco-section { position: relative; }
+.nco-section { position: relative; padding-bottom: var(--space-16); }
 .nco-section::after {
   content: "";
   position: absolute;
