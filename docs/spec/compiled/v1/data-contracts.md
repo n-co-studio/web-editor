@@ -15,7 +15,7 @@
 | sourceVerified | boolean | yes | True when data-source-* attributes are present on the element, false when missing |
 | relatedChanges | RelatedChange[] | no | Property changes on other elements required by this edit (e.g., parent `isolation: isolate` for blend mode). Each entry identifies the affected element and the changes to apply. |
 | reparentChanges | ReparentChange[] | no | Cross-container move operation applied as part of this edit. Populated only for reparent mode edits; empty for property-change-only diffs. |
-| stylesheetChanges | StylesheetChange[] | no | Document-level CSS rules (`@keyframes`, `@supports`, `@media`) that cannot be expressed as element-inline declarations. Populated for scroll-driven parallax (feature-009) and for the mandatory `prefers-reduced-motion` zeroing rule that every parallax mechanism emits. Empty for edits that need no stylesheet-level rules. |
+| stylesheetChanges | StylesheetChange[] | no | Document-level CSS rules (`@keyframes`, `@supports`, `@media`) that cannot be expressed as element-inline declarations. Populated for scroll-driven parallax (feature-009) and for the mandatory `prefers-reduced-motion` zeroing rule that every **CSS** parallax mechanism (`fixed`, `transform-3d`, `scroll-driven`) emits. The `js-scroll` mechanism emits **no** reduced-motion `StylesheetChange` — its generated handler short-circuits on `matchMedia('(prefers-reduced-motion: reduce)')` instead (`ScriptBehaviorChange.respectsReducedMotion: true`). Empty for edits that need no stylesheet-level rules. |
 | scriptChanges | ScriptBehaviorChange[] | no | Declarative descriptors for a bounded, reproducible-to-source JavaScript behavior. **v1 admits exactly one behavior — `parallax-scroll` (feature-009)** — under the constrained boundary allowance in `boundaries.md`. Empty for all CSS-only edits. |
 
 **Relationships:** Contains ElementInfo, PropertyChange[], PageContext, RelatedChange[], StylesheetChange[], ScriptBehaviorChange[]
@@ -85,7 +85,7 @@
 
 ### StylesheetChange
 
-A change that adds one or more **document-level CSS rules** that cannot be expressed as element-inline declarations — `@keyframes`, `@supports`, and `@media` blocks. Introduced by feature-009 (parallax editor) to carry pure-CSS scroll-driven animations (`@keyframes` + `animation-timeline: scroll()`) and the mandatory `prefers-reduced-motion` zeroing rule that every parallax mechanism emits. Stored as a parallel array on `VisualDiff` (separate from `PropertyChange[]`), mirroring `relatedChanges` / `reparentChanges`.
+A change that adds one or more **document-level CSS rules** that cannot be expressed as element-inline declarations — `@keyframes`, `@supports`, and `@media` blocks. Introduced by feature-009 (parallax editor) to carry pure-CSS scroll-driven animations (`@keyframes` + `animation-timeline`) and the mandatory `prefers-reduced-motion` zeroing rule that every **CSS** parallax mechanism (`fixed`, `transform-3d`, `scroll-driven`) emits. `js-scroll` carries no reduced-motion `StylesheetChange` — its handler short-circuits on `matchMedia` (`ScriptBehaviorChange.respectsReducedMotion`). Stored as a parallel array on `VisualDiff` (separate from `PropertyChange[]`), mirroring `relatedChanges` / `reparentChanges`.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|

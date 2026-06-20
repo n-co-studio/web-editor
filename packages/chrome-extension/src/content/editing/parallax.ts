@@ -482,6 +482,12 @@ function reducedMotionRule(mechanism: ParallaxMechanism, selector: string): Styl
     case 'transform-3d':
       body = `  ${selector} > * { transform: none; }`;
       break;
+    case 'js-scroll':
+      // Defensive: js-scroll never reaches here (buildStylesheetChanges returns
+      // early — it handles reduced-motion via the runtime matchMedia short-
+      // circuit, not a StylesheetChange). Zero the inner transform if it ever does.
+      body = `  ${selector} > * { transform: none; }`;
+      break;
     case 'scroll-driven':
     default:
       body = `  ${selector} { animation: none; }`;
