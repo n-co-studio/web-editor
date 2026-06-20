@@ -54,12 +54,15 @@ import {
   buildScriptChange,
   fixedPropertyChanges,
   getParallaxId,
+  readScrollSource,
+  effectiveScroller,
   clampStrength,
   DEFAULT_MECHANISM,
   DEFAULT_STRENGTH,
+  DEFAULT_SCROLL_SOURCE,
   ParallaxRuntime,
 } from './editing/parallax';
-import type { ParallaxMechanism } from './editing/parallax';
+import type { ParallaxMechanism, ParallaxScrollSource } from './editing/parallax';
 import { LayoutEditor } from './editing/layout-editor';
 import { detectContainerLayout } from './editing/gap-math';
 import { GridSettingsPanel } from './grid-settings';
@@ -1284,10 +1287,10 @@ function activateToolForElement(el: Element, mode: EditMode): void {
       const info = buildElementInfo(el);
       const diff = diffBuilder!.buildAttribute(info, attrChanges, undefined, el);
       commitAttributeEdit(el, attrChanges, diff);
-    }, (target, mechanism, strength) => {
-      makeParallaxCommit(target, mechanism, strength);
-    }, (target, mechanism, strength) => {
-      makeParallaxUpdate(target, mechanism, strength);
+    }, (target, mechanism, strength, scrollSource) => {
+      makeParallaxCommit(target, mechanism, strength, scrollSource);
+    }, (target, mechanism, strength, scrollSource) => {
+      makeParallaxUpdate(target, mechanism, strength, scrollSource);
     });
     shadow!.appendChild(controls);
     toolbar!.setActiveMode('media');
@@ -1898,15 +1901,26 @@ function parallaxExtras(
   scriptChanges?: readonly ScriptBehaviorChange[];
 } {
   const id = getParallaxId(block);
-  const stylesheetChanges = buildStylesheetChanges(mechanism, strength, selector, id);
+  const scrollMode = readScrollSource(block);
+  const stylesheetChanges = buildStylesheetChanges(mechanism, strength, selector, id, scrollMode);
   const sourceFile = block.getAttribute('data-source-file') || buildElementInfo(block).sourceFile || '';
-  const scriptChange = buildScriptChange(mechanism, strength, selector, sourceFile);
+  const scriptChange = buildScriptChange(mechanism, strength, selector, sourceFile, parallaxScrollSelector(block, scrollMode));
   return {
     // feature-009 AC §2: fixed surfaces its inline declarations as PropertyChange[].
     changes: mechanism === 'fixed' ? fixedPropertyChanges() : undefined,
     stylesheetChanges,
     scriptChanges: scriptChange ? [scriptChange] : undefined,
   };
+}
+
+/**
+ * Resolve the scroll source to a selector for the source rewrite: `'window'` for
+ * page-level scroll, otherwise a CSS selector for the resolved scroll container.
+ */
+function parallaxScrollSelector(block: HTMLElement, mode: ParallaxScrollSource): string {
+  if (mode === 'page') return 'window';
+  const scroller = effectiveScroller(block, mode);
+  return scroller ? generateSelector(scroller) : 'window';
 }
 
 /**
@@ -1919,6 +1933,7 @@ function makeParallaxCommit(
   el: Element,
   mechanism: ParallaxMechanism = DEFAULT_MECHANISM,
   strength: number = DEFAULT_STRENGTH,
+  scrollSource: ParallaxScrollSource = DEFAULT_SCROLL_SOURCE,
 ): void {
   if (!(el instanceof HTMLElement)) return;
   if (getParallaxBlockReason(el) !== null) {
@@ -1929,7 +1944,7 @@ function makeParallaxCommit(
   const enabling = wouldEnableParallax(el);
   if (enabling) {
     const s = clampStrength(strength);
-    const newEl = toParallaxBlock(el as HTMLImageElement, mechanism, s);
+    const newEl = toParallaxBlock(el as HTMLImageElement, mechanism, s, scrollSource);
     performParallaxReplace(
       el,
       newEl,
@@ -1944,23 +1959,28 @@ function makeParallaxCommit(
 }
 
 /**
- * Retune an existing parallax block to a new mechanism / strength. Rebuilds the
- * block from its stored identity and emits a 'replace' diff carrying the new
- * mechanism's payloads. Invalid strength clamps to the canonical default.
+ * Retune an existing parallax block to a new mechanism / strength / scroll
+ * source. Rebuilds the block from its stored identity and emits a 'replace' diff
+ * carrying the new mechanism's payloads. Invalid strength clamps to the default.
  */
-function makeParallaxUpdate(el: Element, mechanism: ParallaxMechanism, strength: number): void {
+function makeParallaxUpdate(
+  el: Element,
+  mechanism: ParallaxMechanism,
+  strength: number,
+  scrollSource: ParallaxScrollSource = DEFAULT_SCROLL_SOURCE,
+): void {
   const block = resolveParallaxBlock(el);
   if (!block) {
     devtoolsPanel?.log('No parallax block to update', 'warn');
     return;
   }
   const s = clampStrength(strength);
-  const newEl = rebuildParallaxBlock(block, mechanism, s);
+  const newEl = rebuildParallaxBlock(block, mechanism, s, scrollSource);
   performParallaxReplace(
     block,
     newEl,
     (sel) => parallaxExtras(newEl, mechanism, s, sel),
-    `Parallax: ${mechanism} @ ${Math.round(s * 100)}%`,
+    `Parallax: ${mechanism} @ ${Math.round(s * 100)}% (${scrollSource})`,
   );
 }
 

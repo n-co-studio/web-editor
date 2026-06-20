@@ -304,6 +304,13 @@ export interface ScriptBehaviorParams {
   /** Scroll multiplier derived from --parallax-strength. Range 0–1. */
   readonly strengthFactor: number;
   readonly throttle: 'raf';
+  /**
+   * Which element's scrolling drives the effect. `'window'` for page/viewport
+   * scroll; otherwise a CSS selector for the scroll container (e.g. an inner
+   * overlay/`<main>` that scrolls while `body` does not). The generated handler
+   * must attach its scroll listener to this source, not assume `window`.
+   */
+  readonly scrollSource: string;
 }
 
 /**

@@ -127,6 +127,7 @@ A **declarative descriptor** for a bounded JavaScript behavior. It does **not** 
 | axis | "x" \| "y" | yes | Scroll axis the parallax tracks. v1 banners use `"y"`. |
 | strengthFactor | number | yes | Scroll multiplier derived from `--parallax-strength` (the canonical dial). The transform offset per scroll pixel; e.g., `0.4` moves the element 0.4px per scrolled px. Range `0`–`1`. |
 | throttle | "raf" | yes | The throttling strategy the generated handler uses. v1 fixes this to `"raf"` (one `requestAnimationFrame`-batched update per frame) so the descriptor cannot request unthrottled scroll work. |
+| scrollSource | string | yes | Which element's scrolling drives the effect. `"window"` for page/viewport scroll; otherwise a CSS selector for the scroll container (e.g. an inner overlay or `<main>` that scrolls while `body` does not — common in SPAs). The generated handler MUST attach its scroll listener to this source rather than assume `window`. The editor resolves it from the operator's "scroll source" choice (auto-detected nearest scroll container, explicit page, or explicit container). The pure-CSS `scroll-driven` mechanism reflects the same choice in its `animation-timeline` (`scroll(root)` for page vs `scroll()` for the nearest container). |
 
 ### Source Rewrite Semantics (feature-009 change types)
 
