@@ -1,9 +1,36 @@
-timestamp: "2026-03-04T00:00:00Z"
-session: null
-spec_version: null
+timestamp: "2026-06-19T00:00:00Z"
+session: "c8dc0c84-28df-4e06-8521-316710a3c385"
+spec_version: "v1"
 feature_briefs:
   - name: "pm-advisory-agent"
     path: "docs/spec/_templates/feature-brief-pm-advisor.md"
     status: complete
     created_date: "2026-03-04"
+  - name: "parallax-editor"
+    path: "docs/spec/compiled/v1/features/feature-009-parallax-editor.md"
+    status: complete
+    created_date: "2026-06-19"
+contract_changes:
+  - name: "StylesheetChange + StylesheetRule"
+    path: "docs/spec/compiled/v1/data-contracts.md"
+    wired_into: "VisualDiff.stylesheetChanges"
+    created_date: "2026-06-19"
+  - name: "ScriptBehaviorChange + ScriptBehaviorParams"
+    path: "docs/spec/compiled/v1/data-contracts.md"
+    wired_into: "VisualDiff.scriptChanges"
+    created_date: "2026-06-19"
+boundary_changes:
+  - name: "Scroll-driven + JS-scroll parallax constrained-in-scope"
+    path: "docs/spec/compiled/v1/boundaries.md"
+    note: "Moved from blanket no-JS / CSS-only exclusion into a constrained allowance (parallax-only via single-value enum, reproducible-to-source, dev-only, Chrome target, a11y mandatory). General JS behavior still deferred."
+    created_date: "2026-06-19"
+  - name: "product.md JS-exclusion exception (coherence fix)"
+    path: "docs/spec/compiled/v1/product.md"
+    note: "Added the parallax-scroll exception to the 'does not handle JavaScript behavior changes' line so product.md no longer contradicts the boundaries.md carve-out. Surfaced by spec review (PM advisory)."
+    created_date: "2026-06-19"
+registry:
+  - name: "feature-009 registered in manifest"
+    path: "docs/spec/compiled/manifest.json"
+    note: "Added features/feature-009-parallax-editor.md to v1 featureFiles, consistent with feature-007/008 registration. Enables manifest keyword discovery (Decision 0035)."
+    created_date: "2026-06-19"
 status: complete

@@ -59,5 +59,5 @@ Operators working on projects inspect the front end and identify visual adjustme
 - Not a component library or design system manager — does not author, catalogue, or manage component variants, prop types, or design tokens independently of the host project. It surfaces project-local components as insertable elements only.
 - Not a hosted service — everything runs locally
 - Not for production use — dev tooling only
-- Does not handle JavaScript behavior changes — visual/CSS properties only
+- Does not handle JavaScript behavior changes — visual/CSS properties only. **Exception:** a single enumerated `parallax-scroll` script behavior is permitted under the constrained boundary allowance in `boundaries.md` (feature-009); this does not generalise to other JS behavior editing.
 - Can insert, delete, and move (reorder within a container, reparent across containers) elements within and across scoped flex/grid containers — see boundaries.md for expansion details

@@ -15,8 +15,12 @@
 | sourceVerified | boolean | yes | True when data-source-* attributes are present on the element, false when missing |
 | relatedChanges | RelatedChange[] | no | Property changes on other elements required by this edit (e.g., parent `isolation: isolate` for blend mode). Each entry identifies the affected element and the changes to apply. |
 | reparentChanges | ReparentChange[] | no | Cross-container move operation applied as part of this edit. Populated only for reparent mode edits; empty for property-change-only diffs. |
+| stylesheetChanges | StylesheetChange[] | no | Document-level CSS rules (`@keyframes`, `@supports`, `@media`) that cannot be expressed as element-inline declarations. Populated for scroll-driven parallax (feature-009) and for the mandatory `prefers-reduced-motion` zeroing rule that every parallax mechanism emits. Empty for edits that need no stylesheet-level rules. |
+| scriptChanges | ScriptBehaviorChange[] | no | Declarative descriptors for a bounded, reproducible-to-source JavaScript behavior. **v1 admits exactly one behavior — `parallax-scroll` (feature-009)** — under the constrained boundary allowance in `boundaries.md`. Empty for all CSS-only edits. |
 
-**Relationships:** Contains ElementInfo, PropertyChange[], PageContext, RelatedChange[]
+**Relationships:** Contains ElementInfo, PropertyChange[], PageContext, RelatedChange[], StylesheetChange[], ScriptBehaviorChange[]
+
+> The table above highlights the fields relevant to feature-009. `VisualDiff` additionally carries the existing optional parallel arrays `reorderChanges`, `insertChanges`, `removeChanges`, `groupChanges`, `attributeChanges`, and `textChanges` (see `packages/shared/src/diff.ts` for the complete interface). When extending `VisualDiff` for feature-009, add `stylesheetChanges` and `scriptChanges` alongside these — do not omit the existing arrays.
 
 **Assembly note:** The content script assembles the full VisualDiff — it generates the uuid, captures the timestamp, populates PageContext, sets sourceVerified, and sets the initial status to "pending". Feature-001 provides ElementInfo; feature-002 provides PropertyChange.
 
@@ -43,6 +47,10 @@
 | fromToken | string | no | Resolved token name for original value — populated by extension using locally cached token data |
 | toToken | string | no | Resolved token name for new value — populated by extension using locally cached token data |
 | unit | string | no | px, rem, em, %, etc. Null/absent for unitless values (line-height, opacity, z-index) and non-numeric properties (colors). |
+| source | RuleSource | no | Provenance of the existing CSS rule that currently sets this property (selector, source href, specificity, `@media`/`@layer` scope). When present, a downstream agent edits that rule in-place instead of appending an override; absence means no existing rule sets the property. Defined in `packages/shared/src/diff.ts`. |
+| allBreakpointSources | CrossBreakpointRuleSource[] | no | Context-only set of rules that set this property across all viewport `@media` blocks (each flagged `matchesCurrentViewport`). Lets a downstream agent reason about responsive rules without switching viewports; only the active breakpoint is edited unless instructed otherwise. Defined in `packages/shared/src/diff.ts`. |
+
+`StylesheetChange.elementChanges[]` entries carry `source` on the same terms as any other `PropertyChange` — the animation-`*` wiring should edit an existing rule in-place when one is present.
 
 ### RelatedChange
 
@@ -74,6 +82,62 @@
 | siblingSelectors | string[] | yes | Selectors for all siblings in the target container at commit time |
 | prevSibling | SiblingAnchor \| null | yes | Element immediately before the inserted position, or null if inserted at index 0 |
 | nextSibling | SiblingAnchor \| null | yes | Element immediately after the inserted position, or null if inserted at end |
+
+### StylesheetChange
+
+A change that adds one or more **document-level CSS rules** that cannot be expressed as element-inline declarations — `@keyframes`, `@supports`, and `@media` blocks. Introduced by feature-009 (parallax editor) to carry pure-CSS scroll-driven animations (`@keyframes` + `animation-timeline: scroll()`) and the mandatory `prefers-reduced-motion` zeroing rule that every parallax mechanism emits. Stored as a parallel array on `VisualDiff` (separate from `PropertyChange[]`), mirroring `relatedChanges` / `reparentChanges`.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| type | "stylesheet" | yes | Discriminant literal. |
+| rules | StylesheetRule[] | yes | The document-level rules to add to the project's CSS. Order is significant — `@supports` fallbacks and `@media` overrides must follow the base rules they qualify. |
+| elementChanges | PropertyChange[] | yes (may be `[]`) | Element-level longhands that wire the target element to the rules (e.g., `animation-name`, `animation-timeline`, `animation-duration`, `animation-fill-mode`, `animation-timing-function`). Applied to the element identified by `VisualDiff.element`. The array is **always present**, but is an **empty array** when the change adds only a `@media`/`@supports` rule with no new element wiring (e.g., a standalone reduced-motion rule) — an absent `elementChanges` is a protocol error, an empty one is valid. |
+| reason | string | yes | Why the stylesheet rule is needed (e.g., `"scroll-driven-parallax"`, `"reduced-motion-zeroing"`, `"animation-timeline-fallback"`). |
+
+### StylesheetRule
+
+A single CSS rule block carried inside a `StylesheetChange`. `cssText` is the authoritative, ready-to-write rule text; the structured fields exist so a downstream agent can place, dedupe, or rewrite the rule without re-parsing `cssText`.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| ruleType | "keyframes" \| "supports" \| "media" | yes | The at-rule kind. |
+| name | string | no | For `ruleType: "keyframes"`, the `@keyframes` identifier (e.g., `nco-parallax-7f3a`). Generated unique per edit to avoid collisions. Absent for `supports`/`media`. |
+| condition | string | no | For `ruleType: "supports"` / `"media"`, the parenthesized condition (e.g., `(animation-timeline: scroll())`, `not (animation-timeline: scroll())`, `(prefers-reduced-motion: reduce)`). Absent for `keyframes`. |
+| cssText | string | yes | Full rule text including the at-rule header and braces — the exact CSS a downstream agent writes into the stylesheet. |
+
+### ScriptBehaviorChange
+
+A **declarative descriptor** for a bounded JavaScript behavior. It does **not** carry literal JS source — it carries the *intent* and parameters from which Claude Code authors idempotent, reproducible source JS. Introduced by feature-009 for the JS-scroll-listener parallax mechanism. This is the only change type that crosses the CSS-only boundary, and it is constrained to a single enumerated behavior in v1 (see `boundaries.md`). Stored as a parallel array on `VisualDiff`.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| type | "script-behavior" | yes | Discriminant literal. |
+| behavior | "parallax-scroll" | yes | Enumerated behavior identifier. **v1 admits this single value only** — the enum is the mechanism that bounds the boundary expansion; any other value is invalid and must be rejected by the consumer. |
+| targetSelector | string | yes | CSS selector for the element the scroll-driven transform is applied to. |
+| sourceFile | string | yes | Relative path from project root (from `data-source-file`) so Claude Code knows where to attach the behavior. |
+| params | ScriptBehaviorParams | yes | Parameters the source author needs to reproduce the effect deterministically. |
+| respectsReducedMotion | boolean | yes | Always `true` in v1 — the generated handler MUST short-circuit when `matchMedia('(prefers-reduced-motion: reduce)')` matches (WCAG 2.3.3). Carried explicitly so the contract is self-documenting and the QA gate is mechanical. |
+| descriptor | string | yes | Human-readable statement of intent for the receiving agent (e.g., `"On scroll, translate <selector> vertically at 0.4× scroll velocity; disable under reduced-motion."`). |
+| reason | string | yes | Why a script behavior (rather than a CSS mechanism) was chosen — typically `"js-scroll-parallax"`. |
+
+### ScriptBehaviorParams
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| axis | "x" \| "y" | yes | Scroll axis the parallax tracks. v1 banners use `"y"`. |
+| strengthFactor | number | yes | Scroll multiplier derived from `--parallax-strength` (the canonical dial). The transform offset per scroll pixel; e.g., `0.4` moves the element 0.4px per scrolled px. Range `0`–`1`. |
+| throttle | "raf" | yes | The throttling strategy the generated handler uses. v1 fixes this to `"raf"` (one `requestAnimationFrame`-batched update per frame) so the descriptor cannot request unthrottled scroll work. |
+
+### Source Rewrite Semantics (feature-009 change types)
+
+How Claude Code reproduces each new change type as project source. The reproducible-to-source requirement is a boundary condition (`boundaries.md`): every mechanism must round-trip to maintainable source, not a runtime patch.
+
+- **StylesheetChange → CSS source.** Claude Code writes each `StylesheetRule.cssText` into the stylesheet that owns the target element's styles (CSS module, global stylesheet, or the styled-block adjacent to the element's `sourceFile`), then applies `elementChanges` to the element's existing rule in-place (using each `PropertyChange.source` when present, exactly as for ordinary `PropertyChange`s). `@keyframes` names are written verbatim; the agent dedupes by `name` so re-applying an edit does not duplicate the keyframes. `@supports`/`@media` rules are written after the base rule they qualify.
+- **ScriptBehaviorChange → JS source.** Claude Code authors an idempotent scroll handler from `descriptor` + `params` in the module that owns `sourceFile` (e.g., a `useEffect` in the React component, or a co-located effect hook), keyed by `targetSelector`. The handler MUST: batch updates with `requestAnimationFrame` (`params.throttle`), and short-circuit when `prefers-reduced-motion: reduce` matches (`respectsReducedMotion`). Re-application replaces the prior handler rather than stacking listeners. No literal JS crosses the wire — only the descriptor — so the generated source is reviewable and version-controlled like any hand-written code.
+- **CSS-3D transform → existing `InsertChange.outerHTML` + `RemoveChange`.** The 3D mechanism needs no new change type: it reuses the existing replace pattern (a `RemoveChange` for the `<img>` plus an `InsertChange` whose `outerHTML` carries the perspective wrapper and inner element) already used by the current `parallax.ts` toggle. Its `@media (prefers-reduced-motion: reduce)` zeroing rule rides along as a `StylesheetChange`.
+- **background-attachment: fixed → ordinary `PropertyChange[]`.** Inline declarations on the converted block (as `parallax.ts` already emits). Its reduced-motion zeroing rides along as a `StylesheetChange` (a `@media` rule cannot be inline).
+
+**Protocol compatibility.** `stylesheetChanges` and `scriptChanges` are additive, optional arrays on `VisualDiff`. Consumers that predate them ignore unknown fields, so **no `WS_PROTOCOL_VERSION` bump is required** (same treatment as `reorderChanges` / `insertChanges` / `reparentChanges`, which were added without a protocol bump; the version remains `0.4.0`). The MCP tool surface (`get_pending_visual_changes`) returns the full `VisualDiff` unchanged. A `0.4.0` consumer that does not implement feature-009 will silently ignore `scriptChanges` / `stylesheetChanges` — this is intentional: the pending queue stays processable by Claude Code regardless of whether the MCP consumer is feature-009-aware.
 
 ### DesignToken
 
