@@ -10,13 +10,14 @@ import {
   readParallaxStrength,
   readScrollSource,
   resolveScrollContainer,
+  detectExternalParallaxUnit,
   clampStrength,
   defaultStrengthFor,
   DEFAULT_MECHANISM,
   DEFAULT_STRENGTH,
   DEFAULT_SCROLL_SOURCE,
 } from './parallax';
-import type { ParallaxMechanism, ParallaxScrollSource } from './parallax';
+import type { ParallaxMechanism, ParallaxScrollSource, ExternalParallaxUnit } from './parallax';
 
 // File System Access API types (not in standard TS lib)
 declare global {
@@ -77,6 +78,7 @@ export class MediaEditor {
     onAttributeCommit: AttributeCallback,
     onParallaxToggle?: ParallaxCallback,
     onParallaxUpdate?: ParallaxCallback,
+    onParallaxAdopt?: (element: Element) => void,
   ): HTMLDivElement {
     this.cleanup();
 
@@ -140,6 +142,11 @@ export class MediaEditor {
     // Shown for images and for existing parallax blocks (to retune / revert).
     if (onParallaxToggle && getParallaxBlockReason(element) === null) {
       body.appendChild(this.buildParallaxSection(element, onParallaxToggle, onParallaxUpdate, onCommit));
+    } else if (onParallaxAdopt) {
+      // Detected an externally-authored parallax (box + inner background layer,
+      // no tool markers) from a click on either layer — offer to adopt it.
+      const unit = detectExternalParallaxUnit(element);
+      if (unit) body.appendChild(this.buildAdoptSection(unit, onParallaxAdopt));
     }
 
     // Source URL (only for img, video, source elements)
@@ -451,11 +458,13 @@ export class MediaEditor {
         break;
       case 'scroll-driven':
         base = supportsScrollTimeline
-          ? 'Pure-CSS scan (background-position via animation-timeline).'
+          ? 'Pure-CSS scan (oversized inner via animation-timeline). No JS.'
           : 'Requires Chrome 115+ — degrades to a static cover elsewhere.';
         break;
       case 'transform-3d':
-        base = '3D depth via translateZ — static (no scroll motion).';
+        base = supportsScrollTimeline
+          ? 'CSS scan with a 3D depth tint (perspective + translateZ). No JS.'
+          : 'Requires Chrome 115+ — degrades to a static cover elsewhere.';
         break;
       case 'fixed':
         base = 'background-attachment: fixed — page/viewport scroll only; not iOS Safari, not inner scrollers.';
@@ -465,6 +474,44 @@ export class MediaEditor {
       base += ' Motion disabled — prefers-reduced-motion active.';
     }
     return base;
+  }
+
+  /**
+   * Adopt affordance for an externally-authored parallax (box + inner background
+   * layer, no tool markers). Surfaced when the operator selects either layer.
+   * Adopting converts it into a tool-managed block so the full controls apply.
+   */
+  private buildAdoptSection(unit: ExternalParallaxUnit, onAdopt: (element: Element) => void): HTMLDivElement {
+    const section = createElement('div', {}, { display: 'flex', flexDirection: 'column', gap: '6px' });
+
+    const heading = createText('div', 'Parallax (detected)', 'mono');
+    heading.style.color = OVERLAY.text;
+    heading.style.fontSize = '11px';
+    section.appendChild(heading);
+
+    const note = createText('div',
+      'An existing parallax background was found on this banner. Adopt it to tune the mechanism, strength and scroll source with the editor.',
+      'mono');
+    note.style.color = OVERLAY.textMuted;
+    note.style.fontSize = '9px';
+    note.style.lineHeight = '1.3';
+    section.appendChild(note);
+
+    const short = unit.src.length > 40 ? `…${unit.src.slice(-39)}` : unit.src;
+    const srcLabel = createText('div', unit.src ? `Image: ${short}` : 'Image: (none detected)', 'mono');
+    srcLabel.style.color = OVERLAY.textMuted;
+    srcLabel.style.fontSize = '9px';
+    srcLabel.title = unit.src;
+    section.appendChild(srcLabel);
+
+    const btn = createButton('Adopt & edit', 'primary', () => onAdopt(unit.box));
+    btn.style.width = '100%';
+    btn.style.justifyContent = 'center';
+    btn.style.fontSize = '11px';
+    btn.style.padding = '5px 0';
+    section.appendChild(btn);
+
+    return section;
   }
 
   private buildScrollSourceRow(
