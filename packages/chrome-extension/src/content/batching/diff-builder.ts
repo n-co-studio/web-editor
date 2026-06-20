@@ -10,6 +10,8 @@ import type {
   GroupChange,
   ReparentChange,
   RelatedChange,
+  StylesheetChange,
+  ScriptBehaviorChange,
   PageContext,
   RuleSource,
   CrossBreakpointRuleSource,
@@ -116,22 +118,35 @@ export class DiffBuilder {
 
   /**
    * Build a VisualDiff for an in-place element replacement (e.g. parallax:
-   * <img> → fixed-background <div>). Carries both the remove of the old element
-   * and the insert of the new one (with full outerHTML) in a single diff, so it
-   * has one id for queue/undo and serializes as a coherent replace instruction.
+   * <img> → parallax block). Carries both the remove of the old element and the
+   * insert of the new one (with full outerHTML) in a single diff, so it has one
+   * id for queue/undo and serializes as a coherent replace instruction.
+   *
+   * `extras` carries the document-level stylesheet rules (@keyframes,
+   * @supports, @media) and the declarative script behavior that some parallax
+   * mechanisms need (feature-009) — scroll-driven emits stylesheetChanges, and
+   * js-scroll emits scriptChanges; every CSS mechanism emits the mandatory
+   * prefers-reduced-motion zeroing rule. Omitted arrays are left off the diff.
    */
   buildReplace(
     elementInfo: ElementInfo,
     removeChange: RemoveChange,
     insertChange: InsertChange,
+    extras?: {
+      changes?: readonly PropertyChange[];
+      stylesheetChanges?: readonly StylesheetChange[];
+      scriptChanges?: readonly ScriptBehaviorChange[];
+    },
   ): VisualDiff {
     return {
       id: crypto.randomUUID(),
       timestamp: new Date().toISOString(),
       element: elementInfo,
-      changes: [],
+      changes: extras?.changes ?? [],
       removeChanges: [removeChange],
       insertChanges: [insertChange],
+      ...(extras?.stylesheetChanges?.length ? { stylesheetChanges: extras.stylesheetChanges } : {}),
+      ...(extras?.scriptChanges?.length ? { scriptChanges: extras.scriptChanges } : {}),
       context: this.buildPageContext(),
       status: 'pending',
       sourceVerified: Boolean(elementInfo.sourceFile),

@@ -1,0 +1,112 @@
+# Task Group Contract — parallax-editor
+# Created by Brief 1 (spec). Two-brief sequential group: spec then build.
+
+identity:
+  group_name: "parallax-editor"
+  created_by_session: 1
+  created_date: "2026-06-19"
+  execution: sequential
+
+briefs:
+  - title: "Spec the Parallax Editor + Contract/Boundary Governance"
+    sequence: 1
+    session: 1
+    branch: "feature/parallax-editor"
+    status: complete
+    next_brief: "Build the Parallax Editor"
+    boundaries:
+      - docs/spec/compiled/v1/features/feature-009-parallax-editor.md
+      - docs/spec/compiled/v1/data-contracts.md
+      - docs/spec/compiled/v1/boundaries.md
+      - docs/spec/compiled/v1/product.md       # JS-exclusion coherence fix (spec review)
+      - docs/spec/compiled/manifest.json        # feature-009 registration
+      - docs/ai/governance/
+  - title: "Build the Parallax Editor"
+    sequence: 2
+    session: null
+    branch: ""
+    status: pending
+    next_brief: ""
+    boundaries:
+      - packages/chrome-extension/src/content/editing/parallax.ts
+      - packages/chrome-extension/src/content/editing/media.ts
+      - packages/chrome-extension/src/content/index.ts
+      - packages/shared/src/diff.ts
+
+intent:
+  goal: "Author feature-009-parallax-editor.md and the data-contract + boundary changes (StylesheetChange, JS-behavior change, constrained scope expansion) so Brief 2 has gateable acceptance criteria."
+  verification:
+    - "feature-009 exists with full mechanism taxonomy + per-mode mappings + strength model + reduced-motion requirement + acceptance criteria"
+    - "data-contracts.md defines StylesheetChange + JS-behavior change wired into VisualDiff"
+    - "boundaries.md constrained-scope expansion for scroll-driven + JS-scroll parallax; general JS behavior still deferred"
+    - "spec-compiled governance evidence updated"
+  scope_files:
+    - docs/spec/compiled/v1/features/feature-009-parallax-editor.md
+    - docs/spec/compiled/v1/data-contracts.md
+    - docs/spec/compiled/v1/boundaries.md
+    - docs/ai/governance/
+  spec_references:
+    - docs/spec/compiled/v1/data-contracts.md
+    - docs/spec/compiled/v1/boundaries.md
+    - docs/spec/compiled/v1/features/feature-007-css-visual-effects.md
+    - docs/spec/compiled/v1/architecture.md
+
+conventions:
+  naming:
+    - pattern: "Diff change types are PascalCase interfaces named <Verb/Noun>Change (e.g. StylesheetChange, ScriptBehaviorChange)"
+      scope: "packages/shared/src/diff.ts and data-contracts.md"
+    - pattern: "Parallax DOM markers use data-parallax-* attributes (data-parallax-type, data-parallax-strength)"
+      scope: "packages/chrome-extension/src/content/editing/parallax.ts"
+  patterns:
+    - pattern: "New change types are optional readonly arrays on VisualDiff, mirroring relatedChanges / reparentChanges"
+      rationale: "Additive, backward-compatible diff envelope; existing consumers ignore unknown arrays"
+    - pattern: "Canonical --parallax-strength custom property drives all four mechanisms via per-mode calc() derivation"
+      rationale: "Single dial output re-read via getComputedStyle keeps mechanisms interchangeable"
+  decisions:
+    - "0035"
+    - "0014"
+  boundaries:
+    - module: "compiled-spec (feature-009, data-contracts, boundaries)"
+      owner_brief: "Spec the Parallax Editor + Contract/Boundary Governance"
+    - module: "parallax editor implementation (extension + shared diff)"
+      owner_brief: "Build the Parallax Editor"
+
+integration_points:
+  - name: "StylesheetChange + JS-behavior change contract"
+    producer: "Spec the Parallax Editor + Contract/Boundary Governance"
+    consumer: "Build the Parallax Editor"
+    artifact: "docs/spec/compiled/v1/data-contracts.md (StylesheetChange, ScriptBehaviorChange on VisualDiff)"
+  - name: "Constrained scope allowance for scroll-driven + JS-scroll parallax"
+    producer: "Spec the Parallax Editor + Contract/Boundary Governance"
+    consumer: "Build the Parallax Editor"
+    artifact: "docs/spec/compiled/v1/boundaries.md (Boundary Expansions)"
+  - name: "feature-009 acceptance criteria"
+    producer: "Spec the Parallax Editor + Contract/Boundary Governance"
+    consumer: "Build the Parallax Editor"
+    artifact: "docs/spec/compiled/v1/features/feature-009-parallax-editor.md"
+
+session_decisions:
+  - session: 1
+    decision: "All four parallax mechanisms (background-attachment:fixed, CSS 3D transform, pure-CSS scroll-driven, JS scroll listener) are in scope per operator decision."
+    rationale: "Operator rejected the two-mode-only alternative; the build needs authoritative criteria for all four."
+  - session: 1
+    decision: "feature-009 registered in manifest.json featureFiles and product.md JS-exclusion line amended with the parallax-scroll exception — both outside the originally-declared scope_files."
+    rationale: "Spec coherence: registration matches feature-007/008 precedent (enables Decision 0035 manifest discovery); product.md fix resolves a cross-file contradiction the boundary change introduced (surfaced by PM advisory). Boundaries are advisory for sequential groups; recorded here for transparency."
+
+governance:
+  - brief: 1
+    session: "c8dc0c84-28df-4e06-8521-316710a3c385"
+    branch: "feature/parallax-editor"
+    timestamp: "2026-06-19T00:00:00Z"
+    gates:
+      A1: pass
+      A2: pass
+      A3: "n/a (docs-only)"
+      A4: pass
+      A5: "pass (cohesion + diff-review APPROVED; 1 round of critical fixes applied)"
+      A6: pass
+      B1: pass
+      B2: "n/a (no source)"
+      B3: "n/a (no deps)"
+    overrides: none
+    notes: "Spec-writing brief. Handoff bundle valid (Decision 0038) — plan-approved + pragmatist-signed derived from bundle, forward-jumped to build. Critic round 1 BLOCKED (3 critical); fixes applied; round 2 APPROVED."

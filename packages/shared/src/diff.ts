@@ -262,6 +262,68 @@ export interface TextChange {
   readonly toText: string;
 }
 
+/**
+ * A single CSS rule block carried inside a StylesheetChange. `cssText` is the
+ * authoritative, ready-to-write rule text; the structured fields let a
+ * downstream agent place, dedupe, or rewrite the rule without re-parsing it.
+ * Introduced by feature-009 (parallax editor) for scroll-driven animations
+ * and the mandatory prefers-reduced-motion zeroing rule.
+ */
+export interface StylesheetRule {
+  readonly ruleType: 'keyframes' | 'supports' | 'media';
+  /** For ruleType 'keyframes', the @keyframes identifier (unique per edit). */
+  readonly name?: string;
+  /** For ruleType 'supports' / 'media', the parenthesized condition. */
+  readonly condition?: string;
+  /** Full rule text including the at-rule header and braces. */
+  readonly cssText: string;
+}
+
+/**
+ * A change that adds one or more document-level CSS rules that cannot be
+ * expressed as element-inline declarations (@keyframes, @supports, @media).
+ * Stored as a parallel array on VisualDiff (separate from PropertyChange[]).
+ */
+export interface StylesheetChange {
+  readonly type: 'stylesheet';
+  /** Document-level rules to add. Order is significant. */
+  readonly rules: readonly StylesheetRule[];
+  /**
+   * Element-level longhands that wire the target element to the rules
+   * (animation-name, animation-timeline, etc.). Always present — an empty
+   * array is valid (e.g. a standalone reduced-motion rule); an absent array
+   * is a protocol error.
+   */
+  readonly elementChanges: readonly PropertyChange[];
+  readonly reason: string;
+}
+
+/** Parameters a source author needs to reproduce a script behavior deterministically. */
+export interface ScriptBehaviorParams {
+  readonly axis: 'x' | 'y';
+  /** Scroll multiplier derived from --parallax-strength. Range 0–1. */
+  readonly strengthFactor: number;
+  readonly throttle: 'raf';
+}
+
+/**
+ * A declarative descriptor for a bounded, reproducible-to-source JS behavior.
+ * Carries intent + parameters, never literal JS. v1 admits exactly one
+ * behavior — 'parallax-scroll' (feature-009). Stored as a parallel array on
+ * VisualDiff.
+ */
+export interface ScriptBehaviorChange {
+  readonly type: 'script-behavior';
+  readonly behavior: 'parallax-scroll';
+  readonly targetSelector: string;
+  readonly sourceFile: string;
+  readonly params: ScriptBehaviorParams;
+  /** Always true in v1 — generated handler short-circuits under reduced-motion. */
+  readonly respectsReducedMotion: boolean;
+  readonly descriptor: string;
+  readonly reason: string;
+}
+
 /** Page state at the time of edit. */
 export interface PageContext {
   readonly url: string;
@@ -300,6 +362,8 @@ export interface VisualDiff {
   readonly attributeChanges?: readonly AttributeChange[];
   readonly textChanges?: readonly TextChange[];
   readonly relatedChanges?: readonly RelatedChange[];
+  readonly stylesheetChanges?: readonly StylesheetChange[];
+  readonly scriptChanges?: readonly ScriptBehaviorChange[];
   readonly context: PageContext;
   readonly status: DiffStatus;
   readonly sourceVerified: boolean;

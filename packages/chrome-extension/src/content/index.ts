@@ -46,9 +46,20 @@ import { duplicateElement, getDuplicateBlockReason } from './editing/duplicate';
 import {
   getParallaxBlockReason,
   wouldEnableParallax,
+  resolveParallaxBlock,
   toParallaxBlock,
+  rebuildParallaxBlock,
   fromParallaxBlock,
+  buildStylesheetChanges,
+  buildScriptChange,
+  fixedPropertyChanges,
+  getParallaxId,
+  clampStrength,
+  DEFAULT_MECHANISM,
+  DEFAULT_STRENGTH,
+  ParallaxRuntime,
 } from './editing/parallax';
+import type { ParallaxMechanism } from './editing/parallax';
 import { LayoutEditor } from './editing/layout-editor';
 import { detectContainerLayout } from './editing/gap-math';
 import { GridSettingsPanel } from './grid-settings';
@@ -57,7 +68,7 @@ import { MultiSelectManager } from './selection/multi-select';
 import { MultiSelectToolbar } from './editing/multi-select-toolbar';
 import { buildElementInfo, getTopElementAt, generateSelector, getComputedProperty } from '../shared/dom-utils';
 import { PROTOCOL_VERSION } from '@nco-studio/shared';
-import type { VisualDiff, PropertyChange, AttributeChange, TextChange, ReorderChange, ReparentChange, GroupChange, RemoveChange } from '@nco-studio/shared';
+import type { VisualDiff, PropertyChange, AttributeChange, TextChange, ReorderChange, ReparentChange, GroupChange, RemoveChange, StylesheetChange, ScriptBehaviorChange } from '@nco-studio/shared';
 import type { ExtensionMode, ConnectionStatus, EditMode, IconStatus } from '../shared/types';
 
 // ---------------------------------------------------------------------------
@@ -91,6 +102,7 @@ let spacingEditor: SpacingEditor | null = null;
 let layoutEditor: LayoutEditor | null = null;
 let positionEditor: PositionEditor | null = null;
 let editHistory: EditHistory | null = null;
+let parallaxRuntime: ParallaxRuntime | null = null;
 let notesStore: NotesStore | null = null;
 let notesEditor: NotesEditor | null = null;
 let gridOverlay: GridOverlay | null = null;
@@ -307,6 +319,12 @@ export async function activate(): Promise<void> {
 
   // Edit history (undo/redo)
   editHistory = new EditHistory();
+
+  // Parallax live runtime (manages injected stylesheet / scroll listeners for
+  // scroll-driven + js-scroll mechanisms). Reconciled on every history change so
+  // undo/redo/reset restore or tear down live effects without history.ts knowing
+  // anything about parallax.
+  parallaxRuntime = new ParallaxRuntime();
 
   // Notes store (shared between notes panel and review panel)
   notesStore = new NotesStore();
@@ -964,6 +982,8 @@ export async function activate(): Promise<void> {
   // Update toolbar undo/redo button states when history changes
   editHistory.onChange(() => {
     toolbar?.setUndoRedoState(editHistory!.canUndo, editHistory!.canRedo);
+    // Reconcile parallax live effects against the post-change DOM.
+    parallaxRuntime?.sync();
   });
 
   // Wire drag updates → refresh selection highlight + reposition handles
@@ -1031,6 +1051,7 @@ export function deactivate(): void {
   effectsEditor?.cleanup();
   appearanceEditor?.cleanup();
   notesEditor?.cleanup();
+  parallaxRuntime?.destroy();
   gridOverlay?.hide();
   rulerOverlay?.hide();
   gridSettingsPanel?.cleanup();
@@ -1085,6 +1106,7 @@ export function deactivate(): void {
   layoutEditor = null;
   positionEditor = null;
   editHistory = null;
+  parallaxRuntime = null;
   notesStore = null;
   notesEditor = null;
   gridOverlay = null;
@@ -1262,8 +1284,10 @@ function activateToolForElement(el: Element, mode: EditMode): void {
       const info = buildElementInfo(el);
       const diff = diffBuilder!.buildAttribute(info, attrChanges, undefined, el);
       commitAttributeEdit(el, attrChanges, diff);
-    }, (target) => {
-      makeParallaxCommit(target);
+    }, (target, mechanism, strength) => {
+      makeParallaxCommit(target, mechanism, strength);
+    }, (target, mechanism, strength) => {
+      makeParallaxUpdate(target, mechanism, strength);
     });
     shadow!.appendChild(controls);
     toolbar!.setActiveMode('media');
@@ -1797,35 +1821,36 @@ function duplicateElements(elements: Element[]): void {
 }
 
 // ---------------------------------------------------------------------------
-// Parallax — convert an <img> to a fixed-background block (and back)
+// Parallax — convert an <img> to a tunable parallax block (and back), and
+// retune the mechanism / strength of an existing block.
 // ---------------------------------------------------------------------------
 
 /**
- * Toggle parallax on the given element. Enabling converts an `<img>` to a
- * full-width fixed-background `<div>`; disabling reverts the block to an `<img>`.
- * Recorded as a single 'replace' diff (remove old + insert new with outerHTML)
- * and a single reversible history entry.
+ * Replace `oldEl` with `newEl` in place, recorded as a single 'replace' diff
+ * (remove old + insert new with outerHTML) and a single reversible history
+ * entry, then reselect the new element. `extras` carries the parallax
+ * stylesheet / script change payloads (feature-009). The history push triggers
+ * `parallaxRuntime.sync()`, which applies the new block's live effect and tears
+ * down the old block's artifacts.
  */
-function makeParallaxCommit(el: Element): void {
-  if (!(el instanceof HTMLElement)) return;
-  if (getParallaxBlockReason(el) !== null) {
-    devtoolsPanel?.log('Cannot toggle parallax on this element', 'warn');
-    return;
-  }
+function performParallaxReplace(
+  oldEl: HTMLElement,
+  newEl: HTMLElement,
+  buildExtras: (insertedSelector: string) => {
+    stylesheetChanges?: readonly StylesheetChange[];
+    scriptChanges?: readonly ScriptBehaviorChange[];
+  } | undefined,
+  logMsg: string,
+): void {
+  const parent = oldEl.parentElement!;
+  const oldIndex = Array.from(parent.children).indexOf(oldEl);
 
-  const parent = el.parentElement!;
-  const enabling = wouldEnableParallax(el);
-  const newEl = enabling
-    ? toParallaxBlock(el as HTMLImageElement)
-    : fromParallaxBlock(el);
-  const oldIndex = Array.from(parent.children).indexOf(el);
-
-  // Build the diff BEFORE the swap (sibling bracket reads the pre-swap DOM);
+  // Build remove/insert BEFORE the swap (sibling bracket reads the pre-swap DOM);
   // outerHTML carries the full replacement markup for the source rewrite.
-  const oldInfo = buildElementInfo(el);
+  const oldInfo = buildElementInfo(oldEl);
   const removeChange: RemoveChange = {
     type: 'remove',
-    tagName: el.tagName.toLowerCase(),
+    tagName: oldEl.tagName.toLowerCase(),
     containerSelector: buildElementInfo(parent).selector,
     removedIndex: oldIndex,
   };
@@ -1833,26 +1858,110 @@ function makeParallaxCommit(el: Element): void {
     parent, oldIndex, newEl.tagName.toLowerCase(), [],
     undefined, undefined, newEl.outerHTML,
   );
-  const diff = diffBuilder!.buildReplace(oldInfo, removeChange, insertChange);
 
-  parent.replaceChild(newEl, el);
+  parent.replaceChild(newEl, oldEl);
+
+  // Compute the inserted element's selector post-swap (now live in the DOM) so
+  // the stylesheet @keyframes / @supports / @media and the script targetSelector
+  // address the project-meaningful selector.
+  const insertedSelector = generateSelector(newEl);
+  const extras = buildExtras(insertedSelector);
+  const diff = diffBuilder!.buildReplace(oldInfo, removeChange, insertChange, extras);
 
   queue!.add(diff);
   editHistory!.push({
     type: 'replace',
     element: newEl,
     parent,
-    oldEl: el,
+    oldEl,
     newEl,
     diff,
   });
   badge!.update();
   reviewPanel!.refresh();
-  devtoolsPanel?.log(enabling ? 'Converted image to parallax' : 'Reverted parallax to image');
+  devtoolsPanel?.log(logMsg);
 
-  // Reselect the new element so the toggle label flips and the operator can
-  // immediately set the banner height with the dimensions tool.
+  // Reselect the new element so the panel re-reads markers and the operator can
+  // continue tuning (or set the banner height with the dimensions tool).
   queueMicrotask(() => selection?.select(newEl));
+}
+
+/** Assemble the stylesheet + script change payloads for a parallax block. */
+function parallaxExtras(
+  block: HTMLElement,
+  mechanism: ParallaxMechanism,
+  strength: number,
+  selector: string,
+): {
+  changes?: readonly PropertyChange[];
+  stylesheetChanges?: readonly StylesheetChange[];
+  scriptChanges?: readonly ScriptBehaviorChange[];
+} {
+  const id = getParallaxId(block);
+  const stylesheetChanges = buildStylesheetChanges(mechanism, strength, selector, id);
+  const sourceFile = block.getAttribute('data-source-file') || buildElementInfo(block).sourceFile || '';
+  const scriptChange = buildScriptChange(mechanism, strength, selector, sourceFile);
+  return {
+    // feature-009 AC §2: fixed surfaces its inline declarations as PropertyChange[].
+    changes: mechanism === 'fixed' ? fixedPropertyChanges() : undefined,
+    stylesheetChanges,
+    scriptChanges: scriptChange ? [scriptChange] : undefined,
+  };
+}
+
+/**
+ * Toggle parallax on the given element. Enabling converts an `<img>` to a
+ * parallax block for the chosen mechanism + strength; disabling reverts the
+ * block (resolved from the selection, which may be the CSS-3D inner) to an
+ * `<img>`. Invalid strength clamps to the canonical default.
+ */
+function makeParallaxCommit(
+  el: Element,
+  mechanism: ParallaxMechanism = DEFAULT_MECHANISM,
+  strength: number = DEFAULT_STRENGTH,
+): void {
+  if (!(el instanceof HTMLElement)) return;
+  if (getParallaxBlockReason(el) !== null) {
+    devtoolsPanel?.log('Cannot toggle parallax on this element', 'warn');
+    return;
+  }
+
+  const enabling = wouldEnableParallax(el);
+  if (enabling) {
+    const s = clampStrength(strength);
+    const newEl = toParallaxBlock(el as HTMLImageElement, mechanism, s);
+    performParallaxReplace(
+      el,
+      newEl,
+      (sel) => parallaxExtras(newEl, mechanism, s, sel),
+      'Converted image to parallax',
+    );
+  } else {
+    const block = resolveParallaxBlock(el)!;
+    const img = fromParallaxBlock(block);
+    performParallaxReplace(block, img, () => undefined, 'Reverted parallax to image');
+  }
+}
+
+/**
+ * Retune an existing parallax block to a new mechanism / strength. Rebuilds the
+ * block from its stored identity and emits a 'replace' diff carrying the new
+ * mechanism's payloads. Invalid strength clamps to the canonical default.
+ */
+function makeParallaxUpdate(el: Element, mechanism: ParallaxMechanism, strength: number): void {
+  const block = resolveParallaxBlock(el);
+  if (!block) {
+    devtoolsPanel?.log('No parallax block to update', 'warn');
+    return;
+  }
+  const s = clampStrength(strength);
+  const newEl = rebuildParallaxBlock(block, mechanism, s);
+  performParallaxReplace(
+    block,
+    newEl,
+    (sel) => parallaxExtras(newEl, mechanism, s, sel),
+    `Parallax: ${mechanism} @ ${Math.round(s * 100)}%`,
+  );
 }
 
 // ---------------------------------------------------------------------------

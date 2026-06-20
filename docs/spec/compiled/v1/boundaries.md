@@ -20,6 +20,16 @@ These expand specific boundary restrictions for well-scoped operations:
 - **DOM element removal for delete**: `element.remove()` is permitted for delete operations on existing elements. Already implemented in the content script.
 - **DOM element reparenting for group**: `document.createElement` + `insertBefore` + `moveBefore`/`appendChild` is permitted for group operations that wrap sibling elements within the same parent into a new container element.
 - **DOM node relocation for reparent**: `moveBefore`/`insertBefore` is permitted for reparent operations that move an element from one flex/grid container to a different flex/grid container. This relocates an existing element without creating or deleting nodes. Non-layout containers are not valid drop targets.
+- **Scroll-driven and JS-scroll parallax (constrained)**: Two parallax mechanisms that the blanket "no JavaScript behavior / CSS-only" exclusion would otherwise forbid are **in scope for the parallax editor (feature-009) only**, via the dedicated diff change types in `data-contracts.md`:
+  - **Pure-CSS scroll-driven parallax** — `@keyframes` + `animation-timeline: scroll()` carried as a `StylesheetChange`. This is CSS, but it crosses the "element-inline `PropertyChange` only" assumption, so it is scoped explicitly here.
+  - **JS scroll-listener parallax** — a single enumerated behavior (`behavior: "parallax-scroll"`) carried as a `ScriptBehaviorChange` descriptor (intent + parameters, never literal JS).
+
+  **Limits (all REQUIRE-level):**
+  1. **Parallax-only.** The `ScriptBehaviorChange.behavior` enum admits exactly one value (`"parallax-scroll"`) in v1. This allowance does **not** reopen general JavaScript behavior editing (see Future Considerations) — any other behavior value is invalid.
+  2. **Reproducible-to-source.** Both mechanisms must round-trip to maintainable project source (CSS rules / an idempotent, reviewable scroll handler), per "Source Rewrite Semantics" in `data-contracts.md`. No runtime-only patches.
+  3. **Dev-only.** Same dev-mode constraint as the rest of the product — the dev-plugin and editor never touch production builds.
+  4. **Chrome target.** `animation-timeline: scroll()` is not Baseline (no Firefox by default); the scroll-driven mechanism MUST ship an `@supports not (animation-timeline: scroll())` fallback to the CSS-3D mechanism. The JS-scroll mechanism is the universal fallback.
+  5. **Accessibility mandatory.** Every parallax edit (all four mechanisms) MUST emit `prefers-reduced-motion: reduce` zeroing — as a `StylesheetChange` `@media` rule for the CSS mechanisms, and as a `matchMedia` short-circuit for the JS mechanism (WCAG 2.3.3).
 
 ## Scope Clarifications
 
@@ -32,7 +42,7 @@ These expand specific boundary restrictions for well-scoped operations:
 
 These are out of scope for v1 but may be revisited in later versions:
 
-- **JavaScript behavior changes** — click handlers, state, logic (v1 is visual/CSS properties only)
+- **General JavaScript behavior changes** — click handlers, state, application logic (v1 is visual/CSS properties only). **Exception:** the single `parallax-scroll` script behavior is constrained-in-scope for feature-009 (see Boundary Expansions → "Scroll-driven and JS-scroll parallax"). That carve-out is bounded by an enum of exactly one value and does not generalize — all other JS behavior editing remains deferred.
 - **Browser support beyond Chrome** — Firefox, Safari
 - **Mobile app companion** — dedicated app for editing mobile app UIs
 - **Multi-editor support beyond Claude Code** (Cursor, Windsurf — MCP protocol already compatible)
