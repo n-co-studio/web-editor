@@ -140,6 +140,27 @@ function registerTools(server: McpServer, bridge: Bridge): void {
         'instruction explicitly asks for changes at those other breakpoints — ' +
         'they are surfaced so you can reason about responsive variants without ' +
         'switching viewports, not as edit targets. ' +
+        'When `stylesheetChanges` is present (feature-009 parallax editor), the diff ' +
+        'carries document-level CSS rules that cannot be expressed inline — `@keyframes`, ' +
+        '`@supports`, and `@media` blocks. For each StylesheetChange, write every ' +
+        '`rules[].cssText` verbatim into the stylesheet that owns the target element ' +
+        '(the CSS module / global sheet / styled-block adjacent to `element.sourceFile`), ' +
+        'preserving rule order — `@supports` fallbacks and `@media` overrides must follow ' +
+        'the base rules they qualify. Dedupe `@keyframes` by `rules[].name` so re-applying ' +
+        'an edit does not duplicate the keyframes. Then apply `elementChanges` (animation-name, ' +
+        'animation-timeline, etc.) to the element’s existing rule in-place, using each ' +
+        'PropertyChange `source` when present (exactly as for ordinary PropertyChanges). ' +
+        'Every parallax mechanism emits a `reduced-motion-zeroing` StylesheetChange whose ' +
+        '`@media (prefers-reduced-motion: reduce)` rule zeroes the effect (WCAG 2.3.3) — ' +
+        'always write it. When `scriptChanges` is present, the diff carries a declarative ' +
+        '`ScriptBehaviorChange` (the only one in v1 is `behavior: "parallax-scroll"`); it ' +
+        'does NOT contain literal JS. Author an idempotent scroll handler from `descriptor` + ' +
+        '`params` in the module that owns `sourceFile` (e.g. a `useEffect` keyed by ' +
+        '`targetSelector`). The handler MUST batch updates with `requestAnimationFrame` ' +
+        '(`params.throttle: "raf"`) and MUST short-circuit when ' +
+        "`matchMedia('(prefers-reduced-motion: reduce)').matches` (`respectsReducedMotion`); " +
+        're-application replaces the prior handler rather than stacking listeners. Reject any ' +
+        '`behavior` value other than `"parallax-scroll"`. ' +
         'Optionally filter by tab session ID.',
       inputSchema: z.object({
         tabId: z

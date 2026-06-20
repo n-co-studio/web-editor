@@ -3,7 +3,16 @@ import { createElement, createText, createButton, makeDraggable } from '../../sh
 import { getComputedProperty } from '../../shared/dom-utils';
 import { OVERLAY, TOOLBAR_WIDTH } from '../../shared/constants';
 import type { PreviewManager } from './preview';
-import { isParallaxBlock, getParallaxBlockReason } from './parallax';
+import {
+  getParallaxBlockReason,
+  resolveParallaxBlock,
+  readParallaxMechanism,
+  readParallaxStrength,
+  clampStrength,
+  DEFAULT_MECHANISM,
+  DEFAULT_STRENGTH,
+} from './parallax';
+import type { ParallaxMechanism } from './parallax';
 
 // File System Access API types (not in standard TS lib)
 declare global {
@@ -19,8 +28,21 @@ declare global {
 
 type ChangeCallback = (changes: PropertyChange[]) => void;
 type AttributeCallback = (changes: AttributeChange[]) => void;
+type ParallaxCallback = (element: Element, mechanism: ParallaxMechanism, strength: number) => void;
 
 const PANEL_WIDTH = 240;
+
+interface MechanismOption {
+  readonly value: ParallaxMechanism;
+  readonly label: string;
+}
+
+const MECHANISM_OPTIONS: readonly MechanismOption[] = [
+  { value: 'fixed', label: 'Fixed' },
+  { value: 'transform-3d', label: '3D Transform' },
+  { value: 'scroll-driven', label: 'Scroll-driven' },
+  { value: 'js-scroll', label: 'JS Listener' },
+];
 
 const OBJECT_FIT_OPTIONS = ['fill', 'contain', 'cover', 'none', 'scale-down'] as const;
 const OBJECT_POSITION_OPTIONS = ['center', 'top', 'bottom', 'left', 'right', 'top left', 'top right', 'bottom left', 'bottom right'] as const;
@@ -49,7 +71,8 @@ export class MediaEditor {
     anchorPos: { x: number; y: number },
     onCommit: ChangeCallback,
     onAttributeCommit: AttributeCallback,
-    onParallaxToggle?: (element: Element) => void,
+    onParallaxToggle?: ParallaxCallback,
+    onParallaxUpdate?: ParallaxCallback,
   ): HTMLDivElement {
     this.cleanup();
 
@@ -109,10 +132,10 @@ export class MediaEditor {
 
     const isMediaElement = this.isMediaElement(element);
 
-    // Parallax toggle — convert an <img> to a fixed-background block (and back).
-    // Shown for images and for existing parallax blocks (to revert).
+    // Parallax section — toggle, mechanism picker, strength dial, Advanced attrs.
+    // Shown for images and for existing parallax blocks (to retune / revert).
     if (onParallaxToggle && getParallaxBlockReason(element) === null) {
-      body.appendChild(this.buildParallaxToggle(element, onParallaxToggle));
+      body.appendChild(this.buildParallaxSection(element, onParallaxToggle, onParallaxUpdate, onCommit));
     }
 
     // Source URL (only for img, video, source elements)
@@ -263,39 +286,342 @@ export class MediaEditor {
     return match?.[1] ?? '';
   }
 
-  private buildParallaxToggle(
+  /**
+   * Parallax section: a Standard image / Parallax background segmented toggle,
+   * and (when ON) a mechanism picker, a strength dial (slider + numeric), and an
+   * Advanced disclosure for banner height / background-size / background-position.
+   * Values are read from the block's data-* markers + computed --parallax-strength.
+   */
+  private buildParallaxSection(
     element: Element,
-    onParallaxToggle: (element: Element) => void,
+    onParallaxToggle: ParallaxCallback,
+    onParallaxUpdate: ParallaxCallback | undefined,
+    onCommit: ChangeCallback,
   ): HTMLDivElement {
-    const row = createElement('div', {}, {
+    const block = resolveParallaxBlock(element);
+    const isOn = block !== null;
+    const mechanism: ParallaxMechanism = block ? readParallaxMechanism(block) : DEFAULT_MECHANISM;
+    const strength = block ? readParallaxStrength(block) : DEFAULT_STRENGTH;
+
+    const section = createElement('div', {}, {
       display: 'flex',
       flexDirection: 'column',
-      gap: '4px',
+      gap: '6px',
     });
 
-    const label = createText('div', 'Parallax', 'mono');
+    const heading = createText('div', 'Parallax', 'mono');
+    heading.style.color = OVERLAY.text;
+    heading.style.fontSize = '11px';
+    section.appendChild(heading);
+
+    // --- Segmented toggle: Standard image | Parallax background ---
+    const toggleRow = createElement('div', { role: 'group', 'aria-label': 'Parallax mode' }, {
+      display: 'flex',
+      gap: '4px',
+    });
+    const makeToggleBtn = (label: string, active: boolean, onClick: () => void): HTMLButtonElement => {
+      const btn = createElement('button', {
+        type: 'button',
+        'aria-pressed': active ? 'true' : 'false',
+      }, {
+        flex: '1',
+        padding: '2px 8px',
+        fontSize: '10px',
+        cursor: 'pointer',
+        background: 'transparent',
+        border: `1px solid ${active ? OVERLAY.primary : OVERLAY.border}`,
+        borderRadius: OVERLAY.radiusSm,
+        color: active ? OVERLAY.text : OVERLAY.textMuted,
+        fontFamily: OVERLAY.fontFamily,
+      }) as HTMLButtonElement;
+      btn.textContent = label;
+      btn.addEventListener('click', () => { if (!active) onClick(); });
+      btn.addEventListener('focus', () => { btn.style.outline = `2px solid ${OVERLAY.primary}`; });
+      btn.addEventListener('blur', () => { btn.style.outline = ''; });
+      return btn;
+    };
+    toggleRow.appendChild(makeToggleBtn('Standard image', !isOn, () => {
+      // Turn OFF — revert the block to an <img>.
+      onParallaxToggle(element, mechanism, strength);
+    }));
+    toggleRow.appendChild(makeToggleBtn('Parallax background', isOn, () => {
+      // Turn ON — convert with the default mechanism + strength.
+      onParallaxToggle(element, DEFAULT_MECHANISM, DEFAULT_STRENGTH);
+    }));
+    section.appendChild(toggleRow);
+
+    if (!isOn || !block) {
+      return section; // OFF — only the toggle is shown.
+    }
+
+    // --- Mechanism picker ---
+    const supportsScrollTimeline = this.supportsScrollTimeline();
+    const reducedMotion = this.prefersReducedMotion();
+
+    const mechRow = createElement('div', {}, { display: 'flex', flexDirection: 'column', gap: '4px' });
+    const mechLabel = createText('div', 'Mechanism', 'mono');
+    mechLabel.style.color = OVERLAY.textMuted;
+    mechLabel.style.fontSize = '10px';
+    mechRow.appendChild(mechLabel);
+
+    const mechSelect = createElement('select', { 'aria-label': 'Parallax mechanism' }, {
+      width: '100%',
+      padding: '4px 6px',
+      background: 'rgba(255, 255, 255, 0.08)',
+      border: `1px solid ${OVERLAY.border}`,
+      borderRadius: OVERLAY.radiusSm,
+      color: OVERLAY.text,
+      fontSize: OVERLAY.monoSize,
+      fontFamily: OVERLAY.monoFamily,
+      outline: 'none',
+      cursor: 'pointer',
+      boxSizing: 'border-box',
+    }) as HTMLSelectElement;
+    for (const opt of MECHANISM_OPTIONS) {
+      const o = createElement('option', { value: opt.value }, {
+        background: '#1a1a2e',
+        color: OVERLAY.text,
+      }) as HTMLOptionElement;
+      o.textContent = opt.label;
+      if (opt.value === mechanism) o.selected = true;
+      o.title = this.mechanismNote(opt.value, supportsScrollTimeline, reducedMotion);
+      mechSelect.appendChild(o);
+    }
+    mechRow.appendChild(mechSelect);
+
+    // Live support note under the select.
+    const note = createText('div', this.mechanismNote(mechanism, supportsScrollTimeline, reducedMotion), 'mono');
+    note.style.color = OVERLAY.warning;
+    note.style.fontSize = '9px';
+    note.style.lineHeight = '1.3';
+    mechRow.appendChild(note);
+
+    mechSelect.addEventListener('change', () => {
+      const next = mechSelect.value as ParallaxMechanism;
+      note.textContent = this.mechanismNote(next, supportsScrollTimeline, reducedMotion);
+      // Read the live strength (the slider writes --parallax-strength inline on
+      // drag) so a dial adjustment made before switching mechanism is preserved.
+      onParallaxUpdate?.(block, next, readParallaxStrength(block));
+    });
+    section.appendChild(mechRow);
+
+    // --- Strength dial (slider + numeric) ---
+    section.appendChild(this.buildStrengthControl(block, mechanism, strength, onParallaxUpdate));
+
+    // --- Advanced disclosure: banner height / background-size / position ---
+    section.appendChild(this.buildParallaxAdvanced(block, onCommit));
+
+    return section;
+  }
+
+  private supportsScrollTimeline(): boolean {
+    try {
+      return typeof CSS !== 'undefined' && typeof CSS.supports === 'function'
+        && CSS.supports('animation-timeline: scroll()');
+    } catch {
+      return false;
+    }
+  }
+
+  private prefersReducedMotion(): boolean {
+    try {
+      return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    } catch {
+      return false;
+    }
+  }
+
+  private mechanismNote(
+    mechanism: ParallaxMechanism,
+    supportsScrollTimeline: boolean,
+    reducedMotion: boolean,
+  ): string {
+    let base: string;
+    switch (mechanism) {
+      case 'fixed':
+        base = 'background-attachment: fixed — not supported on iOS Safari.';
+        break;
+      case 'transform-3d':
+        base = '3D depth via translateZ — widely supported.';
+        break;
+      case 'scroll-driven':
+        base = supportsScrollTimeline
+          ? 'Pure-CSS scroll animation.'
+          : 'Requires Chrome 115+ — falls back to 3D transform elsewhere.';
+        break;
+      case 'js-scroll':
+        base = 'JS scroll listener (rAF-batched; Chrome target).';
+        break;
+    }
+    if (reducedMotion && mechanism !== 'fixed') {
+      base += ' Animation disabled — prefers-reduced-motion active.';
+    }
+    return base;
+  }
+
+  private buildStrengthControl(
+    block: HTMLElement,
+    mechanism: ParallaxMechanism,
+    initial: number,
+    onParallaxUpdate: ParallaxCallback | undefined,
+  ): HTMLDivElement {
+    const row = createElement('div', {}, { display: 'flex', flexDirection: 'column', gap: '2px' });
+
+    const labelRow = createElement('div', {}, {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    });
+    const label = createText('span', 'Strength', 'mono');
     label.style.color = OVERLAY.textMuted;
     label.style.fontSize = '10px';
-    row.appendChild(label);
+    labelRow.appendChild(label);
+    const valueLabel = createText('span', `${Math.round(initial * 100)}%`, 'mono');
+    valueLabel.style.color = OVERLAY.text;
+    valueLabel.style.fontSize = '10px';
+    labelRow.appendChild(valueLabel);
+    row.appendChild(labelRow);
 
-    const isParallax = isParallaxBlock(element);
-    const btn = createButton(
-      isParallax ? 'Revert to image' : 'Convert to parallax',
-      'ghost',
-      () => onParallaxToggle(element),
-    );
-    btn.style.width = '100%';
-    btn.style.justifyContent = 'center';
-    btn.style.fontSize = '11px';
-    btn.style.padding = '5px 0';
-    btn.style.border = `1px solid ${OVERLAY.border}`;
-    btn.style.borderRadius = OVERLAY.radiusSm;
-    btn.title = isParallax
-      ? 'Revert this parallax block back to an <img>'
-      : 'Convert this image to a full-width fixed-background parallax block — set its height with the dimensions tool';
-    row.appendChild(btn);
+    const controlRow = createElement('div', {}, { display: 'flex', gap: '6px', alignItems: 'center' });
 
+    const slider = createElement('input', {
+      type: 'range',
+      min: '0',
+      max: '1',
+      step: '0.05',
+      value: String(initial),
+      'aria-label': 'Parallax strength',
+      'aria-valuenow': String(initial),
+      'aria-valuetext': `${Math.round(initial * 100)} percent`,
+    }, {
+      flex: '1',
+      minWidth: '0',
+      height: '4px',
+      cursor: 'pointer',
+      accentColor: OVERLAY.primary,
+    }) as HTMLInputElement;
+
+    const numeric = createElement('input', {
+      type: 'number',
+      min: '0',
+      max: '100',
+      step: '5',
+      value: String(Math.round(initial * 100)),
+      'aria-label': 'Parallax strength percent',
+    }, {
+      width: '40px',
+      flexShrink: '0',
+      padding: '2px 4px',
+      background: 'rgba(255, 255, 255, 0.08)',
+      border: `1px solid ${OVERLAY.border}`,
+      borderRadius: OVERLAY.radiusSm,
+      color: OVERLAY.text,
+      fontSize: OVERLAY.monoSize,
+      fontFamily: OVERLAY.monoFamily,
+      outline: 'none',
+      boxSizing: 'border-box',
+    }) as HTMLInputElement;
+
+    const syncDisplay = (s: number): void => {
+      valueLabel.textContent = `${Math.round(s * 100)}%`;
+      slider.setAttribute('aria-valuenow', String(s));
+      slider.setAttribute('aria-valuetext', `${Math.round(s * 100)} percent`);
+    };
+
+    // Live preview on drag (fixed / 3D update via CSS calc; scroll/JS on release).
+    slider.addEventListener('input', () => {
+      const s = clampStrength(parseFloat(slider.value));
+      numeric.value = String(Math.round(s * 100));
+      syncDisplay(s);
+      this.preview.begin(block);
+      this.preview.apply('--parallax-strength', String(s));
+    });
+    slider.addEventListener('change', () => {
+      const s = clampStrength(parseFloat(slider.value));
+      this.preview.commit();
+      onParallaxUpdate?.(block, mechanism, s);
+    });
+    slider.addEventListener('keydown', (e) => e.stopPropagation());
+
+    numeric.addEventListener('keydown', (e) => e.stopPropagation());
+    numeric.addEventListener('change', () => {
+      const s = clampStrength((parseFloat(numeric.value) || 0) / 100);
+      slider.value = String(s);
+      numeric.value = String(Math.round(s * 100));
+      syncDisplay(s);
+      onParallaxUpdate?.(block, mechanism, s);
+    });
+
+    controlRow.appendChild(slider);
+    controlRow.appendChild(numeric);
+    row.appendChild(controlRow);
     return row;
+  }
+
+  private buildParallaxAdvanced(block: HTMLElement, onCommit: ChangeCallback): HTMLDivElement {
+    const section = createElement('div', {}, { display: 'flex', flexDirection: 'column', gap: '4px' });
+
+    const toggle = createElement('div', { role: 'button', tabindex: '0', 'aria-expanded': 'false' }, {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '4px',
+      cursor: 'pointer',
+    });
+    const arrow = createText('span', '▶', 'mono');
+    arrow.style.fontSize = '8px';
+    arrow.style.transition = 'transform 0.15s';
+    toggle.appendChild(arrow);
+    const advLabel = createText('span', 'Advanced', 'mono');
+    advLabel.style.color = OVERLAY.textMuted;
+    advLabel.style.fontSize = '10px';
+    toggle.appendChild(advLabel);
+    section.appendChild(toggle);
+
+    const content = createElement('div', {}, {
+      display: 'none',
+      flexDirection: 'column',
+      gap: '6px',
+    });
+
+    // Banner height — text input committed as a PropertyChange via onCommit.
+    content.appendChild(this.buildTextInput(
+      'Banner height',
+      getComputedProperty(block, 'height'),
+      (value) => {
+        if (!value) return;
+        const fromValue = getComputedProperty(block, 'height');
+        this.preview.begin(block);
+        this.preview.apply('height', value);
+        this.preview.commit();
+        onCommit([{ property: 'height', fromValue, toValue: value }]);
+      },
+    ));
+
+    // Background-size / zoom and position — reuse the select row pattern.
+    content.appendChild(this.buildSelect(
+      'background-size', block, ['auto', 'cover', 'contain', '100% 100%'], onCommit,
+    ));
+    content.appendChild(this.buildSelect(
+      'background-position', block,
+      ['center', 'top', 'bottom', 'left', 'right', 'top left', 'top right', 'bottom left', 'bottom right'],
+      onCommit,
+    ));
+
+    const toggleAdvanced = (): void => {
+      const open = content.style.display !== 'none';
+      content.style.display = open ? 'none' : 'flex';
+      arrow.style.transform = open ? '' : 'rotate(90deg)';
+      toggle.setAttribute('aria-expanded', open ? 'false' : 'true');
+    };
+    toggle.addEventListener('click', toggleAdvanced);
+    toggle.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleAdvanced(); }
+    });
+    toggle.addEventListener('focus', () => { toggle.style.outline = `2px solid ${OVERLAY.primary}`; });
+    toggle.addEventListener('blur', () => { toggle.style.outline = ''; });
+
+    section.appendChild(content);
+    return section;
   }
 
   private buildTextInput(
