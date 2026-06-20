@@ -150,16 +150,26 @@ function registerTools(server: McpServer, bridge: Bridge): void {
         'an edit does not duplicate the keyframes. Then apply `elementChanges` (animation-name, ' +
         'animation-timeline, etc.) to the element’s existing rule in-place, using each ' +
         'PropertyChange `source` when present (exactly as for ordinary PropertyChanges). ' +
-        'Every parallax mechanism emits a `reduced-motion-zeroing` StylesheetChange whose ' +
-        '`@media (prefers-reduced-motion: reduce)` rule zeroes the effect (WCAG 2.3.3) — ' +
-        'always write it. When `scriptChanges` is present, the diff carries a declarative ' +
+        'Every CSS parallax mechanism (fixed, transform-3d, scroll-driven) emits a ' +
+        '`reduced-motion-zeroing` StylesheetChange whose `@media (prefers-reduced-motion: ' +
+        'reduce)` rule zeroes the effect (WCAG 2.3.3) — always write it. The js-scroll ' +
+        'mechanism emits no such StylesheetChange; its generated handler short-circuits on ' +
+        '`matchMedia` instead (see `respectsReducedMotion` below). When `scriptChanges` is ' +
+        'present, the diff carries a declarative ' +
         '`ScriptBehaviorChange` (the only one in v1 is `behavior: "parallax-scroll"`); it ' +
         'does NOT contain literal JS. Author an idempotent scroll handler from `descriptor` + ' +
         '`params` in the module that owns `sourceFile` (e.g. a `useEffect` keyed by ' +
         '`targetSelector`). The handler MUST batch updates with `requestAnimationFrame` ' +
         '(`params.throttle: "raf"`) and MUST short-circuit when ' +
         "`matchMedia('(prefers-reduced-motion: reduce)').matches` (`respectsReducedMotion`); " +
-        're-application replaces the prior handler rather than stacking listeners. Reject any ' +
+        're-application replaces the prior handler rather than stacking listeners. ' +
+        'CRITICAL: attach the scroll listener to `params.scrollSource` — `"window"` for ' +
+        'page/viewport scroll, otherwise the CSS selector of the scroll container (an inner ' +
+        'overlay or `<main>` that scrolls while `body` does not). Do NOT assume `window`; a ' +
+        'window listener never fires for a nested scroll container, so the effect would be dead. ' +
+        'Compute the offset from that source’s scroll position. The pure-CSS `scroll-driven` ' +
+        'mechanism encodes the same choice in its `animation-timeline` (`scroll(root)` for the ' +
+        'page vs `scroll()` for the nearest container) inside the StylesheetChange. Reject any ' +
         '`behavior` value other than `"parallax-scroll"`. ' +
         'Optionally filter by tab session ID.',
       inputSchema: z.object({

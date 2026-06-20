@@ -15,7 +15,7 @@
 | sourceVerified | boolean | yes | True when data-source-* attributes are present on the element, false when missing |
 | relatedChanges | RelatedChange[] | no | Property changes on other elements required by this edit (e.g., parent `isolation: isolate` for blend mode). Each entry identifies the affected element and the changes to apply. |
 | reparentChanges | ReparentChange[] | no | Cross-container move operation applied as part of this edit. Populated only for reparent mode edits; empty for property-change-only diffs. |
-| stylesheetChanges | StylesheetChange[] | no | Document-level CSS rules (`@keyframes`, `@supports`, `@media`) that cannot be expressed as element-inline declarations. Populated for scroll-driven parallax (feature-009) and for the mandatory `prefers-reduced-motion` zeroing rule that every parallax mechanism emits. Empty for edits that need no stylesheet-level rules. |
+| stylesheetChanges | StylesheetChange[] | no | Document-level CSS rules (`@keyframes`, `@supports`, `@media`) that cannot be expressed as element-inline declarations. Populated for scroll-driven parallax (feature-009) and for the mandatory `prefers-reduced-motion` zeroing rule that every **CSS** parallax mechanism (`fixed`, `transform-3d`, `scroll-driven`) emits. The `js-scroll` mechanism emits **no** reduced-motion `StylesheetChange` — its generated handler short-circuits on `matchMedia('(prefers-reduced-motion: reduce)')` instead (`ScriptBehaviorChange.respectsReducedMotion: true`). Empty for edits that need no stylesheet-level rules. |
 | scriptChanges | ScriptBehaviorChange[] | no | Declarative descriptors for a bounded, reproducible-to-source JavaScript behavior. **v1 admits exactly one behavior — `parallax-scroll` (feature-009)** — under the constrained boundary allowance in `boundaries.md`. Empty for all CSS-only edits. |
 
 **Relationships:** Contains ElementInfo, PropertyChange[], PageContext, RelatedChange[], StylesheetChange[], ScriptBehaviorChange[]
@@ -85,7 +85,7 @@
 
 ### StylesheetChange
 
-A change that adds one or more **document-level CSS rules** that cannot be expressed as element-inline declarations — `@keyframes`, `@supports`, and `@media` blocks. Introduced by feature-009 (parallax editor) to carry pure-CSS scroll-driven animations (`@keyframes` + `animation-timeline: scroll()`) and the mandatory `prefers-reduced-motion` zeroing rule that every parallax mechanism emits. Stored as a parallel array on `VisualDiff` (separate from `PropertyChange[]`), mirroring `relatedChanges` / `reparentChanges`.
+A change that adds one or more **document-level CSS rules** that cannot be expressed as element-inline declarations — `@keyframes`, `@supports`, and `@media` blocks. Introduced by feature-009 (parallax editor) to carry pure-CSS scroll-driven animations (`@keyframes` + `animation-timeline`) and the mandatory `prefers-reduced-motion` zeroing rule that every **CSS** parallax mechanism (`fixed`, `transform-3d`, `scroll-driven`) emits. `js-scroll` carries no reduced-motion `StylesheetChange` — its handler short-circuits on `matchMedia` (`ScriptBehaviorChange.respectsReducedMotion`). Stored as a parallel array on `VisualDiff` (separate from `PropertyChange[]`), mirroring `relatedChanges` / `reparentChanges`.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -127,6 +127,7 @@ A **declarative descriptor** for a bounded JavaScript behavior. It does **not** 
 | axis | "x" \| "y" | yes | Scroll axis the parallax tracks. v1 banners use `"y"`. |
 | strengthFactor | number | yes | Scroll multiplier derived from `--parallax-strength` (the canonical dial). The transform offset per scroll pixel; e.g., `0.4` moves the element 0.4px per scrolled px. Range `0`–`1`. |
 | throttle | "raf" | yes | The throttling strategy the generated handler uses. v1 fixes this to `"raf"` (one `requestAnimationFrame`-batched update per frame) so the descriptor cannot request unthrottled scroll work. |
+| scrollSource | string | yes | Which element's scrolling drives the effect. `"window"` for page/viewport scroll; otherwise a CSS selector for the scroll container (e.g. an inner overlay or `<main>` that scrolls while `body` does not — common in SPAs). The generated handler MUST attach its scroll listener to this source rather than assume `window`. The editor resolves it from the operator's "scroll source" choice (auto-detected nearest scroll container, explicit page, or explicit container). The pure-CSS `scroll-driven` mechanism reflects the same choice in its `animation-timeline` (`scroll(root)` for page vs `scroll()` for the nearest container). |
 
 ### Source Rewrite Semantics (feature-009 change types)
 

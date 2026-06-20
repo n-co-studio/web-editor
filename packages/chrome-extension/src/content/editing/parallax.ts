@@ -38,15 +38,40 @@ export const PARALLAX_MECHANISMS: readonly ParallaxMechanism[] = [
   'js-scroll',
 ];
 
-/** Best depth/support trade-off — the build default (feature-009 User Flow §3). */
-export const DEFAULT_MECHANISM: ParallaxMechanism = 'transform-3d';
+/**
+ * Default mechanism: the JS background-scan (`js-scroll`) — pins the image to the
+ * viewport so the box reveals a fixed slice, works in any scroll container, and
+ * matches a hand-built reference parallax. The other mechanisms remain available.
+ */
+export const DEFAULT_MECHANISM: ParallaxMechanism = 'js-scroll';
 
 /** Canonical dial default (feature-009 Strength Model). */
 export const DEFAULT_STRENGTH = 0.3;
 
+/**
+ * Per-mechanism default strength on first convert. The scan reads best near
+ * fully-pinned (like the reference), so it defaults high; the others keep the
+ * canonical 0.3.
+ */
+export function defaultStrengthFor(mechanism: ParallaxMechanism): number {
+  return mechanism === 'js-scroll' ? 0.9 : DEFAULT_STRENGTH;
+}
+
+/**
+ * Which element's scrolling drives the effect. `'auto'` resolves the nearest
+ * scrollable ancestor (handles page scroll AND inner overlay/`<main>` scroll
+ * common in SPAs); `'page'` forces the viewport; `'container'` forces the
+ * nearest scroll container. The operator can override the auto choice in the UI.
+ */
+export type ParallaxScrollSource = 'auto' | 'page' | 'container';
+
+export const PARALLAX_SCROLL_SOURCES: readonly ParallaxScrollSource[] = ['auto', 'page', 'container'];
+export const DEFAULT_SCROLL_SOURCE: ParallaxScrollSource = 'auto';
+
 const PARALLAX_MARKER = 'data-parallax';
 const PARALLAX_TYPE = 'data-parallax-type';
 const PARALLAX_STRENGTH = 'data-parallax-strength';
+const PARALLAX_SCROLL = 'data-parallax-scroll';
 const PARALLAX_SRC = 'data-parallax-src';
 const PARALLAX_ALT = 'data-parallax-alt';
 const PARALLAX_ID = 'data-parallax-id';
@@ -145,6 +170,42 @@ export function keyframesNameFor(id: string): string {
   return `nco-parallax-${id}`;
 }
 
+/** Read the persisted scroll-source intent off a parallax block. */
+export function readScrollSource(block: Element): ParallaxScrollSource {
+  const raw = block.getAttribute(PARALLAX_SCROLL);
+  if (raw && (PARALLAX_SCROLL_SOURCES as readonly string[]).includes(raw)) {
+    return raw as ParallaxScrollSource;
+  }
+  return DEFAULT_SCROLL_SOURCE;
+}
+
+/**
+ * Resolve the nearest scrollable ancestor of `el` — an element whose overflow-y
+ * is auto/scroll and whose content overflows. Returns null when the page
+ * (viewport) is the effective scroller. Skips the block itself.
+ */
+export function resolveScrollContainer(el: Element): HTMLElement | null {
+  let node = el.parentElement;
+  while (node && node !== document.body && node !== document.documentElement) {
+    const oy = getComputedStyle(node).overflowY;
+    if ((oy === 'auto' || oy === 'scroll') && node.scrollHeight > node.clientHeight) {
+      return node;
+    }
+    node = node.parentElement;
+  }
+  return null;
+}
+
+/**
+ * The element whose scroll drives the effect, given the block's scroll-source
+ * intent. `null` means the page/viewport (`window`). `'page'` forces null;
+ * `'container'`/`'auto'` resolve the nearest scroll container (null if none).
+ */
+export function effectiveScroller(block: Element, source: ParallaxScrollSource): HTMLElement | null {
+  if (source === 'page') return null;
+  return resolveScrollContainer(block);
+}
+
 // ---------------------------------------------------------------------------
 // Block construction
 // ---------------------------------------------------------------------------
@@ -200,10 +261,11 @@ function newParallaxId(): string {
 }
 
 /** Apply the shared markers + identity (src/alt/id/class/role) to the outermost block. */
-function applyMarkers(el: HTMLElement, meta: ParallaxMeta, mechanism: ParallaxMechanism, strength: number, id: string): void {
+function applyMarkers(el: HTMLElement, meta: ParallaxMeta, mechanism: ParallaxMechanism, strength: number, id: string, scrollSource: ParallaxScrollSource): void {
   el.setAttribute(PARALLAX_MARKER, '');
   el.setAttribute(PARALLAX_TYPE, mechanism);
   el.setAttribute(PARALLAX_STRENGTH, String(strength));
+  el.setAttribute(PARALLAX_SCROLL, scrollSource);
   el.setAttribute(PARALLAX_SRC, meta.src);
   if (meta.alt) el.setAttribute(PARALLAX_ALT, meta.alt);
   el.setAttribute(PARALLAX_ID, id);
@@ -223,13 +285,31 @@ function paintBackground(el: HTMLElement, src: string): void {
   el.style.backgroundImage = `url("${src}")`;
   el.style.backgroundPosition = 'center';
   el.style.backgroundRepeat = 'no-repeat';
+  el.style.display = 'block';
   el.style.width = '100%';
-  el.style.height = DEFAULT_HEIGHT;
+  setAuthoritativeHeight(el, DEFAULT_HEIGHT);
 }
 
-function buildFixedBlock(meta: ParallaxMeta, strength: number, id: string): HTMLDivElement {
+/**
+ * Set the block's height so it survives the swap. A `<div>` has no intrinsic
+ * size (unlike the `<img>` it replaces), so when it lands in a constrained flex
+ * container it gets shrunk to its min-content height (0) — which is why a plain
+ * `height` was collapsing. `flex-shrink: 0` keeps the block at its own height in
+ * any flex context; `align-self: stretch` is left to the container. The height
+ * stays a plain inline declaration so the Advanced "banner height" editor can
+ * change it and so the source round-trip carries clean CSS (no !important).
+ */
+function setAuthoritativeHeight(el: HTMLElement, value: string): void {
+  el.style.height = value;
+  el.style.flexShrink = '0';
+  // Last-resort floor for non-flex collapses (e.g. a zero-height ancestor);
+  // well below any realistic banner height so it never fights the editor.
+  el.style.minHeight = '40px';
+}
+
+function buildFixedBlock(meta: ParallaxMeta, strength: number, id: string, scrollSource: ParallaxScrollSource): HTMLDivElement {
   const div = document.createElement('div');
-  applyMarkers(div, meta, 'fixed', strength, id);
+  applyMarkers(div, meta, 'fixed', strength, id, scrollSource);
   paintBackground(div, meta.src);
   div.style.backgroundAttachment = 'fixed';
   // Strength zooms the background (apparent-depth proxy — fixed has no true depth).
@@ -237,29 +317,63 @@ function buildFixedBlock(meta: ParallaxMeta, strength: number, id: string): HTML
   return div;
 }
 
-function buildScrollLikeBlock(meta: ParallaxMeta, mechanism: ParallaxMechanism, strength: number, id: string): HTMLDivElement {
-  // scroll-driven + js-scroll share a static, cover-painted div whose motion is
-  // produced by the live runtime (injected stylesheet / scroll listener),
-  // never by unconditional inline animation wiring.
+function buildScrollLikeBlock(meta: ParallaxMeta, mechanism: ParallaxMechanism, strength: number, id: string, scrollSource: ParallaxScrollSource): HTMLDivElement {
+  // scroll-driven uses a single, cover-painted div whose background-position is
+  // animated by the injected stylesheet (CSS-only scan).
   const div = document.createElement('div');
-  applyMarkers(div, meta, mechanism, strength, id);
+  applyMarkers(div, meta, mechanism, strength, id, scrollSource);
   paintBackground(div, meta.src);
   div.style.backgroundSize = 'cover';
   div.style.overflow = 'hidden';
   return div;
 }
 
-function buildTransform3dBlock(meta: ParallaxMeta, strength: number, id: string): HTMLDivElement {
+/**
+ * Background-scan block (default, `js-scroll`) — mirrors a hand-built parallax:
+ * a fixed-height clip box (overflow hidden, flex-shrink 0) containing an
+ * absolutely-positioned inner background-image layer. The box stays put in
+ * layout; the runtime cover-sizes the inner to the viewport and counter-
+ * translates it on scroll so the image is pinned to the viewport and the box
+ * reveals a fixed slice (the "scan"). The 100%/cover inner is the pre-load /
+ * reduced-motion fallback (a plain static cover).
+ */
+function buildScanBlock(meta: ParallaxMeta, strength: number, id: string, scrollSource: ParallaxScrollSource): HTMLDivElement {
+  const outer = document.createElement('div');
+  applyMarkers(outer, meta, 'js-scroll', strength, id, scrollSource);
+  outer.style.position = 'relative';
+  outer.style.overflow = 'hidden';
+  outer.style.display = 'block';
+  outer.style.width = '100%';
+  setAuthoritativeHeight(outer, DEFAULT_HEIGHT);
+
+  const inner = document.createElement('div');
+  inner.setAttribute(PARALLAX_INNER, '');
+  inner.style.position = 'absolute';
+  inner.style.top = '0';
+  inner.style.left = '0';
+  inner.style.width = '100%';
+  inner.style.height = '100%';
+  inner.style.backgroundImage = `url("${meta.src}")`;
+  inner.style.backgroundSize = 'cover';
+  inner.style.backgroundPosition = 'center';
+  inner.style.backgroundRepeat = 'no-repeat';
+  inner.style.willChange = 'transform';
+  outer.appendChild(inner);
+  return outer;
+}
+
+function buildTransform3dBlock(meta: ParallaxMeta, strength: number, id: string, scrollSource: ParallaxScrollSource): HTMLDivElement {
   // Outer wrapper carries the markers (data-parallax on the OUTERMOST element)
   // and the perspective; the inner element carries the translateZ depth.
   const outer = document.createElement('div');
-  applyMarkers(outer, meta, 'transform-3d', strength, id);
+  applyMarkers(outer, meta, 'transform-3d', strength, id, scrollSource);
   outer.style.setProperty(PERSPECTIVE_VAR, PERSPECTIVE_PX);
   outer.style.perspective = `var(${PERSPECTIVE_VAR})`;
   outer.style.overflow = 'hidden';
   outer.style.position = 'relative';
+  outer.style.display = 'block';
   outer.style.width = '100%';
-  outer.style.height = DEFAULT_HEIGHT;
+  setAuthoritativeHeight(outer, DEFAULT_HEIGHT);
 
   const inner = document.createElement('div');
   inner.setAttribute(PARALLAX_INNER, '');
@@ -278,15 +392,16 @@ function buildTransform3dBlock(meta: ParallaxMeta, strength: number, id: string)
   return outer;
 }
 
-function buildBlock(meta: ParallaxMeta, mechanism: ParallaxMechanism, strength: number, id: string): HTMLDivElement {
+function buildBlock(meta: ParallaxMeta, mechanism: ParallaxMechanism, strength: number, id: string, scrollSource: ParallaxScrollSource): HTMLDivElement {
   switch (mechanism) {
     case 'fixed':
-      return buildFixedBlock(meta, strength, id);
+      return buildFixedBlock(meta, strength, id, scrollSource);
     case 'transform-3d':
-      return buildTransform3dBlock(meta, strength, id);
+      return buildTransform3dBlock(meta, strength, id, scrollSource);
     case 'scroll-driven':
+      return buildScrollLikeBlock(meta, mechanism, strength, id, scrollSource);
     case 'js-scroll':
-      return buildScrollLikeBlock(meta, mechanism, strength, id);
+      return buildScanBlock(meta, strength, id, scrollSource);
   }
 }
 
@@ -299,21 +414,29 @@ export function toParallaxBlock(
   img: HTMLImageElement,
   mechanism: ParallaxMechanism = DEFAULT_MECHANISM,
   strength: number = DEFAULT_STRENGTH,
+  scrollSource: ParallaxScrollSource = DEFAULT_SCROLL_SOURCE,
 ): HTMLDivElement {
-  return buildBlock(metaFromImage(img), mechanism, clampStrength(strength), newParallaxId());
+  return buildBlock(metaFromImage(img), mechanism, clampStrength(strength), newParallaxId(), scrollSource);
 }
 
 /**
  * Rebuild a fresh parallax block from an existing block's stored identity, for a
- * new mechanism / strength. A new id is minted so the live runtime treats it as
- * a distinct artifact (old block's artifacts are torn down on replace).
+ * new mechanism / strength / scroll source. A new id is minted so the live
+ * runtime treats it as a distinct artifact (old block's artifacts are torn down
+ * on replace).
  */
 export function rebuildParallaxBlock(
   block: HTMLElement,
   mechanism: ParallaxMechanism,
   strength: number,
+  scrollSource: ParallaxScrollSource = DEFAULT_SCROLL_SOURCE,
 ): HTMLDivElement {
-  return buildBlock(metaFromBlock(block), mechanism, clampStrength(strength), newParallaxId());
+  const newEl = buildBlock(metaFromBlock(block), mechanism, clampStrength(strength), newParallaxId(), scrollSource);
+  // Preserve operator-customized banner height across a mechanism / strength
+  // switch — otherwise the rebuild silently resets the banner to DEFAULT_HEIGHT.
+  const customHeight = block.style.height;
+  if (customHeight) newEl.style.height = customHeight;
+  return newEl;
 }
 
 /** Reconstruct the original `<img>` from a parallax block's data-* markers. */
@@ -333,11 +456,19 @@ export function fromParallaxBlock(block: HTMLElement): HTMLImageElement {
 // Diff payload builders (StylesheetChange / ScriptBehaviorChange)
 // ---------------------------------------------------------------------------
 
+/**
+ * The scan keyframe pans the background WITHIN the fixed box (the box stays put
+ * in layout; the image scans vertically, revealing different parts). Strength
+ * widens the pan range around centre: `50% ± strength·50%`. At strength 1 it's a
+ * full 0%→100% scan; at 0.3 a subtle 35%→65%.
+ */
 function keyframesRule(name: string): StylesheetRule {
+  const from = `calc((0.5 - ${STRENGTH_REF} * 0.5) * 100%)`;
+  const to = `calc((0.5 + ${STRENGTH_REF} * 0.5) * 100%)`;
   const cssText =
     `@keyframes ${name} {\n` +
-    `  from { transform: translateY(0); }\n` +
-    `  to { transform: translateY(calc(${STRENGTH_REF} * -240px)); }\n` +
+    `  from { background-position-y: ${from}; }\n` +
+    `  to { background-position-y: ${to}; }\n` +
     `}`;
   return { ruleType: 'keyframes', name, cssText };
 }
@@ -349,6 +480,12 @@ function reducedMotionRule(mechanism: ParallaxMechanism, selector: string): Styl
       body = `  ${selector} { background-attachment: scroll; }`;
       break;
     case 'transform-3d':
+      body = `  ${selector} > * { transform: none; }`;
+      break;
+    case 'js-scroll':
+      // Defensive: js-scroll never reaches here (buildStylesheetChanges returns
+      // early — it handles reduced-motion via the runtime matchMedia short-
+      // circuit, not a StylesheetChange). Zero the inner transform if it ever does.
       body = `  ${selector} > * { transform: none; }`;
       break;
     case 'scroll-driven':
@@ -363,20 +500,36 @@ function reducedMotionRule(mechanism: ParallaxMechanism, selector: string): Styl
   };
 }
 
-/** The element-level animation longhands wired by scroll-driven (also live). */
-const SCROLL_ANIMATION_LONGHANDS: ReadonlyArray<{ property: string; value: string }> = [
-  { property: 'animation-name', value: '__KEYFRAMES__' },
-  { property: 'animation-timeline', value: 'scroll()' },
-  { property: 'animation-duration', value: 'auto' },
-  { property: 'animation-fill-mode', value: 'both' },
-  { property: 'animation-timing-function', value: 'linear' },
-];
+/**
+ * The CSS `animation-timeline` for a scroll source. For nested/auto we use
+ * `view()` — the scan progresses as the box passes through its nearest
+ * scrollport (the overlay), which is the natural "scan" feel. For an explicit
+ * page source we use `scroll(root)` so it tracks page scroll.
+ */
+function scrollTimelineValue(source: ParallaxScrollSource): string {
+  return source === 'page' ? 'scroll(root)' : 'view()';
+}
 
-function scrollDrivenElementChanges(keyframesName: string): PropertyChange[] {
-  return SCROLL_ANIMATION_LONGHANDS.map((d) => ({
+/**
+ * The element-level animation longhands wired by scroll-driven (also live).
+ * `animation-timeline` reflects the scroll source — `scroll(root)` for the page,
+ * `scroll()` (nearest scroll container) for an inner overlay/`<main>`.
+ */
+function scrollAnimationLonghands(keyframesName: string, timelineValue: string): ReadonlyArray<{ property: string; value: string }> {
+  return [
+    { property: 'animation-name', value: keyframesName },
+    { property: 'animation-timeline', value: timelineValue },
+    { property: 'animation-duration', value: 'auto' },
+    { property: 'animation-fill-mode', value: 'both' },
+    { property: 'animation-timing-function', value: 'linear' },
+  ];
+}
+
+function scrollDrivenElementChanges(keyframesName: string, timelineValue: string): PropertyChange[] {
+  return scrollAnimationLonghands(keyframesName, timelineValue).map((d) => ({
     property: d.property,
     fromValue: 'none',
-    toValue: d.property === 'animation-name' ? keyframesName : d.value,
+    toValue: d.value,
   }));
 }
 
@@ -391,6 +544,7 @@ export function buildStylesheetChanges(
   strength: number,
   selector: string,
   id: string,
+  scrollSource: ParallaxScrollSource = DEFAULT_SCROLL_SOURCE,
 ): StylesheetChange[] {
   if (mechanism === 'js-scroll') return [];
 
@@ -398,34 +552,34 @@ export function buildStylesheetChanges(
 
   if (mechanism === 'scroll-driven') {
     const name = keyframesNameFor(id);
-    const wiring = SCROLL_ANIMATION_LONGHANDS
-      .map((d) => `    ${d.property}: ${d.property === 'animation-name' ? name : d.value};`)
+    const timelineValue = scrollTimelineValue(scrollSource);
+    const wiring = scrollAnimationLonghands(name, timelineValue)
+      .map((d) => `    ${d.property}: ${d.value};`)
       .join('\n');
-    const fallbackDepth = `calc(${STRENGTH_REF} * -300px)`;
     const rules: StylesheetRule[] = [
       keyframesRule(name),
       {
         ruleType: 'supports',
-        condition: '(animation-timeline: scroll())',
+        condition: '(animation-timeline: view())',
         cssText:
-          `@supports (animation-timeline: scroll()) {\n` +
+          `@supports (animation-timeline: view()) {\n` +
           `  ${selector} {\n${wiring}\n  }\n` +
           `}`,
       },
       {
         ruleType: 'supports',
-        condition: 'not (animation-timeline: scroll())',
+        condition: 'not (animation-timeline: view())',
         cssText:
-          `@supports not (animation-timeline: scroll()) {\n` +
-          `  ${selector} { perspective: ${PERSPECTIVE_PX}; overflow: hidden; }\n` +
-          `  ${selector} > * { transform: translateZ(${fallbackDepth}) scale(calc((${PERSPECTIVE_PX} - (${fallbackDepth})) / ${PERSPECTIVE_PX})); }\n` +
+          `@supports not (animation-timeline: view()) {\n` +
+          `  /* No scroll-driven support — degrade to a static centred background. */\n` +
+          `  ${selector} { background-position-y: center; }\n` +
           `}`,
       },
     ];
     changes.push({
       type: 'stylesheet',
       rules,
-      elementChanges: scrollDrivenElementChanges(name),
+      elementChanges: scrollDrivenElementChanges(name, timelineValue),
       reason: 'scroll-driven-parallax',
     });
   }
@@ -465,6 +619,7 @@ export function buildScriptChange(
   strength: number,
   selector: string,
   sourceFile: string,
+  scrollSource: string,
 ): ScriptBehaviorChange | null {
   if (mechanism !== 'js-scroll') return null;
   const factor = clampStrength(strength);
@@ -473,11 +628,19 @@ export function buildScriptChange(
     behavior: 'parallax-scroll',
     targetSelector: selector,
     sourceFile,
-    params: { axis: 'y', strengthFactor: factor, throttle: 'raf' },
+    params: { axis: 'y', strengthFactor: factor, throttle: 'raf', scrollSource },
     respectsReducedMotion: true,
     descriptor:
-      `On scroll, translate ${selector} vertically at ${factor}× scroll offset ` +
-      `using a requestAnimationFrame-batched handler; disable under prefers-reduced-motion.`,
+      `Background-scan parallax on ${selector}: a fixed-height clip box (position:relative; ` +
+      `overflow:hidden; flex-shrink:0) containing an absolutely-positioned inner layer with the ` +
+      `background-image (background-size:cover). In a requestAnimationFrame on scroll, size the ` +
+      `inner to COVER THE VIEWPORT (scale = max(vw/naturalW, vh/naturalH); recompute on load+resize ` +
+      `only) and set its transform to translate3d((baseX - boxRect.left)*${factor}, ` +
+      `(baseY - boxRect.top)*${factor}, 0) where baseX=(vw-coverW)/2, baseY=(vh-coverH)/2 — pinning ` +
+      `the image to the viewport so the box reveals a fixed slice (strengthFactor 1 = fully pinned). ` +
+      `Attach the scroll listener in the CAPTURE phase on window so nested scroll containers ` +
+      `(an inner overlay/<main>, see params.scrollSource) are caught. Disable under ` +
+      `prefers-reduced-motion (leave the inner as a static CSS cover).`,
     reason: 'js-scroll-parallax',
   };
 }
@@ -492,7 +655,8 @@ const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
 
 interface RuntimeArtifact {
   styleEl?: HTMLStyleElement;
-  scrollHandler?: () => void;
+  /** Removes any scroll listener (from window or the resolved container). */
+  cleanup?: () => void;
 }
 
 /**
@@ -531,18 +695,21 @@ export class ParallaxRuntime {
     const strength = readParallaxStrength(block);
     const name = keyframesNameFor(id);
     const sel = `[${PARALLAX_ID}="${id}"]`;
+    const timelineValue = scrollTimelineValue(readScrollSource(block));
     const styleEl = document.createElement('style');
     styleEl.setAttribute(STYLE_FOR_ATTR, id);
-    const wiring = SCROLL_ANIMATION_LONGHANDS
-      .map((d) => `  ${d.property}: ${d.property === 'animation-name' ? name : d.value};`)
+    const wiring = scrollAnimationLonghands(name, timelineValue)
+      .map((d) => `  ${d.property}: ${d.value};`)
       .join('\n');
     const reduced = this.prefersReducedMotion()
       ? `\n@media ${REDUCED_MOTION_QUERY} { ${sel} { animation: none; } }`
       : '';
+    const fromPos = `calc((0.5 - ${STRENGTH_REF} * 0.5) * 100%)`;
+    const toPos = `calc((0.5 + ${STRENGTH_REF} * 0.5) * 100%)`;
     styleEl.textContent =
-      `@keyframes ${name} { from { transform: translateY(0); } ` +
-      `to { transform: translateY(calc(${STRENGTH_REF} * -240px)); } }\n` +
-      `@supports (animation-timeline: scroll()) {\n${sel} {\n${wiring}\n}\n}` +
+      `@keyframes ${name} { from { background-position-y: ${fromPos}; } ` +
+      `to { background-position-y: ${toPos}; } }\n` +
+      `@supports (animation-timeline: view()) {\n${sel} {\n${wiring}\n}\n}` +
       reduced;
     (document.head ?? document.documentElement).appendChild(styleEl);
     block.style.setProperty(STRENGTH_VAR, String(strength));
@@ -550,33 +717,70 @@ export class ParallaxRuntime {
   }
 
   private applyJsScroll(block: HTMLElement, id: string): void {
+    // Background-scan: pin the inner image layer to the viewport so the box
+    // reveals a fixed slice (mirrors the hand-built reference). Operates on the
+    // inner `[data-parallax-inner]`, NOT the box (the box stays put in layout).
+    const inner = block.querySelector<HTMLElement>(`[${PARALLAX_INNER}]`);
+    if (!inner) { this.artifacts.set(id, {}); return; }
+
     if (this.prefersReducedMotion()) {
-      // Honor reduced motion: no listener, no transform.
-      block.style.transform = '';
+      // Honor reduced motion: static cover, no listener.
+      inner.style.transform = '';
+      inner.style.width = '100%';
+      inner.style.height = '100%';
       this.artifacts.set(id, {});
       return;
     }
+
     const factor = readParallaxStrength(block);
-    let ticking = false;
-    const update = () => {
-      ticking = false;
-      if (!block.isConnected) {
-        this.teardown(id);
-        return;
-      }
+    const src = block.getAttribute(PARALLAX_SRC) || '';
+    let nat: { w: number; h: number } | null = null;
+    let baseX = 0;
+    let baseY = 0;
+    let raf = 0;
+
+    // Cover the VIEWPORT (recomputed on load/resize only), centred.
+    const size = () => {
+      if (!nat) return;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const scale = Math.max(vw / nat.w, vh / nat.h);
+      const bw = nat.w * scale;
+      const bh = nat.h * scale;
+      baseX = (vw - bw) / 2;
+      baseY = (vh - bh) / 2;
+      inner.style.width = `${bw}px`;
+      inner.style.height = `${bh}px`;
+    };
+    // Per-frame: place the inner so the box reveals the viewport-fixed slice.
+    // `factor` (strength) scales the pin: 1 = fully viewport-fixed, 0 = scrolls
+    // with the box.
+    const position = () => {
+      raf = 0;
+      if (!block.isConnected) { this.teardown(id); return; }
       const rect = block.getBoundingClientRect();
-      // Offset relative to the element's own crossing of the viewport centre.
-      const offset = (rect.top + rect.height / 2 - window.innerHeight / 2) * -factor;
-      block.style.transform = `translateY(${offset.toFixed(1)}px)`;
+      inner.style.transform =
+        `translate3d(${((baseX - rect.left) * factor).toFixed(1)}px, ${((baseY - rect.top) * factor).toFixed(1)}px, 0)`;
     };
-    const handler = () => {
-      if (ticking) return;
-      ticking = true;
-      requestAnimationFrame(update);
-    };
-    window.addEventListener('scroll', handler, { passive: true });
-    this.artifacts.set(id, { scrollHandler: handler });
-    update();
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(position); };
+    const onResize = () => { size(); position(); };
+
+    // `window.Image` — next/image and other shims can shadow the bare `Image`.
+    const img = new window.Image();
+    img.onload = () => { nat = { w: img.naturalWidth, h: img.naturalHeight }; size(); position(); };
+    img.src = src;
+
+    // Capture-phase window scroll catches inner scrollers (overlays/<main>) too,
+    // so this works regardless of which container actually scrolls.
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onResize);
+    this.artifacts.set(id, {
+      cleanup: () => {
+        window.removeEventListener('scroll', onScroll, true);
+        window.removeEventListener('resize', onResize);
+        if (raf) cancelAnimationFrame(raf);
+      },
+    });
   }
 
   /** Remove the live artifact (style element / listener) for a block id. */
@@ -588,7 +792,7 @@ export class ParallaxRuntime {
       return;
     }
     art.styleEl?.remove();
-    if (art.scrollHandler) window.removeEventListener('scroll', art.scrollHandler);
+    art.cleanup?.();
     this.artifacts.delete(id);
   }
 

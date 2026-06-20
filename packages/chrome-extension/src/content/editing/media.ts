@@ -8,11 +8,15 @@ import {
   resolveParallaxBlock,
   readParallaxMechanism,
   readParallaxStrength,
+  readScrollSource,
+  resolveScrollContainer,
   clampStrength,
+  defaultStrengthFor,
   DEFAULT_MECHANISM,
   DEFAULT_STRENGTH,
+  DEFAULT_SCROLL_SOURCE,
 } from './parallax';
-import type { ParallaxMechanism } from './parallax';
+import type { ParallaxMechanism, ParallaxScrollSource } from './parallax';
 
 // File System Access API types (not in standard TS lib)
 declare global {
@@ -28,7 +32,7 @@ declare global {
 
 type ChangeCallback = (changes: PropertyChange[]) => void;
 type AttributeCallback = (changes: AttributeChange[]) => void;
-type ParallaxCallback = (element: Element, mechanism: ParallaxMechanism, strength: number) => void;
+type ParallaxCallback = (element: Element, mechanism: ParallaxMechanism, strength: number, scrollSource: ParallaxScrollSource) => void;
 
 const PANEL_WIDTH = 240;
 
@@ -38,10 +42,10 @@ interface MechanismOption {
 }
 
 const MECHANISM_OPTIONS: readonly MechanismOption[] = [
-  { value: 'fixed', label: 'Fixed' },
-  { value: 'transform-3d', label: '3D Transform' },
-  { value: 'scroll-driven', label: 'Scroll-driven' },
-  { value: 'js-scroll', label: 'JS Listener' },
+  { value: 'js-scroll', label: 'Background scan (default)' },
+  { value: 'scroll-driven', label: 'Scroll-driven (CSS)' },
+  { value: 'transform-3d', label: '3D depth' },
+  { value: 'fixed', label: 'Fixed (page only)' },
 ];
 
 const OBJECT_FIT_OPTIONS = ['fill', 'contain', 'cover', 'none', 'scale-down'] as const;
@@ -302,6 +306,7 @@ export class MediaEditor {
     const isOn = block !== null;
     const mechanism: ParallaxMechanism = block ? readParallaxMechanism(block) : DEFAULT_MECHANISM;
     const strength = block ? readParallaxStrength(block) : DEFAULT_STRENGTH;
+    const scrollSource: ParallaxScrollSource = block ? readScrollSource(block) : DEFAULT_SCROLL_SOURCE;
 
     const section = createElement('div', {}, {
       display: 'flex',
@@ -342,11 +347,11 @@ export class MediaEditor {
     };
     toggleRow.appendChild(makeToggleBtn('Standard image', !isOn, () => {
       // Turn OFF — revert the block to an <img>.
-      onParallaxToggle(element, mechanism, strength);
+      onParallaxToggle(element, mechanism, strength, scrollSource);
     }));
     toggleRow.appendChild(makeToggleBtn('Parallax background', isOn, () => {
-      // Turn ON — convert with the default mechanism + strength.
-      onParallaxToggle(element, DEFAULT_MECHANISM, DEFAULT_STRENGTH);
+      // Turn ON — convert with the default mechanism + its default strength + scroll source.
+      onParallaxToggle(element, DEFAULT_MECHANISM, defaultStrengthFor(DEFAULT_MECHANISM), DEFAULT_SCROLL_SOURCE);
     }));
     section.appendChild(toggleRow);
 
@@ -401,12 +406,15 @@ export class MediaEditor {
       note.textContent = this.mechanismNote(next, supportsScrollTimeline, reducedMotion);
       // Read the live strength (the slider writes --parallax-strength inline on
       // drag) so a dial adjustment made before switching mechanism is preserved.
-      onParallaxUpdate?.(block, next, readParallaxStrength(block));
+      onParallaxUpdate?.(block, next, readParallaxStrength(block), scrollSource);
     });
     section.appendChild(mechRow);
 
+    // --- Scroll source: which element's scrolling drives the effect ---
+    section.appendChild(this.buildScrollSourceRow(block, mechanism, scrollSource, onParallaxUpdate));
+
     // --- Strength dial (slider + numeric) ---
-    section.appendChild(this.buildStrengthControl(block, mechanism, strength, onParallaxUpdate));
+    section.appendChild(this.buildStrengthControl(block, mechanism, strength, scrollSource, onParallaxUpdate));
 
     // --- Advanced disclosure: banner height / background-size / position ---
     section.appendChild(this.buildParallaxAdvanced(block, onCommit));
@@ -438,31 +446,98 @@ export class MediaEditor {
   ): string {
     let base: string;
     switch (mechanism) {
-      case 'fixed':
-        base = 'background-attachment: fixed — not supported on iOS Safari.';
-        break;
-      case 'transform-3d':
-        base = '3D depth via translateZ — widely supported.';
+      case 'js-scroll':
+        base = 'Pins the image to the viewport so the box reveals a fixed slice — works in any scroll container (rAF + capture scroll).';
         break;
       case 'scroll-driven':
         base = supportsScrollTimeline
-          ? 'Pure-CSS scroll animation.'
-          : 'Requires Chrome 115+ — falls back to 3D transform elsewhere.';
+          ? 'Pure-CSS scan (background-position via animation-timeline).'
+          : 'Requires Chrome 115+ — degrades to a static cover elsewhere.';
         break;
-      case 'js-scroll':
-        base = 'JS scroll listener (rAF-batched; Chrome target).';
+      case 'transform-3d':
+        base = '3D depth via translateZ — static (no scroll motion).';
+        break;
+      case 'fixed':
+        base = 'background-attachment: fixed — page/viewport scroll only; not iOS Safari, not inner scrollers.';
         break;
     }
     if (reducedMotion && mechanism !== 'fixed') {
-      base += ' Animation disabled — prefers-reduced-motion active.';
+      base += ' Motion disabled — prefers-reduced-motion active.';
     }
     return base;
+  }
+
+  private buildScrollSourceRow(
+    block: HTMLElement,
+    mechanism: ParallaxMechanism,
+    current: ParallaxScrollSource,
+    onParallaxUpdate: ParallaxCallback | undefined,
+  ): HTMLDivElement {
+    const row = createElement('div', {}, { display: 'flex', flexDirection: 'column', gap: '4px' });
+    const label = createText('div', 'Scroll source', 'mono');
+    label.style.color = OVERLAY.textMuted;
+    label.style.fontSize = '10px';
+    row.appendChild(label);
+
+    const select = createElement('select', { 'aria-label': 'Scroll source' }, {
+      width: '100%',
+      padding: '4px 6px',
+      background: 'rgba(255, 255, 255, 0.08)',
+      border: `1px solid ${OVERLAY.border}`,
+      borderRadius: OVERLAY.radiusSm,
+      color: OVERLAY.text,
+      fontSize: OVERLAY.monoSize,
+      fontFamily: OVERLAY.monoFamily,
+      outline: 'none',
+      cursor: 'pointer',
+      boxSizing: 'border-box',
+    }) as HTMLSelectElement;
+    const opts: ReadonlyArray<{ value: ParallaxScrollSource; label: string }> = [
+      { value: 'auto', label: 'Auto (nearest scroller)' },
+      { value: 'page', label: 'Page / viewport' },
+      { value: 'container', label: 'This container' },
+    ];
+    for (const o of opts) {
+      const option = createElement('option', { value: o.value }, {
+        background: '#1a1a2e',
+        color: OVERLAY.text,
+      }) as HTMLOptionElement;
+      option.textContent = o.label;
+      if (o.value === current) option.selected = true;
+      select.appendChild(option);
+    }
+    row.appendChild(select);
+
+    const note = createText('div', this.scrollSourceNote(block, mechanism, current), 'mono');
+    note.style.color = OVERLAY.warning;
+    note.style.fontSize = '9px';
+    note.style.lineHeight = '1.3';
+    row.appendChild(note);
+
+    select.addEventListener('change', () => {
+      const next = select.value as ParallaxScrollSource;
+      note.textContent = this.scrollSourceNote(block, mechanism, next);
+      onParallaxUpdate?.(block, mechanism, readParallaxStrength(block), next);
+    });
+    return row;
+  }
+
+  private scrollSourceNote(block: HTMLElement, mechanism: ParallaxMechanism, source: ParallaxScrollSource): string {
+    if (mechanism === 'fixed' && source !== 'page') {
+      return 'Fixed tracks the viewport only — choose Page, or a scroll-linked mechanism (3D / Scroll-driven / JS) for inner-scroll parallax.';
+    }
+    if (source === 'page') return 'Tracks page / viewport scroll.';
+    const container = resolveScrollContainer(block);
+    return container
+      ? 'Tracks the nearest scroll container (e.g. an inner overlay).'
+      : 'No inner scroll container detected — falls back to page scroll.';
   }
 
   private buildStrengthControl(
     block: HTMLElement,
     mechanism: ParallaxMechanism,
     initial: number,
+    scrollSource: ParallaxScrollSource,
     onParallaxUpdate: ParallaxCallback | undefined,
   ): HTMLDivElement {
     const row = createElement('div', {}, { display: 'flex', flexDirection: 'column', gap: '2px' });
@@ -539,7 +614,7 @@ export class MediaEditor {
     slider.addEventListener('change', () => {
       const s = clampStrength(parseFloat(slider.value));
       this.preview.commit();
-      onParallaxUpdate?.(block, mechanism, s);
+      onParallaxUpdate?.(block, mechanism, s, scrollSource);
     });
     slider.addEventListener('keydown', (e) => e.stopPropagation());
 
@@ -549,7 +624,7 @@ export class MediaEditor {
       slider.value = String(s);
       numeric.value = String(Math.round(s * 100));
       syncDisplay(s);
-      onParallaxUpdate?.(block, mechanism, s);
+      onParallaxUpdate?.(block, mechanism, s, scrollSource);
     });
 
     controlRow.appendChild(slider);
