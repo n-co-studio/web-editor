@@ -83,7 +83,7 @@ export const STRENGTH_VAR = '--parallax-strength';
 const STRENGTH_REF = `var(${STRENGTH_VAR})`;
 /** The 3D perspective custom property (transform-3d only). */
 const PERSPECTIVE_VAR = '--p-perspective';
-const PERSPECTIVE_PX = '300px';
+const PERSPECTIVE_PX = '800px';
 
 /** Default banner height — operator adjusts via the dimensions / Advanced tools. */
 const DEFAULT_HEIGHT = '400px';
@@ -127,6 +127,23 @@ export function getParallaxBlockReason(el: Element): string | null {
 /** Whether toggling parallax on this element would turn it ON (vs revert OFF). */
 export function wouldEnableParallax(el: Element): boolean {
   return resolveParallaxBlock(el) === null;
+}
+
+/**
+ * If `el` is a parallax inner background layer (the usual click target — it sits
+ * on top of the box), return the banner box that should be selected first.
+ * Returns null when `el` is not an inner layer (so selection is unchanged).
+ * Covers both tool-managed blocks (`data-parallax-inner`) and externally-authored
+ * structures (an absolutely-positioned background layer inside a clip box).
+ */
+export function parallaxBoxForInner(el: Element): HTMLElement | null {
+  if (!(el instanceof HTMLElement)) return null;
+  if (el.hasAttribute(PARALLAX_INNER)) {
+    const box = el.closest(`[${PARALLAX_MARKER}]`);
+    return box instanceof HTMLElement ? box : null;
+  }
+  const unit = detectExternalParallaxUnit(el);
+  return unit && unit.inner === el ? unit.box : null;
 }
 
 /** Clamp an arbitrary strength input to the canonical 0–1 range; NaN → default. */
@@ -295,16 +312,13 @@ function paintBackground(el: HTMLElement, src: string): void {
  * size (unlike the `<img>` it replaces), so when it lands in a constrained flex
  * container it gets shrunk to its min-content height (0) — which is why a plain
  * `height` was collapsing. `flex-shrink: 0` keeps the block at its own height in
- * any flex context; `align-self: stretch` is left to the container. The height
- * stays a plain inline declaration so the Advanced "banner height" editor can
- * change it and so the source round-trip carries clean CSS (no !important).
+ * any flex context. No `min-height` floor: the height is a plain inline value
+ * the operator can freely drag down (we never set it to zero ourselves), and the
+ * source round-trip carries clean CSS.
  */
 function setAuthoritativeHeight(el: HTMLElement, value: string): void {
   el.style.height = value;
   el.style.flexShrink = '0';
-  // Last-resort floor for non-flex collapses (e.g. a zero-height ancestor);
-  // well below any realistic banner height so it never fights the editor.
-  el.style.minHeight = '40px';
 }
 
 function buildFixedBlock(meta: ParallaxMeta, strength: number, id: string, scrollSource: ParallaxScrollSource): HTMLDivElement {
@@ -317,15 +331,49 @@ function buildFixedBlock(meta: ParallaxMeta, strength: number, id: string, scrol
   return div;
 }
 
-function buildScrollLikeBlock(meta: ParallaxMeta, mechanism: ParallaxMechanism, strength: number, id: string, scrollSource: ParallaxScrollSource): HTMLDivElement {
-  // scroll-driven uses a single, cover-painted div whose background-position is
-  // animated by the injected stylesheet (CSS-only scan).
-  const div = document.createElement('div');
-  applyMarkers(div, meta, mechanism, strength, id, scrollSource);
-  paintBackground(div, meta.src);
-  div.style.backgroundSize = 'cover';
-  div.style.overflow = 'hidden';
-  return div;
+/**
+ * The CSS-scan box+inner shared by `scroll-driven` and `transform-3d`: a clip
+ * box + an OVERSIZED inner (250% tall, centred via top:-75% → 75% overscan each
+ * side) that the injected `@keyframes` translates vertically via
+ * `animation-timeline: view()`. The big overscan gives strong, strength-scaled
+ * travel. `transform-3d` adds a perspective on the box and a static `translateZ`
+ * depth on the inner — the same scan, with a depth tint.
+ */
+function buildCssScanBlock(meta: ParallaxMeta, mechanism: 'scroll-driven' | 'transform-3d', strength: number, id: string, scrollSource: ParallaxScrollSource): HTMLDivElement {
+  const depth = mechanism === 'transform-3d';
+  const outer = document.createElement('div');
+  applyMarkers(outer, meta, mechanism, strength, id, scrollSource);
+  outer.style.position = 'relative';
+  outer.style.overflow = 'hidden';
+  outer.style.display = 'block';
+  outer.style.width = '100%';
+  setAuthoritativeHeight(outer, DEFAULT_HEIGHT);
+  if (depth) {
+    outer.style.setProperty(PERSPECTIVE_VAR, PERSPECTIVE_PX);
+    outer.style.perspective = `var(${PERSPECTIVE_VAR})`;
+  }
+
+  const inner = document.createElement('div');
+  inner.setAttribute(PARALLAX_INNER, '');
+  inner.style.position = 'absolute';
+  inner.style.left = '0';
+  inner.style.top = '-75%';
+  inner.style.width = '100%';
+  inner.style.height = '250%';
+  inner.style.backgroundImage = `url("${meta.src}")`;
+  inner.style.backgroundSize = 'cover';
+  inner.style.backgroundPosition = 'center';
+  inner.style.backgroundRepeat = 'no-repeat';
+  inner.style.willChange = 'transform';
+  if (depth) {
+    // Subtle static depth — animated translateY rides on top (see keyframesRule).
+    inner.style.setProperty('--p-depth', `calc(${STRENGTH_REF} * -150px)`);
+    inner.style.setProperty('--p-scale', `calc((var(${PERSPECTIVE_VAR}) - var(--p-depth)) / var(${PERSPECTIVE_VAR}))`);
+    inner.style.transform = 'translateZ(var(--p-depth)) scale(var(--p-scale))';
+    inner.style.transformOrigin = 'center';
+  }
+  outer.appendChild(inner);
+  return outer;
 }
 
 /**
@@ -362,44 +410,13 @@ function buildScanBlock(meta: ParallaxMeta, strength: number, id: string, scroll
   return outer;
 }
 
-function buildTransform3dBlock(meta: ParallaxMeta, strength: number, id: string, scrollSource: ParallaxScrollSource): HTMLDivElement {
-  // Outer wrapper carries the markers (data-parallax on the OUTERMOST element)
-  // and the perspective; the inner element carries the translateZ depth.
-  const outer = document.createElement('div');
-  applyMarkers(outer, meta, 'transform-3d', strength, id, scrollSource);
-  outer.style.setProperty(PERSPECTIVE_VAR, PERSPECTIVE_PX);
-  outer.style.perspective = `var(${PERSPECTIVE_VAR})`;
-  outer.style.overflow = 'hidden';
-  outer.style.position = 'relative';
-  outer.style.display = 'block';
-  outer.style.width = '100%';
-  setAuthoritativeHeight(outer, DEFAULT_HEIGHT);
-
-  const inner = document.createElement('div');
-  inner.setAttribute(PARALLAX_INNER, '');
-  inner.style.position = 'absolute';
-  inner.style.inset = '0';
-  inner.style.backgroundImage = `url("${meta.src}")`;
-  inner.style.backgroundSize = 'cover';
-  inner.style.backgroundPosition = 'center';
-  inner.style.backgroundRepeat = 'no-repeat';
-  // depth = strength * -300px; compensatory scale keeps the plane filling the frame.
-  inner.style.setProperty('--p-depth', `calc(${STRENGTH_REF} * -300px)`);
-  inner.style.setProperty('--p-scale', `calc((var(${PERSPECTIVE_VAR}) - var(--p-depth)) / var(${PERSPECTIVE_VAR}))`);
-  inner.style.transform = 'translateZ(var(--p-depth)) scale(var(--p-scale))';
-  inner.style.transformOrigin = 'center';
-  outer.appendChild(inner);
-  return outer;
-}
-
 function buildBlock(meta: ParallaxMeta, mechanism: ParallaxMechanism, strength: number, id: string, scrollSource: ParallaxScrollSource): HTMLDivElement {
   switch (mechanism) {
     case 'fixed':
       return buildFixedBlock(meta, strength, id, scrollSource);
     case 'transform-3d':
-      return buildTransform3dBlock(meta, strength, id, scrollSource);
     case 'scroll-driven':
-      return buildScrollLikeBlock(meta, mechanism, strength, id, scrollSource);
+      return buildCssScanBlock(meta, mechanism, strength, id, scrollSource);
     case 'js-scroll':
       return buildScanBlock(meta, strength, id, scrollSource);
   }
@@ -453,22 +470,109 @@ export function fromParallaxBlock(block: HTMLElement): HTMLImageElement {
 }
 
 // ---------------------------------------------------------------------------
+// External parallax detection & adoption
+//
+// Parallaxes built outside this tool (e.g. a hand-authored box + inner
+// background layer, no data-parallax markers) are invisible to the controls.
+// These helpers recognise that structure from a selection of EITHER layer so
+// the operator can adopt it into the tool-managed model and tune it.
+// ---------------------------------------------------------------------------
+
+/** A detected, externally-authored parallax structure (no tool markers). */
+export interface ExternalParallaxUnit {
+  readonly box: HTMLElement;
+  readonly inner: HTMLElement;
+  readonly src: string;
+}
+
+/** Extract the first url(...) from an element's resolved background-image. */
+function backgroundUrl(el: Element): string {
+  const bg = getComputedStyle(el as HTMLElement).backgroundImage;
+  return bg.match(/url\(["']?([^"')]+)["']?\)/)?.[1] ?? '';
+}
+
+/** A clip box: clips overflow and has a real height (the parallax window). */
+function isClipBox(el: HTMLElement): boolean {
+  const s = getComputedStyle(el);
+  const clips = s.overflowY === 'hidden' || s.overflowY === 'clip' || s.overflow === 'hidden' || s.overflow === 'clip';
+  return clips && el.clientHeight > 0;
+}
+
+/** An inner image layer: absolutely positioned with a background-image. */
+function isInnerLayer(el: HTMLElement): boolean {
+  return getComputedStyle(el).position === 'absolute' && backgroundUrl(el) !== '';
+}
+
+/**
+ * Detect a parallax-like structure NOT built by this tool: a clip box (overflow
+ * hidden) whose direct child is an absolutely-positioned background-image layer.
+ * Resolves from a selection of either the box or the inner. Returns null when
+ * there is no such unit, or when the element is already a tool-managed block.
+ */
+export function detectExternalParallaxUnit(el: Element): ExternalParallaxUnit | null {
+  if (!(el instanceof HTMLElement)) return null;
+  if (resolveParallaxBlock(el)) return null; // already tool-managed
+
+  // Selection on the inner background layer (the common click target).
+  if (isInnerLayer(el) && el.parentElement instanceof HTMLElement && isClipBox(el.parentElement)) {
+    return { box: el.parentElement, inner: el, src: backgroundUrl(el) };
+  }
+  // Selection on the box (the banner) — find its inner background child.
+  if (isClipBox(el)) {
+    const inner = Array.from(el.children).find(
+      (c): c is HTMLElement => c instanceof HTMLElement && isInnerLayer(c),
+    );
+    if (inner) return { box: el, inner, src: backgroundUrl(inner) };
+  }
+  return null;
+}
+
+/**
+ * Convert an externally-authored parallax into a tool-managed block: take the
+ * image, height, and identity (id/class/aria/source mapping) from the existing
+ * box+inner and rebuild it as a managed block for the given mechanism. The
+ * operator can then tune it like any tool-created parallax.
+ */
+export function adoptExternalParallax(
+  unit: ExternalParallaxUnit,
+  mechanism: ParallaxMechanism = DEFAULT_MECHANISM,
+  strength: number = defaultStrengthFor(DEFAULT_MECHANISM),
+  scrollSource: ParallaxScrollSource = DEFAULT_SCROLL_SOURCE,
+): HTMLDivElement {
+  const meta: ParallaxMeta = {
+    src: unit.src,
+    alt: unit.box.getAttribute('aria-label') || unit.inner.getAttribute('aria-label') || '',
+    id: unit.box.id || '',
+    className: unit.box.className || '',
+    source: { ...readSourceAttrs(unit.inner), ...readSourceAttrs(unit.box) },
+  };
+  const block = buildBlock(meta, mechanism, clampStrength(strength), newParallaxId(), scrollSource);
+  // Preserve the existing banner height (the clip box was already sized).
+  const h = unit.box.style.height || getComputedStyle(unit.box).height;
+  if (h && h !== 'auto' && h !== '0px') block.style.height = h;
+  return block;
+}
+
+// ---------------------------------------------------------------------------
 // Diff payload builders (StylesheetChange / ScriptBehaviorChange)
 // ---------------------------------------------------------------------------
 
 /**
- * The scan keyframe pans the background WITHIN the fixed box (the box stays put
- * in layout; the image scans vertically, revealing different parts). Strength
- * widens the pan range around centre: `50% ± strength·50%`. At strength 1 it's a
- * full 0%→100% scan; at 0.3 a subtle 35%→65%.
+ * The scan keyframe translates the OVERSIZED inner layer vertically within the
+ * clip box (the box stays put; the image scans). `translateY` is a % of the
+ * inner's own height (250% of the box), so `±strength·28%` of the inner is up to
+ * `±70%` of the box — well within the 75%-per-side overscan, so it never exposes
+ * an edge while giving strong, strength-scaled travel.
  */
-function keyframesRule(name: string): StylesheetRule {
-  const from = `calc((0.5 - ${STRENGTH_REF} * 0.5) * 100%)`;
-  const to = `calc((0.5 + ${STRENGTH_REF} * 0.5) * 100%)`;
+function keyframesRule(name: string, withDepth = false): StylesheetRule {
+  const from = `calc(${STRENGTH_REF} * 28%)`;
+  const to = `calc(${STRENGTH_REF} * -28%)`;
+  // transform-3d rides a static translateZ depth under the animated translateY.
+  const depth = withDepth ? ' translateZ(var(--p-depth)) scale(var(--p-scale))' : '';
   const cssText =
     `@keyframes ${name} {\n` +
-    `  from { background-position-y: ${from}; }\n` +
-    `  to { background-position-y: ${to}; }\n` +
+    `  from { transform: translateY(${from})${depth}; }\n` +
+    `  to { transform: translateY(${to})${depth}; }\n` +
     `}`;
   return { ruleType: 'keyframes', name, cssText };
 }
@@ -480,7 +584,8 @@ function reducedMotionRule(mechanism: ParallaxMechanism, selector: string): Styl
       body = `  ${selector} { background-attachment: scroll; }`;
       break;
     case 'transform-3d':
-      body = `  ${selector} > * { transform: none; }`;
+      // Stop the scan animation; the inner keeps its static inline depth.
+      body = `  ${selector} > * { animation: none; }`;
       break;
     case 'js-scroll':
       // Defensive: js-scroll never reaches here (buildStylesheetChanges returns
@@ -490,7 +595,8 @@ function reducedMotionRule(mechanism: ParallaxMechanism, selector: string): Styl
       break;
     case 'scroll-driven':
     default:
-      body = `  ${selector} { animation: none; }`;
+      // Animation runs on the inner layer for the CSS scan.
+      body = `  ${selector} > * { animation: none; }`;
       break;
   }
   return {
@@ -501,19 +607,9 @@ function reducedMotionRule(mechanism: ParallaxMechanism, selector: string): Styl
 }
 
 /**
- * The CSS `animation-timeline` for a scroll source. For nested/auto we use
- * `view()` — the scan progresses as the box passes through its nearest
- * scrollport (the overlay), which is the natural "scan" feel. For an explicit
- * page source we use `scroll(root)` so it tracks page scroll.
- */
-function scrollTimelineValue(source: ParallaxScrollSource): string {
-  return source === 'page' ? 'scroll(root)' : 'view()';
-}
-
-/**
  * The element-level animation longhands wired by scroll-driven (also live).
- * `animation-timeline` reflects the scroll source — `scroll(root)` for the page,
- * `scroll()` (nearest scroll container) for an inner overlay/`<main>`.
+ * Driven by `animation-timeline: view()` — the scan progresses as the box passes
+ * through its nearest scrollport (the overlay or the page).
  */
 function scrollAnimationLonghands(keyframesName: string, timelineValue: string): ReadonlyArray<{ property: string; value: string }> {
   return [
@@ -523,14 +619,6 @@ function scrollAnimationLonghands(keyframesName: string, timelineValue: string):
     { property: 'animation-fill-mode', value: 'both' },
     { property: 'animation-timing-function', value: 'linear' },
   ];
-}
-
-function scrollDrivenElementChanges(keyframesName: string, timelineValue: string): PropertyChange[] {
-  return scrollAnimationLonghands(keyframesName, timelineValue).map((d) => ({
-    property: d.property,
-    fromValue: 'none',
-    toValue: d.value,
-  }));
 }
 
 /**
@@ -550,20 +638,23 @@ export function buildStylesheetChanges(
 
   const changes: StylesheetChange[] = [];
 
-  if (mechanism === 'scroll-driven') {
+  // scroll-driven and transform-3d share the CSS scan; transform-3d adds depth.
+  if (mechanism === 'scroll-driven' || mechanism === 'transform-3d') {
     const name = keyframesNameFor(id);
-    const timelineValue = scrollTimelineValue(scrollSource);
-    const wiring = scrollAnimationLonghands(name, timelineValue)
+    // The animation runs on the INNER oversized layer (`<box> > *`), driven by
+    // the box's passage through its nearest scrollport (`view()`).
+    const innerSel = `${selector} > *`;
+    const wiring = scrollAnimationLonghands(name, 'view()')
       .map((d) => `    ${d.property}: ${d.value};`)
       .join('\n');
     const rules: StylesheetRule[] = [
-      keyframesRule(name),
+      keyframesRule(name, mechanism === 'transform-3d'),
       {
         ruleType: 'supports',
         condition: '(animation-timeline: view())',
         cssText:
           `@supports (animation-timeline: view()) {\n` +
-          `  ${selector} {\n${wiring}\n  }\n` +
+          `  ${innerSel} {\n${wiring}\n  }\n` +
           `}`,
       },
       {
@@ -571,15 +662,17 @@ export function buildStylesheetChanges(
         condition: 'not (animation-timeline: view())',
         cssText:
           `@supports not (animation-timeline: view()) {\n` +
-          `  /* No scroll-driven support — degrade to a static centred background. */\n` +
-          `  ${selector} { background-position-y: center; }\n` +
+          `  /* No scroll-driven support — inner stays static (centred cover${mechanism === 'transform-3d' ? ', depth preserved' : ''}). */\n` +
+          `  ${innerSel} { transform: ${mechanism === 'transform-3d' ? 'translateZ(var(--p-depth)) scale(var(--p-scale))' : 'none'}; }\n` +
           `}`,
       },
     ];
     changes.push({
+      // Wiring lives in the @supports rule (it targets the inner, not the box),
+      // so elementChanges is empty — the box has no element-inline animation.
       type: 'stylesheet',
       rules,
-      elementChanges: scrollDrivenElementChanges(name, timelineValue),
+      elementChanges: [],
       reason: 'scroll-driven-parallax',
     });
   }
@@ -683,32 +776,35 @@ export class ParallaxRuntime {
     if (!id) return;
     this.teardown(id);
     const mechanism = readParallaxMechanism(block);
-    if (mechanism === 'scroll-driven') {
+    if (mechanism === 'scroll-driven' || mechanism === 'transform-3d') {
       this.applyScrollDriven(block, id);
     } else if (mechanism === 'js-scroll') {
       this.applyJsScroll(block, id);
     }
-    // fixed / transform-3d need no runtime artifact (inline styles suffice).
+    // fixed needs no runtime artifact (background-attachment:fixed is inline).
   }
 
   private applyScrollDriven(block: HTMLElement, id: string): void {
     const strength = readParallaxStrength(block);
     const name = keyframesNameFor(id);
-    const sel = `[${PARALLAX_ID}="${id}"]`;
-    const timelineValue = scrollTimelineValue(readScrollSource(block));
+    // The animation runs on the INNER oversized layer, driven by the box's
+    // passage through its nearest scrollport (view()).
+    const sel = `[${PARALLAX_ID}="${id}"] > *`;
     const styleEl = document.createElement('style');
     styleEl.setAttribute(STYLE_FOR_ATTR, id);
-    const wiring = scrollAnimationLonghands(name, timelineValue)
+    const wiring = scrollAnimationLonghands(name, 'view()')
       .map((d) => `  ${d.property}: ${d.value};`)
       .join('\n');
     const reduced = this.prefersReducedMotion()
       ? `\n@media ${REDUCED_MOTION_QUERY} { ${sel} { animation: none; } }`
       : '';
-    const fromPos = `calc((0.5 - ${STRENGTH_REF} * 0.5) * 100%)`;
-    const toPos = `calc((0.5 + ${STRENGTH_REF} * 0.5) * 100%)`;
+    const withDepth = readParallaxMechanism(block) === 'transform-3d';
+    const depth = withDepth ? ' translateZ(var(--p-depth)) scale(var(--p-scale))' : '';
+    const fromY = `calc(${STRENGTH_REF} * 28%)`;
+    const toY = `calc(${STRENGTH_REF} * -28%)`;
     styleEl.textContent =
-      `@keyframes ${name} { from { background-position-y: ${fromPos}; } ` +
-      `to { background-position-y: ${toPos}; } }\n` +
+      `@keyframes ${name} { from { transform: translateY(${fromY})${depth}; } ` +
+      `to { transform: translateY(${toY})${depth}; } }\n` +
       `@supports (animation-timeline: view()) {\n${sel} {\n${wiring}\n}\n}` +
       reduced;
     (document.head ?? document.documentElement).appendChild(styleEl);

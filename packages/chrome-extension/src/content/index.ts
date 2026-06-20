@@ -56,6 +56,10 @@ import {
   getParallaxId,
   readScrollSource,
   effectiveScroller,
+  parallaxBoxForInner,
+  detectExternalParallaxUnit,
+  adoptExternalParallax,
+  defaultStrengthFor,
   clampStrength,
   DEFAULT_MECHANISM,
   DEFAULT_STRENGTH,
@@ -106,6 +110,9 @@ let layoutEditor: LayoutEditor | null = null;
 let positionEditor: PositionEditor | null = null;
 let editHistory: EditHistory | null = null;
 let parallaxRuntime: ParallaxRuntime | null = null;
+// Tracks the last click on a parallax inner layer, for double-click drill-in
+// (first click selects the banner box; a quick second click selects the inner).
+let lastParallaxInnerClick: { el: Element | null; time: number } = { el: null, time: 0 };
 let notesStore: NotesStore | null = null;
 let notesEditor: NotesEditor | null = null;
 let gridOverlay: GridOverlay | null = null;
@@ -371,8 +378,21 @@ export async function activate(): Promise<void> {
   multiSelectToolbar.onGroup((elements) => makeGroupCommit(elements));
   multiSelectToolbar.onDuplicate((elements) => duplicateElements(elements));
 
-  // Wire hover click → selection
-  hover.onClick((el) => selection!.select(el));
+  // Wire hover click → selection. For a parallax inner background layer (the
+  // usual click target, since it sits on top of the box), select the banner box
+  // first; a second click on the same spot drills into the inner layer.
+  hover.onClick((el) => {
+    const box = parallaxBoxForInner(el);
+    if (box) {
+      const now = Date.now();
+      const isDrillIn = lastParallaxInnerClick.el === el && (now - lastParallaxInnerClick.time) < 450;
+      lastParallaxInnerClick = { el, time: now };
+      selection!.select(isDrillIn ? el : box);
+      return;
+    }
+    lastParallaxInnerClick = { el: null, time: 0 };
+    selection!.select(el);
+  });
 
   // Wire DevTools DOM tree clicks → re-select different element
   devtoolsPanel.onElementSelect((el) => selection!.select(el));
@@ -1291,6 +1311,8 @@ function activateToolForElement(el: Element, mode: EditMode): void {
       makeParallaxCommit(target, mechanism, strength, scrollSource);
     }, (target, mechanism, strength, scrollSource) => {
       makeParallaxUpdate(target, mechanism, strength, scrollSource);
+    }, (target) => {
+      makeParallaxAdopt(target);
     });
     shadow!.appendChild(controls);
     toolbar!.setActiveMode('media');
@@ -1981,6 +2003,29 @@ function makeParallaxUpdate(
     newEl,
     (sel) => parallaxExtras(newEl, mechanism, s, sel),
     `Parallax: ${mechanism} @ ${Math.round(s * 100)}% (${scrollSource})`,
+  );
+}
+
+/**
+ * Adopt an externally-authored parallax (a box + inner background layer not
+ * built by this tool) into the tool-managed model: replace the existing box
+ * with a managed block carrying the same image/height/identity, so the operator
+ * can tune it with the normal controls. Emitted as a 'replace' diff.
+ */
+function makeParallaxAdopt(el: Element): void {
+  const unit = detectExternalParallaxUnit(el);
+  if (!unit || !unit.box.parentElement) {
+    devtoolsPanel?.log('No external parallax detected to adopt', 'warn');
+    return;
+  }
+  const mechanism = DEFAULT_MECHANISM;
+  const s = defaultStrengthFor(mechanism);
+  const newEl = adoptExternalParallax(unit, mechanism, s, DEFAULT_SCROLL_SOURCE);
+  performParallaxReplace(
+    unit.box,
+    newEl,
+    (sel) => parallaxExtras(newEl, mechanism, s, sel),
+    'Adopted existing parallax',
   );
 }
 
