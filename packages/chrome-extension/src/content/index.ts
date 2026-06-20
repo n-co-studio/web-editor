@@ -2014,7 +2014,7 @@ function makeParallaxUpdate(
  */
 function makeParallaxAdopt(el: Element): void {
   const unit = detectExternalParallaxUnit(el);
-  if (!unit) {
+  if (!unit || !unit.box.parentElement) {
     devtoolsPanel?.log('No external parallax detected to adopt', 'warn');
     return;
   }

@@ -549,7 +549,7 @@ export function adoptExternalParallax(
   const block = buildBlock(meta, mechanism, clampStrength(strength), newParallaxId(), scrollSource);
   // Preserve the existing banner height (the clip box was already sized).
   const h = unit.box.style.height || getComputedStyle(unit.box).height;
-  if (h && h !== 'auto') block.style.height = h;
+  if (h && h !== 'auto' && h !== '0px') block.style.height = h;
   return block;
 }
 
