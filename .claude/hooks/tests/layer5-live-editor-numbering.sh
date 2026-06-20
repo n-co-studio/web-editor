@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Layer 5 — Editor-live durable monotonic counter (Decision 0023 Amendment 2).
+# Layer 5 — Editor-live durable monotonic counter (Decision 0023 Amendment 2)
+#           and merged-branch cleanup (Decision 0045).
 #
-# Covers next-live-editor-branch.sh numbering and the editor-live close-path
-# branch deletion helper in _cleanup-helper.sh:
+# Covers next-live-editor-branch.sh numbering and the session-branch deletion
+# helper in _cleanup-helper.sh (delete_merged_session_branch):
 #   L5.1  Cold start: no HWM, no live refs -> live-editor-1, HWM written = 1.
 #   L5.2  HWM floor: seed 25 -> live-editor-26.
 #   L5.3  Reset-prevention: merge HWM to main, delete ALL live branches, rerun
@@ -11,11 +12,16 @@
 #   L5.5  Re-init guard: invoking while already on a live-editor-N branch returns
 #          the same name and creates no new branch.
 #   L5.6  Non-numeric HWM is treated as floor 0.
-#   L5.7  delete_merged_editor_live_branch deletes a merged live-editor branch.
-#   L5.8  delete_merged_editor_live_branch never touches feature/* branches.
-#   L5.9  delete_merged_editor_live_branch is a safe no-op on an unmerged branch.
+#   L5.7  delete_merged_session_branch deletes a merged live-editor branch.
+#   L5.8  delete_merged_session_branch deletes a merged feature/* branch (Decision 0045).
+#   L5.9  delete_merged_session_branch is a safe no-op on an unmerged branch.
 #   L5.10 No-duplicate: a second creation from main (first branch unmerged) sees
 #          the live ref via the scan backstop and issues a distinct higher number.
+#   L5.11 close fallback seals orphaned merged live-editor branch (no signal).
+#   L5.12 delete_merged_session_branch deletes a merged fix/* branch.
+#   L5.13 delete_merged_session_branch deletes a merged hotfix/* branch.
+#   L5.14 delete_merged_session_branch deletes a merged experiment/* branch.
+#   L5.15 delete_merged_session_branch never deletes an unmerged feature/* branch.
 #
 # Bash 3.2 compatible.
 
@@ -110,14 +116,14 @@ B=$(_run_helper "$SB2")
 assert_eq "$B" "live-editor-1" "non-numeric HWM -> floor 0 -> live-editor-1 (no live refs)"
 
 # ============================================================
-tap_section "L5.7: delete_merged_editor_live_branch deletes merged live branch"
+tap_section "L5.7: delete_merged_session_branch deletes merged live-editor branch"
 git -C "$SB2" checkout -q main
 git -C "$SB2" branch live-editor-50 main >/dev/null 2>&1
 git -C "$SB2" checkout -q live-editor-50
 echo x > "$SB2/x.txt"; git -C "$SB2" add x.txt >/dev/null 2>&1; git -C "$SB2" commit -qm c >/dev/null 2>&1
 git -C "$SB2" checkout -q main
 git -C "$SB2" merge --no-ff -m m live-editor-50 >/dev/null 2>&1
-delete_merged_editor_live_branch "live-editor-50" "$SB2"
+delete_merged_session_branch "live-editor-50" "$SB2"
 if git -C "$SB2" show-ref --verify --quiet refs/heads/live-editor-50; then
   assert_eq "exists" "deleted" "merged live-editor-50 should be deleted"
 else
@@ -125,26 +131,26 @@ else
 fi
 
 # ============================================================
-tap_section "L5.8: delete helper never touches feature/* branches"
-git -C "$SB2" branch feature/keepme main >/dev/null 2>&1
-git -C "$SB2" checkout -q feature/keepme
+tap_section "L5.8: delete_merged_session_branch deletes merged feature/* branch (Decision 0045)"
+git -C "$SB2" branch feature/auto-testme main >/dev/null 2>&1
+git -C "$SB2" checkout -q feature/auto-testme
 echo y > "$SB2/y.txt"; git -C "$SB2" add y.txt >/dev/null 2>&1; git -C "$SB2" commit -qm c2 >/dev/null 2>&1
 git -C "$SB2" checkout -q main
-git -C "$SB2" merge --no-ff -m m2 feature/keepme >/dev/null 2>&1
-delete_merged_editor_live_branch "feature/keepme" "$SB2"
-if git -C "$SB2" show-ref --verify --quiet refs/heads/feature/keepme; then
-  assert_eq "preserved" "preserved" "feature/keepme preserved (not editor-live)"
+git -C "$SB2" merge --no-ff -m m2 feature/auto-testme >/dev/null 2>&1
+delete_merged_session_branch "feature/auto-testme" "$SB2"
+if git -C "$SB2" show-ref --verify --quiet refs/heads/feature/auto-testme; then
+  assert_eq "exists" "deleted" "merged feature/auto-testme should be deleted"
 else
-  assert_eq "deleted" "preserved" "feature/keepme must NOT be deleted"
+  assert_eq "deleted" "deleted" "merged feature/auto-testme deleted"
 fi
 
 # ============================================================
-tap_section "L5.9: delete helper safe no-op on unmerged branch"
+tap_section "L5.9: delete_merged_session_branch safe no-op on unmerged live-editor branch"
 git -C "$SB2" branch live-editor-60 main >/dev/null 2>&1
 git -C "$SB2" checkout -q live-editor-60
 echo z > "$SB2/z.txt"; git -C "$SB2" add z.txt >/dev/null 2>&1; git -C "$SB2" commit -qm c3 >/dev/null 2>&1
 git -C "$SB2" checkout -q main
-delete_merged_editor_live_branch "live-editor-60" "$SB2"
+delete_merged_session_branch "live-editor-60" "$SB2"
 if git -C "$SB2" show-ref --verify --quiet refs/heads/live-editor-60; then
   assert_eq "preserved" "preserved" "unmerged live-editor-60 preserved (git branch -d safe)"
 else
@@ -207,6 +213,64 @@ if git -C "$SB4" show-ref --verify --quiet refs/heads/feature/keep; then
   assert_eq "preserved" "preserved" "fallback never deletes a merged feature/* branch"
 else
   assert_eq "deleted" "preserved" "fallback must not touch feature/* branches"
+fi
+
+# ============================================================
+tap_section "L5.12: delete_merged_session_branch deletes merged fix/* branch"
+setup_sandbox
+SB5="$(get_sandbox)"
+_prep_repo "$SB5"
+git -C "$SB5" branch fix/auto-bug main >/dev/null 2>&1
+git -C "$SB5" checkout -q fix/auto-bug
+echo a > "$SB5/a.txt"; git -C "$SB5" add a.txt >/dev/null 2>&1; git -C "$SB5" commit -qm c >/dev/null 2>&1
+git -C "$SB5" checkout -q main
+git -C "$SB5" merge --no-ff -m m fix/auto-bug >/dev/null 2>&1
+delete_merged_session_branch "fix/auto-bug" "$SB5"
+if git -C "$SB5" show-ref --verify --quiet refs/heads/fix/auto-bug; then
+  assert_eq "exists" "deleted" "merged fix/auto-bug should be deleted"
+else
+  assert_eq "deleted" "deleted" "merged fix/auto-bug deleted"
+fi
+
+# ============================================================
+tap_section "L5.13: delete_merged_session_branch deletes merged hotfix/* branch"
+git -C "$SB5" branch hotfix/auto-patch main >/dev/null 2>&1
+git -C "$SB5" checkout -q hotfix/auto-patch
+echo b > "$SB5/b.txt"; git -C "$SB5" add b.txt >/dev/null 2>&1; git -C "$SB5" commit -qm c2 >/dev/null 2>&1
+git -C "$SB5" checkout -q main
+git -C "$SB5" merge --no-ff -m m2 hotfix/auto-patch >/dev/null 2>&1
+delete_merged_session_branch "hotfix/auto-patch" "$SB5"
+if git -C "$SB5" show-ref --verify --quiet refs/heads/hotfix/auto-patch; then
+  assert_eq "exists" "deleted" "merged hotfix/auto-patch should be deleted"
+else
+  assert_eq "deleted" "deleted" "merged hotfix/auto-patch deleted"
+fi
+
+# ============================================================
+tap_section "L5.14: delete_merged_session_branch deletes merged experiment/* branch"
+git -C "$SB5" branch experiment/auto-probe main >/dev/null 2>&1
+git -C "$SB5" checkout -q experiment/auto-probe
+echo c > "$SB5/c.txt"; git -C "$SB5" add c.txt >/dev/null 2>&1; git -C "$SB5" commit -qm c3 >/dev/null 2>&1
+git -C "$SB5" checkout -q main
+git -C "$SB5" merge --no-ff -m m3 experiment/auto-probe >/dev/null 2>&1
+delete_merged_session_branch "experiment/auto-probe" "$SB5"
+if git -C "$SB5" show-ref --verify --quiet refs/heads/experiment/auto-probe; then
+  assert_eq "exists" "deleted" "merged experiment/auto-probe should be deleted"
+else
+  assert_eq "deleted" "deleted" "merged experiment/auto-probe deleted"
+fi
+
+# ============================================================
+tap_section "L5.15: delete_merged_session_branch safe no-op on unmerged feature/* branch"
+git -C "$SB5" branch feature/unmerged-keep main >/dev/null 2>&1
+git -C "$SB5" checkout -q feature/unmerged-keep
+echo d > "$SB5/d.txt"; git -C "$SB5" add d.txt >/dev/null 2>&1; git -C "$SB5" commit -qm c4 >/dev/null 2>&1
+git -C "$SB5" checkout -q main
+delete_merged_session_branch "feature/unmerged-keep" "$SB5"
+if git -C "$SB5" show-ref --verify --quiet refs/heads/feature/unmerged-keep; then
+  assert_eq "preserved" "preserved" "unmerged feature/unmerged-keep preserved (ancestor check safe)"
+else
+  assert_eq "deleted" "preserved" "unmerged feature/* must NOT be force-deleted"
 fi
 
 finish_tests

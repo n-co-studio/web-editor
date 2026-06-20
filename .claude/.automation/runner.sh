@@ -1008,6 +1008,7 @@ _solo_merge_if_needed() {
         if [ "$_merge_ok" = true ]; then
           if _is_final_taskgroup_entry "$brief_id" "$work_order_id"; then
             record_closed_branch "$entry_current_branch"
+            delete_merged_session_branch "$entry_current_branch" "${_main_repo:-}"
           fi
           echo "Solo merge: $entry_current_branch → main (success)" >&2
           # Sync main repo index/working tree after worktree merge (Decision 0030)
