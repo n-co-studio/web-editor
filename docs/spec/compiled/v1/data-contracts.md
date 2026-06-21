@@ -17,6 +17,7 @@
 | reparentChanges | ReparentChange[] | no | Cross-container move operation applied as part of this edit. Populated only for reparent mode edits; empty for property-change-only diffs. |
 | stylesheetChanges | StylesheetChange[] | no | Document-level CSS rules (`@keyframes`, `@supports`, `@media`) that cannot be expressed as element-inline declarations. Populated for scroll-driven parallax (feature-009) and for the mandatory `prefers-reduced-motion` zeroing rule that every **CSS** parallax mechanism (`fixed`, `transform-3d`, `scroll-driven`) emits. The `js-scroll` mechanism emits **no** reduced-motion `StylesheetChange` — its generated handler short-circuits on `matchMedia('(prefers-reduced-motion: reduce)')` instead (`ScriptBehaviorChange.respectsReducedMotion: true`). Empty for edits that need no stylesheet-level rules. |
 | scriptChanges | ScriptBehaviorChange[] | no | Declarative descriptors for a bounded, reproducible-to-source JavaScript behavior. **v1 admits exactly one behavior — `parallax-scroll` (feature-009)** — under the constrained boundary allowance in `boundaries.md`. Empty for all CSS-only edits. |
+| batchId | string | no | **Batch dispatch identity.** The `batch-YYYYMMDD-HHMMSS-xxxx` identifier minted by the content script at Apply-Changes click time (feature-004). Every diff in a single Apply-Changes click carries the **same** `batchId`. A reconnect retry re-sends diffs with the original `batchId` (membership is on the diff, not the transient send envelope). Absent on diffs produced before feature-004 batch identity was implemented — consumers treat absent `batchId` as membership in an ungrouped "legacy" batch (see [State Management / Persisted Queue](#state-management) for the degradation rule). |
 
 **Relationships:** Contains ElementInfo, PropertyChange[], PageContext, RelatedChange[], StylesheetChange[], ScriptBehaviorChange[]
 
@@ -143,7 +144,7 @@ How Claude Code reproduces each new change type as project source. The reproduci
 - **CSS-3D transform → existing `InsertChange.outerHTML` + `RemoveChange`.** The 3D mechanism needs no new change type: it reuses the existing replace pattern (a `RemoveChange` for the `<img>` plus an `InsertChange` whose `outerHTML` carries the perspective wrapper and inner element) already used by the current `parallax.ts` toggle. Its `@media (prefers-reduced-motion: reduce)` zeroing rule rides along as a `StylesheetChange`.
 - **background-attachment: fixed → ordinary `PropertyChange[]`.** Inline declarations on the converted block (as `parallax.ts` already emits). Its reduced-motion zeroing rides along as a `StylesheetChange` (a `@media` rule cannot be inline).
 
-**Protocol compatibility.** `stylesheetChanges` and `scriptChanges` are additive, optional arrays on `VisualDiff`. Consumers that predate them ignore unknown fields, so **no `WS_PROTOCOL_VERSION` bump is required** (same treatment as `reorderChanges` / `insertChanges` / `reparentChanges`, which were added without a protocol bump; the version remains `0.4.0`). The MCP tool surface (`get_pending_visual_changes`) returns the full `VisualDiff` unchanged. A `0.4.0` consumer that does not implement feature-009 will silently ignore `scriptChanges` / `stylesheetChanges` — this is intentional: the pending queue stays processable by Claude Code regardless of whether the MCP consumer is feature-009-aware. The `uid` / `anchorUid` / `anchorPosition` identity fields (issue #27) follow the same additive-optional rule — see [Protocol compatibility (uid + anchor fields)](#protocol-compatibility-uid--anchor-fields).
+**Protocol compatibility.** `stylesheetChanges`, `scriptChanges`, and `batchId` are additive, optional fields on `VisualDiff`. Consumers that predate them ignore unknown fields, so **no `WS_PROTOCOL_VERSION` bump is required** (same treatment as `reorderChanges` / `insertChanges` / `reparentChanges`, which were added without a protocol bump; the version remains `0.4.0`). The MCP tool surface (`get_pending_visual_changes`) returns the full `VisualDiff` unchanged. A `0.4.0` consumer that does not implement feature-009 will silently ignore `scriptChanges` / `stylesheetChanges` — this is intentional: the pending queue stays processable by Claude Code regardless of whether the MCP consumer is feature-009-aware. The `uid` / `anchorUid` / `anchorPosition` identity fields (issue #27) follow the same additive-optional rule — see [Protocol compatibility (uid + anchor fields)](#protocol-compatibility-uid--anchor-fields). `batchId` follows the same rule explicitly: a pre-batch-identity consumer that receives `batchId` simply ignores it and degrades to flat-pool processing — **no `WS_PROTOCOL_VERSION` bump is required**.
 
 ### DesignToken
 
@@ -333,7 +334,7 @@ All WebSocket messages use the following envelope structure:
 |------|-----------|---------|
 | EXTENSION_HELLO | ext → server | `{ tabId: string, pendingDiffIds: string[] }` |
 | SERVER_HELLO | server → ext | `{ knownDiffIds: string[], protocolVersion: string }` |
-| VISUAL_DIFF_BATCH | ext → server | `{ diffs: VisualDiff[] }` |
+| VISUAL_DIFF_BATCH | ext → server | `{ diffs: VisualDiff[], batchNote?: string, batchId?: string }` — `batchId` is the authoritative batch identity for this dispatch (same value stamped on every diff in `diffs`); the server stamps it onto any diff missing it as a belt-and-suspenders. `batchNote` is the optional operator free-text note for this batch. |
 | DIFF_ACK | server → ext | `{ diffIds: string[] }` |
 | TOKEN_DATA | server → ext | `{ tokens: DesignToken[], sources: TokenSourceStatus[] }` |
 | TOKEN_UPDATE | server → ext | Delta tokens (partial TOKEN_DATA payload) |
@@ -360,9 +361,12 @@ interface TokenSourceStatus {
 ## MCP Tool Definitions
 
 #### get_pending_visual_changes
-- **Purpose**: Returns all visual diffs queued by the extension
-- **Parameters**: `{ tabId?: string }` (optional filter by tab session)
-- **Returns**: `{ changes: VisualDiff[] }`
+- **Purpose**: Returns all visual diffs and operator notes queued by the extension, with a lightweight batch summary index for cheap staleness scanning
+- **Parameters**: `{ tabId?: string, batchId?: string }` — `tabId` filters by tab session; `batchId` filters to diffs belonging to a single batch (agents use this to retrieve one batch at a time without fetching the full queue)
+- **Returns**: `{ changes: VisualDiff[], notes: PendingNote[], batches: BatchSummary[] }`
+  - `changes` — flat array of all matching `VisualDiff[]`, each carrying `batchId` when present; agents group by `batchId` themselves (no nested restructure)
+  - `notes` — flat array of `PendingNote[]` (preserved; removing this field would break existing agent consumers); each note carries an optional `batchId` correlating it to its batch (so the previously decoupled batch note re-associates)
+  - `batches` — lightweight summary index `[{ batchId: string, batchNote?: string, createdAt: string, diffCount: number }]` for cheap batch enumeration and staleness scanning without fetching full diff bodies; ordered newest-first
 
 #### acknowledge_visual_change
 - **Purpose**: Marks a diff as applied (removes from pending queue)
@@ -390,9 +394,9 @@ interface TokenSourceStatus {
 - **Returns**: `{ escapes: { property: string, value: string, count: number, nearestToken?: string }[], summary: { totalEdits: number, tokenMatches: number, customValues: number } }`
 
 #### get_queue_status
-- **Purpose**: Returns lightweight queue status (active/closed, pending count, last update timestamp). Use instead of `get_pending_visual_changes` when only the queue state is needed (not full diff bodies).
+- **Purpose**: Returns lightweight queue status (active/closed, pending count, last update timestamp, latest batch id). Use instead of `get_pending_visual_changes` when only the queue state is needed (not full diff bodies).
 - **Parameters**: `{}` (no input)
-- **Returns**: `{ status: 'active' | 'closed', pending_count: number, updated_at: string }`
+- **Returns**: `{ status: 'active' | 'closed', pending_count: number, updated_at: string, latest_batch_id?: string }` — `latest_batch_id` is the `batchId` of the most recently received batch (absent when no batches have been received, or when all diffs predate batch identity)
 
 #### export_session
 - **Purpose**: Writes the pending queue to a JSON file for archival or handoff
@@ -416,7 +420,9 @@ interface TokenSourceStatus {
 
 - **Approach**: In-memory state in MCP server process with light file-based persistence
 - **Key state shapes:**
-  - Pending queue: `VisualDiff[]` — checkpointed to `.nco-web-editor/pending-queue.json` on each update, cleared when all diffs acknowledged
+  - Pending queue: `VisualDiff[]` — checkpointed to `.nco-web-editor/pending-queue.json` on each update, cleared when all diffs acknowledged. Each diff carries `batchId` when present; `batchId` rides on the persisted diff automatically with no migration or version bump required.
+  - Pending notes: `PendingNote[]` — stored alongside the pending queue in `.nco-web-editor/pending-queue.json`. `PendingNote` gains an optional `batchId?: string` field correlating the note to the batch whose `VISUAL_DIFF_BATCH` envelope carried the matching `batchNote`. When the bridge receives a `batchNote` with a `batchId`, the stored `PendingNote` records both.
+  - **Legacy `pending-queue.json` degradation:** Diffs and notes written before batch identity was implemented will not have a `batchId`. No migration code is run, no version bump is issued, and no queue file is rewritten. Legacy diffs pass through in the `changes` array of `get_pending_visual_changes` unchanged (with no `batchId` field). The `batches` summary index **omits** legacy diffs entirely — they are not grouped under a synthetic `"legacy"` entry. Consumers MUST NOT crash when `batchId` is absent on a diff in `changes`.
   - Token registry: `Map<string, DesignToken[]>` — rebuilt on file change, pushed to extensions
   - Component registry: `Map<string, ProjectComponent>` keyed by `importPath` — built at MCP server startup from convention-gated scan, rebuilt per-file on chokidar file change (300ms debounce), full registry pushed to all connected extensions on connect (`COMPONENT_DATA`) and on update (`COMPONENT_UPDATE`). Not persisted across server restarts (re-derived on next startup).
   - Token drift counters: session-scoped Map tracking custom value usage, reset on server restart

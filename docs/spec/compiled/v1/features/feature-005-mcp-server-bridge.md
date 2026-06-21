@@ -24,12 +24,13 @@ N/A — headless server process. Status is communicated to the extension via Web
 
 ## Outputs
 - MCP tools exposed to Claude Code:
-  - `get_pending_visual_changes` — returns queued diffs
+  - `get_pending_visual_changes` — returns queued diffs (`changes`), operator notes (`notes`), and a lightweight batch summary index (`batches`); accepts optional `batchId` filter
   - `acknowledge_visual_change` — marks diff as applied
   - `reject_visual_change` — rejects a diff and removes it from the queue
   - `get_design_tokens` — returns parsed tokens
   - `resolve_to_token` — maps CSS value to nearest token
   - `get_token_drift_report` — returns a report of design token drift across pending diffs
+  - `get_queue_status` — returns lightweight queue status including `latest_batch_id`
   - `export_session` — exports the current session state (pending queue, token registry) to a file
   - `import_session` — restores session state from a previously exported file
   - `get_project_components` — returns the project-local component registry (feature-008; editor-agnostic)
@@ -49,8 +50,19 @@ Token discovery and parsing are wrapped in try/catch. A parse failure in any tok
 - Server process crashes → Claude Code's MCP client restarts it on next tool call (dependency on Claude Code behavior — documented assumption). Pending queue restored from `.nco-web-editor/pending-queue.json` on restart.
 - Page reload → extension content script reinitializes, restores pending queue from chrome.storage.session, reconnects WebSocket, sends EXTENSION_HELLO for reconciliation
 
+## Batch Identity Handling
+
+The bridge is the authoritative point for `batchId` ingest and correlation:
+
+- **Preservation on ingest:** When the bridge receives a `VISUAL_DIFF_BATCH` message, it reads `batchId` from the envelope payload and stamps it onto any diff in `diffs[]` that is missing it (belt-and-suspenders — the extension stamps diffs at source, but the envelope `batchId` is the fallback).
+- **batchNote correlation:** When the envelope carries both `batchNote` and `batchId`, the stored `PendingNote` records both fields (`{ text: batchNote, batchId, receivedAt }`), re-associating the operator note with its batch.
+- **latest_batch_id tracking:** The bridge tracks the `batchId` of the most recently ingested batch and exposes it via `get_queue_status.latest_batch_id`.
+- **batches summary:** The bridge derives the `batches` summary index on demand (for `get_pending_visual_changes`) by scanning the pending queue for unique `batchId` values, aggregating `{ batchId, batchNote?, createdAt, diffCount }`. Ordered newest-first by `createdAt` (earliest diff timestamp in the batch).
+- **batchId filter:** When `get_pending_visual_changes` is called with `batchId?`, the bridge filters `changes` to diffs matching that `batchId` before returning.
+- **Legacy diffs (no batchId):** Diffs in the pending queue that predate batch identity have no `batchId`. These are passed through in `changes` unchanged and are omitted from the `batches` index (not grouped as a synthetic legacy entry at the bridge level — consumers handle absent `batchId` gracefully).
+
 ## Persistence
-MCP server writes pending queue to `.nco-web-editor/pending-queue.json` on each queue update (add/acknowledge/reject). File is deleted when queue is empty. On crash and restart, queue is restored from this file. Extension persists queue to chrome.storage.session — survives page reloads and service worker suspension, cleared on browser close.
+MCP server writes pending queue to `.nco-web-editor/pending-queue.json` on each queue update (add/acknowledge/reject). File is deleted when queue is empty. On crash and restart, queue is restored from this file. `batchId` rides on each persisted `VisualDiff` and on each `PendingNote` automatically — no migration is needed. Extension persists queue to chrome.storage.session — survives page reloads and service worker suspension, cleared on browser close.
 
 ## Configuration
 
@@ -72,9 +84,15 @@ MCP server writes pending queue to `.nco-web-editor/pending-queue.json` on each 
 - [ ] MCP tools return correct data over JSON-RPC 2.0 stdio transport
 - [ ] Protocol version handshake on connect (EXTENSION_HELLO / SERVER_HELLO)
 - [ ] EXTENSION_HELLO reconciliation prevents duplicate diffs after reconnect or page reload
-- [ ] `get_pending_visual_changes` returns all queued diffs
+- [ ] `get_pending_visual_changes` returns `{ changes, notes, batches }` — flat changes + preserved notes + batches summary index
+- [ ] `get_pending_visual_changes` accepts optional `batchId` filter and returns only matching diffs
 - [ ] `acknowledge_visual_change` removes diff from queue
 - [ ] `reject_visual_change` rejects a diff and removes it from the queue
+- [ ] `get_queue_status` returns `latest_batch_id` (absent when no batches received)
+- [ ] Bridge stamps `batchId` from envelope onto any diff missing it on ingest
+- [ ] Bridge correlates `batchNote` to `batchId` in stored `PendingNote`
+- [ ] `batches` index is ordered newest-first and omits diffs without `batchId`
+- [ ] Legacy diffs (no `batchId`) pass through in `changes` without causing errors
 - [ ] `export_session` and `import_session` tools correctly serialize and restore session state
 - [ ] `get_design_tokens` returns parsed tokens, filterable by category
 - [ ] `resolve_to_token` maps CSS values to nearest token with exactMatch flag

@@ -1,0 +1,135 @@
+identity:
+  group_name: "batch-identity"
+  created_by_session: "eadaa5a1-a812-4537-8ca9-f5b61ea51d3e"
+  created_date: "2026-06-21"
+  execution: sequential
+
+briefs:
+  - title: "Ratify Batch Identity & Grouping Contract (spec + governance)"
+    sequence: 1
+    session: "eadaa5a1-a812-4537-8ca9-f5b61ea51d3e"
+    branch: "feature/batch-identity"
+    status: in_progress
+    next_brief: "Implement Batch Identity (batchId stamp + bridge + panel grouping)"
+    boundaries:
+      - "docs/spec/compiled/v1/features/feature-004-change-batching.md"
+      - "docs/spec/compiled/v1/data-contracts.md"
+      - "docs/spec/compiled/v1/features/feature-005-mcp-server-bridge.md"
+      - "docs/ai/governance/spec-compiled.yaml"
+      - "docs/ai/task-groups/batch-identity.yaml"
+
+  - title: "Implement Batch Identity (batchId stamp + bridge + panel grouping)"
+    sequence: 2
+    session: null
+    branch: "feature/batch-identity"
+    status: pending
+    next_brief: ""
+    boundaries:
+      - "packages/shared/src/diff.ts"
+      - "packages/shared/src/protocol.ts"
+      - "packages/chrome-extension/src/content/batching/"
+      - "packages/mcp-server/src/"
+
+intent:
+  goal: >
+    Ratify a stable per-dispatch batch identity contract in the compiled specs
+    so Brief 2 implements against an agreed schema. batchId is minted at
+    Apply-Changes click time, carried through VisualDiff → WebSocket → bridge →
+    pending-queue → MCP tool output, enabling agents to group changes by batch
+    and reason about stale batches.
+  verification:
+    - "data-contracts.md VisualDiff table has additive-optional batchId row with no-protocol-bump note"
+    - "data-contracts.md documents VISUAL_DIFF_BATCH { diffs, batchNote?, batchId? } envelope"
+    - "data-contracts.md documents get_pending_visual_changes { changes, notes, batches } + batchId filter"
+    - "data-contracts.md documents get_queue_status.latest_batch_id"
+    - "data-contracts.md documents PendingNote.batchId and legacy-degradation rules"
+    - "feature-004 defines batchId generation (extension, click-time, readable, retry-stable, one-click-one-id)"
+    - "feature-004 specifies batch grouping in persistent Sent/Applied panel sections"
+    - "feature-004 defines >100-diff invariant (loop-send one batchId) and corrects Sent: queue cleared text"
+    - "feature-004 adds Future Considerations hook for deferred batch-lifecycle tools"
+    - "feature-005 reflects bridge batchId preservation, batches summary, latest_batch_id, batchId filter"
+    - "governance evidence updated"
+    - "No product code files changed"
+  scope_files:
+    - "docs/spec/compiled/v1/features/feature-004-change-batching.md"
+    - "docs/spec/compiled/v1/data-contracts.md"
+    - "docs/spec/compiled/v1/features/feature-005-mcp-server-bridge.md"
+    - "docs/ai/governance/spec-compiled.yaml"
+  spec_references:
+    - "docs/spec/compiled/v1/features/feature-004-change-batching.md"
+    - "docs/spec/compiled/v1/data-contracts.md"
+    - "docs/spec/compiled/v1/features/feature-005-mcp-server-bridge.md"
+
+conventions:
+  naming:
+    - pattern: "batchId format: batch-YYYYMMDD-HHMMSS-xxxx (date + time + 4-char random hex suffix)"
+      scope: "batchId generation in extension, wire format, spec, and UI display"
+    - pattern: "batches summary index: [{ batchId, batchNote?, createdAt, diffCount }]"
+      scope: "get_pending_visual_changes MCP tool return shape batches field"
+  patterns:
+    - pattern: "additive-optional — no WS_PROTOCOL_VERSION bump for batchId (same rule as uid/stylesheetChanges/scriptChanges)"
+      rationale: "Pre-batchId consumers ignore unknown fields and degrade to flat-pool processing (data-contracts.md:146,302 precedent)"
+    - pattern: "one Apply-Changes click = one batchId; loop-send if >100 diffs (multiple WS messages, same batchId)"
+      rationale: "Keeps the logical batch identity pure across large dispatches"
+    - pattern: "legacy pending-queue.json without batchId = ungrouped 'legacy' batch; no migration code"
+      rationale: "Strictly additive; existing queues remain processable"
+  decisions:
+    - "Decision 0014"
+    - "Decision 0020"
+    - "Decision 0038"
+  boundaries:
+    - module: "compiled spec (feature-004, data-contracts, feature-005, governance)"
+      owner_brief: "Ratify Batch Identity & Grouping Contract (spec + governance)"
+    - module: "implementation (shared types, protocol, batching, mcp-server)"
+      owner_brief: "Implement Batch Identity (batchId stamp + bridge + panel grouping)"
+
+integration_points:
+  - name: "VisualDiff.batchId schema + protocol-compatibility ruling"
+    producer: "Ratify Batch Identity & Grouping Contract (spec + governance)"
+    consumer: "Implement Batch Identity (batchId stamp + bridge + panel grouping)"
+    artifact: "docs/spec/compiled/v1/data-contracts.md — VisualDiff.batchId row + no-bump note"
+  - name: "VISUAL_DIFF_BATCH envelope schema (batchId? field)"
+    producer: "Ratify Batch Identity & Grouping Contract (spec + governance)"
+    consumer: "Implement Batch Identity (batchId stamp + bridge + panel grouping)"
+    artifact: "docs/spec/compiled/v1/data-contracts.md — WebSocket Protocol table"
+  - name: "MCP tool shapes (batches summary, batchId filter, latest_batch_id)"
+    producer: "Ratify Batch Identity & Grouping Contract (spec + governance)"
+    consumer: "Implement Batch Identity (batchId stamp + bridge + panel grouping)"
+    artifact: "docs/spec/compiled/v1/data-contracts.md — MCP Tool Definitions section"
+  - name: "batchId generation rule (format, click-time, retry-stable, loop-send >100)"
+    producer: "Ratify Batch Identity & Grouping Contract (spec + governance)"
+    consumer: "Implement Batch Identity (batchId stamp + bridge + panel grouping)"
+    artifact: "docs/spec/compiled/v1/features/feature-004-change-batching.md"
+
+session_decisions:
+  - session: "eadaa5a1-a812-4537-8ca9-f5b61ea51d3e"
+    decision: "batchId format chosen: batch-YYYYMMDD-HHMMSS-xxxx (human-readable, date+time+4-char hex)"
+    rationale: "Operator communicates batch references to agent and reads the id in the panel; readable date-time id serves both. UUID was the lighter alternative but rejected for readability."
+  - session: "eadaa5a1-a812-4537-8ca9-f5b61ea51d3e"
+    decision: ">100 diffs handling: loop-send all diffs under one batchId (multiple WS messages, same batchId)"
+    rationale: "Keeps one-click-one-batchId invariant pure; avoids silent split with no signal. Alternative (cap+surface feedback with second click as new batchId) was rejected to keep logical batch cohesion."
+  - session: "eadaa5a1-a812-4537-8ca9-f5b61ea51d3e"
+    decision: "batchId is additive-optional on VisualDiff; no WS_PROTOCOL_VERSION bump (stays 0.4.0)"
+    rationale: "Consistent with uid/stylesheetChanges/scriptChanges precedent (data-contracts.md:146,302). Pre-batchId consumers degrade gracefully to flat-pool processing."
+  - session: "eadaa5a1-a812-4537-8ca9-f5b61ea51d3e"
+    decision: "MCP get_pending_visual_changes returns flat changes + notes + batches index (not nested diffs under batches)"
+    rationale: "Nested diffs harms agent parsing and breaks flat-list consumers. Flat changes + lightweight batches index balances agent convenience with backward compatibility."
+  - session: "eadaa5a1-a812-4537-8ca9-f5b61ea51d3e"
+    decision: "notes array preserved in get_pending_visual_changes return; gains batchId correlation"
+    rationale: "Removing notes would break existing agent consumers. Each note gains optional batchId so the previously decoupled batch note re-associates with its batch."
+
+governance:
+  - brief_sequence: 1
+    gates_a:
+      A1: "pass"
+      A2: "pass"
+      A3: "n/a"
+      A4: "pass"
+      A5: "pass"
+      A6: "pass"
+    gates_b:
+      B1: "pass"
+      B2: "n/a"
+      B3: "n/a"
+    overrides_used: []
+    timestamp: ""
