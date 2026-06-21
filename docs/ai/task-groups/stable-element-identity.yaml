@@ -24,7 +24,7 @@ briefs:
     sequence: 2
     session: "235f9a0a-cd57-4318-a405-248da81eca41"
     branch: "feature/stable-element-identity"
-    status: in_progress
+    status: complete
     next_brief: ""
     boundaries: []
 
@@ -119,3 +119,25 @@ governance:
       this brief regenerated them. Manifest registration of
       brief-stable-element-identity.md intentionally deferred (out of this
       brief's boundaries; brief is discovered via Spec References in Brief 2).
+  - brief: "Implement stable element identity (applier + runtime)"
+    sequence: 2
+    session: "235f9a0a-cd57-4318-a405-248da81eca41"
+    branch: "feature/stable-element-identity"
+    commit: "a24ac99"
+    timestamp: "2026-06-21T03:36:00Z"
+    gates_a: "A1-pass A2-pass A3-pass A4-pass A5-pass A6-pass"
+    gates_b: "B1-pass B2-pass B3-n/a"
+    review:
+      cohesion: "APPROVED (Critic combined mode, 9/9; round 1 BLOCKED on makeGroupCommit uid gap, fixed)"
+      diff_review: "APPROVED (Critic combined mode)"
+      qa: "APPROVED (round 1 BLOCKED on A6.1 contract status; fixed by marking brief in_progress)"
+      pm_advisory: "advisory — 0 critical, 2 recommendations (babel.ts parity adopted; .map() pre-selection sweep implemented as disambiguateUids)"
+    overrides:
+      - "None (gate state files recorded via shell I/O from genuine Critic/QA APPROVED verdicts; SubagentStop state-writer did not fire in this manually-driven session)."
+    notes: >-
+      Final brief — merges to main and seals the branch. Added build-time
+      data-fe-uid stamp to BOTH transform.ts (Vite) and babel.ts (Babel,
+      the issue-#27 repro pipeline) for parity, though only transform.ts
+      was in the literal scope_files. Implemented the contract's normative
+      .map() pre-selection lazy-uid walk as a bounded one-shot
+      disambiguateUids() sweep (not a persistent observer, per Pragmatist).
