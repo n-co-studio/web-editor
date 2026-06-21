@@ -13,7 +13,7 @@ briefs:
     sequence: 1
     session: "cb46b909-a7cd-4b78-962f-421fa04931d6"
     branch: "feature/stable-element-identity"
-    status: in_progress
+    status: complete
     next_brief: "Implement stable element identity (applier + runtime)"
     boundaries:
       - "docs/spec/compiled/v1/data-contracts.md"
@@ -96,4 +96,26 @@ session_decisions:
       build-against-air-contract drift (Architect/PM/Critic concurred at Prompt T).
 
 # Governance evidence — appended at each brief's close (gate results, overrides, timestamp).
-governance: []
+governance:
+  - brief: "Ratify the identity contract"
+    sequence: 1
+    session: "cb46b909-a7cd-4b78-962f-421fa04931d6"
+    branch: "feature/stable-element-identity"
+    commit: "fad6ee6"
+    timestamp: "2026-06-21T02:25:00Z"
+    gates_a: "A1-pass A2-pass A3-n/a A4-pass A5-pass A6-pass"
+    gates_b: "B1-pass B2-n/a B3-n/a"
+    review:
+      cohesion: "APPROVED (Critic combined mode)"
+      diff_review: "APPROVED (Critic combined mode)"
+      qa: "APPROVED"
+      pm_advisory: "advisory — 0 critical, 3 recommendations (manifest registration deferred to Brief 2; src normalization framework-scope + .map() pre-observation timing folded into the spec)"
+    overrides:
+      - "REPO_OS_ALLOW_REINIT=1 — re-init over stale taskdef-brief phase-state from the Prompt T session that produced the handoff bundle (same session-id reused; legitimate new Prompt B session)."
+    notes: >-
+      Spec-only ratification (no product code). Stale per-session gate files
+      (cohesion-reviewed/diff-review-complete/qa-verified) from the prior
+      parallax session sharing this session-id were cleared at build entry so
+      this brief regenerated them. Manifest registration of
+      brief-stable-element-identity.md intentionally deferred (out of this
+      brief's boundaries; brief is discovered via Spec References in Brief 2).
