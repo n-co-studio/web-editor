@@ -37,8 +37,9 @@ N/A — build-time plugin, no UI. Effects are visible as `data-source-*` attribu
 - Build mode (development vs production)
 
 ## Outputs
-- Transpiled output with `data-source-file`, `data-source-line`, and `data-source-index` attributes on every DOM element
+- Transpiled output with `data-source-file`, `data-source-line`, `data-source-index`, and `data-fe-uid` attributes on every DOM element
 - `data-source-index` is added for repeated sibling elements sharing the same source line (e.g., inside `.map()` calls)
+- `data-fe-uid` is the **stable per-instance element identity** (the canonical diff-targeting key — see [data-contracts § Stable Element Identity](../data-contracts.md#stable-element-identity-data-fe-uid)). The plugin stamps a deterministic build-time uid as the **primary** source of identity because, unlike a content-script stamp, it is part of the element's markup and so **survives React reconciliation** across re-renders. `data-source-*` remain code-map hints only; `data-fe-uid` is identity. Build-time stamping is per JSX element, so `.map()` runtime fan-out (N nodes from one JSX line) is resolved to per-instance uids at **runtime** by the content script (feature-001), not by the plugin.
 - Zero output in production mode
 
 ## Edge Cases
@@ -60,3 +61,6 @@ N/A — build-time plugin, no UI. Effects are visible as `data-source-*` attribu
 - [ ] Plugin is a complete no-op in production mode
 - [ ] `data-source-index` correctly disambiguates repeated sibling elements
 - [ ] Plugin works with both `@vitejs/plugin-react` and `@vitejs/plugin-react-swc` Vite configurations
+- [ ] `data-fe-uid` is stamped on every JSX element at build time
+- [ ] `data-fe-uid` is preserved across HMR / React reconciliation (does not change on re-render of the same element)
+- [ ] A cloned/duplicated element receives a **fresh** `data-fe-uid` at runtime (assigned by the content script, not the build plugin) so twins never share identity (issue #27)

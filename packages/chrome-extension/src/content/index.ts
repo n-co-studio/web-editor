@@ -42,7 +42,7 @@ import { captureFullPage } from './screenshot';
 import type { InsertCommitCallback } from './editing/insert';
 import { buildInsertChange } from './editing/insert-source';
 import { groupElements, getGroupBlockReason } from './editing/group';
-import { duplicateElement, getDuplicateBlockReason } from './editing/duplicate';
+import { duplicateElement, getDuplicateBlockReason, regenerateUidsDeep } from './editing/duplicate';
 import {
   getParallaxBlockReason,
   wouldEnableParallax,
@@ -73,7 +73,7 @@ import { GridSettingsPanel } from './grid-settings';
 import { MeasureOverlay } from './selection/measure-overlay';
 import { MultiSelectManager } from './selection/multi-select';
 import { MultiSelectToolbar } from './editing/multi-select-toolbar';
-import { buildElementInfo, getTopElementAt, generateSelector, getComputedProperty } from '../shared/dom-utils';
+import { buildElementInfo, getTopElementAt, generateSelector, getComputedProperty, ensureUid, disambiguateUids } from '../shared/dom-utils';
 import { PROTOCOL_VERSION } from '@nco-studio/shared';
 import type { VisualDiff, PropertyChange, AttributeChange, TextChange, ReorderChange, ReparentChange, GroupChange, RemoveChange, StylesheetChange, ScriptBehaviorChange } from '@nco-studio/shared';
 import type { ExtensionMode, ConnectionStatus, EditMode, IconStatus } from '../shared/types';
@@ -1028,6 +1028,11 @@ export async function activate(): Promise<void> {
     commitEdit(el, changes, diff);
   });
 
+  // Disambiguate any shared build-time uids (.map() runtime instances) before
+  // exposing nodes for selection, so a captured diff can never reference a
+  // non-unique uid (data-contracts § Stamping lifecycle 3, issue #27).
+  disambiguateUids();
+
   // Enter selection mode
   mode = 'selecting';
   hover.enable();
@@ -1431,7 +1436,12 @@ function makeReorderCommit(el: Element): ReorderCommitCallback {
       type: 'reorder',
       fromIndex,
       toIndex,
-      siblingSelectors: originalChildOrder.map((c) => generateSelector(c)),
+      // Mint/repair each sibling's uid first so generateSelector returns
+      // uid-based selectors (issue #27) rather than positional nth-of-type.
+      siblingSelectors: originalChildOrder.map((c) => {
+        ensureUid(c);
+        return generateSelector(c);
+      }),
       containerSelector: generateSelector(container),
       containerDirection: getComputedStyle(container).display.includes('grid')
         ? (getComputedStyle(container).gridAutoFlow?.includes('column') ? 'column' : 'row')
@@ -1468,10 +1478,14 @@ function makeReparentCommit(el: Element): ReparentCommitCallback {
   return (element, sourceContainer, sourceIndex, targetContainer, targetIndex) => {
     const info = buildElementInfo(element);
 
-    // Build sibling selectors from target container's children (pre-move — element not yet in target)
+    // Build sibling selectors from target container's children (pre-move — element not yet in target).
+    // Mint/repair each child's uid first so selectors are uid-based (issue #27).
     const targetChildren = Array.from(targetContainer.children)
       .filter((c): c is HTMLElement => c instanceof HTMLElement && c !== element);
-    const siblingSelectors = targetChildren.map((c) => generateSelector(c));
+    const siblingSelectors = targetChildren.map((c) => {
+      ensureUid(c);
+      return generateSelector(c);
+    });
 
     // Build sibling anchors at the insert position (pre-move state)
     const prevEl = targetIndex > 0 ? targetChildren[targetIndex - 1] : null;
@@ -1481,6 +1495,7 @@ function makeReparentCommit(el: Element): ReparentCommitCallback {
       if (!anchorEl || anchorEl === element) return null;
       const anchorInfo = buildElementInfo(anchorEl);
       return {
+        uid: anchorInfo.uid,
         selector: anchorInfo.selector,
         sourceFile: anchorInfo.sourceFile,
         sourceLine: anchorInfo.sourceLine,
@@ -1593,6 +1608,7 @@ function makeGroupCommit(elements: Element[]): void {
     if (!el) return null;
     const info = buildElementInfo(el);
     return {
+      uid: info.uid,
       selector: info.selector,
       sourceFile: info.sourceFile,
       sourceLine: info.sourceLine,
@@ -1600,7 +1616,11 @@ function makeGroupCommit(elements: Element[]): void {
     };
   };
 
-  const wrappedSelectors = sorted.map((el) => generateSelector(el));
+  // Mint/repair each wrapped element's uid first so selectors are uid-based (issue #27).
+  const wrappedSelectors = sorted.map((el) => {
+    ensureUid(el);
+    return generateSelector(el);
+  });
 
   // Perform DOM mutation
   const result = groupElements(htmlElements, shadow!);
@@ -1735,13 +1755,18 @@ function pasteElement(): void {
   const clone = template.content.firstElementChild as HTMLElement;
   if (!clone) return;
 
+  // Strip+regenerate data-fe-uid on the pasted subtree (root + every descendant)
+  // so the pasted instance is independently addressable and never collides with
+  // the copied original (issue #27).
+  regenerateUidsDeep(clone);
+
   // Build diff before DOM insertion (sibling bracket reads pre-insert state).
-  // Carry the full clipboard markup as outerHTML so the source rewrite
-  // reproduces the entire subtree, not an empty <tag>.
+  // Carry the regenerated clone markup as outerHTML so the source rewrite
+  // reproduces the entire subtree (with fresh uids), not an empty <tag>.
   const containerInfo = buildElementInfo(container);
   const insertChange = buildInsertChange(
     container, insertIndex, clone.tagName.toLowerCase(), [],
-    undefined, undefined, elementClipboard.html,
+    undefined, undefined, clone.outerHTML,
   );
   const diff = diffBuilder!.buildInsert(containerInfo, insertChange);
 
@@ -1783,17 +1808,21 @@ function duplicateElementWithHistory(el: Element): HTMLElement | null {
   const container = el.parentElement!;
   const insertIndex = Array.from(container.children).indexOf(el) + 1;
 
-  // Build the diff BEFORE the DOM mutation so the sibling bracket reads the
-  // pre-insert child list (mirrors pasteElement). outerHTML carries the
-  // verbatim subtree for source reproduction.
+  // Build the sibling bracket / child snapshot BEFORE the DOM mutation so they
+  // read the pre-insert child list (the freshly inserted clone must not pollute
+  // the bracket). The clone's outerHTML — carrying *regenerated* data-fe-uids
+  // (issue #27) — is captured from duplicateElement and merged in afterward.
   const containerInfo = buildElementInfo(container);
-  const insertChange = buildInsertChange(
+  const baseChange = buildInsertChange(
     container, insertIndex, el.tagName.toLowerCase(), [],
-    undefined, undefined, el.outerHTML,
   );
-  const diff = diffBuilder!.buildInsert(containerInfo, insertChange);
 
   const result = duplicateElement(el);
+
+  // Carry the clone's post-regeneration markup so the source reproduction uses
+  // the fresh per-instance uids rather than the origin's.
+  const insertChange = { ...baseChange, outerHTML: result.outerHTML };
+  const diff = diffBuilder!.buildInsert(containerInfo, insertChange);
 
   queue!.add(diff);
   editHistory!.push({

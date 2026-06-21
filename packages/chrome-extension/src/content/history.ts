@@ -8,6 +8,13 @@ import type { VisualDiff, AttributeChange } from '@nco-studio/shared';
  *  - 'removal'   — element deleted from DOM
  *  - 'reorder'   — element moved within its parent container
  *  - 'insertion' — new element inserted into a container
+ *
+ * Stable-element-identity note (issue #27): replay resolves elements by the live
+ * DOM node references held on each entry (`element`, `oldEl`/`newEl`, `parent`,
+ * `container`), never by selector or source coordinate, so undo/redo is
+ * inherently `data-fe-uid`-compatible — a re-inserted node keeps its uid
+ * attribute, and the stored `diff` already carries the uid via its ElementInfo
+ * (assigned in `buildElementInfo`). No uid-specific replay logic is required.
  */
 
 interface CssHistoryEntry {

@@ -48,6 +48,13 @@ export type CrossBreakpointSourcesResolver = (
  * Source provenance is best-effort: when no resolver is configured or the
  * caller doesn't pass the live element, the `source` field is simply
  * omitted (signaling "no known owning rule") rather than failing the build.
+ *
+ * Stable-element-identity note (issue #27): the per-instance `uid` (and the
+ * `anchorUid`/`anchorPosition` carried by InsertChange) flow through this
+ * builder unchanged — `uid` rides on the `ElementInfo` passed to every `build*`
+ * method (assigned by `buildElementInfo`), and anchor fields ride on the
+ * pre-assembled change objects. The builder neither strips nor rewrites them, so
+ * no uid-specific assembly logic is needed here.
  */
 export class DiffBuilder {
   constructor(

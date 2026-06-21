@@ -29,11 +29,12 @@ Select any visible element on the page via click. Display a highlight overlay wi
 
 ## Inputs
 - DOM elements on the host page
-- `data-source-file` and `data-source-line` attributes (injected by dev-plugin)
+- `data-fe-uid` attribute (the **stable per-instance element identity** — the canonical diff-targeting key; see [data-contracts § Stable Element Identity](../data-contracts.md#stable-element-identity-data-fe-uid)). Build-stamped by the dev-plugin (feature-006); the content script lazily assigns a fresh uid to any tracked node that lacks a unique one (`.map()` runtime instances, `sourceVerified: false` nodes) and mints fresh uids for cloned/pasted subtrees.
+- `data-source-file` and `data-source-line` attributes (injected by dev-plugin) — **code-map location hints only, never identity.** They locate the originating source; clones inherit their origin's `data-source-line`, so they are non-unique and must not key a diff (issue #27). Identity comes from `data-fe-uid`.
 - Design tokens from MCP server (if loaded) for token name resolution
 
 ## Outputs
-- Selected element's `ElementInfo` object (passed to property editing feature and diff creation)
+- Selected element's `ElementInfo` object (passed to property editing feature and diff creation), including its `uid` from `data-fe-uid` as the canonical identity
 
 ## Edge Cases
 - Element has no `data-source-*` attributes (dev-plugin not installed) → show warning, still allow editing but flag diff as "source unverified"
@@ -62,3 +63,5 @@ Select any visible element on the page via click. Display a highlight overlay wi
 - [ ] Panel never fully obscures the selected element's bounding box
 - [ ] Alt key pauses inspection and passes pointer events to host page
 - [ ] Stale selection detected and warned when selected element leaves the DOM
+- [ ] `ElementInfo.uid` is populated from `data-fe-uid` as the canonical identity; a tracked node lacking a unique uid (`.map()` instance, `sourceVerified: false`) is lazily assigned a fresh uid on first observation
+- [ ] `data-source-*` are surfaced as location hints, not used to distinguish element instances

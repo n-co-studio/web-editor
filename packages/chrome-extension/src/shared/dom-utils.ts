@@ -2,15 +2,119 @@ import type { BoundingRect, ElementInfo } from '@nco-studio/shared';
 import { TEXT_CONTENT_TRUNCATE_LENGTH } from './constants';
 
 // ---------------------------------------------------------------------------
+// Stable element identity (data-fe-uid) — issue #27
+// ---------------------------------------------------------------------------
+
+/** DOM attribute carrying the stable, per-instance element identity. */
+export const FE_UID_ATTR = 'data-fe-uid';
+
+/**
+ * Reconciliation-resilience sidecar (data-contracts § Stamping lifecycle 4):
+ * React can replace a DOM node while preserving logical identity and may drop a
+ * runtime-set attribute. The attribute remains the wire-format source of truth;
+ * this WeakMap lets `ensureUid` recover a previously-minted uid and re-stamp the
+ * node rather than mint a colliding new one.
+ */
+const uidSidecar = new WeakMap<Element, string>();
+
+/** Mint a fresh, opaque per-instance uid. */
+function mintUid(): string {
+  const rnd =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return `fe-${rnd}`;
+}
+
+/**
+ * Return the element's stable uid, assigning a fresh one if it has none.
+ *
+ * Build-time stamping (feature-006) is the primary source and survives React
+ * reconciliation; this lazy runtime path covers `.map()` runtime instances,
+ * `sourceVerified: false` nodes, and elements rendered before the content
+ * script observed them (data-contracts § Stamping lifecycle 3). Idempotent —
+ * an element already carrying `data-fe-uid` keeps it.
+ */
+export function ensureUid(el: Element): string {
+  const existing = el.getAttribute(FE_UID_ATTR);
+  if (existing) {
+    uidSidecar.set(el, existing);
+    return existing;
+  }
+  // Attribute absent — recover from the sidecar (reconciliation drop) or mint.
+  const uid = uidSidecar.get(el) ?? mintUid();
+  el.setAttribute(FE_UID_ATTR, uid);
+  uidSidecar.set(el, uid);
+  return uid;
+}
+
+/** Read the element's uid without minting (attribute, then sidecar). Undefined when none. */
+export function readUid(el: Element): string | undefined {
+  return el.getAttribute(FE_UID_ATTR) ?? uidSidecar.get(el) ?? undefined;
+}
+
+/**
+ * One-shot synchronous sweep guaranteeing per-instance uid uniqueness across the
+ * document before any element is exposed for selection (data-contracts § Stamping
+ * lifecycle 3, normative "MUST"). Build-time stamping gives `.map()` runtime
+ * instances a *shared* uid (one JSX node → N rendered nodes); this walk keeps the
+ * first occurrence of each uid and re-stamps every subsequent duplicate with a
+ * fresh one, so a captured diff can never reference a non-unique uid (issue #27).
+ *
+ * Bounded and single-pass — not a persistent MutationObserver (per the
+ * Pragmatist's minimal-fix guidance). It runs at selection-mode activation, so
+ * the page's initial `.map()` lists are disambiguated before the operator can
+ * select; nodes rendered later are covered by the clone fresh-stamp and lazy
+ * `ensureUid` paths. Returns the number of duplicates re-stamped.
+ */
+export function disambiguateUids(root: ParentNode = document): number {
+  const seen = new Set<string>();
+  let restamped = 0;
+  for (const el of Array.from(root.querySelectorAll(`[${FE_UID_ATTR}]`))) {
+    const uid = el.getAttribute(FE_UID_ATTR);
+    if (uid == null) continue;
+    if (seen.has(uid)) {
+      stampFreshUid(el);
+      restamped++;
+    } else {
+      seen.add(uid);
+      uidSidecar.set(el, uid);
+    }
+  }
+  return restamped;
+}
+
+/**
+ * Force a *fresh* uid onto an element, replacing any existing one. Used by the
+ * clone/paste path (data-contracts § Stamping lifecycle 2): a clone must never
+ * reuse the origin's uid, or the issue-#27 collision returns. Updates the
+ * sidecar so `readUid` stays consistent.
+ */
+export function stampFreshUid(el: Element): string {
+  const uid = mintUid();
+  el.setAttribute(FE_UID_ATTR, uid);
+  uidSidecar.set(el, uid);
+  return uid;
+}
+
+// ---------------------------------------------------------------------------
 // Selector generation
 // ---------------------------------------------------------------------------
 
 /**
  * Build a reasonably unique CSS selector for an element.
- * Priority: #id → [data-source-*] → .classes:nth-of-type → tag:nth-child path.
- * Traverses at most 5 levels to keep selectors readable.
+ * Priority: [data-fe-uid] → #id → [data-source-*] → .classes:nth-of-type →
+ * tag:nth-child path. The `data-fe-uid` preference is the single chokepoint that
+ * makes every selector-based change type (ElementInfo.selector,
+ * SiblingAnchor.selector, ChildSnapshotEntry.selector, ReorderChange /
+ * ReparentChange siblingSelectors) target by stable per-instance identity
+ * (issue #27). Traverses at most 5 levels to keep selectors readable.
  */
 export function generateSelector(el: Element): string {
+  // Prefer the stable per-instance identity when present.
+  const uid = el.getAttribute(FE_UID_ATTR);
+  if (uid) return `[${FE_UID_ATTR}="${CSS.escape(uid)}"]`;
+
   if (el.id) return `#${CSS.escape(el.id)}`;
 
   // data-source attributes give a stable identity
@@ -78,6 +182,50 @@ export function readSourceAttributes(el: Element): SourceAttrs | null {
 }
 
 // ---------------------------------------------------------------------------
+// Deployment-aware src/href normalization (issue #27, weakness 2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize a captured `src`/`href`/background-url value so the path written to
+ * source is correct on apply. Observed failure: a captured `/public/images/x.jpg`
+ * where the served path is `/images/x.jpg` (Next.js / Vite serve `public/` at
+ * the web root). See data-contracts § Deployment-aware src normalization.
+ *
+ * Rules:
+ *  - `data:` URIs are left untouched (inline data has no deployment base).
+ *  - absolute `http(s)://` (any scheme `://`) and protocol-relative `//` URLs are
+ *    left untouched (already fully qualified).
+ *  - otherwise strip **at most one** leading `/public` segment from root-relative
+ *    paths; all other paths pass through unchanged.
+ *
+ * Convention-gated: stripping happens only when `base` (the element's resolved
+ * `data-source-file`, i.e. a known project context) is non-empty. Without a
+ * project context the value degrades to the literal captured path — this keeps
+ * the rule scoped to the Next.js/Vite convention it targets and avoids
+ * over-stripping elsewhere.
+ *
+ * @param rawSrc the captured attribute value
+ * @param base   the element's resolved data-source-file (project context gate)
+ */
+export function resolvePublicSrc(rawSrc: string, base: string): string {
+  if (!rawSrc) return rawSrc;
+  const trimmed = rawSrc.trim();
+
+  // Inline data, fully-qualified, and protocol-relative URLs are never rewritten.
+  if (/^data:/i.test(trimmed)) return rawSrc;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return rawSrc;
+  if (trimmed.startsWith('//')) return rawSrc;
+
+  // Convention-gated: only normalize within a known project source context.
+  if (!base) return rawSrc;
+
+  if (trimmed === '/public') return '/';
+  if (trimmed.startsWith('/public/')) return trimmed.slice('/public'.length);
+
+  return rawSrc;
+}
+
+// ---------------------------------------------------------------------------
 // ElementInfo assembly
 // ---------------------------------------------------------------------------
 
@@ -101,6 +249,12 @@ export function buildElementInfo(el: Element): ElementInfo {
   const rect = el.getBoundingClientRect();
   const text = el.textContent?.trim().slice(0, TEXT_CONTENT_TRUNCATE_LENGTH);
 
+  // Mint/repair the stable per-instance uid first so the (uid-preferring)
+  // selector and the attributes map below both reflect the assigned
+  // data-fe-uid, keeping `uid`, `selector`, and `attributes['data-fe-uid']`
+  // consistent (issue #27).
+  const uid = ensureUid(el);
+
   // Gather useful attributes
   const attrs: Record<string, string> = {};
   for (const attr of el.attributes) {
@@ -116,6 +270,7 @@ export function buildElementInfo(el: Element): ElementInfo {
   }
 
   return {
+    uid,
     selector: generateSelector(el),
     tagName: el.tagName.toLowerCase(),
     textContent: text || undefined,

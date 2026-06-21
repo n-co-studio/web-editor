@@ -1,5 +1,5 @@
-timestamp: "2026-06-19T00:00:00Z"
-session: "c8dc0c84-28df-4e06-8521-316710a3c385"
+timestamp: "2026-06-21T00:00:00Z"
+session: "cb46b909-a7cd-4b78-962f-421fa04931d6"
 spec_version: "v1"
 feature_briefs:
   - name: "pm-advisory-agent"
@@ -10,6 +10,11 @@ feature_briefs:
     path: "docs/spec/compiled/v1/features/feature-009-parallax-editor.md"
     status: complete
     created_date: "2026-06-19"
+  - name: "stable-element-identity"
+    path: "docs/spec/compiled/v1/features/brief-stable-element-identity.md"
+    status: complete
+    created_date: "2026-06-21"
+    note: "Ratifies the data-fe-uid per-instance identity contract (issue #27). Brief 1 of 2 in the stable-element-identity task group — spec-only; implementation follows in Brief 2."
 contract_changes:
   - name: "StylesheetChange + StylesheetRule"
     path: "docs/spec/compiled/v1/data-contracts.md"
@@ -19,6 +24,21 @@ contract_changes:
     path: "docs/spec/compiled/v1/data-contracts.md"
     wired_into: "VisualDiff.scriptChanges"
     created_date: "2026-06-19"
+  - name: "Stable element identity (data-fe-uid / uid)"
+    path: "docs/spec/compiled/v1/data-contracts.md"
+    wired_into: "ElementInfo.uid, SiblingAnchor.uid, ChildSnapshotEntry.uid"
+    note: "Canonical diff-targeting key; demotes sourceLine/instanceIndex to code-map hints. Additive-optional, no WS_PROTOCOL_VERSION bump. Issue #27. Implementation in stable-element-identity Brief 2."
+    created_date: "2026-06-21"
+  - name: "Source-anchored InsertChange (anchorUid + anchorPosition)"
+    path: "docs/spec/compiled/v1/data-contracts.md"
+    wired_into: "InsertChange.anchorUid, InsertChange.anchorPosition"
+    note: "Anchor inserts to a sibling uid + before/after instead of positional nth-of-type. Normative anchor table + uid->source mapping (existing/clone/fresh-insert). Issue #27."
+    created_date: "2026-06-21"
+  - name: "Stamping lifecycle + deployment-aware src normalization"
+    path: "docs/spec/compiled/v1/data-contracts.md"
+    wired_into: "Stable Element Identity section (lifecycle + src rules)"
+    note: "Build-time primary stamp, runtime fresh-uid on clone, runtime lazy uid for .map()/sourceVerified:false, WeakMap-sidecar option; strip leading /public, leave data:/http(s) untouched. Issue #27."
+    created_date: "2026-06-21"
 boundary_changes:
   - name: "Scroll-driven + JS-scroll parallax constrained-in-scope"
     path: "docs/spec/compiled/v1/boundaries.md"

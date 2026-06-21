@@ -1,6 +1,6 @@
 import type { PropertyChange, AttributeChange } from '@nco-studio/shared';
 import { createElement, createText, createButton, makeDraggable } from '../../shared/ui-utils';
-import { getComputedProperty } from '../../shared/dom-utils';
+import { getComputedProperty, resolvePublicSrc } from '../../shared/dom-utils';
 import { OVERLAY, TOOLBAR_WIDTH } from '../../shared/constants';
 import type { PreviewManager } from './preview';
 import {
@@ -151,18 +151,25 @@ export class MediaEditor {
 
     // Source URL (only for img, video, source elements)
     if (isMediaElement) {
-      const srcValue = (element as HTMLImageElement).src || '';
+      // Deployment-aware capture (issue #27, weakness 2): prefer the authored
+      // attribute (relative path) over the resolved absolute `.src`, and
+      // normalize a leading `/public` so the path written to source is
+      // apply-correct. `base` (data-source-file) gates the convention.
+      const base = element.getAttribute('data-source-file') ?? '';
+      const srcValue = element.getAttribute('src') ?? (element as HTMLImageElement).src ?? '';
       body.appendChild(this.buildTextInput(
         'Source URL',
         srcValue,
         (value) => {
-          const oldSrc = (element as HTMLImageElement).src || '';
+          const oldSrc = element.getAttribute('src') ?? (element as HTMLImageElement).src ?? '';
+          // Live DOM shows the literal entered value; the diff carries the
+          // deployment-normalized path (data:/http(s) pass through untouched).
           (element as HTMLImageElement).src = value;
           onAttributeCommit([{
             type: 'attribute',
             attribute: 'src',
-            fromValue: oldSrc,
-            toValue: value,
+            fromValue: resolvePublicSrc(oldSrc, base),
+            toValue: resolvePublicSrc(value, base),
           }]);
         },
         { filePicker: true },
@@ -190,13 +197,17 @@ export class MediaEditor {
 
     // Background image URL (for non-media elements)
     if (!isMediaElement) {
+      const base = element.getAttribute('data-source-file') ?? '';
       const bgImage = getComputedProperty(element, 'background-image');
       const bgUrl = this.extractUrl(bgImage);
       body.appendChild(this.buildTextInput(
         'Background URL',
         bgUrl,
         (value) => {
-          const cssValue = value ? `url(${value})` : 'none';
+          // Normalize a leading `/public` so the url() written to source is
+          // apply-correct (data:/http(s) pass through untouched).
+          const normalized = resolvePublicSrc(value, base);
+          const cssValue = normalized ? `url(${normalized})` : 'none';
           this.preview.begin(element as HTMLElement);
           this.preview.apply('background-image', cssValue);
           this.preview.commit();

@@ -95,10 +95,20 @@ export function transformJSX(
   const sorted = insertions.sort((a, b) => b.insertPos - a.insertPos);
 
   for (const { element, line, insertPos } of sorted) {
+    const index = indexMap.has(element) ? indexMap.get(element)! : undefined;
     let attrs = ` data-source-file="${filePath}" data-source-line="${line}"`;
-    if (indexMap.has(element)) {
-      attrs += ` data-source-index="${indexMap.get(element)!}"`;
+    if (index !== undefined) {
+      attrs += ` data-source-index="${index}"`;
     }
+    // Build-time stable element identity (issue #27): a deterministic per-JSX
+    // -element uid derived from file:line[:index]. Deterministic so it survives
+    // HMR/re-render (the value is part of the emitted markup, so React preserves
+    // it across reconciliation — the primary, reconciliation-stable identity
+    // source per data-contracts § Stamping lifecycle 1). `.map()` runtime
+    // instances share one JSX node and therefore one build-time uid; the content
+    // script lazily mints per-instance uids for those (and for clones) at
+    // runtime — build-time alone is intentionally not sufficient there.
+    attrs += ` data-fe-uid="${buildUid(filePath, line, index)}"`;
     s.appendLeft(insertPos, attrs);
     mutated = true;
   }
@@ -109,6 +119,24 @@ export function transformJSX(
     code: s.toString(),
     map: s.generateMap({ hires: true }),
   };
+}
+
+/**
+ * Deterministic build-time uid for a JSX element, derived from its source
+ * coordinate (file:line[:index]). FNV-1a 32-bit hash → base36, prefixed `fe-`.
+ * Deterministic across builds/HMR so the same source element keeps the same uid
+ * (issue #27). Note: `.map()` runtime instances share one JSX node and thus one
+ * build-time uid by construction — runtime per-instance assignment handles that.
+ */
+function buildUid(filePath: string, line: number, index?: number): string {
+  const key = `${filePath}:${line}${index !== undefined ? `:${index}` : ''}`;
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < key.length; i++) {
+    hash ^= key.charCodeAt(i);
+    // FNV prime multiply, kept in 32-bit unsigned range.
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `fe-${hash.toString(36)}`;
 }
 
 function isFragment(node: JSXOpeningElement): boolean {
