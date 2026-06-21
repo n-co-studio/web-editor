@@ -89,18 +89,46 @@ export class PendingQueue {
   }
 
   /**
-   * Get active diffs ready to send. Enforces MAX_DIFFS_PER_BATCH.
-   * Returns the batch and whether more remain.
+   * Get active diffs ready to send, starting at `offset`.
+   * Used by the loop-send path to iterate through all diffs in
+   * MAX_DIFFS_PER_BATCH segments under one batchId.
+   *
+   * Returns the segment and whether more remain after this segment.
    */
-  getBatch(): { diffs: VisualDiff[]; hasMore: boolean } {
+  getBatch(offset = 0): { diffs: VisualDiff[]; hasMore: boolean } {
     const active = this.getActive();
-    if (active.length <= MAX_DIFFS_PER_BATCH) {
-      return { diffs: active, hasMore: false };
+    const segment = active.slice(offset, offset + MAX_DIFFS_PER_BATCH);
+    const hasMore = offset + MAX_DIFFS_PER_BATCH < active.length;
+    return { diffs: segment, hasMore };
+  }
+
+  /**
+   * Get ALL active diffs (no segment cap). Used by the loop-send path
+   * to count and iterate; callers are responsible for chunking.
+   */
+  getAllActive(): VisualDiff[] {
+    return this.getActive();
+  }
+
+  /**
+   * Stamp a batchId on all active pending diffs identified by `diffIds`.
+   * Called at send time so that the outgoing diffs carry the id and the
+   * queue items' `diff.batchId` is also populated for the acknowledge path.
+   * Returns the stamped VisualDiff objects (new object per diff — batchId is readonly).
+   */
+  stampBatchId(batchId: string, diffIds: readonly string[]): VisualDiff[] {
+    const idSet = new Set(diffIds);
+    const stamped: VisualDiff[] = [];
+    for (let i = 0; i < this.items.length; i++) {
+      const item = this.items[i];
+      if (!idSet.has(item.diffId) || item.removedAt) continue;
+      const stampedDiff: VisualDiff = { ...item.diff, batchId };
+      this.items[i] = { ...item, diff: stampedDiff };
+      stamped.push(stampedDiff);
     }
-    return {
-      diffs: active.slice(0, MAX_DIFFS_PER_BATCH),
-      hasMore: true,
-    };
+    this.persist();
+    this.notify();
+    return stamped;
   }
 
   /**
@@ -127,6 +155,8 @@ export class PendingQueue {
   /**
    * Transition diffs to 'sent' status.
    * Called when DIFF_ACK is received from the server.
+   * Stamps `batchId` from the diff itself onto the PendingEdit so the
+   * review panel can group Sent/Applied sections without unwrapping diffs.
    */
   acknowledge(diffIds: readonly string[]): void {
     const acked = new Set(diffIds);
@@ -135,6 +165,9 @@ export class PendingQueue {
       if (acked.has(item.diffId) && !item.removedAt) {
         item.lifecycleStatus = 'sent';
         item.sentAt = now;
+        if (item.diff.batchId && !item.batchId) {
+          item.batchId = item.diff.batchId;
+        }
       }
     }
     this.persist();

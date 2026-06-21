@@ -401,6 +401,13 @@ export interface RelatedChange {
 export interface VisualDiff {
   readonly id: string;
   readonly timestamp: string;
+  /**
+   * Batch identity — minted once per Apply-Changes click, shared by every
+   * diff dispatched in that logical batch. Additive-optional: absent for
+   * diffs created before batch identity was introduced; consumers degrade
+   * gracefully to flat-pool processing. No WS_PROTOCOL_VERSION bump.
+   */
+  readonly batchId?: string;
   readonly element: ElementInfo;
   readonly changes: readonly PropertyChange[];
   readonly reorderChanges?: readonly ReorderChange[];

@@ -36,6 +36,12 @@ export interface VisualDiffBatchPayload {
   readonly diffs: readonly VisualDiff[];
   /** Optional operator note describing intent for this batch. */
   readonly batchNote?: string;
+  /**
+   * Batch identity shared by all diffs in this dispatch. Matches the
+   * `batchId` stamped on each `VisualDiff` in `diffs`. Additive-optional;
+   * absent from pre-batchId extension versions. No WS_PROTOCOL_VERSION bump.
+   */
+  readonly batchId?: string;
 }
 
 export interface DiffAckPayload {

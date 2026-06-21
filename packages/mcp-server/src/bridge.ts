@@ -18,7 +18,7 @@ import type {
   ServerToExtensionMessage,
 } from '@nco-studio/shared';
 import { resolveToToken } from './tokens.js';
-import type { ConnectedClient, PendingNote, PersistedQueue, SessionExport, DriftEntry } from './types.js';
+import type { ConnectedClient, PendingNote, PersistedQueue, SessionExport, DriftEntry, BatchSummary } from './types.js';
 
 const PERSIST_DIR = '.nco-web-editor';
 const PERSIST_FILE = 'pending-queue.json';
@@ -40,6 +40,8 @@ export class Bridge {
   private driftTotalEdits = 0;
   private driftTokenMatches = 0;
   private lastToolCallAt: string | null = null;
+  /** The batchId of the most recently ingested batch. Absent until first batch arrives. */
+  private latestBatchId: string | null = null;
   private readonly persistPath: string;
   private readonly statusFilePath: string;
   private readonly lockPath: string;
@@ -174,12 +176,54 @@ export class Bridge {
   // Pending queue operations (called by MCP tools)
   // -----------------------------------------------------------------------
 
-  /** Get all pending diffs and notes, optionally filtered by tabId. */
-  getPendingChanges(tabId?: string): { diffs: VisualDiff[]; notes: PendingNote[] } {
-    const diffs = tabId
+  /** Get all pending diffs, notes, and batch summary; optionally filtered by tabId and/or batchId. */
+  getPendingChanges(tabId?: string, batchId?: string): {
+    diffs: VisualDiff[];
+    notes: PendingNote[];
+    batches: BatchSummary[];
+  } {
+    let diffs = tabId
       ? this.pendingQueue.filter((d) => d.context.tabId === tabId)
       : [...this.pendingQueue];
-    return { diffs, notes: [...this.pendingNotes] };
+    if (batchId) {
+      diffs = diffs.filter((d) => d.batchId === batchId);
+    }
+    return { diffs, notes: [...this.pendingNotes], batches: this.buildBatchesSummary() };
+  }
+
+  /** Derive the batches summary index from the pending queue. Ordered newest-first. */
+  buildBatchesSummary(): BatchSummary[] {
+    // Collect unique batchIds with earliest createdAt and diffCount
+    const batchMap = new Map<string, { createdAt: string; diffCount: number }>();
+    for (const diff of this.pendingQueue) {
+      if (!diff.batchId) continue;
+      const existing = batchMap.get(diff.batchId);
+      if (!existing) {
+        batchMap.set(diff.batchId, { createdAt: diff.timestamp, diffCount: 1 });
+      } else {
+        if (diff.timestamp < existing.createdAt) existing.createdAt = diff.timestamp;
+        existing.diffCount++;
+      }
+    }
+    // Correlate batchNotes to batchIds
+    const noteByBatchId = new Map<string, string>();
+    for (const note of this.pendingNotes) {
+      if (note.batchId && !noteByBatchId.has(note.batchId)) {
+        noteByBatchId.set(note.batchId, note.text);
+      }
+    }
+    // Build summary array, newest-first
+    const summaries: BatchSummary[] = [];
+    for (const [bid, { createdAt, diffCount }] of batchMap) {
+      summaries.push({
+        batchId: bid,
+        batchNote: noteByBatchId.get(bid),
+        createdAt,
+        diffCount,
+      });
+    }
+    summaries.sort((a, b) => b.batchId.localeCompare(a.batchId) || b.createdAt.localeCompare(a.createdAt));
+    return summaries;
   }
 
   /** Acknowledge a diff — remove from queue, add to tombstone, notify extension, persist. */
@@ -605,24 +649,52 @@ export class Bridge {
   }
 
   private async processDiffBatch(payload: VisualDiffBatchPayload): Promise<void> {
-    const { diffs, batchNote } = payload;
+    const { diffs, batchNote, batchId: envelopeBatchId } = payload;
     const existingIds = new Set(this.pendingQueue.map((d) => d.id));
     const newDiffs: VisualDiff[] = [];
+
+    // Mint the legacy id once per payload (not per diff) so all diffs from a pre-batchId
+    // extension in one payload share the same synthetic id and appear as one logical batch.
+    const legacyId = !envelopeBatchId
+      ? `batch-legacy-${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '')}`
+      : null;
 
     for (const rawDiff of diffs) {
       // Skip diffs that are already pending or were previously processed
       if (existingIds.has(rawDiff.id) || this.processedIds.has(rawDiff.id)) {
         continue;
       }
+      // Belt-and-suspenders: stamp batchId from envelope onto any diff missing it.
+      // The extension stamps diffs at source, but the envelope batchId is the fallback.
+      let diffToProcess = rawDiff;
+      if (!diffToProcess.batchId && envelopeBatchId) {
+        diffToProcess = { ...rawDiff, batchId: envelopeBatchId };
+      } else if (!diffToProcess.batchId && legacyId) {
+        // Pre-batchId extension — stamp the shared synthetic legacy id for this payload.
+        diffToProcess = { ...rawDiff, batchId: legacyId };
+      }
       // Extract data URLs in attribute changes → save as files
-      const diff = await this.extractDataUrls(rawDiff);
+      const diff = await this.extractDataUrls(diffToProcess);
       this.pendingQueue.push(diff);
       newDiffs.push(diff);
     }
 
-    // Store batch note if provided
+    // Determine the effective batchId for this payload
+    const effectiveBatchId = envelopeBatchId ??
+      (newDiffs.length > 0 ? newDiffs[0].batchId : undefined);
+
+    // Track latest_batch_id (most recently received batch)
+    if (effectiveBatchId) {
+      this.latestBatchId = effectiveBatchId;
+    }
+
+    // Store batch note correlated to its batchId
     if (batchNote) {
-      this.pendingNotes.push({ text: batchNote, receivedAt: new Date().toISOString() });
+      this.pendingNotes.push({
+        text: batchNote,
+        receivedAt: new Date().toISOString(),
+        batchId: effectiveBatchId,
+      });
       console.error(`[nco-web-editor] Received batch note (${batchNote.length} chars)`);
     }
 
@@ -716,12 +788,14 @@ export class Bridge {
   // -----------------------------------------------------------------------
 
   /** Get lightweight queue status (for the get_queue_status MCP tool). */
-  getQueueStatus(): { status: 'active' | 'closed'; pending_count: number; updated_at: string } {
-    return {
+  getQueueStatus(): { status: 'active' | 'closed'; pending_count: number; updated_at: string; latest_batch_id?: string } {
+    const result: { status: 'active' | 'closed'; pending_count: number; updated_at: string; latest_batch_id?: string } = {
       status: this.pendingQueue.length > 0 ? 'active' : 'closed',
       pending_count: this.pendingQueue.length,
       updated_at: this.lastStatusUpdate,
     };
+    if (this.latestBatchId) result.latest_batch_id = this.latestBatchId;
+    return result;
   }
 
   /** Write status: closed to the status file (for shutdown). */
@@ -800,6 +874,13 @@ export class Bridge {
           console.error(
             `[nco-web-editor] Restored ${valid.length} pending diffs from disk`,
           );
+          // Restore latest_batch_id from the most recently timestamped diff with a batchId
+          for (const diff of [...valid].sort((a, b) => b.timestamp.localeCompare(a.timestamp))) {
+            if (diff.batchId) {
+              this.latestBatchId = diff.batchId;
+              break;
+            }
+          }
         }
       }
 

@@ -11,6 +11,23 @@ export interface ConnectedClient {
 export interface PendingNote {
   readonly text: string;
   readonly receivedAt: string;
+  /** The batchId of the batch this note was sent with. Absent for legacy notes. */
+  readonly batchId?: string;
+}
+
+/**
+ * Lightweight summary of one logical batch in the pending queue.
+ * Derived on demand by scanning pendingQueue for unique batchId values.
+ * Ordered newest-first by createdAt (earliest diff timestamp in the batch).
+ */
+export interface BatchSummary {
+  readonly batchId: string;
+  /** The operator note associated with this batch, if any. */
+  readonly batchNote?: string;
+  /** ISO 8601 timestamp of the earliest diff in this batch. */
+  readonly createdAt: string;
+  /** Number of diffs in this batch currently in the pending queue. */
+  readonly diffCount: number;
 }
 
 /** Serializable shape for .nco-web-editor/pending-queue.json. */

@@ -78,13 +78,16 @@ export class WebSocketClient {
   }
 
   /** Send a batch of diffs over the WebSocket. */
-  sendDiffBatch(diffs: readonly VisualDiff[], batchNote?: string): boolean {
+  sendDiffBatch(diffs: readonly VisualDiff[], batchNote?: string, batchId?: string): boolean {
     if (isDemoMode()) return false;
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false;
+    const payload: { diffs: readonly VisualDiff[]; batchNote?: string; batchId?: string } = { diffs };
+    if (batchNote) payload.batchNote = batchNote;
+    if (batchId) payload.batchId = batchId;
     this.send({
       type: MessageType.VISUAL_DIFF_BATCH,
       version: PROTOCOL_VERSION,
-      payload: batchNote ? { diffs, batchNote } : { diffs },
+      payload,
     });
     return true;
   }

@@ -171,19 +171,28 @@ function registerTools(server: McpServer, bridge: Bridge): void {
         'mechanism encodes the same choice in its `animation-timeline` (`scroll(root)` for the ' +
         'page vs `scroll()` for the nearest container) inside the StylesheetChange. Reject any ' +
         '`behavior` value other than `"parallax-scroll"`. ' +
-        'Optionally filter by tab session ID.',
+        'Optionally filter by tab session ID. ' +
+        'The `batches` index groups pending diffs by logical Apply-Changes click: ' +
+        '`[{ batchId, batchNote?, createdAt, diffCount }]`, newest-first. ' +
+        'Diffs without a `batchId` (legacy) are omitted from `batches` but appear in `changes`. ' +
+        'Pass `batchId` to filter `changes` to a single batch. ' +
+        'Use `get_queue_status.latest_batch_id` to identify the most recently submitted batch.',
       inputSchema: z.object({
         tabId: z
           .string()
           .optional()
           .describe('Optional tab session ID to filter by'),
+        batchId: z
+          .string()
+          .optional()
+          .describe('Optional batch ID to filter changes to a single batch'),
       }),
     },
-    async ({ tabId }) => {
+    async ({ tabId, batchId }) => {
       bridge.recordToolCall();
-      const { diffs, notes } = bridge.getPendingChanges(tabId);
+      const { diffs, notes, batches } = bridge.getPendingChanges(tabId, batchId);
       return {
-        content: [{ type: 'text' as const, text: JSON.stringify({ changes: diffs, notes }, null, 2) }],
+        content: [{ type: 'text' as const, text: JSON.stringify({ changes: diffs, notes, batches }, null, 2) }],
       };
     },
   );
@@ -345,8 +354,10 @@ function registerTools(server: McpServer, bridge: Bridge): void {
     {
       title: 'Get Queue Status',
       description:
-        'Returns lightweight queue status: active/closed, pending count, and last update timestamp. ' +
-        'Use this instead of get_pending_visual_changes when you only need to check whether diffs are waiting.',
+        'Returns lightweight queue status: active/closed, pending count, last update timestamp, ' +
+        'and `latest_batch_id` (the batchId of the most recently ingested batch — absent until ' +
+        'the first batch arrives). Use this instead of get_pending_visual_changes when you only ' +
+        'need to check whether diffs are waiting or to identify the most recent batch.',
       inputSchema: z.object({}),
     },
     async () => {
