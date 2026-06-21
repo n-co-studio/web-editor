@@ -22,9 +22,9 @@ briefs:
       - "docs/spec/compiled/v1/features/feature-001-element-selection.md"
   - title: "Implement stable element identity (applier + runtime)"
     sequence: 2
-    session: null
-    branch: ""
-    status: pending
+    session: "235f9a0a-cd57-4318-a405-248da81eca41"
+    branch: "feature/stable-element-identity"
+    status: in_progress
     next_brief: ""
     boundaries: []
 

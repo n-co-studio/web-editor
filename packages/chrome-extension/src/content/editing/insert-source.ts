@@ -13,7 +13,7 @@ import type {
   InsertChange,
   PropertyChange,
 } from '@nco-studio/shared';
-import { generateSelector } from '../../shared/dom-utils';
+import { generateSelector, ensureUid, readUid } from '../../shared/dom-utils';
 
 // ---------------------------------------------------------------------------
 // Sibling bracket — prev/next anchors around the insert position
@@ -87,7 +87,10 @@ export function collectChildSnapshot(container: HTMLElement): ChildSnapshotEntry
       const file = child.getAttribute('data-source-file') ?? '';
       const line = parseInt(child.getAttribute('data-source-line') ?? '0', 10);
       const indexAttr = child.getAttribute('data-source-index');
+      // Mint/repair the uid so each snapshot entry is per-instance distinct —
+      // this is what lets the applier tell clone twins apart (issue #27).
       const entry: ChildSnapshotEntry = {
+        uid: ensureUid(child),
         tagName: child.tagName.toLowerCase(),
         selector: generateSelector(child),
         sourceFile: file,
@@ -148,7 +151,32 @@ export function buildInsertChange(
   if (outerHTML) {
     change = { ...change, outerHTML };
   }
+
+  // Source-anchored addressing (issue #27): anchor the insert to a stable
+  // sibling uid + side instead of a positional index. Prefer the preceding
+  // sibling (insert "after" it); fall back to the following sibling ("before").
+  // All-or-nothing — only set when a sibling actually carries a uid; otherwise
+  // the applier degrades to positional resolution.
+  const anchor = anchorPairFromBracket(prev, next);
+  if (anchor) {
+    change = { ...change, anchorUid: anchor.uid, anchorPosition: anchor.position };
+  }
+
   return change;
+}
+
+/**
+ * Derive the source-anchored insert pair from the sibling bracket. Prefers the
+ * previous sibling ("after" it); falls back to the next sibling ("before" it).
+ * Returns null when neither carries a uid (positional fallback).
+ */
+function anchorPairFromBracket(
+  prev: SiblingAnchor | null,
+  next: SiblingAnchor | null,
+): { uid: string; position: 'before' | 'after' } | null {
+  if (prev?.uid) return { uid: prev.uid, position: 'after' };
+  if (next?.uid) return { uid: next.uid, position: 'before' };
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -158,13 +186,23 @@ export function buildInsertChange(
 function anchorFromElement(el: Element): SiblingAnchor | null {
   const file = el.getAttribute('data-source-file');
   const line = el.getAttribute('data-source-line');
-  if (!file || !line) return null;
+
+  // An anchor is useful when the sibling carries a stable uid OR a source
+  // coordinate. A uid-only sibling (e.g. a freshly pasted/runtime-stamped node
+  // with no data-source-*) must still be anchorable so anchorUid resolution does
+  // not silently fall back to positional addressing (issue #27). When there is
+  // neither, degrade to positional — the applier handles that.
+  const hasSource = Boolean(file && line);
+  if (!hasSource && !readUid(el)) return null;
 
   const indexAttr = el.getAttribute('data-source-index');
+  // Mint/repair the uid so the anchor (and its uid-preferring selector) resolve
+  // by stable per-instance identity, and so InsertChange.anchorUid can read it.
   const anchor: SiblingAnchor = {
+    uid: ensureUid(el),
     selector: generateSelector(el),
-    sourceFile: file,
-    sourceLine: parseInt(line, 10),
+    sourceFile: file ?? '',
+    sourceLine: line ? parseInt(line, 10) : 0,
   };
   if (indexAttr != null) {
     return { ...anchor, instanceIndex: parseInt(indexAttr, 10) };

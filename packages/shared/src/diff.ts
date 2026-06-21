@@ -19,6 +19,17 @@ export interface BoundingRect {
  * attributes injected by @nco-studio/web-editor-plugin.
  */
 export interface ElementInfo {
+  /**
+   * Canonical diff-targeting key — the stable, per-instance element identity
+   * read from the `data-fe-uid` attribute (feature-006 stamps it at build, the
+   * content script assigns/repairs it at runtime). Unique per DOM instance: a
+   * clone receives a *fresh* uid, so duplicate-then-edit no longer collides
+   * (issue #27). Optional only for backward compatibility — absent for
+   * `sourceVerified: false` nodes not yet lazily stamped and for pre-uid queued
+   * payloads, where consumers degrade to `selector` targeting.
+   * `sourceFile`/`sourceLine` are code-map hints, never identity.
+   */
+  readonly uid?: string;
   readonly selector: string;
   readonly tagName: string;
   readonly textContent?: string;
@@ -118,6 +129,13 @@ export interface ReorderChange {
 
 /** Identifies a sibling element adjacent to an insert position. */
 export interface SiblingAnchor {
+  /**
+   * Canonical anchor identity — `data-fe-uid` of the sibling. When present,
+   * insert/reparent/group anchors resolve by `uid` (stable across re-render and
+   * reorder); when absent, `selector` + the `sourceFile`/`sourceLine` hints are
+   * used. This is the value `InsertChange.anchorUid` references. (issue #27)
+   */
+  readonly uid?: string;
   readonly selector: string;
   readonly sourceFile: string;
   readonly sourceLine: number;
@@ -126,6 +144,13 @@ export interface SiblingAnchor {
 
 /** Snapshot of an existing child in the target container (for context). */
 export interface ChildSnapshotEntry {
+  /**
+   * Per-instance identity (`data-fe-uid`) of the snapshotted child. Two clones
+   * in a childSnapshot previously shared one `sourceLine`; with `uid` each entry
+   * is distinct so the applier can tell the original from the duplicate (issue
+   * #27). Optional for backward compatibility.
+   */
+  readonly uid?: string;
   readonly tagName: string;
   readonly selector: string;
   readonly sourceFile: string;
@@ -224,9 +249,26 @@ export interface InsertChange {
    * Full serialized HTML of the inserted element, including its entire subtree.
    * Carried for clone/paste/duplicate inserts where the new element reproduces
    * an existing element verbatim — the receiving agent recreates the exact
-   * markup rather than an empty `<tagName>`.
+   * markup rather than an empty `<tagName>`. For clone/paste inserts this markup
+   * carries *freshly regenerated* `data-fe-uid`s (root + every descendant), so
+   * the inserted instance is independently addressable (issue #27).
    */
   readonly outerHTML?: string;
+  /**
+   * Source-anchored insert addressing (issue #27). The `uid` of the existing
+   * sibling the new element is positioned relative to — equal to the chosen
+   * `prevSibling`/`nextSibling` `SiblingAnchor.uid`. Replaces fragile positional
+   * `nth-of-type` resolution. Optional/all-or-nothing with `anchorPosition`:
+   * when absent, the applier falls back to `insertIndex` + sibling selectors +
+   * `containerSelector`.
+   */
+  readonly anchorUid?: string;
+  /**
+   * Side of `anchorUid` the new element occupies. Required when `anchorUid` is
+   * present; ignored otherwise. `"after"` mirrors a `prevSibling`-anchored
+   * insert, `"before"` a `nextSibling`-anchored insert.
+   */
+  readonly anchorPosition?: 'before' | 'after';
 }
 
 /**

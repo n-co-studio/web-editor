@@ -95,19 +95,48 @@ export default function ncoWebEditorBabel(
               ),
             );
 
-            if (indexMap.has(path)) {
+            const index = indexMap.has(path) ? indexMap.get(path)! : undefined;
+            if (index !== undefined) {
               node.attributes.push(
                 t.jsxAttribute(
                   t.jsxIdentifier('data-source-index'),
-                  t.stringLiteral(String(indexMap.get(path)!)),
+                  t.stringLiteral(String(index)),
                 ),
               );
             }
+
+            // Build-time stable element identity (issue #27) — parity with the
+            // Vite transform (transform.ts buildUid). Deterministic per JSX
+            // element so it survives HMR/reconciliation; the content script
+            // lazily mints per-instance uids for .map() instances and clones.
+            node.attributes.push(
+              t.jsxAttribute(
+                t.jsxIdentifier('data-fe-uid'),
+                t.stringLiteral(buildUidBabel(relPath, loc.start.line, index)),
+              ),
+            );
           }
         },
       },
     },
   };
+}
+
+/**
+ * Deterministic build-time uid from a JSX element's source coordinate
+ * (file:line[:index]). FNV-1a 32-bit → base36, prefixed `fe-`. Kept identical to
+ * transform.ts `buildUid` so the Vite and Babel pipelines stamp the same value
+ * for the same element (issue #27). Duplicated rather than shared because the two
+ * plugins are independent entry points with no common runtime module.
+ */
+function buildUidBabel(filePath: string, line: number, index?: number): string {
+  const key = `${filePath}:${line}${index !== undefined ? `:${index}` : ''}`;
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < key.length; i++) {
+    hash ^= key.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `fe-${hash.toString(36)}`;
 }
 
 function isFragmentBabel(
