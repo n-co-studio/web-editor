@@ -9,7 +9,7 @@ briefs:
     sequence: 1
     session: "eadaa5a1-a812-4537-8ca9-f5b61ea51d3e"
     branch: "feature/batch-identity"
-    status: in_progress
+    status: complete
     next_brief: "Implement Batch Identity (batchId stamp + bridge + panel grouping)"
     boundaries:
       - "docs/spec/compiled/v1/features/feature-004-change-batching.md"
@@ -132,4 +132,4 @@ governance:
       B2: "n/a"
       B3: "n/a"
     overrides_used: []
-    timestamp: ""
+    timestamp: "2026-06-21T22:05:00Z"
