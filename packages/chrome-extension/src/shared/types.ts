@@ -57,6 +57,12 @@ export interface PendingEdit {
   sentAt?: number;
   copiedToClipboard?: boolean;
   copiedAt?: number;
+  /**
+   * Batch identity stamped when the diff is acknowledged (sent). Mirrors
+   * `diff.batchId`; stored here so grouping in Sent/Applied sections can
+   * be done without unwrapping the inner diff on every render cycle.
+   */
+  batchId?: string;
 }
 
 // ---------------------------------------------------------------------------

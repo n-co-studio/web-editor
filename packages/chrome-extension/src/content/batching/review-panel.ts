@@ -4,6 +4,7 @@ import {
   OVERLAY,
   SELECTOR_TRUNCATE_LENGTH,
   BATCH_CONFIRM_THRESHOLD,
+  MAX_DIFFS_PER_BATCH,
   QUEUE_PANEL_DEFAULT_WIDTH,
   QUEUE_PANEL_MIN_WIDTH,
   QUEUE_PANEL_MAX_WIDTH_RATIO,
@@ -286,30 +287,19 @@ export class ReviewPanel {
       body.appendChild(this.renderGroup(selector, diffs));
     }
 
-    // Sent changes section
+    // Sent changes section — grouped by batch (Batch → Element → Property)
     if (sent.length > 0) {
       body.appendChild(this.renderSectionHeader('Sent to Server', sent.length, OVERLAY.warning));
-      const sentDiffs = sent.map((s) => s.diff);
-      const sentGroups = this.groupByElement(sentDiffs);
-      for (const [selector, diffs] of sentGroups) {
-        body.appendChild(this.renderGroup(selector, diffs, 'sent'));
-      }
-      // Stale indicator
-      const staleCount = sent.filter(
-        (s) => s.sentAt && Date.now() - s.sentAt > 24 * 60 * 60 * 1000,
-      ).length;
-      if (staleCount > 0) {
-        body.appendChild(this.renderStaleNotice(staleCount));
+      for (const batchBlock of this.groupByBatch(sent)) {
+        body.appendChild(this.renderBatchBlock(batchBlock, 'sent'));
       }
     }
 
-    // Applied changes section
+    // Applied changes section — grouped by batch (Batch → Element → Property)
     if (applied.length > 0) {
       body.appendChild(this.renderSectionHeader('Applied', applied.length, '#10b981'));
-      const appliedDiffs = applied.map((a) => a.diff);
-      const appliedGroups = this.groupByElement(appliedDiffs);
-      for (const [selector, diffs] of appliedGroups) {
-        body.appendChild(this.renderGroup(selector, diffs, 'applied'));
+      for (const batchBlock of this.groupByBatch(applied)) {
+        body.appendChild(this.renderBatchBlock(batchBlock, 'applied'));
       }
       // Clear applied link
       const clearLink = createElement('button', {}, {
@@ -994,33 +984,60 @@ export class ReviewPanel {
 
   private async handleSend(): Promise<void> {
     if (this.sending) return;
-    const { diffs } = this.queue.getBatch();
+    const allActive = this.queue.getAllActive();
     const note = this.notesStore.toBatchNote();
-    if (diffs.length === 0 && !note) return;
+    if (allActive.length === 0 && !note) return;
 
-    // Confirm large batches
-    if (diffs.length >= BATCH_CONFIRM_THRESHOLD) {
+    if (allActive.length >= BATCH_CONFIRM_THRESHOLD) {
       console.log(
-        `[nco-web-editor] Sending batch of ${diffs.length} changes`,
+        `[nco-web-editor] Sending batch of ${allActive.length} changes`,
       );
     }
 
     this.sending = true;
     this.refresh();
 
-    const success = this.wsClient.sendDiffBatch(diffs, note);
-    if (!success) {
-      console.error('[nco-web-editor] Failed to send batch — WebSocket not connected');
-      this.sending = false;
-      this.refresh();
-      return;
+    // Mint one batchId for the entire click — invariant: one click = one batchId.
+    const batchId = makeBatchId();
+
+    // Stamp batchId on ALL active diffs in the queue (updates queue items in place
+    // so the diff.batchId is available when DIFF_ACK triggers acknowledge()).
+    const allDiffIds = allActive.map((d) => d.id);
+    const stampedDiffs = this.queue.stampBatchId(batchId, allDiffIds);
+
+    // Loop-send in MAX_DIFFS_PER_BATCH segments under the same batchId.
+    // The server ACKs each segment independently; the queue updates on each ACK.
+    let sentAny = false;
+    for (let offset = 0; offset < stampedDiffs.length; offset += MAX_DIFFS_PER_BATCH) {
+      const segment = stampedDiffs.slice(offset, offset + MAX_DIFFS_PER_BATCH);
+      // Only attach the note to the first segment (one note per logical batch)
+      const segmentNote = offset === 0 ? note : undefined;
+      const success = this.wsClient.sendDiffBatch(segment, segmentNote, batchId);
+      if (!success) {
+        console.error('[nco-web-editor] Failed to send batch — WebSocket not connected');
+        this.sending = false;
+        this.refresh();
+        return;
+      }
+      sentAny = true;
+    }
+
+    // Note-only batch (no diffs)
+    if (!sentAny && note) {
+      const success = this.wsClient.sendDiffBatch([], note, batchId);
+      if (!success) {
+        console.error('[nco-web-editor] Failed to send note — WebSocket not connected');
+        this.sending = false;
+        this.refresh();
+        return;
+      }
     }
 
     // Clear notes after successful send
     this.notesStore.clear();
 
-    // The queue will be updated when DIFF_ACK arrives (via queue.acknowledge)
     // Reset sending state after a reasonable timeout
+    // (The queue updates when DIFF_ACK arrives via queue.acknowledge)
     setTimeout(() => {
       this.sending = false;
       this.refresh();
@@ -1106,6 +1123,118 @@ export class ReviewPanel {
     }
     return groups;
   }
+
+  /**
+   * Group PendingEdit items by batchId (newest-first).
+   * Items without a batchId are collected into a synthetic "legacy" group.
+   */
+  private groupByBatch(items: import('../../shared/types').PendingEdit[]): Array<{
+    batchId: string | null;
+    sentAt: number | undefined;
+    diffs: VisualDiff[];
+  }> {
+    const batchMap = new Map<string, { sentAt: number | undefined; diffs: VisualDiff[] }>();
+    const legacy: { sentAt: number | undefined; diffs: VisualDiff[] } = { sentAt: undefined, diffs: [] };
+
+    for (const item of items) {
+      const bid = item.batchId ?? item.diff.batchId;
+      if (bid) {
+        let entry = batchMap.get(bid);
+        if (!entry) {
+          entry = { sentAt: item.sentAt, diffs: [] };
+          batchMap.set(bid, entry);
+        } else if (item.sentAt && (!entry.sentAt || item.sentAt < entry.sentAt)) {
+          entry.sentAt = item.sentAt;
+        }
+        entry.diffs.push(item.diff);
+      } else {
+        if (item.sentAt && (!legacy.sentAt || item.sentAt < legacy.sentAt)) {
+          legacy.sentAt = item.sentAt;
+        }
+        legacy.diffs.push(item.diff);
+      }
+    }
+
+    // Newest batch first (highest sentAt first)
+    const result: Array<{ batchId: string | null; sentAt: number | undefined; diffs: VisualDiff[] }> = [];
+    for (const [bid, entry] of batchMap) {
+      result.push({ batchId: bid, ...entry });
+    }
+    result.sort((a, b) => (b.sentAt ?? 0) - (a.sentAt ?? 0));
+    if (legacy.diffs.length > 0) {
+      result.push({ batchId: null, ...legacy });
+    }
+    return result;
+  }
+
+  private renderBatchBlock(
+    block: { batchId: string | null; sentAt: number | undefined; diffs: VisualDiff[] },
+    lifecycle: 'sent' | 'applied',
+  ): HTMLDivElement {
+    const wrapper = createElement('div', {}, {
+      borderBottom: `1px solid ${OVERLAY.border}`,
+      marginBottom: '2px',
+    });
+
+    // Batch header
+    const headerEl = createElement('div', {}, {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '6px',
+      padding: '4px 12px',
+      background: 'rgba(255,255,255,0.04)',
+      fontFamily: OVERLAY.monoFamily,
+      fontSize: '10px',
+      color: OVERLAY.textMuted,
+    });
+
+    const idEl = createElement('span', {}, { color: OVERLAY.primary, fontWeight: '600' });
+    idEl.textContent = block.batchId ?? 'legacy';
+    headerEl.appendChild(idEl);
+
+    if (block.sentAt) {
+      const elapsed = formatElapsed(new Date(block.sentAt).toISOString());
+      if (elapsed) {
+        const timeEl = createElement('span');
+        timeEl.textContent = `· ${elapsed}`;
+        headerEl.appendChild(timeEl);
+      }
+
+      // Stale indicator — batch-level: oldest sentAt > 24h
+      if (Date.now() - block.sentAt > 24 * 60 * 60 * 1000) {
+        const staleEl = createElement('span', {}, { color: OVERLAY.warning });
+        staleEl.textContent = '⚠ stale';
+        staleEl.title = 'Batch sent more than 24 hours ago';
+        headerEl.appendChild(staleEl);
+      }
+    }
+
+    wrapper.appendChild(headerEl);
+
+    // Element groups inside this batch
+    const elementGroups = this.groupByElement(block.diffs);
+    for (const [selector, diffs] of elementGroups) {
+      const groupEl = this.renderGroup(selector, diffs, lifecycle);
+      groupEl.style.borderBottom = 'none';
+      groupEl.style.paddingLeft = '20px';
+      wrapper.appendChild(groupEl);
+    }
+
+    return wrapper;
+  }
+}
+
+/**
+ * Mint a stable, human-readable batch ID for one Apply-Changes click.
+ * Format: batch-YYYYMMDD-HHMMSS-xxxx (UTC date + time + 4-char hex suffix)
+ * Example: batch-20260621-143052-a3f7
+ */
+function makeBatchId(): string {
+  const now = new Date();
+  const date = now.toISOString().slice(0, 10).replace(/-/g, '');
+  const time = now.toISOString().slice(11, 19).replace(/:/g, '');
+  const suffix = Math.floor(Math.random() * 0x10000).toString(16).padStart(4, '0');
+  return `batch-${date}-${time}-${suffix}`;
 }
 
 /** Format elapsed time since an ISO timestamp as a compact string. */
