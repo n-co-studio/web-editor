@@ -14,7 +14,7 @@ feature_briefs:
     path: "docs/spec/compiled/v1/features/brief-stable-element-identity.md"
     status: complete
     created_date: "2026-06-21"
-    note: "Ratifies the data-fe-uid per-instance identity contract (issue #27). Brief 1 of 2 in the stable-element-identity task group — spec-only; implementation follows in Brief 2."
+    note: "Ratifies the data-fe-uid per-instance identity contract (issue #27). Two-brief task group: Brief 1 ratified the contract (spec-only); Brief 2 implemented it (commit a24ac99 — schema uid/anchor fields, generateSelector uid-preference, deep clone/paste re-stamp, source-anchored inserts, deployment-aware src, build-time stamp on transform.ts + babel.ts). Group complete. Registered here in the canonical brief registry; not added to manifest.json (Prompt-0-owned; featureFiles tracks feature-NNN specs only, not briefs)."
 contract_changes:
   - name: "StylesheetChange + StylesheetRule"
     path: "docs/spec/compiled/v1/data-contracts.md"
