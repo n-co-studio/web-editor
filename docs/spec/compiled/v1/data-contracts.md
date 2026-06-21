@@ -28,14 +28,17 @@
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| selector | string | yes | CSS selector (most specific available) |
+| uid | string | no | **Canonical diff-targeting key** — the stable per-instance element identity, read from the `data-fe-uid` attribute (feature-006 stamps it at build, the content script assigns/repairs it at runtime; see [Stable Element Identity](#stable-element-identity-data-fe-uid)). Unique per DOM instance: a clone receives a **fresh** uid, so duplicate-then-edit no longer collides (issue #27). Optional only for backward compatibility — present whenever the element has been stamped; absent for `sourceVerified: false` nodes that have not yet been lazily stamped. When present, all change types (insert / reorder / attribute / text / reparent / remove) target the element by `uid`; when absent, consumers degrade to `selector` targeting. |
+| selector | string | yes | CSS selector (most specific available). Fallback targeting key when `uid` is absent; also the human-readable locator. |
 | tagName | string | yes | HTML tag name |
 | textContent | string | no | First 80 chars (for identification) |
-| sourceFile | string | yes | Relative path from project root, from data-source-file attribute |
-| sourceLine | number | yes | Line number from data-source-line attribute |
-| instanceIndex | number | no | Index for repeated elements sharing the same sourceLine (e.g., items inside .map() calls). Populated from data-source-index attribute when available. |
-| attributes | Record<string, string> | yes | class, id, data-*, aria-* |
+| sourceFile | string | yes | **Code-map hint, not identity.** Relative path from project root, from `data-source-file`. Locates the originating source for the applier; never used to distinguish element instances (clones share their origin's `sourceFile`). |
+| sourceLine | number | yes | **Code-map hint, not identity.** Line number from `data-source-line`. Locates the originating source line; clones inherit the origin's `sourceLine`, so it is non-unique and must never key a diff (this collision is the root cause of issue #27). |
+| instanceIndex | number | no | **Code-map hint, not identity.** Index for repeated elements sharing the same `sourceLine` (e.g., items inside `.map()` calls), from `data-source-index`. A best-effort disambiguator for source location only; `.map()` runtime instances still collide on it (every iteration shares one JSX line+index), so it is never authoritative identity — `uid` is. |
+| attributes | Record<string, string> | yes | class, id, data-* (including `data-fe-uid` and `data-source-*`), aria-* |
 | boundingRect | DOMRect | yes | Position and size at time of edit |
+
+> **Identity vs. location.** `uid` answers *"which element instance is this?"* (per-instance, unique, the diff key). `sourceFile` / `sourceLine` / `instanceIndex` answer *"where in source did this instance originate?"* (a shared code-map hint the applier uses to find or create source). The two are orthogonal: many DOM instances may map to one `sourceLine`, but each carries its own `uid`. See [Stable Element Identity](#stable-element-identity-data-fe-uid) for the full model.
 
 ### PropertyChange
 
@@ -82,6 +85,8 @@
 | siblingSelectors | string[] | yes | Selectors for all siblings in the target container at commit time |
 | prevSibling | SiblingAnchor \| null | yes | Element immediately before the inserted position, or null if inserted at index 0 |
 | nextSibling | SiblingAnchor \| null | yes | Element immediately after the inserted position, or null if inserted at end |
+
+> **Sibling identity in reparent (issue #27).** Reparent-destination sibling identity is carried by `prevSibling.uid` / `nextSibling.uid` on the extended [SiblingAnchor](#siblinganchor-extended). The `siblingSelectors: string[]` array stays **selector-only** by design — it is a positional snapshot of the target container for context, not an identity register; do not add a parallel uid-indexed list. If uid-indexed sibling lists are ever needed, `siblingSelectors` is the extension point.
 
 ### StylesheetChange
 
@@ -138,7 +143,7 @@ How Claude Code reproduces each new change type as project source. The reproduci
 - **CSS-3D transform → existing `InsertChange.outerHTML` + `RemoveChange`.** The 3D mechanism needs no new change type: it reuses the existing replace pattern (a `RemoveChange` for the `<img>` plus an `InsertChange` whose `outerHTML` carries the perspective wrapper and inner element) already used by the current `parallax.ts` toggle. Its `@media (prefers-reduced-motion: reduce)` zeroing rule rides along as a `StylesheetChange`.
 - **background-attachment: fixed → ordinary `PropertyChange[]`.** Inline declarations on the converted block (as `parallax.ts` already emits). Its reduced-motion zeroing rides along as a `StylesheetChange` (a `@media` rule cannot be inline).
 
-**Protocol compatibility.** `stylesheetChanges` and `scriptChanges` are additive, optional arrays on `VisualDiff`. Consumers that predate them ignore unknown fields, so **no `WS_PROTOCOL_VERSION` bump is required** (same treatment as `reorderChanges` / `insertChanges` / `reparentChanges`, which were added without a protocol bump; the version remains `0.4.0`). The MCP tool surface (`get_pending_visual_changes`) returns the full `VisualDiff` unchanged. A `0.4.0` consumer that does not implement feature-009 will silently ignore `scriptChanges` / `stylesheetChanges` — this is intentional: the pending queue stays processable by Claude Code regardless of whether the MCP consumer is feature-009-aware.
+**Protocol compatibility.** `stylesheetChanges` and `scriptChanges` are additive, optional arrays on `VisualDiff`. Consumers that predate them ignore unknown fields, so **no `WS_PROTOCOL_VERSION` bump is required** (same treatment as `reorderChanges` / `insertChanges` / `reparentChanges`, which were added without a protocol bump; the version remains `0.4.0`). The MCP tool surface (`get_pending_visual_changes`) returns the full `VisualDiff` unchanged. A `0.4.0` consumer that does not implement feature-009 will silently ignore `scriptChanges` / `stylesheetChanges` — this is intentional: the pending queue stays processable by Claude Code regardless of whether the MCP consumer is feature-009-aware. The `uid` / `anchorUid` / `anchorPosition` identity fields (issue #27) follow the same additive-optional rule — see [Protocol compatibility (uid + anchor fields)](#protocol-compatibility-uid--anchor-fields).
 
 ### DesignToken
 
@@ -152,13 +157,28 @@ How Claude Code reproduces each new change type as project source. The reproduci
 
 ### InsertChange
 
-The existing `InsertChange` shape (defined in `packages/shared/src/diff.ts`) is extended with a single optional field for component-aware inserts. All other fields are unchanged.
+The existing `InsertChange` shape (defined in `packages/shared/src/diff.ts`) is extended with optional fields for component-aware inserts and for **source-anchored insertion** (issue #27). All other fields are unchanged.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | componentInsert | ComponentInsertDescriptor | no | When present, the insert resolves to a project component rather than a raw HTML element. `tagName` becomes a placeholder used for the phantom DOM render only; Claude Code substitutes the rendered tag for the actual component JSX on application. When absent (existing flow), the insert is a plain HTML element identified by `tagName`. |
+| anchorUid | string | no | **Source-anchored insert addressing.** The `uid` of the existing sibling the new element is positioned relative to. Replaces fragile positional `nth-of-type` resolution: instead of *"child index 2 in this container"*, the insert says *"after the element with this uid"*. `anchorUid` **is** the `uid` value of the chosen `prevSibling` or `nextSibling` `SiblingAnchor` (no separate lookup) — `anchorPosition` records which side that anchor sits on. Optional for backward compatibility — when absent, the applier falls back to the existing `insertIndex` + `prevSibling`/`nextSibling` selectors + `containerSelector`. |
+| anchorPosition | "before" \| "after" | no | Where the new element lands relative to `anchorUid`. Required when `anchorUid` is present; ignored otherwise. `"after"` mirrors `prevSibling`-anchored inserts; `"before"` mirrors `nextSibling`-anchored inserts. |
 
 The discriminator is presence: `componentInsert` present → component insert; absent → HTML element insert.
+
+#### InsertChange anchor model (normative)
+
+Source-anchored inserts address the insertion point by a stable sibling `uid` + side, parallel to how `ReparentChange` carries `prevSibling` / `nextSibling` `SiblingAnchor`s. This table is normative for the anchor pair. The pair is **conditionally required**: on the `InsertChange` shape both fields are optional (a payload may omit them and fall back to positional addressing), but **when anchored addressing is used, the pair is all-or-nothing** — `anchorUid` present ⇒ `anchorPosition` MUST also be present, and vice versa. That conditional requirement is what "Required: yes (within the anchor model)" denotes below:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| anchorUid | string | yes (within the anchor model) | `uid` of the existing sibling the insert is anchored to. The applier resolves this sibling's source location (via its `SiblingAnchor` `sourceFile`/`sourceLine` hint or the receiving agent's uid→source map) and writes the new markup immediately `before`/`after` it. |
+| anchorPosition | "before" \| "after" | yes (within the anchor model) | Side of the anchor the new element occupies. `before` ⇒ new element precedes `anchorUid`; `after` ⇒ new element follows it. |
+
+**Why anchored, not positional (issue #27, weakness 1).** Inserted elements previously arrived with `sourceVerified: false`, empty `sourceFile`/`sourceLine`, and positional selectors (`div > div:nth-of-type(1) > …`) that only resolve against the intermediate DOM, so replay was fragile. Anchoring the insert to a sibling `uid` makes the insertion point survive re-render and reorder: the anchor is a stable instance, not a DOM coordinate. When no sibling has a `uid` (e.g., inserting into an all-unstamped container), the applier degrades to the legacy positional path — anchored addressing is strictly additive.
+
+The new element's own `uid` (a fresh value) travels on `ElementInfo.uid` of the diff that carries the insert, and its markup travels in `outerHTML` (existing field) — see the **fresh insert** row of [uid → source mapping](#uid--source-mapping).
 
 ### ProjectComponent
 
@@ -193,6 +213,93 @@ Prop value descriptor. Present in v1 data contracts so the v1.1 prop editor can 
 | defaultValue | string | no | Stringified default literal extracted from the component source (e.g., `"primary"`, `"16"`, `"true"`). Absent when no default is declared. |
 | unionValues | string[] | no | When `type === "string-union"`, the allowed string literals (e.g., `["primary", "secondary", "ghost"]`). Absent otherwise. |
 | tokenCategory | TokenCategory | no | When the prop semantically aligns with a design token category (e.g., a `color` prop), the matched `TokenCategory` (`spacing`, `typography`, `colors`, `radii`, `shadows`, `breakpoints`). Drives token-snapping for prop values in feature-008.1. Absent when no alignment is inferred. |
+
+---
+
+## Stable Element Identity (data-fe-uid)
+
+> Ratified by the `stable-element-identity` task group (issue #27). The fields below are **additive-optional** schema extensions — see [Protocol compatibility](#protocol-compatibility-uid--anchor-fields). Implementation (stamping + applier resolution) lands in the build brief; this section is the agreed contract it builds against.
+
+### Problem
+
+Every tracked element was identified by `sourceFile` + `sourceLine`. When an operator **duplicates** an element, the clone is a DOM copy that inherits the **same `data-source-line`** as the original, so the two instances are indistinguishable in the diff payload. A follow-up operation on either twin (edit `src`/text, reorder, delete) can only reference the shared identity, so on replay the applier mis-assigns the edit and drops one twin — *"the image I duplicated first was deleted"*, *"the ordering is wrong"* (issue #27). `.map()` runtime instances have the same latent collision: N rendered nodes share one JSX `sourceLine` (+ `instanceIndex`).
+
+### Model
+
+`data-fe-uid` is a **stable, unique, per-instance** identifier carried as a DOM attribute and surfaced as `uid` on the diff-payload identity shapes. It is the **canonical diff-targeting key** for all change types. `data-source-*` attributes are demoted to **code-map hints** — they locate source, they never establish identity.
+
+The `uid` field is added to every shape that currently identifies an element by `sourceFile`/`sourceLine`:
+
+#### ElementInfo.uid
+Documented in [ElementInfo](#elementinfo) — the canonical key for the edited element.
+
+#### SiblingAnchor (extended)
+
+`SiblingAnchor` (defined in `packages/shared/src/diff.ts`; carried by `ReparentChange`, `GroupChange`, and `InsertChange` `prevSibling`/`nextSibling`) gains `uid`:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| uid | string | no | **Canonical anchor identity.** `data-fe-uid` of the sibling. When present, insert/reparent/group anchors resolve by `uid` (stable across re-render and reorder); when absent, the existing `selector` + `sourceFile`/`sourceLine` hints are used. This is the field `InsertChange.anchorUid` references. |
+| selector | string | yes | CSS selector of the sibling (fallback anchor + human locator). |
+| sourceFile | string | yes | Code-map hint — source file of the sibling. Not identity. |
+| sourceLine | number | yes | Code-map hint — source line of the sibling. Not identity (clones collide). |
+| instanceIndex | number | no | Code-map hint — `.map()` disambiguator. Not identity. |
+
+#### ChildSnapshotEntry (extended)
+
+`ChildSnapshotEntry` (defined in `packages/shared/src/diff.ts`; the `childSnapshot[]` context array on `InsertChange`) gains `uid`:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| uid | string | no | **Per-instance identity** of the snapshotted child. This is what fixes the reported repro: two clones in a `childSnapshot` previously shared `sourceLine: 428`; with `uid` each entry is distinct, so the applier can tell the original from the duplicate. Optional for backward compatibility. |
+| tagName | string | yes | Tag name of the child. |
+| selector | string | yes | CSS selector (fallback). |
+| sourceFile | string | yes | Code-map hint. Not identity. |
+| sourceLine | number | yes | Code-map hint. Not identity. |
+| instanceIndex | number | no | Code-map hint. Not identity. |
+
+### uid → source mapping
+
+How the **applier** (Claude Code, build brief) resolves a `uid` to a concrete source edit. The applier never trusts `uid` as a source coordinate — `uid` selects *which instance*, and the `sourceFile`/`sourceLine` **hint** (plus `outerHTML` for new markup) tells it *where in source* to act. Three cases:
+
+| Case | Payload carries | Applier resolves to source by |
+|------|-----------------|-------------------------------|
+| **(a) Existing element** | `uid` + `sourceFile` + `sourceLine` hint | Edit the existing source node located at `sourceFile:sourceLine`. The `uid` confirms instance identity (and disambiguates when the operator edited one of several instances), but the edit targets already-existing source. |
+| **(b) Clone / duplicate / paste** | **fresh** `uid` (≠ origin uid) + `outerHTML` of the cloned subtree + the **origin's** `sourceLine` as a hint | **Create new source** near the origin: the applier copies the origin's source node (located via the origin `sourceLine` hint), inserts the copy at the anchored position, and the new node's fresh `uid` becomes its stable identity for any later edit. The origin source is **not** modified. This is what makes duplicate-then-edit replay correctly — the twin has its own identity from creation. |
+| **(c) Fresh insert** | fresh `uid` + `anchorUid` + `anchorPosition` + `outerHTML` (no meaningful origin `sourceLine`; `sourceVerified` may be `false`) | **Create new source** at the anchor: resolve `anchorUid` to its sibling's source location, then write the `outerHTML`-described markup `before`/`after` it (per `anchorPosition`). No positional `nth-of-type` resolution required. |
+
+> **Where the clone's origin `sourceLine` comes from (case b).** A clone is a DOM copy, so the new node inherits the origin's `data-source-line` attribute verbatim; its `ElementInfo.sourceLine` therefore already carries the origin's line. The capture layer MUST preserve that inherited `sourceLine` as the origin hint when it mints the clone's fresh `uid` — i.e. assign a fresh `data-fe-uid` **without** disturbing the copied `data-source-*`. This is precisely why `sourceLine` is a hint and not identity: two instances legitimately share it (origin and clone), and only `uid` separates them.
+
+In every case the **fresh uid is minted at the moment of creation** (clone or insert) and stamped onto the new DOM node, so the *next* operation on that node already has stable identity — the failure mode in issue #27 (second operation references shared identity) cannot recur.
+
+### Stamping lifecycle
+
+Where each `data-fe-uid` value comes from, in priority order:
+
+1. **Build-time stamp (primary).** The dev-plugin (feature-006) stamps a deterministic `data-fe-uid` on every JSX element at build, alongside `data-source-*`. Build-time stamping is the primary source because it **survives React reconciliation** — the attribute is part of the element's props/markup, so React preserves it across re-render rather than the content script having to re-stamp a recycled DOM node. For static (non-`.map()`) JSX, the build-time uid is stable for the element's lifetime.
+2. **Runtime fresh-uid on clone / paste / duplicate.** When the content script clones a subtree (duplicate/paste), it mints a **fresh** uid for the new root **and every descendant** (deep walk) — a clone must never reuse the origin's uids, or the collision returns. Applied immediately on creation so the clone is independently addressable.
+3. **Runtime lazy uid for `.map()` runtime instances and `sourceVerified: false` nodes.** One JSX line inside a `.map()` renders N runtime nodes that would share the build-time stamp (hash of file:line[:index]); a pure build-time uid is therefore **insufficient alone**. On first observation (MutationObserver / first selection) the content script lazily assigns a fresh per-instance uid to any tracked node that lacks a unique one — including nodes with no `data-source-*` (`sourceVerified: false`). Lazy assignment also covers elements rendered before the observer attached. **Pre-observation window:** between page render and the first observer sweep, `.map()` siblings transiently share a non-unique build-time uid. Brief 2 MUST complete the lazy-uid walk before any node is exposed for selection (e.g. run the initial walk synchronously when the observer connects, before enabling selection mode), so a diff can never capture a non-unique uid.
+4. **Reconciliation resilience (option).** Because React can replace a DOM node while preserving logical identity, the content script MAY keep a **`WeakMap<Element, uid>` sidecar** so a uid can be recovered/re-stamped if the attribute is lost to a reconciliation that drops it. The attribute remains the wire-format source of truth; the WeakMap is a runtime durability aid, not a second identity system.
+
+> **Why both build-time and runtime.** Build-time gives reconciliation-stable identity for the common static case for free; runtime assignment covers the cases the build plugin structurally cannot resolve to per-instance values (`.map()` fan-out, clones, unstamped/`sourceVerified:false` nodes). Neither alone is sufficient — see [*Alternatives Considered* in brief-stable-element-identity](features/brief-stable-element-identity.md#alternatives-considered).
+
+### Deployment-aware src normalization
+
+Captured `src`/`href` values are normalized so the path written to source is correct on apply (issue #27, weakness 2). Observed failure: captured `src="/public/images/foo.jpg"` (literal) where the served path is `/images/foo.jpg` (Next serves `public/` at the web root).
+
+Normalization rule (applied at capture, before the value enters an `AttributeChange.toValue` / `outerHTML`):
+- **Strip a single leading `/public` segment** from root-relative paths (`/public/images/foo.jpg` → `/images/foo.jpg`), reflecting that the framework serves the public directory at root.
+- **Leave `data:` URIs untouched** (inline data has no deployment base).
+- **Leave absolute `http(s)://` URLs untouched** (already fully qualified).
+- Other root-relative and relative paths pass through unchanged.
+
+This is a capture-layer concern (the value is normalized once, at the source of truth) so every downstream consumer receives an apply-correct path.
+
+> **Framework scope.** The `/public`-at-root convention is Next.js / Vite-default behavior — the conventions v1 actually targets. The rule strips **at most one** leading `/public` segment, so a path that does not begin with `/public` is never altered (no over-stripping for frameworks that already serve at root). Frameworks that serve the public directory under a non-root base, or projects with a custom asset base, fall outside this rule; Brief 2 SHOULD treat the strip as convention-gated (verify against the resolved `data-source-file` project root before stripping) rather than unconditional, and any unsupported convention degrades to the literal captured path. This limitation is intentionally narrow — it fixes the observed Next.js `/public` mismatch without claiming universal base resolution.
+
+### Protocol compatibility (uid + anchor fields)
+
+`uid` (on `ElementInfo`, `SiblingAnchor`, `ChildSnapshotEntry`) and `anchorUid` / `anchorPosition` (on `InsertChange`) are **additive, optional** fields. Consumers that predate them ignore unknown fields, so **no `WS_PROTOCOL_VERSION` bump is required** — the version stays at `0.4.0`, exactly as `reorderChanges` / `insertChanges` / `reparentChanges` were added without a bump. A pre-uid consumer that receives these fields simply ignores them and **degrades to `selector` targeting** (and positional insert resolution) — the same behavior it has today. No required field is redefined; existing payloads remain valid. The `EXTENSION_HELLO` / `SERVER_HELLO` handshake is unaffected.
 
 ---
 

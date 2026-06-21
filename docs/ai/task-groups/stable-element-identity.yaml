@@ -1,0 +1,99 @@
+# Task Group Contract: stable-element-identity
+# Created from Prompt T output (issue #27 — diff identity collides for clones).
+# Spec-first split: Brief 1 ratifies the data-fe-uid contract; Brief 2 implements.
+
+identity:
+  group_name: "stable-element-identity"
+  created_by_session: "cb46b909-a7cd-4b78-962f-421fa04931d6"
+  created_date: "2026-06-21"
+  execution: sequential
+
+briefs:
+  - title: "Ratify the identity contract"
+    sequence: 1
+    session: "cb46b909-a7cd-4b78-962f-421fa04931d6"
+    branch: "feature/stable-element-identity"
+    status: in_progress
+    next_brief: "Implement stable element identity (applier + runtime)"
+    boundaries:
+      - "docs/spec/compiled/v1/data-contracts.md"
+      - "docs/spec/compiled/v1/features/brief-stable-element-identity.md"
+      - "docs/spec/compiled/v1/features/feature-006-dev-plugin.md"
+      - "docs/spec/compiled/v1/features/feature-001-element-selection.md"
+  - title: "Implement stable element identity (applier + runtime)"
+    sequence: 2
+    session: null
+    branch: ""
+    status: pending
+    next_brief: ""
+    boundaries: []
+
+# Intent — per-brief task contract fields (Decision 0020). Brief 1's intent.
+intent:
+  goal: >-
+    Ratify the stable per-instance element-identity contract (data-fe-uid) in the
+    compiled specs before implementation, so the downstream applier and the build
+    session work against an agreed schema. No product code.
+  verification:
+    - "data-contracts.md defines uid on ElementInfo, SiblingAnchor, ChildSnapshotEntry and a normative InsertChange anchor table."
+    - "data-contracts.md contains a uid->source mapping section covering existing/clone/fresh-insert cases."
+    - "data-contracts.md documents the stamping lifecycle and deployment-aware src normalization."
+    - "feature-006 and feature-001 reflect data-fe-uid; protocol-compat note updated."
+    - "spec-compiled governance evidence updated."
+  scope_files:
+    - "docs/spec/compiled/v1/data-contracts.md"
+    - "docs/spec/compiled/v1/features/brief-stable-element-identity.md"
+    - "docs/spec/compiled/v1/features/feature-006-dev-plugin.md"
+    - "docs/spec/compiled/v1/features/feature-001-element-selection.md"
+  spec_references:
+    - "docs/spec/compiled/v1/data-contracts.md"
+    - "docs/spec/compiled/v1/features/feature-006-dev-plugin.md"
+    - "docs/spec/compiled/v1/features/feature-001-element-selection.md"
+
+# Shared conventions — REQUIRE-level constraints for all sessions in the group.
+conventions:
+  naming:
+    - pattern: "data-fe-uid — DOM attribute carrying the stable per-instance uid"
+      scope: "stamped elements across dev-plugin (build-time) + content script (runtime)"
+    - pattern: "uid — ElementInfo / SiblingAnchor / ChildSnapshotEntry field name for the same value"
+      scope: "packages/shared/src/diff.ts diff payload schema"
+    - pattern: "anchorUid + anchorPosition (before|after) — source-anchored insert addressing"
+      scope: "InsertChange in the diff payload + applier"
+  patterns:
+    - pattern: "uid is the canonical diff-targeting key; data-source-* are code-map hints only, never identity"
+      rationale: "Clones inherit the origin's data-source-line — identity must be per-instance (issue #27)."
+    - pattern: "Additive-optional schema fields; no WS_PROTOCOL_VERSION bump"
+      rationale: "Pre-uid consumers ignore unknown fields and degrade to selector targeting (same treatment as reorder/insert/reparent)."
+  decisions:
+    - "Decision 0035 — selective spec loading via Spec References"
+    - "Decision 0018 — task group contract A6 gates"
+  boundaries:
+    - module: "compiled-spec/data-contracts"
+      owner_brief: "Ratify the identity contract"
+    - module: "compiled-spec/features"
+      owner_brief: "Ratify the identity contract"
+    - module: "product-code (dev-plugin, content-script, shared-diff, mcp-server apply)"
+      owner_brief: "Implement stable element identity (applier + runtime)"
+
+# Integration points — cross-brief touchpoints. Brief 1 produces the ratified
+# contract that Brief 2 consumes. Artifact path must exist in the working tree.
+integration_points:
+  - name: "Ratified data-fe-uid identity contract"
+    producer: "Ratify the identity contract"
+    consumer: "Implement stable element identity (applier + runtime)"
+    artifact: "docs/spec/compiled/v1/data-contracts.md"
+  - name: "Stable-element-identity feature brief"
+    producer: "Ratify the identity contract"
+    consumer: "Implement stable element identity (applier + runtime)"
+    artifact: "docs/spec/compiled/v1/features/brief-stable-element-identity.md"
+
+session_decisions:
+  - session: "cb46b909-a7cd-4b78-962f-421fa04931d6"
+    decision: "Spec-first split: ratify the uid contract (Brief 1) before any applier/runtime code (Brief 2)."
+    rationale: >-
+      The uid->source mapping semantics are non-trivial and currently undefined; the
+      contract is read by the downstream applier. Ratifying first prevents
+      build-against-air-contract drift (Architect/PM/Critic concurred at Prompt T).
+
+# Governance evidence — appended at each brief's close (gate results, overrides, timestamp).
+governance: []
