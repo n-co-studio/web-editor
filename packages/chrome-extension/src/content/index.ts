@@ -29,6 +29,7 @@ import { GridOverlay } from './grid-overlay';
 import { RulerOverlay } from './ruler-overlay';
 import { ReorderEditor, getReorderBlockReason } from './editing/reorder';
 import type { ReorderCommitCallback } from './editing/reorder';
+import { ReorderPanel } from './editing/reorder-panel';
 import { ReparentEditor, getReparentBlockReason } from './editing/reparent';
 import type { ReparentCommitCallback } from './editing/reparent';
 import { InsertEditor, getInsertBlockReason } from './editing/insert';
@@ -117,6 +118,7 @@ let notesStore: NotesStore | null = null;
 let notesEditor: NotesEditor | null = null;
 let gridOverlay: GridOverlay | null = null;
 let reorderEditor: ReorderEditor | null = null;
+let reorderPanel: ReorderPanel | null = null;
 let reparentEditor: ReparentEditor | null = null;
 let insertEditor: InsertEditor | null = null;
 let textEditor: TextEditor | null = null;
@@ -364,6 +366,7 @@ export async function activate(): Promise<void> {
   gridOverlay = new GridOverlay(shadow, tokenStore);
   rulerOverlay = new RulerOverlay(shadow, () => gridOverlay!.getEffectiveSettings(), () => gridOverlay?.isVisible() ?? false);
   reorderEditor = new ReorderEditor(shadow);
+  reorderPanel = new ReorderPanel(shadow);
   reparentEditor = new ReparentEditor(shadow);
   insertEditor = new InsertEditor(shadow);
   textEditor = new TextEditor();
@@ -490,6 +493,7 @@ export async function activate(): Promise<void> {
     layoutEditor!.cleanup();
     positionEditor!.cleanup();
     reorderEditor!.cleanup();
+    reorderPanel!.cleanup();
     reparentEditor!.cleanup();
     insertEditor!.cleanup();
     textEditor!.cleanup();
@@ -547,6 +551,7 @@ export async function activate(): Promise<void> {
     layoutEditor!.cleanup();
     positionEditor!.cleanup();
     reorderEditor!.cleanup();
+    reorderPanel!.cleanup();
     reparentEditor!.cleanup();
     insertEditor!.cleanup();
     textEditor!.cleanup();
@@ -627,6 +632,7 @@ export async function activate(): Promise<void> {
       layoutEditor!.cleanup();
       positionEditor!.cleanup();
       reorderEditor!.cleanup();
+      reorderPanel!.cleanup();
     reparentEditor!.cleanup();
       insertEditor!.cleanup();
       textEditor!.cleanup();
@@ -686,6 +692,7 @@ export async function activate(): Promise<void> {
       notesEditor!.reposition(toolbar!.getButtonPosition('notes'));
     }
     reorderEditor!.reposition(toolbar!.getButtonPosition('reorder'));
+    reorderPanel!.reposition(toolbar!.getButtonPosition('reorder'));
     reparentEditor!.reposition({ x: 0, y: 0 }); // no-op — reparent has no positioned panel
     mediaEditor!.reposition(toolbar!.getButtonPosition('media'));
     effectsEditor!.reposition(toolbar!.getButtonPosition('effects'));
@@ -1049,6 +1056,7 @@ export function deactivate(): void {
   layoutEditor?.cleanup();
   positionEditor?.cleanup();
   reorderEditor?.cleanup();
+  reorderPanel?.cleanup();
   reparentEditor?.cleanup();
   insertEditor?.cleanup();
   textEditor?.cleanup();
@@ -1117,6 +1125,7 @@ export function deactivate(): void {
   gridOverlay = null;
   rulerOverlay = null;
   reorderEditor = null;
+  reorderPanel = null;
   reparentEditor = null;
   insertEditor = null;
   textEditor = null;
@@ -1176,6 +1185,7 @@ function activateToolForElement(el: Element, mode: EditMode): void {
   layoutEditor!.cleanup();
   positionEditor!.cleanup();
   reorderEditor!.cleanup();
+  reorderPanel!.cleanup();
   reparentEditor!.cleanup();
   insertEditor!.cleanup();
   textEditor!.cleanup();
@@ -1266,6 +1276,7 @@ function activateToolForElement(el: Element, mode: EditMode): void {
     toolbar!.setActiveMode('position');
   } else if (mode === 'reorder') {
     reorderEditor!.render(el, makeReorderCommit(el));
+    renderReorderPanel(el);
     toolbar!.setActiveMode('reorder');
   } else if (mode === 'reparent') {
     reparentEditor!.render(el, makeReparentCommit(el));
@@ -1482,8 +1493,36 @@ function commitReorderChange(
 function makeReorderCommit(el: Element): ReorderCommitCallback {
   return (element, container, fromIndex, toIndex, originalChildOrder) => {
     commitReorderChange(element, container, fromIndex, toIndex, originalChildOrder,
-      () => reorderEditor!.render(el, makeReorderCommit(el)));
+      () => {
+        // Rebuild BOTH surfaces after any commit (in-place drag or panel drag)
+        // so the editor overlay and the toolbar-anchored list stay in sync.
+        reorderEditor!.render(el, makeReorderCommit(el));
+        renderReorderPanel(el);
+      });
   };
+}
+
+/**
+ * (Re)render the toolbar-anchored reorder list for `el`'s parent container.
+ * Anchors are built from the editor's frozen child snapshot so panel row
+ * indices line up 1:1 with {@link ReorderEditor.commitFromIndex}. Call after
+ * `reorderEditor.render(el, …)` so `childSnapshot` reflects the current order.
+ */
+function renderReorderPanel(el: Element): void {
+  if (!reorderPanel || !reorderEditor || !toolbar || !shadow) return;
+  const container = el.parentElement;
+  if (!container) {
+    reorderPanel.cleanup();
+    return;
+  }
+  const anchors = reorderEditor.childSnapshot.map((c) => buildSiblingAnchor(c));
+  reorderPanel.render(
+    container,
+    anchors,
+    (from, to) => reorderEditor!.commitFromIndex(from, to),
+    toolbar.getButtonPosition('reorder'),
+  );
+  reorderPanel.highlight(el as HTMLElement);
 }
 
 // ---------------------------------------------------------------------------
@@ -1693,7 +1732,10 @@ function refreshReorderAfterHistoryChange(entry: HistoryEntry): void {
     // (issue #30) — refresh whichever drag editor is currently active so its
     // overlay and drop zones track the element at its new position.
     if (reorderEditor?.isActive()) {
+      // EditHistory rebuilds the DOM directly (no re-render lambda), so refresh
+      // the panel explicitly to keep the list in sync after undo/redo.
       reorderEditor.render(el, makeReorderCommit(el));
+      renderReorderPanel(el);
     } else if (reparentEditor?.isActive()) {
       reparentEditor.render(el, makeReparentCommit(el));
     }
@@ -2296,6 +2338,7 @@ function enterMultiSelectMode(): void {
   layoutEditor?.cleanup();
   positionEditor?.cleanup();
   reorderEditor?.cleanup();
+  reorderPanel?.cleanup();
   toolbar?.setActiveMode('cursor');
 
   // Show multi-select toolbar (or update it)
