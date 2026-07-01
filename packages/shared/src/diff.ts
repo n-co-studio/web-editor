@@ -284,6 +284,22 @@ export interface RemoveChange {
 }
 
 /**
+ * Metadata for a locally-picked asset whose bytes are deliberately NOT inlined
+ * into the diff (issue #28). The media file picker emits a blob URL for live
+ * preview and carries this side-channel instead of a multi-MB `data:` URI, so
+ * the bridge can name/dedup the persisted asset from the original filename
+ * rather than inferring it. Additive-optional — no `WS_PROTOCOL_VERSION` bump.
+ */
+export interface PendingUpload {
+  /** The picked file's name (e.g. `hero.jpg`) — used to name/dedup the persisted asset. */
+  readonly filename: string;
+  /** The picked file's MIME type (e.g. `image/jpeg`). */
+  readonly mimeType: string;
+  /** The picked file's size in bytes — lets the server reason about the per-asset size cap. */
+  readonly sizeBytes: number;
+}
+
+/**
  * An HTML attribute change (e.g. src, alt) on the target element.
  * Stored as a parallel array on VisualDiff (separate from CSS PropertyChange[]).
  */
@@ -292,6 +308,22 @@ export interface AttributeChange {
   readonly attribute: string;
   readonly fromValue: string;
   readonly toValue: string;
+  /**
+   * Metadata for a file-picker-selected asset (issue #28). When present, the
+   * asset was picked locally and its bytes were never inlined: `toValue` is a
+   * provisional served path (`/images/<filename>`), and the bridge persists /
+   * dedups the asset server-side using `pendingUpload.filename`, rewriting
+   * `toValue` to the final `/images/<name>`. Additive-optional — no protocol bump.
+   */
+  readonly pendingUpload?: PendingUpload;
+  /**
+   * Set by the server when an asset exceeded the per-asset size cap and could
+   * not be resolved to a served path: `toValue` is emptied rather than carrying
+   * a multi-MB inline blob (issue #28). The applier should treat the attribute
+   * as unresolved (leave the existing reference in place / surface to the
+   * operator) rather than writing an empty `src`. Additive-optional — no bump.
+   */
+  readonly assetTruncated?: boolean;
 }
 
 /**

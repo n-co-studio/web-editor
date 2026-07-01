@@ -9,6 +9,9 @@ import {
 import type {
   VisualDiff,
   AttributeChange,
+  PendingUpload,
+  InsertChange,
+  PropertyChange,
   VisualDiffBatchPayload,
   DesignToken,
   TokenSourceStatus,
@@ -908,6 +911,15 @@ export class Bridge {
   // -----------------------------------------------------------------------
 
   private static readonly ASSET_DIR_FALLBACK = 'public/images';
+  /**
+   * Per-asset size cap (issue #28). An inline `data:` asset larger than this
+   * that cannot be deduplicated to an already-committed file is truncated
+   * (`assetTruncated: true`, empty value) rather than persisted/inlined — an
+   * asset this large belongs in the repo, not pasted through a diff.
+   */
+  private static readonly MAX_INLINE_ASSET_BYTES = 4 * 1024 * 1024;
+  /** Matches a single `data:` URI up to the first quote, paren, or whitespace. */
+  private static readonly DATA_URL_RE = /data:[^"')\s]+/gi;
   private static readonly MIME_EXT: Record<string, string> = {
     'image/png': '.png',
     'image/jpeg': '.jpg',
@@ -928,57 +940,191 @@ export class Bridge {
   ]);
 
   /**
-   * Process a diff's attribute changes — if any `toValue` is a data URL,
-   * decode it, save it as a file, and replace the data URL with the file path.
-   * Returns a new diff with the updated attribute changes (or the original if unchanged).
+   * Persist any inline assets carried by a diff and rewrite references to a
+   * served path (issue #28). Base64 can enter a diff through more than one
+   * carrier, so this scans every one:
+   *   1. `attributeChanges` — a `data:` `toValue` (decode + save), or a
+   *      `pendingUpload` file-picker reference (normalize the served path).
+   *   2. `insertChanges[].outerHTML` — clone/paste markup may embed `data:` URIs.
+   *   3. `changes` (`background-image` `PropertyChange.toValue`) — `url(data:…)`.
+   * Returns a new diff with the rewritten carriers (or the original if none
+   * matched). A single oversized/unresolvable asset is truncated rather than
+   * inlined (see {@link saveDataUrl}).
    */
   private async extractDataUrls(diff: VisualDiff): Promise<VisualDiff> {
-    if (!diff.attributeChanges || diff.attributeChanges.length === 0) return diff;
+    let mutated = false;
 
-    let changed = false;
-    const updated: AttributeChange[] = [];
-
-    for (const ac of diff.attributeChanges) {
-      if (ac.toValue.startsWith('data:')) {
-        try {
-          const savedPath = await this.saveDataUrl(ac.toValue, ac.fromValue);
-          updated.push({ ...ac, toValue: savedPath });
-          changed = true;
-          console.error(`[nco-web-editor] Saved data URL as ${savedPath}`);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.error(`[nco-web-editor] Failed to save data URL: ${msg}`);
-          updated.push(ac); // keep original data URL as fallback
-        }
-      } else {
-        updated.push(ac);
+    // 1. Attribute changes (src, etc.).
+    let attributeChanges = diff.attributeChanges;
+    if (attributeChanges && attributeChanges.length > 0) {
+      const updated: AttributeChange[] = [];
+      let anyChanged = false;
+      for (const ac of attributeChanges) {
+        const next = await this.resolveAttributeAsset(ac);
+        if (next !== ac) anyChanged = true;
+        updated.push(next);
       }
+      if (anyChanged) { attributeChanges = updated; mutated = true; }
     }
 
-    return changed ? { ...diff, attributeChanges: updated } : diff;
+    // 2. Insert changes — scan the serialized clone/paste markup for data: URIs.
+    // Only `data:` is rewritten here. A `blob:` src can appear in outerHTML when
+    // an element is duplicated right after a file-picker pick (the live DOM src is
+    // the preview blob URL); a blob: URL is page-local and unresolvable server-side,
+    // so it is a documented partial — the served path lives on the paired
+    // AttributeChange.toValue, and Brief 2 (#29) carries a resolved assetPath on
+    // element references to close it. See data-contracts § No base64 in diffs.
+    let insertChanges = diff.insertChanges;
+    if (insertChanges && insertChanges.length > 0) {
+      const updated: InsertChange[] = [];
+      let anyChanged = false;
+      for (const ic of insertChanges) {
+        if (ic.outerHTML && ic.outerHTML.includes('data:')) {
+          const rewritten = await this.replaceDataUrlsInString(ic.outerHTML);
+          if (rewritten !== ic.outerHTML) {
+            updated.push({ ...ic, outerHTML: rewritten });
+            anyChanged = true;
+            continue;
+          }
+        }
+        updated.push(ic);
+      }
+      if (anyChanged) { insertChanges = updated; mutated = true; }
+    }
+
+    // 3. background-image property changes — url(data:…).
+    let changes = diff.changes;
+    if (changes.some((c) => c.property === 'background-image' && c.toValue.includes('data:'))) {
+      const updated: PropertyChange[] = [];
+      for (const c of changes) {
+        if (c.property === 'background-image' && c.toValue.includes('data:')) {
+          const rewritten = await this.replaceDataUrlsInString(c.toValue);
+          updated.push(rewritten !== c.toValue ? { ...c, toValue: rewritten } : c);
+        } else {
+          updated.push(c);
+        }
+      }
+      changes = updated;
+      mutated = true;
+    }
+
+    return mutated ? { ...diff, attributeChanges, insertChanges, changes } : diff;
   }
 
   /**
-   * Decode a data URL, save the binary to the project, return a project-relative path.
-   * Infers the target directory from the original src path (fromValue).
+   * Resolve a single attribute change to a base64-free served path (issue #28):
+   *   - `data:` `toValue` → decode + persist (or truncate if oversized).
+   *   - a `pendingUpload` reference (blob-URL-backed pick) → normalize the
+   *     provisional served path (strip a leading `/public`); the bytes were
+   *     never transmitted, so an existing committed asset is the resolution and
+   *     the provisional `/images/<name>` path is the graceful fallback.
+   *   - anything else → unchanged.
+   */
+  private async resolveAttributeAsset(ac: AttributeChange): Promise<AttributeChange> {
+    if (ac.toValue.startsWith('data:')) {
+      try {
+        const savedPath = await this.saveDataUrl(ac.toValue, ac.fromValue, ac.pendingUpload);
+        if (savedPath === null) {
+          console.error(`[nco-web-editor] Asset exceeded ${Bridge.MAX_INLINE_ASSET_BYTES}-byte cap — truncating`);
+          return { ...ac, toValue: '', assetTruncated: true };
+        }
+        console.error(`[nco-web-editor] Saved data URL as ${savedPath}`);
+        return { ...ac, toValue: savedPath };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[nco-web-editor] Failed to save data URL: ${msg}`);
+        return ac; // keep original value as fallback
+      }
+    }
+
+    if (ac.pendingUpload) {
+      // File-picker pick (blob-URL-backed): the bytes were never transmitted, so
+      // the provisional served path IS the resolution. Defensively strip a
+      // leading `/public` so the emitted path is apply-correct (/images/<name>);
+      // only mutate when the strip actually changes the value.
+      const stripped = this.stripPublicPrefix(ac.toValue);
+      return stripped !== ac.toValue ? { ...ac, toValue: stripped } : ac;
+    }
+
+    return ac;
+  }
+
+  /**
+   * Replace every `data:` URI embedded in a string (e.g. `outerHTML`, a
+   * `url(data:…)` value) with its persisted served path (issue #28). A URI that
+   * is oversized/unresolvable is replaced with an empty reference rather than
+   * left inline; a persistence failure leaves that URI untouched.
+   */
+  private async replaceDataUrlsInString(str: string): Promise<string> {
+    const matches = str.match(Bridge.DATA_URL_RE);
+    if (!matches) return str;
+
+    let out = str;
+    for (const dataUrl of new Set(matches)) {
+      try {
+        const saved = await this.saveDataUrl(dataUrl, '');
+        // `null` = oversized/unresolvable → drop the inline blob (empty ref).
+        out = out.split(dataUrl).join(saved ?? '');
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[nco-web-editor] Failed to save embedded data URL: ${msg}`);
+        // Leave this occurrence as-is; other matches still get a chance.
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Strip a single leading `/public` segment from a served web path so it is
+   * apply-correct (issue #28) — e.g. `/public/images/x.png` → `/images/x.png`
+   * (Next.js / Vite serve `public/` at the web root). At most one segment is
+   * removed; a path that does not start with `/public` is returned unchanged.
+   */
+  private stripPublicPrefix(webPath: string): string {
+    if (webPath === '/public') return '/';
+    if (webPath.startsWith('/public/')) return webPath.slice('/public'.length);
+    return webPath;
+  }
+
+  /**
+   * Decode a data URL, save the binary to the project, and return the served
+   * web path (a leading `/public` is stripped so the path is apply-correct —
+   * `/images/<name>`, issue #28). Infers the target directory from the original
+   * src path (`fromValue`).
    *
    * Deduplication: if a byte-identical file already exists in the target asset
    * directory (e.g. the user picked an image already committed to the repo via the
-   * media file picker, which always re-reads it as a data URL), reference that file
-   * instead of writing a duplicate. New files are named by content hash so that
+   * media file picker), reference that file instead of writing a duplicate.
+   *
+   * Naming: when `pendingUpload.filename` is supplied it seeds a human-readable
+   * name (`<stem>-<hash>.<ext>`); otherwise the content hash names the file
+   * (`uploaded-<hash>.<ext>`). Either way the content hash is embedded so
    * re-selecting the same image is idempotent.
+   *
+   * Size cap: an asset larger than {@link MAX_INLINE_ASSET_BYTES} that cannot be
+   * deduplicated to a committed file returns `null` (caller truncates) rather
+   * than persisting/inlining a multi-MB blob.
    */
-  private async saveDataUrl(dataUrl: string, fromValue: string): Promise<string> {
-    // Parse data URL: data:[<mime>][;base64],<data>
-    const match = dataUrl.match(/^data:([^;,]+)(?:;base64)?,(.+)$/s);
+  private async saveDataUrl(
+    dataUrl: string,
+    fromValue: string,
+    pendingUpload?: PendingUpload,
+  ): Promise<string | null> {
+    // Parse data URL: data:[<mime>][;base64],<data>. Capture the base64 flag so
+    // a non-base64 (percent-encoded, e.g. `data:image/svg+xml,%3Csvg…`) payload
+    // is decoded as text rather than mis-decoded as base64 into garbage bytes.
+    const match = dataUrl.match(/^data:([^;,]*)(;base64)?,(.*)$/s);
     if (!match) throw new Error('Invalid data URL format');
 
-    const mime = match[1];
-    const base64Data = match[2];
-    const buffer = Buffer.from(base64Data, 'base64');
+    const mime = match[1] || 'application/octet-stream';
+    const isBase64 = Boolean(match[2]);
+    const payload = match[3];
+    const buffer = isBase64
+      ? Buffer.from(payload, 'base64')
+      : Buffer.from(decodeURIComponent(payload), 'utf-8');
 
-    // Determine file extension from MIME type
-    const ext = Bridge.MIME_EXT[mime] || this.guessExtFromMime(mime);
+    // Determine file extension — prefer the picked filename's extension, then MIME.
+    const ext = this.assetExt(mime, pendingUpload?.filename);
 
     // Determine target directory from the original src path
     const targetDir = await this.resolveAssetDir(fromValue);
@@ -986,39 +1132,72 @@ export class Bridge {
     // Content hash drives both dedup matching and stable (idempotent) naming.
     const hash = createHash('sha256').update(buffer).digest('hex');
 
-    // If a byte-identical file already exists in the target directory, reuse it.
-    // The scan is best-effort — any failure falls back to writing a new file.
+    // If a byte-identical file already exists in the target directory, reuse it
+    // (regardless of size — it is already committed). Best-effort — any failure
+    // falls back to the size-cap + write path below.
     try {
       const existing = await this.findExistingAsset(buffer, hash, targetDir);
       if (existing) {
         console.error(`[nco-web-editor] Reusing existing asset ${existing} (content match — no duplicate written)`);
-        return existing;
+        return this.stripPublicPrefix(existing);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[nco-web-editor] Asset dedup scan failed (${msg}) — writing new file`);
     }
 
-    // Name the file by content hash so re-uploading the same image is idempotent.
-    const filename = `uploaded-${hash.slice(0, 12)}${ext}`;
+    // Oversized and unresolvable — do not write a multi-MB new asset or inline it.
+    if (buffer.length > Bridge.MAX_INLINE_ASSET_BYTES) return null;
+
+    // Name the file, embedding the content hash so re-uploads are idempotent.
+    const filename = this.assetFilename(hash, ext, pendingUpload?.filename);
     const absDir = resolve(this.cwd, targetDir);
     await mkdir(absDir, { recursive: true });
     const absPath = join(absDir, filename);
     const relPath = '/' + relative(this.cwd, absPath).replace(/\\/g, '/');
 
-    // Idempotent: the filename is the content hash, so a file already present at
-    // this path is the same image — skip the write. (size check is a sanity guard.)
+    // Idempotent: the filename embeds the content hash, so a file already present
+    // at this path is the same image — skip the write. (size check is a sanity guard.)
     try {
       const s = await stat(absPath);
-      if (s.isFile() && s.size === buffer.length) return relPath;
+      if (s.isFile() && s.size === buffer.length) return this.stripPublicPrefix(relPath);
     } catch {
       // not present — fall through to write
     }
 
     await writeFile(absPath, buffer);
 
-    // Return project-relative path with leading slash (web-style)
-    return relPath;
+    // Return served web path with a leading `/public` stripped (apply-correct).
+    return this.stripPublicPrefix(relPath);
+  }
+
+  /** Resolve the asset extension — prefer the picked filename's, else the MIME type. */
+  private assetExt(mime: string, filename?: string): string {
+    if (filename) {
+      const dot = filename.lastIndexOf('.');
+      if (dot > 0 && dot < filename.length - 1) {
+        return filename.slice(dot).toLowerCase();
+      }
+    }
+    return Bridge.MIME_EXT[mime] || this.guessExtFromMime(mime);
+  }
+
+  /**
+   * Build the persisted asset filename. When a picked filename is supplied its
+   * stem seeds a readable name (`<stem>-<hash>.<ext>`); otherwise the content
+   * hash names it (`uploaded-<hash>.<ext>`). The hash is always embedded so
+   * re-selecting the same bytes is idempotent.
+   */
+  private assetFilename(hash: string, ext: string, filename?: string): string {
+    const shortHash = hash.slice(0, 12);
+    if (filename) {
+      const base = filename.split(/[\\/]/).pop() ?? '';
+      const dot = base.lastIndexOf('.');
+      const rawStem = dot > 0 ? base.slice(0, dot) : base;
+      const stem = rawStem.replace(/[^A-Za-z0-9._-]/g, '-').replace(/-+/g, '-').replace(/^[-.]+/, '');
+      if (stem) return `${stem}-${shortHash}${ext}`;
+    }
+    return `uploaded-${shortHash}${ext}`;
   }
 
   /**

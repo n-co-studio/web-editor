@@ -1,4 +1,4 @@
-import type { BoundingRect, ElementInfo } from '@nco-studio/shared';
+import type { BoundingRect, ElementInfo, PendingUpload } from '@nco-studio/shared';
 import { TEXT_CONTENT_TRUNCATE_LENGTH } from './constants';
 
 // ---------------------------------------------------------------------------
@@ -223,6 +223,57 @@ export function resolvePublicSrc(rawSrc: string, base: string): string {
   if (trimmed.startsWith('/public/')) return trimmed.slice('/public'.length);
 
   return rawSrc;
+}
+
+/**
+ * The base64-free result of picking a local asset for an element (issue #28).
+ * `previewUrl` is a blob URL for live in-DOM preview (never serialized into a
+ * diff — blob URLs are not resolvable outside the page). `provisionalSrc` is
+ * the served path written to the diff's `toValue`; the bridge confirms/persists
+ * it server-side. `pendingUpload` is the metadata side-channel the bridge uses
+ * to name/dedup the persisted asset without ever transmitting the raw bytes.
+ */
+export interface ResolvedAsset {
+  readonly previewUrl: string;
+  readonly provisionalSrc: string;
+  readonly pendingUpload: PendingUpload;
+}
+
+/** Default served asset directory — mirrors the bridge's `public/images` fallback. */
+const PROVISIONAL_ASSET_DIR = '/images';
+
+/**
+ * Reduce a picked file's name to a safe, path-free asset filename. Strips any
+ * directory component and characters that have no business in a served path,
+ * so the provisional `/images/<name>` (and the server-side dedup key) is stable.
+ * Falls back to a generic name when nothing usable remains.
+ */
+export function sanitizeAssetName(rawName: string): string {
+  const base = rawName.split(/[\\/]/).pop() ?? '';
+  const cleaned = base.trim().replace(/[^A-Za-z0-9._-]/g, '-').replace(/-+/g, '-');
+  return cleaned.replace(/^[-.]+/, '') || 'asset';
+}
+
+/**
+ * Turn a locally-picked `File` into a base64-free {@link ResolvedAsset} (issue
+ * #28). The blob URL drives live preview in the page; the provisional served
+ * path (`/images/<filename>`) and `pendingUpload` metadata are what enter the
+ * diff — the file's bytes are never read into a `data:` URI. The bridge later
+ * persists/dedups the asset from `pendingUpload.filename` and finalizes the
+ * served path. This is the single capture-layer chokepoint that guarantees no
+ * base64 leaves the extension via the media picker.
+ */
+export function resolveElementAsset(file: File): ResolvedAsset {
+  const filename = sanitizeAssetName(file.name);
+  return {
+    previewUrl: URL.createObjectURL(file),
+    provisionalSrc: `${PROVISIONAL_ASSET_DIR}/${filename}`,
+    pendingUpload: {
+      filename,
+      mimeType: file.type,
+      sizeBytes: file.size,
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------

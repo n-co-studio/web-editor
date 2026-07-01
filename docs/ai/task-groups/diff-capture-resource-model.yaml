@@ -1,0 +1,99 @@
+identity:
+  group_name: "diff-capture-resource-model"
+  created_by_session: "235f9a0a-cd57-4318-a405-248da81eca41"
+  created_date: "2026-07-01"
+  execution: sequential
+
+briefs:
+  - title: "Resolve image src to a public path and eliminate base64 (#28)"
+    sequence: 1
+    session: "235f9a0a-cd57-4318-a405-248da81eca41"
+    branch: "feature/diff-capture-resource-model"
+    status: in_progress
+    next_brief: "Carry a resolved assetPath + label on every element reference (#29)"
+    boundaries:
+      - "packages/chrome-extension/src/content/editing/media.ts"
+      - "packages/chrome-extension/src/shared/dom-utils.ts"
+      - "packages/mcp-server/src/bridge.ts"
+      - "packages/mcp-server/src/server.ts"
+      - "packages/shared/src/diff.ts"
+      - "docs/spec/compiled/v1/data-contracts.md"
+
+  - title: "Carry a resolved assetPath + label on every element reference (#29)"
+    sequence: 2
+    session: null
+    branch: "feature/diff-capture-resource-model"
+    status: pending
+    next_brief: ""
+    boundaries:
+      - "packages/shared/src/diff.ts"
+      - "packages/chrome-extension/src/shared/dom-utils.ts"
+      - "packages/chrome-extension/src/content/editing/notes.ts"
+      - "packages/chrome-extension/src/content/batching/notes-store.ts"
+      - "packages/chrome-extension/src/content/index.ts"
+      - "packages/chrome-extension/src/content/batching/prompt-serializer.ts"
+      - "docs/spec/compiled/v1/data-contracts.md"
+
+intent:
+  goal: >
+    Resolve image src/background-image to a public served path (/images/<name>),
+    never inline base64 into diffs, and strip the leading /public everywhere the
+    path is emitted. Foundation for Brief 2 (#29). Fixes issue #28.
+  verification:
+    - "A file-picker-added image produces an AttributeChange whose toValue is a /images/<name> path (no data: URI, no /public prefix), with pendingUpload metadata carried to the server."
+    - "Duplicating an element whose src is a newly-added image yields an InsertChange.outerHTML containing NO data: URI."
+    - "A background-image picked via the media panel is referenced as url(/images/<name>), not url(data:...)."
+    - "bridge saveDataUrl returns a path with no leading /public segment."
+    - "An oversized asset yields assetTruncated: true and an empty toValue rather than an inline multi-MB blob."
+    - "tsc --noEmit passes; npm run build produces dist; existing bridge/serializer tests pass."
+  scope_files:
+    - "packages/chrome-extension/src/content/editing/media.ts"
+    - "packages/chrome-extension/src/shared/dom-utils.ts"
+    - "packages/mcp-server/src/bridge.ts"
+    - "packages/mcp-server/src/server.ts"
+    - "packages/shared/src/diff.ts"
+    - "docs/spec/compiled/v1/data-contracts.md"
+  spec_references:
+    - "docs/spec/compiled/v1/data-contracts.md"
+    - "docs/spec/compiled/v1/features/feature-005-mcp-server-bridge.md"
+    - "docs/spec/compiled/v1/features/feature-004-change-batching.md"
+
+conventions:
+  naming:
+    - pattern: "resolveElementAsset() — capture-layer helper turning a picked File into { previewUrl, provisionalSrc, pendingUpload }"
+      scope: "packages/chrome-extension/src/shared/dom-utils.ts (seeded Brief 1, enriched Brief 2)"
+    - pattern: "PendingUpload { filename, mimeType, sizeBytes } — additive-optional on AttributeChange"
+      scope: "packages/shared/src/diff.ts"
+    - pattern: "served asset paths are /images/<name> (leading /public stripped), never data: or blob:"
+      scope: "capture layer + mcp-server bridge"
+  patterns:
+    - pattern: "Kill base64 at the source (blob URL preview + pendingUpload side-channel); server-side scan is the safety net across all data-URL carriers"
+      rationale: "content script has no filesystem access; server scan closes outerHTML + background-image leak carriers"
+    - pattern: "additive-optional contract fields only — no WS_PROTOCOL_VERSION bump (stays 0.4.0); consumers degrade gracefully"
+      rationale: "data-contracts § Protocol compatibility"
+  decisions:
+    - "Decision 0035 (selective spec loading)"
+    - "additive-optional protocol per data-contracts § Protocol compatibility"
+  boundaries:
+    - module: "chrome-extension media editor + capture helpers"
+      owner_brief: "Resolve image src to a public path and eliminate base64 (#28)"
+    - module: "mcp-server bridge (data-URL extraction + asset persistence)"
+      owner_brief: "Resolve image src to a public path and eliminate base64 (#28)"
+
+integration_points:
+  - name: "resolveElementAsset capture helper"
+    producer: "Resolve image src to a public path and eliminate base64 (#28)"
+    consumer: "Carry a resolved assetPath + label on every element reference (#29)"
+    artifact: "packages/chrome-extension/src/shared/dom-utils.ts"
+  - name: "AttributeChange.pendingUpload + assetTruncated contract fields"
+    producer: "Resolve image src to a public path and eliminate base64 (#28)"
+    consumer: "Carry a resolved assetPath + label on every element reference (#29)"
+    artifact: "packages/shared/src/diff.ts"
+  - name: "server-side asset persistence to /images/<name>"
+    producer: "Resolve image src to a public path and eliminate base64 (#28)"
+    consumer: "Carry a resolved assetPath + label on every element reference (#29)"
+    artifact: "packages/mcp-server/src/bridge.ts"
+
+session_decisions: []
+
+governance: []
