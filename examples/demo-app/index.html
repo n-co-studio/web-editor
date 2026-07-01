@@ -12,6 +12,67 @@
   </head>
   <body>
     <div id="root"></div>
+
+    <!--
+      Drag containment + reorder-affordance verification fixture (issue #30).
+      Static markup (no React) so the content script can exercise it directly:
+        1. #page-root-row — a page-root flex container OUTSIDE the modal. A
+           reparent drag started inside the modal must NOT be able to drop here
+           (out of overlay scope): the element snaps back, no diff enqueued.
+        2. #verify-modal — a [role=dialog][aria-modal] overlay containing a
+           WRAPPING gallery (.gallery, flex-wrap) of mixed narrow + full-width
+           items. Every item — including the full-width one — must expose the
+           reorder affordance, and an in-gallery move must commit a reorderChange
+           to the correct 2D index.
+    -->
+    <style>
+      #fe-fixture { font-family: system-ui, sans-serif; padding: 24px; }
+      #fe-fixture h2 { font-size: 14px; color: #475569; margin: 24px 0 8px; }
+      #page-root-row { display: flex; gap: 12px; }
+      #page-root-row > div {
+        flex: 1; height: 72px; border-radius: 8px;
+        background: #e2e8f0; display: flex; align-items: center;
+        justify-content: center; color: #334155; font-size: 13px;
+      }
+      #verify-modal {
+        margin-top: 12px; max-width: 520px; padding: 20px; border-radius: 12px;
+        border: 1px solid #cbd5e1; background: #fff;
+        box-shadow: 0 12px 40px rgba(15, 23, 42, 0.18);
+        position: relative; z-index: 100;
+      }
+      #verify-modal .gallery {
+        display: flex; flex-wrap: wrap; gap: 12px;
+      }
+      #verify-modal .gallery > .tile {
+        height: 88px; border-radius: 8px; display: flex;
+        align-items: center; justify-content: center;
+        color: #fff; font-size: 13px; font-weight: 600;
+      }
+      #verify-modal .gallery > .narrow { width: 140px; background: #6366f1; }
+      #verify-modal .gallery > .full { width: 100%; background: #0ea5e9; }
+    </style>
+
+    <div id="fe-fixture">
+      <h2>Page-root row (outside the modal — not a valid reparent target)</h2>
+      <div id="page-root-row">
+        <div>Page A</div>
+        <div>Page B</div>
+        <div>Page C</div>
+      </div>
+
+      <h2>Modal with wrapping gallery (in-overlay reorder + containment)</h2>
+      <div id="verify-modal" role="dialog" aria-modal="true" aria-label="Gallery editor">
+        <div class="gallery">
+          <div class="tile narrow">1</div>
+          <div class="tile narrow">2</div>
+          <div class="tile narrow">3</div>
+          <div class="tile full">4 — full width</div>
+          <div class="tile narrow">5</div>
+          <div class="tile narrow">6</div>
+        </div>
+      </div>
+    </div>
+
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

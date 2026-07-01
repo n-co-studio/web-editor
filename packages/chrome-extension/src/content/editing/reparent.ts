@@ -9,7 +9,8 @@
 
 import { createElement } from '../../shared/ui-utils';
 import { HANDLE_COLORS, DROP_INDICATOR, OVERLAY } from '../../shared/constants';
-import { detectContainerLayout, computeGapZones, hitTestGapZone, type ContainerLayout, type GapZone } from './gap-math';
+import { detectContainerLayout, computeGapZones, hitTestGapZone, detectWrapping, computeGapZones2D, hitTestGapZone2D, type ContainerLayout, type GapZone } from './gap-math';
+import { findOverlayRoot } from './overlay-scope';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -34,7 +35,32 @@ interface TargetCandidate {
   container: HTMLElement;
   layout: ContainerLayout;
   children: HTMLElement[];
+  /** True when the container wraps / is 2D — gates 2D gap-math (issue #30). */
+  is2D: boolean;
   dropZones: DropZone[];
+}
+
+/**
+ * Build a target candidate for a container: layout, children, 2D gate, and drop
+ * zones (2D nearest-gap when wrapping, single-axis otherwise). Children include
+ * every element child so the source container's zones share the same
+ * including-dragged index space the reorder path uses.
+ */
+function buildTargetCandidate(container: HTMLElement): TargetCandidate {
+  const layout = detectContainerLayout(container);
+  const children = Array.from(container.children)
+    .filter((c): c is HTMLElement => c instanceof HTMLElement);
+  const is2D = detectWrapping(container, children, layout);
+  const zones = is2D
+    ? computeGapZones2D(container, children, layout)
+    : computeGapZones(container, children, layout);
+  return {
+    container,
+    layout,
+    children,
+    is2D,
+    dropZones: zones.map((gz) => ({ ...gz, indicator: null })),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -63,21 +89,33 @@ export function getReparentBlockReason(element: Element): string | null {
 // ---------------------------------------------------------------------------
 
 /**
- * Find all flex/grid containers on the page, excluding the source container
- * and the extension's shadow host.
+ * Find all flex/grid containers within the active overlay scope, excluding the
+ * source container and the extension's shadow host.
+ *
+ * `scopeRoot` is the active overlay boundary from [findOverlayRoot] (issue #30):
+ * a candidate is kept only when the scope is page-wide (`document.body` — no
+ * overlay detected, previous unconstrained behavior) or the candidate lives
+ * inside the overlay. This is what contains an in-overlay reparent drag: a
+ * page-root container outside the overlay never becomes a drop target, so a drop
+ * there resolves to "no target" and the element snaps back.
  */
 function discoverTargetContainers(
   sourceContainer: HTMLElement,
   draggedElement: HTMLElement,
   shadowHost: Element | null,
+  scopeRoot: HTMLElement,
 ): TargetCandidate[] {
   const candidates: TargetCandidate[] = [];
+  const pageWide = scopeRoot === document.body;
   const all = document.querySelectorAll('*');
 
   for (const el of all) {
     if (el === sourceContainer) continue;
     if (shadowHost && (el === shadowHost || shadowHost.contains(el))) continue;
     if (!(el instanceof HTMLElement)) continue;
+
+    // Overlay containment: outside-the-overlay containers are not valid targets.
+    if (!pageWide && !scopeRoot.contains(el)) continue;
 
     const cs = getComputedStyle(el);
     const display = cs.display;
@@ -86,17 +124,7 @@ function discoverTargetContainers(
     // Skip if the container is the dragged element or a descendant of it (would be circular)
     if (el === draggedElement || draggedElement.contains(el)) continue;
 
-    const layout = detectContainerLayout(el);
-    const children = Array.from(el.children)
-      .filter((c): c is HTMLElement => c instanceof HTMLElement);
-
-    candidates.push({
-      container: el,
-      layout,
-      children,
-      dropZones: computeGapZones(el, children, layout)
-        .map((gz) => ({ ...gz, indicator: null })),
-    });
+    candidates.push(buildTargetCandidate(el));
   }
 
   return candidates;
@@ -246,21 +274,15 @@ export class ReparentEditor {
     this.grabOffsetX = e.clientX - rect.left;
     this.grabOffsetY = e.clientY - rect.top;
 
-    // Discover target containers
+    // Discover target containers, contained to the active overlay (issue #30).
     const shadowHost = this.shadow.host;
-    this.targets = discoverTargetContainers(this.sourceContainer!, this.currentElement!, shadowHost);
+    const overlayRoot = findOverlayRoot(this.currentElement!);
+    this.targets = discoverTargetContainers(this.sourceContainer!, this.currentElement!, shadowHost, overlayRoot);
 
-    // Also include source container as a valid drop target (for same-container reorder)
-    const sourceLayout = detectContainerLayout(this.sourceContainer!);
-    const sourceChildren = Array.from(this.sourceContainer!.children)
-      .filter((c): c is HTMLElement => c instanceof HTMLElement);
-    this.targets.push({
-      container: this.sourceContainer!,
-      layout: sourceLayout,
-      children: sourceChildren,
-      dropZones: computeGapZones(this.sourceContainer!, sourceChildren, sourceLayout)
-        .map((gz) => ({ ...gz, indicator: null })),
-    });
+    // Always include the source container as a valid drop target (for a
+    // same-container move, which commits as a reorder). It is inside the
+    // overlay by construction, so it is never filtered out by scope.
+    this.targets.push(buildTargetCandidate(this.sourceContainer!));
 
     // Dim the dragged element
     this.currentElement.style.opacity = '0.4';
@@ -285,6 +307,10 @@ export class ReparentEditor {
     // Hit-test: which container is the pointer over?
     const target = this.findTargetAtPoint(e.clientX, e.clientY);
 
+    // Reflect drop validity on the cursor (issue #30): no valid in-overlay
+    // target under the pointer → not-allowed (the drop will snap back).
+    this.cursorOverlay.style.cursor = target ? 'grabbing' : 'not-allowed';
+
     if (target !== this.activeTarget) {
       // Container changed — remove old indicators, render new ones
       this.removeIndicators();
@@ -300,10 +326,11 @@ export class ReparentEditor {
     }
 
     if (target) {
-      // Hit-test within the target container
-      const isRow = target.layout.direction === 'row';
-      const pos = isRow ? e.clientX : e.clientY;
-      const newIndex = hitTestGapZone(target.dropZones, pos);
+      // Hit-test within the target container: 2D nearest-gap when wrapping,
+      // else single-axis (issue #30).
+      const newIndex = target.is2D
+        ? hitTestGapZone2D(target.dropZones, e.clientX, e.clientY)
+        : hitTestGapZone(target.dropZones, target.layout.direction === 'row' ? e.clientX : e.clientY);
 
       if (newIndex !== this.activeInsertIndex) {
         this.activeInsertIndex = newIndex;
@@ -347,7 +374,8 @@ export class ReparentEditor {
       );
 
       if (!isSamePosition) {
-        // Fire callback BEFORE DOM move so it can capture pre-move sibling state
+        // Fire callback BEFORE DOM move so it can capture pre-move sibling state.
+        // index.ts routes a same-container drop to a ReorderChange (issue #30).
         this.onCommitCb?.(
           this.currentElement,
           sourceContainer,
@@ -355,7 +383,14 @@ export class ReparentEditor {
           target.container,
           targetIndex,
         );
-        this.commitReparent(target.container, targetIndex);
+        // Same-container drop is an in-list reorder: use reorder DOM semantics
+        // so the moved node lands at the index the ReorderChange describes.
+        // Cross-container drop uses the reparent move.
+        if (isSameContainer) {
+          this.commitReorderInPlace(sourceContainer, sourceIndex, targetIndex);
+        } else {
+          this.commitReparent(target.container, targetIndex);
+        }
       }
     }
 
@@ -438,6 +473,28 @@ export class ReparentEditor {
     }
   }
 
+  /**
+   * Same-container move via the reparent tool — commit with reorder semantics
+   * (issue #30). `fromIndex` is the element's child position and `toIndex` is
+   * the gap insert index (0..N in including-dragged space), matching the
+   * ReorderChange the commit callback emits, so the DOM lands where the diff
+   * says it will. Mirrors `ReorderEditor.commitReorder`.
+   */
+  private commitReorderInPlace(container: HTMLElement, fromIndex: number, toIndex: number): void {
+    const el = this.currentElement!;
+    const original = Array.from(container.children)
+      .filter((c): c is HTMLElement => c instanceof HTMLElement);
+    const remaining = original.filter((_, i) => i !== fromIndex);
+    const effectiveIdx = toIndex > fromIndex ? toIndex - 1 : toIndex;
+    const refNode = effectiveIdx < remaining.length ? remaining[effectiveIdx] : null;
+
+    if ('moveBefore' in container && typeof (container as any).moveBefore === 'function') {
+      (container as any).moveBefore(el, refNode);
+    } else {
+      container.insertBefore(el, refNode);
+    }
+  }
+
   // -----------------------------------------------------------------------
   // DOM rendering helpers
   // -----------------------------------------------------------------------
@@ -496,6 +553,12 @@ export class ReparentEditor {
   }
 
   private renderDropIndicators(target: TargetCandidate): void {
+    // 2D containers get pips at each gap center; 1D keeps the full-span line.
+    if (target.is2D) {
+      this.renderDropPips(target);
+      return;
+    }
+
     const containerRect = target.container.getBoundingClientRect();
     const isRow = target.layout.direction === 'row';
 
@@ -528,7 +591,43 @@ export class ReparentEditor {
     }
   }
 
+  /** Render wrap-aware drop pips at each 2D gap center (issue #30). */
+  private renderDropPips(target: TargetCandidate): void {
+    const size = DROP_INDICATOR.pipSize;
+    for (const zone of target.dropZones) {
+      const cx = zone.cx ?? zone.center;
+      const cy = zone.cy ?? 0;
+      const indicator = createElement('div', {}, {
+        position: 'fixed',
+        left: `${cx - size / 2}px`,
+        top: `${cy - size / 2}px`,
+        width: `${size}px`,
+        height: `${size}px`,
+        borderRadius: '50%',
+        zIndex: '59',
+        pointerEvents: 'none',
+        background: DROP_INDICATOR.color,
+        opacity: '0.4',
+        transition: 'opacity 100ms, background 100ms, transform 100ms',
+      });
+      zone.indicator = indicator;
+      this.shadow.appendChild(indicator);
+      this.indicators.push(indicator);
+    }
+  }
+
   private updateActiveIndicator(target: TargetCandidate, insertIndex: number): void {
+    if (target.is2D) {
+      for (const zone of target.dropZones) {
+        if (!zone.indicator) continue;
+        const active = zone.insertIndex === insertIndex;
+        zone.indicator.style.background = active ? DROP_INDICATOR.activeColor : DROP_INDICATOR.color;
+        zone.indicator.style.opacity = active ? '1' : '0.4';
+        zone.indicator.style.transform = active ? 'scale(1.7)' : 'scale(1)';
+      }
+      return;
+    }
+
     const isRow = target.layout.direction === 'row';
 
     for (const zone of target.dropZones) {

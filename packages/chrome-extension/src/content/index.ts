@@ -68,7 +68,7 @@ import {
 } from './editing/parallax';
 import type { ParallaxMechanism, ParallaxScrollSource } from './editing/parallax';
 import { LayoutEditor } from './editing/layout-editor';
-import { detectContainerLayout } from './editing/gap-math';
+import { detectContainerLayout, detectWrapping } from './editing/gap-math';
 import { GridSettingsPanel } from './grid-settings';
 import { MeasureOverlay } from './selection/measure-overlay';
 import { MultiSelectManager } from './selection/multi-select';
@@ -1049,6 +1049,7 @@ export function deactivate(): void {
   layoutEditor?.cleanup();
   positionEditor?.cleanup();
   reorderEditor?.cleanup();
+  reparentEditor?.cleanup();
   insertEditor?.cleanup();
   textEditor?.cleanup();
   mediaEditor?.cleanup();
@@ -1116,6 +1117,7 @@ export function deactivate(): void {
   gridOverlay = null;
   rulerOverlay = null;
   reorderEditor = null;
+  reparentEditor = null;
   insertEditor = null;
   textEditor = null;
   mediaEditor = null;
@@ -1404,49 +1406,83 @@ function commitTextEdit(
 // Reorder commit helper — builds diff + history entry, re-renders reorder mode
 // ---------------------------------------------------------------------------
 
+/**
+ * Serialize a container's primary axis for a ReorderChange. For a wrapped flex
+ * or multi-track grid the axis alone is insufficient (the layout is 2D), so the
+ * wrap intent is carried as a ` wrap` suffix (issue #30) — e.g. `row wrap`. The
+ * base token stays `row`/`column`/`row-reverse`, so consumers that read only the
+ * first token are unaffected.
+ */
+function computeContainerDirection(container: HTMLElement): string {
+  const cs = getComputedStyle(container);
+  const base = cs.display.includes('grid')
+    ? (cs.gridAutoFlow?.includes('column') ? 'column' : 'row')
+    : (cs.flexDirection || 'row');
+  const children = Array.from(container.children)
+    .filter((c): c is HTMLElement => c instanceof HTMLElement);
+  const wraps = detectWrapping(container, children, detectContainerLayout(container));
+  return wraps ? `${base} wrap` : base;
+}
+
+/**
+ * Build + enqueue a ReorderChange and push the reorder history entry. Shared by
+ * the reorder tool and the same-container branch of the reparent tool (issue
+ * #30) so an in-list move always emits a `reorderChange`, never a
+ * `reparentChange`. Fires the caller's `reRender` to restore the active tool on
+ * the element at its new position.
+ */
+function commitReorderChange(
+  element: HTMLElement,
+  container: HTMLElement,
+  fromIndex: number,
+  toIndex: number,
+  originalChildOrder: HTMLElement[],
+  reRender: () => void,
+): void {
+  const info = buildElementInfo(element);
+
+  const reorderChange: ReorderChange = {
+    type: 'reorder',
+    fromIndex,
+    toIndex,
+    // Mint/repair each sibling's uid first so generateSelector returns
+    // uid-based selectors (issue #27) rather than positional nth-of-type.
+    siblingSelectors: originalChildOrder.map((c) => {
+      ensureUid(c);
+      return generateSelector(c);
+    }),
+    // Parallel anchor list carrying uid + resolved assetPath/label per sibling
+    // (issue #29) so a gallery reorder renders `N → /images/<file>` from the
+    // payload alone. siblingSelectors stays the canonical always-present list.
+    siblingAnchors: originalChildOrder.map((c) => buildSiblingAnchor(c)),
+    containerSelector: generateSelector(container),
+    containerDirection: computeContainerDirection(container),
+  };
+
+  const diff = diffBuilder!.buildReorder(info, reorderChange);
+
+  queue!.add(diff);
+  editHistory!.push({
+    type: 'reorder',
+    element,
+    container,
+    fromIndex,
+    toIndex,
+    originalChildOrder,
+    diff,
+  });
+  badge!.update();
+  reviewPanel!.refresh();
+  devtoolsPanel?.refreshProperties();
+  selection?.refreshHighlight();
+
+  reRender();
+}
+
 function makeReorderCommit(el: Element): ReorderCommitCallback {
   return (element, container, fromIndex, toIndex, originalChildOrder) => {
-    const info = buildElementInfo(element);
-
-    const reorderChange: ReorderChange = {
-      type: 'reorder',
-      fromIndex,
-      toIndex,
-      // Mint/repair each sibling's uid first so generateSelector returns
-      // uid-based selectors (issue #27) rather than positional nth-of-type.
-      siblingSelectors: originalChildOrder.map((c) => {
-        ensureUid(c);
-        return generateSelector(c);
-      }),
-      // Parallel anchor list carrying uid + resolved assetPath/label per sibling
-      // (issue #29) so a gallery reorder renders `N → /images/<file>` from the
-      // payload alone. siblingSelectors stays the canonical always-present list.
-      siblingAnchors: originalChildOrder.map((c) => buildSiblingAnchor(c)),
-      containerSelector: generateSelector(container),
-      containerDirection: getComputedStyle(container).display.includes('grid')
-        ? (getComputedStyle(container).gridAutoFlow?.includes('column') ? 'column' : 'row')
-        : (getComputedStyle(container).flexDirection || 'row'),
-    };
-
-    const diff = diffBuilder!.buildReorder(info, reorderChange);
-
-    queue!.add(diff);
-    editHistory!.push({
-      type: 'reorder',
-      element,
-      container,
-      fromIndex,
-      toIndex,
-      originalChildOrder,
-      diff,
-    });
-    badge!.update();
-    reviewPanel!.refresh();
-    devtoolsPanel?.refreshProperties();
-    selection?.refreshHighlight();
-
-    // Re-render reorder mode on the element at its new position
-    reorderEditor!.render(el, makeReorderCommit(el));
+    commitReorderChange(element, container, fromIndex, toIndex, originalChildOrder,
+      () => reorderEditor!.render(el, makeReorderCommit(el)));
   };
 }
 
@@ -1456,6 +1492,20 @@ function makeReorderCommit(el: Element): ReorderCommitCallback {
 
 function makeReparentCommit(el: Element): ReparentCommitCallback {
   return (element, sourceContainer, sourceIndex, targetContainer, targetIndex) => {
+    // Same-container drop via the reparent tool is an in-list reorder, not a
+    // cross-container move — emit a ReorderChange (fromIndex→toIndex) so the
+    // payload reflects the real operation (issue #30). The callback fires BEFORE
+    // the DOM move, so sourceContainer still holds all children in their
+    // original order. fromIndex/toIndex match the reorder DOM semantics the
+    // ReparentEditor uses for a same-container commit (commitReorderInPlace).
+    if (sourceContainer === targetContainer) {
+      const originalChildOrder = Array.from(sourceContainer.children)
+        .filter((c): c is HTMLElement => c instanceof HTMLElement);
+      commitReorderChange(element, sourceContainer, sourceIndex, targetIndex, originalChildOrder,
+        () => reparentEditor!.render(el, makeReparentCommit(el)));
+      return;
+    }
+
     const info = buildElementInfo(element);
 
     // Build sibling selectors from target container's children (pre-move — element not yet in target).
@@ -1635,16 +1685,20 @@ function makeGroupCommit(elements: Element[]): void {
 // ---------------------------------------------------------------------------
 
 function refreshReorderAfterHistoryChange(entry: HistoryEntry): void {
+  const el = selection?.getSelectedElement();
+  if (!el) return;
+
   if (entry.type === 'reorder') {
-    if (!reorderEditor?.isActive()) return;
-    const el = selection?.getSelectedElement();
-    if (el) {
+    // A same-container drop via the reparent tool also pushes a 'reorder' entry
+    // (issue #30) — refresh whichever drag editor is currently active so its
+    // overlay and drop zones track the element at its new position.
+    if (reorderEditor?.isActive()) {
       reorderEditor.render(el, makeReorderCommit(el));
+    } else if (reparentEditor?.isActive()) {
+      reparentEditor.render(el, makeReparentCommit(el));
     }
   } else if (entry.type === 'reparent') {
-    if (!reparentEditor?.isActive()) return;
-    const el = selection?.getSelectedElement();
-    if (el) {
+    if (reparentEditor?.isActive()) {
       reparentEditor.render(el, makeReparentCommit(el));
     }
   }

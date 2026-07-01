@@ -130,6 +130,8 @@ export const DROP_INDICATOR = {
   activeColor: '#60a5fa',
   thickness: 2,
   activeThickness: 3,
+  /** Diameter of a 2D wrap-aware drop pip (issue #30). */
+  pipSize: 9,
 } as const;
 
 // Insert indicator for insert tool drop zones and phantom

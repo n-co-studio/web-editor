@@ -7,7 +7,7 @@
 import { createElement } from '../../shared/ui-utils';
 import { HANDLE_COLORS, DROP_INDICATOR, OVERLAY } from '../../shared/constants';
 import { OrderPreview } from './order-preview';
-import { detectContainerLayout, computeGapZones, hitTestGapZone, type ContainerLayout, type GapZone } from './gap-math';
+import { detectContainerLayout, computeGapZones, hitTestGapZone, detectWrapping, computeGapZones2D, hitTestGapZone2D, type ContainerLayout, type GapZone } from './gap-math';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -52,10 +52,10 @@ export function getReorderBlockReason(element: Element): string | null {
     return 'Parent is not a flex or grid container';
   }
 
-  if (isFlex && parentStyle.flexWrap !== 'nowrap') {
-    return 'Wrapped flex containers are not supported for reorder';
-  }
-
+  // Wrapped/2D reorderable containers are now supported via the gated 2D
+  // gap-math (issue #30) — every sibling, including a full-width item in a
+  // wrapping gallery, exposes the reorder affordance. Only genuinely
+  // non-reorderable cases (non-layout parent, single child) stay blocked.
   if (parent.children.length <= 1) {
     return 'Element is the only child — nothing to reorder';
   }
@@ -78,6 +78,8 @@ export class ReorderEditor {
   private currentInsertIndex = -1;
   private originalChildOrder: HTMLElement[] = [];
   private layout: ContainerLayout = { direction: 'row', isReversed: false };
+  /** True when the container wraps / is 2D — gates the 2D gap-math (issue #30). */
+  private is2D = false;
 
   // --- Geometry ---
   private dropZones: DropZone[] = [];
@@ -149,9 +151,15 @@ export class ReorderEditor {
     this.originalIndex = this.originalChildOrder.indexOf(this.currentElement);
     this.currentInsertIndex = this.originalIndex;
 
+    // Gate the 2D gap-math to wrapping/multi-line containers (issue #30);
+    // nowrap containers stay on the single-axis path unchanged.
+    this.is2D = detectWrapping(this.container, this.originalChildOrder, this.layout);
+
     // Compute drop zones (gap-math returns GapZone[], extend with indicator field)
-    this.dropZones = computeGapZones(this.container, this.originalChildOrder, this.layout)
-      .map((gz) => ({ ...gz, indicator: null }));
+    const zones = this.is2D
+      ? computeGapZones2D(this.container, this.originalChildOrder, this.layout)
+      : computeGapZones(this.container, this.originalChildOrder, this.layout);
+    this.dropZones = zones.map((gz) => ({ ...gz, indicator: null }));
 
     // Render cursor overlay
     this.renderCursorOverlay();
@@ -289,9 +297,10 @@ export class ReorderEditor {
       this.ghostEl.style.top = `${e.clientY - this.grabOffsetY}px`;
     }
 
-    // Hit-test along layout axis
-    const pos = this.layout.direction === 'row' ? e.clientX : e.clientY;
-    const newIndex = hitTestGapZone(this.dropZones, pos);
+    // Hit-test: 2D nearest-gap for wrapping containers, else single-axis.
+    const newIndex = this.is2D
+      ? hitTestGapZone2D(this.dropZones, e.clientX, e.clientY)
+      : hitTestGapZone(this.dropZones, this.layout.direction === 'row' ? e.clientX : e.clientY);
 
     // Midpoint crossing throttle — only update on index change
     if (newIndex !== this.currentInsertIndex) {
@@ -496,6 +505,13 @@ export class ReorderEditor {
   }
 
   private renderDropIndicators(): void {
+    // 2D containers get pips at each gap center (a full-span line is
+    // meaningless when gaps sit on different rows); 1D keeps the axis line.
+    if (this.is2D) {
+      this.renderDropPips();
+      return;
+    }
+
     const containerRect = this.container!.getBoundingClientRect();
     const isRow = this.layout.direction === 'row';
 
@@ -528,7 +544,43 @@ export class ReorderEditor {
     }
   }
 
+  /** Render wrap-aware drop pips at each 2D gap center (issue #30). */
+  private renderDropPips(): void {
+    const size = DROP_INDICATOR.pipSize;
+    for (const zone of this.dropZones) {
+      const cx = zone.cx ?? zone.center;
+      const cy = zone.cy ?? 0;
+      const indicator = createElement('div', {}, {
+        position: 'fixed',
+        left: `${cx - size / 2}px`,
+        top: `${cy - size / 2}px`,
+        width: `${size}px`,
+        height: `${size}px`,
+        borderRadius: '50%',
+        zIndex: '59',
+        pointerEvents: 'none',
+        background: DROP_INDICATOR.color,
+        opacity: '0.4',
+        transition: 'opacity 100ms, background 100ms, transform 100ms',
+      });
+      zone.indicator = indicator;
+      this.shadow.appendChild(indicator);
+      this.indicators.push(indicator);
+    }
+  }
+
   private updateActiveIndicator(insertIndex: number): void {
+    if (this.is2D) {
+      for (const zone of this.dropZones) {
+        if (!zone.indicator) continue;
+        const active = zone.insertIndex === insertIndex;
+        zone.indicator.style.background = active ? DROP_INDICATOR.activeColor : DROP_INDICATOR.color;
+        zone.indicator.style.opacity = active ? '1' : '0.4';
+        zone.indicator.style.transform = active ? 'scale(1.7)' : 'scale(1)';
+      }
+      return;
+    }
+
     const isRow = this.layout.direction === 'row';
 
     for (const zone of this.dropZones) {
