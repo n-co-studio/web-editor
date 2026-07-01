@@ -119,6 +119,33 @@ function registerTools(server: McpServer, bridge: Bridge): void {
         'Each group change includes wrapperTagName, wrapperInitialStyles (display:flex etc.), ' +
         'containerSelector, insertIndex, wrappedSelectors[], and a sibling bracket ' +
         '(prevSibling/nextSibling) indicating the JSX insertion point for the wrapper. ' +
+        'STRUCTURAL AUTO-LAYOUT (feature-010): reorder/group/reparent changes may carry ' +
+        'uid-keyed container identity and editable-list descriptors — all additive-optional; ' +
+        'a diff without them behaves exactly as before (degrade to containerSelector targeting ' +
+        'and flat, all-`flow` reorder). `ReorderChange.containerUid` (and ' +
+        '`ReparentChange.sourceContainerUid`/`targetContainerUid`) is the `data-fe-uid` of the ' +
+        'editable-list container — prefer it over `containerSelector` when present (stable across ' +
+        're-render/reorder). The diff may carry `layoutContainers[]`: one ' +
+        '`LayoutContainerDescriptor` per editable-list container (`uid`, `layout` flex|grid, ' +
+        '`direction`, `childUids[]` in visual order, optional `parentUid`/`role`, and ' +
+        '`signalSource` explicit|heuristic). `childUids[]` lists EVERY direct child in visual ' +
+        'order, so a `layoutRole: absolute` peer (a `position:absolute` parallax child or an ' +
+        'explicitly-placed grid child) is visible in the model but is NEVER a reorder target and ' +
+        'is excluded from `fromIndex`/`toIndex` math — never rewrite its position from a reorder ' +
+        'index (it stays selector-anchored, feature-009). A `layoutRole: group` child is itself a ' +
+        'nested container: it appears as one opaque peer in its parent `childUids[]` AND as its ' +
+        'own descriptor (with `parentUid` + `role:"group"`), bounded to one nesting level. When ' +
+        '`signalSource` is `heuristic`, stamp a `data-fe-layout="flex|grid"` attribute on the ' +
+        'container when you write source so the list becomes authoritative. GROUPING requires a ' +
+        'REAL STRUCTURAL BOUNDARY: a `GroupChange` carries a fresh `wrapperUid` (the runtime-created ' +
+        'container has no build-time origin) and `wrappedUids[]` (the grouped children, parallel to ' +
+        '`wrappedSelectors`). Create a real container element in the JSX (with `data-fe-layout`) ' +
+        'wrapping the grouped children AND, for data-driven items, introduce a nested data sub-array ' +
+        '— do NOT wrap a `.map()` slice by index or distinguish items by a presentational flag ' +
+        '(e.g. `width:"half"`), which would desync on the next data edit. After apply + hot-reload ' +
+        'the wrapper gets a build-time uid; re-associate it as the container whose `childUids[]` is a ' +
+        'superset of `wrappedUids`. Reorder writes SOURCE ORDER (reorder the JSX siblings or the ' +
+        'backing data-array entries) — never inject `order:` CSS. ' +
         'When `attributeChanges` is present, the intent is to modify HTML attributes ' +
         '(e.g. src, alt) on the element. Each attribute change includes attribute name, ' +
         'fromValue, and toValue. When the user selects an image via the file picker, ' +

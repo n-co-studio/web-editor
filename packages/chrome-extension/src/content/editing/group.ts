@@ -6,6 +6,8 @@
  */
 
 import { detectContainerLayout } from './gap-math';
+import { DATA_FE_LAYOUT_ATTR } from '@nco-studio/shared/layout';
+import { stampFreshUid } from '../../shared/dom-utils';
 
 // ---------------------------------------------------------------------------
 // Block-reason guard
@@ -93,6 +95,15 @@ export function groupElements(elements: HTMLElement[], _shadow: ShadowRoot): Gro
   wrapper.style.display = 'flex';
   wrapper.style.flexDirection = flexDirection;
   wrapper.style.gap = '0px';
+
+  // Mark the runtime-created wrapper as an authoritative editable list
+  // (feature-010): the explicit `data-fe-layout` signal makes the container a
+  // real structural boundary the applier stamps on codegen, and a fresh
+  // `data-fe-uid` gives it a runtime identity with no build-time origin (uid →
+  // source mapping case (d)). The grouped children keep their own uids across the
+  // wrap (grouping moves existing nodes, it does not re-mint them).
+  wrapper.setAttribute(DATA_FE_LAYOUT_ATTR, 'flex');
+  stampFreshUid(wrapper);
 
   // Insert wrapper before the first selected element
   parent.insertBefore(wrapper, sorted[0]);

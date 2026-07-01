@@ -3,6 +3,8 @@
 ## Summary
 Discover the target project's local React components (JSX/TSX) and surface them as insertable elements in the insert panel. The MCP server scans convention-gated source roots, parses component signatures (name, import path, prop schema), and pushes the resulting registry to the extension over WebSocket. When the operator picks a project component from the insert panel, the resulting `InsertChange` carries a `componentInsert` descriptor — Claude Code resolves the descriptor into a JSX usage with the correct import. v1 scope is discovery + insert only; prop UI and token-snapping for prop values are deferred to feature-008.1.
 
+> **Related — Structural Auto-Layout (feature-010).** A component inserted into an **editable-list** container becomes a `layoutRole: flow` peer in that container's structural model; a component that is itself a flex/grid container is a `layoutRole: group` peer with its own [`LayoutContainerDescriptor`](../data-contracts.md#layoutcontainerdescriptor). The [flat-data structural-boundary rule](feature-010-structural-contract.md#the-flat-data-group-problem-acceptance-defining) applies equally to component-backed groups: a conforming group needs a real container element (and, for data-driven items, a nested data sub-array), not sibling entries distinguished only by a presentational flag. See [feature-010](feature-010-structural-contract.md).
+
 ## User Flow
 1. Operator activates extension on a project with local components under conventional roots (`src/components/**`, `src/ui/**`, `components/**`, or operator-configured roots via `nco-web-editor.componentRoots` in the target project's `package.json`)
 2. MCP server scans the configured roots at startup, parses each component, and assembles a `ProjectComponent[]` registry

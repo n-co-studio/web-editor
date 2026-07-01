@@ -13,6 +13,7 @@
     "paths": {
       "@nco-studio/shared": ["../shared/src/index.ts"],
       "@nco-studio/shared/diff": ["../shared/src/diff.ts"],
+      "@nco-studio/shared/layout": ["../shared/src/layout.ts"],
       "@nco-studio/shared/protocol": ["../shared/src/protocol.ts"]
     }
   },

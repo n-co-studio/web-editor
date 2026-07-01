@@ -74,9 +74,10 @@ import { GridSettingsPanel } from './grid-settings';
 import { MeasureOverlay } from './selection/measure-overlay';
 import { MultiSelectManager } from './selection/multi-select';
 import { MultiSelectToolbar } from './editing/multi-select-toolbar';
-import { buildElementInfo, buildNoteElementRef, buildSiblingAnchor, getTopElementAt, generateSelector, getComputedProperty, ensureUid, disambiguateUids } from '../shared/dom-utils';
+import { buildElementInfo, buildNoteElementRef, buildSiblingAnchor, getTopElementAt, generateSelector, getComputedProperty, ensureUid, readUid, disambiguateUids } from '../shared/dom-utils';
 import { PROTOCOL_VERSION } from '@nco-studio/shared';
-import type { VisualDiff, PropertyChange, AttributeChange, TextChange, ReorderChange, ReparentChange, GroupChange, RemoveChange, StylesheetChange, ScriptBehaviorChange } from '@nco-studio/shared';
+import type { VisualDiff, PropertyChange, AttributeChange, TextChange, ReorderChange, ReparentChange, GroupChange, RemoveChange, StylesheetChange, ScriptBehaviorChange, LayoutContainerDescriptor } from '@nco-studio/shared';
+import { parseLayoutSignal, classifyLayoutRole } from '@nco-studio/shared/layout';
 import type { ExtensionMode, ConnectionStatus, EditMode, IconStatus } from '../shared/types';
 
 // ---------------------------------------------------------------------------
@@ -1436,6 +1437,51 @@ function computeContainerDirection(container: HTMLElement): string {
 }
 
 /**
+ * Assemble the feature-010 `LayoutContainerDescriptor` set for an editable-list
+ * container: the container itself, plus a descriptor for each direct child that is
+ * itself an editable list (a `layoutRole: group` peer), bounded to one nesting
+ * level (v1). Stamps `data-fe-uid` on the container and its (one-level)
+ * descendants first so `childUids[]` resolve, and refines each descriptor's
+ * `direction` with the wrap suffix (issue #30) so it matches the emitted
+ * `containerDirection`. Returns `undefined` when the container is not an editable
+ * list — the diff then degrades to `containerSelector` targeting (no regression).
+ * `childUids[]` enumerates every direct child in visual order, so a
+ * `layoutRole: absolute` peer (parallax) is carried, never diff-hidden.
+ */
+function buildLayoutContainers(container: HTMLElement): LayoutContainerDescriptor[] | undefined {
+  ensureUid(container);
+  const children = Array.from(container.children)
+    .filter((c): c is HTMLElement => c instanceof HTMLElement);
+  for (const c of children) ensureUid(c);
+
+  const top = parseLayoutSignal(container);
+  if (!top) return undefined;
+
+  const descriptors: LayoutContainerDescriptor[] = [
+    { ...top, direction: computeContainerDirection(container) },
+  ];
+
+  // Nested group peers — one level down (v1 bound). Each is exposed as its own
+  // descriptor with a `parentUid` edge back to the top container.
+  for (const child of children) {
+    if (classifyLayoutRole(child, container) !== 'group') continue;
+    for (const gc of Array.from(child.children)) {
+      if (gc instanceof HTMLElement) ensureUid(gc);
+    }
+    const nested = parseLayoutSignal(child);
+    if (!nested) continue;
+    descriptors.push({
+      ...nested,
+      direction: computeContainerDirection(child),
+      parentUid: top.uid,
+      role: 'group',
+    });
+  }
+
+  return descriptors;
+}
+
+/**
  * Build + enqueue a ReorderChange and push the reorder history entry. Shared by
  * the reorder tool and the same-container branch of the reparent tool (issue
  * #30) so an in-list move always emits a `reorderChange`, never a
@@ -1451,6 +1497,9 @@ function commitReorderChange(
   reRender: () => void,
 ): void {
   const info = buildElementInfo(element);
+  // Editable-list container identity (feature-010) — mint/repair the container's
+  // uid so the reorder targets it by stable identity, not just a positional selector.
+  ensureUid(container);
 
   const reorderChange: ReorderChange = {
     type: 'reorder',
@@ -1464,13 +1513,21 @@ function commitReorderChange(
     }),
     // Parallel anchor list carrying uid + resolved assetPath/label per sibling
     // (issue #29) so a gallery reorder renders `N → /images/<file>` from the
-    // payload alone. siblingSelectors stays the canonical always-present list.
-    siblingAnchors: originalChildOrder.map((c) => buildSiblingAnchor(c)),
+    // payload alone, plus each sibling's `layoutRole` (feature-010).
+    // siblingSelectors stays the canonical always-present list.
+    siblingAnchors: originalChildOrder.map((c) => ({
+      ...buildSiblingAnchor(c),
+      layoutRole: classifyLayoutRole(c, container),
+    })),
     containerSelector: generateSelector(container),
     containerDirection: computeContainerDirection(container),
+    containerUid: readUid(container),
   };
 
-  const diff = diffBuilder!.buildReorder(info, reorderChange);
+  // Container descriptor(s) — the container plus any nested group peer, with
+  // childUids enumerating every direct child (absolute peers visible, not hidden).
+  const layoutContainers = buildLayoutContainers(container);
+  const diff = diffBuilder!.buildReorder(info, reorderChange, layoutContainers);
 
   queue!.add(diff);
   editHistory!.push({
@@ -1566,6 +1623,11 @@ function makeReparentCommit(el: Element): ReparentCommitCallback {
       return buildSiblingAnchor(anchorEl);
     };
 
+    // Source/target editable-list container identity (feature-010) — key the
+    // cross-container move by stable uid, not just positional selectors.
+    ensureUid(sourceContainer);
+    ensureUid(targetContainer);
+
     const reparentChange: ReparentChange = {
       type: 'reparent',
       sourceContainerSelector: generateSelector(sourceContainer),
@@ -1575,9 +1637,23 @@ function makeReparentCommit(el: Element): ReparentCommitCallback {
       siblingSelectors,
       prevSibling: buildAnchor(prevEl),
       nextSibling: buildAnchor(nextEl),
+      sourceContainerUid: readUid(sourceContainer),
+      targetContainerUid: readUid(targetContainer),
     };
 
-    const diff = diffBuilder!.buildReparent(info, reparentChange);
+    // Descriptors for both containers (deduped by uid) when either is an
+    // editable list — additive-optional, absent otherwise (degrade to selectors).
+    const seenUids = new Set<string>();
+    const layoutContainers = [
+      ...(buildLayoutContainers(sourceContainer) ?? []),
+      ...(buildLayoutContainers(targetContainer) ?? []),
+    ].filter((d) => (seenUids.has(d.uid) ? false : (seenUids.add(d.uid), true)));
+
+    const diff = diffBuilder!.buildReparent(
+      info,
+      reparentChange,
+      layoutContainers.length ? layoutContainers : undefined,
+    );
 
     queue!.add(diff);
     editHistory!.push({
@@ -1673,13 +1749,19 @@ function makeGroupCommit(elements: Element[]): void {
     return buildSiblingAnchor(el);
   };
 
-  // Mint/repair each wrapped element's uid first so selectors are uid-based (issue #27).
+  // Mint/repair each wrapped element's uid first so selectors are uid-based (issue
+  // #27). The uids are captured as `wrappedUids` — the stable child-uid set the
+  // runtime-created-container round-trip (case (d)) keys re-association on.
   const wrappedSelectors = sorted.map((el) => {
     ensureUid(el);
     return generateSelector(el);
   });
+  const wrappedUids = sorted
+    .map((el) => readUid(el))
+    .filter((uid): uid is string => Boolean(uid));
 
-  // Perform DOM mutation
+  // Perform DOM mutation — groupElements stamps `data-fe-layout="flex"` + a fresh
+  // uid on the wrapper (feature-010).
   const result = groupElements(htmlElements, shadow!);
 
   // Build diff using the wrapper as the element
@@ -1698,9 +1780,16 @@ function makeGroupCommit(elements: Element[]): void {
     wrappedSelectors,
     prevSibling: buildAnchor(prevEl),
     nextSibling: buildAnchor(nextEl),
+    // Runtime-created-container identity (feature-010, uid → source case (d)).
+    wrapperUid: readUid(result.wrapper),
+    wrappedUids,
   };
 
-  const diff = diffBuilder!.buildGroup(wrapperInfo, groupChange);
+  // Descriptor for the runtime-created wrapper (now an authoritative editable list
+  // via its `data-fe-layout` signal), so the applier can key the created source
+  // node and reconcile it after hot-reload.
+  const layoutContainers = buildLayoutContainers(result.wrapper);
+  const diff = diffBuilder!.buildGroup(wrapperInfo, groupChange, layoutContainers);
 
   queue!.add(diff);
   editHistory!.push({

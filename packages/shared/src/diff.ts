@@ -139,6 +139,64 @@ export interface PropertyChange {
 }
 
 /**
+ * Structural classification of a direct child of an editable list (feature-010).
+ * `flow` — a normal in-flow reorder/group target (the default when absent, so a
+ * consumer that ignores the field sees the pre-contract flat behavior). `absolute`
+ * — a `position: absolute|fixed` child (the parallax case) or an explicitly-placed
+ * grid child: a visible, selectable, never-diff-hidden peer that is nonetheless
+ * excluded from reorder index math and gap-math. `group` — a child that is itself
+ * an editable-list container, exposed as an opaque peer at its parent's level.
+ * See data-contracts.md → Structural Auto-Layout.
+ */
+export type LayoutRole = 'flow' | 'absolute' | 'group';
+
+/**
+ * A self-describing descriptor for one editable-list container (feature-010),
+ * carried on the additive-optional `VisualDiff.layoutContainers[]` array. A
+ * `layoutRole: group` child appears twice, additively: once as an opaque peer in
+ * its parent's `childUids[]` (so a parent-level reorder moves the whole group as
+ * one item), and once as its own descriptor here (so the group's internals are
+ * self-describing without a recursive tree on the wire). Bounded to one nesting
+ * level in v1 — a single `parentUid` edge reconstructs the hierarchy from the flat
+ * array. See data-contracts.md → LayoutContainerDescriptor.
+ */
+export interface LayoutContainerDescriptor {
+  /** The container's own `data-fe-uid`. */
+  readonly uid: string;
+  /** Layout kind, from `data-fe-layout` (explicit) or resolved computed style (heuristic). */
+  readonly layout: 'flex' | 'grid';
+  /**
+   * The container's `containerDirection` — primary axis, with the ` wrap` suffix
+   * for wrapped containers (`"row wrap"`, issue #30). First token is always the axis.
+   */
+  readonly direction: string;
+  /**
+   * `data-fe-uid`s of the container's direct children, in visual order — all of
+   * them (flow + absolute + group), so a non-flow peer (parallax) is never hidden
+   * from the structural model. A child that is itself a group appears here as its
+   * `uid` and has its own descriptor entry elsewhere in `layoutContainers[]`.
+   */
+  readonly childUids: readonly string[];
+  /**
+   * `data-fe-uid` of the enclosing editable-list container. Absent for the
+   * top-level container. The single edge that reconstructs the (one-level) nesting.
+   */
+  readonly parentUid?: string;
+  /**
+   * This descriptor's role in its parent list — `group` when nested as a peer
+   * inside another editable list; absent/`flow` for the top-level container.
+   * Deliberately omits `absolute` (a container is never a positioned peer).
+   */
+  readonly role?: 'flow' | 'group';
+  /**
+   * How the list was detected — `explicit` when `data-fe-layout` is authoritative
+   * on the element, `heuristic` when detected from computed style. Tells the
+   * applier whether it must stamp `data-fe-layout` on codegen.
+   */
+  readonly signalSource: 'explicit' | 'heuristic';
+}
+
+/**
  * A reorder operation — moves a child element within the same parent container.
  * Stored as a parallel array on VisualDiff (separate from PropertyChange[]).
  */
@@ -159,6 +217,17 @@ export interface ReorderChange {
   readonly siblingAnchors?: readonly SiblingAnchor[];
   readonly containerSelector: string;
   readonly containerDirection: string;
+  /**
+   * Editable-list container identity (feature-010) — `data-fe-uid` of the
+   * container the reorder happened in, the `uid`-keyed peer of `containerSelector`.
+   * When present, the applier resolves the container to source by `uid` (stable
+   * across re-render/reorder) instead of the positional selector. Additive-optional;
+   * absent for pre-feature-010 payloads and containers with no `uid`, where the
+   * applier falls back to `containerSelector`. The reorder targets are the
+   * container's `layoutRole: flow` peers only — `absolute` children (parallax /
+   * explicitly-placed) are excluded from `fromIndex`/`toIndex` math.
+   */
+  readonly containerUid?: string;
 }
 
 /** Identifies a sibling element adjacent to an insert position. */
@@ -182,6 +251,15 @@ export interface SiblingAnchor {
    */
   readonly assetPath?: string;
   readonly label?: string;
+  /**
+   * Structural classification of this anchored child within its editable list
+   * (feature-010). `flow` (default when absent) / `absolute` (positioned peer,
+   * excluded from reorder & gap-math) / `group` (nested container peer). This is
+   * the per-child carrier of the child's role — a `flow`/`group` peer records it
+   * here; a `group` child's role is additionally recoverable via its own
+   * `LayoutContainerDescriptor`. Additive-optional.
+   */
+  readonly layoutRole?: LayoutRole;
 }
 
 /** Snapshot of an existing child in the target container (for context). */
@@ -206,6 +284,12 @@ export interface ChildSnapshotEntry {
    */
   readonly assetPath?: string;
   readonly label?: string;
+  /**
+   * Structural classification of the snapshotted child within its editable list
+   * (feature-010). `flow` (default when absent) / `absolute` / `group`.
+   * Additive-optional — see [LayoutRole].
+   */
+  readonly layoutRole?: LayoutRole;
 }
 
 /** Describes a child element to create as part of a compound insert. */
@@ -231,6 +315,26 @@ export interface GroupChange {
   readonly wrappedSelectors: readonly string[];
   readonly prevSibling: SiblingAnchor | null;
   readonly nextSibling: SiblingAnchor | null;
+  /**
+   * Runtime-created-container identity (feature-010) — the **fresh** `data-fe-uid`
+   * minted for the wrapper at group time (the wrapper has no build-time origin).
+   * Carries the wrapper's identity into the diff so the applier can key the created
+   * source node and reconcile it after hot-reload via the child-uid-set
+   * re-association (uid → source mapping case (d)). When authored/authoritative,
+   * the applier also stamps `data-fe-layout` on the created container.
+   * Additive-optional.
+   */
+  readonly wrapperUid?: string;
+  /**
+   * `data-fe-uid`s of the wrapped children, positionally parallel to
+   * `wrappedSelectors` (feature-010). The stable child-`uid` set the
+   * runtime-created-container round-trip (case (d)) keys re-association on: after
+   * hot-reload the container whose `childUids[]` is a superset of `wrappedUids`
+   * is identified as the same logical container even under a new build-time
+   * wrapper `uid`. Additive-optional; the applier falls back to the created
+   * container's `LayoutContainerDescriptor.childUids[]`, else to `wrappedSelectors`.
+   */
+  readonly wrappedUids?: readonly string[];
 }
 
 /**
@@ -247,6 +351,18 @@ export interface ReparentChange {
   readonly siblingSelectors: readonly string[];
   readonly prevSibling: SiblingAnchor | null;
   readonly nextSibling: SiblingAnchor | null;
+  /**
+   * Source editable-list container identity (feature-010) — `data-fe-uid` of the
+   * source container, the `uid`-keyed peer of `sourceContainerSelector`. The
+   * applier falls back to the selector when absent. Additive-optional.
+   */
+  readonly sourceContainerUid?: string;
+  /**
+   * Target editable-list container identity (feature-010) — `data-fe-uid` of the
+   * target container, the `uid`-keyed peer of `targetContainerSelector`. The
+   * applier falls back to the selector when absent. Additive-optional.
+   */
+  readonly targetContainerUid?: string;
 }
 
 /**
@@ -502,6 +618,16 @@ export interface VisualDiff {
   readonly relatedChanges?: readonly RelatedChange[];
   readonly stylesheetChanges?: readonly StylesheetChange[];
   readonly scriptChanges?: readonly ScriptBehaviorChange[];
+  /**
+   * Editable-list container descriptors (feature-010) referenced by any structural
+   * change in this diff — the self-describing shape for the container a reorder /
+   * group happened in and, for a nested group, its own descriptor. `childUids[]`
+   * enumerates every direct child in visual order (so a `layoutRole: absolute`
+   * peer is visible, never diff-hidden). Additive-optional: absent for
+   * pre-feature-010 payloads, where consumers degrade to `containerSelector`
+   * targeting and flat (all-`flow`) behavior. No `WS_PROTOCOL_VERSION` bump.
+   */
+  readonly layoutContainers?: readonly LayoutContainerDescriptor[];
   readonly context: PageContext;
   readonly status: DiffStatus;
   readonly sourceVerified: boolean;
