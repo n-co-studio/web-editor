@@ -8,6 +8,7 @@ import { createElement } from '../../shared/ui-utils';
 import { HANDLE_COLORS, DROP_INDICATOR, OVERLAY } from '../../shared/constants';
 import { OrderPreview } from './order-preview';
 import { detectContainerLayout, computeGapZones, hitTestGapZone, detectWrapping, computeGapZones2D, hitTestGapZone2D, type ContainerLayout, type GapZone } from './gap-math';
+import { parseLayoutSignal, classifyLayoutRole } from '@nco-studio/shared/layout';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -42,22 +43,34 @@ export function getReorderBlockReason(element: Element): string | null {
     return 'Element has no parent';
   }
 
-  const parentStyle = getComputedStyle(parent);
-  const parentDisplay = parentStyle.display;
-
-  const isFlex = parentDisplay.includes('flex');
-  const isGrid = parentDisplay.includes('grid');
-
-  if (!isFlex && !isGrid) {
-    return 'Parent is not a flex or grid container';
+  // Positioned-child exclusion (feature-010): a `position: absolute|fixed` child
+  // (the parallax case) or an explicitly-placed grid child is a visible peer but
+  // never a reorder target — it is out of normal flow, so a reorder index would
+  // be meaningless. It stays selectable/editable via its own tools (feature-009);
+  // only reorder is blocked.
+  if (classifyLayoutRole(element, parent) === 'absolute') {
+    return 'Positioned element is out of normal flow — excluded from reorder';
   }
 
-  // Wrapped/2D reorderable containers are now supported via the gated 2D
-  // gap-math (issue #30) — every sibling, including a full-width item in a
-  // wrapping gallery, exposes the reorder affordance. Only genuinely
-  // non-reorderable cases (non-layout parent, single child) stay blocked.
-  if (parent.children.length <= 1) {
-    return 'Element is the only child — nothing to reorder';
+  // Editable-list gate (feature-010): the parent is reorderable only when it is
+  // an editable list — an explicit `data-fe-layout` signal, or the thresholded
+  // heuristic (flex/grid ∧ ≥2 homogeneous children). This suppresses incidental
+  // flex wrappers (nav bars, button rows, icon clusters) that are `display:flex`
+  // but not editable lists. Wrapped/2D containers stay reorderable via the gated
+  // 2D gap-math (issue #30).
+  if (parseLayoutSignal(parent) === null) {
+    const parentDisplay = getComputedStyle(parent).display;
+    if (!parentDisplay.includes('flex') && !parentDisplay.includes('grid')) {
+      return 'Parent is not a flex or grid container';
+    }
+    // Element-only children matching the reorder editor's HTMLElement filter.
+    const childCount = Array.from(parent.children).filter(
+      (c) => c instanceof HTMLElement,
+    ).length;
+    if (childCount <= 1) {
+      return 'Element is the only child — nothing to reorder';
+    }
+    return 'Container is not an editable list (incidental layout wrapper)';
   }
 
   return null;
@@ -145,9 +158,17 @@ export class ReorderEditor {
     // Determine layout direction
     this.layout = detectContainerLayout(this.container);
 
-    // Capture original child order (HTMLElement children only)
+    // Capture original child order — the `layoutRole: flow | group` peer list
+    // (feature-010). `absolute` children (parallax / explicitly-placed grid) are
+    // excluded so they never enter the reorder index math, gap-math, or FLIP; they
+    // keep their DOM slot and stay visible/selectable. `group` children remain in
+    // the list as opaque reorderable peers.
     this.originalChildOrder = Array.from(this.container.children)
-      .filter((c): c is HTMLElement => c instanceof HTMLElement);
+      .filter(
+        (c): c is HTMLElement =>
+          c instanceof HTMLElement &&
+          classifyLayoutRole(c, this.container!) !== 'absolute',
+      );
     this.originalIndex = this.originalChildOrder.indexOf(this.currentElement);
     this.currentInsertIndex = this.originalIndex;
 

@@ -11,6 +11,8 @@ export type {
   ReparentChange,
   SiblingAnchor,
   ChildSnapshotEntry,
+  LayoutRole,
+  LayoutContainerDescriptor,
   InsertChange,
   CompoundChildDescriptor,
   RemoveChange,

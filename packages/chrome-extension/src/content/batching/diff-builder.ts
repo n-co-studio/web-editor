@@ -15,6 +15,7 @@ import type {
   PageContext,
   RuleSource,
   CrossBreakpointRuleSource,
+  LayoutContainerDescriptor,
 } from '@nco-studio/shared';
 import type { TokenStore } from '../tokens/store';
 
@@ -81,14 +82,25 @@ export class DiffBuilder {
     };
   }
 
-  /** Build a VisualDiff for a reorder operation (no CSS property changes). */
-  buildReorder(elementInfo: ElementInfo, reorderChange: ReorderChange): VisualDiff {
+  /**
+   * Build a VisualDiff for a reorder operation (no CSS property changes).
+   * `layoutContainers` (feature-010) carries the editable-list descriptor(s) for
+   * the container the reorder happened in — enumerating every direct child in
+   * visual order so a `layoutRole: absolute` peer is visible, never diff-hidden.
+   * Attached only when non-empty (additive-optional).
+   */
+  buildReorder(
+    elementInfo: ElementInfo,
+    reorderChange: ReorderChange,
+    layoutContainers?: readonly LayoutContainerDescriptor[],
+  ): VisualDiff {
     return {
       id: crypto.randomUUID(),
       timestamp: new Date().toISOString(),
       element: elementInfo,
       changes: [],
       reorderChanges: [reorderChange],
+      ...(layoutContainers?.length ? { layoutContainers } : {}),
       context: this.buildPageContext(),
       status: 'pending',
       sourceVerified: Boolean(elementInfo.sourceFile),
@@ -179,28 +191,47 @@ export class DiffBuilder {
     };
   }
 
-  /** Build a VisualDiff for a group operation (wrapping siblings in a flex container). */
-  buildGroup(elementInfo: ElementInfo, groupChange: GroupChange): VisualDiff {
+  /**
+   * Build a VisualDiff for a group operation (wrapping siblings in a flex
+   * container). `layoutContainers` (feature-010) carries the runtime-created
+   * wrapper's descriptor (uid → source mapping case (d)) so the applier can key
+   * the created container and reconcile it after hot-reload. Additive-optional.
+   */
+  buildGroup(
+    elementInfo: ElementInfo,
+    groupChange: GroupChange,
+    layoutContainers?: readonly LayoutContainerDescriptor[],
+  ): VisualDiff {
     return {
       id: crypto.randomUUID(),
       timestamp: new Date().toISOString(),
       element: elementInfo,
       changes: [],
       groupChanges: [groupChange],
+      ...(layoutContainers?.length ? { layoutContainers } : {}),
       context: this.buildPageContext(),
       status: 'pending',
       sourceVerified: Boolean(elementInfo.sourceFile),
     };
   }
 
-  /** Build a VisualDiff for a reparent operation (cross-container move). */
-  buildReparent(elementInfo: ElementInfo, reparentChange: ReparentChange): VisualDiff {
+  /**
+   * Build a VisualDiff for a reparent operation (cross-container move).
+   * `layoutContainers` (feature-010) carries the source/target editable-list
+   * descriptors when present. Additive-optional.
+   */
+  buildReparent(
+    elementInfo: ElementInfo,
+    reparentChange: ReparentChange,
+    layoutContainers?: readonly LayoutContainerDescriptor[],
+  ): VisualDiff {
     return {
       id: crypto.randomUUID(),
       timestamp: new Date().toISOString(),
       element: elementInfo,
       changes: [],
       reparentChanges: [reparentChange],
+      ...(layoutContainers?.length ? { layoutContainers } : {}),
       context: this.buildPageContext(),
       status: 'pending',
       sourceVerified: Boolean(elementInfo.sourceFile),

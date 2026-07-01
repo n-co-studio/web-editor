@@ -11,6 +11,10 @@
       "types": "./dist/diff.d.ts",
       "default": "./dist/diff.js"
     },
+    "./layout": {
+      "types": "./dist/layout.d.ts",
+      "default": "./dist/layout.js"
+    },
     "./protocol": {
       "types": "./dist/protocol.d.ts",
       "default": "./dist/protocol.js"
