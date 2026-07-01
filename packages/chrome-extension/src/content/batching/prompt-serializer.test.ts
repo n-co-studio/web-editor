@@ -322,4 +322,85 @@ describe('prompt-serializer insert changes', () => {
     const out = serializeToPrompt([diff]);
     assert.match(out, /Children: <div> \{flex: 2\}, <div> \{flex: 1\}/);
   });
+
+  it('insert sibling bracket carries the anchor asset path', () => {
+    const diff = makeInsertDiff([{
+      type: 'insert',
+      tagName: 'img',
+      insertIndex: 1,
+      containerSelector: '.container',
+      prevSibling: {
+        uid: 'p', selector: '#p', sourceFile: 'src/App.tsx', sourceLine: 9,
+        assetPath: '/images/prev.jpg', label: 'prev',
+      },
+      nextSibling: null,
+      sameSiblingSource: false,
+      crossFileInsertion: false,
+      initialStyles: [],
+    }]);
+    const out = serializeToPrompt([diff]);
+    assert.match(out, /after src\/App\.tsx:9 \(asset: \/images\/prev\.jpg\)/);
+  });
+});
+
+describe('prompt-serializer asset references (issue #29)', () => {
+  it('element heading carries the resolved asset path; non-image heading omits it', () => {
+    const imageDiff: VisualDiff = {
+      id: 'a1',
+      timestamp: '2026-05-13T00:00:00Z',
+      element: {
+        selector: '.hero', tagName: 'img', sourceFile: 'src/Hero.tsx', sourceLine: 3,
+        attributes: {}, boundingRect: baseRect, assetPath: '/images/hero.jpg', label: 'hero',
+      },
+      changes: [{ property: 'width', fromValue: '10px', toValue: '20px' }],
+      context: { url: 'http://localhost', viewport: { width: 1280, height: 800 }, tabId: 't1' },
+      status: 'pending',
+      sourceVerified: true,
+    };
+    const out = serializeToPrompt([imageDiff]);
+    assert.match(out, /### `\.hero` \(line 3\).*\(asset: \/images\/hero\.jpg\)/);
+
+    // A plain (non-image) element heading gets no asset suffix.
+    assert.doesNotMatch(serializeToPrompt([makeDiff({})]), /\(asset: /);
+  });
+
+  it('reorder renders the sibling order with resolved asset paths (gallery reorder)', () => {
+    const diff: VisualDiff = {
+      id: 'r1',
+      timestamp: '2026-05-13T00:00:00Z',
+      element: {
+        selector: '.gallery', tagName: 'div', sourceFile: 'src/Gallery.tsx', sourceLine: 1,
+        attributes: {}, boundingRect: baseRect,
+      },
+      changes: [],
+      reorderChanges: [{
+        type: 'reorder', fromIndex: 0, toIndex: 2,
+        siblingSelectors: ['[data-fe-uid="a"]', '[data-fe-uid="b"]'],
+        siblingAnchors: [
+          { uid: 'a', selector: '[data-fe-uid="a"]', sourceFile: 'src/Gallery.tsx', sourceLine: 5, assetPath: '/images/a.jpg', label: 'a' },
+          { uid: 'b', selector: '[data-fe-uid="b"]', sourceFile: 'src/Gallery.tsx', sourceLine: 6, assetPath: '/images/b.jpg', label: 'b' },
+        ],
+        containerSelector: '.gallery', containerDirection: 'row',
+      }],
+      context: { url: 'http://localhost', viewport: { width: 1280, height: 800 }, tabId: 't1' },
+      status: 'pending',
+      sourceVerified: true,
+    };
+    const out = serializeToPrompt([diff]);
+    assert.match(out, /Order: 1 → \/images\/a\.jpg, 2 → \/images\/b\.jpg/);
+  });
+
+  it('operator notes render N → /images/<file> per referenced element (the #29 motivator)', () => {
+    const notes = [{
+      text: 'number these 1,2,3,4 left to right',
+      elements: [
+        { selector: '#i1', tagName: 'img', sourceFile: 'src/G.tsx', sourceLine: 1, assetPath: '/images/one.jpg', label: 'one' },
+        { selector: '#i2', tagName: 'img', sourceFile: 'src/G.tsx', sourceLine: 2, assetPath: '/images/two.jpg', label: 'two' },
+      ],
+    }];
+    const out = serializeToPrompt([makeDiff({})], notes);
+    assert.match(out, /1\. number these 1,2,3,4 left to right/);
+    assert.match(out, /^ {3}1 → \/images\/one\.jpg$/m);
+    assert.match(out, /^ {3}2 → \/images\/two\.jpg$/m);
+  });
 });

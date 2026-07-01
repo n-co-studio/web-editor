@@ -78,7 +78,11 @@ export class NotesStore {
     return this.notes.map((note, i) => {
       let line = `${i + 1}. ${note.text}`;
       if (note.elements.length > 0) {
-        const refs = note.elements.map((ref) => `   \u2192 ${formatElementRef(ref)}`);
+        // Number each referenced element so an ordering note over a gallery
+        // renders `N \u2192 /images/<file>` per item (issue #29, the motivating case).
+        const refs = note.elements.map(
+          (ref, ei) => `   ${ei + 1} \u2192 ${formatElementRef(ref)}`,
+        );
         line += '\n' + refs.join('\n');
       }
       return line;
@@ -133,6 +137,9 @@ export class NotesStore {
 // ---------------------------------------------------------------------------
 
 function formatElementRef(ref: NoteElementRef): string {
+  // Prefer the resolved served asset path — directly actionable, and the
+  // `N → /images/<file>` ordering surface the agent maps from (issue #29).
+  if (ref.assetPath) return ref.assetPath;
   const label = ref.textContent
     ? `<${ref.tagName}> "${ref.textContent.slice(0, 30)}"`
     : `<${ref.tagName}> ${ref.selector.slice(0, 40)}`;

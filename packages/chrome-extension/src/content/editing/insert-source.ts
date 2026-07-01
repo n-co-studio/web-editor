@@ -13,7 +13,7 @@ import type {
   InsertChange,
   PropertyChange,
 } from '@nco-studio/shared';
-import { generateSelector, ensureUid, readUid } from '../../shared/dom-utils';
+import { generateSelector, ensureUid, readUid, resolveElementAssetRef } from '../../shared/dom-utils';
 
 // ---------------------------------------------------------------------------
 // Sibling bracket — prev/next anchors around the insert position
@@ -95,6 +95,9 @@ export function collectChildSnapshot(container: HTMLElement): ChildSnapshotEntry
         selector: generateSelector(child),
         sourceFile: file,
         sourceLine: line,
+        // Resolved assetPath/label when the child is an image (issue #29) —
+        // absent for non-image children (spread of `{}`).
+        ...resolveElementAssetRef(child),
       };
       if (indexAttr != null) {
         return { ...entry, instanceIndex: parseInt(indexAttr, 10) };
@@ -203,6 +206,9 @@ function anchorFromElement(el: Element): SiblingAnchor | null {
     selector: generateSelector(el),
     sourceFile: file ?? '',
     sourceLine: line ? parseInt(line, 10) : 0,
+    // Resolved assetPath/label when the sibling is an image (issue #29) —
+    // absent for non-image anchors (spread of `{}`).
+    ...resolveElementAssetRef(el),
   };
   if (indexAttr != null) {
     return { ...anchor, instanceIndex: parseInt(indexAttr, 10) };

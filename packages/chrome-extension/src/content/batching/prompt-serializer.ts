@@ -1,6 +1,8 @@
 import type {
   VisualDiff,
   NoteEntry,
+  NoteElementRef,
+  SiblingAnchor,
   CompoundChildDescriptor,
   RuleSource,
   CrossBreakpointRuleSource,
@@ -60,7 +62,8 @@ export function serializeToPrompt(
         ? ` (line ${diff.element.sourceLine})`
         : '';
       const breakpointInfo = formatBreakpointHeading(diff.context);
-      sections.push(`### \`${diff.element.selector}\`${lineInfo}${breakpointInfo}\n`);
+      const assetInfo = formatAssetSuffix(diff.element);
+      sections.push(`### \`${diff.element.selector}\`${lineInfo}${breakpointInfo}${assetInfo}\n`);
 
       // Property changes
       const activeBreakpointLabel = formatActiveBreakpointLabel(diff.context);
@@ -128,6 +131,14 @@ export function serializeToPrompt(
         sections.push(
           `- Move child from position ${rc.fromIndex + 1} to position ${rc.toIndex + 1} in \`${rc.containerSelector}\` (${rc.containerDirection})`,
         );
+        // Enumerate the sibling order with resolved asset paths so a gallery
+        // reorder is actionable from the payload alone (issue #29).
+        if (rc.siblingAnchors && rc.siblingAnchors.length > 0) {
+          const order = rc.siblingAnchors.map(
+            (a, i) => `${i + 1} → ${anchorLabel(a)}`,
+          );
+          sections.push(`  Order: ${order.join(', ')}`);
+        }
       }
     }
     sections.push('');
@@ -142,8 +153,8 @@ export function serializeToPrompt(
       seen.add(diff.id);
       for (const ic of diff.insertChanges!) {
         const bracketInfo = [];
-        if (ic.prevSibling) bracketInfo.push(`after ${ic.prevSibling.sourceFile}:${ic.prevSibling.sourceLine}`);
-        if (ic.nextSibling) bracketInfo.push(`before ${ic.nextSibling.sourceFile}:${ic.nextSibling.sourceLine}`);
+        if (ic.prevSibling) bracketInfo.push(`after ${ic.prevSibling.sourceFile}:${ic.prevSibling.sourceLine}${formatAssetSuffix(ic.prevSibling)}`);
+        if (ic.nextSibling) bracketInfo.push(`before ${ic.nextSibling.sourceFile}:${ic.nextSibling.sourceLine}${formatAssetSuffix(ic.nextSibling)}`);
         const bracket = bracketInfo.length > 0 ? ` (${bracketInfo.join(', ')})` : '';
         sections.push(
           `- Insert \`<${ic.tagName}>\` at position ${ic.insertIndex + 1} in \`${ic.containerSelector}\`${bracket}`,
@@ -242,7 +253,13 @@ export function serializeToPrompt(
   if (activeNotes.length > 0) {
     sections.push('## Operator Notes\n');
     for (let i = 0; i < activeNotes.length; i++) {
-      sections.push(`${i + 1}. ${activeNotes[i].text}`);
+      const note = activeNotes[i];
+      sections.push(`${i + 1}. ${note.text}`);
+      // Number each referenced element and prefer its resolved asset path, so a
+      // numbering note over a gallery renders `N → /images/<file>` (issue #29).
+      for (let e = 0; e < note.elements.length; e++) {
+        sections.push(`   ${e + 1} → ${formatNoteRefTarget(note.elements[e])}`);
+      }
     }
     sections.push('');
   }
@@ -252,6 +269,26 @@ export function serializeToPrompt(
   sections.push(`<!-- nco-web-editor-raw: ${raw} -->`);
 
   return sections.join('\n');
+}
+
+/**
+ * Trailing ` (asset: /images/<file>)` suffix for any element reference carrying
+ * a resolved `assetPath` (issue #29). Returns "" for non-asset references.
+ */
+function formatAssetSuffix(ref: { assetPath?: string }): string {
+  return ref.assetPath ? ` (asset: ${ref.assetPath})` : '';
+}
+
+/** Compact label for a reordered sibling — asset path when present, else selector. */
+function anchorLabel(a: SiblingAnchor): string {
+  return a.assetPath ?? a.label ?? a.selector;
+}
+
+/** Actionable target for a note element reference — asset path when present. */
+function formatNoteRefTarget(ref: NoteElementRef): string {
+  if (ref.assetPath) return ref.assetPath;
+  if (ref.textContent) return `<${ref.tagName}> "${ref.textContent.slice(0, 30)}"`;
+  return `<${ref.tagName}> ${ref.selector}`;
 }
 
 /** Describe compound children for prompt output. */

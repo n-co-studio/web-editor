@@ -1,4 +1,10 @@
-import type { BoundingRect, ElementInfo, PendingUpload } from '@nco-studio/shared';
+import type {
+  BoundingRect,
+  ElementInfo,
+  NoteElementRef,
+  PendingUpload,
+  SiblingAnchor,
+} from '@nco-studio/shared';
 import { TEXT_CONTENT_TRUNCATE_LENGTH } from './constants';
 
 // ---------------------------------------------------------------------------
@@ -277,6 +283,86 @@ export function resolveElementAsset(file: File): ResolvedAsset {
 }
 
 // ---------------------------------------------------------------------------
+// Element → resolved asset reference (issue #29)
+// ---------------------------------------------------------------------------
+
+/** Max length for a derived asset label — keep pills / prompt lines readable. */
+const ASSET_LABEL_MAX_LENGTH = 40;
+
+/**
+ * Extract the element's own asset URL: the `src` attribute first (img / video /
+ * source / iframe …), then an inline `background-image` `url(...)`. Reads only
+ * cheap DOM attributes / inline style — no `getComputedStyle` — so it stays on
+ * the hot `buildElementInfo` path without forcing style recalc. Class-driven
+ * (computed-only) backgrounds are intentionally out of scope: they are usually
+ * decorative, not the asset the operator is referencing.
+ */
+function extractAssetUrl(el: Element): string | undefined {
+  const src = el.getAttribute('src');
+  if (src && src.trim()) return src.trim();
+
+  // `?.` guards elements without an inline style object (e.g. non-HTMLElement
+  // nodes, or lightweight test doubles) — never force a getComputedStyle here.
+  const inlineBg = el instanceof HTMLElement ? el.style?.backgroundImage : '';
+  if (inlineBg && inlineBg !== 'none') {
+    const match = inlineBg.match(/url\((['"]?)(.*?)\1\)/);
+    if (match && match[2]) return match[2].trim();
+  }
+  return undefined;
+}
+
+/** Filename stem of a served path — `/images/hero.jpg` → `hero`. */
+function assetFilenameStem(assetPath: string): string {
+  const file = assetPath.split(/[?#]/)[0].split('/').pop() ?? '';
+  const dot = file.lastIndexOf('.');
+  return dot > 0 ? file.slice(0, dot) : file;
+}
+
+/**
+ * Derive a short human label for a resolved asset (issue #29).
+ * Priority: filename stem > `alt` > trimmed textContent (≤40) > tagName.
+ * Always returns a value — tagName is the guaranteed fallback — so a resolved
+ * asset never carries `assetPath` without a `label`.
+ */
+function deriveAssetLabel(el: Element, assetPath: string): string {
+  const stem = assetFilenameStem(assetPath);
+  if (stem) return stem.slice(0, ASSET_LABEL_MAX_LENGTH);
+  const alt = el.getAttribute('alt')?.trim();
+  if (alt) return alt.slice(0, ASSET_LABEL_MAX_LENGTH);
+  const text = el.textContent?.trim().slice(0, ASSET_LABEL_MAX_LENGTH);
+  if (text) return text;
+  return el.tagName.toLowerCase();
+}
+
+/**
+ * Resolve a live element's own asset reference to a served path + label (issue
+ * #29). `assetPath` is the element's `src` / inline `background-image`,
+ * normalized through {@link resolvePublicSrc} (single leading `/public` strip,
+ * gated on a source-file context). Returns `{}` — **both fields absent** — when
+ * no asset resolves, or when the resolved value is a `data:` / `blob:` URI
+ * (inline bytes / page-local blobs are never a served path; Brief 1 / #28
+ * guarantees the served form). Spread onto every element-reference shape so the
+ * pair is present only when it is meaningful, never as a dead field on a
+ * non-image carrier.
+ *
+ * Named `resolveElementAssetRef` to sit alongside — not shadow —
+ * {@link resolveElementAsset}, which resolves a *picked `File`* into a
+ * provisional served asset for the media picker.
+ */
+export function resolveElementAssetRef(el: Element): { assetPath?: string; label?: string } {
+  const rawUrl = extractAssetUrl(el);
+  if (!rawUrl) return {};
+
+  const base = readSourceAttributes(el)?.file ?? '';
+  const resolved = resolvePublicSrc(rawUrl, base).trim();
+
+  // Never carry inline bytes or a page-local blob as a served asset path.
+  if (!resolved || /^(?:data|blob):/i.test(resolved)) return {};
+
+  return { assetPath: resolved, label: deriveAssetLabel(el, resolved) };
+}
+
+// ---------------------------------------------------------------------------
 // ElementInfo assembly
 // ---------------------------------------------------------------------------
 
@@ -330,7 +416,51 @@ export function buildElementInfo(el: Element): ElementInfo {
     instanceIndex: source?.index,
     attributes: attrs,
     boundingRect: serializeBoundingRect(rect),
+    // assetPath/label added only when the element resolves to a served asset
+    // (issue #29) — spread of `{}` for non-image carriers adds nothing.
+    ...resolveElementAssetRef(el),
   };
+}
+
+/**
+ * Build a {@link NoteElementRef} for a live element, carrying the resolved
+ * asset reference (issue #29) so a note over a gallery image is actionable from
+ * the payload alone. Single construction chokepoint for the note-pick / anchor
+ * sites in index.ts.
+ */
+export function buildNoteElementRef(el: Element): NoteElementRef {
+  const info = buildElementInfo(el);
+  const ref: NoteElementRef = {
+    selector: info.selector,
+    tagName: info.tagName,
+    textContent: info.textContent,
+    sourceFile: info.sourceFile,
+    sourceLine: info.sourceLine,
+    instanceIndex: info.instanceIndex,
+  };
+  return info.assetPath
+    ? { ...ref, assetPath: info.assetPath, label: info.label }
+    : ref;
+}
+
+/**
+ * Build a {@link SiblingAnchor} for a live element, carrying `uid` + the
+ * resolved asset reference (issue #29). Used for `ReorderChange.siblingAnchors`
+ * so a gallery reorder renders `N → /images/<file>` per sibling.
+ */
+export function buildSiblingAnchor(el: Element): SiblingAnchor {
+  const info = buildElementInfo(el);
+  const anchor: SiblingAnchor = {
+    uid: info.uid,
+    selector: info.selector,
+    sourceFile: info.sourceFile,
+    sourceLine: info.sourceLine,
+  };
+  const withIndex =
+    info.instanceIndex != null ? { ...anchor, instanceIndex: info.instanceIndex } : anchor;
+  return info.assetPath
+    ? { ...withIndex, assetPath: info.assetPath, label: info.label }
+    : withIndex;
 }
 
 // ---------------------------------------------------------------------------
