@@ -881,3 +881,19 @@ edges:
     last_verified: "2026-06-21"
     status: "active"
     confidence: 0.8
+  - source: "product-src-bridge"
+    target: "product-src-diff"
+    relation: "consumes"
+    context: "extractDataUrls/resolveAttributeAsset consume AttributeChange.pendingUpload + emit assetTruncated when persisting picked assets to /images (#28)"
+    source_type: "agent-inferred"
+    last_verified: "2026-07-01"
+    status: "active"
+    confidence: 0.7
+  - source: "product-editing-media"
+    target: "product-src-diff"
+    relation: "depends-on"
+    context: "media file picker imports AttributeChange + PendingUpload; emits pendingUpload on the src/background AttributeChange (#28)"
+    source_type: "agent-inferred"
+    last_verified: "2026-07-01"
+    status: "active"
+    confidence: 0.7

@@ -9,7 +9,7 @@ briefs:
     sequence: 1
     session: "235f9a0a-cd57-4318-a405-248da81eca41"
     branch: "feature/diff-capture-resource-model"
-    status: in_progress
+    status: complete
     next_brief: "Carry a resolved assetPath + label on every element reference (#29)"
     boundaries:
       - "packages/chrome-extension/src/content/editing/media.ts"
@@ -94,6 +94,30 @@ integration_points:
     consumer: "Carry a resolved assetPath + label on every element reference (#29)"
     artifact: "packages/mcp-server/src/bridge.ts"
 
-session_decisions: []
+session_decisions:
+  - session: "235f9a0a-cd57-4318-a405-248da81eca41"
+    decision: "Capture emits a provisional /images/<filename> path (not a data: or blob: URI) as AttributeChange.toValue; the blob URL is used only for live DOM preview. The bridge is the resolution point (dedup / persist / size-cap)."
+    rationale: "Guarantees toValue is already base64-free and apply-shaped even if the server does nothing; the content script has no filesystem access so it cannot hash/persist. Satisfies verification criterion 1 by construction."
+  - session: "235f9a0a-cd57-4318-a405-248da81eca41"
+    decision: "Per-asset size cap set at 4 MB (MAX_INLINE_ASSET_BYTES). Dedup to a committed file wins regardless of size; the cap only bites when writing a NEW oversized inline asset that cannot be deduplicated -> assetTruncated."
+    rationale: "Bounds diff payload without nuking legitimately committed assets; an asset >4MB that is not in the repo should be committed directly, not pasted through a diff."
+  - session: "235f9a0a-cd57-4318-a405-248da81eca41"
+    decision: "blob: URL surviving into InsertChange.outerHTML (duplicate-after-pick, pre-apply) is a documented partial for Brief 1; closed by Brief 2 (#29) resolved assetPath on element references. Documented in bridge.ts + data-contracts."
+    rationale: "Resolving a blob: in outerHTML needs pendingUpload correlation on InsertChange, which is Brief 2 scope. Critic recommendation #5 addressed by documentation, not silent passthrough."
 
-governance: []
+governance:
+  - brief_sequence: 1
+    gates_a:
+      A1: pass
+      A2: pass
+      A3: pass
+      A4: pass
+      A5: pass
+      A6: pass
+    gates_b:
+      B1: pass
+      B2: pass
+      B3: pass
+    overrides_used:
+      - "REPO_OS_ALLOW_REINIT (re-init stale taskdef-brief phase-state left by Prompt T session sharing this session id)"
+    timestamp: "2026-07-01T01:24:00Z"
