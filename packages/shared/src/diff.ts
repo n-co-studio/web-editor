@@ -38,6 +38,22 @@ export interface ElementInfo {
   readonly instanceIndex?: number;
   readonly attributes: Readonly<Record<string, string>>;
   readonly boundingRect: BoundingRect;
+  /**
+   * Resolved, public-relative served asset path (e.g. `/images/hero.jpg`) when
+   * this element carries an asset — its `src` or inline `background-image`,
+   * normalized through `resolvePublicSrc` (issue #29). Present **only** when an
+   * asset actually resolves: absent for non-image carriers, and never a `data:`
+   * or `blob:` URI (Brief 1 / #28 guarantees a served path, not inline bytes).
+   * Lets a downstream agent map `uid → /images/<file>` from the payload alone,
+   * with no working-tree correlation.
+   */
+  readonly assetPath?: string;
+  /**
+   * Short human label for the resolved asset — filename stem > `alt` > trimmed
+   * text (≤40) > tagName (issue #29). Emitted **together with** `assetPath`
+   * (both present or both absent).
+   */
+  readonly label?: string;
 }
 
 /**
@@ -51,6 +67,14 @@ export interface NoteElementRef {
   readonly sourceFile: string;
   readonly sourceLine: number;
   readonly instanceIndex?: number;
+  /**
+   * Resolved served asset path + short label for the referenced element (issue
+   * #29). Same semantics as [ElementInfo.assetPath] / [ElementInfo.label]:
+   * populated only when the referenced element resolves to a served asset, so a
+   * numbering note over a gallery renders `N → /images/<file>` from the payload.
+   */
+  readonly assetPath?: string;
+  readonly label?: string;
 }
 
 /** A note with optional element references. */
@@ -123,6 +147,16 @@ export interface ReorderChange {
   readonly fromIndex: number;
   readonly toIndex: number;
   readonly siblingSelectors: string[];
+  /**
+   * Per-sibling anchors parallel to `siblingSelectors`, each carrying `uid`
+   * plus a resolved `assetPath`/`label` when the sibling is an asset (issue
+   * #29). This is what makes a gallery reorder actionable from the payload
+   * alone — `N → /images/<file>` per reordered image. Additive-optional:
+   * `siblingSelectors` stays the canonical, always-present list, so consumers
+   * that ignore `siblingAnchors` are unaffected; it may also be absent or
+   * shorter than `siblingSelectors` when siblings carry no asset context.
+   */
+  readonly siblingAnchors?: readonly SiblingAnchor[];
   readonly containerSelector: string;
   readonly containerDirection: string;
 }
@@ -140,6 +174,14 @@ export interface SiblingAnchor {
   readonly sourceFile: string;
   readonly sourceLine: number;
   readonly instanceIndex?: number;
+  /**
+   * Resolved served asset path + short label for the anchor element (issue
+   * #29). Same both-or-neither semantics as [ElementInfo.assetPath]: an
+   * insert/reparent/group anchored to a gallery image carries its
+   * `/images/<file>` so the anchor is identifiable without DOM correlation.
+   */
+  readonly assetPath?: string;
+  readonly label?: string;
 }
 
 /** Snapshot of an existing child in the target container (for context). */
@@ -156,6 +198,14 @@ export interface ChildSnapshotEntry {
   readonly sourceFile: string;
   readonly sourceLine: number;
   readonly instanceIndex?: number;
+  /**
+   * Resolved served asset path + short label for the snapshotted child (issue
+   * #29). Same both-or-neither semantics as [ElementInfo.assetPath]: an image
+   * child in the target container carries its `/images/<file>` so the applier
+   * can reason about sibling assets from the snapshot alone.
+   */
+  readonly assetPath?: string;
+  readonly label?: string;
 }
 
 /** Describes a child element to create as part of a compound insert. */
@@ -284,6 +334,22 @@ export interface RemoveChange {
 }
 
 /**
+ * Metadata for a locally-picked asset whose bytes are deliberately NOT inlined
+ * into the diff (issue #28). The media file picker emits a blob URL for live
+ * preview and carries this side-channel instead of a multi-MB `data:` URI, so
+ * the bridge can name/dedup the persisted asset from the original filename
+ * rather than inferring it. Additive-optional — no `WS_PROTOCOL_VERSION` bump.
+ */
+export interface PendingUpload {
+  /** The picked file's name (e.g. `hero.jpg`) — used to name/dedup the persisted asset. */
+  readonly filename: string;
+  /** The picked file's MIME type (e.g. `image/jpeg`). */
+  readonly mimeType: string;
+  /** The picked file's size in bytes — lets the server reason about the per-asset size cap. */
+  readonly sizeBytes: number;
+}
+
+/**
  * An HTML attribute change (e.g. src, alt) on the target element.
  * Stored as a parallel array on VisualDiff (separate from CSS PropertyChange[]).
  */
@@ -292,6 +358,22 @@ export interface AttributeChange {
   readonly attribute: string;
   readonly fromValue: string;
   readonly toValue: string;
+  /**
+   * Metadata for a file-picker-selected asset (issue #28). When present, the
+   * asset was picked locally and its bytes were never inlined: `toValue` is a
+   * provisional served path (`/images/<filename>`), and the bridge persists /
+   * dedups the asset server-side using `pendingUpload.filename`, rewriting
+   * `toValue` to the final `/images/<name>`. Additive-optional — no protocol bump.
+   */
+  readonly pendingUpload?: PendingUpload;
+  /**
+   * Set by the server when an asset exceeded the per-asset size cap and could
+   * not be resolved to a served path: `toValue` is emptied rather than carrying
+   * a multi-MB inline blob (issue #28). The applier should treat the attribute
+   * as unresolved (leave the existing reference in place / surface to the
+   * operator) rather than writing an empty `src`. Additive-optional — no bump.
+   */
+  readonly assetTruncated?: boolean;
 }
 
 /**

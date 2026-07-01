@@ -568,6 +568,9 @@ export class NotesEditor {
 
 /** Build a short pill label from a NoteElementRef. */
 function getPillLabel(ref: NoteElementRef): string {
+  // Prefer the resolved asset label (filename stem) when the ref is an image —
+  // a gallery pill reads "hero" rather than a positional selector (issue #29).
+  if (ref.label) return ref.label.slice(0, 14);
   // Priority: textContent > #id > .class > selector tail
   if (ref.textContent) {
     return ref.textContent.slice(0, 12);

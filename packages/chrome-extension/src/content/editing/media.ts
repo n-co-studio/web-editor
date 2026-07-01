@@ -1,6 +1,7 @@
 import type { PropertyChange, AttributeChange } from '@nco-studio/shared';
 import { createElement, createText, createButton, makeDraggable } from '../../shared/ui-utils';
-import { getComputedProperty, resolvePublicSrc } from '../../shared/dom-utils';
+import { getComputedProperty, resolvePublicSrc, resolveElementAsset } from '../../shared/dom-utils';
+import type { ResolvedAsset } from '../../shared/dom-utils';
 import { OVERLAY, TOOLBAR_WIDTH } from '../../shared/constants';
 import type { PreviewManager } from './preview';
 import {
@@ -160,16 +161,19 @@ export class MediaEditor {
       body.appendChild(this.buildTextInput(
         'Source URL',
         srcValue,
-        (value) => {
+        (value, asset) => {
           const oldSrc = element.getAttribute('src') ?? (element as HTMLImageElement).src ?? '';
-          // Live DOM shows the literal entered value; the diff carries the
-          // deployment-normalized path (data:/http(s) pass through untouched).
-          (element as HTMLImageElement).src = value;
+          // For a file-picker pick, the live DOM shows the blob URL (loadable
+          // in-page) while the diff carries the base64-free provisional served
+          // path (/images/<name>) plus pendingUpload — never a data: URI (#28).
+          // For a typed value, the literal entered value is shown and normalized.
+          (element as HTMLImageElement).src = asset ? asset.previewUrl : value;
           onAttributeCommit([{
             type: 'attribute',
             attribute: 'src',
             fromValue: resolvePublicSrc(oldSrc, base),
             toValue: resolvePublicSrc(value, base),
+            ...(asset ? { pendingUpload: asset.pendingUpload } : {}),
           }]);
         },
         { filePicker: true },
@@ -203,13 +207,18 @@ export class MediaEditor {
       body.appendChild(this.buildTextInput(
         'Background URL',
         bgUrl,
-        (value) => {
+        (value, asset) => {
           // Normalize a leading `/public` so the url() written to source is
-          // apply-correct (data:/http(s) pass through untouched).
+          // apply-correct (data:/http(s) pass through untouched). A file-picker
+          // pick supplies a base64-free provisional served path (/images/<name>),
+          // so the committed url() is never url(data:...) (#28).
           const normalized = resolvePublicSrc(value, base);
           const cssValue = normalized ? `url(${normalized})` : 'none';
+          // Live preview shows the blob URL (loadable in-page); the committed
+          // diff references the served path.
+          const previewCss = asset ? `url(${asset.previewUrl})` : cssValue;
           this.preview.begin(element as HTMLElement);
-          this.preview.apply('background-image', cssValue);
+          this.preview.apply('background-image', previewCss);
           this.preview.commit();
           onCommit([{
             property: 'background-image',
@@ -760,7 +769,7 @@ export class MediaEditor {
   private buildTextInput(
     label: string,
     value: string,
-    onChange: (value: string) => void,
+    onChange: (value: string, asset?: ResolvedAsset) => void,
     options?: { filePicker?: boolean },
   ): HTMLDivElement {
     const row = createElement('div', {}, {
@@ -830,9 +839,11 @@ export class MediaEditor {
       browseBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         e.preventDefault();
-        this.openFilePicker((dataUrl) => {
-          input.value = dataUrl;
-          onChange(dataUrl);
+        this.openFilePicker((asset) => {
+          // Show the base64-free provisional served path in the field; carry the
+          // blob preview URL + pendingUpload through to the change handler (#28).
+          input.value = asset.provisionalSrc;
+          onChange(asset.provisionalSrc, asset);
         });
       });
       browseBtn.addEventListener('mousedown', (e) => e.stopPropagation());
@@ -847,7 +858,7 @@ export class MediaEditor {
   /** Last file handle — browser uses its parent directory as startIn for the next pick. */
   private static lastFileHandle: FileSystemFileHandle | null = null;
 
-  private async openFilePicker(onSelect: (dataUrl: string) => void): Promise<void> {
+  private async openFilePicker(onSelect: (asset: ResolvedAsset) => void): Promise<void> {
     // Try File System Access API first (remembers directory per project)
     if ('showOpenFilePicker' in window) {
       try {
@@ -873,7 +884,7 @@ export class MediaEditor {
         // Persist handle to IndexedDB so it survives page reloads
         MediaEditor.persistHandle(handle);
         const file = await handle.getFile();
-        this.readFileAsDataUrl(file, onSelect);
+        onSelect(resolveElementAsset(file));
         return;
       } catch {
         // User cancelled or API not available — fall through
@@ -889,7 +900,7 @@ export class MediaEditor {
     fileInput.addEventListener('change', () => {
       const file = fileInput.files?.[0];
       if (!file) return;
-      this.readFileAsDataUrl(file, onSelect);
+      onSelect(resolveElementAsset(file));
     });
 
     fileInput.click();
@@ -930,14 +941,6 @@ export class MediaEditor {
         }
       };
     };
-  }
-
-  private readFileAsDataUrl(file: File, onSelect: (dataUrl: string) => void): void {
-    const reader = new FileReader();
-    reader.onload = () => {
-      onSelect(reader.result as string);
-    };
-    reader.readAsDataURL(file);
   }
 
   private buildSelect(

@@ -73,7 +73,7 @@ import { GridSettingsPanel } from './grid-settings';
 import { MeasureOverlay } from './selection/measure-overlay';
 import { MultiSelectManager } from './selection/multi-select';
 import { MultiSelectToolbar } from './editing/multi-select-toolbar';
-import { buildElementInfo, getTopElementAt, generateSelector, getComputedProperty, ensureUid, disambiguateUids } from '../shared/dom-utils';
+import { buildElementInfo, buildNoteElementRef, buildSiblingAnchor, getTopElementAt, generateSelector, getComputedProperty, ensureUid, disambiguateUids } from '../shared/dom-utils';
 import { PROTOCOL_VERSION } from '@nco-studio/shared';
 import type { VisualDiff, PropertyChange, AttributeChange, TextChange, ReorderChange, ReparentChange, GroupChange, RemoveChange, StylesheetChange, ScriptBehaviorChange } from '@nco-studio/shared';
 import type { ExtensionMode, ConnectionStatus, EditMode, IconStatus } from '../shared/types';
@@ -772,15 +772,7 @@ export async function activate(): Promise<void> {
 
       // Element mode only for single selection (no multi-select)
       if (selectedEl && !isMulti) {
-        const info = buildElementInfo(selectedEl);
-        notesEditor!.setAnchoredElement(selectedEl, {
-          selector: info.selector,
-          tagName: info.tagName,
-          textContent: info.textContent,
-          sourceFile: info.sourceFile,
-          sourceLine: info.sourceLine,
-          instanceIndex: info.instanceIndex,
-        });
+        notesEditor!.setAnchoredElement(selectedEl, buildNoteElementRef(selectedEl));
       } else {
         notesEditor!.clearAnchoredElement();
       }
@@ -830,15 +822,7 @@ export async function activate(): Promise<void> {
 
       const target = getTopElementAt(e.clientX, e.clientY, host!);
       if (target && target !== document.documentElement && target !== document.body) {
-        const info = buildElementInfo(target);
-        notesStore!.addElementToNote(noteIndex, {
-          selector: info.selector,
-          tagName: info.tagName,
-          textContent: info.textContent,
-          sourceFile: info.sourceFile,
-          sourceLine: info.sourceLine,
-          instanceIndex: info.instanceIndex,
-        });
+        notesStore!.addElementToNote(noteIndex, buildNoteElementRef(target));
       }
     };
 
@@ -855,15 +839,7 @@ export async function activate(): Promise<void> {
       ? multiSelect.getAllElements(primary)
       : [primary];
     for (const el of elements) {
-      const info = buildElementInfo(el);
-      notesStore!.addElementToNote(noteIndex, {
-        selector: info.selector,
-        tagName: info.tagName,
-        textContent: info.textContent,
-        sourceFile: info.sourceFile,
-        sourceLine: info.sourceLine,
-        instanceIndex: info.instanceIndex,
-      });
+      notesStore!.addElementToNote(noteIndex, buildNoteElementRef(el));
     }
   });
 
@@ -1442,6 +1418,10 @@ function makeReorderCommit(el: Element): ReorderCommitCallback {
         ensureUid(c);
         return generateSelector(c);
       }),
+      // Parallel anchor list carrying uid + resolved assetPath/label per sibling
+      // (issue #29) so a gallery reorder renders `N → /images/<file>` from the
+      // payload alone. siblingSelectors stays the canonical always-present list.
+      siblingAnchors: originalChildOrder.map((c) => buildSiblingAnchor(c)),
       containerSelector: generateSelector(container),
       containerDirection: getComputedStyle(container).display.includes('grid')
         ? (getComputedStyle(container).gridAutoFlow?.includes('column') ? 'column' : 'row')
@@ -1491,16 +1471,10 @@ function makeReparentCommit(el: Element): ReparentCommitCallback {
     const prevEl = targetIndex > 0 ? targetChildren[targetIndex - 1] : null;
     const nextEl = targetIndex < targetChildren.length ? targetChildren[targetIndex] : null;
 
+    // buildSiblingAnchor carries uid + resolved assetPath/label (issue #29).
     const buildAnchor = (anchorEl: Element | null) => {
       if (!anchorEl || anchorEl === element) return null;
-      const anchorInfo = buildElementInfo(anchorEl);
-      return {
-        uid: anchorInfo.uid,
-        selector: anchorInfo.selector,
-        sourceFile: anchorInfo.sourceFile,
-        sourceLine: anchorInfo.sourceLine,
-        instanceIndex: anchorInfo.instanceIndex,
-      };
+      return buildSiblingAnchor(anchorEl);
     };
 
     const reparentChange: ReparentChange = {
@@ -1604,16 +1578,10 @@ function makeGroupCommit(elements: Element[]): void {
   const prevEl = firstIdx > 0 ? childList[firstIdx - 1] : null;
   const nextEl = lastIdx < childList.length - 1 ? childList[lastIdx + 1] : null;
 
+  // buildSiblingAnchor carries uid + resolved assetPath/label (issue #29).
   const buildAnchor = (el: Element | null) => {
     if (!el) return null;
-    const info = buildElementInfo(el);
-    return {
-      uid: info.uid,
-      selector: info.selector,
-      sourceFile: info.sourceFile,
-      sourceLine: info.sourceLine,
-      instanceIndex: info.instanceIndex,
-    };
+    return buildSiblingAnchor(el);
   };
 
   // Mint/repair each wrapped element's uid first so selectors are uid-based (issue #27).
@@ -2539,15 +2507,7 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
         const selectedEl = selection?.getSelectedElement();
         const isMulti = multiSelect?.isActive();
         if (selectedEl && !isMulti) {
-          const info = buildElementInfo(selectedEl);
-          notesEditor!.setAnchoredElement(selectedEl, {
-            selector: info.selector,
-            tagName: info.tagName,
-            textContent: info.textContent,
-            sourceFile: info.sourceFile,
-            sourceLine: info.sourceLine,
-            instanceIndex: info.instanceIndex,
-          });
+          notesEditor!.setAnchoredElement(selectedEl, buildNoteElementRef(selectedEl));
         } else {
           notesEditor!.clearAnchoredElement();
         }

@@ -122,10 +122,15 @@ function registerTools(server: McpServer, bridge: Bridge): void {
         'When `attributeChanges` is present, the intent is to modify HTML attributes ' +
         '(e.g. src, alt) on the element. Each attribute change includes attribute name, ' +
         'fromValue, and toValue. When the user selects an image via the file picker, ' +
-        'the server automatically saves it to the project (in the same directory as the ' +
-        'original image, or public/images/ as fallback) and the toValue will be a ' +
-        'project-relative file path (e.g. /public/images/uploaded-xyz.png). ' +
-        'Update the source code to reference this path. ' +
+        'the server resolves it to a served, apply-correct path and the toValue will be a ' +
+        'root-relative path with any leading /public stripped (e.g. /images/hero-abc123.png) — ' +
+        'never an inline data: URI. Update the source code to reference this path. ' +
+        'A file-picker pick also carries `pendingUpload` (filename, mimeType, sizeBytes); ' +
+        'it is metadata the server used to name/dedup the asset and needs no action. ' +
+        'If an attribute change has `assetTruncated: true`, the asset exceeded the ' +
+        'per-asset size cap and could not be resolved: `toValue` is empty — do NOT write an ' +
+        'empty src; leave the existing reference in place and surface it to the operator ' +
+        '(the asset should be committed to the project directly). ' +
         'Each PropertyChange may also carry an `allBreakpointSources` array of ' +
         'rules that define the same property at OTHER viewport breakpoints — ' +
         'rules collected by walking @media bodies regardless of whether they ' +

@@ -1,0 +1,148 @@
+identity:
+  group_name: "diff-capture-resource-model"
+  created_by_session: "235f9a0a-cd57-4318-a405-248da81eca41"
+  created_date: "2026-07-01"
+  execution: sequential
+
+briefs:
+  - title: "Resolve image src to a public path and eliminate base64 (#28)"
+    sequence: 1
+    session: "235f9a0a-cd57-4318-a405-248da81eca41"
+    branch: "feature/diff-capture-resource-model"
+    status: complete
+    next_brief: "Carry a resolved assetPath + label on every element reference (#29)"
+    boundaries:
+      - "packages/chrome-extension/src/content/editing/media.ts"
+      - "packages/chrome-extension/src/shared/dom-utils.ts"
+      - "packages/mcp-server/src/bridge.ts"
+      - "packages/mcp-server/src/server.ts"
+      - "packages/shared/src/diff.ts"
+      - "docs/spec/compiled/v1/data-contracts.md"
+
+  - title: "Carry a resolved assetPath + label on every element reference (#29)"
+    sequence: 2
+    session: "235f9a0a-cd57-4318-a405-248da81eca41"
+    branch: "feature/diff-capture-resource-model"
+    status: complete
+    next_brief: ""
+    boundaries:
+      - "packages/shared/src/diff.ts"
+      - "packages/chrome-extension/src/shared/dom-utils.ts"
+      - "packages/chrome-extension/src/content/editing/notes.ts"
+      - "packages/chrome-extension/src/content/batching/notes-store.ts"
+      - "packages/chrome-extension/src/content/index.ts"
+      - "packages/chrome-extension/src/content/batching/prompt-serializer.ts"
+      - "docs/spec/compiled/v1/data-contracts.md"
+
+intent:
+  goal: >
+    Resolve image src/background-image to a public served path (/images/<name>),
+    never inline base64 into diffs, and strip the leading /public everywhere the
+    path is emitted. Foundation for Brief 2 (#29). Fixes issue #28.
+  verification:
+    - "A file-picker-added image produces an AttributeChange whose toValue is a /images/<name> path (no data: URI, no /public prefix), with pendingUpload metadata carried to the server."
+    - "Duplicating an element whose src is a newly-added image yields an InsertChange.outerHTML containing NO data: URI."
+    - "A background-image picked via the media panel is referenced as url(/images/<name>), not url(data:...)."
+    - "bridge saveDataUrl returns a path with no leading /public segment."
+    - "An oversized asset yields assetTruncated: true and an empty toValue rather than an inline multi-MB blob."
+    - "tsc --noEmit passes; npm run build produces dist; existing bridge/serializer tests pass."
+  scope_files:
+    - "packages/chrome-extension/src/content/editing/media.ts"
+    - "packages/chrome-extension/src/shared/dom-utils.ts"
+    - "packages/mcp-server/src/bridge.ts"
+    - "packages/mcp-server/src/server.ts"
+    - "packages/shared/src/diff.ts"
+    - "docs/spec/compiled/v1/data-contracts.md"
+  spec_references:
+    - "docs/spec/compiled/v1/data-contracts.md"
+    - "docs/spec/compiled/v1/features/feature-005-mcp-server-bridge.md"
+    - "docs/spec/compiled/v1/features/feature-004-change-batching.md"
+
+conventions:
+  naming:
+    - pattern: "resolveElementAsset(file: File) — capture helper turning a picked File into { previewUrl, provisionalSrc, pendingUpload } (Brief 1). Brief 2 added the DISTINCT resolveElementAssetRef(el: Element) -> { assetPath?, label? } (element -> served-path ref) — a separate name to avoid clobbering the File overload the approved key-interface unintentionally collided with."
+      scope: "packages/chrome-extension/src/shared/dom-utils.ts (seeded Brief 1, resolveElementAssetRef + buildNoteElementRef + buildSiblingAnchor added Brief 2)"
+    - pattern: "PendingUpload { filename, mimeType, sizeBytes } — additive-optional on AttributeChange"
+      scope: "packages/shared/src/diff.ts"
+    - pattern: "served asset paths are /images/<name> (leading /public stripped), never data: or blob:"
+      scope: "capture layer + mcp-server bridge"
+  patterns:
+    - pattern: "Kill base64 at the source (blob URL preview + pendingUpload side-channel); server-side scan is the safety net across all data-URL carriers"
+      rationale: "content script has no filesystem access; server scan closes outerHTML + background-image leak carriers"
+    - pattern: "additive-optional contract fields only — no WS_PROTOCOL_VERSION bump (stays 0.4.0); consumers degrade gracefully"
+      rationale: "data-contracts § Protocol compatibility"
+  decisions:
+    - "Decision 0035 (selective spec loading)"
+    - "additive-optional protocol per data-contracts § Protocol compatibility"
+  boundaries:
+    - module: "chrome-extension media editor + capture helpers"
+      owner_brief: "Resolve image src to a public path and eliminate base64 (#28)"
+    - module: "mcp-server bridge (data-URL extraction + asset persistence)"
+      owner_brief: "Resolve image src to a public path and eliminate base64 (#28)"
+
+integration_points:
+  - name: "resolveElementAsset capture helper"
+    producer: "Resolve image src to a public path and eliminate base64 (#28)"
+    consumer: "Carry a resolved assetPath + label on every element reference (#29)"
+    artifact: "packages/chrome-extension/src/shared/dom-utils.ts"
+  - name: "AttributeChange.pendingUpload + assetTruncated contract fields"
+    producer: "Resolve image src to a public path and eliminate base64 (#28)"
+    consumer: "Carry a resolved assetPath + label on every element reference (#29)"
+    artifact: "packages/shared/src/diff.ts"
+  - name: "server-side asset persistence to /images/<name>"
+    producer: "Resolve image src to a public path and eliminate base64 (#28)"
+    consumer: "Carry a resolved assetPath + label on every element reference (#29)"
+    artifact: "packages/mcp-server/src/bridge.ts"
+
+session_decisions:
+  - session: "235f9a0a-cd57-4318-a405-248da81eca41"
+    decision: "Capture emits a provisional /images/<filename> path (not a data: or blob: URI) as AttributeChange.toValue; the blob URL is used only for live DOM preview. The bridge is the resolution point (dedup / persist / size-cap)."
+    rationale: "Guarantees toValue is already base64-free and apply-shaped even if the server does nothing; the content script has no filesystem access so it cannot hash/persist. Satisfies verification criterion 1 by construction."
+  - session: "235f9a0a-cd57-4318-a405-248da81eca41"
+    decision: "Per-asset size cap set at 4 MB (MAX_INLINE_ASSET_BYTES). Dedup to a committed file wins regardless of size; the cap only bites when writing a NEW oversized inline asset that cannot be deduplicated -> assetTruncated."
+    rationale: "Bounds diff payload without nuking legitimately committed assets; an asset >4MB that is not in the repo should be committed directly, not pasted through a diff."
+  - session: "235f9a0a-cd57-4318-a405-248da81eca41"
+    decision: "blob: URL surviving into InsertChange.outerHTML (duplicate-after-pick, pre-apply) is a documented partial for Brief 1; closed by Brief 2 (#29) resolved assetPath on element references. Documented in bridge.ts + data-contracts."
+    rationale: "Resolving a blob: in outerHTML needs pendingUpload correlation on InsertChange, which is Brief 2 scope. Critic recommendation #5 addressed by documentation, not silent passthrough."
+  - session: "235f9a0a-cd57-4318-a405-248da81eca41"
+    decision: "Brief 2: new element->ref resolver named resolveElementAssetRef(el: Element), NOT the approved key-interface name resolveElementAsset(el) — that name is Brief 1's File-taking media-picker helper. Both fields (assetPath + label) are both-or-neither, emitted ONLY when an asset resolves (spread of {} for non-image carriers), and never a data:/blob: value."
+    rationale: "Faithful execution of the approved design; only the identifier changed to avoid a same-file overload TypeScript cannot express for module functions. Pragmatist's no-dead-field constraint met by the {}-spread pattern."
+  - session: "235f9a0a-cd57-4318-a405-248da81eca41"
+    decision: "insert-source.ts (anchorFromElement + collectChildSnapshot) enriched with resolveElementAssetRef even though it is not in Brief 2's literal scope_files — it is the SOLE construction site for insert SiblingAnchor / ChildSnapshotEntry, both explicitly named in the contract goal. In-goal, minimal (8 lines via the shared helper). Critic + QA confirmed sound."
+    rationale: "The contract goal ('insert sibling anchors and child snapshots') cannot be met without touching the file that builds those shapes; scattering the enrichment across index.ts callers would be worse."
+  - session: "235f9a0a-cd57-4318-a405-248da81eca41"
+    decision: "drift_check returned code 4 (spec-snapshot mismatch) for data-contracts.md — Brief 1's merged edit (8ba5b51) moved the file after Brief 2 was planned. Operator accepted focused re-approval; plan-approved + pragmatist-signed seated from the sealed bundle (mode: auto)."
+    rationale: "Expected dependency drift — the brief explicitly shares data-contracts.md with Brief 1. Other two snapshotted specs matched."
+
+governance:
+  - brief_sequence: 1
+    gates_a:
+      A1: pass
+      A2: pass
+      A3: pass
+      A4: pass
+      A5: pass
+      A6: pass
+    gates_b:
+      B1: pass
+      B2: pass
+      B3: pass
+    overrides_used:
+      - "REPO_OS_ALLOW_REINIT (re-init stale taskdef-brief phase-state left by Prompt T session sharing this session id)"
+    timestamp: "2026-07-01T01:24:00Z"
+  - brief_sequence: 2
+    gates_a:
+      A1: pass
+      A2: pass
+      A3: pass
+      A4: pass
+      A5: pass
+      A6: pass
+    gates_b:
+      B1: pass
+      B2: pass
+      B3: pass
+    overrides_used:
+      - "REPO_OS_ALLOW_REINIT (re-init stale phase-state from Brief 1's closed session sharing this branch/cwd -> same session id)"
+      - "drift-check code 4 focused re-approval (operator-accepted spec-snapshot drift on data-contracts.md from Brief 1 merge 8ba5b51)"
+    timestamp: "2026-07-01T02:35:00Z"

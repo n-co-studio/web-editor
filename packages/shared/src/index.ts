@@ -15,6 +15,7 @@ export type {
   CompoundChildDescriptor,
   RemoveChange,
   AttributeChange,
+  PendingUpload,
   TextChange,
   RelatedChange,
   StylesheetRule,

@@ -38,6 +38,8 @@
 | instanceIndex | number | no | **Code-map hint, not identity.** Index for repeated elements sharing the same `sourceLine` (e.g., items inside `.map()` calls), from `data-source-index`. A best-effort disambiguator for source location only; `.map()` runtime instances still collide on it (every iteration shares one JSX line+index), so it is never authoritative identity — `uid` is. |
 | attributes | Record<string, string> | yes | class, id, data-* (including `data-fe-uid` and `data-source-*`), aria-* |
 | boundingRect | DOMRect | yes | Position and size at time of edit |
+| assetPath | string | no | **Resolved served asset path** (issue #29). The element's own `src` / inline `background-image`, normalized through the [deployment-aware `src` rule](#deployment-aware-srchref-normalization) (single leading `/public` strip). Present **only** when the element resolves to a served asset — absent for non-image carriers — and **never** a `data:` / `blob:` URI (Brief 1 / #28 guarantees a served path, not inline bytes). Lets a downstream agent map `uid → /images/<file>` from the payload alone. See [Resolved asset reference](#resolved-asset-reference-assetpath--label). |
+| label | string | no | **Short human label for the resolved asset** (issue #29): filename stem > `alt` > trimmed text (≤40) > tagName. Emitted **together with** `assetPath` (both present or both absent). |
 
 > **Identity vs. location.** `uid` answers *"which element instance is this?"* (per-instance, unique, the diff key). `sourceFile` / `sourceLine` / `instanceIndex` answer *"where in source did this instance originate?"* (a shared code-map hint the applier uses to find or create source). The two are orthogonal: many DOM instances may map to one `sourceLine`, but each carries its own `uid`. See [Stable Element Identity](#stable-element-identity-data-fe-uid) for the full model.
 
@@ -88,6 +90,8 @@
 | nextSibling | SiblingAnchor \| null | yes | Element immediately after the inserted position, or null if inserted at end |
 
 > **Sibling identity in reparent (issue #27).** Reparent-destination sibling identity is carried by `prevSibling.uid` / `nextSibling.uid` on the extended [SiblingAnchor](#siblinganchor-extended). The `siblingSelectors: string[]` array stays **selector-only** by design — it is a positional snapshot of the target container for context, not an identity register; do not add a parallel uid-indexed list. If uid-indexed sibling lists are ever needed, `siblingSelectors` is the extension point.
+>
+> **`ReorderChange.siblingAnchors` carries the same constraint (issue #29).** Although `SiblingAnchor` includes `uid`, `ReorderChange.siblingAnchors` is an **asset-resolution surface** (carrying `assetPath`/`label` per sibling), not a uid-indexed sibling register — do not treat it as a uid-keyed identity list. `siblingSelectors` remains the canonical, always-present list. In the current capture path `siblingAnchors` is emitted one-per-sibling (same length as `siblingSelectors`); when it is shorter or absent, present entries align **positionally from index 0** and an absent entry means that sibling carried no resolvable asset. See [Resolved asset reference](#resolved-asset-reference-assetpath--label).
 
 ### StylesheetChange
 
@@ -144,7 +148,7 @@ How Claude Code reproduces each new change type as project source. The reproduci
 - **CSS-3D transform → existing `InsertChange.outerHTML` + `RemoveChange`.** The 3D mechanism needs no new change type: it reuses the existing replace pattern (a `RemoveChange` for the `<img>` plus an `InsertChange` whose `outerHTML` carries the perspective wrapper and inner element) already used by the current `parallax.ts` toggle. Its `@media (prefers-reduced-motion: reduce)` zeroing rule rides along as a `StylesheetChange`.
 - **background-attachment: fixed → ordinary `PropertyChange[]`.** Inline declarations on the converted block (as `parallax.ts` already emits). Its reduced-motion zeroing rides along as a `StylesheetChange` (a `@media` rule cannot be inline).
 
-**Protocol compatibility.** `stylesheetChanges`, `scriptChanges`, and `batchId` are additive, optional fields on `VisualDiff`. Consumers that predate them ignore unknown fields, so **no `WS_PROTOCOL_VERSION` bump is required** (same treatment as `reorderChanges` / `insertChanges` / `reparentChanges`, which were added without a protocol bump; the version remains `0.4.0`). The MCP tool surface (`get_pending_visual_changes`) returns the full `VisualDiff` unchanged. A `0.4.0` consumer that does not implement feature-009 will silently ignore `scriptChanges` / `stylesheetChanges` — this is intentional: the pending queue stays processable by Claude Code regardless of whether the MCP consumer is feature-009-aware. The `uid` / `anchorUid` / `anchorPosition` identity fields (issue #27) follow the same additive-optional rule — see [Protocol compatibility (uid + anchor fields)](#protocol-compatibility-uid--anchor-fields). `batchId` follows the same rule explicitly: a pre-batch-identity consumer that receives `batchId` simply ignores it and degrades to flat-pool processing — **no `WS_PROTOCOL_VERSION` bump is required**.
+**Protocol compatibility.** `stylesheetChanges`, `scriptChanges`, and `batchId` are additive, optional fields on `VisualDiff`. Consumers that predate them ignore unknown fields, so **no `WS_PROTOCOL_VERSION` bump is required** (same treatment as `reorderChanges` / `insertChanges` / `reparentChanges`, which were added without a protocol bump; the version remains `0.4.0`). The MCP tool surface (`get_pending_visual_changes`) returns the full `VisualDiff` unchanged. A `0.4.0` consumer that does not implement feature-009 will silently ignore `scriptChanges` / `stylesheetChanges` — this is intentional: the pending queue stays processable by Claude Code regardless of whether the MCP consumer is feature-009-aware. The `uid` / `anchorUid` / `anchorPosition` identity fields (issue #27) follow the same additive-optional rule — see [Protocol compatibility (uid + anchor fields)](#protocol-compatibility-uid--anchor-fields). `batchId` follows the same rule explicitly: a pre-batch-identity consumer that receives `batchId` simply ignores it and degrades to flat-pool processing — **no `WS_PROTOCOL_VERSION` bump is required**. The `AttributeChange.pendingUpload` / `AttributeChange.assetTruncated` asset fields (issue #28) follow the same additive-optional rule — see [No base64 in diffs — resolution to a served path](#no-base64-in-diffs--resolution-to-a-served-path-issue-28).
 
 ### DesignToken
 
@@ -245,6 +249,23 @@ Documented in [ElementInfo](#elementinfo) — the canonical key for the edited e
 | sourceFile | string | yes | Code-map hint — source file of the sibling. Not identity. |
 | sourceLine | number | yes | Code-map hint — source line of the sibling. Not identity (clones collide). |
 | instanceIndex | number | no | Code-map hint — `.map()` disambiguator. Not identity. |
+| assetPath | string | no | **Resolved served asset path** of the anchor when it is an image (issue #29). Same both-or-neither semantics as [ElementInfo.assetPath](#elementinfo). See [Resolved asset reference](#resolved-asset-reference-assetpath--label). |
+| label | string | no | Short human label for the anchor's asset (issue #29). Emitted with `assetPath`. |
+
+#### NoteElementRef (extended)
+
+`NoteElementRef` (defined in `packages/shared/src/diff.ts`; the lightweight element reference carried in `NoteEntry.elements[]` on operator notes) gains `assetPath` / `label` (issue #29):
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| selector | string | yes | CSS selector (fallback anchor + human locator). |
+| tagName | string | yes | HTML tag name. |
+| textContent | string | no | First chars of the referenced element's text (for identification). |
+| sourceFile | string | yes | Code-map hint. Not identity. |
+| sourceLine | number | yes | Code-map hint. Not identity. |
+| instanceIndex | number | no | Code-map hint — `.map()` disambiguator. Not identity. |
+| assetPath | string | no | **Resolved served asset path** of the referenced element (issue #29). Same both-or-neither semantics as [ElementInfo.assetPath](#elementinfo): present only when the element resolves to a served asset, absent for non-image carriers, never a `data:` / `blob:` URI. Lets a numbering note render `N → /images/<file>` from the payload alone. See [Resolved asset reference](#resolved-asset-reference-assetpath--label). |
+| label | string | no | Short human label for the referenced element's asset (issue #29). Emitted with `assetPath`. |
 
 #### ChildSnapshotEntry (extended)
 
@@ -258,6 +279,8 @@ Documented in [ElementInfo](#elementinfo) — the canonical key for the edited e
 | sourceFile | string | yes | Code-map hint. Not identity. |
 | sourceLine | number | yes | Code-map hint. Not identity. |
 | instanceIndex | number | no | Code-map hint. Not identity. |
+| assetPath | string | no | **Resolved served asset path** of the snapshotted child when it is an image (issue #29). Same both-or-neither semantics as [ElementInfo.assetPath](#elementinfo). See [Resolved asset reference](#resolved-asset-reference-assetpath--label). |
+| label | string | no | Short human label for the child's asset (issue #29). Emitted with `assetPath`. |
 
 ### uid → source mapping
 
@@ -300,9 +323,37 @@ This is a capture-layer concern (the value is normalized once, at the source of 
 >
 > **`sourceVerified: false` passthrough.** A `sourceVerified: false` element has no `data-source-file`, so the convention gate above is not met and the captured value passes through **literally** — unnormalized. An applier that encounters a literal `/public/…` path in an `AttributeChange.toValue` or `InsertChange.outerHTML` for a `sourceVerified: false` node should treat it as **expected passthrough, not a capture bug** (the capture layer could not confirm the project's asset convention without a source-file context). This is the same degrade-to-literal behavior described for unsupported conventions, surfaced explicitly here because it is the common shape for fresh inserts (uid → source mapping case (c)).
 
+#### No base64 in diffs — resolution to a served path (issue #28)
+
+Ratified by the `diff-capture-resource-model` task group (Brief 1, issue #28). A picked or embedded image must resolve to a **served path** (`/images/<name>`) in the diff — its bytes are never inlined as a `data:` URI. Base64 inline is the observed source of multi-MB batch bloat, and an inline blob is not an apply target (the agent cannot write a `data:` back to source as an asset reference).
+
+**Capture layer (extension).** The media file picker emits a **blob URL** (`URL.createObjectURL`) for live in-DOM preview and carries a `pendingUpload { filename, mimeType, sizeBytes }` side-channel on the resulting `AttributeChange`, whose `toValue` is a provisional served path (`/images/<filename>`). No file bytes are read into the diff. `pendingUpload` and `assetTruncated?: boolean` are **additive-optional** `AttributeChange` fields (see [Protocol compatibility](#protocol-compatibility-uid--anchor-fields)) — no `WS_PROTOCOL_VERSION` bump.
+
+**Server carriers (bridge).** Because base64 can enter a diff through more than one carrier, the bridge scans **all** of them at ingest and rewrites each to a served path: `attributeChanges[].toValue`, `insertChanges[].outerHTML` (clone/paste markup), and `background-image` `PropertyChange.toValue` in `changes` (`url(data:…)`). The single leading `/public` strip (above) is applied to every emitted served path, so a persisted asset is `/images/<name>`, never `/public/images/<name>`.
+
+**Content-hash resolution for uncommitted assets.** When bytes are present (a residual `data:` carrier), the bridge content-hashes them (SHA-256): if a byte-identical file already exists in the resolved asset directory it is reused (no duplicate written); otherwise a new file is written, named `<stem>-<hash>.<ext>` (stem seeded from `pendingUpload.filename` when present, else `uploaded-<hash>`). The embedded hash makes re-selecting the same image idempotent. A file-picker pick transmits **no bytes** (blob-URL-backed) — its resolution is to an already-committed asset via `pendingUpload.filename`, with the provisional `/images/<filename>` path as the graceful fallback when the file is not found (the applier / operator reconciles it).
+
+**base64 as a defined exception.** A `data:` URI surviving into an emitted value is **only** valid when the bridge could not persist it (a persistence failure is logged and the original value is passed through as a last-resort fallback). It is never the intended steady-state; consumers should treat a surviving `data:` as a degraded carrier, not a resource reference.
+
+> **`blob:` in `outerHTML` — closed by Brief 2 (#29).** A file-picker pick sets the live DOM `src` to a blob URL (for preview). If such an element is duplicated **before** its served path is applied, the captured `InsertChange.outerHTML` carries a `src="blob:…"` — a page-local URL that is not resolvable server-side. The bridge rewrites only `data:` in `outerHTML`, so a `blob:` passes through unchanged. Brief 2 (#29) closes this: **every element reference now carries a resolved `assetPath`** (see [Resolved asset reference](#resolved-asset-reference-assetpath--label)) — and, critically, `assetPath` is populated only from a served path, so a `blob:` never lands there (it is filtered out at resolution). An applier that encounters a `blob:` in `outerHTML` ignores that reference and relies on the element's resolved `assetPath` (or the paired `AttributeChange.toValue`).
+
+#### Resolved asset reference (`assetPath` + `label`)
+
+Ratified by the `diff-capture-resource-model` task group (Brief 2, issue #29). Building on Brief 1's served-path guarantee (#28), **every element reference in the payload carries a resolved `assetPath` (a public-relative served path) plus a short human `label`** when — and only when — the referenced element resolves to an asset. This lets a downstream agent map `uid → /images/<file>` from the payload alone, with no working-tree correlation. The motivating repro (#29): a numbering note (`1,2,3,4 →` gallery images) carried uids but no `src`, so the ordering was unactionable; it now renders `N → /images/<file>` per item.
+
+**Carriers.** `assetPath` / `label` are additive-optional fields on **`ElementInfo`, `NoteElementRef`, `SiblingAnchor`, and `ChildSnapshotEntry`** — i.e. the diff's element descriptor, note references, insert/reparent/group sibling anchors, and child snapshots. `ReorderChange` additionally gains an optional `siblingAnchors?: SiblingAnchor[]` parallel array (carrying `uid` + `assetPath`/`label` per sibling) alongside the existing `siblingSelectors: string[]`; `siblingSelectors` stays the canonical, always-present, selector-only list, so a consumer that ignores `siblingAnchors` is unaffected (this is the sanctioned use of the `siblingSelectors` extension point noted under [ReparentChange](#reparentchange)).
+
+**Resolution rule.** `assetPath` is the element's own `src` / inline `background-image`, normalized through the [deployment-aware `src` rule](#deployment-aware-srchref-normalization) (single leading `/public` strip, source-file-gated). It is populated **only when an asset actually resolves** — absent (not empty / not `null`) on non-image carriers — and is **never** a `data:` or `blob:` URI (both are filtered at resolution: inline bytes and page-local blobs are not served paths). `label` derives as filename stem > `alt` > trimmed text (≤40) > tagName, and is emitted **together with** `assetPath` (both present or both absent). Resolution happens at capture / pick time while the DOM is live — the extension reads `src`; the server does **not** backfill `assetPath` for sibling / note references.
+
+**`sourceVerified: false` interaction.** For a `sourceVerified: false` element (no `data-source-file`), the `/public` strip is not applied (convention gate unmet), so `assetPath` carries the literal captured served path — the same degrade-to-literal passthrough documented above. When the referenced element's asset was only recoverable via the bridge's content-hash resolution (a residual `data:` carrier persisted to `<stem>-<hash>.<ext>`), `assetPath` reflects that resolved `/images/<name>` when the capture layer observed a served `src`; it stays **absent** when no served path was resolvable at capture time (never a `data:` fallback). Additive-optional — **no `WS_PROTOCOL_VERSION` bump** (see [Protocol compatibility](#protocol-compatibility-uid--anchor-fields)); pre-#29 consumers ignore the fields and degrade to `selector` / `uid` targeting.
+
+**Size cap + `assetTruncated`.** A single inline asset larger than the per-asset cap (4 MB) that **cannot** be deduplicated to a committed file is **truncated**, not inlined: for an `AttributeChange` the server sets `assetTruncated: true` and empties `toValue`; inside `outerHTML` / `url(data:…)` the oversized occurrence is replaced with an empty reference. An applier seeing `assetTruncated: true` must **not** write an empty `src` — it leaves the existing reference in place and surfaces the asset to the operator (an asset that large belongs committed to the project, not pasted through a diff). Dedup to an existing committed file wins regardless of size (the file is already in the repo).
+
 ### Protocol compatibility (uid + anchor fields)
 
 `uid` (on `ElementInfo`, `SiblingAnchor`, `ChildSnapshotEntry`) and `anchorUid` / `anchorPosition` (on `InsertChange`) are **additive, optional** fields. Consumers that predate them ignore unknown fields, so **no `WS_PROTOCOL_VERSION` bump is required** — the version stays at `0.4.0`, exactly as `reorderChanges` / `insertChanges` / `reparentChanges` were added without a bump. A pre-uid consumer that receives these fields simply ignores them and **degrades to `selector` targeting** (and positional insert resolution) — the same behavior it has today. No required field is redefined; existing payloads remain valid. The `EXTENSION_HELLO` / `SERVER_HELLO` handshake is unaffected.
+
+The `assetPath` / `label` fields (on `ElementInfo`, `NoteElementRef`, `SiblingAnchor`, `ChildSnapshotEntry`) and `ReorderChange.siblingAnchors` (issue #29) follow the **same** additive-optional rule — see [Resolved asset reference](#resolved-asset-reference-assetpath--label). A pre-#29 consumer ignores them and continues to target by `uid` / `selector`; no version bump.
 
 ---
 
