@@ -21,7 +21,7 @@
 
 **Relationships:** Contains ElementInfo, PropertyChange[], PageContext, RelatedChange[], StylesheetChange[], ScriptBehaviorChange[]
 
-> The table above highlights the fields relevant to feature-009. `VisualDiff` additionally carries the existing optional parallel arrays `reorderChanges`, `insertChanges`, `removeChanges`, `groupChanges`, `attributeChanges`, and `textChanges` (see `packages/shared/src/diff.ts` for the complete interface). When extending `VisualDiff` for feature-009, add `stylesheetChanges` and `scriptChanges` alongside these — do not omit the existing arrays.
+> The table above highlights the fields relevant to feature-009. `VisualDiff` additionally carries the existing optional parallel arrays `reorderChanges`, `insertChanges`, `removeChanges`, `groupChanges`, `attributeChanges`, and `textChanges` (see `packages/shared/src/diff.ts` for the complete interface). When extending `VisualDiff` for feature-009, add `stylesheetChanges` and `scriptChanges` alongside these — do not omit the existing arrays. feature-010 adds one further optional parallel array, `layoutContainers?: LayoutContainerDescriptor[]`, describing the editable-list containers referenced by any structural change in the diff (see [Structural Auto-Layout](#structural-auto-layout-data-fe-layout--layoutrole)) — additive-optional, no protocol bump.
 
 **Assembly note:** The content script assembles the full VisualDiff — it generates the uuid, captures the timestamp, populates PageContext, sets sourceVerified, and sets the initial status to "pending". Feature-001 provides ElementInfo; feature-002 provides PropertyChange.
 
@@ -76,14 +76,61 @@
 | breakpointValue | string | no | Actual media query width (e.g., '768px') for the matched breakpoint |
 | tabId | string | yes | Unique tab session identifier — UUID generated per tab on extension activation, stable for the tab's lifetime |
 
+### ReorderChange
+
+Moves a child element within the same parent container. Stored as a parallel array on `VisualDiff` (`reorderChanges[]`), separate from `PropertyChange[]`. The full runtime shape lives in `packages/shared/src/diff.ts`; this table is the **formal base contract** (previously the schema was footnoted to `diff.ts` only — see the [VisualDiff assembly note](#visualdiff)). `siblingAnchors` (issue #29) and `containerUid` (feature-010) are the additive-optional extensions layered on this base.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| type | "reorder" | yes | Discriminant literal. |
+| fromIndex | number | yes | Child index within the container before the move. |
+| toIndex | number | yes | Child index within the container after the move. |
+| siblingSelectors | string[] | yes | Selectors for all siblings in the container at commit time — the canonical, always-present positional snapshot. |
+| siblingAnchors | SiblingAnchor[] | no | Per-sibling anchors parallel to `siblingSelectors`, carrying `uid` + resolved `assetPath`/`label` per sibling (issue #29). Asset-resolution surface, **not** a uid-indexed identity register — see the [ReorderChange.siblingAnchors constraint](#reparentchange). |
+| containerSelector | string | yes | CSS selector for the parent container the reorder happened in. |
+| containerUid | string | no | **Editable-list container identity (feature-010).** `data-fe-uid` of the container the reorder happened in — the `uid`-keyed peer of `containerSelector`. When present, the applier resolves the container to source by `uid` (stable across re-render/reorder) instead of the positional selector. Additive-optional; absent for pre-feature-010 payloads and for containers with no `uid`, where the applier falls back to `containerSelector`. See [Structural Auto-Layout](#structural-auto-layout-data-fe-layout--layoutrole). |
+| containerDirection | string | yes | Primary-axis direction of the container (`row` / `column` / `row-reverse`). For a wrapped/multi-line container it carries a space-separated ` wrap` suffix (`"row wrap"` / `"column wrap"`, issue #30) — the **first token is always the axis**, so a consumer reading only the first token is unaffected. |
+
+> **Emitters.** `reorderChanges` is produced both by the reorder tool and by the reparent tool when the operator drops within the source container — a same-container drop is committed as a `reorderChange` (`fromIndex`→`toIndex`), never a `reparentChange` (see [`boundaries.md`](boundaries.md) → "Overlay containment"). Under feature-010 the reorder targets are the container's `layoutRole: flow` children only; `layoutRole: absolute` children (parallax / explicitly-placed) are **excluded** from `fromIndex`/`toIndex` math.
+
+### GroupChange
+
+Wraps 2+ sibling elements in a **new** flex/grid container. Stored as a parallel array on `VisualDiff` (`groupChanges[]`). The natural inverse is ungroup (unwrap). This table is the **formal base contract** (previously footnoted to `diff.ts` only). The runtime-created wrapper is the [uid → source mapping case (d)](#uid--source-mapping) — a container minted at runtime with a fresh `uid` and no build-time source origin.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| type | "group" | yes | Discriminant literal. |
+| wrapperTagName | string | yes | Tag name of the new wrapper element the applier creates (e.g. `"div"`). |
+| wrapperInitialStyles | PropertyChange[] | yes | Inline styles applied to the wrapper (e.g. `display:flex`, `gap`), so the created container is a conforming editable list. |
+| wrapperUid | string | no | **Runtime-created-container identity (feature-010).** The **fresh** `data-fe-uid` minted for the wrapper at group time (the wrapper has no build-time origin). Carries the wrapper's identity into the diff so the applier can key the created source node and reconcile it after hot-reload via the [child-uid-set re-association, case (d)](#uid--source-mapping). Additive-optional. When authored/marked authoritative, the applier also stamps `data-fe-layout` on the created container. |
+| containerSelector | string | yes | CSS selector for the parent container holding the siblings being grouped. |
+| insertIndex | number | yes | Index in the parent where the new wrapper is inserted. |
+| wrappedSelectors | string[] | yes | Selectors for the sibling elements being wrapped, in order. Under feature-010 these are `layoutRole: flow` peers; grouping requires a [real structural boundary](features/feature-010-structural-contract.md#the-flat-data-group-problem-acceptance-defining) — a container element and, for data-driven items, a nested data sub-array. |
+| wrappedUids | string[] | no | **`data-fe-uid`s of the wrapped children**, positionally parallel to `wrappedSelectors` (feature-010). The `uid`-keyed peer of `wrappedSelectors`, following the same identity-vs-locator split as `siblingSelectors`/`siblingAnchors`. This is the **stable child-`uid` set** the [runtime-created-container round-trip (case d)](#uid--source-mapping) keys re-association on — carried on the `GroupChange` itself so re-association does not depend on a separate `LayoutContainerDescriptor` being present. Additive-optional; when absent, the applier falls back to matching the created container's `LayoutContainerDescriptor.childUids[]` in `layoutContainers[]`, else to `wrappedSelectors`. |
+| prevSibling | SiblingAnchor \| null | yes | Sibling immediately before the wrapper's insert position, or null at index 0. |
+| nextSibling | SiblingAnchor \| null | yes | Sibling immediately after the wrapper's insert position, or null at end. |
+
+### RemoveChange
+
+Deletes an element from its container. Stored as a parallel array on `VisualDiff` (`removeChanges[]`). The target element is identified by `VisualDiff.element` (by `uid` when present, else `selector` + `sourceFile`/`sourceLine`). This table is the **formal base contract** (previously footnoted to `diff.ts` only).
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| type | "remove" | yes | Discriminant literal. |
+| tagName | string | yes | Tag name of the removed element (for context / validation on apply). |
+| containerSelector | string | yes | CSS selector for the container the element was removed from. |
+| removedIndex | number | yes | Child index the element occupied before removal. |
+
 ### ReparentChange
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | type | "reparent" | yes | Discriminant literal |
 | sourceContainerSelector | string | yes | CSS selector for the container the element moved from |
+| sourceContainerUid | string | no | **Source editable-list container identity (feature-010).** `data-fe-uid` of the source container — the `uid`-keyed peer of `sourceContainerSelector`. Additive-optional; the applier falls back to the selector when absent. See [Structural Auto-Layout](#structural-auto-layout-data-fe-layout--layoutrole). |
 | sourceIndex | number | yes | Child index within the source container before the move |
 | targetContainerSelector | string | yes | CSS selector for the container the element moved into |
+| targetContainerUid | string | no | **Target editable-list container identity (feature-010).** `data-fe-uid` of the target container — the `uid`-keyed peer of `targetContainerSelector`. Additive-optional; the applier falls back to the selector when absent. |
 | targetIndex | number | yes | Child index within the target container after the move |
 | siblingSelectors | string[] | yes | Selectors for all siblings in the target container at commit time |
 | prevSibling | SiblingAnchor \| null | yes | Element immediately before the inserted position, or null if inserted at index 0 |
@@ -253,6 +300,7 @@ Documented in [ElementInfo](#elementinfo) — the canonical key for the edited e
 | instanceIndex | number | no | Code-map hint — `.map()` disambiguator. Not identity. |
 | assetPath | string | no | **Resolved served asset path** of the anchor when it is an image (issue #29). Same both-or-neither semantics as [ElementInfo.assetPath](#elementinfo). See [Resolved asset reference](#resolved-asset-reference-assetpath--label). |
 | label | string | no | Short human label for the anchor's asset (issue #29). Emitted with `assetPath`. |
+| layoutRole | "flow" \| "absolute" \| "group" | no | **Structural classification of the anchored child** (feature-010). `flow` (default when absent) / `absolute` (positioned peer, excluded from reorder & gap-math) / `group` (nested container peer). Additive-optional — see [Structural Auto-Layout → layoutRole](#structural-auto-layout-data-fe-layout--layoutrole). |
 
 #### NoteElementRef (extended)
 
@@ -283,6 +331,7 @@ Documented in [ElementInfo](#elementinfo) — the canonical key for the edited e
 | instanceIndex | number | no | Code-map hint. Not identity. |
 | assetPath | string | no | **Resolved served asset path** of the snapshotted child when it is an image (issue #29). Same both-or-neither semantics as [ElementInfo.assetPath](#elementinfo). See [Resolved asset reference](#resolved-asset-reference-assetpath--label). |
 | label | string | no | Short human label for the child's asset (issue #29). Emitted with `assetPath`. |
+| layoutRole | "flow" \| "absolute" \| "group" | no | **Structural classification of the snapshotted child** (feature-010). `flow` (default when absent) / `absolute` / `group`. Additive-optional — see [Structural Auto-Layout → layoutRole](#structural-auto-layout-data-fe-layout--layoutrole). |
 
 ### uid → source mapping
 
@@ -293,6 +342,9 @@ How the **applier** (Claude Code, build brief) resolves a `uid` to a concrete so
 | **(a) Existing element** | `uid` + `sourceFile` + `sourceLine` hint | Edit the existing source node located at `sourceFile:sourceLine`. The `uid` confirms instance identity (and disambiguates when the operator edited one of several instances), but the edit targets already-existing source. |
 | **(b) Clone / duplicate / paste** | **fresh** `uid` (≠ origin uid) + `outerHTML` of the cloned subtree + the **origin's** `sourceLine` as a hint | **Create new source** near the origin: the applier copies the origin's source node (located via the origin `sourceLine` hint), inserts the copy at the anchored position, and the new node's fresh `uid` becomes its stable identity for any later edit. The origin source is **not** modified. This is what makes duplicate-then-edit replay correctly — the twin has its own identity from creation. |
 | **(c) Fresh insert** | fresh `uid` + `anchorUid` + `anchorPosition` + `outerHTML` (no meaningful origin `sourceLine`; `sourceVerified` may be `false`) | **Create new source** at the anchor: resolve `anchorUid` to its sibling's source location, then write the `outerHTML`-described markup `before`/`after` it (per `anchorPosition`). No positional `nth-of-type` resolution required. |
+| **(d) Runtime-created container (group wrapper)** | **fresh** `wrapperUid` (minted at group time, no build-time origin) + the wrapped children's `uid`s (`GroupChange.wrappedUids`, falling back to the matching `LayoutContainerDescriptor.childUids[]`) + `prevSibling`/`nextSibling` anchors (feature-010 `GroupChange`) | **Create a new container in source** wrapping the grouped children: resolve each wrapped child's source node by its `uid` (cases a–c), then write a real container element (with conforming flex/grid styles and, when authoritative, a `data-fe-layout` stamp) around them at the anchored position — and, for data-driven items, introduce a **nested data sub-array** (the [flat-data structural-boundary rule](features/feature-010-structural-contract.md#the-flat-data-group-problem-acceptance-defining)). **Round-trip re-association:** after apply + hot-reload the dev-plugin stamps a *build-time* `uid` on the wrapper that differs from the runtime `wrapperUid`; the applier/reconciliation re-associates them by the **stable child-`uid` set** — the container whose `childUids[]` is a **superset of** `GroupChange.wrappedUids` is identified as the same logical container even under a new wrapper `uid` (superset, not exact-match, so a child inserted/removed inside the group before the reload does not defeat re-association; the grouped children keep their identities across the wrap). Re-association is attempted on the first post-reload `MutationObserver` tick; if no superset match is found, the wrapper is treated as a new anonymous container keyed by its build-time `uid` going forward. |
+
+> **The runtime-created-container round-trip (case d).** The wrapper is the one node in a group operation with *no* pre-existing identity — it is minted live. Its `wrapperUid` is fresh (per the [fresh-uid-on-creation rule](#stamping-lifecycle)), so the *next* operation on the wrapper already has stable identity. The gap is only across the hot-reload boundary, where a build-time uid supersedes the runtime one; it is closed by keying re-association on the invariant that survives the swap — the set of child `uid`s the container wraps — backed by the [`data-fe-uid` reconciliation aids](#stamping-lifecycle) (lazy-uid walk + optional `WeakMap<Element, uid>` sidecar). This is the round-trip semantics feature-010 ratifies; the applier implements it in Brief 2.
 
 > **Where the clone's origin `sourceLine` comes from (case b).** A clone is a DOM copy, so the new node inherits the origin's `data-source-line` attribute verbatim; its `ElementInfo.sourceLine` therefore already carries the origin's line. The capture layer MUST preserve that inherited `sourceLine` as the origin hint when it mints the clone's fresh `uid` — i.e. assign a fresh `data-fe-uid` **without** disturbing the copied `data-source-*`. This is precisely why `sourceLine` is a hint and not identity: two instances legitimately share it (origin and clone), and only `uid` separates them.
 
@@ -356,6 +408,64 @@ Ratified by the `diff-capture-resource-model` task group (Brief 2, issue #29). B
 `uid` (on `ElementInfo`, `SiblingAnchor`, `ChildSnapshotEntry`) and `anchorUid` / `anchorPosition` (on `InsertChange`) are **additive, optional** fields. Consumers that predate them ignore unknown fields, so **no `WS_PROTOCOL_VERSION` bump is required** — the version stays at `0.4.0`, exactly as `reorderChanges` / `insertChanges` / `reparentChanges` were added without a bump. A pre-uid consumer that receives these fields simply ignores them and **degrades to `selector` targeting** (and positional insert resolution) — the same behavior it has today. No required field is redefined; existing payloads remain valid. The `EXTENSION_HELLO` / `SERVER_HELLO` handshake is unaffected.
 
 The `assetPath` / `label` fields (on `ElementInfo`, `NoteElementRef`, `SiblingAnchor`, `ChildSnapshotEntry`) and `ReorderChange.siblingAnchors` (issue #29) follow the **same** additive-optional rule — see [Resolved asset reference](#resolved-asset-reference-assetpath--label). A pre-#29 consumer ignores them and continues to target by `uid` / `selector`; no version bump.
+
+The feature-010 structural fields — `VisualDiff.layoutContainers[]`, `LayoutContainerDescriptor`, `layoutRole` (on `SiblingAnchor` / `ChildSnapshotEntry`), `ReorderChange.containerUid`, `ReparentChange.sourceContainerUid`/`targetContainerUid`, and `GroupChange.wrapperUid`/`wrappedUids` — follow the **same** additive-optional rule (see [Structural Auto-Layout](#structural-auto-layout-data-fe-layout--layoutrole)). A pre-feature-010 consumer ignores them and degrades to `containerSelector` targeting and flat (all-`flow`) reorder behavior — the behavior it has today. No required field is redefined; the version stays at `0.4.0` and the `EXTENSION_HELLO` / `SERVER_HELLO` handshake is unaffected. The `data-fe-layout` DOM attribute is likewise additive: it is a new optional attribute the capture layer reads, never a change to an existing one.
+
+---
+
+## Structural Auto-Layout (data-fe-layout / layoutRole)
+
+> Ratified by the `structural-auto-layout-contract` task group (Brief 1). The fields below are **additive-optional** schema extensions — see [Protocol compatibility](#protocol-compatibility-uid--anchor-fields). The conceptual model, the code-gen convention, and the acceptance-defining flat-data rule live in [feature-010](features/feature-010-structural-contract.md); this section is the authoritative wire contract they build against. Implementation (runtime signal + detection + the shared `packages/shared/src/layout.ts` module) lands in Brief 2.
+
+### The editable-list signal (`data-fe-layout`)
+
+An **editable list** is a container whose direct element children form a reorderable / groupable peer set. It is detected two ways, in priority order:
+
+1. **Explicit signal — authoritative.** A **runtime-assigned or opt-in-authored** `data-fe-layout="flex" | "grid"` attribute on the container. When present, the container **is** an editable list of the named layout kind; the heuristic below is not consulted.
+2. **Thresholded heuristic — fallback.** When no explicit signal is present: `getComputedStyle(el).display ∈ {flex, grid}` **AND** direct-element-child-count ≥ 2 **AND** child tag/uid homogeneity — children share a `tagName`, **or** share a `.map()` source-origin family, defined as **the same `data-source-file` + `data-source-line` pair** (siblings emitted by a single `.map()` call over one JSX line; `data-source-index` distinguishes the instances but the shared file+line is the family key). The gate suppresses **incidental flex wrappers** (nav bars, button rows, icon clusters) that are `display:flex` but are not editable lists.
+
+**Why runtime / opt-in, never build-time.** The dev-plugin (feature-006) runs an AST pass at build and **cannot compute `display`** — the layout lives in CSS-module / Tailwind classes that resolve only at runtime. A build-time `data-fe-layout` would be a guess, not a fact. So the attribute is **stamped at runtime** from live computed style (behind the thresholded gate), or **authored opt-in** to mark a container authoritative. `data-fe-layout` carries the layout **kind** only (`flex`/`grid`) — it is not a duplicate of `display`, and its **absence means "fall back to the heuristic," not "not a list."** This mirrors the [`data-fe-uid` stamping split](#stamping-lifecycle): the plugin owns statically-computable facts; the runtime owns facts that exist only live.
+
+The threshold constant (min child count = 2) and the homogeneity predicate are encoded once in `packages/shared/src/layout.ts` (`DATA_FE_LAYOUT_ATTR`, `parseLayoutSignal`), so capture and any convention validation share a single definition — see [feature-010 → Shared source of truth](features/feature-010-structural-contract.md#shared-source-of-truth--code-gen-convention).
+
+### layoutRole (item classification)
+
+Every **direct child** of an editable list is classified with an additive-optional `layoutRole`. **Wire carriage:** it is carried as an additive-optional `layoutRole?` field on the per-child context shapes — **`SiblingAnchor`** (used by `ReorderChange.siblingAnchors`, `GroupChange`, `ReparentChange`, `InsertChange`) and **`ChildSnapshotEntry`** (used by `InsertChange.childSnapshot`). `LayoutContainerDescriptor.childUids[]` is a `string[]` of uids and therefore does **not** itself carry roles; a child that is *itself a container* (`layoutRole: group`) additionally appears as its own `LayoutContainerDescriptor` in `layoutContainers[]`, so a group child's role is also recoverable by uid lookup, while `flow`/`absolute` **leaf** children carry their role only on the per-child shape. **Default when absent: `flow`** — so a consumer that ignores the field sees the pre-contract flat behavior (every child a reorder target), a clean degrade.
+
+| `layoutRole` | Applies to | Reorderable | In gap-math | Diff-hidden | Notes |
+|---|---|---|---|---|---|
+| `flow` | Normal in-flow child (default). | yes | yes | no | The ordinary reorder/group target. |
+| `absolute` | `position: absolute \| fixed` child, **and** an explicitly-placed grid child (`grid-area` / `grid-column` / `grid-row` placement). | **no** | **no** | **no — a visible peer** | The **parallax case**. Kept as a first-class, selectable, never-hidden peer, but **excluded from reorder index math and gap-math** because it is out of normal flow. Preserves feature-009's selector-anchored `ScriptBehaviorChange` contract — a parallax element is never swept into a `ReorderChange.fromIndex`/`toIndex`. |
+| `group` | A direct child that is **itself** an editable-list container (nested flex/grid). | yes — **as an opaque peer** at the parent's level | yes (as one peer) | no | Exposed as a first-class peer; its internal children are one level down, described by a `LayoutContainerDescriptor`. Bounded to **one nesting level** in v1 ([`boundaries.md`](boundaries.md)). |
+
+### LayoutContainerDescriptor
+
+A self-describing descriptor for one editable-list container, carried on the additive-optional `VisualDiff.layoutContainers[]` array. A `layoutRole: group` child appears **twice, additively**: once as an opaque peer in its parent's `childUids[]` (so a parent-level reorder moves the whole group as one item), and once as its own `LayoutContainerDescriptor` (so the group's internals are self-describing **without a recursive tree on the wire**).
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| uid | string | yes | The container's own `data-fe-uid`. |
+| layout | "flex" \| "grid" | yes | The layout kind, from `data-fe-layout` (explicit) or the resolved computed style (heuristic). |
+| direction | string | yes | The container's `containerDirection` — primary axis, with the ` wrap` suffix for wrapped containers (`"row wrap"`, issue #30). First token is always the axis. |
+| childUids | string[] | yes | `data-fe-uid`s of the container's direct children, **in visual order**. The parallel-array convention (idiomatic to `siblingSelectors`/`siblingAnchors`); lower agent parse cost than a recursive tree. A child that is itself a group appears here as its `uid` and has its own descriptor entry elsewhere in `layoutContainers[]`. |
+| parentUid | string | no | `data-fe-uid` of the enclosing editable-list container. Absent for the top-level container. The single edge that reconstructs the (one-level) nesting from the flat `layoutContainers[]` array. |
+| role | "flow" \| "group" | no | This descriptor's role in its parent list — `group` when this container is nested as a peer inside another editable list; absent/`flow` for the top-level container. **Distinct from `layoutRole`:** a `LayoutContainerDescriptor` describes a *container*, which is either a top-level list (`flow`/absent) or a nested peer (`group`) — it is never `absolute` (only non-container children are positioned peers), so this field deliberately omits `absolute` and is **not** the same type as the child `LayoutRole` union. |
+| signalSource | "explicit" \| "heuristic" | yes | How the list was detected — `explicit` when `data-fe-layout` is already authoritative on the element, `heuristic` when detected from computed style. Tells the applier whether it must stamp `data-fe-layout` on codegen. |
+
+**Considered alternative — recursive `leaf \| group` union on `childSnapshot`.** A discriminated tree where each child entry is a leaf or a group carrying its own children. **Rejected** in favor of the flat descriptor with explicit `childUids[]`: lower agent parse cost (no recursion), matches the existing parallel-array convention, and — because nesting is bounded to one level in v1 — a single `parentUid` edge suffices. The recursive union is the natural extension point if multi-level nesting is ever admitted (see [`boundaries.md`](boundaries.md) Future Considerations).
+
+### Container identity on Reorder / Reparent
+
+Two additive-optional `uid`-keyed container fields let structural moves target their container by stable identity instead of a positional selector (defined in the base tables above):
+
+- **[`ReorderChange.containerUid?`](#reorderchange)** — the editable-list container the reorder happened in.
+- **[`ReparentChange.sourceContainerUid?` / `targetContainerUid?`](#reparentchange)** — the source and target containers of a cross-container move.
+
+In both cases the `uid` field is the canonical key when present, with the existing `*Selector` field as the always-present fallback — the same identity-vs-locator split the rest of the contract uses. The `GroupChange.wrapperUid` for a runtime-created container is the [uid → source mapping case (d)](#uid--source-mapping).
+
+### Structural conformance — real boundary required
+
+A group is only representable when it has a **real structural boundary**: a container element in the rendered JSX **and**, for data-driven items, a nested data sub-array — **not** flat sibling entries distinguished only by a presentational flag (e.g. `width:"half"`). The code-gen convention therefore governs the **data shape**, not only the JSX. This is the acceptance-defining "flat-data group problem" — its full statement, the Levantine root case, and the rule that an editor must not synthesize a phantom group over flat data live in [feature-010 → The flat-data group problem](features/feature-010-structural-contract.md#the-flat-data-group-problem-acceptance-defining).
 
 ---
 

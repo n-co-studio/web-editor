@@ -32,6 +32,18 @@ These expand specific boundary restrictions for well-scoped operations:
   4. **Chrome target.** `animation-timeline: scroll()` is not Baseline (no Firefox by default); the scroll-driven mechanism MUST ship an `@supports not (animation-timeline: scroll())` fallback to the CSS-3D mechanism. The JS-scroll mechanism is the universal fallback.
   5. **Accessibility mandatory.** Every parallax edit (all four mechanisms) MUST emit `prefers-reduced-motion: reduce` zeroing — as a `StylesheetChange` `@media` rule for the CSS mechanisms, and as a `matchMedia` short-circuit for the JS mechanism (WCAG 2.3.3).
 
+- **Structural auto-layout — bounded (feature-010)**: The editor's structural model (editable list / item / group, the `data-fe-layout` signal, `layoutRole`, and nested-group-as-peer) is **explicitly bounded** for v1, mirroring the feature-009 enum-bounding pattern. The contract is ratified in `data-contracts.md` → [Structural Auto-Layout](data-contracts.md#structural-auto-layout-data-fe-layout--layoutrole) and modeled in [feature-010](features/feature-010-structural-contract.md). What v1 covers:
+
+  **In-bound (v1):**
+  1. **One nesting level.** A `layoutRole: group` peer may contain leaf children; a group **within** a group is out of scope. The flat `layoutContainers[]` + single `parentUid` edge is sufficient for exactly one level.
+  2. **Flex + wrap.** Flex containers, including wrapped/multi-line flex (`flex-wrap` ≠ `nowrap`), are fully covered — reorder uses the `containerDirection` ` wrap` suffix (issue #30).
+  3. **Grid — detected, reorder bounded.** A grid container **is detected** (`data-fe-layout="grid"` / `layout: "grid"`) and its children are exposed as peers. But grid has no single direction vector, so **grid-reorder semantics are enumerated-or-deferred**: only **auto-placed** grid children (source-order = visual-order) support reorder in v1, committed as source-order changes exactly like flex. **Explicitly-placed** grid children (`grid-area` / `grid-column` / `grid-row`) are classified `layoutRole: absolute` and are **not** reorder targets; the applier **rejects** a grid reorder that would require rewriting explicit `grid-area` placement rather than guessing. The two deferred grid-reorder strategies are recorded for a later version (see Future Considerations): (a) swap explicit `grid-area` placement; (b) reorder source order and rely on auto-placement.
+  4. **Parallax unchanged.** `position:absolute|fixed` children (the parallax case) are `layoutRole: absolute` — visible, selectable peers that are **never diff-hidden** but are **excluded from reorder index math and gap-math**. This preserves feature-009's selector-anchored `ScriptBehaviorChange` contract exactly; feature-010 adds no new parallax behavior.
+
+  **Conformance requirement (REQUIRE-level):** a group is only representable when it has a **real structural boundary** — a container element in JSX **and**, for data-driven items, a nested data sub-array (not flat siblings distinguished only by a presentational flag). The editor must not synthesize a phantom group over flat data. See [feature-010 → the flat-data group problem](features/feature-010-structural-contract.md#the-flat-data-group-problem-acceptance-defining).
+
+  **All schema deltas additive-optional** — no `WS_PROTOCOL_VERSION` bump (stays `0.4.0`); pre-feature-010 consumers degrade to `containerSelector` targeting + flat (all-`flow`) behavior. Does not modify the #27 identity or #28/#29 asset contracts.
+
 ## Scope Clarifications
 
 - **CSS visual effects editing is in scope**: Editing CSS `filter`, `mix-blend-mode`, and basic `clip-path` shapes (`circle()`, `inset()`) via the extension overlay is supported. These produce standard `PropertyChange` objects in the diff pipeline.
@@ -50,6 +62,13 @@ These are out of scope for v1 but may be revisited in later versions:
 - **MCP resources for design tokens** (currently exposed as tools only)
 - **Prop editing for inserted components** — surface prop schemas and token-snap prop values (deferred to feature-008.1). v1 emits empty `props: []` on every `ProjectComponent` and `ComponentInsertDescriptor`; the `PropDefault` shape lives in v1 data contracts so feature-008.1 can land without schema migration.
 - **External library component discovery (shadcn, Radix, MUI)** — gated behind `source: 'npm'` filter on `ProjectComponent` (deferred to v2). v1 only discovers project-local components (`source: 'local'`); the `'npm'` reservation is an extension hook with no v1 surface.
+- **Structural auto-layout beyond the feature-010 v1 bound** — the following are explicitly **OUT** of v1 (see the feature-010 bound above):
+  - **Multi-level nested groups** (a group inside a group). One nesting level only in v1; the recursive `leaf | group` union is the recorded extension point.
+  - **Grid explicit-placement reorder** — reorder that rewrites `grid-area` / `grid-column` / `grid-row`. Enumerated (swap `grid-area`, or source-order + auto-placement) but deferred; v1 supports auto-placed grid reorder only.
+  - **A universal layout IR** — the model is a bounded structural contract (list / item / group), **not** a general-purpose layout intermediate representation. Actively bounded to prevent scope inflation.
+  - **Non-flex/grid layout systems** — CSS `float`, `table`/`display:table`, multi-column (`column-count`), and masonry are not editable-list layouts in v1.
+  - **Absolute-position drag-reflow** — dragging a `layoutRole: absolute` (parallax / explicitly-placed) child to change its position via the reorder model. Positioned children stay selector-anchored (feature-009); they are visible peers, not reorder targets.
+  - **Build-time `data-fe-layout` stamping** — the signal is runtime-assigned / opt-in only; a build-time dev-plugin duplicate of computed style is out of scope (the plugin cannot resolve CSS-module/Tailwind `display`).
 
 ## Accepted Limitations
 

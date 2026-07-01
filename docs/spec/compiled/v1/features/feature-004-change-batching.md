@@ -3,6 +3,8 @@
 ## Summary
 Collect multiple edits before applying changes. Review panel lists all pending changes with before/after values and token names. Operator can review, remove unwanted changes, and send the full batch at once.
 
+> **Related — Structural Auto-Layout (feature-010).** Structural edits in a batch — reorder, group, reparent — reference their editable-list container by `uid` ([`ReorderChange.containerUid`](../data-contracts.md#reorderchange), [`ReparentChange.sourceContainerUid`/`targetContainerUid`](../data-contracts.md#reparentchange)) and may carry [`LayoutContainerDescriptor`](../data-contracts.md#layoutcontainerdescriptor) peers on `VisualDiff.layoutContainers[]`. These are additive-optional and ride the same batch envelope (no `WS_PROTOCOL_VERSION` bump). See [feature-010](feature-010-structural-contract.md).
+
 ## User Flow
 1. Operator makes edits (each added to pending queue via feature-002)
 2. Pending count badge appears on extension icon

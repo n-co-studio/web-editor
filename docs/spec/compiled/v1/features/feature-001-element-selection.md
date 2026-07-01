@@ -3,6 +3,8 @@
 ## Summary
 Select any visible element on the page via click. Display a highlight overlay with bounding box, tag name, source file, line number, and key computed properties (dimensions, spacing, font, color). Read `data-source-file` and `data-source-line` attributes for deterministic source mapping. Extension activation includes a dropdown toggle from the extension toolbar icon.
 
+> **Related — Structural Auto-Layout (feature-010).** When a selected element is an **editable-list** container (or a child of one), the structural model in [feature-010](feature-010-structural-contract.md) classifies it: the container is detected via the `data-fe-layout` signal (runtime/opt-in) or the thresholded computed-style heuristic, and each direct child carries a [`layoutRole`](../data-contracts.md#layoutrole-item-classification) (`flow` / `absolute` / `group`). Selection is the entry point for the reorder/group affordances that consume that model.
+
 ## User Flow
 1. Operator activates Frontend Editor from the extension toolbar dropdown (toggle on/off). Alternatively: keyboard shortcut.
 2. Hold Alt to temporarily pause element inspection and interact with the host page (e.g., open a dropdown, navigate to a state to inspect)
