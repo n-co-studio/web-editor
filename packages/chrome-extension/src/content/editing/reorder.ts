@@ -448,8 +448,11 @@ export class ReorderEditor {
   // DOM commit
   // -----------------------------------------------------------------------
 
-  private commitReorder(fromIndex: number, toIndex: number): void {
-    const el = this.currentElement!;
+  private commitReorder(
+    fromIndex: number,
+    toIndex: number,
+    el: HTMLElement = this.currentElement!,
+  ): void {
     const container = this.container!;
 
     // Compute reference node from the original child order
@@ -463,6 +466,45 @@ export class ReorderEditor {
     } else {
       container.insertBefore(el, refNode);
     }
+  }
+
+  // -----------------------------------------------------------------------
+  // Panel-driven commit seam (ReorderPanel)
+  // -----------------------------------------------------------------------
+
+  /**
+   * Commit a reorder by index — the panel-driven equivalent of the onPointerUp
+   * commit path. Moves the element currently at `fromIndex` to insert-position
+   * `toIndex` through the shared {@link commitReorder} (so the
+   * `moveBefore`/`insertBefore` feature-detect stays in one place), then fires
+   * `onCommitCb` with the frozen child order so the move flows through the exact
+   * same {@link ReorderChange} pipeline as an in-place drag. One call = one
+   * ReorderChange. No-ops when inactive (deactivation race), when the indices
+   * are out of range, or when the move would leave the element in place.
+   */
+  commitFromIndex(fromIndex: number, toIndex: number): void {
+    if (!this.currentElement || !this.container) return;
+    const order = this.originalChildOrder;
+    if (fromIndex < 0 || fromIndex >= order.length) return;
+    if (toIndex < 0 || toIndex > order.length) return;
+    // A drop onto the element's own slot — or the gap immediately after it —
+    // leaves the DOM unchanged; skip it so no empty ReorderChange is enqueued.
+    if (toIndex === fromIndex || toIndex === fromIndex + 1) return;
+
+    const el = order[fromIndex];
+    const childOrderSnapshot = [...order];
+    this.commitReorder(fromIndex, toIndex, el);
+    this.onCommitCb?.(el, this.container, fromIndex, toIndex, childOrderSnapshot);
+  }
+
+  /**
+   * Frozen snapshot of the container's element children captured at
+   * {@link render}, in DOM order. Element-only (matches the reorder
+   * `HTMLElement` filter) so callers can build a `SiblingAnchor[]` whose indices
+   * line up 1:1 with {@link commitFromIndex}'s `fromIndex`/`toIndex`.
+   */
+  get childSnapshot(): readonly HTMLElement[] {
+    return this.originalChildOrder;
   }
 
   // -----------------------------------------------------------------------
