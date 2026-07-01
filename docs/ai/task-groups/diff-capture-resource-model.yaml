@@ -21,9 +21,9 @@ briefs:
 
   - title: "Carry a resolved assetPath + label on every element reference (#29)"
     sequence: 2
-    session: null
+    session: "235f9a0a-cd57-4318-a405-248da81eca41"
     branch: "feature/diff-capture-resource-model"
-    status: pending
+    status: complete
     next_brief: ""
     boundaries:
       - "packages/shared/src/diff.ts"
@@ -60,8 +60,8 @@ intent:
 
 conventions:
   naming:
-    - pattern: "resolveElementAsset() — capture-layer helper turning a picked File into { previewUrl, provisionalSrc, pendingUpload }"
-      scope: "packages/chrome-extension/src/shared/dom-utils.ts (seeded Brief 1, enriched Brief 2)"
+    - pattern: "resolveElementAsset(file: File) — capture helper turning a picked File into { previewUrl, provisionalSrc, pendingUpload } (Brief 1). Brief 2 added the DISTINCT resolveElementAssetRef(el: Element) -> { assetPath?, label? } (element -> served-path ref) — a separate name to avoid clobbering the File overload the approved key-interface unintentionally collided with."
+      scope: "packages/chrome-extension/src/shared/dom-utils.ts (seeded Brief 1, resolveElementAssetRef + buildNoteElementRef + buildSiblingAnchor added Brief 2)"
     - pattern: "PendingUpload { filename, mimeType, sizeBytes } — additive-optional on AttributeChange"
       scope: "packages/shared/src/diff.ts"
     - pattern: "served asset paths are /images/<name> (leading /public stripped), never data: or blob:"
@@ -104,6 +104,15 @@ session_decisions:
   - session: "235f9a0a-cd57-4318-a405-248da81eca41"
     decision: "blob: URL surviving into InsertChange.outerHTML (duplicate-after-pick, pre-apply) is a documented partial for Brief 1; closed by Brief 2 (#29) resolved assetPath on element references. Documented in bridge.ts + data-contracts."
     rationale: "Resolving a blob: in outerHTML needs pendingUpload correlation on InsertChange, which is Brief 2 scope. Critic recommendation #5 addressed by documentation, not silent passthrough."
+  - session: "235f9a0a-cd57-4318-a405-248da81eca41"
+    decision: "Brief 2: new element->ref resolver named resolveElementAssetRef(el: Element), NOT the approved key-interface name resolveElementAsset(el) — that name is Brief 1's File-taking media-picker helper. Both fields (assetPath + label) are both-or-neither, emitted ONLY when an asset resolves (spread of {} for non-image carriers), and never a data:/blob: value."
+    rationale: "Faithful execution of the approved design; only the identifier changed to avoid a same-file overload TypeScript cannot express for module functions. Pragmatist's no-dead-field constraint met by the {}-spread pattern."
+  - session: "235f9a0a-cd57-4318-a405-248da81eca41"
+    decision: "insert-source.ts (anchorFromElement + collectChildSnapshot) enriched with resolveElementAssetRef even though it is not in Brief 2's literal scope_files — it is the SOLE construction site for insert SiblingAnchor / ChildSnapshotEntry, both explicitly named in the contract goal. In-goal, minimal (8 lines via the shared helper). Critic + QA confirmed sound."
+    rationale: "The contract goal ('insert sibling anchors and child snapshots') cannot be met without touching the file that builds those shapes; scattering the enrichment across index.ts callers would be worse."
+  - session: "235f9a0a-cd57-4318-a405-248da81eca41"
+    decision: "drift_check returned code 4 (spec-snapshot mismatch) for data-contracts.md — Brief 1's merged edit (8ba5b51) moved the file after Brief 2 was planned. Operator accepted focused re-approval; plan-approved + pragmatist-signed seated from the sealed bundle (mode: auto)."
+    rationale: "Expected dependency drift — the brief explicitly shares data-contracts.md with Brief 1. Other two snapshotted specs matched."
 
 governance:
   - brief_sequence: 1
@@ -121,3 +130,19 @@ governance:
     overrides_used:
       - "REPO_OS_ALLOW_REINIT (re-init stale taskdef-brief phase-state left by Prompt T session sharing this session id)"
     timestamp: "2026-07-01T01:24:00Z"
+  - brief_sequence: 2
+    gates_a:
+      A1: pass
+      A2: pass
+      A3: pass
+      A4: pass
+      A5: pass
+      A6: pass
+    gates_b:
+      B1: pass
+      B2: pass
+      B3: pass
+    overrides_used:
+      - "REPO_OS_ALLOW_REINIT (re-init stale phase-state from Brief 1's closed session sharing this branch/cwd -> same session id)"
+      - "drift-check code 4 focused re-approval (operator-accepted spec-snapshot drift on data-contracts.md from Brief 1 merge 8ba5b51)"
+    timestamp: "2026-07-01T02:35:00Z"
