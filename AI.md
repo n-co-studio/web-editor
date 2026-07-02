@@ -27,6 +27,7 @@ Agent-allowed:
 - docs/ai/logs/sessions/session-{id}.md (template mode: `.claude/local/sessions/session-{id}.md`)
 - docs/ai/logs/known-issues.md (template mode: `.claude/local/known-issues.md`)
 - docs/ai/governance/ (inter-session governance evidence)
+- docs/ai/eval/ (committed evaluation study records — nomenclature, study manifests, cell records, suite results, reports; Decision t-0046)
 - .claude/agents/orchestrator.md
 - .claude/agents/_agent-glossary.md
 - .claude/agents/_agent-workflow.md
@@ -49,6 +50,8 @@ On-demand (loaded by orchestrator.md triggers, not at session start):
 - docs/ai/workflow-appendix/session-type-finish.md (read when session type is finish-loop — detected at init from brief or operator signal)
 - docs/ai/workflow-appendix/session-type-automation.md (read when session type is automation — detected at init from runner context or operator signal)
 - docs/ai/workflow-appendix/session-type-queue-triage.md (read when session type is queue-triage — detected at init from Prompt Q invocation)
+- docs/ai/workflow-appendix/session-type-eval.md (read when session type is eval or eval-cell — detected at init from `prompt-eval-study.md` reference, `eval/*` branch, or operator signal; Decision t-0046)
+- docs/ai/prompts/prompt-eval-study.md (loaded by eval conductor session — entry point for eval session type; covers design → pre-register → launch → await → collect → judge → report → close; Decision t-0046)
 - docs/ai/knowledge-graph/graph.yaml, docs/ai/knowledge-graph/product-graph.yaml (read when task brief references files with graph nodes or session touches governance-adjacent paths; used for relevance scoring via `.claude/tools/kg-relevance.sh` which searches both graphs automatically; Decision 0034)
 - docs/ai/quality-gates.md (read in full when in verify or commit phase, or when QA agent is dispatched)
 - docs/ai/workflow.md (read when `upgrade_session_type` is called on an ephemeral session; read in full when in verify or commit phase, or when detailed close sequence reference is needed)
@@ -82,6 +85,8 @@ Automation layer (Decision 0017): optional headless runner in `.claude/.automati
 - **Feature Briefs** (`docs/spec/compiled/{active}/features/brief-{name}.md`): Lightweight feature specs for individual feature additions. Created via Prompt T significant feature path (two-brief task group). Template at `docs/spec/_templates/feature-brief.md`.
 - **Manifest** (`docs/spec/compiled/manifest.json`): Tracks the active version. Read `active` field to resolve the current spec path: `docs/spec/compiled/{active}/`.
 - If `manifest.json` has `"active": null`, specs have not been compiled yet. Run Prompt 0.
+- **Eval Study Brief** (`docs/spec/_templates/_eval-study-brief.md`): Pre-registration template for multi-arm evaluation studies (arms/tasks/n_reps, blinding, decision rule, threats). Fill before any cells run. See `docs/ai/eval/_nomenclature.md` and schemas at `.claude/.automation/schemas/eval-*.yaml` (Decision t-0046).
+- **Eval Results Report** (`docs/spec/_templates/_eval-report.md`): Raw-data-complete results report template. Filled from `study.yaml` + `cells/*.yaml` + suite TAP + judge outputs (Decision t-0046).
 
 ## Prompts
 - docs/ai/prompts/prompt-0-spec-builder.md

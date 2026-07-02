@@ -69,6 +69,13 @@ get_phases_for_type() {
     finish-loop)
       # Loop: reassess:fix (backward transition — reassess failure triggers another fix cycle)
       echo "init assess fix reassess commit close" ;;
+    eval)
+      # Conductor session: full governance applies to conductor's own committed records.
+      # Cells are NOT merged to main — they are evaluation artifacts (Decision t-0046).
+      echo "init design pre-register launch await collect judge report close" ;;
+    eval-cell)
+      # Per-cell agent in isolated worktree. No close-merge. Gate profile set by arm.
+      echo "init build commit close" ;;
     *)
       echo "" ;;
   esac
@@ -117,6 +124,13 @@ get_write_phases_for_type() {
       # their type updated in phase-state; get_session_type() returns the new type on the
       # next hook call, so upgrades are not affected.
       echo "" ;;
+    eval)
+      # Conductor writes committed study records: pre-register, collect, judge, report, close.
+      # launch is included because eval_launch_cells writes cell stub YAML records.
+      echo "pre-register launch collect judge report close" ;;
+    eval-cell)
+      # Per-cell agent: build and commit phases only. No close-merge write.
+      echo "build commit" ;;
     *)
       # Unknown session type — conservative: no phases
       echo "" ;;

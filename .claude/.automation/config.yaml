@@ -37,6 +37,10 @@ model_routing_overrides:
   queue-triage: haiku
   standard: sonnet
   taskgroup-merge: sonnet
+  # Evaluation study session types (Decision t-0046 Amendment 1)
+  eval: sonnet        # Conductor — orchestrates arms×tasks×reps; sonnet for reasoning quality
+  eval-cell: sonnet   # Per-cell agent run — task execution in isolated worktree
+  judge: haiku        # Read-only scoring; haiku sufficient for rubric application
 
 retention:
   queue_days: 30

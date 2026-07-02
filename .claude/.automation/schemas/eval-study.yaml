@@ -1,0 +1,78 @@
+# Eval Study Schema — pre-registered study manifest.
+# One file per study, committed to docs/ai/eval/{study_id}/study.yaml
+# before any cells run. The commit SHA is the pre-registration anchor.
+# See docs/ai/eval/_nomenclature.md for the full data model.
+# Decision t-0046.
+
+study:
+  study_id: ""                # {YYYYMMDD}-{lineage_slug}-v{n}
+                               # e.g. 20260701-repo-os-governance-ab-v5
+  lineage_id: ""              # kebab slug shared across studies in this lineage
+                               # e.g. repo-os-governance-ab
+  title: ""                   # human-readable study title
+  created_at: ""              # ISO 8601 timestamp — when study.yaml was authored
+  pre_registered_at: ""       # ISO 8601 timestamp — when the pre-registration commit landed
+                               # (filled in after the commit; leave blank until then)
+  run_context: ""             # template | project
+                               # template = target is the governance machinery itself
+                               # project  = target is a child repo's product code / prompts
+
+  target_repo: ""             # repo identifier (e.g. github.com/org/repo or "self")
+  target_baseline_sha: ""     # git SHA of the baseline commit under evaluation
+                               # (the commit arms are evaluated against)
+
+  arms:                       # list of held-constant conditions
+    - id: ""                  # short label, e.g. B0, CX, GV
+      label: ""               # human-readable, e.g. "Bare (no context)"
+      condition: ""           # one sentence: what is held constant in this arm
+
+  tasks:                      # list of probes (task types to run per arm × rep)
+    - id: ""                  # short label, e.g. T2, T4, T5
+      description: ""         # one sentence: what the agent is asked to do
+      what_it_probes: ""      # what capability or risk this task measures
+      baseline: ""            # expected behavior or pass criterion
+
+  n_reps: 0                   # number of repetitions per cell (arm × task)
+                               # minimum 3; 5+ recommended for narrow comparisons
+
+  judge:
+    model: ""                 # e.g. claude-opus-4-6
+    api_version: ""           # e.g. 2025-06-01
+    profile: ""               # path to judge config / rubric override (or "default")
+    rubric_ref: ""            # path to rubric file embedded in the study brief
+                               # e.g. docs/ai/eval/{study_id}/rubric.md
+
+  decision_rule:
+    metric: ""                # e.g. mean_blind_judge_score | pass_rate | hidden_rate
+    threshold: ""             # numeric threshold, e.g. 0.7
+    direction: ""             # above | below  (above = higher score favors treatment)
+    verdict_map:              # pre-registered interpretation of outcomes
+      above_threshold: ""     # e.g. "adopt GV arm — governance context improves accuracy"
+      below_threshold: ""     # e.g. "do not adopt — insufficient improvement"
+      tie: ""                 # e.g. "defer — collect more reps before deciding"
+
+  provenance:
+    orchestrator_model: ""    # model that orchestrated the cell runs
+    config_hash: ""           # sha256 of the runner config / prompt used
+    prompt_version: ""        # version tag of the orchestration prompt
+    runner_version: ""        # version of the automation runner (git SHA or tag)
+    env:
+      os: ""                  # e.g. darwin-25.5.0
+      shell: ""               # e.g. bash-3.2
+      model_api_version: ""   # API version used for cell runs
+
+  blinding:
+    seed: ""                  # random seed used to generate the shuffle manifest
+    shuffle_manifest_ref: ""  # path to shuffle-manifest.json
+                               # e.g. docs/ai/eval/{study_id}/shuffle-manifest.json
+
+  committed_root: ""          # docs/ai/eval/{study_id}/
+  raw_root: ""                # .claude/.automation/reports/eval/{study_id}/
+                               # (gitignored — see docs/ai/eval/_nomenclature.md)
+
+  status: registered          # registered | running | partial | completed | failed
+                               # registered = pre-registration complete, no cells run yet
+                               # running    = cells actively executing
+                               # partial    = some cells done, some failed/pending
+                               # completed  = all cells done, report filed
+                               # failed     = unrecoverable failure (see deviations.md)

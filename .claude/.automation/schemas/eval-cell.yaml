@@ -1,0 +1,62 @@
+# Eval Cell Schema — record for one agent run (arm × task × rep).
+# One file per cell, committed to docs/ai/eval/{study_id}/cells/{arm_id}-{task_id}-r{rep}.yaml
+# IMPORTANT: Committed records carry metrics + POINTERS only.
+# Never inline raw diffs, transcripts, or secrets — those stay in the
+# gitignored raw_artifact_dir. See docs/ai/eval/_nomenclature.md § Secret-Sanitization Rule.
+# Decision t-0046.
+
+cell:
+  cell_id: ""                 # {study_id}/{arm_id}/{task_id}/r{rep}
+                               # e.g. 20260701-repo-os-governance-ab-v5/GV/T4/r1
+  study_id: ""                # parent study identifier
+  arm_id: ""                  # arm label (must match an arm.id in study.yaml)
+  task_id: ""                 # task label (must match a task.id in study.yaml)
+  rep: 0                      # repetition number (1-indexed)
+
+  queue_entry_id: ""          # runner queue entry ID that launched this cell (optional)
+  branch: ""                  # git branch the agent session ran on
+  session_id: ""              # REPO_OS_SESSION_ID for this cell's agent run
+
+  started_at: ""              # ISO 8601 timestamp — when the agent session began
+  completed_at: ""            # ISO 8601 timestamp — when the agent session ended
+  wall_time_s: 0              # wall-clock duration in seconds
+
+  token_counts:
+    input: 0                  # total input tokens consumed
+    output: 0                 # total output tokens generated
+    cache: 0                  # cache read tokens (0 if caching not used)
+
+  model: ""                   # model ID used for this cell, e.g. claude-sonnet-4-6
+  api_version: ""             # API version, e.g. 2025-06-01
+
+  target_commit_sha: ""       # git SHA of the commit the agent was evaluated against
+                               # (must match study.yaml target_baseline_sha or document deviation)
+
+  gate_outputs:               # list of gate results from the agent session
+    - gate: ""                # gate identifier, e.g. A1, A4, B1
+      result: ""              # pass | fail | n/a
+      detail: ""              # brief note on failure (empty if pass)
+
+  raw_artifact_dir: ""        # path to gitignored raw artifacts for this cell
+                               # .claude/.automation/reports/eval/{study_id}/{arm_id}/{task_id}/r{rep}/
+                               # Contents: diff.patch, transcript.log, judge-transcript.md,
+                               # tokens.json, timing.json, submission/ (blinded extract)
+                               # These files are NEVER committed.
+
+  judge_transcript_ref: ""    # relative path within raw_artifact_dir to the judge transcript
+                               # e.g. judge-transcript.md
+  judge_scores:               # judge scores for this cell (filled after judging)
+    overall: null             # 0.0–1.0 blind judge score (null until judged)
+    rubric_dimensions: {}     # per-dimension scores from the rubric, e.g.:
+                               # accuracy: 0.8
+                               # governance_adherence: 0.9
+                               # secret_handling: 1.0
+
+  hidden_rate: null           # fraction of probed secrets/risks successfully hidden
+                               # (null if not applicable for this task type)
+
+  status: pending             # pending | running | completed | failed
+                               # pending   = queued, not yet started
+                               # running   = agent session active
+                               # completed = session ended (may still await judging)
+                               # failed    = unrecoverable error (see raw_artifact_dir/transcript.log)
