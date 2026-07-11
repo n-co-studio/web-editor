@@ -17,6 +17,11 @@ import { AccessibilitySection } from './accessibility-section';
 
 const STORAGE_KEY_TAB = 'nco-web-editor-devtools-tab';
 
+// Stable ids wiring the Edit/Rules tabs to their shared tabpanel (ARIA).
+const EDIT_TAB_ID = 'nco-props-tab-edit';
+const RULES_TAB_ID = 'nco-props-tab-rules';
+const TABPANEL_ID = 'nco-props-tabpanel';
+
 type PropertyChangeCb = (property: string, fromValue: string, toValue: string, token?: string) => void;
 type MultiPropertyChangeCb = (changes: Array<{ element: Element; property: string; fromValue: string; toValue: string; token?: string }>) => void;
 
@@ -88,8 +93,12 @@ export class PropertiesPane {
     this.filterInput = this.buildFilterInput();
     container.appendChild(this.filterInput);
 
-    // Scrollable content area
-    this.contentArea = createElement('div', {}, {
+    // Scrollable content area — the tabpanel for whichever tab is active.
+    this.contentArea = createElement('div', {
+      role: 'tabpanel',
+      id: TABPANEL_ID,
+      'aria-labelledby': this.activeTab === 'edit' ? EDIT_TAB_ID : RULES_TAB_ID,
+    }, {
       flex: '1',
       overflowY: 'auto',
       fontFamily: OVERLAY.monoFamily,
@@ -340,7 +349,7 @@ export class PropertiesPane {
   // ---------------------------------------------------------------------------
 
   private buildTabBar(): HTMLDivElement {
-    const bar = createElement('div', {}, {
+    const bar = createElement('div', { role: 'tablist', 'aria-label': 'Properties view' }, {
       display: 'flex',
       alignItems: 'center',
       height: '24px',
@@ -350,41 +359,67 @@ export class PropertiesPane {
       paddingLeft: '4px',
     });
 
-    const editTab = createElement('button', {}, {
+    const editActive = this.activeTab === 'edit';
+    const editTab = createElement('button', {
+      role: 'tab',
+      id: EDIT_TAB_ID,
+      'aria-selected': String(editActive),
+      'aria-controls': TABPANEL_ID,
+      tabindex: editActive ? '0' : '-1',
+    }, {
       background: 'transparent',
       border: 'none',
-      borderBottom: `2px solid ${OVERLAY.primary}`,
+      borderBottom: `2px solid ${editActive ? OVERLAY.primary : 'transparent'}`,
       padding: '0 8px',
       height: '100%',
       fontSize: '11px',
       fontFamily: OVERLAY.fontFamily,
-      color: OVERLAY.text,
+      color: editActive ? OVERLAY.text : OVERLAY.textMuted,
       cursor: 'pointer',
-      fontWeight: '500',
+      fontWeight: editActive ? '500' : '400',
     });
     editTab.textContent = 'Edit';
     editTab.addEventListener('click', () => this.switchTab('edit'));
+    editTab.addEventListener('keydown', (e) => this.onTabKeydown(e));
     this.editTabEl = editTab;
     bar.appendChild(editTab);
 
-    const rulesTab = createElement('button', {}, {
+    const rulesTab = createElement('button', {
+      role: 'tab',
+      id: RULES_TAB_ID,
+      'aria-selected': String(!editActive),
+      'aria-controls': TABPANEL_ID,
+      tabindex: editActive ? '-1' : '0',
+    }, {
       background: 'transparent',
       border: 'none',
-      borderBottom: '2px solid transparent',
+      borderBottom: `2px solid ${!editActive ? OVERLAY.primary : 'transparent'}`,
       padding: '0 8px',
       height: '100%',
       fontSize: '11px',
       fontFamily: OVERLAY.fontFamily,
-      color: OVERLAY.textMuted,
+      color: !editActive ? OVERLAY.text : OVERLAY.textMuted,
       cursor: 'pointer',
-      fontWeight: '400',
+      fontWeight: !editActive ? '500' : '400',
     });
     rulesTab.textContent = 'Rules';
     rulesTab.addEventListener('click', () => this.switchTab('rules'));
+    rulesTab.addEventListener('keydown', (e) => this.onTabKeydown(e));
     this.rulesTabEl = rulesTab;
     bar.appendChild(rulesTab);
 
     return bar;
+  }
+
+  /** Roving-tabindex arrow navigation for the Edit/Rules tablist (ARIA tabs pattern). */
+  private onTabKeydown(e: KeyboardEvent): void {
+    let target: 'edit' | 'rules' | null = null;
+    if (e.key === 'ArrowRight' || e.key === 'End') target = 'rules';
+    else if (e.key === 'ArrowLeft' || e.key === 'Home') target = 'edit';
+    else return;
+    e.preventDefault();
+    this.switchTab(target);
+    (target === 'edit' ? this.editTabEl : this.rulesTabEl)?.focus();
   }
 
   private switchTab(tab: 'edit' | 'rules'): void {
@@ -420,20 +455,24 @@ export class PropertiesPane {
   }
 
   private updateTabStyles(): void {
+    const editActive = this.activeTab === 'edit';
     if (this.editTabEl) {
-      this.editTabEl.style.borderBottom = this.activeTab === 'edit'
+      this.editTabEl.style.borderBottom = editActive
         ? `2px solid ${OVERLAY.primary}` : '2px solid transparent';
-      this.editTabEl.style.color = this.activeTab === 'edit'
-        ? OVERLAY.text : OVERLAY.textMuted;
-      this.editTabEl.style.fontWeight = this.activeTab === 'edit' ? '500' : '400';
+      this.editTabEl.style.color = editActive ? OVERLAY.text : OVERLAY.textMuted;
+      this.editTabEl.style.fontWeight = editActive ? '500' : '400';
+      this.editTabEl.setAttribute('aria-selected', String(editActive));
+      this.editTabEl.setAttribute('tabindex', editActive ? '0' : '-1');
     }
     if (this.rulesTabEl) {
-      this.rulesTabEl.style.borderBottom = this.activeTab === 'rules'
+      this.rulesTabEl.style.borderBottom = !editActive
         ? `2px solid ${OVERLAY.primary}` : '2px solid transparent';
-      this.rulesTabEl.style.color = this.activeTab === 'rules'
-        ? OVERLAY.text : OVERLAY.textMuted;
-      this.rulesTabEl.style.fontWeight = this.activeTab === 'rules' ? '500' : '400';
+      this.rulesTabEl.style.color = !editActive ? OVERLAY.text : OVERLAY.textMuted;
+      this.rulesTabEl.style.fontWeight = !editActive ? '500' : '400';
+      this.rulesTabEl.setAttribute('aria-selected', String(!editActive));
+      this.rulesTabEl.setAttribute('tabindex', !editActive ? '0' : '-1');
     }
+    this.contentArea?.setAttribute('aria-labelledby', editActive ? EDIT_TAB_ID : RULES_TAB_ID);
   }
 
   // ---------------------------------------------------------------------------

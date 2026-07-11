@@ -727,8 +727,8 @@ export class FloatingToolbar {
     });
     toolsSection.appendChild(sep);
 
-    // Tools wrapper
-    const wrapper = createElement('div', {}, {
+    // Tools wrapper — a radio group: exactly one editing tool is active at a time.
+    const wrapper = createElement('div', { role: 'radiogroup', 'aria-label': 'Editing tool' }, {
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
@@ -749,6 +749,8 @@ export class FloatingToolbar {
           this.toolCb?.(mode);
         }
       });
+      btn.setAttribute('role', 'radio');
+      btn.addEventListener('keydown', (e) => this.onToolKeydown(e, mode));
       this.toolButtons.set(mode, btn);
       wrapper.appendChild(btn);
     }
@@ -892,7 +894,9 @@ export class FloatingToolbar {
   ): HTMLButtonElement {
     // `aria-label` mirrors the visible `title` so the icon-only button carries a
     // stable accessible name even when the tooltip text is later reassigned (e.g.
-    // disabled-state titles). Setters that toggle active state add `aria-pressed`.
+    // disabled-state titles). State is layered on per button kind: tool buttons
+    // get radio semantics (aria-checked) via applyButtonStyle; the toggle buttons
+    // (grid/rulers/notes/review/devtools) get aria-pressed via their setters.
     const btn = createElement('button', { title, 'aria-label': title }, {
       width: '32px',
       height: '32px',
@@ -953,7 +957,18 @@ export class FloatingToolbar {
     const isActive = this.activeMode === mode;
     const disabledReason = this.disabledTools.get(mode);
 
-    btn.setAttribute('aria-pressed', String(isActive));
+    // Radio semantics apply only to real tool buttons. buildIconButton's
+    // mouseleave handler calls this for every icon button (grid, rulers, undo…),
+    // so guard against writing radio ARIA onto non-tool buttons — that would
+    // clobber their aria-pressed and drop them from the tab order.
+    if (this.toolButtons.get(mode) === btn) {
+      // aria-checked reflects the single active tool; a roving tabindex keeps
+      // exactly one tool in the tab order (the active one, or the default cursor
+      // before any tool is chosen).
+      btn.setAttribute('aria-checked', String(isActive));
+      const tabbable = isActive || (this.activeMode === null && mode === TOOL_ORDER[0]);
+      btn.setAttribute('tabindex', tabbable ? '0' : '-1');
+    }
 
     if (disabledReason) {
       btn.style.opacity = '0.3';
@@ -976,6 +991,35 @@ export class FloatingToolbar {
       btn.style.background = 'transparent';
       btn.style.color = OVERLAY.textMuted;
       btn.title = TOOL_LABELS[mode];
+    }
+  }
+
+  /**
+   * Radio-group keyboard navigation (ARIA tabs/radio pattern): arrow keys move to
+   * the next/previous enabled tool (wrapping), Home/End jump to the first/last.
+   * Moving selects the tool and shifts focus, keeping the roving tabindex intact.
+   */
+  private onToolKeydown(e: KeyboardEvent, current: EditMode): void {
+    const n = TOOL_ORDER.length;
+    let dir: number;
+    let start = TOOL_ORDER.indexOf(current);
+    switch (e.key) {
+      case 'ArrowDown': case 'ArrowRight': dir = 1; break;
+      case 'ArrowUp': case 'ArrowLeft': dir = -1; break;
+      case 'Home': dir = 1; start = -1; break;
+      case 'End': dir = -1; start = n; break;
+      default: return;
+    }
+    e.preventDefault();
+    let idx = start;
+    for (let i = 0; i < n; i++) {
+      idx = (idx + dir + n) % n;
+      const mode = TOOL_ORDER[idx];
+      if (!this.disabledTools.has(mode)) {
+        this.toolCb?.(mode);
+        this.toolButtons.get(mode)?.focus();
+        return;
+      }
     }
   }
 
@@ -1051,7 +1095,12 @@ export class FloatingToolbar {
     });
 
     // Modal
-    const modal = createElement('div', { role: 'alertdialog', 'aria-label': 'Confirm reset' }, {
+    const modal = createElement('div', {
+      role: 'alertdialog',
+      'aria-modal': 'true',
+      'aria-labelledby': 'nco-reset-heading',
+      'aria-describedby': 'nco-reset-desc',
+    }, {
       background: OVERLAY.bg,
       border: `1px solid ${OVERLAY.border}`,
       borderRadius: OVERLAY.radiusMd,
@@ -1065,7 +1114,7 @@ export class FloatingToolbar {
       gap: '12px',
     });
 
-    const heading = createElement('div', {}, {
+    const heading = createElement('div', { id: 'nco-reset-heading' }, {
       fontSize: OVERLAY.headingSize,
       fontWeight: OVERLAY.headingWeight,
       color: OVERLAY.text,
@@ -1074,7 +1123,7 @@ export class FloatingToolbar {
     heading.textContent = 'Reset all changes?';
     modal.appendChild(heading);
 
-    const desc = createElement('div', {}, {
+    const desc = createElement('div', { id: 'nco-reset-desc' }, {
       fontSize: OVERLAY.bodySize,
       color: OVERLAY.textMuted,
       fontFamily: OVERLAY.fontFamily,
@@ -1108,13 +1157,40 @@ export class FloatingToolbar {
       if (e.target === overlay) this.hideResetConfirmation();
     });
 
+    // Modal keyboard contract: Escape cancels; Tab/Shift+Tab are trapped within
+    // the two action buttons so focus cannot escape the dialog to the page behind.
+    const focusables = [cancelBtn, confirmBtn];
+    modal.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        this.hideResetConfirmation();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      e.preventDefault();
+      const active = this.shadow.activeElement as HTMLElement | null;
+      const idx = active ? focusables.indexOf(active as HTMLButtonElement) : -1;
+      if (idx === -1) {
+        // Focus escaped the trap — re-enter at the natural end (first for Tab,
+        // last for Shift+Tab). Don't feed a synthetic index into the wrap math.
+        focusables[e.shiftKey ? focusables.length - 1 : 0].focus();
+        return;
+      }
+      const nextIdx = (idx + (e.shiftKey ? -1 : 1) + focusables.length) % focusables.length;
+      focusables[nextIdx].focus();
+    });
+
     this.confirmOverlay = overlay;
     this.shadow.appendChild(overlay);
+    // Initial focus lands on the non-destructive action (ARIA alertdialog pattern).
+    cancelBtn.focus();
   }
 
   private hideResetConfirmation(): void {
     this.confirmOverlay?.remove();
     this.confirmOverlay = null;
+    // Restore focus to the control that opened the dialog.
+    this.resetBtn?.focus();
   }
 
   // -----------------------------------------------------------------------

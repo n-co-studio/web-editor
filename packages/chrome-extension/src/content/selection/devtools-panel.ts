@@ -26,6 +26,9 @@ type MultiPropertyChangeCallback = (changes: Array<{ element: Element; property:
 const STORAGE_KEY_HEIGHT = 'nco-web-editor-devtools-height';
 const STORAGE_KEY_SPLIT = 'nco-web-editor-devtools-split';
 const MIN_PANE_WIDTH = 200;
+// Arrow-key resize steps for keyboard-operable separators.
+const SPLIT_KEY_STEP = 0.02; // 2% of the split container per keypress
+const HEIGHT_KEY_STEP = 16; // px per keypress for the panel height handle
 
 /**
  * Chrome DevTools-style bottom panel with a three-column split view.
@@ -213,8 +216,11 @@ export class DevToolsPanel {
       gap: '8px',
     });
 
+    // Visible column headings — the accessible names live on the pane regions
+    // below (role="region" aria-label), so hide these to avoid double announcement.
     const elementsLabel = createText('span', 'Elements', 'heading');
     elementsLabel.style.fontSize = '11px';
+    elementsLabel.setAttribute('aria-hidden', 'true');
     headerBar.appendChild(elementsLabel);
 
     const dividerDot1 = createElement('div', {}, {
@@ -226,6 +232,7 @@ export class DevToolsPanel {
 
     const propertiesLabel = createText('span', 'Properties', 'heading');
     propertiesLabel.style.fontSize = '11px';
+    propertiesLabel.setAttribute('aria-hidden', 'true');
     headerBar.appendChild(propertiesLabel);
 
     const dividerDot2 = createElement('div', {}, {
@@ -238,6 +245,7 @@ export class DevToolsPanel {
     const consoleLabel = createText('span', 'Console', 'heading');
     consoleLabel.style.fontSize = '11px';
     consoleLabel.style.flex = '1';
+    consoleLabel.setAttribute('aria-hidden', 'true');
     headerBar.appendChild(consoleLabel);
 
     const closeBtn = createButton('\u00d7', 'ghost', () => {
@@ -259,7 +267,7 @@ export class DevToolsPanel {
     });
 
     // Left pane (DOM inspector)
-    const leftPane = createElement('div', {}, {
+    const leftPane = createElement('div', { role: 'region', 'aria-label': 'Elements' }, {
       flex: `0 0 ${this.leftRatio * 100}%`,
       display: 'flex',
       flexDirection: 'column',
@@ -316,7 +324,7 @@ export class DevToolsPanel {
     splitContainer.appendChild(divider1);
 
     // Middle pane (Properties) — mount PropertiesPane
-    const middlePane = createElement('div', {}, {
+    const middlePane = createElement('div', { role: 'region', 'aria-label': 'Properties' }, {
       flex: `0 0 ${this.middleRatio * 100}%`,
       display: 'flex',
       flexDirection: 'column',
@@ -352,7 +360,7 @@ export class DevToolsPanel {
     splitContainer.appendChild(divider2);
 
     // Right pane (console) — mount ConsolePane
-    const rightPane = createElement('div', {}, {
+    const rightPane = createElement('div', { role: 'region', 'aria-label': 'Console' }, {
       flex: '1',
       display: 'flex',
       flexDirection: 'column',
@@ -418,6 +426,30 @@ export class DevToolsPanel {
     handle.addEventListener('pointerdown', onPointerDown);
     handle.addEventListener('pointermove', onPointerMove);
     handle.addEventListener('pointerup', onPointerUp);
+
+    // Keyboard operability — focusable horizontal separator with arrow-key resize.
+    handle.setAttribute('role', 'separator');
+    handle.setAttribute('tabindex', '0');
+    handle.setAttribute('aria-orientation', 'horizontal');
+    handle.setAttribute('aria-label', 'Resize panel height');
+    const syncValue = () => {
+      const maxHeight = Math.floor(window.innerHeight * DEVTOOLS_MAX_HEIGHT_RATIO);
+      handle.setAttribute('aria-valuemin', String(DEVTOOLS_MIN_HEIGHT));
+      handle.setAttribute('aria-valuemax', String(maxHeight));
+      handle.setAttribute('aria-valuenow', String(this.panelHeight));
+    };
+    syncValue();
+    handle.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+      e.preventDefault();
+      const maxHeight = Math.floor(window.innerHeight * DEVTOOLS_MAX_HEIGHT_RATIO);
+      // ArrowUp grows the panel (it is docked to the bottom edge).
+      const next = this.panelHeight + (e.key === 'ArrowUp' ? HEIGHT_KEY_STEP : -HEIGHT_KEY_STEP);
+      this.panelHeight = Math.max(DEVTOOLS_MIN_HEIGHT, Math.min(next, maxHeight));
+      panel.style.height = `${this.panelHeight}px`;
+      syncValue();
+      this.saveHeight(this.panelHeight);
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -461,6 +493,30 @@ export class DevToolsPanel {
     divider.addEventListener('pointerdown', onPointerDown);
     divider.addEventListener('pointermove', onPointerMove);
     divider.addEventListener('pointerup', onPointerUp);
+
+    // Keyboard operability — focusable separator with arrow-key resize.
+    divider.setAttribute('role', 'separator');
+    divider.setAttribute('tabindex', '0');
+    divider.setAttribute('aria-orientation', 'vertical');
+    divider.setAttribute('aria-label', 'Resize Elements pane');
+    divider.setAttribute('aria-valuemin', '0');
+    divider.setAttribute('aria-valuemax', '100');
+    const syncValue = () =>
+      divider.setAttribute('aria-valuenow', String(Math.round(this.leftRatio * 100)));
+    syncValue();
+    divider.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      const containerWidth = splitContainer.offsetWidth;
+      if (containerWidth === 0) return;
+      const minRatio = MIN_PANE_WIDTH / containerWidth;
+      const maxRatio = 1 - (2 * MIN_PANE_WIDTH) / containerWidth;
+      const next = this.leftRatio + (e.key === 'ArrowRight' ? SPLIT_KEY_STEP : -SPLIT_KEY_STEP);
+      this.leftRatio = Math.max(minRatio, Math.min(next, maxRatio));
+      leftPane.style.flex = `0 0 ${this.leftRatio * 100}%`;
+      syncValue();
+      this.saveSplit();
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -504,6 +560,30 @@ export class DevToolsPanel {
     divider.addEventListener('pointerdown', onPointerDown);
     divider.addEventListener('pointermove', onPointerMove);
     divider.addEventListener('pointerup', onPointerUp);
+
+    // Keyboard operability — focusable separator with arrow-key resize.
+    divider.setAttribute('role', 'separator');
+    divider.setAttribute('tabindex', '0');
+    divider.setAttribute('aria-orientation', 'vertical');
+    divider.setAttribute('aria-label', 'Resize Properties pane');
+    divider.setAttribute('aria-valuemin', '0');
+    divider.setAttribute('aria-valuemax', '100');
+    const syncValue = () =>
+      divider.setAttribute('aria-valuenow', String(Math.round(this.middleRatio * 100)));
+    syncValue();
+    divider.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      const containerWidth = splitContainer.offsetWidth;
+      if (containerWidth === 0) return;
+      const minRatio = MIN_PANE_WIDTH / containerWidth;
+      const maxRatio = 1 - this.leftRatio - MIN_PANE_WIDTH / containerWidth;
+      const next = this.middleRatio + (e.key === 'ArrowRight' ? SPLIT_KEY_STEP : -SPLIT_KEY_STEP);
+      this.middleRatio = Math.max(minRatio, Math.min(next, maxRatio));
+      middlePane.style.flex = `0 0 ${this.middleRatio * 100}%`;
+      syncValue();
+      this.saveSplit();
+    });
   }
 
   // ---------------------------------------------------------------------------
