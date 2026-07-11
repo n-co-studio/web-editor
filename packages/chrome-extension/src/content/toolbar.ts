@@ -334,6 +334,7 @@ export class FloatingToolbar {
   setRulersEnabled(enabled: boolean): void {
     this.rulersEnabled = enabled;
     if (!this.rulersBtn) return;
+    this.rulersBtn.setAttribute('aria-pressed', String(enabled));
     if (enabled) {
       this.rulersBtn.style.background = 'rgba(6, 182, 212, 0.12)';
       this.rulersBtn.style.color = OVERLAY.primary;
@@ -379,6 +380,7 @@ export class FloatingToolbar {
   /** Sync notes button active state with panel open/closed. */
   setNotesOpen(open: boolean): void {
     if (!this.notesBtn) return;
+    this.notesBtn.setAttribute('aria-pressed', String(open));
     if (open) {
       this.notesBtn.style.background = 'rgba(6, 182, 212, 0.12)';
       this.notesBtn.style.color = OVERLAY.primary;
@@ -392,6 +394,7 @@ export class FloatingToolbar {
   setGridEnabled(enabled: boolean): void {
     this.gridEnabled = enabled;
     if (!this.gridBtn) return;
+    this.gridBtn.setAttribute('aria-pressed', String(enabled));
     if (enabled) {
       this.gridBtn.style.background = 'rgba(6, 182, 212, 0.12)';
       this.gridBtn.style.color = OVERLAY.primary;
@@ -422,6 +425,7 @@ export class FloatingToolbar {
     else this.activeInspectors.delete(mode);
     const btn = this.inspectorButtons.get(mode);
     if (!btn) return;
+    btn.setAttribute('aria-pressed', String(open));
     if (open) {
       btn.style.background = 'rgba(6, 182, 212, 0.12)';
       btn.style.color = OVERLAY.primary;
@@ -447,6 +451,7 @@ export class FloatingToolbar {
   setReviewPanelOpen(open: boolean): void {
     this.reviewOpen = open;
     if (!this.reviewBtn) return;
+    this.reviewBtn.setAttribute('aria-pressed', String(open));
     if (open) {
       this.reviewBtn.style.background = `rgba(251, 113, 133, 0.15)`;
       this.reviewBtn.style.color = OVERLAY.accent;
@@ -869,6 +874,14 @@ export class FloatingToolbar {
     // Initialize undo/redo as disabled
     this.setUndoRedoState(false, false);
 
+    // Seed toggle buttons with an explicit aria-pressed so assistive tech
+    // announces them as toggles from first render; index.ts re-syncs real state.
+    this.setGridEnabled(this.gridEnabled);
+    this.setRulersEnabled(this.rulersEnabled);
+    this.setNotesOpen(false);
+    this.setReviewPanelOpen(this.reviewOpen);
+    this.setInspectorOpen('devtools', this.activeInspectors.has('devtools'));
+
     return container;
   }
 
@@ -877,7 +890,10 @@ export class FloatingToolbar {
     title: string,
     onClick: () => void,
   ): HTMLButtonElement {
-    const btn = createElement('button', { title }, {
+    // `aria-label` mirrors the visible `title` so the icon-only button carries a
+    // stable accessible name even when the tooltip text is later reassigned (e.g.
+    // disabled-state titles). Setters that toggle active state add `aria-pressed`.
+    const btn = createElement('button', { title, 'aria-label': title }, {
       width: '32px',
       height: '32px',
       border: 'none',
@@ -893,7 +909,8 @@ export class FloatingToolbar {
       transition: 'background 0.1s, color 0.1s',
     }) as HTMLButtonElement;
 
-    const iconSpan = createElement('span', {}, {
+    // Decorative glyph — the accessible name comes from the button's aria-label.
+    const iconSpan = createElement('span', { 'aria-hidden': 'true' }, {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -935,6 +952,8 @@ export class FloatingToolbar {
   private applyButtonStyle(btn: HTMLButtonElement, mode: EditMode): void {
     const isActive = this.activeMode === mode;
     const disabledReason = this.disabledTools.get(mode);
+
+    btn.setAttribute('aria-pressed', String(isActive));
 
     if (disabledReason) {
       btn.style.opacity = '0.3';

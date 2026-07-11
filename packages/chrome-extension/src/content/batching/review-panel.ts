@@ -404,7 +404,7 @@ export class ReviewPanel {
     text.style.wordBreak = 'break-word';
     row.appendChild(text);
 
-    const delBtn = createElement('button', { title: 'Remove note' }, {
+    const delBtn = createElement('button', { title: 'Remove note', 'aria-label': 'Remove note' }, {
       background: 'none',
       border: 'none',
       color: OVERLAY.textMuted,
@@ -559,6 +559,7 @@ export class ReviewPanel {
           });
           removeBtn.textContent = '\u00d7';
           removeBtn.title = 'Remove this change';
+          removeBtn.setAttribute('aria-label', 'Remove this change');
           removeBtn.addEventListener('click', () => {
             this.queue.remove(diff.id);
           });
@@ -607,6 +608,7 @@ export class ReviewPanel {
             });
             removeBtn.textContent = '\u00d7';
             removeBtn.title = 'Remove this change';
+            removeBtn.setAttribute('aria-label', 'Remove this change');
             removeBtn.addEventListener('click', () => {
               this.queue.remove(diff.id);
             });
@@ -656,6 +658,7 @@ export class ReviewPanel {
             });
             removeBtn.textContent = '\u00d7';
             removeBtn.title = 'Remove this change';
+            removeBtn.setAttribute('aria-label', 'Remove this change');
             removeBtn.addEventListener('click', () => {
               this.queue.remove(diff.id);
             });
@@ -705,6 +708,7 @@ export class ReviewPanel {
             });
             removeBtn.textContent = '×';
             removeBtn.title = 'Remove this change';
+            removeBtn.setAttribute('aria-label', 'Remove this change');
             removeBtn.addEventListener('click', () => {
               this.queue.remove(diff.id);
             });
@@ -754,6 +758,7 @@ export class ReviewPanel {
             });
             removeBtn.textContent = '\u00d7';
             removeBtn.title = 'Remove this change';
+            removeBtn.setAttribute('aria-label', 'Remove this change');
             removeBtn.addEventListener('click', () => {
               this.queue.remove(diff.id);
             });
@@ -816,6 +821,7 @@ export class ReviewPanel {
             });
             removeBtn.textContent = '\u00d7';
             removeBtn.title = 'Remove this change';
+            removeBtn.setAttribute('aria-label', 'Remove this change');
             removeBtn.addEventListener('click', () => {
               this.queue.remove(diff.id);
             });
