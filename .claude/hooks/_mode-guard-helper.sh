@@ -91,6 +91,7 @@ is_carved_out() {
         .gitignore) return 0 ;;
         docs/ai/prompts/*) return 0 ;;
         docs/ai/decisions/*) return 0 ;;
+        docs/ai/eval/*) return 0 ;;
         docs/ai/logs/*) return 0 ;;
         docs/ai/workflow.md) return 0 ;;
         docs/ai/quality-gates.md|docs/ai/hook-rules-summary.md|docs/ai/quality-gates-summary.md|docs/ai/workflow-summary.md) return 0 ;;
@@ -110,6 +111,7 @@ is_carved_out() {
       ;;
     child)
       case "$p" in
+        docs/ai/eval/*) return 0 ;;
         docs/ai/governance/*) return 0 ;;
         docs/ai/logs/*) return 0 ;;
         docs/ai/task-groups/_*) return 1 ;;
@@ -125,6 +127,7 @@ is_carved_out() {
       ;;
     autonomous)
       case "$p" in
+        docs/ai/eval/*) return 0 ;;
         docs/ai/logs/*) return 0 ;;
         docs/ai/task-groups/_*) return 1 ;;
         docs/ai/task-groups/*.yaml) return 0 ;;

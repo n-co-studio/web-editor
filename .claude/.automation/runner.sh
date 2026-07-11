@@ -1131,7 +1131,7 @@ if [ "$DAEMON_MODE" = false ]; then
     "Entry $BRIEF_ID started (single-shot)" 2>/dev/null || true
 
   # Execute (direct call — no subshell, outcome in globals)
-  _run_single_entry "$BRIEF_ID" "$PROMPT" "$SESSION_TYPE" "$EXISTING_BRANCH" "build" "false"
+  _run_single_entry "$BRIEF_ID" "$PROMPT" "$SESSION_TYPE" "$EXISTING_BRANCH" "${_QE_PERMISSION_PROFILE:-build}" "false"
 
   # Solo merge + branch seal (Phase 2: extracted from _run_single_entry)
   _solo_merge_if_needed "$_RESULT_BRANCH" "false" "$BRIEF_ID" ""
@@ -1540,6 +1540,7 @@ while true; do
   ENTRY_BRIEF_PATH="$_QE_BRIEF_PATH"
   ENTRY_WORK_ORDER_ID="$_QE_WORK_ORDER_ID"
   ENTRY_PUSH="${_QE_PUSH_ON_COMPLETE:-false}"
+  ENTRY_PERMISSION_PROFILE="${_QE_PERMISSION_PROFILE:-build}"
 
   echo "Processing entry: $ENTRY_ID (type: $ENTRY_SESSION_TYPE)" >&2
 
@@ -1716,7 +1717,7 @@ while true; do
   # --- Execute (direct call — no subshell, outcome in globals) ---
   _CURRENT_ENTRY_ID="$ENTRY_ID"
   _write_health "running"
-  _run_single_entry "$ENTRY_ID" "$PROMPT" "$ENTRY_SESSION_TYPE" "$ENTRY_BRANCH" "build" "$ENTRY_PUSH"
+  _run_single_entry "$ENTRY_ID" "$PROMPT" "$ENTRY_SESSION_TYPE" "$ENTRY_BRANCH" "$ENTRY_PERMISSION_PROFILE" "$ENTRY_PUSH"
 
   # --- Stop heartbeat ---
   _stop_heartbeat

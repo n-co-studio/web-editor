@@ -1,0 +1,86 @@
+identity:
+  group_name: "eval-study-infrastructure"
+  created_by_session: "daemon-20260701-134124-67409"
+  created_date: "2026-07-01"
+  execution: sequential
+
+conventions:
+  # REQUIRE-level bindings (all briefs must follow)
+  session_type: taskgroup
+  branch: "feature/eval-study-infrastructure"
+  decision_ref: "t-0046-evaluation-study-infrastructure.md"
+  naming:
+    study_id_pattern: "{YYYYMMDD}-{lineage_slug}-v{n}"
+    cell_id_pattern: "{study_id}/{arm_id}/{task_id}/r{rep}"
+    cell_branch_pattern: "eval/{study_id}/{arm_id}/{task_id}/r{rep}"
+    committed_root: "docs/ai/eval/{study_id}/"
+    raw_root: ".claude/.automation/reports/eval/{study_id}/"
+  schemas:
+    study: ".claude/.automation/schemas/eval-study.yaml"
+    cell: ".claude/.automation/schemas/eval-cell.yaml"
+    suite: ".claude/.automation/schemas/eval-suite.yaml"
+  templates:
+    study_brief: "docs/spec/_templates/_eval-study-brief.md"
+    report: "docs/spec/_templates/_eval-report.md"
+  isolation:
+    per_cell_worktree: true
+    cell_close_merge: false
+    branch_disposition: prune
+
+briefs:
+  - title: "Evaluation Data Model, Templates & Conventions"
+    sequence: 1
+    session: "daemon-20260701-134124-67409"
+    branch: "feature/eval-study-infrastructure"
+    status: complete
+    next_brief: "Brief 2 — Evaluation Orchestration"
+    boundaries:
+      - "docs/ai/eval/_nomenclature.md"
+      - ".claude/.automation/schemas/eval-*.yaml"
+      - "docs/spec/_templates/_eval-study-brief.md"
+      - "docs/spec/_templates/_eval-report.md"
+      - ".claude/hooks/_mode-guard-helper.sh"
+      - "docs/ai/decisions/t-0046-evaluation-study-infrastructure.md"
+      - "docs/ai/decisions/t-manifest.txt"
+      - "AI.md"
+      - ".gitignore"
+    session_decisions:
+      - "t-0046-evaluation-study-infrastructure.md"
+
+  - title: "Evaluation Orchestration: Conductor, Session Types & Judge"
+    sequence: 2
+    session: "daemon-20260701-140242-67409"
+    branch: "feature/eval-study-infrastructure"
+    status: in_progress
+    next_brief: null
+    final_brief: true
+    boundaries:
+      - ".claude/.automation/lib/eval-conductor.sh"
+      - "docs/ai/workflow-appendix/session-type-eval.md"
+      - "docs/ai/prompts/prompt-eval-study.md"
+      - ".claude/.automation/lib/permission-profiles.sh"
+      - ".claude/.automation/config.yaml"
+      - ".claude/agents/_agent-glossary.md"
+      - ".claude/hooks/_phase-helper.sh"
+      - "AI.md"
+      - "docs/ai/decisions/t-0046-evaluation-study-infrastructure.md"
+      - "docs/ai/task-groups/eval-study-infrastructure.yaml"
+
+session_decisions:
+  - "t-0046-evaluation-study-infrastructure.md (Brief 1)"
+
+governance:
+  - brief_sequence: 1
+    gates_a:
+      A1: "pass"
+      A2: "pass"
+      A3: "n/a"
+      A4: "pass"
+      A5: "pass"
+      A6: "pass"
+    gates_b:
+      B1: "pass"
+      B2: "n/a"
+      B3: "pass"
+    overrides_used: []
+    timestamp: "2026-07-01T13:41:00Z"

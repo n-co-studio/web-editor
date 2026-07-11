@@ -1,5 +1,10 @@
 # Experiment: [Short Name]
 
+<!-- This template is for SINGLE-HYPOTHESIS spikes: one question, one method, one outcome.
+     For MULTI-ARM evaluation studies (multiple held-constant conditions, n_reps,
+     blind judge, pre-registered decision rule), use _eval-study-brief.md instead.
+     See docs/ai/eval/_nomenclature.md for when to use each template. -->
+
 ## Question
 [One sentence: what are you trying to find out?]
 

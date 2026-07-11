@@ -185,7 +185,7 @@ Ordered phases tracked in `.claude/.state/phase-state` (Decision 0014). Tags: `a
 | contract-update | Task group: update at close |
 | cohesion | Taskgroup-merge: cross-brief cohesion |
 
-Session-type-specific phases (see sequences table): `interview`/`write` (Prompt 0), `tier-select`/`dispatch`/`synthesize`/`output`/`governance`/`validate` (advisory), `conversation` (ephemeral/queue-triage), `evaluate`/`document` (prototype), `scope` (Prompt C).
+Session-type-specific phases (see sequences table): `interview`/`write` (Prompt 0), `tier-select`/`dispatch`/`synthesize`/`output`/`governance`/`validate` (advisory), `conversation` (ephemeral/queue-triage), `evaluate`/`document` (prototype), `scope` (Prompt C), `design`/`pre-register`/`launch`/`await`/`collect`/`judge`/`report` (eval).
 
 | Session type | Phase sequence | Notes |
 |-------------|----------------|-------|
@@ -197,6 +197,8 @@ Session-type-specific phases (see sequences table): `interview`/`write` (Prompt 
 | advisory-reinit | init→validate→governance→close | Lightweight re-review |
 | ephemeral | init→conversation→close | Skip gates; upgrade via `upgrade_session_type` |
 | taskgroup-merge | init→contract-init→cohesion→verify→commit→[op-review]→close | Cross-brief Critic; seal all branches |
+| eval | init→design→pre-register→launch→await→collect→judge→report→close | Conductor: orchestrates arms×tasks×reps; full governance on own committed records; cells NOT merged to main. Decision t-0046 |
+| eval-cell | init→build→commit→close | Per-cell agent in isolated worktree; no close-merge; A4-only gate (standard arm) or full gate (full-governance arm). Decision t-0046 |
 
 ---
 

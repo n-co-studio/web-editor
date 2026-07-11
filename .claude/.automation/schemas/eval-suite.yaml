@@ -1,0 +1,38 @@
+# Eval Suite Schema — deterministic (non-agent) harness attached to a study.
+# One file per suite, committed to docs/ai/eval/{study_id}/suites/{harness_slug}.yaml
+# Suites measure deterministic governance properties (e.g. gate catch rates)
+# independently from the agent cells. Wire format: TAP (Test Anything Protocol),
+# consistent with .claude/hooks/tests/*.sh convention in this repo.
+# Decision t-0046.
+
+suite:
+  suite_id: ""                # {study_id}/{harness_slug}
+                               # e.g. 20260701-repo-os-governance-ab-v5/gate-harness
+  study_id: ""                # parent study identifier (must match study.yaml study_id)
+
+  harness: ""                 # name/path of the test harness script
+                               # e.g. .claude/hooks/tests/run-gate-tests.sh
+                               # or a brief description if run manually
+
+  tap_ref: ""                 # path to the TAP output file (relative to repo root)
+                               # e.g. docs/ai/eval/{study_id}/suites/gate-harness.tap
+                               # The .tap file is committed alongside this schema.
+
+  n_runs: 0                   # total number of test runs executed in this suite
+
+  results:
+    tp: 0                     # true positives  (threat detected correctly)
+    fn: 0                     # false negatives (threat missed — catch failure)
+    fp: 0                     # false positives (blocked when it should have passed)
+    tn: 0                     # true negatives  (correctly passed)
+    catch_rate: null          # tp / (tp + fn) — fraction of threats correctly caught
+    fp_rate: null             # fp / (fp + tn) — fraction of benign cases incorrectly blocked
+
+  deterministic: true         # always true for suites — marks this as non-agent harness output
+
+  env:
+    os: ""                    # e.g. darwin-25.5.0
+    shell: ""                 # e.g. bash-3.2
+    repo_sha: ""              # git SHA of repo at time of suite run
+
+  run_at: ""                  # ISO 8601 timestamp when the suite was executed

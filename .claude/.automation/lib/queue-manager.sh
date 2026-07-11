@@ -35,7 +35,7 @@ _ensure_queue_dirs() {
 _QE_ID="" _QE_STATUS="" _QE_PRIORITY="" _QE_SESSION_TYPE="" _QE_BRANCH="" _QE_BRIEF_PATH=""
 _QE_PROMPT="" _QE_LAST_PROMPT="" _QE_AUTO_MODE="" _QE_SOLO_MODE="" _QE_PUSH_ON_COMPLETE="" _QE_RETRY_COUNT=""
 _QE_MAX_RETRIES="" _QE_ERROR_LOG="" _QE_WORK_ORDER_ID="" _QE_CREATED_AT=""
-_QE_UPDATED_AT="" _QE_COMPLETED_AT=""
+_QE_UPDATED_AT="" _QE_COMPLETED_AT="" _QE_PERMISSION_PROFILE=""
 
 # --- Strip surrounding double quotes and unescape a YAML scalar value ---
 # Handles both quoted ("value") and unquoted (value) formats for backward compat.
@@ -96,6 +96,7 @@ _load_queue_entry() {
   _QE_UPDATED_AT="" _QE_COMPLETED_AT=""
   [ -f "$entry_file" ] || return 1
 
+  _QE_PERMISSION_PROFILE=""
   local _line _in_prompt=false _prompt_is_block=false
   while IFS= read -r _line || [ -n "$_line" ]; do
     # Handle multi-line prompt block scalar
@@ -137,6 +138,7 @@ ${_line#    }"
       "  created_at: "*)   _QE_CREATED_AT="${_line#  created_at: }" ;;
       "  updated_at: "*)   _QE_UPDATED_AT="${_line#  updated_at: }" ;;
       "  completed_at: "*) _QE_COMPLETED_AT="${_line#  completed_at: }" ;;
+      "  permission_profile: "*) _QE_PERMISSION_PROFILE="${_line#  permission_profile: }" ;;
     esac
   done < "$entry_file"
 
@@ -166,6 +168,7 @@ ${_line#    }"
   _QE_CREATED_AT=$(_strip_quotes "$_QE_CREATED_AT")
   _QE_UPDATED_AT=$(_strip_quotes "$_QE_UPDATED_AT")
   _QE_COMPLETED_AT=$(_strip_quotes "$_QE_COMPLETED_AT")
+  _QE_PERMISSION_PROFILE=$(_strip_quotes "$_QE_PERMISSION_PROFILE")
 }
 
 # --- Write queue entry YAML from _QE_* variables (atomic) ---
@@ -208,6 +211,7 @@ _write_queue_entry() {
     printf '  created_at: "%s"\n' "$(_yaml_escape_scalar "$_QE_CREATED_AT")"
     printf '  updated_at: "%s"\n' "$(_yaml_escape_scalar "$_QE_UPDATED_AT")"
     printf '  completed_at: "%s"\n' "$(_yaml_escape_scalar "$_QE_COMPLETED_AT")"
+    printf '  permission_profile: "%s"\n' "$(_yaml_escape_scalar "${_QE_PERMISSION_PROFILE:-build}")"
   } > "$tmp_file"
   mv "$tmp_file" "$entry_file"
 }
@@ -529,6 +533,7 @@ queue_enqueue() {
   local work_order_id="${6:-}"
   local push_on_complete="${7:-}"
   local priority="${8:-0}"
+  local permission_profile="${9:-build}"
 
   _ensure_queue_dirs
 
@@ -601,6 +606,7 @@ queue_enqueue() {
   _QE_CREATED_AT="$timestamp"
   _QE_UPDATED_AT="$timestamp"
   _QE_COMPLETED_AT=""
+  _QE_PERMISSION_PROFILE="${permission_profile:-build}"
 
   local qdir
   qdir=$(_queue_dir)

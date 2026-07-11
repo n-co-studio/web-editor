@@ -28,6 +28,12 @@ get_disallowed_tools() {
     audit)
       echo "Edit,Write,Bash(git commit:*),Bash(git push:*),Bash(curl:*),Bash(wget:*),WebSearch,WebFetch,AskUserQuestion"
       ;;
+    judge)
+      # Read-only scoring profile — blocks all writes, commits, pushes, and interactive prompts.
+      # Permits read-only Bash (Grep, Read, Glob pass through as dedicated tools).
+      # Decision t-0046 Amendment 1.
+      echo "Edit,Write,Bash(git commit:*),Bash(git push:*),AskUserQuestion"
+      ;;
     strict)
       # Maximum lockdown — blocks all outbound network, package installs, web tools.
       # Agent can only read, edit, commit, and run local commands.

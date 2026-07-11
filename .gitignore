@@ -50,6 +50,11 @@ editor-queue-status.yaml
 .claude/.automation/briefs/
 .claude/.automation/logs/
 
+# Eval study raw artifacts — gitignored to prevent accidental secret commits (Decision t-0046)
+# Committed study records live in docs/ai/eval/ (tracked).
+# Raw cell artifacts (diffs, transcripts, judge outputs, blinded submissions) stay here only.
+.claude/.automation/reports/eval/
+
 # Operator-specific child repo registry (use child-repos.conf.example as template)
 .claude/.automation/child-repos.conf
 
