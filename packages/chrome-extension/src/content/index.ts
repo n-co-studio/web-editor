@@ -1145,9 +1145,12 @@ export function deactivate(): void {
   console.log('[nco-web-editor] Extension deactivated');
 }
 
-function toggleActive(): void {
+async function toggleActive(): Promise<void> {
   if (mode === 'inactive') {
-    activate();
+    // Await activation so callers (e.g. the popup's TOGGLE_EXTENSION handler)
+    // observe the settled `mode` — `activate()` only flips `mode` to 'selecting'
+    // after awaiting tab-id + queue restore, so a synchronous read would be stale.
+    await activate();
   } else {
     deactivate();
   }
@@ -2853,8 +2856,15 @@ async function getOrCreateTabId(): Promise<string> {
 chrome.runtime.onMessage.addListener(
   (msg: { type: string }, _sender, sendResponse) => {
     if (msg.type === 'TOGGLE_EXTENSION') {
-      toggleActive();
-      sendResponse({ active: mode !== 'inactive' });
+      // Await the toggle so the popup receives the settled state and its on/off
+      // indicator updates in real time (not only on next popup open). Always
+      // respond — even if activation rejects — so the popup never hangs on a
+      // closed channel; it reports whatever mode actually settled on.
+      void toggleActive()
+        .catch(() => {})
+        .finally(() => {
+          sendResponse({ active: mode !== 'inactive' });
+        });
     } else if (msg.type === 'GET_STATE') {
       sendResponse({ active: mode !== 'inactive', queueOpen: reviewPanel?.isOpen() ?? false });
     } else if (msg.type === 'TOGGLE_QUEUE_PANEL') {

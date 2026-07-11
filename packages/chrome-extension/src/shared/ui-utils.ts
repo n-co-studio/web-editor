@@ -102,14 +102,24 @@ const BUTTON_VARIANTS: Record<ButtonVariant, Partial<CSSStyleDeclaration>> = {
   },
 };
 
-/** Create a styled button. */
+/**
+ * Create a styled button.
+ *
+ * When the visible label is a glyph with no textual meaning (e.g. the "×" close
+ * glyph, which assistive tech announces as "times"), pass `ariaLabel` to give the
+ * button a real accessible name. As a convenience, a bare "×" label defaults its
+ * accessible name to "Close" so the many panel close buttons need no extra wiring.
+ */
 export function createButton(
   label: string,
   variant: ButtonVariant,
   onClick: () => void,
+  ariaLabel?: string,
 ): HTMLButtonElement {
   const btn = createElement('button', {}, { ...BUTTON_BASE, ...BUTTON_VARIANTS[variant] });
   btn.textContent = label;
+  const accessibleName = ariaLabel ?? (label === '×' ? 'Close' : undefined);
+  if (accessibleName) btn.setAttribute('aria-label', accessibleName);
   btn.style.pointerEvents = 'auto';
   btn.addEventListener('click', onClick);
 
