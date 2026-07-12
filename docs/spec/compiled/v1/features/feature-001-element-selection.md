@@ -6,7 +6,7 @@ Select any visible element on the page via click. Display a highlight overlay wi
 > **Related — Structural Auto-Layout (feature-010).** When a selected element is an **editable-list** container (or a child of one), the structural model in [feature-010](feature-010-structural-contract.md) classifies it: the container is detected via the `data-fe-layout` signal (runtime/opt-in) or the thresholded computed-style heuristic, and each direct child carries a [`layoutRole`](../data-contracts.md#layoutrole-item-classification) (`flow` / `absolute` / `group`). Selection is the entry point for the reorder/group affordances that consume that model.
 
 ## User Flow
-1. Operator activates Frontend Editor from the extension toolbar dropdown (toggle on/off). Alternatively: keyboard shortcut.
+1. Operator activates n'co studio Web Editor from the extension toolbar dropdown (toggle on/off). Alternatively: keyboard shortcut.
 2. Hold Alt to temporarily pause element inspection and interact with the host page (e.g., open a dropdown, navigate to a state to inspect)
 3. Hovering over elements shows a light highlight with tag name tooltip
 4. Clicking an element selects it — full highlight with property panel

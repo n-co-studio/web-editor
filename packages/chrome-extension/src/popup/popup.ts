@@ -55,7 +55,7 @@ function render(state: EditorState): void {
 function renderUnavailable(): void {
   extBtn.disabled = true;
   queueBtn.disabled = true;
-  hint.textContent = 'Frontend Editor is unavailable on this page. Open a localhost dev page to use it.';
+  hint.textContent = "n'co studio Web Editor is unavailable on this page. Open a localhost dev page to use it.";
 }
 
 async function init(): Promise<void> {

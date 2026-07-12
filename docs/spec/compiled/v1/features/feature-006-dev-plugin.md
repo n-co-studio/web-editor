@@ -1,7 +1,7 @@
 # Feature: Dev Plugin (Source Mapping)
 
 ## Summary
-Build plugin that injects `data-source-file` and `data-source-line` attributes onto every rendered DOM element during development. This is the deterministic source mapping layer that enables precise file:line references in visual diffs. Published as a standalone source-mapping primitive — Frontend Editor is a first-party consumer.
+Build plugin that injects `data-source-file` and `data-source-line` attributes onto every rendered DOM element during development. This is the deterministic source mapping layer that enables precise file:line references in visual diffs. Published as a standalone source-mapping primitive — n'co studio Web Editor is a first-party consumer.
 
 ## User Flow
 1. Operator installs `@nco-studio/web-editor-plugin` as a devDependency

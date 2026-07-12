@@ -1,6 +1,6 @@
 # Compatibility Matrix
 
-NCO Studio Web Editor uses a typed WebSocket protocol (`WS_PROTOCOL_VERSION`) between the Chrome extension and the MCP server. This document maps protocol versions to minimum package versions and explains what happens when they do not match.
+n'co studio Web Editor uses a typed WebSocket protocol (`WS_PROTOCOL_VERSION`) between the Chrome extension and the MCP server. This document maps protocol versions to minimum package versions and explains what happens when they do not match.
 
 ---
 
@@ -30,7 +30,7 @@ NCO Studio Web Editor uses a typed WebSocket protocol (`WS_PROTOCOL_VERSION`) be
 
 When the protocol version sent by the extension in `EXTENSION_HELLO` does not match the protocol version the MCP server expects, the extension displays a banner at the top of the page:
 
-> **NCO Studio: Protocol mismatch.** Extension is version X.Y.Z, server expects A.B.C. Update one or both to resolve.
+> **n'co studio: Protocol mismatch.** Extension is version X.Y.Z, server expects A.B.C. Update one or both to resolve.
 
 **What to do:**
 

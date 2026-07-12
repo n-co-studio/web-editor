@@ -1,5 +1,5 @@
 /**
- * Service worker for the Frontend Editor Chrome extension.
+ * Service worker for the n'co studio Web Editor Chrome extension.
  * Intentionally minimal — the content script owns the WebSocket
  * connection to avoid MV3 service worker termination risk.
  *
@@ -29,11 +29,11 @@ const ICON_PATHS: Record<IconStatus, string> = {
 };
 
 const ICON_TITLES: Record<IconStatus, string> = {
-  disabled: 'Frontend Editor — off',
-  active: 'Frontend Editor — connected',
-  orange: 'Frontend Editor — pending changes',
-  green: 'Frontend Editor — changes applied',
-  red: 'Frontend Editor — connection error',
+  disabled: "n'co studio Web Editor — off",
+  active: "n'co studio Web Editor — connected",
+  orange: "n'co studio Web Editor — pending changes",
+  green: "n'co studio Web Editor — changes applied",
+  red: "n'co studio Web Editor — connection error",
 };
 
 // Toolbar icon sizes Chrome requests. We rasterize the source PNG to these via

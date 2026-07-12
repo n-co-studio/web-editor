@@ -1,7 +1,7 @@
 {
   "name": "@nco-studio/web-editor-plugin",
   "version": "0.1.0",
-  "description": "Vite and Babel plugin for NCO Studio Web Editor — injects source location metadata for in-browser editing",
+  "description": "Vite and Babel plugin for n'co studio Web Editor — injects source location metadata for in-browser editing",
   "type": "module",
   "exports": {
     ".": {
@@ -57,7 +57,7 @@
     "node": ">=20"
   },
   "license": "MIT",
-  "author": "NCO Studio (Mark Preston) <hello@markpreston.co>",
+  "author": "n'co studio (Mark Preston) <hello@markpreston.co>",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/nco-studio/web-editor.git",

@@ -34,7 +34,7 @@ export default function MotionApp() {
           backdropFilter: 'blur(8px)',
         }}
       >
-        <a href="#top" aria-label="NCO Studio" style={{ color: 'var(--m-fg)', display: 'flex' }}>
+        <a href="#top" aria-label="n'co studio" style={{ color: 'var(--m-fg)', display: 'flex' }}>
           <Logo height={20} />
         </a>
         <nav style={{ marginLeft: 'auto', display: 'flex', gap: 'var(--space-6)', alignItems: 'center' }}>
@@ -59,7 +59,7 @@ export default function MotionApp() {
         <div style={{ maxWidth: 1080, margin: '0 auto', display: 'flex', flexWrap: 'wrap', gap: 'var(--space-6)', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ color: 'var(--m-fg)', display: 'flex' }}><Logo height={24} /></span>
           <code style={{ fontFamily: 'var(--m-mono)', fontSize: 12, color: 'var(--m-fg-dim)' }}>npx @nco-studio/web-editor-mcp</code>
-          <span style={{ fontFamily: 'var(--m-mono)', fontSize: 12, color: 'var(--m-fg-dim)' }}>© 2026 NCO Studio · /motion</span>
+          <span style={{ fontFamily: 'var(--m-mono)', fontSize: 12, color: 'var(--m-fg-dim)' }}>© 2026 n'co studio · /motion</span>
         </div>
       </footer>
     </div>

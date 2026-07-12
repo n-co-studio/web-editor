@@ -1,10 +1,10 @@
 /**
- * NCO Studio wordmark. Inlined so it inherits `currentColor` — set `color` on a
+ * n'co studio wordmark. Inlined so it inherits `currentColor` — set `color` on a
  * parent (ink on paper, paper on ink) and the mark follows. Source asset:
  * n-co-studio-logo-full.svg.
  */
 
-export default function Logo({ height = 22, title = 'NCO Studio' }: { height?: number; title?: string }) {
+export default function Logo({ height = 22, title = "n'co studio" }: { height?: number; title?: string }) {
   return (
     <svg
       role="img"

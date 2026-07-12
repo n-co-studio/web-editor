@@ -1,4 +1,4 @@
-# Frontend Editor - Repo OS — Starting Spec Reference
+# n'co studio Web Editor - Repo OS — Starting Spec Reference
 
 > **What this is:** Pre-researched answers for Prompt 0 (Spec Builder).
 > When you create a new repo from the repo-OS template for this project,
@@ -9,11 +9,11 @@
 
 ## For: product.md
 
-**Product Name:** Frontend Editor - Repo OS
+**Product Name:** n'co studio Web Editor - Repo OS
 
 **One-Line Description:** Chrome extension + local MCP server that lets operators visually edit live front-end UI and feed deterministic change requests back to Claude Code in VS Code.
 
-**Problem Statement:** Operators working on projects inspect the front end and identify visual adjustments — spacing, font sizes, colors, layout shifts. Translating those observations into code changes requires manually describing them in a prompt or hunting through source files. This breaks flow and loses precision. Frontend Editor - Repo OS closes the loop: point, adjust, apply — with deterministic source mapping so changes land in the right file every time.
+**Problem Statement:** Operators working on projects inspect the front end and identify visual adjustments — spacing, font sizes, colors, layout shifts. Translating those observations into code changes requires manually describing them in a prompt or hunting through source files. This breaks flow and loses precision. n'co studio Web Editor - Repo OS closes the loop: point, adjust, apply — with deterministic source mapping so changes land in the right file every time.
 
 **Target Users:**
 - **Operator (repo-OS user)**: Wants to make visual tweaks in the browser and have them reflected in source code without writing CSS by hand or describing changes in natural language
@@ -23,7 +23,7 @@
 
 ### Flow 1: Visual Edit → Code Change
 1. Operator opens their project's dev server in Chrome
-2. Activates Frontend Editor - Repo OS extension (toolbar icon or keyboard shortcut)
+2. Activates n'co studio Web Editor - Repo OS extension (toolbar icon or keyboard shortcut)
 3. Overlay appears — elements become selectable on hover
 4. Operator clicks an element → selection highlight + property panel appears
 5. Operator adjusts a property (drag to resize, pick a color, change font size)
@@ -143,7 +143,7 @@ visual-bridge/
 
 ## For: design-system.md
 
-Frontend Editor - Repo OS itself does not have a user-facing design system in the traditional sense. The extension overlay UI should be minimal and utility-focused:
+n'co studio Web Editor - Repo OS itself does not have a user-facing design system in the traditional sense. The extension overlay UI should be minimal and utility-focused:
 
 - **Source:** Defaults — internal tool UI, not a branded product
 - **Colors:** Use a neutral dark overlay theme (semi-transparent dark backgrounds, white text, blue accent for selection highlights) to contrast with any host page
@@ -371,11 +371,11 @@ export default defineConfig({
 
 ### Third-Party Services
 
-None. Frontend Editor - Repo OS is fully local with no external service dependencies.
+None. n'co studio Web Editor - Repo OS is fully local with no external service dependencies.
 
 ### MCP Connections
 
-#### Frontend Editor - Repo OS MCP Server (this project)
+#### n'co studio Web Editor - Repo OS MCP Server (this project)
 
 - **Purpose**: Bridge between Chrome extension and Claude Code
 - **Server**: `@visual-bridge/mcp-server` (npm package)
@@ -413,7 +413,7 @@ None. Frontend Editor - Repo OS is fully local with no external service dependen
 - Does not communicate with any remote server — all traffic is localhost
 
 **Protected Areas:**
-- The target project's source files are never modified by Frontend Editor - Repo OS directly — only Claude Code writes to source
+- The target project's source files are never modified by n'co studio Web Editor - Repo OS directly — only Claude Code writes to source
 - The dev-plugin never modifies source files — it transforms build output only
 - Production builds must have zero trace of dev-plugin annotations
 
@@ -459,7 +459,7 @@ Claude Code (VS Code)
 
 ## Key Design Decision: Deterministic Source Mapping
 
-Frontend Editor - Repo OS does NOT use AI/fuzzy matching to locate source files. Instead:
+n'co studio Web Editor - Repo OS does NOT use AI/fuzzy matching to locate source files. Instead:
 
 1. The **dev-plugin** injects `data-source-file` and `data-source-line` onto every DOM element at build time
 2. The **Chrome extension** reads these attributes when an element is selected

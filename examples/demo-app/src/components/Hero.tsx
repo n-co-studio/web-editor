@@ -58,7 +58,7 @@ export default function Hero() {
               color: 'var(--color-secondary)',
             }}
           >
-            NCO Studio Web Editor — guide
+            n'co studio Web Editor — guide
           </span>
 
           <h1

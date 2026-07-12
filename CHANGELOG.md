@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [0.1.0] - 2026-06-17
 
-Initial public release of NCO Studio Web Editor.
+Initial public release of n'co studio Web Editor.
 
 ### Packages
 
