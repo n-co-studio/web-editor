@@ -182,7 +182,7 @@ const TOOL_LABELS: Record<EditMode, string> = {
   cursor: 'Select',
   spacing: 'Spacing',
   layout: 'Layout',
-  dimensions: 'Size',
+  dimensions: 'Dimensions',
   typography: 'Type',
   colors: 'Colors',
   'border-radius': 'Radius',
@@ -342,6 +342,9 @@ export class FloatingToolbar {
       this.rulersBtn.style.background = 'transparent';
       this.rulersBtn.style.color = OVERLAY.textMuted;
     }
+    // Record the resting background so hover restore (mouseleave) keeps the
+    // active highlight instead of clearing it to transparent.
+    this.rulersBtn.dataset.restBg = this.rulersBtn.style.background;
   }
 
   onDelete(cb: VoidCallback): void {
@@ -388,6 +391,7 @@ export class FloatingToolbar {
       this.notesBtn.style.background = 'transparent';
       this.notesBtn.style.color = OVERLAY.textMuted;
     }
+    this.notesBtn.dataset.restBg = this.notesBtn.style.background;
   }
 
   /** Sync grid button active state. */
@@ -402,6 +406,7 @@ export class FloatingToolbar {
       this.gridBtn.style.background = 'transparent';
       this.gridBtn.style.color = OVERLAY.textMuted;
     }
+    this.gridBtn.dataset.restBg = this.gridBtn.style.background;
   }
 
   /** Set grid block reason (disables button with tooltip). */
@@ -433,6 +438,7 @@ export class FloatingToolbar {
       btn.style.background = 'transparent';
       btn.style.color = OVERLAY.textMuted;
     }
+    btn.dataset.restBg = btn.style.background;
   }
 
 
@@ -459,6 +465,7 @@ export class FloatingToolbar {
       this.reviewBtn.style.background = 'transparent';
       this.reviewBtn.style.color = OVERLAY.textMuted;
     }
+    this.reviewBtn.dataset.restBg = this.reviewBtn.style.background;
   }
 
   /** Update undo/redo button enabled states. */
@@ -936,8 +943,20 @@ export class FloatingToolbar {
       }
     });
     btn.addEventListener('mouseleave', () => {
-      // Re-apply the correct state
-      this.applyButtonStyle(btn, iconKey as EditMode);
+      // applyButtonStyle re-styles TOOL buttons from their active/disabled state.
+      // Non-tool icon buttons (grid, ruler, collapse, undo, redo, reset, notes,
+      // review, devtools, screenshot, duplicate, delete) are not in TOOL_LABELS,
+      // so routing them here would set `title = TOOL_LABELS[iconKey]` → the string
+      // "undefined". Just clear the hover background; their title/state is owned
+      // by their own setters.
+      if (this.toolButtons.get(iconKey as EditMode) === btn) {
+        this.applyButtonStyle(btn, iconKey as EditMode);
+      } else if (btn.style.opacity !== '0.3') {
+        // Restore the resting background. Toggle buttons (grid/rulers/notes/
+        // review/devtools) record their active cyan/pink in dataset.restBg via
+        // their setters; everything else falls back to transparent.
+        btn.style.background = btn.dataset.restBg ?? 'transparent';
+      }
     });
 
     return btn;
