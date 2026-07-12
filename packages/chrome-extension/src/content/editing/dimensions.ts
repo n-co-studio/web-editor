@@ -122,7 +122,7 @@ export class DimensionsEditor {
       padding: '6px 10px',
       borderBottom: `1px solid ${OVERLAY.border}`,
     });
-    const title = createText('span', 'Size', 'heading');
+    const title = createText('span', 'Dimensions', 'heading');
     title.style.fontSize = '12px';
     header.appendChild(title);
 
