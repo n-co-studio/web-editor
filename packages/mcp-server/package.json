@@ -26,14 +26,14 @@
     "clean": "rm -rf dist dist-test *.tsbuildinfo"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.25.0",
+    "@modelcontextprotocol/sdk": "^1.25.2",
+    "@nco-studio/shared": "0.1.0",
     "chokidar": "^4.0.0",
     "react-docgen": "^7.0.0",
-    "ws": "^8.18.0",
+    "ws": "^8.21.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {
-    "@nco-studio/shared": "0.1.0",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.5.0",
     "tsup": "^8.0.0",

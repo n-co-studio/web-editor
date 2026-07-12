@@ -502,7 +502,18 @@ export class Bridge {
 
   private tryPort(port: number): Promise<boolean> {
     return new Promise((resolve) => {
-      const wss = new WebSocketServer({ port });
+      // Bind to loopback only and reject cross-origin upgrades. The bridge writes
+      // files into the project directory, so a server reachable off-host or
+      // drivable by any in-browser page is a security risk. Browsers send a
+      // truthful Origin header on WebSocket upgrades, so the origin allowlist
+      // blocks drive-by connections from arbitrary web pages; the loopback bind
+      // blocks off-host access. All legitimate traffic is localhost (spec:
+      // boundaries.md — "all traffic is localhost").
+      const wss = new WebSocketServer({
+        port,
+        host: '127.0.0.1',
+        verifyClient: (info: { origin?: string }) => Bridge.isAllowedOrigin(info.origin),
+      });
 
       wss.on('listening', () => {
         this.wss = wss;
@@ -515,6 +526,30 @@ export class Bridge {
         resolve(false);
       });
     });
+  }
+
+  /**
+   * Allowlist for WebSocket Origin headers. Only same-host dev origins and the
+   * browser extension may connect. This blocks drive-by connections from an
+   * arbitrary web page open in the same browser — such a page sends its own
+   * truthful Origin on the WS upgrade, which fails this check. A missing/empty
+   * Origin (a non-browser client) is rejected: the only legitimate client is the
+   * browser extension.
+   */
+  private static isAllowedOrigin(origin: string | undefined): boolean {
+    if (!origin) return false;
+    if (origin.startsWith('chrome-extension://') || origin.startsWith('moz-extension://')) {
+      return true;
+    }
+    let host: string;
+    try {
+      host = new URL(origin).hostname;
+    } catch {
+      return false;
+    }
+    // URL.hostname brackets IPv6 literals (e.g. "[::1]"); normalize before compare.
+    const bare = host.replace(/^\[|\]$/g, '');
+    return bare === 'localhost' || bare === '127.0.0.1' || bare === '::1';
   }
 
   private handleConnection(ws: WebSocket): void {
@@ -1151,7 +1186,11 @@ export class Bridge {
 
     // Name the file, embedding the content hash so re-uploads are idempotent.
     const filename = this.assetFilename(hash, ext, pendingUpload?.filename);
-    const absDir = resolve(this.cwd, targetDir);
+    // Confine the write to the project directory. `targetDir` is inferred from a
+    // page-controlled `src` attribute (resolveAssetDir), so without this a crafted
+    // `../` value could steer writes outside cwd — parity with the export/import
+    // paths that already call confineToProject.
+    const absDir = this.confineToProject(targetDir);
     await mkdir(absDir, { recursive: true });
     const absPath = join(absDir, filename);
     const relPath = '/' + relative(this.cwd, absPath).replace(/\\/g, '/');
@@ -1261,6 +1300,9 @@ export class Bridge {
 
     const dirPart = dirname(urlPath).replace(/^\//, ''); // e.g. "images" or "assets/img"
     if (!dirPart || dirPart === '.') return Bridge.ASSET_DIR_FALLBACK;
+    // Reject traversal segments — a page-controlled src must not steer the write
+    // dir outside the inferred asset tree (defense-in-depth with confineToProject).
+    if (dirPart.split(/[\\/]/).includes('..')) return Bridge.ASSET_DIR_FALLBACK;
 
     // Check common project structures: try "public/<dir>", "src/<dir>", then "<dir>" directly
     const candidates = [
