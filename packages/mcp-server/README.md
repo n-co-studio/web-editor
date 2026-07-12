@@ -1,6 +1,6 @@
 # @nco-studio/web-editor-mcp
 
-MCP server bridge for [NCO Studio Web Editor](https://github.com/markpreston2/frontend-editor). Connects Claude Code to your browser via a local WebSocket, enabling visual UI editing directly in your running dev server.
+MCP server bridge for [n'co studio Web Editor](https://github.com/markpreston2/frontend-editor). Connects Claude Code to your browser via a local WebSocket, enabling visual UI editing directly in your running dev server.
 
 ## How It Fits the Loop
 

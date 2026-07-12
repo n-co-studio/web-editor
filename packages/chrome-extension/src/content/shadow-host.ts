@@ -1,5 +1,5 @@
 /**
- * Mounts the Shadow DOM host for the Frontend Editor overlay.
+ * Mounts the Shadow DOM host for the n'co studio Web Editor overlay.
  * All extension UI is rendered inside this shadow root, isolated
  * from the host page via `all: initial` CSS reset.
  */

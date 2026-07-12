@@ -1,6 +1,6 @@
 # Editor Log
 
-Usage notes, lessons learned, and ideas for the Frontend Editor extension.
+Usage notes, lessons learned, and ideas for the n'co studio Web Editor extension.
 
 ---
 

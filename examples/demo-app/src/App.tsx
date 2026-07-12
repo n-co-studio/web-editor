@@ -27,7 +27,7 @@ export default function App() {
           backdropFilter: 'blur(8px)',
         }}
       >
-        <a href="#top" aria-label="NCO Studio" style={{ color: 'var(--color-ink)', display: 'flex' }}>
+        <a href="#top" aria-label="n'co studio" style={{ color: 'var(--color-ink)', display: 'flex' }}>
           <Logo height={20} />
         </a>
 

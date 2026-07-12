@@ -1,16 +1,16 @@
-# Privacy Policy — NCO Studio Web Editor
+# Privacy Policy — n'co studio Web Editor
 
 **Last updated:** 2026-06-17
 
 ## Summary
 
-NCO Studio Web Editor is a developer tool. It collects no personal data, transmits no data to any remote server, and requires no account.
+n'co studio Web Editor is a developer tool. It collects no personal data, transmits no data to any remote server, and requires no account.
 
 ---
 
 ## What the extension does
 
-NCO Studio Web Editor is a Chrome extension that overlays a visual editing interface on locally-running web pages (development servers at `localhost` / `127.0.0.1`). It lets developers select DOM elements, adjust visual properties, and send structured diffs to Claude Code via a locally-installed MCP server.
+n'co studio Web Editor is a Chrome extension that overlays a visual editing interface on locally-running web pages (development servers at `localhost` / `127.0.0.1`). It lets developers select DOM elements, adjust visual properties, and send structured diffs to Claude Code via a locally-installed MCP server.
 
 ## Data collection
 
@@ -21,7 +21,7 @@ NCO Studio Web Editor is a Chrome extension that overlays a visual editing inter
 All network communication is **strictly local**:
 
 - The extension's content script opens a WebSocket connection to `ws://localhost:<port>` — the locally-installed `@nco-studio/web-editor-mcp` server running on your own machine.
-- No data is sent to NCO Studio servers, cloud services, third-party analytics platforms, or any remote endpoint.
+- No data is sent to n'co studio servers, cloud services, third-party analytics platforms, or any remote endpoint.
 - The extension operates on `http://localhost/*`, `http://127.0.0.1/*`, and `https://localhost/*` only. It does not run on public websites.
 
 ## The local MCP server

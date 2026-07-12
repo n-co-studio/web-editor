@@ -80,7 +80,7 @@ These are known limitations documented as explicit design choices:
 
 ## Protected Areas
 
-- The target project's source files are never modified by Frontend Editor directly — only Claude Code writes to source
+- The target project's source files are never modified by n'co studio Web Editor directly — only Claude Code writes to source
 - The dev-plugin never modifies source files — it transforms build output only
 - Production builds must have zero trace of dev-plugin annotations
 

@@ -19,7 +19,7 @@ export function serializeToPrompt(
 ): string {
   const sections: string[] = [];
 
-  sections.push('# Visual Changes from Frontend Editor\n');
+  sections.push("# Visual Changes from n'co studio Web Editor\n");
 
   if (hasResponsiveContext(diffs)) {
     sections.push(

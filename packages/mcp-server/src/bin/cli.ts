@@ -18,7 +18,7 @@ function getVersion(): string {
 }
 
 const HELP_TEXT = `
-nco-web-editor-mcp — MCP server bridge for NCO Studio Web Editor
+nco-web-editor-mcp — MCP server bridge for n'co studio Web Editor
 
 USAGE
   npx --yes @nco-studio/web-editor-mcp@^1   (add to .claude/settings.json)

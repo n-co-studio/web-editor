@@ -72,7 +72,7 @@ export function showProtocolMismatchBanner(
     marginBottom: '4px',
     color: 'var(--fe-destructive)',
   } satisfies Partial<CSSStyleDeclaration>);
-  heading.textContent = 'NCO Studio Web Editor — Protocol Version Mismatch';
+  heading.textContent = "n'co studio Web Editor — Protocol Version Mismatch";
 
   const detail = document.createElement('div');
   Object.assign(detail.style, {

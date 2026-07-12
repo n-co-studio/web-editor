@@ -1,27 +1,27 @@
-# Chrome Web Store Listing — NCO Studio Web Editor
+# Chrome Web Store Listing — n'co studio Web Editor
 
-This document contains all copy and metadata needed to submit NCO Studio Web Editor to the Chrome Web Store, plus reviewer notes and asset specifications.
+This document contains all copy and metadata needed to submit n'co studio Web Editor to the Chrome Web Store, plus reviewer notes and asset specifications.
 
 ---
 
 ## Store Metadata
 
 ### Name
-NCO Studio Web Editor
+n'co studio Web Editor
 
 ### Short description (132 chars max)
 Point, adjust, generate — visual editing overlay for your local dev pages that feeds structured diffs to Claude Code.
 
 ### Detailed description
 
-**NCO Studio Web Editor** is a developer productivity tool that closes the gap between visual intent and code. It overlays an inspection and editing UI directly on your locally-running web page, so you can point at any element, tweak its visual properties, and send a structured diff to Claude Code — all without leaving the browser.
+**n'co studio Web Editor** is a developer productivity tool that closes the gap between visual intent and code. It overlays an inspection and editing UI directly on your locally-running web page, so you can point at any element, tweak its visual properties, and send a structured diff to Claude Code — all without leaving the browser.
 
 **How it works:**
 
 1. Start your dev server (`npm run dev` or equivalent).
 2. Run the companion MCP server: `npx @nco-studio/web-editor-mcp@latest`
 3. Open your project in Claude Code with the MCP server configured.
-4. Click the NCO Studio Web Editor toolbar icon to activate the overlay.
+4. Click the n'co studio Web Editor toolbar icon to activate the overlay.
 5. Click any element to inspect it, adjust spacing/color/typography/layout visually, then hit "Apply" — Claude Code receives a structured diff and writes the code changes.
 
 **What you can edit:**
@@ -53,7 +53,7 @@ These justifications are required for Chrome Web Store review. Copy them verbati
 
 ### `activeTab`
 
-> NCO Studio Web Editor needs `activeTab` to read the current tab's DOM and URL in order to render the visual selection overlay and identify which elements the developer is inspecting. The overlay is only activated when the user explicitly clicks the toolbar icon on a localhost page — the extension does not access any tab automatically.
+> n'co studio Web Editor needs `activeTab` to read the current tab's DOM and URL in order to render the visual selection overlay and identify which elements the developer is inspecting. The overlay is only activated when the user explicitly clicks the toolbar icon on a localhost page — the extension does not access any tab automatically.
 
 ### `storage`
 
@@ -75,7 +75,7 @@ These notes help the Chrome Web Store review team understand how to test the ext
 
 ### What this extension does
 
-NCO Studio Web Editor is a developer tool that overlays a visual inspection and editing UI on locally-running web pages. It requires a locally-installed companion MCP server. It does not work on public websites.
+n'co studio Web Editor is a developer tool that overlays a visual inspection and editing UI on locally-running web pages. It requires a locally-installed companion MCP server. It does not work on public websites.
 
 ### How to test
 
@@ -98,7 +98,7 @@ NCO Studio Web Editor is a developer tool that overlays a visual inspection and 
 
 1. Load the extension as an unpacked extension from the `dist/` directory (or install from the store).
 2. Navigate to `http://localhost:3000` (or your local dev server).
-3. Click the NCO Studio Web Editor icon in the Chrome toolbar.
+3. Click the n'co studio Web Editor icon in the Chrome toolbar.
 4. The overlay activates — you should see a cyan selection highlight as you hover over elements.
 5. Click an element to inspect it. The properties panel appears at the bottom of the viewport.
 6. Adjust a spacing or color value — the live preview updates instantly.
@@ -136,7 +136,7 @@ The Web Store requires up to 5 screenshots at **1280×800** pixels (PNG or JPEG)
 ### Promo tile
 
 - **Size:** 440×280 pixels (PNG)
-- **Content:** NCO Studio wordmark / logo on a dark background (`rgba(0,0,0,0.9)`); tagline "Point → Adjust → Generate"; cyan accent (`#06b6d4`) for the arrow glyphs.
+- **Content:** n'co studio wordmark / logo on a dark background (`rgba(0,0,0,0.9)`); tagline "Point → Adjust → Generate"; cyan accent (`#06b6d4`) for the arrow glyphs.
 - **Note:** Producing the actual image files is an operator step. This document specifies the content.
 
 ---

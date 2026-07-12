@@ -20,7 +20,7 @@ export default function MotionHero() {
     >
       <div>
         <span style={{ fontFamily: 'var(--m-mono)', fontSize: 12, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--m-accent)' }}>
-          NCO Studio — in motion
+          n'co studio — in motion
         </span>
         <h1
           style={{

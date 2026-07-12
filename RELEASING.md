@@ -1,6 +1,6 @@
 # Releasing
 
-This document covers everything needed to publish a new version of the NCO Studio npm packages and update the Chrome Web Store extension. The actual `npm publish` and store upload are **operator-gated** — only a human with valid credentials should execute those steps.
+This document covers everything needed to publish a new version of the n'co studio npm packages and update the Chrome Web Store extension. The actual `npm publish` and store upload are **operator-gated** — only a human with valid credentials should execute those steps.
 
 ---
 

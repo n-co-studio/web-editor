@@ -1,5 +1,5 @@
 /**
- * Footer — the one ink section. NCO Studio wordmark (inherits paper via
+ * Footer — the one ink section. n'co studio wordmark (inherits paper via
  * currentColor) over a flat ink field. No nav columns: every link there would
  * have been a dead "#" placeholder, so the footer is just brand + the one real
  * command. Sharp, no shadows.
@@ -51,7 +51,7 @@ export default function SiteFooter() {
           color: 'var(--color-on-ink-muted)',
         }}
       >
-        <span>© 2026 NCO Studio · Demo fixture</span>
+        <span>© 2026 n'co studio · Demo fixture</span>
         <span style={{ fontFamily: 'var(--font-mono)' }}>localhost:5173</span>
       </div>
     </footer>

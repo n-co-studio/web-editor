@@ -1,4 +1,4 @@
-# NCO Studio Web Editor — Quickstart
+# n'co studio Web Editor — Quickstart
 
 Get from zero to your first visual edit in about five minutes.
 
@@ -74,7 +74,7 @@ Download `nco-web-editor-v0.2.0.zip` from the [latest release](../../releases/la
 2. Open `chrome://extensions`
 3. Enable **Developer mode** (toggle, top-right)
 4. Click **Load unpacked** and select the unzipped folder
-5. Pin the NCO Studio Web Editor icon to your Chrome toolbar
+5. Pin the n'co studio Web Editor icon to your Chrome toolbar
 
 **Verification:** The extension icon appears in the toolbar. Clicking it shows a popup with "Off" status.
 
@@ -84,7 +84,7 @@ Download `nco-web-editor-v0.2.0.zip` from the [latest release](../../releases/la
 
 1. Start your dev server: `npm run dev`
 2. Open `http://localhost:5173` (or your configured port) in Chrome
-3. Click the NCO Studio Web Editor icon → toggle the extension **On**
+3. Click the n'co studio Web Editor icon → toggle the extension **On**
 4. Hover over elements — a cyan highlight appears on hover
 5. Click an element — the property panel opens at the bottom of the page
 6. Adjust a property (e.g., change padding or a color)
