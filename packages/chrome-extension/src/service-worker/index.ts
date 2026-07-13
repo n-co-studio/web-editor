@@ -91,6 +91,10 @@ async function applyStatusIcon(status: IconStatus, tabId: number | undefined): P
 
 chrome.runtime.onMessage.addListener(
   (msg: { type: string; payload?: { count?: number; status?: IconStatus } }, sender, sendResponse) => {
+    // Only honor messages from this extension's own contexts. CAPTURE_VIEWPORT
+    // triggers a full-tab screenshot — without this guard another installed
+    // extension could silently capture the active tab. Reject foreign senders.
+    if (sender.id !== chrome.runtime.id) return false;
     if (msg.type === 'CAPTURE_VIEWPORT') {
       const windowId = sender.tab?.windowId;
       if (windowId == null) {

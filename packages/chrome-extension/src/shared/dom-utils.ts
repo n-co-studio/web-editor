@@ -728,3 +728,52 @@ const SHORTHAND_MAP: Record<string, Expander> = {
   'border-width': expandBorderWidth,
   'border-radius': expandBorderRadius,
 };
+
+// ---------------------------------------------------------------------------
+// HTML/SVG sanitization
+// ---------------------------------------------------------------------------
+//
+// Markup entering the live page DOM from an untrusted source — a copied page
+// element's outerHTML (clipboard paste), or a project-component icon delivered
+// over the WebSocket bridge — must be scrubbed of script-execution vectors
+// before insertion. Shadow DOM does not contain script execution, so an
+// `<img onerror>` or `javascript:` URL would run in the host page's context.
+
+/** Elements that can execute script or load external content — removed outright. */
+const DANGEROUS_ELEMENTS = 'script,iframe,object,embed,link,meta,base';
+
+/** Attributes carrying a URL that could hold a `javascript:` payload. */
+const URL_ATTRS = new Set(['href', 'src', 'xlink:href', 'formaction', 'action']);
+
+/**
+ * Scrub a parsed fragment/subtree in place: drop dangerous elements, strip every
+ * inline event handler (`on*`), and neutralize `javascript:` URLs. Operates on an
+ * already-parsed tree (typically the inert content of a `<template>`), never on a
+ * live-document node, so no handler fires during scrubbing.
+ */
+export function sanitizeFragment(root: ParentNode): void {
+  root.querySelectorAll(DANGEROUS_ELEMENTS).forEach((el) => el.remove());
+  root.querySelectorAll('*').forEach((el) => {
+    for (const attr of Array.from(el.attributes)) {
+      const name = attr.name.toLowerCase();
+      if (name.startsWith('on')) {
+        el.removeAttribute(attr.name);
+      } else if (URL_ATTRS.has(name) && /^\s*javascript:/i.test(attr.value)) {
+        el.removeAttribute(attr.name);
+      }
+    }
+  });
+}
+
+/**
+ * Parse an untrusted HTML/SVG string into a sanitized, inert DocumentFragment
+ * suitable for insertion via `replaceChildren`/`appendChild`. Parsing happens in
+ * a detached `<template>`, whose content is inert (no resource loads, no script
+ * execution) until the sanitized nodes are attached to the live document.
+ */
+export function sanitizeToFragment(markup: string): DocumentFragment {
+  const template = document.createElement('template');
+  template.innerHTML = markup;
+  sanitizeFragment(template.content);
+  return template.content;
+}

@@ -74,7 +74,7 @@ import { GridSettingsPanel } from './grid-settings';
 import { MeasureOverlay } from './selection/measure-overlay';
 import { MultiSelectManager } from './selection/multi-select';
 import { MultiSelectToolbar } from './editing/multi-select-toolbar';
-import { buildElementInfo, buildNoteElementRef, buildSiblingAnchor, getTopElementAt, generateSelector, getComputedProperty, ensureUid, readUid, disambiguateUids } from '../shared/dom-utils';
+import { buildElementInfo, buildNoteElementRef, buildSiblingAnchor, getTopElementAt, generateSelector, getComputedProperty, ensureUid, readUid, disambiguateUids, sanitizeFragment } from '../shared/dom-utils';
 import { PROTOCOL_VERSION } from '@nco-studio/shared';
 import type { VisualDiff, PropertyChange, AttributeChange, TextChange, ReorderChange, ReparentChange, GroupChange, RemoveChange, StylesheetChange, ScriptBehaviorChange, LayoutContainerDescriptor } from '@nco-studio/shared';
 import { parseLayoutSignal, classifyLayoutRole } from '@nco-studio/shared/layout';
@@ -1905,9 +1905,13 @@ function pasteElement(): void {
     ? Array.from(container.children).indexOf(selectedEl) + 1
     : container.children.length;
 
-  // Parse clipboard HTML into a live element
+  // Parse clipboard HTML into an inert <template>, then sanitize before it ever
+  // touches the live DOM. The markup is a copied page element's outerHTML, which
+  // may carry event-handler attributes (e.g. <img onerror>) that would execute
+  // in the host page on insertion — Shadow DOM does not contain that.
   const template = document.createElement('template');
   template.innerHTML = elementClipboard.html;
+  sanitizeFragment(template.content);
   const clone = template.content.firstElementChild as HTMLElement;
   if (!clone) return;
 
@@ -2854,7 +2858,11 @@ async function getOrCreateTabId(): Promise<string> {
 // ---------------------------------------------------------------------------
 
 chrome.runtime.onMessage.addListener(
-  (msg: { type: string }, _sender, sendResponse) => {
+  (msg: { type: string }, sender, sendResponse) => {
+    // Only honor messages from this extension's own contexts (popup / service
+    // worker). Another installed extension with tabs permission could otherwise
+    // toggle activation or the queue panel on this tab. Reject foreign senders.
+    if (sender.id !== chrome.runtime.id) return false;
     if (msg.type === 'TOGGLE_EXTENSION') {
       // Await the toggle so the popup receives the settled state and its on/off
       // indicator updates in real time (not only on next popup open). Always

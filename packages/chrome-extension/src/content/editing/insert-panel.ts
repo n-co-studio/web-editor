@@ -7,6 +7,7 @@
  */
 
 import { createElement, createButton } from "../../shared/ui-utils";
+import { sanitizeToFragment } from "../../shared/dom-utils";
 import {
   OVERLAY,
   INSERT_INDICATOR,
@@ -670,7 +671,12 @@ export class InsertPanel {
         color: OVERLAY.textMuted,
       },
     );
-    iconSpan.innerHTML = entry.icon;
+    // Defense-in-depth: route entry.icon through the sanitizer instead of
+    // innerHTML. Today's catalog/project-component icons are static SVG
+    // constants (harmless no-op), but entry.icon is the field that would carry
+    // a data-sourced (e.g. WS-delivered) project-component icon, so no injection
+    // path can open here if that lands later.
+    iconSpan.replaceChildren(sanitizeToFragment(entry.icon));
     row.appendChild(iconSpan);
 
     const textCol = createElement(
@@ -780,7 +786,12 @@ export class InsertPanel {
         color: OVERLAY.textMuted,
       },
     );
-    iconSpan.innerHTML = entry.icon;
+    // Defense-in-depth: route entry.icon through the sanitizer instead of
+    // innerHTML. Today's catalog/project-component icons are static SVG
+    // constants (harmless no-op), but entry.icon is the field that would carry
+    // a data-sourced (e.g. WS-delivered) project-component icon, so no injection
+    // path can open here if that lands later.
+    iconSpan.replaceChildren(sanitizeToFragment(entry.icon));
     btn.appendChild(iconSpan);
 
     // Label span
