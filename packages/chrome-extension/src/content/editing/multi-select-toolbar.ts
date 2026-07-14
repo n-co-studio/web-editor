@@ -16,11 +16,6 @@ type CommitCallback = (element: Element, changes: PropertyChange[]) => void;
 type GroupCallback = (elements: Element[]) => void;
 type DuplicateCallback = (elements: Element[]) => void;
 
-function extractUnit(value: string): string | undefined {
-  const match = value.match(/[\d.]+(.+)$/);
-  return match?.[1] || undefined;
-}
-
 /** Determine which CSS property to modify for repositioning an element. */
 function getPositionProperty(element: Element, axis: 'h' | 'v'): string {
   const pos = getComputedStyle(element).position;

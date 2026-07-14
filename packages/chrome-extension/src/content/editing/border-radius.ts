@@ -1,5 +1,6 @@
 import type { PropertyChange } from '@nco-studio/shared';
 import { getComputedProperty } from '../../shared/dom-utils';
+import { extractUnit } from './token-select';
 
 /** Border radius corner properties. */
 export const BORDER_RADIUS_PROPERTIES = [
@@ -44,9 +45,4 @@ export function buildBorderRadiusChanges(
   }
 
   return changes;
-}
-
-function extractUnit(value: string): string | undefined {
-  const match = value.match(/[\d.]+(.+)$/);
-  return match?.[1] || undefined;
 }

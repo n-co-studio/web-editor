@@ -1,6 +1,7 @@
 import type { PropertyChange } from '@nco-studio/shared';
 import { createElement, createText, createButton, makeDraggable } from '../../shared/ui-utils';
 import { getComputedProperty } from '../../shared/dom-utils';
+import { extractUnit } from './token-select';
 import { OVERLAY, TOOLBAR_WIDTH } from '../../shared/constants';
 import type { PreviewManager } from './preview';
 
@@ -43,11 +44,6 @@ export function buildDimensionChanges(
   }
 
   return changes;
-}
-
-function extractUnit(value: string): string | undefined {
-  const match = value.match(/[\d.]+(.+)$/);
-  return match?.[1] || undefined;
 }
 
 // ---------------------------------------------------------------------------

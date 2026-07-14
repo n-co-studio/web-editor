@@ -4,6 +4,7 @@ import { getComputedProperty } from '../../shared/dom-utils';
 import { OVERLAY, TOOLBAR_WIDTH } from '../../shared/constants';
 import type { TokenStore } from '../tokens/store';
 import type { PreviewManager } from './preview';
+import { extractUnit } from './token-select';
 
 type ChangeCallback = (changes: PropertyChange[]) => void;
 
@@ -415,9 +416,4 @@ export class TypographyEditor {
     return select;
   }
 
-}
-
-function extractUnit(value: string): string | undefined {
-  const match = value.match(/[\d.]+(.+)$/);
-  return match?.[1] || undefined;
 }

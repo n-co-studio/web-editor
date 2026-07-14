@@ -1,6 +1,7 @@
 import type { ElementInfo, PropertyChange } from '@nco-studio/shared';
 import { createElement } from '../../shared/ui-utils';
 import { getComputedProperty, buildElementInfo } from '../../shared/dom-utils';
+import { extractUnit } from './token-select';
 import {
   OVERLAY,
   HANDLE_VISUAL_SIZE,
@@ -197,7 +198,7 @@ export class DragHandleManager {
     if (isNaN(currentVal)) return;
 
     const newVal = currentVal + delta;
-    const unit = extractUnit(computed);
+    const unit = extractUnit(computed) ?? 'px';
     const snap = this.snapping.snap(property, newVal);
 
     const newStr = `${snap.snappedValue}${unit}`;
@@ -405,7 +406,7 @@ export class DragHandleManager {
       const delta = currentPos - startPos;
       const rawValue = config.computeValue(startValue, delta);
       const numVal = parseFloat(rawValue);
-      const unit = extractUnit(rawValue);
+      const unit = extractUnit(rawValue) ?? 'px';
 
       let finalValue = rawValue;
       if (!isNaN(numVal)) {
@@ -809,11 +810,6 @@ export function getDimensionBlockReason(element: Element): string | null {
   }
 
   return null;
-}
-
-function extractUnit(value: string): string {
-  const match = value.match(/[\d.]+(.*)$/);
-  return match?.[1] || 'px';
 }
 
 /**
