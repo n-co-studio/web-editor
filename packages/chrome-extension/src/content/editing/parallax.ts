@@ -897,17 +897,18 @@ export class ParallaxRuntime {
    * gone, and (re)apply the effect for every parallax block currently present.
    */
   sync(): void {
+    // Single static-NodeList snapshot reused for both passes (teardown mutates
+    // only the artifacts Map, not the DOM) — avoids a second full-DOM query.
+    const blocks = document.querySelectorAll<HTMLElement>(`[${PARALLAX_MARKER}][${PARALLAX_ID}]`);
     const present = new Set<string>();
-    document.querySelectorAll<HTMLElement>(`[${PARALLAX_MARKER}][${PARALLAX_ID}]`).forEach((block) => {
+    blocks.forEach((block) => {
       const id = getParallaxId(block);
       if (id) present.add(id);
     });
     for (const id of Array.from(this.artifacts.keys())) {
       if (!present.has(id)) this.teardown(id);
     }
-    document.querySelectorAll<HTMLElement>(`[${PARALLAX_MARKER}][${PARALLAX_ID}]`).forEach((block) => {
-      this.applyLive(block);
-    });
+    blocks.forEach((block) => this.applyLive(block));
   }
 
   /** Tear down every artifact (editor deactivation). */
