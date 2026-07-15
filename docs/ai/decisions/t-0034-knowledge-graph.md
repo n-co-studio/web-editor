@@ -37,6 +37,28 @@ Add a persistent knowledge graph that maps semantic connections between codebase
 - Decision 0014 respected: graph read at init, graph write before commit
 - Decision 0030/0033 respected: concurrent write safety via mkdir locking
 
+## Amendment 6 — Child-Mode Write Carve-Out for product-graph.yaml (2026-07-14)
+
+Closes the mode-guard gap that prevented child repos from fulfilling the Amendment 3 REQUIRE-attempt close-write obligation for `product-graph.yaml`.
+
+### Problem
+
+Amendment 2 established that `product-graph.yaml` is child-owned and child-created — it is excluded from template sync via `.templatesyncignore`. Amendment 3 made graph writes at session close REQUIRE-attempt (not merely advisory). However, the mode-guard (`_mode-guard-helper.sh`) did not carve out `docs/ai/knowledge-graph/product-graph.yaml` in child mode. Because `docs/ai/knowledge-graph/` falls under the `docs/ai/` governance prefix, every child-mode write attempt to `product-graph.yaml` was silently blocked by write-guard, leaving child product graphs stuck at their seed date.
+
+### Resolution
+
+1. **`_mode-guard-helper.sh` child block**: `docs/ai/knowledge-graph/product-graph.yaml` added to the child-mode carve-out. Child sessions may now write to `product-graph.yaml` at close as required. `docs/ai/knowledge-graph/graph.yaml` (template graph) is NOT carved out in child mode — it remains template-only, consistent with §2 (write authority: template graph writes happen in template-mode sessions only).
+
+2. **Decision t-0012 §3** amended to list `docs/ai/knowledge-graph/product-graph.yaml` in the child carve-out alongside the rationale.
+
+3. **Scope**: The carve-out is path-specific (`product-graph.yaml` only), not directory-wide (`docs/ai/knowledge-graph/*`). `schema.yaml`, `README.md`, and `graph.yaml` remain governed by the template mode guard and cannot be modified in child mode.
+
+### Authorization
+
+This amendment is authorized under §2 (write authority — extends the shell I/O write pattern to the child-mode path that Amendment 2 designated as child-owned) and §9 (session integration — Amendment 3 mandated the REQUIRE-attempt; this amendment makes that mandate mechanically possible). No schema changes — §3 not triggered.
+
+---
+
 ## Amendment 5 — Parallel Task Group Delta Authoring (2026-05-13)
 
 Replaces the N+1 per-brief direct graph writes in parallel task groups with N per-brief delta files (authored in-context by each content brief) plus one aggregating write performed by the merge brief. Eliminates lock contention on `graph.yaml` / `product-graph.yaml` across parallel worktrees and preserves the authorship context that direct re-authoring from a combined diff would lose.

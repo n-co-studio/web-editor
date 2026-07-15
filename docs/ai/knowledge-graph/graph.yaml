@@ -3,7 +3,7 @@
 # Seeded from governance metadata on 2026-03-31
 
 schema_version: 1
-last_updated: "2026-04-08T14:54:21Z"
+last_updated: "2026-07-14T00:00:00Z"
 
 nodes:
   # --- Decisions (from DIGEST.md) ---
@@ -45,9 +45,9 @@ nodes:
   - id: "decision-0012"
     type: "decision"
     path: "docs/ai/decisions/t-0012-file-edit-restrictions.md"
-    description: "File Edit Restrictions (Mode Guard)"
-    last_verified: "2026-03-31"
-    status: "unverified"
+    description: "File Edit Restrictions (Mode Guard) — §3 carve-outs include child .automation/reports/* and product-graph.yaml (amended 2026-07-14)"
+    last_verified: "2026-07-14"
+    status: "active"
     layer: "template"
   - id: "decision-0014"
     type: "decision"
@@ -59,8 +59,8 @@ nodes:
   - id: "decision-0017"
     type: "decision"
     path: "docs/ai/decisions/t-0017-operator-automation-layer.md"
-    description: "Operator Automation Layer"
-    last_verified: "2026-06-18"
+    description: "Operator Automation Layer — §10 child carve-out narrowed to .automation/reports/* (amended 2026-07-14)"
+    last_verified: "2026-07-14"
     status: "active"
     layer: "template"
   - id: "decision-0025"
@@ -94,8 +94,8 @@ nodes:
   - id: "decision-0034"
     type: "decision"
     path: "docs/ai/decisions/t-0034-knowledge-graph.md"
-    description: "Knowledge Graph Data Layer (Amendment 3: mandatory integration across session types — REQUIRE-attempt writes, REQUIRE-when-present reads, session-type profiles)"
-    last_verified: "2026-04-04"
+    description: "Knowledge Graph Data Layer (Amend 3: REQUIRE-attempt writes; Amend 6: product-graph.yaml child-mode write carve-out closes Amendment 3 mechanical gap)"
+    last_verified: "2026-07-14"
     status: "active"
     layer: "template"
 
@@ -132,8 +132,8 @@ nodes:
     type: "file"
     path: "docs/ai/hook-rules-summary.md"
     description: "Hook rules summary documentation"
-    last_verified: "2026-03-31"
-    status: "unverified"
+    last_verified: "2026-07-14"
+    status: "active"
     layer: "template"
   - id: "sot-decisions"
     type: "file"
@@ -296,9 +296,9 @@ nodes:
   - id: "hook-mode-guard-helper"
     type: "hook"
     path: ".claude/hooks/_mode-guard-helper.sh"
-    description: "Mode-guard policy helper"
-    last_verified: "2026-03-31"
-    status: "unverified"
+    description: "Mode-guard policy helper — child carve-out narrowed to .automation/reports/*; product-graph.yaml added to child block (amended 2026-07-14)"
+    last_verified: "2026-07-14"
+    status: "active"
     layer: "template"
   - id: "hook-permission-allowlist"
     type: "hook"
