@@ -120,7 +120,14 @@ is_carved_out() {
         docs/ai/decisions/0[1-9][0-9][0-9]-*.md) return 0 ;;  # child decisions (0100+) — allowed
         docs/spec/compiled/*) return 0 ;;
         docs/spec/prototypes/*) return 0 ;;
-        .claude/.automation/*) return 0 ;;
+        # Narrowed from .automation/* — only reports/ is writable in child mode.
+        # Dev Orchestrator writes health reports here via Bash redirect (Decision t-0017 §10, t-0012 §3).
+        # config.yaml, schemas/, queue/, decision-cache/, lib/ remain template-only.
+        .claude/.automation/reports/*) return 0 ;;
+        # product-graph.yaml is child-owned — child Prompt B sessions must write it at close
+        # to fulfil the Decision t-0034 Amendment 3 REQUIRE-attempt obligation. graph.yaml
+        # (template graph) remains template-only and is not carved out here.
+        docs/ai/knowledge-graph/product-graph.yaml) return 0 ;;
         .claude/agents/custom/*) return 0 ;;  # custom agent namespace — operator-writable in child mode
         *) return 1 ;;
       esac
