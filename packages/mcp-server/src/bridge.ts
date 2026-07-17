@@ -555,6 +555,20 @@ export class Bridge {
   private handleConnection(ws: WebSocket): void {
     console.error('[nco-web-editor] Extension connected');
 
+    // HACK-008: identify ourselves proactively so a new extension can confirm this
+    // is the real MCP server before disclosing tab/diff identifiers. Old extensions
+    // ignore this extra hello and speak first (EXTENSION_HELLO) as before; the full
+    // SERVER_HELLO + token/component data still follows registration.
+    this.send(ws, {
+      type: MessageType.SERVER_HELLO,
+      version: PROTOCOL_VERSION,
+      payload: {
+        pendingDiffIds: this.pendingQueue.map((d) => d.id),
+        appliedDiffIds: [...this.processedIds],
+        protocolVersion: PROTOCOL_VERSION,
+      },
+    });
+
     ws.on('message', (data: Buffer) => {
       this.handleMessage(ws, data);
     });

@@ -8,6 +8,10 @@ export const WS_BACKOFF_BASE_MS = 1_000;
 export const WS_BACKOFF_MAX_MS = 30_000;
 export const WS_MAX_RETRIES = 0; // 0 = unlimited — keep retrying indefinitely
 export const WS_KEEPALIVE_INTERVAL_MS = 20_000;
+// HACK-008: max time to wait for the peer to identify itself as the MCP server
+// (proactive SERVER_HELLO, or a STATUS_RESPONSE to our identifier-free probe)
+// before abandoning the port. No identifiers are disclosed until confirmation.
+export const WS_HANDSHAKE_TIMEOUT_MS = 2_000;
 
 // ---------------------------------------------------------------------------
 // Batching
