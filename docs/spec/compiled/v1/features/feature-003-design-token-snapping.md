@@ -13,7 +13,7 @@ When design tokens are loaded from the project, constrain all edits to valid tok
 7. If operator needs a non-token value, they use the "custom value" escape hatch
 
 ### Token Discovery Priority
-1. `tailwind.config.js` / `tailwind.config.ts` — parse theme. Note: `tailwind.config.ts` is executable code. The MCP server uses esbuild to compile it before reading the theme — this executes user code in the server process (trust boundary documented in boundaries.md).
+1. `tailwind.config.js` / `tailwind.config.ts` / `tailwind.config.mts` / `tailwind.config.cts` — parse theme. Note: the TS variants (`.ts`, `.mts`, `.cts`) are executable code. The MCP server uses esbuild to compile them before reading the theme — this executes user code in the server process (trust boundary documented in boundaries.md). The compile step uses esbuild `transform` (not `build`), so a TS config that imports sibling modules will fail to evaluate and degrade to no-tokens for that source; a single-file config is required for TS token discovery.
 2. `tokens.json` / `design-tokens.json` — Style Dictionary format
 3. `docs/spec/compiled/{active}/design-system.md` — parse markdown tables (repo-OS)
 4. CSS custom properties (`--*`) in `src/**/*.css` files. Scan is scoped to `src/**/*.css` with standard exclusions (node_modules, dist, build, .cache). Maximum 200 CSS files; warn and truncate if exceeded.
@@ -44,7 +44,7 @@ File watcher uses chokidar with 300ms debounce. Granularity: per-source rebuild 
 - Token file changes while extension is active → MCP server rebuilds registry, pushes update to extension. Token updates are applied between edits — if an edit is in progress (drag handle active), the update is queued and applied on commit.
 
 ## Acceptance Criteria
-- [ ] Tokens auto-discovered from tailwind.config.js/ts
+- [x] Tokens auto-discovered from tailwind.config.js/ts (TS variants `.ts`/`.mts`/`.cts` compiled via esbuild)
 - [ ] Tokens auto-discovered from tokens.json / design-tokens.json (Style Dictionary format)
 - [ ] Tokens auto-discovered from design-system.md markdown tables
 - [ ] Tokens auto-discovered from CSS custom properties

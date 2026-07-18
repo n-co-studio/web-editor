@@ -76,7 +76,7 @@ These are known limitations documented as explicit design choices:
 
 - **Page reload clears in-progress edits**: A frontend page reload reinitializes the content script. Pending changes are restored from `chrome.storage.session`, but any edit actively in progress (mid-drag) is lost.
 - **MCP server crash recovery depends on Claude Code**: The MCP server restart-on-crash behavior is a dependency on Claude Code's MCP client implementation. If Claude Code does not auto-restart, the operator must restart manually.
-- **Token discovery executes user code**: Parsing `tailwind.config.ts` requires compiling and evaluating the config file via esbuild. This executes arbitrary user code in the MCP server process. Acceptable because the MCP server already runs in the project's trust context.
+- **Token discovery executes user code**: Parsing `tailwind.config.ts` / `.mts` / `.cts` requires compiling and evaluating the config file via esbuild. This executes arbitrary user code in the MCP server process. Acceptable because the MCP server already runs in the project's trust context. A TS config that imports sibling modules (e.g., `import colors from './colors'`) fails to compile (esbuild `transform`, not `build`) and degrades to no-tokens for that source — a single-file config is required for TS token discovery.
 
 ## Protected Areas
 
