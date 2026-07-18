@@ -1,0 +1,100 @@
+identity:
+  group_name: "page-value-inference"
+  created_by_session: 1
+  created_date: "2026-07-18"
+  execution: sequential
+
+briefs:
+  - title: "Write page-value inference feature spec"
+    sequence: 1
+    session: 1
+    branch: "feature/page-value-inference"
+    status: in_progress
+    next_brief: "Build page-value inference"
+    boundaries:
+      - docs/spec/compiled/v1/features/feature-011-page-value-inference.md
+      - docs/spec/compiled/v1/features/feature-003-design-token-snapping.md
+      - docs/spec/compiled/manifest.json
+      - docs/ai/governance/
+  - title: "Build page-value inference"
+    sequence: 2
+    session: null
+    branch: "feature/page-value-inference"
+    status: pending
+    next_brief: ""
+    boundaries:
+      - packages/chrome-extension/src/content/tokens/page-harvester.ts
+      - packages/chrome-extension/src/content/tokens/page-value-store.ts
+      - packages/chrome-extension/src/content/index.ts
+      - packages/chrome-extension/src/content/editing/colors.ts
+      - packages/chrome-extension/src/content/editing/typography.ts
+      - packages/chrome-extension/src/content/editing/layout-editor.ts
+
+intent:
+  goal: "Author feature-011-page-value-inference (resolving the open design questions) and amend feature-003 with a fifth 'Page-inferred values' source tier + a 'Page Defaults' UI state, plus spec-compiled governance evidence. Spec-first brief of a significant feature — no product code."
+  verification:
+    - "feature-011 exists with Summary, User Flow, UI States, Inputs, Outputs, Edge Cases, and falsifiable Acceptance Criteria covering precedence, non-token semantics (no toToken / fromPageInference), cross-origin handling, dedup/caps, and performance"
+    - "feature-003 includes the fifth 'Page-inferred values' source tier and the 'Page Defaults' UI state (distinct from 'No Tokens')"
+    - "manifest.json lists features/feature-011-page-value-inference.md and remains valid JSON"
+    - "spec-compiled governance evidence updated"
+  scope_files:
+    - docs/spec/compiled/v1/features/feature-011-page-value-inference.md
+    - docs/spec/compiled/v1/features/feature-003-design-token-snapping.md
+    - docs/spec/compiled/manifest.json
+    - docs/ai/governance/
+  spec_references:
+    - docs/spec/compiled/v1/features/feature-003-design-token-snapping.md
+    - docs/spec/compiled/v1/features/feature-005-mcp-server-bridge.md
+    - docs/spec/compiled/v1/data-contracts.md
+
+conventions:
+  naming:
+    - pattern: "PageValueStore / InferredOption (NOT DesignToken); PropertyChange.fromPageInference: true; 'On this page' option group; 'Page Defaults' feature-003 UI state; source tier 5 'Page-inferred values'"
+      scope: "page-value inference capture + editor consumption + feature-003 amendment"
+  patterns:
+    - pattern: "Spec-first ratification (mirror stable-element-identity / structural-auto-layout two-brief precedent): Brief 1 authors feature-011 + amends feature-003 in compiled specs; Brief 2 implements against it. Page-inferred values are a SEPARATE store and never enter the DesignToken registry or populate PropertyChange.toToken."
+      rationale: "Page-inferred values are observed reality, not design intent; folding them into TokenStore corrupts the token/drift trust chain that Claude Code consumes."
+    - pattern: "Bound page inference as a last-resort fallback tier: activates only when token sources 1-4 yield nothing (tokenStore empty); real tokens always win and drop page values when they arrive over WebSocket."
+      rationale: "Resolves the token-first vs 'match the page' thesis tension flagged by PM — page inference is a fallback, not a peer of the design system."
+  decisions:
+    - "0014"
+    - "0020"
+    - "0035"
+    - "0038"
+  boundaries:
+    - module: "compiled-spec/features"
+      owner_brief: "Write page-value inference feature spec"
+    - module: "chrome-extension/content/tokens"
+      owner_brief: "Build page-value inference"
+    - module: "chrome-extension/content/editing"
+      owner_brief: "Build page-value inference"
+
+integration_points:
+  - name: "Page-value inference contract (feature-011 + feature-003 amendment)"
+    producer: "Write page-value inference feature spec"
+    consumer: "Build page-value inference"
+    artifact: "docs/spec/compiled/v1/features/feature-011-page-value-inference.md"
+
+session_decisions:
+  - session: 1
+    decision: "Authored feature-011-page-value-inference.md defining the page-inferred fallback tier (separate PageValueStore/InferredOption, fromPageInference: true, never toToken); amended feature-003 with source tier 5 'Page-inferred values' and the 'Page Defaults' UI state (distinct from 'No Tokens'); registered feature-011 in manifest.json; updated spec-compiled governance evidence."
+    rationale: "Brief 1 of 2 — spec-first authoring of a significant feature before build, mirroring the structural-auto-layout / stable-element-identity precedent. The page-inferred store must be unmistakably distinct from design tokens so B1-2 does not pollute diff/drift semantics."
+
+governance:
+  - brief_sequence: 1
+    session: 1
+    branch: "feature/page-value-inference"
+    commit: ""
+    gates_a:
+      A1: ""
+      A2: ""
+      A3: ""
+      A4: ""
+      A5: ""
+      A6: ""
+    gates_b:
+      B1: ""
+      B2: ""
+      B3: ""
+    overrides_used: []
+    timestamp: ""
