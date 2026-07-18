@@ -5,6 +5,7 @@ import { OVERLAY, TOOLBAR_WIDTH } from '../../shared/constants';
 import type { TokenStore } from '../tokens/store';
 import type { SnappingEngine } from '../tokens/snapping';
 import type { PreviewManager } from './preview';
+import { buildColorInput } from './color-input';
 
 type ChangeCallback = (changes: PropertyChange[]) => void;
 
@@ -146,10 +147,18 @@ export class ColorEditor {
       );
       body.appendChild(swatches);
     } else {
-      const noTokens = createText('div', 'No color tokens loaded', 'mono');
-      noTokens.style.color = OVERLAY.textMuted;
-      noTokens.style.fontSize = '10px';
-      body.appendChild(noTokens);
+      // No tokens loaded — fall back to freeform editing (feature-003).
+      // Edits are emitted as raw CSS (no toToken) via buildColorInput.
+      body.appendChild(
+        buildColorInput(property, currentValue, element, this.preview, (changes) => {
+          const last = changes[changes.length - 1];
+          if (last) {
+            colorChip.style.background = last.toValue;
+            valueText.textContent = last.toValue;
+          }
+          onCommit(changes);
+        }),
+      );
     }
 
     container.appendChild(body);

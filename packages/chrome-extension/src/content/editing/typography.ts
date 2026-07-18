@@ -5,6 +5,7 @@ import { OVERLAY, TOOLBAR_WIDTH } from '../../shared/constants';
 import type { TokenStore } from '../tokens/store';
 import type { PreviewManager } from './preview';
 import { extractUnit } from './token-select';
+import { buildColorInput } from './color-input';
 
 type ChangeCallback = (changes: PropertyChange[]) => void;
 
@@ -308,21 +309,25 @@ export class TypographyEditor {
     const row = this.buildRow('color');
     const currentValue = getComputedProperty(element, 'color');
 
-    // Color preview chip
+    if (tokens.length === 0) {
+      // No color tokens — fall back to freeform editing (feature-003).
+      // buildColorInput carries its own live swatch, so no separate preview
+      // chip is added here (avoids a redundant static + interactive swatch).
+      // Edits are emitted as raw CSS (no toToken).
+      row.appendChild(buildColorInput('color', currentValue, element, this.preview, onCommit));
+      return row;
+    }
+
+    // Token mode — static preview chip + snap-to-token dropdown.
     const chip = createElement('div', {}, {
       width: '20px',
       height: '20px',
-      borderRadius: '3px',
+      borderRadius: OVERLAY.radiusSm,
       border: `1px solid ${OVERLAY.border}`,
       background: currentValue,
       flexShrink: '0',
     });
     row.appendChild(chip);
-
-    if (tokens.length === 0) {
-      row.appendChild(this.buildReadOnlyValue(currentValue));
-      return row;
-    }
 
     const select = this.buildTokenSelect(tokens, currentValue, (newValue, token) => {
       this.preview.begin(element as HTMLElement);
@@ -360,17 +365,6 @@ export class TypographyEditor {
     row.appendChild(labelEl);
 
     return row;
-  }
-
-  private buildReadOnlyValue(value: string): HTMLElement {
-    const el = createText('span', value, 'mono');
-    el.style.color = OVERLAY.textMuted;
-    el.style.fontSize = '10px';
-    el.style.flex = '1';
-    el.style.overflow = 'hidden';
-    el.style.textOverflow = 'ellipsis';
-    el.style.whiteSpace = 'nowrap';
-    return el;
   }
 
   private buildTokenSelect(
