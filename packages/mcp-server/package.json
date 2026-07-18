@@ -29,6 +29,7 @@
     "@modelcontextprotocol/sdk": "^1.25.2",
     "@nco-studio/shared": "0.1.0",
     "chokidar": "^4.0.0",
+    "esbuild": "^0.25.0",
     "react-docgen": "^7.0.0",
     "ws": "^8.21.0",
     "zod": "^3.23.0"

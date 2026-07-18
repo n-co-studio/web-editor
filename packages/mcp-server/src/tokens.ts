@@ -7,6 +7,7 @@ import type {
   TokenSourceStatus,
 } from '@nco-studio/shared';
 import type { TokenSourceType } from './types.js';
+import { loadTsConfig } from './ts-config-loader.js';
 
 // ---------------------------------------------------------------------------
 // Category inference from CSS custom property names
@@ -126,8 +127,17 @@ interface DiscoveredSource {
 async function findTokenSources(cwd: string): Promise<DiscoveredSource[]> {
   const sources: DiscoveredSource[] = [];
 
-  // Tailwind config
-  for (const name of ['tailwind.config.js', 'tailwind.config.ts', 'tailwind.config.mjs']) {
+  // Tailwind config. TS variants (.ts/.mts/.cts) are compiled via esbuild in
+  // parseTailwindConfig; ordering preserves first-match-wins priority.
+  const tailwindCandidates = [
+    'tailwind.config.js',
+    'tailwind.config.ts',
+    'tailwind.config.mjs',
+    'tailwind.config.cjs',
+    'tailwind.config.mts',
+    'tailwind.config.cts',
+  ];
+  for (const name of tailwindCandidates) {
     const file = resolve(cwd, name);
     if (await fileExists(file)) {
       sources.push({ file, type: 'tailwind' });
@@ -408,83 +418,118 @@ function isTokenCategory(val: string | undefined): val is TokenCategory {
   return typeof val === 'string' && TOKEN_CATEGORIES.has(val);
 }
 
+// TypeScript Tailwind config extensions — compiled via esbuild before eval.
+const TS_CONFIG_EXTENSIONS = ['.ts', '.mts', '.cts'];
+
 /**
- * Parse Tailwind config (JS only — TS configs log a warning and skip).
+ * Parse a Tailwind config into design tokens.
  *
- * SECURITY: This uses dynamic import() which executes the config file as
- * a Node.js module. The MCP server runs in the project's trust context
- * (same as `npm install` or `npx`), so this is an accepted boundary
- * limitation. Full esbuild-based evaluation is deferred to a future version.
+ * SECURITY: both branches execute the config as code — TS via esbuild compile +
+ * dynamic import(), JS via dynamic import() directly. The MCP server runs in the
+ * project's trust context (same as `npm install` / `npx`), an accepted boundary
+ * documented in `boundaries.md` ("Token discovery executes user code").
+ *
+ * Error isolation (feature-005): the TS branch lets compile/eval/timeout
+ * failures propagate to `parseTokenSource`, which records an errored
+ * `TokenSourceStatus` (so a broken config surfaces to the operator). The JS
+ * branch preserves the pre-existing behavior of degrading to zero tokens
+ * (source still reported as `parsed`). Either way one source's failure never
+ * affects other sources or the transport.
  */
 async function parseTailwindConfig(filePath: string): Promise<DesignToken[]> {
-  if (filePath.endsWith('.ts')) {
+  const isTsConfig = TS_CONFIG_EXTENSIONS.some((ext) => filePath.endsWith(ext));
+
+  if (isTsConfig) {
+    // Propagate failures to parseTokenSource → errored TokenSourceStatus.
     console.error(
-      `[nco-web-editor] Tailwind TS config not supported in v1 — skipping ${filePath}`,
+      `[nco-web-editor] Compiling Tailwind TS config (executes user code): ${filePath}`,
     );
-    return [];
+    const config = await loadTsConfig(filePath);
+    return extractTokensFromConfig(config, filePath);
   }
 
+  // JS path: preserve existing degrade-to-empty behavior on import failure.
+  try {
+    const configModule: Record<string, unknown> = await import(filePath);
+    const config = configModule.default ?? configModule;
+    return extractTokensFromConfig(config, filePath);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[nco-web-editor] Tailwind config import failed: ${message}`);
+    return [];
+  }
+}
+
+/**
+ * Walk a resolved Tailwind config's `theme` (+ `theme.extend`) and emit tokens.
+ *
+ * We deliberately do NOT run Tailwind's `resolveConfig`: it would inject
+ * Tailwind's full built-in default theme (hundreds of default tokens), drowning
+ * the project's own design tokens and coupling the server to a `tailwindcss`
+ * dependency and its version. Snapping targets the author's declared tokens, so
+ * a shallow `theme` + `theme.extend` merge — identical for the JS and TS
+ * branches — is the correct, dependency-free choice.
+ */
+function extractTokensFromConfig(config: unknown, filePath: string): DesignToken[] {
   const tokens: DesignToken[] = [];
 
-  try {
-    const configModule = await import(filePath);
-    const config = configModule.default ?? configModule;
+  const cfg = config as { theme?: Record<string, unknown> } | null | undefined;
+  const themeRoot = cfg?.theme;
+  if (!themeRoot) return tokens;
 
-    if (!config?.theme?.extend && !config?.theme) return tokens;
+  const extend = themeRoot.extend;
+  const theme: Record<string, unknown> = {
+    ...themeRoot,
+    ...(typeof extend === 'object' && extend !== null ? (extend as Record<string, unknown>) : {}),
+  };
 
-    const theme = { ...config.theme, ...config.theme?.extend };
+  // Extract known theme keys
+  const themeKeyMap: Array<[string, TokenCategory]> = [
+    ['colors', 'colors'],
+    ['spacing', 'spacing'],
+    ['fontSize', 'typography'],
+    ['fontWeight', 'typography'],
+    ['fontFamily', 'typography'],
+    ['lineHeight', 'typography'],
+    ['letterSpacing', 'typography'],
+    ['borderRadius', 'radii'],
+    ['boxShadow', 'shadows'],
+    ['screens', 'breakpoints'],
+  ];
 
-    // Extract known theme keys
-    const themeKeyMap: Array<[string, TokenCategory]> = [
-      ['colors', 'colors'],
-      ['spacing', 'spacing'],
-      ['fontSize', 'typography'],
-      ['fontWeight', 'typography'],
-      ['fontFamily', 'typography'],
-      ['lineHeight', 'typography'],
-      ['letterSpacing', 'typography'],
-      ['borderRadius', 'radii'],
-      ['boxShadow', 'shadows'],
-      ['screens', 'breakpoints'],
-    ];
+  for (const [key, category] of themeKeyMap) {
+    const section = theme[key];
+    if (typeof section !== 'object' || section === null) continue;
 
-    for (const [key, category] of themeKeyMap) {
-      const section = theme[key];
-      if (typeof section !== 'object' || section === null) continue;
+    // Use specific CSS properties for Tailwind keys when available
+    const cssProps = key in TAILWIND_KEY_CSS_PROPERTIES
+      ? [...TAILWIND_KEY_CSS_PROPERTIES[key]]
+      : getCssPropertiesForToken(key, category);
 
-      // Use specific CSS properties for Tailwind keys when available
-      const cssProps = key in TAILWIND_KEY_CSS_PROPERTIES
-        ? [...TAILWIND_KEY_CSS_PROPERTIES[key]]
-        : getCssPropertiesForToken(key, category);
-
-      for (const [name, value] of Object.entries(section as Record<string, unknown>)) {
-        if (typeof value === 'string') {
-          tokens.push({
-            name: `${key}-${name}`,
-            category,
-            value,
-            cssProperties: cssProps,
-            source: filePath,
-          });
-        } else if (typeof value === 'object' && value !== null) {
-          // Nested (e.g., colors: { blue: { 500: '#3b82f6' } })
-          for (const [subName, subValue] of Object.entries(value as Record<string, unknown>)) {
-            if (typeof subValue === 'string') {
-              tokens.push({
-                name: `${key}-${name}-${subName}`,
-                category,
-                value: subValue,
-                cssProperties: cssProps,
-                source: filePath,
-              });
-            }
+    for (const [name, value] of Object.entries(section as Record<string, unknown>)) {
+      if (typeof value === 'string') {
+        tokens.push({
+          name: `${key}-${name}`,
+          category,
+          value,
+          cssProperties: cssProps,
+          source: filePath,
+        });
+      } else if (typeof value === 'object' && value !== null) {
+        // Nested (e.g., colors: { blue: { 500: '#3b82f6' } })
+        for (const [subName, subValue] of Object.entries(value as Record<string, unknown>)) {
+          if (typeof subValue === 'string') {
+            tokens.push({
+              name: `${key}-${name}-${subName}`,
+              category,
+              value: subValue,
+              cssProperties: cssProps,
+              source: filePath,
+            });
           }
         }
       }
     }
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`[nco-web-editor] Tailwind config import failed: ${message}`);
   }
 
   return tokens;
