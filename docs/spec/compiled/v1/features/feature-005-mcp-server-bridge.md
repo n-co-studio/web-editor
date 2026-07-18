@@ -40,6 +40,8 @@ N/A — headless server process. Status is communicated to the extension via Web
 ## Error Isolation
 Token discovery and parsing are wrapped in try/catch. A parse failure in any token source (e.g., malformed tailwind.config.ts) degrades to "no tokens" mode for that source without crashing the WebSocket server or MCP transport. The server logs the error and includes it in the TokenSourceStatus array pushed to the extension.
 
+TS-config failures are surfaced explicitly: a compile error, an evaluation throw, or a 5s timeout on config evaluation (the dynamic-import step, which bounds a config with a hanging top-level `await`) propagates to the source parser and is recorded as `status: 'error'` in TokenSourceStatus, so the operator can diagnose a broken TS config. JS-config import failures preserve the pre-existing behavior of degrading to `status: 'parsed'` with zero tokens (the source is reported as parsed but empty). This asymmetry is intentional — the TS path is new and favors operator diagnosability; the JS path is unchanged for backward compatibility.
+
 ## Edge Cases
 - Port already in use → try next port, log the actual port
 - Server not yet started when extension tries to connect → extension retries with exponential backoff (1s, 2s, 4s, 8s, 16s cap, max 5 attempts). After 5 failures: persistent "Server not found — ensure MCP server is running" message with manual Retry button.

@@ -182,6 +182,10 @@ async function fileExists(path: string): Promise<boolean> {
   }
 }
 
+// Directories excluded from the CSS custom-property scan (feature-003 §Token
+// Discovery Priority: "standard exclusions — node_modules, dist, build, .cache").
+const CSS_SCAN_EXCLUDED_DIRS = new Set(['node_modules', 'dist', 'build', '.cache']);
+
 async function findCssFiles(cwd: string, maxFiles = 200): Promise<string[]> {
   const results: string[] = [];
   const srcDir = resolve(cwd, 'src');
@@ -210,7 +214,9 @@ async function walkDir(dir: string, results: string[], maxFiles: number): Promis
 
     const fullPath = join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (entry.name === 'node_modules') continue;
+      // Standard exclusions per feature-003 §Token Discovery Priority — skip
+      // build artifacts and caches so scanned CSS reflects authored source.
+      if (CSS_SCAN_EXCLUDED_DIRS.has(entry.name)) continue;
       await walkDir(fullPath, results, maxFiles);
     } else if (extname(entry.name) === '.css') {
       results.push(fullPath);
