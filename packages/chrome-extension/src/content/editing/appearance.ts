@@ -3,6 +3,7 @@ import { createElement, createText, createButton, makeDraggable } from '../../sh
 import { getComputedProperty } from '../../shared/dom-utils';
 import { OVERLAY, TOOLBAR_WIDTH } from '../../shared/constants';
 import type { PreviewManager } from './preview';
+import { buildColorInput, toHex } from './color-input';
 
 type ChangeCallback = (changes: PropertyChange[]) => void;
 
@@ -218,69 +219,8 @@ export class AppearanceEditor {
     section.appendChild(sectionLabel);
 
     const currentValue = getComputedProperty(element, property);
+    section.appendChild(buildColorInput(property, currentValue, element, this.preview, onCommit));
 
-    const row = createElement('div', {}, {
-      display: 'flex',
-      gap: '6px',
-      alignItems: 'center',
-    });
-
-    // Color swatch preview
-    const swatch = createElement('div', {}, {
-      width: '24px',
-      height: '24px',
-      borderRadius: OVERLAY.radiusSm,
-      border: `1px solid ${OVERLAY.border}`,
-      background: currentValue,
-      flexShrink: '0',
-      cursor: 'pointer',
-    });
-
-    // Color input (native picker)
-    const colorInput = createElement('input', { type: 'color' }, {
-      position: 'absolute',
-      opacity: '0',
-      width: '0',
-      height: '0',
-      pointerEvents: 'none',
-    }) as HTMLInputElement;
-
-    // Try to set initial hex value
-    colorInput.value = this.toHex(currentValue);
-
-    swatch.addEventListener('click', () => colorInput.click());
-    colorInput.addEventListener('input', () => {
-      swatch.style.background = colorInput.value;
-      this.preview.begin(element as HTMLElement);
-      this.preview.apply(property, colorInput.value);
-    });
-    colorInput.addEventListener('change', () => {
-      const originals = this.preview.commit();
-      const fromValue = originals.get(property) || currentValue;
-      onCommit([{ property, fromValue, toValue: colorInput.value }]);
-      textInput.value = colorInput.value;
-    });
-
-    row.appendChild(swatch);
-    row.appendChild(colorInput);
-
-    // Text input for manual entry
-    const textInput = this.buildInput(currentValue);
-    textInput.style.flex = '1';
-    textInput.addEventListener('keydown', (e) => {
-      e.stopPropagation();
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        const fromValue = getComputedProperty(element, property);
-        (element as HTMLElement).style.setProperty(property, textInput.value);
-        swatch.style.background = textInput.value;
-        onCommit([{ property, fromValue, toValue: textInput.value }]);
-        textInput.blur();
-      }
-    });
-    row.appendChild(textInput);
-
-    section.appendChild(row);
     return section;
   }
 
@@ -403,7 +343,7 @@ export class AppearanceEditor {
       height: '0',
       pointerEvents: 'none',
     }) as HTMLInputElement;
-    colorPicker.value = this.toHex(shadow.color);
+    colorPicker.value = toHex(shadow.color);
 
     colorSwatch.addEventListener('click', () => colorPicker.click());
     colorPicker.addEventListener('input', () => {
@@ -662,7 +602,7 @@ export class AppearanceEditor {
       height: '0',
       pointerEvents: 'none',
     }) as HTMLInputElement;
-    colorPicker.value = this.toHex(currentColor);
+    colorPicker.value = toHex(currentColor);
 
     colorSwatch.addEventListener('click', () => colorPicker.click());
     colorPicker.addEventListener('input', () => {
@@ -681,39 +621,5 @@ export class AppearanceEditor {
     section.appendChild(colorRow);
 
     return section;
-  }
-
-  // ---------------------------------------------------------------------------
-  // Helpers
-  // ---------------------------------------------------------------------------
-
-  private buildInput(value: string): HTMLInputElement {
-    return createElement('input', { type: 'text', value }, {
-      padding: '4px 6px',
-      background: 'rgba(255, 255, 255, 0.08)',
-      border: `1px solid ${OVERLAY.border}`,
-      borderRadius: OVERLAY.radiusSm,
-      color: OVERLAY.text,
-      fontSize: OVERLAY.monoSize,
-      fontFamily: OVERLAY.monoFamily,
-      outline: 'none',
-      boxSizing: 'border-box',
-      minWidth: '0',
-    }) as HTMLInputElement;
-  }
-
-  private toHex(color: string): string {
-    // Attempt to convert CSS color to hex for the native color picker
-    if (color.startsWith('#')) return color.length <= 7 ? color : color.slice(0, 7);
-
-    const match = color.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
-    if (match) {
-      const r = parseInt(match[1], 10);
-      const g = parseInt(match[2], 10);
-      const b = parseInt(match[3], 10);
-      return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
-    }
-
-    return '#000000';
   }
 }
