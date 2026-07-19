@@ -3,11 +3,40 @@ import { createElement, createText, createButton, makeDraggable } from '../../sh
 import { getComputedProperty } from '../../shared/dom-utils';
 import { OVERLAY, TOOLBAR_WIDTH } from '../../shared/constants';
 import type { TokenStore } from '../tokens/store';
+import type { PageValueStore, InferredOption } from '../tokens/page-value-store';
 import type { PreviewManager } from './preview';
 import { extractUnit } from './token-select';
 import { buildColorInput } from './color-input';
+import { buildPageValueColorGroup } from './colors';
 
 type ChangeCallback = (changes: PropertyChange[]) => void;
+
+/** A plain (non-token, non-page) value option in the freeform fallback list. */
+interface ValueOption {
+  readonly name: string;
+  readonly value: string;
+}
+
+// Freeform fallback option lists (feature-003) — offered when no tokens exist,
+// beneath any page-inferred "On this page" group (feature-011).
+const FONT_SIZE_DEFAULTS: ValueOption[] = [
+  '10px', '11px', '12px', '13px', '14px', '16px', '18px', '20px', '24px',
+  '28px', '32px', '36px', '40px', '48px', '56px', '64px', '72px',
+].map((v) => ({ name: v, value: v }));
+
+const FONT_FAMILY_DEFAULTS: ValueOption[] = [
+  { name: 'sans-serif', value: 'sans-serif' },
+  { name: 'serif', value: 'serif' },
+  { name: 'monospace', value: 'monospace' },
+  { name: 'system-ui', value: 'system-ui' },
+];
+
+const FONT_WEIGHT_DEFAULTS: ValueOption[] = [
+  { name: 'normal', value: '400' },
+  { name: 'medium', value: '500' },
+  { name: 'semibold', value: '600' },
+  { name: 'bold', value: '700' },
+];
 
 /**
  * Typography editing controls rendered as a floating mini-panel.
@@ -22,6 +51,7 @@ export class TypographyEditor {
   constructor(
     private readonly tokenStore: TokenStore,
     private readonly preview: PreviewManager,
+    private readonly pageValueStore: PageValueStore,
   ) {}
 
   onClose(cb: () => void): void {
@@ -139,113 +169,74 @@ export class TypographyEditor {
     element: Element,
     onCommit: ChangeCallback,
   ): HTMLDivElement {
-    const tokens = this.tokenStore.getForProperty('font-size');
-    const row = this.buildRow('font-size');
-    const currentValue = getComputedProperty(element, 'font-size');
-
-    const options = tokens.length > 0
-      ? tokens
-      : [
-          { name: '10px', value: '10px' },
-          { name: '11px', value: '11px' },
-          { name: '12px', value: '12px' },
-          { name: '13px', value: '13px' },
-          { name: '14px', value: '14px' },
-          { name: '16px', value: '16px' },
-          { name: '18px', value: '18px' },
-          { name: '20px', value: '20px' },
-          { name: '24px', value: '24px' },
-          { name: '28px', value: '28px' },
-          { name: '32px', value: '32px' },
-          { name: '36px', value: '36px' },
-          { name: '40px', value: '40px' },
-          { name: '48px', value: '48px' },
-          { name: '56px', value: '56px' },
-          { name: '64px', value: '64px' },
-          { name: '72px', value: '72px' },
-        ];
-
-    const select = this.buildTokenSelect(options, currentValue, (newValue, token) => {
-      this.preview.begin(element as HTMLElement);
-      this.preview.apply('font-size', newValue);
-      this.preview.commit();
-      onCommit([{
-        property: 'font-size',
-        fromValue: currentValue,
-        toValue: newValue,
-        unit: extractUnit(newValue),
-        toToken: token?.name,
-      }]);
-    });
-    row.appendChild(select);
-
-    return row;
+    return this.buildTypographyValueControl(
+      element, 'font-size', FONT_SIZE_DEFAULTS, onCommit,
+      (value) => ({ unit: extractUnit(value) }),
+    );
   }
 
   private buildFontFamilyControl(
     element: Element,
     onCommit: ChangeCallback,
   ): HTMLDivElement {
-    const tokens = this.tokenStore.getForProperty('font-family');
-    const row = this.buildRow('font-family');
-    const currentValue = getComputedProperty(element, 'font-family');
-
-    const options = tokens.length > 0
-      ? tokens
-      : [
-          { name: 'sans-serif', value: 'sans-serif' },
-          { name: 'serif', value: 'serif' },
-          { name: 'monospace', value: 'monospace' },
-          { name: 'system-ui', value: 'system-ui' },
-        ];
-
-    const select = this.buildTokenSelect(options, currentValue, (newValue, token) => {
-      this.preview.begin(element as HTMLElement);
-      this.preview.apply('font-family', newValue);
-      this.preview.commit();
-      onCommit([{
-        property: 'font-family',
-        fromValue: currentValue,
-        toValue: newValue,
-        toToken: token?.name,
-      }]);
-    });
-    row.appendChild(select);
-
-    return row;
+    return this.buildTypographyValueControl(
+      element, 'font-family', FONT_FAMILY_DEFAULTS, onCommit,
+    );
   }
 
   private buildFontWeightControl(
     element: Element,
     onCommit: ChangeCallback,
   ): HTMLDivElement {
-    const tokens = this.tokenStore.getForProperty('font-weight');
-    const row = this.buildRow('font-weight');
-    const currentValue = getComputedProperty(element, 'font-weight');
+    return this.buildTypographyValueControl(
+      element, 'font-weight', FONT_WEIGHT_DEFAULTS, onCommit,
+    );
+  }
 
-    // Use token dropdown if tokens available, otherwise fall back to hardcoded weights
-    const options = tokens.length > 0
-      ? tokens
-      : [
-          { name: 'normal', value: '400' },
-          { name: 'medium', value: '500' },
-          { name: 'semibold', value: '600' },
-          { name: 'bold', value: '700' },
-        ];
+  /**
+   * Shared builder for the token-or-freeform typography selects (font-size,
+   * font-family, font-weight). Token mode uses the token dropdown. When no
+   * tokens exist, page-inferred values (feature-011) are offered in an "On this
+   * page" optgroup above the feature-003 freeform defaults; selecting a page
+   * value emits `fromPageInference: true` with no `toToken`.
+   */
+  private buildTypographyValueControl(
+    element: Element,
+    property: string,
+    fallback: readonly ValueOption[],
+    onCommit: ChangeCallback,
+    extra: (value: string) => Partial<PropertyChange> = () => ({}),
+  ): HTMLDivElement {
+    const tokens = this.tokenStore.getForProperty(property);
+    const row = this.buildRow(property);
+    const currentValue = getComputedProperty(element, property);
 
-    const select = this.buildTokenSelect(options, currentValue, (newValue, token) => {
+    const apply = (newValue: string, provenance: { toToken?: string; fromPageInference?: true }): void => {
       this.preview.begin(element as HTMLElement);
-      this.preview.apply('font-weight', newValue);
+      this.preview.apply(property, newValue);
       this.preview.commit();
       onCommit([{
-        property: 'font-weight',
+        property,
         fromValue: currentValue,
         toValue: newValue,
-        toToken: token?.name,
+        ...extra(newValue),
+        ...provenance,
       }]);
+    };
+
+    if (tokens.length > 0) {
+      const select = this.buildTokenSelect(tokens, currentValue, (newValue, token) => {
+        apply(newValue, { toToken: token?.name });
+      });
+      row.appendChild(select);
+      return row;
+    }
+
+    const pageOptions = this.pageValueStore.getForProperty(property);
+    const select = this.buildFallbackSelect(pageOptions, fallback, currentValue, (newValue, fromPage) => {
+      apply(newValue, fromPage ? { fromPageInference: true } : {});
     });
     row.appendChild(select);
-
     return row;
   }
 
@@ -310,10 +301,27 @@ export class TypographyEditor {
     const currentValue = getComputedProperty(element, 'color');
 
     if (tokens.length === 0) {
-      // No color tokens — fall back to freeform editing (feature-003).
-      // buildColorInput carries its own live swatch, so no separate preview
-      // chip is added here (avoids a redundant static + interactive swatch).
-      // Edits are emitted as raw CSS (no toToken).
+      // No color tokens. Offer page-inferred colors ("On this page") above the
+      // freeform floor when the harvester found any (feature-011); otherwise
+      // fall straight through to freeform (feature-003). buildColorInput carries
+      // its own live swatch, so no separate preview chip is added here.
+      const pageOptions = this.pageValueStore.getForProperty('color');
+      if (pageOptions.length > 0) {
+        // Stack the "On this page" group above the freeform input in a column so
+        // the single-row layout still reads cleanly.
+        const column = createElement('div', {}, {
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px',
+          flex: '1',
+          minWidth: '0',
+        });
+        column.appendChild(buildPageValueColorGroup('color', pageOptions, element, this.preview, onCommit));
+        column.appendChild(buildColorInput('color', currentValue, element, this.preview, onCommit));
+        row.appendChild(column);
+        return row;
+      }
+      // Freeform floor — raw CSS, no toToken (feature-003).
       row.appendChild(buildColorInput('color', currentValue, element, this.preview, onCommit));
       return row;
     }
@@ -405,6 +413,76 @@ export class TypographyEditor {
     select.addEventListener('change', () => {
       const token = tokens.find((t) => t.value === select.value);
       onChange(select.value, token);
+    });
+
+    return select;
+  }
+
+  /**
+   * Build a no-token <select> that groups page-inferred values (feature-011)
+   * under an "On this page" optgroup above the feature-003 freeform defaults.
+   * The change handler reports whether the chosen value was page-inferred so the
+   * caller can stamp `fromPageInference` (and never `toToken`).
+   */
+  private buildFallbackSelect(
+    pageOptions: readonly InferredOption[],
+    fallback: readonly ValueOption[],
+    currentValue: string,
+    onChange: (value: string, fromPageInference: boolean) => void,
+  ): HTMLSelectElement {
+    const select = createElement('select', {}, {
+      background: 'rgba(255, 255, 255, 0.1)',
+      color: OVERLAY.text,
+      border: `1px solid ${OVERLAY.border}`,
+      borderRadius: OVERLAY.radiusSm,
+      padding: '2px 4px',
+      fontSize: '10px',
+      fontFamily: OVERLAY.monoFamily,
+      pointerEvents: 'auto',
+      cursor: 'pointer',
+      flex: '1',
+      minWidth: '0',
+    }) as HTMLSelectElement;
+
+    const pageValues = new Set(pageOptions.map((o) => o.value));
+
+    // Surface the current value up-front when it matches neither a page value
+    // nor a fallback default, so the select always shows the live value.
+    const hasMatch = pageValues.has(currentValue) || fallback.some((f) => f.value === currentValue);
+    if (!hasMatch) {
+      const opt = document.createElement('option');
+      opt.value = currentValue;
+      opt.textContent = currentValue;
+      opt.selected = true;
+      select.appendChild(opt);
+    }
+
+    if (pageOptions.length > 0) {
+      const group = document.createElement('optgroup');
+      group.label = 'On this page';
+      for (const o of pageOptions) {
+        const opt = document.createElement('option');
+        opt.value = o.value;
+        opt.textContent = o.label ? `${o.value} · ${o.label}` : o.value;
+        if (o.value === currentValue) opt.selected = true;
+        group.appendChild(opt);
+      }
+      select.appendChild(group);
+    }
+
+    const fallbackGroup = document.createElement('optgroup');
+    fallbackGroup.label = pageOptions.length > 0 ? 'Common' : 'Values';
+    for (const f of fallback) {
+      const opt = document.createElement('option');
+      opt.value = f.value;
+      opt.textContent = f.name === f.value ? f.value : `${f.value} (${f.name})`;
+      if (f.value === currentValue) opt.selected = true;
+      fallbackGroup.appendChild(opt);
+    }
+    select.appendChild(fallbackGroup);
+
+    select.addEventListener('change', () => {
+      onChange(select.value, pageValues.has(select.value));
     });
 
     return select;

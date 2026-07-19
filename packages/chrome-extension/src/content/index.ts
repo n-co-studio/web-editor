@@ -7,6 +7,8 @@ import { DevToolsPanel } from './selection/devtools-panel';
 import { StaleDetector } from './selection/stale';
 import { TokenStore } from './tokens/store';
 import { SnappingEngine } from './tokens/snapping';
+import { PageValueStore } from './tokens/page-value-store';
+import { harvestPageValues } from './tokens/page-harvester';
 import { PreviewManager } from './editing/preview';
 import { DragHandleManager, getDimensionBlockReason } from './editing/handles';
 import { DimensionsEditor } from './editing/dimensions';
@@ -97,6 +99,16 @@ let toolbar: FloatingToolbar | null = null;
 let staleDetector: StaleDetector | null = null;
 let tokenStore: TokenStore | null = null;
 let snapping: SnappingEngine | null = null;
+// Page-value inference (feature-011) — fallback tier beneath tokens. Holds the
+// values harvested from the live page; active only while `tokenStore` is empty.
+let pageValueStore: PageValueStore | null = null;
+// Bumped to abort any in-flight harvest (token supersession or a fresh
+// re-harvest); a running harvest checks its generation and bails if it changed.
+let harvestGeneration = 0;
+let harvestScheduled = false;
+let harvestObserver: MutationObserver | null = null;
+let harvestDebounceTimer: number | null = null;
+let harvestNetMutations = 0;
 let preview: PreviewManager | null = null;
 let handles: DragHandleManager | null = null;
 let keyboard: KeyboardHandler | null = null;
@@ -173,6 +185,145 @@ function refreshExtensionIcon(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Page-value inference (feature-011)
+//
+// A last-resort fallback tier beneath design tokens: when `tokenStore` is empty
+// (token sources 1–4 found nothing), harvest the CSS values already in use on
+// the page and offer the most common ones as "On this page" editor defaults.
+// Real tokens always win — page values are cleared the moment tokens arrive.
+// ---------------------------------------------------------------------------
+
+const HARVEST_DEBOUNCE_MS = 750;
+const HARVEST_MUTATION_THRESHOLD = 25;
+
+/**
+ * Schedule a harvest on idle, gated on the empty-token-store activation
+ * predicate. Bumps the harvest generation so any in-flight harvest aborts and
+ * this fresh one replaces the store atomically. De-duped via `harvestScheduled`.
+ */
+function scheduleHarvest(): void {
+  if (!pageValueStore || !tokenStore) return;
+  if (tokenStore.loaded) return; // tokens present — page inference is dormant
+  if (harvestScheduled) return;
+
+  harvestScheduled = true;
+  const gen = ++harvestGeneration;
+  const run = (): void => {
+    harvestScheduled = false;
+    void runHarvest(gen);
+  };
+  if (typeof requestIdleCallback === 'function') {
+    requestIdleCallback(run, { timeout: 1_000 });
+  } else {
+    setTimeout(run, 0);
+  }
+}
+
+/** Run one harvest and, if still valid on completion, load the page-value store. */
+async function runHarvest(gen: number): Promise<void> {
+  if (!pageValueStore || !tokenStore || tokenStore.loaded) return;
+
+  const result = await harvestPageValues({
+    excludeRoot: host ?? undefined,
+    // Abort if a newer harvest superseded this one, the extension deactivated,
+    // or real tokens arrived mid-harvest (supersession wins).
+    isAborted: () => gen !== harvestGeneration || mode === 'inactive' || (tokenStore?.loaded ?? true),
+  });
+
+  // Discard if superseded/re-triggered or if tokens arrived while harvesting.
+  if (result.aborted || gen !== harvestGeneration) return;
+  if (!pageValueStore || !tokenStore || tokenStore.loaded) return;
+
+  pageValueStore.load(result.options);
+  devtoolsPanel?.log(
+    `Page inference: ${result.options.length} value(s) harvested` +
+      (result.partial ? ' (partial — some styles unreadable or DOM sampled)' : ''),
+  );
+}
+
+/**
+ * Real tokens arrived — clear page values and abort any in-flight harvest.
+ * One-way and terminal for the session unless the token store later empties
+ * again (which re-arms `scheduleHarvest`). Idempotent.
+ */
+function supersedePageValues(): void {
+  harvestGeneration++; // abort any running / scheduled harvest
+  harvestScheduled = false;
+  pageValueStore?.clear();
+}
+
+/**
+ * Reconcile page inference after a token-store change. Non-empty tokens
+ * supersede (clear) page values; an empty token set (no sources, or every
+ * source errored on a rebuild) re-arms a fresh harvest.
+ */
+function reconcilePageInference(): void {
+  if (!tokenStore) return;
+  if (tokenStore.loaded) {
+    supersedePageValues();
+  } else {
+    scheduleHarvest();
+  }
+}
+
+/**
+ * Re-render the currently-open value editor (colors / typography / layout) so it
+ * picks up a completed harvest or a supersession. No-op when no such editor is
+ * open. Called on both page-value-store and token-store updates.
+ */
+function refreshActiveValueEditor(): void {
+  const el = selection?.getSelectedElement();
+  if (!el) return;
+  const activeMode = toolbar?.getActiveMode();
+  if (activeMode === 'colors' || activeMode === 'typography' || activeMode === 'layout') {
+    activateToolForElement(el, activeMode);
+  }
+}
+
+/**
+ * Debounced `MutationObserver` for SPA re-harvest. Re-runs the harvest only when
+ * a debounced batch nets ≥ HARVEST_MUTATION_THRESHOLD added/removed *elements*
+ * (so incremental hover/focus mutations don't trigger it) and only while tokens
+ * are absent (supersession has priority).
+ */
+function setupHarvestObserver(): void {
+  if (typeof MutationObserver === 'undefined' || !document.body) return;
+
+  harvestObserver = new MutationObserver((records) => {
+    if (!tokenStore || tokenStore.loaded) return; // dormant once tokens exist
+    for (const r of records) {
+      for (const n of r.addedNodes) if (n.nodeType === Node.ELEMENT_NODE) harvestNetMutations++;
+      for (const n of r.removedNodes) if (n.nodeType === Node.ELEMENT_NODE) harvestNetMutations++;
+    }
+    if (harvestDebounceTimer != null) clearTimeout(harvestDebounceTimer);
+    harvestDebounceTimer = window.setTimeout(() => {
+      harvestDebounceTimer = null;
+      const net = harvestNetMutations;
+      harvestNetMutations = 0;
+      if (net >= HARVEST_MUTATION_THRESHOLD && tokenStore && !tokenStore.loaded) {
+        scheduleHarvest();
+      }
+    }, HARVEST_DEBOUNCE_MS);
+  });
+  harvestObserver.observe(document.body, { childList: true, subtree: true });
+}
+
+/** Tear down the harvest observer + timers and abort any in-flight harvest. */
+function teardownHarvest(): void {
+  harvestGeneration++;
+  harvestScheduled = false;
+  if (harvestObserver) {
+    harvestObserver.disconnect();
+    harvestObserver = null;
+  }
+  if (harvestDebounceTimer != null) {
+    clearTimeout(harvestDebounceTimer);
+    harvestDebounceTimer = null;
+  }
+  harvestNetMutations = 0;
+}
+
+// ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
 
@@ -189,6 +340,7 @@ export async function activate(): Promise<void> {
 
   // Initialize subsystems
   tokenStore = new TokenStore();
+  pageValueStore = new PageValueStore();
   queue = new PendingQueue();
   await queue.restore();
 
@@ -283,10 +435,12 @@ export async function activate(): Promise<void> {
     onTokenData: (payload) => {
       tokenStore!.setAll(payload.tokens, payload.sources);
       devtoolsPanel?.log(`Received ${payload.tokens.length} design tokens`);
+      reconcilePageInference();
     },
     onTokenUpdate: (payload) => {
       tokenStore!.update(payload.tokens, payload.sources);
       devtoolsPanel?.log(`Token update: ${payload.tokens.length} tokens`);
+      reconcilePageInference();
     },
     onComponentData: (payload) => {
       const entries = payload.components.map((c) =>
@@ -357,12 +511,16 @@ export async function activate(): Promise<void> {
       setTimeout(() => hover?.clearProgrammaticHighlight(), 3000);
     }
   });
-  typographyEditor = new TypographyEditor(tokenStore, preview);
-  colorEditor = new ColorEditor(tokenStore, snapping, preview);
+  typographyEditor = new TypographyEditor(tokenStore, preview, pageValueStore);
+  colorEditor = new ColorEditor(tokenStore, snapping, preview, pageValueStore);
   dimensionsEditor = new DimensionsEditor(preview);
   spacingEditor = new SpacingEditor(tokenStore, preview);
-  layoutEditor = new LayoutEditor(tokenStore, preview);
+  layoutEditor = new LayoutEditor(tokenStore, preview, pageValueStore);
   positionEditor = new PositionEditor(shadow, preview);
+
+  // Refresh an open value editor when a harvest completes or is superseded, so
+  // the "On this page" group appears/disappears without a manual re-select.
+  pageValueStore.onUpdate(() => refreshActiveValueEditor());
   notesEditor = new NotesEditor(notesStore, shadow);
   gridOverlay = new GridOverlay(shadow, tokenStore);
   rulerOverlay = new RulerOverlay(shadow, () => gridOverlay!.getEffectiveSettings(), () => gridOverlay?.isVisible() ?? false);
@@ -919,6 +1077,9 @@ export async function activate(): Promise<void> {
     gridOverlay?.refresh();
     const effective = gridOverlay!.getEffectiveSettings();
     gridSettingsPanel?.updateDefaults(effective.baseSpacing, effective.majorSpacing);
+    // Token arrival flips an open value editor from "On this page" (or freeform)
+    // to the token UI; token removal re-arms page inference on next harvest.
+    refreshActiveValueEditor();
   });
 
   // Wire reorder editor close → fall back to cursor tool
@@ -1033,6 +1194,12 @@ export async function activate(): Promise<void> {
   refreshExtensionIcon();
   devtoolsPanel.log('Extension activated');
   devtoolsPanel.log(`WebSocket connecting to localhost…`);
+
+  // Page-value inference (feature-011): schedule the first harvest on idle
+  // (gated on the token store still being empty — real tokens arriving over the
+  // WebSocket supersede it), and watch for SPA navigation to re-harvest.
+  setupHarvestObserver();
+  scheduleHarvest();
 }
 
 export function deactivate(): void {
@@ -1077,6 +1244,7 @@ export function deactivate(): void {
   preview?.revert();
   reviewPanel?.hide();
   wsClient?.destroy();
+  teardownHarvest();
 
   // Unmount Shadow DOM
   if (host) {
@@ -1105,6 +1273,7 @@ export function deactivate(): void {
   toolbar = null;
   staleDetector = null;
   tokenStore = null;
+  pageValueStore = null;
   snapping = null;
   preview = null;
   handles = null;

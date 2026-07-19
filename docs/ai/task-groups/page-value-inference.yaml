@@ -18,9 +18,9 @@ briefs:
       - docs/ai/governance/
   - title: "Build page-value inference"
     sequence: 2
-    session: null
+    session: 2
     branch: "feature/page-value-inference"
-    status: pending
+    status: complete
     next_brief: ""
     boundaries:
       - packages/chrome-extension/src/content/tokens/page-harvester.ts
@@ -79,6 +79,9 @@ session_decisions:
   - session: 1
     decision: "Authored feature-011-page-value-inference.md defining the page-inferred fallback tier (separate PageValueStore/InferredOption, fromPageInference: true, never toToken); amended feature-003 with source tier 5 'Page-inferred values' and the 'Page Defaults' UI state (distinct from 'No Tokens'); registered feature-011 in manifest.json; updated spec-compiled governance evidence."
     rationale: "Brief 1 of 2 — spec-first authoring of a significant feature before build, mirroring the structural-auto-layout / stable-element-identity precedent. The page-inferred store must be unmistakably distinct from design tokens so B1-2 does not pollute diff/drift semantics."
+  - session: 2
+    decision: "Implemented page-value inference per feature-011: page-harvester.ts (3-pass :root/getComputedStyle/CSSOM scan with normalize/dedup/frequency-floor/top-N-cap), page-value-store.ts (PageValueStore + InferredOption), index.ts wiring (idle-scheduled harvest gated on empty TokenStore, generation-based abort, token supersession clear, debounced MutationObserver re-harvest), and 'On this page' consumption in colors.ts (dashed swatch group), typography.ts (fallback optgroup), layout-editor.ts (gutter select). Added additive-optional PropertyChange.fromPageInference to packages/shared/src/diff.ts (spec Internal Design § Components assigns it to Brief 2)."
+    rationale: "Brief 2 of 2 (final). Page-inferred selections emit fromPageInference:true with no toToken so the token/drift trust chain stays authoritative; real tokens always win (supersession clears the store). Scope held to the contracted files — the dedicated margin/padding SpacingEditor and a line-height select were flagged by PM as follow-ups (out of contracted scope_files); deferred to a follow-up brief rather than expanding scope in auto mode."
 
 governance:
   - brief_sequence: 1
@@ -101,3 +104,28 @@ governance:
       - "drift-check invoked with explicit task-group bundle path (.claude/local/task-groups/page-value-inference/briefs/1.bundle.yaml) — _handoff_bundle_path only resolves the singular per-brief path"
       - "A5 + qa-verified state files written via shell I/O — SubagentStop state-writer skipped them (combined-mode Critic '---' separator; qa-verifier sentinel not captured); verdicts faithfully recorded (all APPROVED)"
     timestamp: "2026-07-18T07:30:00Z"
+  - brief_sequence: 2
+    session: 2
+    branch: "feature/page-value-inference"
+    commit: "pending-close"
+    gates_a:
+      A1: "pass (Decisions: 0014, 0020, 0035, 0038 trailer)"
+      A2: "pass (large additive build ~1373 insertions / 7 files; pre-approved via bundle mode:auto, large-scope:true)"
+      A3: "pass (tsc --noEmit clean; npm run build produced dist/content.js 905.7kb)"
+      A4: "pass (no secrets)"
+      A5: "pass (Critic combined: cohesion APPROVED 0-critical; diff-review BLOCKED on 1 critical [collectFromDeclaration shorthand expansion recorded margin/padding/border-color/border-radius values all under -top longhand] → fixed via recordExpanded; diff-review re-run single-mode APPROVED 0-critical; state files written via shell I/O after combined-mode state-writer skipped them again)"
+      A6: "pass (task-group contract present, brief 2 marked complete; integration artifact feature-011 spec exists)"
+    gates_b:
+      B1: "pass"
+      B2: "n/a"
+      B3: "n/a"
+    overrides_used:
+      - "init_phase re-init via REPO_OS_ALLOW_REINIT=1 — stale phase-state (current_phase: close) persisted from Brief 1's closed session in the shared sequential-group state dir"
+      - "drift-check invoked with explicit task-group bundle path (.claude/local/task-groups/page-value-inference/briefs/2.bundle.yaml); returned 0 (valid+fresh); plan-approved bundle_brief_id initially reflected a stale prior run and was re-derived from 2.bundle.yaml before build"
+      - "A5 cohesion-reviewed + diff-review-complete + qa-verified state files: authoritative verdicts written via shell I/O — SubagentStop state-writer left stale 07:09 files (combined-mode Critic dual-section not captured); all verdicts APPROVED"
+      - "phase-state mode synced review→auto to match bundle.mode:auto (drift_check wrote mode into plan-approved but not phase-state)"
+    followups:
+      - "PM (advisory): wire the dedicated margin/padding SpacingEditor (spacing.ts) to PageValueStore — margin/padding page values are harvested but only gap/row-gap/column-gap surface (via layout-editor). Out of contracted scope_files; deferred."
+      - "PM (advisory): line-height uses a slider; add an 'On this page' affordance for harvested line-heights. In-scope file (typography.ts) but non-trivial UX change; deferred."
+      - "PM/spec (SHOULD): 'degraded design system' affordance keyed off TokenSourceStatus status:'error' + empty token set (feature-011 § Edge Cases). Not implemented; deferred."
+    timestamp: "2026-07-18T08:05:00Z"

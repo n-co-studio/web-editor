@@ -3,8 +3,9 @@ import { createElement, createText, createButton, makeDraggable } from '../../sh
 import { getComputedProperty } from '../../shared/dom-utils';
 import { OVERLAY, TOOLBAR_WIDTH } from '../../shared/constants';
 import type { TokenStore } from '../tokens/store';
+import type { PageValueStore, InferredOption } from '../tokens/page-value-store';
 import type { PreviewManager } from './preview';
-import { buildTokenSelect } from './token-select';
+import { buildTokenSelect, extractUnit } from './token-select';
 import { LAYOUT_RATIOS } from './insert-catalog';
 
 type ChangeCallback = (changes: PropertyChange[]) => void;
@@ -48,6 +49,7 @@ export class LayoutEditor {
   constructor(
     private readonly tokenStore: TokenStore,
     private readonly preview: PreviewManager,
+    private readonly pageValueStore: PageValueStore,
   ) {}
 
   onClose(cb: () => void): void {
@@ -176,17 +178,105 @@ export class LayoutEditor {
 
       // Prefer property-specific tokens; fall back to all spacing tokens since a
       // token may not declare `gap` in its cssProperties.
-      const tokens = this.tokenStore.getForProperty(property).length > 0
-        ? this.tokenStore.getForProperty(property)
-        : this.tokenStore.getForCategory('spacing');
+      const propTokens = this.tokenStore.getForProperty(property);
+      const tokens = propTokens.length > 0 ? propTokens : this.tokenStore.getForCategory('spacing');
       const currentValue = getComputedProperty(element, property);
-      row.appendChild(
-        buildTokenSelect(property, tokens, currentValue, element, this.preview, onCommit),
-      );
+
+      if (tokens.length > 0) {
+        row.appendChild(
+          buildTokenSelect(property, tokens, currentValue, element, this.preview, onCommit),
+        );
+      } else {
+        // No spacing tokens. Offer page-inferred spacing ("On this page") when the
+        // harvester found any (feature-011); otherwise keep the feature-003
+        // freeform floor (buildTokenSelect with an empty token set still offers
+        // `auto` + the current value, so gutters never dead-end).
+        const pageOptions = this.pageValueStore.getForProperty(property);
+        if (pageOptions.length > 0) {
+          row.appendChild(this.buildPageGutterSelect(property, pageOptions, currentValue, element, onCommit));
+        } else {
+          row.appendChild(
+            buildTokenSelect(property, tokens, currentValue, element, this.preview, onCommit),
+          );
+        }
+      }
       group.appendChild(row);
     }
 
     return group;
+  }
+
+  /**
+   * A gutter <select> backed by page-inferred spacing values (feature-011),
+   * grouped under an "On this page" optgroup above `auto`. Selecting a page
+   * value emits `fromPageInference: true` with no `toToken`; the freeform
+   * escape (`auto` / the live value) remains available.
+   */
+  private buildPageGutterSelect(
+    property: string,
+    pageOptions: readonly InferredOption[],
+    currentValue: string,
+    element: Element,
+    onCommit: ChangeCallback,
+  ): HTMLSelectElement {
+    const select = createElement('select', {}, {
+      background: 'rgba(255, 255, 255, 0.1)',
+      color: OVERLAY.text,
+      border: `1px solid ${OVERLAY.border}`,
+      borderRadius: OVERLAY.radiusSm,
+      padding: '2px 3px',
+      fontSize: '10px',
+      fontFamily: OVERLAY.monoFamily,
+      pointerEvents: 'auto',
+      cursor: 'pointer',
+      flex: '1',
+      minWidth: '0',
+    }) as HTMLSelectElement;
+
+    const pageValues = new Set(pageOptions.map((o) => o.value));
+
+    const autoOpt = document.createElement('option');
+    autoOpt.value = 'auto';
+    autoOpt.textContent = 'auto';
+    if (currentValue === 'auto') autoOpt.selected = true;
+    select.appendChild(autoOpt);
+
+    const hasMatch = currentValue === 'auto' || pageValues.has(currentValue);
+    if (!hasMatch) {
+      const opt = document.createElement('option');
+      opt.value = currentValue;
+      opt.textContent = currentValue;
+      opt.selected = true;
+      select.appendChild(opt);
+    }
+
+    const group = document.createElement('optgroup');
+    group.label = 'On this page';
+    for (const o of pageOptions) {
+      const opt = document.createElement('option');
+      opt.value = o.value;
+      opt.textContent = o.value;
+      if (o.value === currentValue) opt.selected = true;
+      group.appendChild(opt);
+    }
+    select.appendChild(group);
+
+    select.addEventListener('change', () => {
+      const toValue = select.value;
+      const fromValue = getComputedProperty(element, property);
+      this.preview.begin(element as HTMLElement);
+      this.preview.apply(property, toValue);
+      this.preview.commit();
+      onCommit([{
+        property,
+        fromValue,
+        toValue,
+        unit: extractUnit(toValue),
+        ...(pageValues.has(toValue) ? { fromPageInference: true as const } : {}),
+      }]);
+    });
+
+    return select;
   }
 
   // -----------------------------------------------------------------------

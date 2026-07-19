@@ -4,10 +4,88 @@ import { getComputedProperty } from '../../shared/dom-utils';
 import { OVERLAY, TOOLBAR_WIDTH } from '../../shared/constants';
 import type { TokenStore } from '../tokens/store';
 import type { SnappingEngine } from '../tokens/snapping';
+import type { PageValueStore, InferredOption } from '../tokens/page-value-store';
 import type { PreviewManager } from './preview';
 import { buildColorInput } from './color-input';
 
 type ChangeCallback = (changes: PropertyChange[]) => void;
+
+/**
+ * "On this page" heading for a page-inferred (feature-011) option group. Styled
+ * distinctly from token headings so provenance is always legible.
+ */
+export function pageValueHeading(text = 'On this page'): HTMLDivElement {
+  const el = createText('div', text, 'mono') as HTMLDivElement;
+  el.style.color = OVERLAY.textMuted;
+  el.style.fontSize = '10px';
+  el.style.textTransform = 'uppercase';
+  el.style.letterSpacing = '0.5px';
+  return el;
+}
+
+/**
+ * Render an "On this page" swatch group of page-inferred color values
+ * (feature-011). Swatches use a dashed "observed" border — deliberately
+ * distinct from the token swatch treatment (2px solid) — so the operator can
+ * always tell a page value from a design token. Selecting a swatch commits a
+ * `PropertyChange` with `fromPageInference: true` and no `toToken`.
+ */
+export function buildPageValueColorGroup(
+  property: string,
+  options: readonly InferredOption[],
+  element: Element,
+  preview: PreviewManager,
+  onCommit: ChangeCallback,
+): HTMLDivElement {
+  const group = createElement('div', {}, {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+  });
+  group.appendChild(pageValueHeading());
+
+  const grid = createElement('div', {}, {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(6, 1fr)',
+    gap: '4px',
+    pointerEvents: 'auto',
+  });
+
+  for (const opt of options) {
+    const title = `${opt.value}${opt.label ? ` · ${opt.label}` : ''} · on this page`;
+    const swatch = createElement('div', { role: 'button', tabindex: '0', title }, {
+      width: '22px',
+      height: '22px',
+      borderRadius: OVERLAY.radiusSm,
+      background: opt.value,
+      // Dashed "observed" affordance — never the token swatch treatment.
+      border: `1px dashed ${OVERLAY.textMuted}`,
+      boxSizing: 'border-box',
+      cursor: 'pointer',
+    });
+
+    const pick = (): void => {
+      const fromValue = getComputedProperty(element, property);
+      preview.begin(element as HTMLElement);
+      preview.apply(property, opt.value);
+      preview.commit();
+      onCommit([{ property, fromValue, toValue: opt.value, fromPageInference: true }]);
+    };
+    swatch.addEventListener('click', pick);
+    swatch.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        pick();
+      }
+    });
+    swatch.addEventListener('mouseenter', () => { swatch.style.borderColor = OVERLAY.primary; });
+    swatch.addEventListener('mouseleave', () => { swatch.style.borderColor = OVERLAY.textMuted; });
+    grid.appendChild(swatch);
+  }
+
+  group.appendChild(grid);
+  return group;
+}
 
 /**
  * Color editing panel — token swatch grid only.
@@ -22,6 +100,7 @@ export class ColorEditor {
     private readonly tokenStore: TokenStore,
     private readonly snapping: SnappingEngine,
     private readonly preview: PreviewManager,
+    private readonly pageValueStore: PageValueStore,
   ) {}
 
   onClose(cb: () => void): void {
@@ -147,17 +226,29 @@ export class ColorEditor {
       );
       body.appendChild(swatches);
     } else {
-      // No tokens loaded — fall back to freeform editing (feature-003).
-      // Edits are emitted as raw CSS (no toToken) via buildColorInput.
+      // No tokens loaded. Offer page-inferred colors ("On this page") above the
+      // freeform floor when the harvester found any (feature-011); otherwise
+      // fall straight through to freeform (feature-003). Either way freeform
+      // entry remains available beneath — the escape hatch is never suppressed.
+      const reflectPick = (changes: PropertyChange[]): void => {
+        const last = changes[changes.length - 1];
+        if (last) {
+          colorChip.style.background = last.toValue;
+          valueText.textContent = last.toValue;
+        }
+        onCommit(changes);
+      };
+
+      const pageOptions = this.pageValueStore.getForProperty(property);
+      if (pageOptions.length > 0) {
+        body.appendChild(
+          buildPageValueColorGroup(property, pageOptions, element, this.preview, reflectPick),
+        );
+      }
+
+      // Freeform floor — raw CSS, no toToken (feature-003).
       body.appendChild(
-        buildColorInput(property, currentValue, element, this.preview, (changes) => {
-          const last = changes[changes.length - 1];
-          if (last) {
-            colorChip.style.background = last.toValue;
-            valueText.textContent = last.toValue;
-          }
-          onCommit(changes);
-        }),
+        buildColorInput(property, currentValue, element, this.preview, reflectPick),
       );
     }
 

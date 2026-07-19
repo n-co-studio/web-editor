@@ -136,6 +136,20 @@ export interface PropertyChange {
   readonly unit?: string;
   readonly source?: RuleSource;
   readonly allBreakpointSources?: readonly CrossBreakpointRuleSource[];
+  /**
+   * Provenance marker for a page-inferred selection (feature-011). Set to `true`
+   * only when the operator picked a value harvested from the live page (the
+   * "On this page" fallback offered when no design tokens exist), never on token
+   * or arbitrary-freeform edits. A page-inferred change is, by construction, a
+   * custom (raw-CSS) change: it carries **no `toToken` / `fromToken`**, so
+   * `get_token_drift_report` never counts it as a token match — the flag only
+   * lets a downstream consumer distinguish a *grounded* custom (a value the page
+   * already uses) from an arbitrary one. Additive-optional: absent on all
+   * pre-feature-011 diffs and on token / freeform edits; a consumer that ignores
+   * it sees an ordinary no-`toToken` custom change (clean degrade). No
+   * `WS_PROTOCOL_VERSION` bump (same treatment as `reorderChanges` / `uid`).
+   */
+  readonly fromPageInference?: true;
 }
 
 /**
