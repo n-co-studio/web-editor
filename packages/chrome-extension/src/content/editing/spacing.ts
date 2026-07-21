@@ -3,10 +3,15 @@ import { createElement, createText, createButton, makeDraggable } from '../../sh
 import { getComputedProperty } from '../../shared/dom-utils';
 import { OVERLAY, TOOLBAR_WIDTH, HANDLE_COLORS } from '../../shared/constants';
 import type { TokenStore } from '../tokens/store';
+import type { PageValueStore, InferredOption } from '../tokens/page-value-store';
 import type { PreviewManager } from './preview';
 import { buildTokenSelect, extractUnit } from './token-select';
+import { pageValueHeading } from './colors';
 
 type ChangeCallback = (changes: PropertyChange[]) => void;
+
+/** Monotonic id source for per-input `<datalist>` elements (page suggestions). */
+let datalistSeq = 0;
 
 /** Spacing properties that the spacing edit mode handles. */
 export const SPACING_PROPERTIES = [
@@ -89,6 +94,7 @@ export class SpacingEditor {
   constructor(
     private readonly tokenStore: TokenStore,
     private readonly preview: PreviewManager,
+    private readonly pageValueStore: PageValueStore,
   ) {}
 
   onClose(cb: () => void): void {
@@ -157,6 +163,14 @@ export class SpacingEditor {
       flexDirection: 'column',
       gap: '10px',
     });
+
+    // Page-inference hint (feature-011): when no spacing tokens exist but the
+    // page harvest found spacing values, the T/R/B/L inputs below expose them as
+    // `<datalist>` suggestions. A single header keeps the 2×2 grids uncluttered.
+    if (this.tokenStore.getForProperty('padding-top').length === 0 &&
+        this.pageValueStore.getForProperty('padding-top').length > 0) {
+      body.appendChild(pageValueHeading(this.tokenStore.hasDegradedDesignSystem()));
+    }
 
     // Padding group
     body.appendChild(this.buildGroup(
@@ -282,8 +296,12 @@ export class SpacingEditor {
     if (tokens.length > 0) {
       cell.appendChild(buildTokenSelect(property, tokens, currentValue, element, this.preview, onCommit));
     } else {
-      // Fallback: editable text input
-      cell.appendChild(this.buildValueInput(property, currentValue, element, onCommit));
+      // Freeform text input (feature-003 escape hatch — preserved), augmented
+      // with a `<datalist>` of page-inferred spacing values for discoverability
+      // (feature-011). A committed value that matches a harvested page value is
+      // stamped `fromPageInference: true` (a grounded custom), never `toToken`.
+      const pageOptions = this.pageValueStore.getForProperty(property);
+      cell.appendChild(this.buildValueInput(property, currentValue, element, pageOptions, onCommit));
     }
 
     return cell;
@@ -293,8 +311,9 @@ export class SpacingEditor {
     property: string,
     currentValue: string,
     element: Element,
+    pageOptions: readonly InferredOption[],
     onCommit: ChangeCallback,
-  ): HTMLInputElement {
+  ): HTMLElement {
     const input = createElement('input', {
       type: 'text',
       value: currentValue,
@@ -312,6 +331,28 @@ export class SpacingEditor {
       width: '100%',
     }) as HTMLInputElement;
 
+    const pageValues = new Set(pageOptions.map((o) => o.value));
+
+    // Attach page-inferred suggestions via a native <datalist> (freeform typing
+    // remains fully available). The datalist lives in the same shadow tree.
+    let datalist: HTMLDataListElement | null = null;
+    if (pageOptions.length > 0) {
+      const listId = `pv-spacing-${datalistSeq++}`;
+      datalist = document.createElement('datalist');
+      datalist.id = listId;
+      for (const o of pageOptions) {
+        const opt = document.createElement('option');
+        opt.value = o.value;
+        datalist.appendChild(opt);
+      }
+      input.setAttribute('list', listId);
+      input.title = 'Type a value, or pick one already used on this page';
+      // Dashed "observed" border echoes the color-swatch page-inference treatment
+      // so provenance is legible at the input level, not just the panel header.
+      input.style.borderStyle = 'dashed';
+      input.style.borderColor = OVERLAY.textMuted;
+    }
+
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -326,11 +367,17 @@ export class SpacingEditor {
             fromValue,
             toValue,
             unit: extractUnit(toValue),
+            ...(pageValues.has(toValue) ? { fromPageInference: true as const } : {}),
           }]);
         }
       }
     });
 
-    return input;
+    if (!datalist) return input;
+    // Wrap input + datalist so the cell receives a single element.
+    const wrap = createElement('div', {}, { display: 'contents' });
+    wrap.appendChild(input);
+    wrap.appendChild(datalist);
+    return wrap;
   }
 }

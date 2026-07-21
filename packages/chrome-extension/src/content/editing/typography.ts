@@ -7,7 +7,7 @@ import type { PageValueStore, InferredOption } from '../tokens/page-value-store'
 import type { PreviewManager } from './preview';
 import { extractUnit } from './token-select';
 import { buildColorInput } from './color-input';
-import { buildPageValueColorGroup } from './colors';
+import { buildPageValueColorGroup, pageValueHeading, pageGroupLabel } from './colors';
 
 type ChangeCallback = (changes: PropertyChange[]) => void;
 
@@ -235,7 +235,7 @@ export class TypographyEditor {
     const pageOptions = this.pageValueStore.getForProperty(property);
     const select = this.buildFallbackSelect(pageOptions, fallback, currentValue, (newValue, fromPage) => {
       apply(newValue, fromPage ? { fromPageInference: true } : {});
-    });
+    }, this.tokenStore.hasDegradedDesignSystem());
     row.appendChild(select);
     return row;
   }
@@ -244,8 +244,48 @@ export class TypographyEditor {
     element: Element,
     onCommit: ChangeCallback,
   ): HTMLDivElement {
-    const row = this.buildRow('line-height');
     const currentValue = getComputedProperty(element, 'line-height');
+
+    // When no line-height tokens exist but the page harvest found line-heights,
+    // offer them as an "On this page" select above the slider (feature-011).
+    // The slider below remains as the freeform escape.
+    const tokens = this.tokenStore.getForProperty('line-height');
+    const pageOptions = tokens.length === 0 ? this.pageValueStore.getForProperty('line-height') : [];
+    if (pageOptions.length > 0) {
+      const column = createElement('div', {}, {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '6px',
+      });
+      column.appendChild(pageValueHeading(this.tokenStore.hasDegradedDesignSystem()));
+      const select = this.buildFallbackSelect(pageOptions, [], currentValue, (newValue, fromPage) => {
+        this.preview.begin(element as HTMLElement);
+        this.preview.apply('line-height', newValue);
+        this.preview.commit();
+        onCommit([{
+          property: 'line-height',
+          fromValue: currentValue,
+          toValue: newValue,
+          ...(fromPage ? { fromPageInference: true as const } : {}),
+        }]);
+      }, this.tokenStore.hasDegradedDesignSystem());
+      const pageRow = this.buildRow('line-height');
+      pageRow.appendChild(select);
+      column.appendChild(pageRow);
+      column.appendChild(this.buildLineHeightSlider(element, currentValue, onCommit));
+      return column;
+    }
+
+    return this.buildLineHeightSlider(element, currentValue, onCommit);
+  }
+
+  /** The line-height ratio slider (the feature-003 freeform control). */
+  private buildLineHeightSlider(
+    element: Element,
+    currentValue: string,
+    onCommit: ChangeCallback,
+  ): HTMLDivElement {
+    const row = this.buildRow('line-height');
     const currentNum = parseFloat(currentValue);
 
     const slider = createElement('input', {
@@ -316,7 +356,7 @@ export class TypographyEditor {
           flex: '1',
           minWidth: '0',
         });
-        column.appendChild(buildPageValueColorGroup('color', pageOptions, element, this.preview, onCommit));
+        column.appendChild(buildPageValueColorGroup('color', pageOptions, element, this.preview, onCommit, this.tokenStore.hasDegradedDesignSystem()));
         column.appendChild(buildColorInput('color', currentValue, element, this.preview, onCommit));
         row.appendChild(column);
         return row;
@@ -429,6 +469,7 @@ export class TypographyEditor {
     fallback: readonly ValueOption[],
     currentValue: string,
     onChange: (value: string, fromPageInference: boolean) => void,
+    degraded = false,
   ): HTMLSelectElement {
     const select = createElement('select', {}, {
       background: 'rgba(255, 255, 255, 0.1)',
@@ -459,7 +500,7 @@ export class TypographyEditor {
 
     if (pageOptions.length > 0) {
       const group = document.createElement('optgroup');
-      group.label = 'On this page';
+      group.label = pageGroupLabel(degraded);
       for (const o of pageOptions) {
         const opt = document.createElement('option');
         opt.value = o.value;
@@ -470,16 +511,20 @@ export class TypographyEditor {
       select.appendChild(group);
     }
 
-    const fallbackGroup = document.createElement('optgroup');
-    fallbackGroup.label = pageOptions.length > 0 ? 'Common' : 'Values';
-    for (const f of fallback) {
-      const opt = document.createElement('option');
-      opt.value = f.value;
-      opt.textContent = f.name === f.value ? f.value : `${f.value} (${f.name})`;
-      if (f.value === currentValue) opt.selected = true;
-      fallbackGroup.appendChild(opt);
+    // Freeform defaults (feature-003). Skipped entirely when there are none
+    // (e.g. line-height, whose freeform escape is the slider, not this select).
+    if (fallback.length > 0) {
+      const fallbackGroup = document.createElement('optgroup');
+      fallbackGroup.label = pageOptions.length > 0 ? 'Common' : 'Values';
+      for (const f of fallback) {
+        const opt = document.createElement('option');
+        opt.value = f.value;
+        opt.textContent = f.name === f.value ? f.value : `${f.value} (${f.name})`;
+        if (f.value === currentValue) opt.selected = true;
+        fallbackGroup.appendChild(opt);
+      }
+      select.appendChild(fallbackGroup);
     }
-    select.appendChild(fallbackGroup);
 
     select.addEventListener('change', () => {
       onChange(select.value, pageValues.has(select.value));

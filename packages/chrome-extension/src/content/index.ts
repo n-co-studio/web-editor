@@ -275,7 +275,7 @@ function refreshActiveValueEditor(): void {
   const el = selection?.getSelectedElement();
   if (!el) return;
   const activeMode = toolbar?.getActiveMode();
-  if (activeMode === 'colors' || activeMode === 'typography' || activeMode === 'layout') {
+  if (activeMode === 'colors' || activeMode === 'typography' || activeMode === 'layout' || activeMode === 'spacing') {
     activateToolForElement(el, activeMode);
   }
 }
@@ -514,7 +514,7 @@ export async function activate(): Promise<void> {
   typographyEditor = new TypographyEditor(tokenStore, preview, pageValueStore);
   colorEditor = new ColorEditor(tokenStore, snapping, preview, pageValueStore);
   dimensionsEditor = new DimensionsEditor(preview);
-  spacingEditor = new SpacingEditor(tokenStore, preview);
+  spacingEditor = new SpacingEditor(tokenStore, preview, pageValueStore);
   layoutEditor = new LayoutEditor(tokenStore, preview, pageValueStore);
   positionEditor = new PositionEditor(shadow, preview);
 

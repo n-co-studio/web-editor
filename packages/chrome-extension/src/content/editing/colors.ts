@@ -11,16 +11,50 @@ import { buildColorInput } from './color-input';
 type ChangeCallback = (changes: PropertyChange[]) => void;
 
 /**
- * "On this page" heading for a page-inferred (feature-011) option group. Styled
- * distinctly from token headings so provenance is always legible.
+ * Label shown on page-inference option groups / optgroups when a token source
+ * errored (feature-011 § Edge Cases — "degraded design system"). A trailing
+ * marker so the operator sees these may be their own design variables surfaced
+ * because a token source failed to load, not ordinary observed reality.
  */
-export function pageValueHeading(text = 'On this page'): HTMLDivElement {
-  const el = createText('div', text, 'mono') as HTMLDivElement;
+export const PAGE_GROUP_LABEL = 'On this page';
+export const PAGE_GROUP_LABEL_DEGRADED = 'On this page ⚠'; // ⚠
+
+/** Optgroup label for a page-inference `<optgroup>`, degraded-aware. */
+export function pageGroupLabel(degraded = false): string {
+  return degraded ? PAGE_GROUP_LABEL_DEGRADED : PAGE_GROUP_LABEL;
+}
+
+/**
+ * "On this page" heading for a page-inferred (feature-011) option group. Styled
+ * distinctly from token headings so provenance is always legible. When
+ * `degraded` is true, a muted note is appended flagging a possible failed token
+ * source (feature-011 § Edge Cases).
+ */
+export function pageValueHeading(degraded = false): HTMLDivElement {
+  const wrap = createElement('div', {}, {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+  });
+  const el = createText('div', PAGE_GROUP_LABEL, 'mono');
   el.style.color = OVERLAY.textMuted;
   el.style.fontSize = '10px';
   el.style.textTransform = 'uppercase';
   el.style.letterSpacing = '0.5px';
-  return el;
+  wrap.appendChild(el);
+  if (degraded) wrap.appendChild(buildDegradedNote());
+  return wrap;
+}
+
+/** Muted advisory shown when a token source errored (feature-011 § Edge Cases). */
+export function buildDegradedNote(): HTMLDivElement {
+  const note = createText('div', '⚠ A token source may have failed to load — these may be your design system.', 'mono') as HTMLDivElement;
+  note.style.color = OVERLAY.warning;
+  note.style.fontSize = '9px';
+  note.style.lineHeight = '1.3';
+  note.style.textTransform = 'none';
+  note.style.letterSpacing = '0';
+  return note;
 }
 
 /**
@@ -36,13 +70,14 @@ export function buildPageValueColorGroup(
   element: Element,
   preview: PreviewManager,
   onCommit: ChangeCallback,
+  degraded = false,
 ): HTMLDivElement {
   const group = createElement('div', {}, {
     display: 'flex',
     flexDirection: 'column',
     gap: '6px',
   });
-  group.appendChild(pageValueHeading());
+  group.appendChild(pageValueHeading(degraded));
 
   const grid = createElement('div', {}, {
     display: 'grid',
@@ -242,7 +277,7 @@ export class ColorEditor {
       const pageOptions = this.pageValueStore.getForProperty(property);
       if (pageOptions.length > 0) {
         body.appendChild(
-          buildPageValueColorGroup(property, pageOptions, element, this.preview, reflectPick),
+          buildPageValueColorGroup(property, pageOptions, element, this.preview, reflectPick, this.tokenStore.hasDegradedDesignSystem()),
         );
       }
 

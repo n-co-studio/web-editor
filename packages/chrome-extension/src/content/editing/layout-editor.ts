@@ -6,6 +6,7 @@ import type { TokenStore } from '../tokens/store';
 import type { PageValueStore, InferredOption } from '../tokens/page-value-store';
 import type { PreviewManager } from './preview';
 import { buildTokenSelect, extractUnit } from './token-select';
+import { pageGroupLabel } from './colors';
 import { LAYOUT_RATIOS } from './insert-catalog';
 
 type ChangeCallback = (changes: PropertyChange[]) => void;
@@ -251,7 +252,7 @@ export class LayoutEditor {
     }
 
     const group = document.createElement('optgroup');
-    group.label = 'On this page';
+    group.label = pageGroupLabel(this.tokenStore.hasDegradedDesignSystem());
     for (const o of pageOptions) {
       const opt = document.createElement('option');
       opt.value = o.value;

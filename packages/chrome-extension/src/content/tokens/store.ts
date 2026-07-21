@@ -81,6 +81,20 @@ export class TokenStore {
   }
 
   /**
+   * True when the design system looks **degraded** (feature-011 § Edge Cases):
+   * the token store is empty **and** at least one discovered token source
+   * reported an error (`TokenSourceStatus.status === 'error'`). In that state the
+   * harvested "On this page" values may actually be the project's own design
+   * variables surfaced because a token source failed to load, so editors annotate
+   * the page group rather than presenting it as ordinary observed reality. Both
+   * conditions are enforced here so the predicate is safe to read in any context
+   * (a mixed-source state where tokens did load returns false).
+   */
+  hasDegradedDesignSystem(): boolean {
+    return this.tokens.length === 0 && this.sources.some((s) => s.status === 'error');
+  }
+
+  /**
    * Resolve a CSS value to its nearest design token.
    * Mirrors the server-side resolveToToken logic for instant client feedback.
    */

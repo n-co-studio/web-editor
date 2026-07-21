@@ -1147,3 +1147,11 @@ edges:
     last_verified: "2026-07-18"
     status: "active"
     confidence: 0.7
+  - source: "product-editing-spacing"
+    target: "product-tokens-page-value-store"
+    relation: "consumes"
+    context: "SpacingEditor offers page-inferred margin/padding values as <datalist> suggestions (feature-011 follow-up), stamping fromPageInference on match"
+    source_type: "agent-inferred"
+    last_verified: "2026-07-18"
+    status: "active"
+    confidence: 0.7
