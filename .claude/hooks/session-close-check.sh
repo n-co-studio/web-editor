@@ -1047,27 +1047,38 @@ if [ "$IS_RETRY" = false ]; then
   fi
 fi
 
-# --- Knowledge graph update reminder (Decision 0034, Amendment 3) ---
-# REQUIRE-attempt write stance: fires for Full (standard), Expedited (hotfix), Light (editor-live).
-# Audit (Prompt C, session type "audit") has no write requirement — excluded.
-# Two-graph architecture: check both template graph (graph.yaml) and product graph (product-graph.yaml)
+# --- Knowledge graph update check (Decision 0034, Amendment 7) ---
+# Blocking enforcement is at commit time (pre-commit-gates.sh KG Update Gate).
+# This close-check is advisory only: fires when modified files have KG nodes but no
+# kg-updated session marker is present (gate may not have been triggered yet).
+# Audit sessions excluded — no write requirement.
+# Two-graph architecture: check both template graph (graph.yaml) and product graph (product-graph.yaml).
 KG_SESSION_TYPE=$(infer_session_type)
 KG_TEMPLATE_GRAPH="$REPO_ROOT/docs/ai/knowledge-graph/graph.yaml"
 KG_PRODUCT_GRAPH="$REPO_ROOT/docs/ai/knowledge-graph/product-graph.yaml"
 if [ "$KG_SESSION_TYPE" != "audit" ] && { [ -f "$KG_TEMPLATE_GRAPH" ] || [ -f "$KG_PRODUCT_GRAPH" ]; }; then
-  # Check if any modified files have nodes in either graph
-  KG_MODIFIED_FILES=$(git -C "$REPO_ROOT" diff --cached --name-only 2>/dev/null || git -C "$REPO_ROOT" diff --name-only HEAD 2>/dev/null || true)
-  KG_HAS_GRAPH_NODE=false
-  for kgf in $KG_MODIFIED_FILES; do
-    for kg_file in "$KG_TEMPLATE_GRAPH" "$KG_PRODUCT_GRAPH"; do
-      if [ -f "$kg_file" ] && grep -q "path: \"${kgf}\"" "$kg_file" 2>/dev/null; then
-        KG_HAS_GRAPH_NODE=true
-        break 2
-      fi
+  # Suppress advisory when kg-updated session marker is present (gate passed this session)
+  _KG_PASS_MARKER="$_SESSION_STATE_DIR/kg-updated"
+  _KG_ALREADY_PASSED=false
+  if [ -f "$_KG_PASS_MARKER" ] && grep -q '^result: PASSED' "$_KG_PASS_MARKER" 2>/dev/null; then
+    _KG_ALREADY_PASSED=true
+  fi
+  if [ "$_KG_ALREADY_PASSED" = false ]; then
+    KG_MODIFIED_FILES=$(git -C "$REPO_ROOT" diff --cached --name-only 2>/dev/null || git -C "$REPO_ROOT" diff --name-only HEAD 2>/dev/null || true)
+    KG_HAS_GRAPH_NODE=false
+    KG_NODE_FILES=""
+    for kgf in $KG_MODIFIED_FILES; do
+      for kg_file in "$KG_TEMPLATE_GRAPH" "$KG_PRODUCT_GRAPH"; do
+        if [ -f "$kg_file" ] && grep -qF "path: \"${kgf}\"" "$kg_file" 2>/dev/null; then
+          KG_HAS_GRAPH_NODE=true
+          KG_NODE_FILES="${KG_NODE_FILES:+$KG_NODE_FILES }$kgf"
+          break
+        fi
+      done
     done
-  done
-  if [ "$KG_HAS_GRAPH_NODE" = true ]; then
-    _add_advisory "Advisory: Modified files have knowledge graph nodes — update the appropriate graph before close. Template files → graph.yaml, product files → product-graph.yaml. Cross-layer edges go in the source node's graph. See Decision 0034."
+    if [ "$KG_HAS_GRAPH_NODE" = true ]; then
+      _add_advisory "Advisory: Modified files have knowledge graph nodes but no kg-updated marker found — ensure graph.yaml/product-graph.yaml is updated before commit. Files: $KG_NODE_FILES. The KG Update Gate (Amendment 7) will block commit if graph not staged or updated this session. See Decision 0034."
+    fi
   fi
 fi
 

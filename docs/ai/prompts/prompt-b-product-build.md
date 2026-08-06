@@ -245,7 +245,7 @@ Use `mkdir`-based locking per Decision 0034 before writing. Template graph uses 
 2. Run `bash .claude/tools/kg-merge-deltas.sh {group}` — reads all per-brief deltas + the merge-brief delta, dedups (last `authored_at` wins on `last_verified`; max wins on `confidence`; first-seen wins on `status` conflict; operator-curated edges immutable), and applies the union to the shared graph under a single lock.
 3. If `$_REPO_OS_ROOT/.claude/.state/kg-aggregation-conflicts.log` was written, surface those tuples as CRITICAL cohesion findings — do not silently accept.
 
-REQUIRE: attempt graph writes (or delta writes for parallel content briefs) at close before the final commit. If the write fails (lock contention, parse error), log the failure in the closing summary and proceed to commit — do not block the close sequence. Skipping the attempt entirely is a REQUIRE violation (Decision 0034 Amendment 3).
+REQUIRE: attempt graph writes (or delta writes for parallel content briefs) at close before the final commit. If the write fails (lock contention, parse error), log the failure in the closing summary and proceed to commit — do not block the close sequence. Skipping the attempt entirely is a REQUIRE violation (Decision 0034 Amendment 3). Note: this tolerate-failure stance governs close-time writes only. The KG Update Gate in `pre-commit-gates.sh` (Decision 0034 Amendment 7) is separately blocking at commit time — a staged governance file without a graph node or without a graph update this session will block the commit regardless of the close-write outcome.
 
 ## Operating Rules
 - REQUIRE: at session start, create a branch from main: `git checkout -b <category>/<description>` (standard: `feature/<description>`, hotfix: `hotfix/<description>`)

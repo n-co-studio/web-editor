@@ -73,6 +73,17 @@ _REPO_OS_STDIN_SID="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev
 
 COMMIT_CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null || true)
 
+# --- Self-filter: skip the full gate chain for non-commit commands ---
+# The matcher is now "Bash" (fires on every Bash call); guard against running
+# A1-A6 + secret scan on unrelated commands like 'ls' or 'echo'.
+# Permissive match: cd ... && git commit, git -C . commit, etc. all pass.
+# Edge case: 'git commit' in a -m message string is accepted as a false positive
+# (cheap to re-run and full message parsing adds fragility).
+case "$COMMIT_CMD" in
+  *"git commit"*) ;;
+  *) exit 0 ;;
+esac
+
 # --- REPO_OS_RECOVER override (env var or file-based signal) ---
 RECOVER_SIGNAL_FILE="$REPO_ROOT/.claude/.state/.recover-signal"
 if [ "${REPO_OS_RECOVER:-0}" = "1" ]; then
@@ -148,7 +159,7 @@ if [ "$IS_EXPERIMENT" = true ]; then
   if [ "$FAILED" -ne 0 ]; then
     log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "$BLOCKED_REASONS"
     echo "Commit blocked by pre-commit gate check." >&2
-    exit 1
+    exit 2
   fi
   log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "experiment_branch"
   exit 0
@@ -178,7 +189,7 @@ if [ "$IS_EDITOR_LIVE_LOOP" = true ]; then
   if [ "$FAILED" -ne 0 ]; then
     log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "$BLOCKED_REASONS"
     echo "Commit blocked by pre-commit gate check." >&2
-    exit 1
+    exit 2
   fi
   log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "editor_live_loop"
   exit 0
@@ -1427,44 +1438,183 @@ if [ "$SKIP_STATE" = false ] && [ -n "$STAGED_FILES" ]; then
 fi
 
 # ============================================================
-# KG Coverage Advisory (advisory, non-blocking)
-# Warns when committed governance files lack knowledge graph nodes.
-# Scopes to governance paths only — product files use folder-level nodes.
-# Template graph only (Decision 0034 Amendment 2).
-# Decision 0034 excludes KG blocking enforcement.
+# KG Update Gate (blocking — Decision 0034 Amendment 7)
+# Two-half check on staged governance files:
+#   COVERAGE  — a staged file has no node in the applicable graph (blocking).
+#   FRESHNESS — a staged file HAS a node, but no graph file is staged AND no
+#               session-scoped kg-updated marker is present (blocking).
+# Six-branch exemption matrix downgrades to advisory (never blocks):
+#   audit session | parallel tg-delta | experiment/* | graph not writable
+#   in current mode | REPO_OS_RECOVER | REPO_OS_SKIP_KG_GATE
+# FRESHNESS is a presence proxy: it verifies the graph was touched this
+# session, not that the touch was semantically accurate (accepted limitation).
 # ============================================================
 if [ "$SKIP_STATE" = false ] && [ -n "$STAGED_FILES" ]; then
   KG_GRAPH="$REPO_ROOT/docs/ai/knowledge-graph/graph.yaml"
+  KG_PRODUCT_GRAPH="$REPO_ROOT/docs/ai/knowledge-graph/product-graph.yaml"
+  KG_COVER_TOOL="$REPO_ROOT/.claude/tools/kg-cover.sh"
   if [ -f "$KG_GRAPH" ]; then
-    # Governance paths to check (space-delimited prefix list)
     KG_GOV_PATHS='.claude/hooks/ .claude/tools/ docs/ai/decisions/ docs/ai/prompts/ .claude/agents/'
 
-    KG_MISSING_NODES=""
+    # --- Build filtered list of staged governance files ---
+    # Non-entity exclusions: the graph models governance *entities* (hooks, tools,
+    # decisions, prompts, agents). Test artifacts, generated markers, and directory
+    # placeholders are not entities — graphing them yields stub nodes that dilute
+    # kg-relevance.sh scoring without adding signal. Note this forecloses populating
+    # the taxonomy's `tests` relation (Decision 0034 §5) via this gate; test-to-hook
+    # edges must be authored directly.
+    _KG_GOV_STAGED=""
     while IFS= read -r _kg_file; do
       [ -z "$_kg_file" ] && continue
-      # Skip lock/log files (generated artifacts that may land in governance paths)
       case "$_kg_file" in
-        *.lock|*.log) continue ;;
+        *.lock|*.log) continue ;;  # generated artifacts
+        */tests/*)    continue ;;  # test scripts and fixtures
+        */.gitkeep)   continue ;;  # directory placeholders
+        */.[!.]*)     continue ;;  # generated dotfile markers (.a1-trigger-index, etc.)
       esac
-      # Check if file is in a governance path
       _kg_in_gov=false
       for _kg_gov in $KG_GOV_PATHS; do
-        case "$_kg_file" in
-          "$_kg_gov"*) _kg_in_gov=true; break ;;
-        esac
+        case "$_kg_file" in "$_kg_gov"*) _kg_in_gov=true; break ;; esac
       done
       [ "$_kg_in_gov" = false ] && continue
-      # Check if an exact path entry exists in the template graph
-      if ! grep -qF "path: \"$_kg_file\"" "$KG_GRAPH" 2>/dev/null; then
-        KG_MISSING_NODES="${KG_MISSING_NODES:+$KG_MISSING_NODES }$_kg_file"
-      fi
+      _KG_GOV_STAGED="${_KG_GOV_STAGED:+$_KG_GOV_STAGED }$_kg_file"
     done <<< "$STAGED_FILES"
 
-    if [ -n "$KG_MISSING_NODES" ]; then
-      _kg_count=$(echo "$KG_MISSING_NODES" | wc -w | tr -d ' ')
-      echo "Advisory: KG coverage — $_kg_count governance file(s) lack nodes in graph.yaml. Add nodes at session close: $KG_MISSING_NODES" >&2
-      warn "kg_coverage_advisory"
-      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "warn" "$START_MS" "kg_coverage_advisory" "count:$_kg_count"
+    if [ -n "$_KG_GOV_STAGED" ]; then
+      # --- Exemption matrix (any hit → advisory, never block) ---
+      _KG_EXEMPT=false
+      _KG_EXEMPT_REASON=""
+
+      # Exemption 1: audit session (Prompt C read-only — Amendment 3 §3)
+      # get_session_type() comes from _phase-helper.sh (sourced above).
+      # Do NOT use infer_session_type() — it is defined only in
+      # session-close-check.sh, so under `set -euo pipefail` it aborts this
+      # hook with 127, which Claude Code treats as non-blocking. That silently
+      # disabled this gate and every check below it.
+      _KG_STYPE=$(get_session_type 2>/dev/null || echo "unknown")
+      if [ "$_KG_STYPE" = "audit" ]; then
+        _KG_EXEMPT=true; _KG_EXEMPT_REASON="audit_session"
+      fi
+
+      # Exemption 2: parallel task-group delta present (Amendment 5 — must not touch shared graph)
+      if [ "$_KG_EXEMPT" = false ]; then
+        for _kgd in "$REPO_ROOT/.claude/.state/tg-"*"-brief-"*".kg-delta.yaml"; do
+          if [ -f "$_kgd" ]; then
+            _KG_EXEMPT=true; _KG_EXEMPT_REASON="parallel_tg_delta"; break
+          fi
+        done
+      fi
+
+      # Exemption 3: experiment/* branch
+      if [ "$_KG_EXEMPT" = false ] && [ "$IS_EXPERIMENT" = true ]; then
+        _KG_EXEMPT=true; _KG_EXEMPT_REASON="experiment_branch"
+      fi
+
+      # Exemption 4: template graph not writable in current mode
+      # Child mode cannot write graph.yaml (_mode-guard-helper.sh:130 carve-out absent).
+      if [ "$_KG_EXEMPT" = false ]; then
+        _KG_MODE="${REPO_OS_MODE:-}"
+        if [ -z "$_KG_MODE" ] && [ -f "$REPO_ROOT/.claude/repo-mode" ]; then
+          _KG_MODE=$(cat "$REPO_ROOT/.claude/repo-mode" 2>/dev/null | tr -d '[:space:]')
+        fi
+        _KG_MODE="${_KG_MODE:-child}"
+        if [ "$_KG_MODE" != "template" ]; then
+          _KG_EXEMPT=true; _KG_EXEMPT_REASON="graph_not_writable_mode:$_KG_MODE"
+        fi
+      fi
+
+      # Exemption 5: REPO_OS_RECOVER=1 (belt-and-suspenders — SKIP_STATE already set above)
+      if [ "$_KG_EXEMPT" = false ] && [ "${REPO_OS_RECOVER:-0}" = "1" ]; then
+        _KG_EXEMPT=true; _KG_EXEMPT_REASON="repo_os_recover"
+      fi
+
+      # Exemption 6: REPO_OS_SKIP_KG_GATE=1 — interactive only; ignored in headless/auto
+      # (precedent: SKIP_FUNC_CHECK in Decision t-0044 Amendment 1)
+      if [ "$_KG_EXEMPT" = false ] && [ "${REPO_OS_SKIP_KG_GATE:-0}" = "1" ]; then
+        if [ "$IS_NO_REVIEW_BACKSTOP" = false ]; then
+          log_override "pre-commit-gates" "REPO_OS_SKIP_KG_GATE"
+          _KG_EXEMPT=true; _KG_EXEMPT_REASON="skip_kg_gate_override"
+        else
+          log_override "pre-commit-gates" "REPO_OS_SKIP_KG_GATE_IGNORED_HEADLESS"
+          echo "Advisory: REPO_OS_SKIP_KG_GATE=1 is ignored in headless/auto mode — KG gate still enforced." >&2
+        fi
+      fi
+
+      if [ "$_KG_EXEMPT" = true ]; then
+        warn "kg_update_advisory"
+        log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "warn" "$START_MS" "kg_update_advisory_exempt" "$_KG_EXEMPT_REASON"
+      else
+        # --- COVERAGE half: staged gov file lacks a node in either graph ---
+        _KG_MISSING_NODES=""
+        _KG_HAS_NODES=""
+        for _kg_file in $_KG_GOV_STAGED; do
+          if grep -qF "path: \"$_kg_file\"" "$KG_GRAPH" 2>/dev/null           || { [ -f "$KG_PRODUCT_GRAPH" ] && grep -qF "path: \"$_kg_file\"" "$KG_PRODUCT_GRAPH" 2>/dev/null; }; then
+            _KG_HAS_NODES="${_KG_HAS_NODES:+$_KG_HAS_NODES }$_kg_file"
+          else
+            _KG_MISSING_NODES="${_KG_MISSING_NODES:+$_KG_MISSING_NODES }$_kg_file"
+          fi
+        done
+
+        # --- FRESHNESS half: graphed file staged, no graph staged, no session marker ---
+        _KG_STALE=false
+        if [ -n "$_KG_HAS_NODES" ]; then
+          _KG_GRAPH_STAGED=false
+          case "$STAGED_FILES" in
+            *"docs/ai/knowledge-graph/graph.yaml"*)         _KG_GRAPH_STAGED=true ;;
+          esac
+          case "$STAGED_FILES" in
+            *"docs/ai/knowledge-graph/product-graph.yaml"*) _KG_GRAPH_STAGED=true ;;
+          esac
+          if [ "$_KG_GRAPH_STAGED" = false ]; then
+            if ! _validate_state_session_id "$STATE_DIR/kg-updated"; then
+              _KG_STALE=true
+            fi
+          fi
+        fi
+
+        # --- Emit block or pass ---
+        if [ -n "$_KG_MISSING_NODES" ] || [ "$_KG_STALE" = true ]; then
+          if [ -n "$_KG_MISSING_NODES" ]; then
+            _kg_count=$(echo "$_KG_MISSING_NODES" | wc -w | tr -d ' ')
+            if [ -f "$KG_COVER_TOOL" ]; then
+              echo "GATE-RECOVERABLE: KG update — $_kg_count governance file(s) staged without a graph node. NEXT: run .claude/tools/kg-cover.sh $_KG_MISSING_NODES then re-stage. (override: REPO_OS_SKIP_KG_GATE=1)" >&2
+            else
+              echo "GATE-RECOVERABLE: KG update — $_kg_count governance file(s) staged without a graph node. NEXT: add nodes to graph.yaml via shell I/O, then re-stage. (override: REPO_OS_SKIP_KG_GATE=1)" >&2
+            fi
+            log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "kg_update_coverage" "count:$_kg_count"
+          fi
+          if [ "$_KG_STALE" = true ]; then
+            echo "GATE-RECOVERABLE: KG update — governance file(s) have graph nodes but no graph file is staged and no kg-updated marker found for this session. NEXT: update graph.yaml/product-graph.yaml and re-stage (or run .claude/tools/kg-cover.sh to refresh). (override: REPO_OS_SKIP_KG_GATE=1)" >&2
+            log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "kg_update_freshness"
+          fi
+          # Headless/auto escalation (IS_NO_REVIEW_BACKSTOP pattern — A3.4 precedent ~lines 467-473)
+          if [ "$IS_NO_REVIEW_BACKSTOP" = true ]; then
+            _KG_ESC_DIR="$REPO_ROOT/.claude/.automation/escalations"
+            if [ -d "$_KG_ESC_DIR" ]; then
+              _KG_ESC_SID="${REPO_OS_SESSION_ID:-$(date -u +%Y%m%d-%H%M%S)}"
+              _KG_ESC_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+              printf 'escalation:\n  id: "esc-%s-%s"\n  queue_entry_id: "%s"\n  type: "gate-failure"\n  severity: "blocking"\n  phase_at_exit: "commit"\n  tag_at_exit: "agent"\n  message: "KG Update Gate blocked — governance files staged without a corresponding graph update"\n  context: "missing_nodes: %s stale: %s"\n  created_at: "%s"\n  resolved: false\n  resolution: ""\n' \
+                "$_KG_ESC_SID" "$(date -u +%Y%m%d-%H%M%S)" "$_KG_ESC_SID" \
+                "${_KG_MISSING_NODES:-none}" "$_KG_STALE" "$_KG_ESC_TS" \
+                > "$_KG_ESC_DIR/kg-update-fail-$(date -u +%Y%m%d-%H%M%S).yaml" 2>/dev/null || true
+            fi
+          fi
+          block "kg_update_violation"
+          log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "kg_update_violation"
+        else
+          # Both halves pass — write session-scoped kg-updated marker
+          _KG_SID=""
+          if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
+            _KG_SID="$REPO_OS_SESSION_ID"
+          else
+            _KG_SID=$(cat "$REPO_ROOT/.claude/.session-id" 2>/dev/null || echo "")
+          fi
+          printf 'timestamp: %s\nsession_id: %s\nresult: PASSED\n' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_KG_SID" \
+            > "$STATE_DIR/kg-updated" 2>/dev/null || true
+          log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "kg_update_passed"
+        fi
+      fi
     fi
   fi
 fi
@@ -1519,7 +1669,7 @@ fi
 if [ "$FAILED" -ne 0 ]; then
   log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "$BLOCKED_REASONS"
   echo "Commit blocked by pre-commit gate check." >&2
-  exit 1
+  exit 2
 fi
 
 REASON="pass"

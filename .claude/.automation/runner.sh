@@ -757,6 +757,22 @@ _run_single_entry() {
     if git worktree add "$worktree_dir" "$_SETUP_BRANCH" 2>/dev/null; then
       _CURRENT_WORKTREE_DIR="$worktree_dir"
       launch_dir="$worktree_dir"
+      # Propagate the operating mode into the worktree. `.claude/repo-mode` is
+      # gitignored (Decision 0024 — child repos keep their own mode), so it is
+      # NOT carried over by `git worktree add`. Without it the mode guard falls
+      # back to its `child` default inside every headless worktree, which in a
+      # template repo blocks legitimate writes to `.claude/hooks/` and invites
+      # agents to route around write-guard instead. Copying preserves whatever
+      # the parent declares rather than hardcoding a mode; this runs in the
+      # runner before the session launches, so the immune-path rule in Decision
+      # t-0012 §4 (which governs agent tool-call writes) does not apply.
+      if [ -f "$REPO_ROOT/.claude/repo-mode" ]; then
+        mkdir -p "$worktree_dir/.claude" 2>/dev/null || true
+        if ! cp "$REPO_ROOT/.claude/repo-mode" "$worktree_dir/.claude/repo-mode" 2>/dev/null; then
+          # Warn loudly — silently continuing reproduces the exact bug this guards.
+          echo "WARNING: Failed to copy .claude/repo-mode into $worktree_dir — mode guard will default to 'child' in this session" >&2
+        fi
+      fi
     else
       echo "ERROR: Failed to create worktree at $worktree_dir for branch $_SETUP_BRANCH" >&2
       _RESULT_OUTCOME="failed:worktree-creation"

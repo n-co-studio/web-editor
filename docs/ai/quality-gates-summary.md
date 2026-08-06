@@ -13,6 +13,7 @@
 | **A4 Safety** | No secrets/PII. High-risk path/content detection → Reviewer + Security sign-off. Automation-specific: no unbriefed network calls, new deps, or out-of-repo writes. | `reviewer-signed`, `security-signed` |
 | **A5 Cohesion** _(session types with review phase only)_ | Two parallel checks — both APPROVED required. **Cohesion**: Critic (cohesion mode) clean; `GATE_RESULT: APPROVED` in `cohesion-reviewed`. **Diff-review**: Critic (diff-review mode) clean; `GATE_RESULT: APPROVED` in `diff-review-complete`. Contract `verification:` criteria evaluated (advisory). Completeness pass: each criterion scored COMPLETE/INCOMPLETE/PARTIAL; INCOMPLETE triggers loop-back to Builder (advisory, 2-round cap). Session-type-aware: skips for hotfix and other types without review phase. | `cohesion-reviewed`, `diff-review-complete` |
 | **A6 Task Group** _(taskgroup only)_ | **A6.1**: Contract with `status: in_progress` exists. **A6.2**: Modified contract YAML staged. **A6.3**: Each `integration_points[].artifact` in contract exists in working tree (file-existence check). | — (contract file check) |
+| **KG Update Gate** _(template mode, conditional)_ | COVERAGE: staged gov file lacks node → blocked (run `kg-cover.sh`). FRESHNESS: staged gov file has node, no graph updated this session → blocked. Six-branch exemption matrix. `REPO_OS_SKIP_KG_GATE=1` (interactive only). Decision 0034 Amendment 7. | `kg-updated` (written on pass) |
 
 ## Push Gates (B)
 
@@ -51,6 +52,7 @@
 | `reviewer-signed`, `security-signed` | A4 | Required on high-risk detection |
 | `pragmatist-signed` | Plan-gating | Written by Pragmatist plan-review (legacy dispatch), by `_phase-helper.sh::bundle_to_pragmatist_signed` (handoff bundle path), or by the Orchestrator's `deterministic_alignment_check` (alignment-aligned outcome). Decisions 0025 + 0038. Checked at commit time |
 | `functional-verified` | A3.4 (headless/auto only) | Written by `pre-commit-gates.sh` inline on script pass; required by binding gate when `_A34_APPLICABLE=true` and `IS_NO_REVIEW_BACKSTOP=true`. Decision 0044. |
+| `kg-updated` | KG Update Gate (template mode, conditional) | Written by `pre-commit-gates.sh` on gate pass (staged gov files, template mode); session-scoped; suppresses `session-close-check.sh` advisory. Decision 0034 Amendment 7. |
 | `.claude/local/closed-branches` | Session isolation | Persistent ledger (not session-scoped) |
 
 Recovery: `REPO_OS_RECOVER=1` skips all state-dependent checks.

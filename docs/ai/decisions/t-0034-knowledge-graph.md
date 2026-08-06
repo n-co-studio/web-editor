@@ -37,6 +37,52 @@ Add a persistent knowledge graph that maps semantic connections between codebase
 - Decision 0014 respected: graph read at init, graph write before commit
 - Decision 0030/0033 respected: concurrent write safety via mkdir locking
 
+## Amendment 7 — Compulsory Update Enforcement (2026-08-06)
+
+Promotes the KG update obligation from REQUIRE-attempt/tolerate-failure to mechanically blocking at commit time for governance files. Supersedes the Amendment 3 exclusion sentence "Hook-based enforcement is explicitly excluded (operator constraint)."
+
+### What changes
+
+1. **`pre-commit-gates.sh` KG Update Gate (blocking)**: Two-half check on staged governance files in template mode.
+   - **COVERAGE half**: a staged governance file has no node in either graph → `block "kg_update_violation"`. Recovery: `kg-cover.sh <files>` then re-stage.
+   - **FRESHNESS half**: a staged governance file HAS a node, no graph file is staged, AND no session-scoped `kg-updated` marker is present → `block "kg_update_violation"`. Recovery: update `graph.yaml`/`product-graph.yaml` and re-stage.
+
+2. **Six-branch exemption matrix** (any hit → advisory, never blocks):
+   - **audit session** (Prompt C read-only — Amendment 3 §3)
+   - **parallel tg-delta present** (Amendment 5 — must not touch shared graph)
+   - **`experiment/*` branch** (A4-only profile)
+   - **graph not writable in current mode** (child/autonomous mode cannot write `graph.yaml`)
+   - **`REPO_OS_RECOVER=1`** (belt-and-suspenders emergency bypass)
+   - **`REPO_OS_SKIP_KG_GATE=1`** — interactive sessions only; ignored in headless/auto (`IS_NO_REVIEW_BACKSTOP=true`)
+
+3. **`kg-cover.sh`** (`.claude/tools/kg-cover.sh`): one-command remediation for COVERAGE failures. Derives node id/type/description from path, acquires mkdir lock, inserts stub nodes before `edges:` via awk, runs `kg-validate.sh --strict`. Accepts `--target template|product` and `--dry-run`.
+
+4. **State file `kg-updated`**: session-scoped, written on gate pass. Format mirrors `functional-verified` (`timestamp:`, `session_id:`, `result: PASSED`). Cleaned by `cleanup_session_files` on session close. `session-close-check.sh` reads this marker to suppress its advisory when the gate already passed this session.
+
+5. **Headless escalation**: when `IS_NO_REVIEW_BACKSTOP=true` and the gate blocks, writes a `type: gate-failure` YAML to `.claude/.automation/escalations/`.
+
+### Scope constraint
+
+The gate applies **only when the current mode is `template`** (Exemption 4 in the matrix). Child and autonomous sessions are exempt because they cannot write `graph.yaml`. This preserves Amendment 6's mode-guard carve-out for `product-graph.yaml` writes.
+
+### Close-time write obligation preserved
+
+Amendment 3's REQUIRE-attempt/tolerate-failure obligation for close-time graph writes is preserved unchanged. This amendment adds commit-time blocking enforcement; it does not alter close-time behavior. The tolerate-failure stance at close time remains correct: a transient lock failure should not block the close sequence, but the commit gate ensures that the graph was updated before the commit reaches the repo.
+
+### FRESHNESS limitation (accepted)
+
+The FRESHNESS half is a presence proxy: it verifies the graph file was staged or a `kg-updated` marker exists this session, not that any particular node was semantically updated. A session that runs `kg-cover.sh` on unrelated files will satisfy the gate for all governance files. This is an accepted limitation — the gate enforces update discipline, not semantic accuracy.
+
+### Governance paths in scope
+
+`.claude/hooks/`, `.claude/tools/`, `docs/ai/decisions/`, `docs/ai/prompts/`, `.claude/agents/` — same set as the former advisory block. Lock files (`.lock`, `.log`) are excluded.
+
+### Authorization
+
+Authorized under §9 (session integration — upgrades REQUIRE-attempt to mechanical enforcement) and §2 (write authority — adds commit-gate as enforcement complement to the existing shell I/O write pattern). No new node types or edge types — §3 not triggered.
+
+---
+
 ## Amendment 6 — Child-Mode Write Carve-Out for product-graph.yaml (2026-07-14)
 
 Closes the mode-guard gap that prevented child repos from fulfilling the Amendment 3 REQUIRE-attempt close-write obligation for `product-graph.yaml`.
