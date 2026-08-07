@@ -14,11 +14,13 @@ Harden the governance state boundary between worktree-isolated subagents and the
 
 ### Audit Findings
 
-1. **`_REPO_OS_ROOT` always resolves to the main repo**: Derived from `BASH_SOURCE[0]` (the hook file's own location). Since hooks live at `.claude/hooks/` in the main repo and Claude Code registers them by absolute path in `settings.json`, `_REPO_OS_ROOT` points to the main repo root even when a hook fires inside a worktree subagent.
+1. **`_REPO_OS_ROOT` in subagent worktrees (this decision's scope)**: For governance agents spawned with `isolation: "worktree"` from a session running in the main repo, the parent session's hooks fire with the main repo as CWD. `_REPO_OS_ROOT` (derived from `BASH_SOURCE[0]`) resolves to the main repo root. `state-writer.sh` uses `get_repo_root()` and therefore targets the main repo's `.claude/.state/`.
 
-2. **State reads target the main session**: All `_phase-helper.sh` functions (`get_phase()`, `assert_phase()`, `_validate_phase_session()`) use `$_REPO_OS_ROOT/.claude/.state/phase-state`. In worktree context, hooks read the parent session's phase state. This is correct — worktree subagents do not have their own governance lifecycle.
+   **Correction for full worktree sessions (Decision 0030 scope, empirically established 2026-08-07)**: When Claude Code is launched directly inside a worktree (`(cd "$worktree_dir" && claude -p ...)`), hooks are registered via RELATIVE paths in `settings.json`, so `BASH_SOURCE[0]` resolves relative to the worktree CWD. In this case, `_REPO_OS_ROOT` = **worktree root**, not the main repo. The runner (which sources hooks via absolute paths) resolves to the main repo root; the agent hooks resolve to the worktree root. See Decision 0030 for the per-session state dir design that accounts for this.
 
-3. **State writes target the main session**: `state-writer.sh` uses `get_repo_root()` to locate `.claude/.state/` and reads `STATE_SID` from the main repo's `.session-id`. A worktree governance agent's verdict would be written as if it were the main session's evidence, even though the agent reviewed code in the worktree (which may diverge from the main working tree).
+2. **State reads target the main session (subagent scope)**: All `_phase-helper.sh` functions (`get_phase()`, `assert_phase()`, `_validate_phase_session()`) use `$_REPO_OS_ROOT/.claude/.state/phase-state`. In subagent worktree context (where `_REPO_OS_ROOT` = main repo), hooks read the parent session's phase state. This is correct — worktree subagents do not have their own governance lifecycle.
+
+3. **State writes target the main session (subagent scope)**: `state-writer.sh` uses `get_repo_root()` to locate `.claude/.state/` and reads `STATE_SID` from the main repo's `.session-id`. A worktree governance agent's verdict would be written as if it were the main session's evidence, even though the agent reviewed code in the worktree (which may diverge from the main working tree).
 
 ### Implementation
 
@@ -46,6 +48,26 @@ Decision 0027 (Agent Tool Governance Gate) is the primary defense — it prevent
 None — the worktree guard is unconditional for subagent worktrees. If a worktree subagent's verdict needs to be recorded, re-dispatch the agent without worktree isolation.
 
 **Note**: Decision 0030 supersedes this decision **for full worktree sessions** (`claude --worktree` with `REPO_OS_SESSION_ID` set). The subagent worktree block defined here remains in effect.
+
+## Gitignored Governance Path Disposition Table (Amendment — 2026-08-07)
+
+For each gitignored governance path, the correct disposition in worktree sessions:
+
+| Path | Disposition | Rationale |
+|------|-------------|-----------|
+| `.claude/repo-mode` | **Propagate** | Copied by `runner.sh` at worktree creation (`4bce973`). Small, session-invariant, must exist before session starts. Verified effective. |
+| `.claude/.state/wt-sessions/{sid}/` | **Worktree-local** | Per-session phase state created by `init_phase()` in the worktree. Correct per Decision 0030. Runner and agent must target the same root — see runner.sh mitigation note. |
+| `.claude/local/handoff-bundles/` | **Resolve to main** | Bundles written by Prompt T in the main-repo context (runner). `_handoff_bundle_path()` now uses `get_main_repo_root()` so Prompt B in a worktree can find bundles. Missing bundle now emits a loud WARNING rather than silently returning a wrong path. |
+| `.claude/local/known-issues.md` | **Drop** | Gitignored canonical = invisible in worktrees and git history. Consolidated to `docs/ai/logs/known-issues.md` (tracked). The `.claude/local/known-issues.md` is now a deprecation pointer. `AI.md` updated to remove the template-mode override convention. |
+| `.claude/local/sessions/` | **Drop** | Same reason. `AI.md` now points to `docs/ai/logs/sessions/` unconditionally (no template-mode override). MEMORY.md already reflects this for worktree sessions. |
+| `.claude/.automation/escalations/` | **Resolve to main** | Daemon reads escalations from the main repo. Agents in worktree sessions should write escalations to the main repo path: `$(get_main_repo_root)/.claude/.automation/escalations/`. The Escalation Protocol in session prompt docs should be updated to use `get_main_repo_root()`. |
+| `.claude/.automation/queue/` | **Resolve to main** | Runner manages queue in the main repo. Worktree agents do not write to the queue directly; no change needed. |
+
+### Loud-failure Pattern
+
+Where a canonical governance file is expected and absent, prefer loud failure over silent fallback:
+- `_handoff_bundle_path()` now prints a three-line WARNING when the bundle file is not found at the resolved path.
+- Future additions should follow this pattern: emit `WARNING: <path> not found — <context hint>` to stderr, never silently substitute a different path.
 
 ## Supersedes
 None. Addresses the deferred concern noted in Decision 0027 § Deferred Concerns.

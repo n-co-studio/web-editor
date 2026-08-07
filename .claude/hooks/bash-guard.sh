@@ -13,7 +13,8 @@
 #      b. Override pre-checks (REPO_OS_SKIP_STATE_GUARD, REPO_OS_RECOVER, REPO_OS_SKIP_MODE_GUARD)
 #      c. Phase 1b: Knowledge graph search advisory (Decision 0034)
 #      d. Phase 1c: Daemon-safe branching guard (Decision 0036)
-#      e. Combined fast-exit: no Gate 7/daemon match AND no write patterns AND all guards skipped
+#      e. Phase 1e: Worktree ref-move guard (Decision 0030 — blocks git branch -f main etc. from worktrees)
+#      f. Combined fast-exit: no Gate 7/daemon match AND no write patterns AND all guards skipped
 #   2. Source libraries (single sourcing of _analytics-helper.sh + _phase-helper.sh)
 #   3. Gate 7 enforcement (task group merge protection — Decision 0018)
 #   4. Fast-exit for no-write-target Bash commands
@@ -206,6 +207,48 @@ fi
 if [ "$_DAEMON_BRANCH_BLOCK" = true ]; then
   echo "GATE-RECOVERABLE: Daemon is running — halt it first (queue-cli.sh halt) or use worktree isolation. Branch switches on the main working tree corrupt active daemon sessions. (override: REPO_OS_RECOVER=1)" >&2
   exit 2
+fi
+
+# --- Phase 1e: Worktree ref-move guard (Decision 0030) ---
+# Blocks git commands that move the 'main' branch ref when running from a worktree:
+#   git branch -f main / --force main
+#   git checkout -B main
+#   git update-ref refs/heads/main
+#   git fetch . <ref>:main
+#
+# Moving the main ref from a worktree is silent data-loss: the ref pointer
+# advances to the new commit, but the main working tree's index and content
+# remain frozen at the old state. 'git status' on main then shows staged
+# reverts of the merged work, and merged code is absent from disk even though
+# 'git log' looks correct. This is how merged governance code has been
+# inactive without any alert.
+#
+# Correct path for worktree sessions: let session-close-check.sh (solo merge
+# path) or runner.sh handle the merge via 'git -C <main-repo> merge'. Call
+# write_merge_signal '<branch>' to signal that the agent close phase is done
+# and let the stop hook skip a redundant merge.
+#
+# Exempt: main repo context (not a worktree) — those callers are already in the
+# right working tree and a merge/ref-update is safe.
+# Exempt: REPO_OS_RECOVER=1 recovery bypass.
+if [ "${REPO_OS_RECOVER:-0}" != "1" ] && [ "$_RECOVER_VIA_SIGNAL" != true ]; then
+  _WRM_DETECTED=false
+  if [[ "$INPUT" == *'git branch -f main'* ]] \
+  || [[ "$INPUT" == *'git branch --force main'* ]] \
+  || [[ "$INPUT" == *'git checkout -B main'* ]] \
+  || [[ "$INPUT" == *'git update-ref refs/heads/main'* ]]; then
+    _WRM_DETECTED=true
+  elif [[ "$INPUT" == *'git fetch . '* ]] && [[ "$INPUT" == *':main'* ]]; then
+    _WRM_DETECTED=true
+  fi
+  if [ "$_WRM_DETECTED" = true ]; then
+    # Reuse _D_GIT_DIR if Phase 1c already computed it; otherwise compute fresh.
+    _WRM_GIT_DIR="${_D_GIT_DIR:-$(git rev-parse --git-dir 2>/dev/null || echo "")}"
+    if [[ "$_WRM_GIT_DIR" == *"worktrees"* ]]; then
+      echo "GATE-RECOVERABLE: Ref-move commands targeting 'main' are blocked from a worktree. Moving the main ref from a worktree leaves the main working tree stale (index/tree frozen at old state while HEAD advances — merged code is absent from disk). NEXT: Let session-close-check.sh handle the merge (solo=true is set), or use 'git -C <main-repo-path> merge <branch>' from the runner context. Call write_merge_signal '<branch>' to signal close completion. (Decision 0030; override: REPO_OS_RECOVER=1)" >&2
+      exit 2
+    fi
+  fi
 fi
 
 # --- Write-detection pre-filter (pre-source inline copy) ---

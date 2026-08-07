@@ -556,11 +556,22 @@ _resolve_brief_id() {
 # .claude/local/handoff-bundle.yaml — retained read-only for one release cycle.
 # Task groups continue to resolve their per-brief bundle path directly.
 _handoff_bundle_path() {
-  local repo_root="$_REPO_OS_ROOT"
+  # Use main repo root so bundles written by Prompt T (runner / main-repo context)
+  # are visible from within worktree sessions where _REPO_OS_ROOT = worktree root.
+  # get_main_repo_root() falls back to _REPO_OS_ROOT when not in a worktree.
+  local repo_root
+  repo_root="$(get_main_repo_root)"
   local brief_id="${1:-}"
   [ -z "$brief_id" ] && brief_id="$(_resolve_brief_id)"
   if [ -n "$brief_id" ]; then
-    printf '%s/.claude/local/handoff-bundles/%s.yaml\n' "$repo_root" "$brief_id"
+    local bundle_path
+    bundle_path="$(printf '%s/.claude/local/handoff-bundles/%s.yaml' "$repo_root" "$brief_id")"
+    if [ ! -f "$bundle_path" ] && is_worktree 2>/dev/null; then
+      echo "WARNING: handoff-bundle not found at expected path: $bundle_path" >&2
+      echo "  This may be because the bundle was written in a different context (main repo vs worktree)." >&2
+      echo "  If running a Prompt B in a worktree, ensure Prompt T ran and the bundle exists at the main repo path." >&2
+    fi
+    printf '%s\n' "$bundle_path"
   else
     printf '%s/.claude/local/handoff-bundle.yaml\n' "$repo_root"
   fi
@@ -579,7 +590,8 @@ _atomic_write_bundle() {
     echo "ERROR: _atomic_write_bundle requires a brief_id" >&2
     return 1
   fi
-  local repo_root="$_REPO_OS_ROOT"
+  local repo_root
+  repo_root="$(get_main_repo_root)"
   local dir="$repo_root/.claude/local/handoff-bundles"
   mkdir -p "$dir" 2>/dev/null || true
   local final="$dir/$brief_id.yaml"
@@ -659,7 +671,7 @@ bundle_expired() {
 # Shell I/O — same established pattern as plan-approval.sh.
 bundle_to_plan_approved() {
   local bundle="${1:-$(_handoff_bundle_path)}"
-  local sid="${2:-$(get_session_id "$_REPO_OS_ROOT")}"
+  local sid="${2:-$(get_session_id "$(get_main_repo_root)")}"
   local state_dir
   state_dir="$(get_session_state_dir)"
   mkdir -p "$state_dir" 2>/dev/null || true
@@ -694,7 +706,7 @@ bundle_to_plan_approved() {
   printf 'timestamp: %s\nquestion_hash: %s\nlarge-scope: true\nmode: %s\nsession_id: %s\nsource: handoff-bundle\nbundle_brief_id: %s\nbundle_approved_at: %s\n' \
     "$ts" "$question_hash" "$mode" "$sid" "$brief_id" "$approved_at" \
     > "$state_dir/plan-approved" 2>/dev/null || true
-  refresh_manifest_entry "plan-approved" "$_REPO_OS_ROOT" 2>/dev/null || true
+  refresh_manifest_entry "plan-approved" "$(get_main_repo_root)" 2>/dev/null || true
 }
 
 # --- bundle_to_pragmatist_signed ---
@@ -703,7 +715,7 @@ bundle_to_plan_approved() {
 # Shell I/O — same pattern as state-writer.sh.
 bundle_to_pragmatist_signed() {
   local bundle="${1:-$(_handoff_bundle_path)}"
-  local sid="${2:-$(get_session_id "$_REPO_OS_ROOT")}"
+  local sid="${2:-$(get_session_id "$(get_main_repo_root)")}"
   local state_dir
   state_dir="$(get_session_state_dir)"
   mkdir -p "$state_dir" 2>/dev/null || true
@@ -719,7 +731,7 @@ bundle_to_pragmatist_signed() {
   printf 'GATE_RESULT: %s\nsession_id: %s\nsource: handoff-bundle\nbundle_verdict: %s\n' \
     "$gate_result" "$sid" "$verdict" \
     > "$state_dir/pragmatist-signed" 2>/dev/null || true
-  refresh_manifest_entry "pragmatist-signed" "$_REPO_OS_ROOT" 2>/dev/null || true
+  refresh_manifest_entry "pragmatist-signed" "$(get_main_repo_root)" 2>/dev/null || true
 }
 
 # --- _bundle_field ---

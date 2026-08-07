@@ -73,13 +73,38 @@ portable_hash() {
   esac
 }
 
-# --- Repo root (derived from this file's location — never depends on CWD or git) ---
+# --- Repo root (derived from this file's location — eliminates CWD dependency) ---
 # _analytics-helper.sh lives at .claude/hooks/ — repo root is always two levels up.
-# Eliminates: CWD dependency, git dependency, stale PID-based /tmp/ cache.
+# Eliminates: CWD dependency, stale PID-based /tmp/ cache.
 # Test seam: _REPO_OS_TEST_ROOT overrides repo root, but ONLY when
 # REPO_OS_TEST_MODE=1 is also set (dual guard prevents accidental env leaks).
 # Path prefix guard: _REPO_OS_TEST_ROOT must start with /tmp/ or /private/tmp/
 # to bound the redirect surface to temp directories only.
+#
+# WORKTREE BEHAVIOR (empirically established 2026-08-07 — Decision 0028 correction):
+# Decision 0028 claimed "_REPO_OS_ROOT always resolves to the main repo" because
+# "hooks are registered by absolute path in settings.json". This is INCORRECT.
+# settings.json uses RELATIVE paths (.claude/hooks/...). Claude Code resolves
+# them relative to the launch directory (CWD). In full worktree sessions the runner
+# does `(cd "$worktree_dir" && claude -p ...)`, so CWD = worktree. Therefore:
+#   • BASH_SOURCE[0] = relative path → resolved against worktree CWD
+#   • _REPO_OS_ROOT = WORKTREE root (not the main repo root)
+# The runner, which sources hooks via absolute path ($REPO_ROOT/.claude/hooks/...),
+# resolves _REPO_OS_ROOT to the MAIN REPO root. This creates a two-root divergence:
+#   • Runner writes governance state to: main_repo/.claude/.state/wt-sessions/{sid}/
+#   • Agent hooks read/write to:         worktree/.claude/.state/wt-sessions/{sid}/
+# These are DIFFERENT directories. The runner also writes plan-approved and registers
+# the session under the main-repo path, which agent hooks cannot see.
+#
+# Mitigations implemented (2026-08-07):
+#   1. runner.sh state_manager_setup: write state to the WORKTREE path by passing
+#      the worktree dir as REPO_ROOT when calling init_phase helpers.
+#   2. get_main_repo_root(): resolves to the main repo via git-common-dir regardless
+#      of whether we are in the worktree or the main repo.
+#   3. _handoff_bundle_path() uses get_main_repo_root() so bundles written by
+#      Prompt T (in main repo context) are visible to Prompt B (in worktree context).
+#   4. Escalation writes in headless sessions use the main repo path so the daemon
+#      (which runs in the main repo) sees them.
 if [ "${REPO_OS_TEST_MODE:-0}" = "1" ] && [ -n "${_REPO_OS_TEST_ROOT:-}" ]; then
   case "$_REPO_OS_TEST_ROOT" in
     /tmp/*|/private/tmp/*)
@@ -96,6 +121,35 @@ fi
 
 get_repo_root() {
   echo "$_REPO_OS_ROOT"
+}
+
+# --- Main repo root (always the primary worktree, even from a worktree session) ---
+# In a worktree, git rev-parse --git-common-dir returns an absolute path to the
+# main repo's .git/ directory (e.g. /path/to/main/.git). In the main repo it
+# returns ".git" (relative). dirname of the absolute path gives the main repo root.
+# Falls back to _REPO_OS_ROOT (safe no-op when already in the main repo or in
+# test mode where git is mocked). Used for cross-session shared paths that are
+# written by the runner in the main-repo context and must be visible from within
+# worktree sessions (handoff-bundles, escalations, daemon queue).
+_CACHED_MAIN_REPO_ROOT=""
+get_main_repo_root() {
+  if [ -n "$_CACHED_MAIN_REPO_ROOT" ]; then
+    echo "$_CACHED_MAIN_REPO_ROOT"
+    return
+  fi
+  local common_dir gitdir
+  common_dir=$(git rev-parse --git-common-dir 2>/dev/null || true)
+  gitdir=$(git rev-parse --git-dir 2>/dev/null || true)
+  if [ -n "$common_dir" ] && [ -n "$gitdir" ] \
+     && [ "$common_dir" != "$gitdir" ] \
+     && [ "${common_dir:0:1}" = "/" ]; then
+    # In a worktree: common_dir is absolute path to main repo's .git/
+    _CACHED_MAIN_REPO_ROOT="$(dirname "$common_dir")"
+  else
+    # In the main repo (or test mode): _REPO_OS_ROOT is already correct
+    _CACHED_MAIN_REPO_ROOT="$_REPO_OS_ROOT"
+  fi
+  echo "$_CACHED_MAIN_REPO_ROOT"
 }
 
 # --- Worktree detection (Decision 0028) ---

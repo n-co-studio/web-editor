@@ -157,9 +157,7 @@ After presenting the escalation report, wait for operator direction. The operato
 Execute close sequence per `docs/ai/workflow.md` § Session Lifecycle:
 1. Update session log (product: `docs/ai/logs/sessions/session-{id}.md`; template: `.claude/local/sessions/session-{id}.md`)
 2. Commit remaining changes including session log
-3. Merge to main (solo mode): `git checkout main && git merge --ff-only <branch>` (fallback `--no-ff`)
-   - On merge success: call `write_merge_signal "<branch>"` so the stop hook skips redundant merge
-   - On failure: `git merge --abort && git checkout <branch>`, notify operator
+3. Merge to main (solo mode): handled by stop hook and/or runner per `docs/ai/workflow.md` § Close Sequence step 4. In worktree sessions (default), do not merge directly — stop hook runs `git -C <main-repo-path> merge --ff-only <branch>` (fallback `--no-ff`) with post-merge working-tree sync. In non-worktree sessions: `git checkout main && git merge --ff-only <branch>` (fallback `--no-ff`); on success call `write_merge_signal "<branch>"`; on failure `git merge --abort && git checkout <branch>`, notify operator
 4. Present closing summary — include: root cause, fix applied, verification results
 
 ### Build Sequence — Agent Dispatch

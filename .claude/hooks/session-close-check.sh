@@ -1274,6 +1274,8 @@ if [ "$SOLO" = "true" ] && [ "$BRANCH_SEALED" = false ]; then
         local _main_branch
         _main_branch=$(git -C "$_main_repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
         if [ "$_main_branch" = "main" ]; then
+          local _wt_pre_merge_sha
+          _wt_pre_merge_sha=$(git -C "$_main_repo" rev-parse HEAD 2>/dev/null || echo "")
           if git -C "$_main_repo" merge --ff-only "$MERGE_BRANCH" 2>/dev/null; then
             MERGE_OK=true
           elif git -C "$_main_repo" merge --no-ff -m "Merge $MERGE_BRANCH" "$MERGE_BRANCH" 2>/dev/null; then
@@ -1281,6 +1283,47 @@ if [ "$SOLO" = "true" ] && [ "$BRANCH_SEALED" = false ]; then
           fi
           if [ "$MERGE_OK" = false ]; then
             git -C "$_main_repo" merge --abort 2>/dev/null || true
+          fi
+          if [ "$MERGE_OK" = true ]; then
+            # Detect ref-move anomaly: unchanged HEAD means the branch was
+            # already an ancestor or a prior ref-move made main point there.
+            local _wt_post_merge_sha
+            _wt_post_merge_sha=$(git -C "$_main_repo" rev-parse HEAD 2>/dev/null || echo "")
+            if [ -n "$_wt_pre_merge_sha" ] && [ "$_wt_pre_merge_sha" = "$_wt_post_merge_sha" ]; then
+              echo "WARNING: stop-hook merge: 'Already up to date' — main HEAD unchanged by merge of '$MERGE_BRANCH'. Possible prior ref-move by agent. Applying working-tree sync." >&2
+            fi
+            # Post-merge working-tree sync (Decision 0030): sync main repo index
+            # and working tree to HEAD. A ref-move from the worktree leaves index/
+            # tree frozen at old state even though HEAD advanced. Errors are logged
+            # (not silenced) so staleness is never invisible.
+            if ! git -C "$_main_repo" reset HEAD -- . 2>/dev/null; then
+              echo "WARNING: stop-hook merge: post-merge index reset failed for '$_main_repo'" >&2
+            fi
+            if ! git -C "$_main_repo" checkout HEAD -- . 2>/dev/null; then
+              echo "WARNING: stop-hook merge: post-merge working tree restore failed for '$_main_repo'" >&2
+            fi
+            # Stale-tree detection backstop: verify sync was effective.
+            if ! git -C "$_main_repo" diff HEAD --quiet 2>/dev/null; then
+              echo "ERROR: Main working tree still stale after post-merge sync (stop hook) — index/tree differ from HEAD. Merged code committed but absent from disk. Repair: 'git -C $_main_repo checkout HEAD -- . && git -C $_main_repo clean -fd'" >&2
+              local _esc_dir="$_main_repo/.claude/.automation/escalations"
+              mkdir -p "$_esc_dir" 2>/dev/null || true
+              local _stale_esc_id="esc-stale-main-$(date +%Y%m%d-%H%M%S)-stop"
+              {
+                printf 'escalation:\n'
+                printf '  id: "%s"\n' "$_stale_esc_id"
+                printf '  queue_entry_id: "stop-hook"\n'
+                printf '  type: "gate-failure"\n'
+                printf '  severity: "blocking"\n'
+                printf '  phase_at_exit: "close"\n'
+                printf '  tag_at_exit: "close"\n'
+                printf '  message: "Main working tree stale after worktree solo merge sync (stop hook) — index/tree differ from HEAD. Merged code committed but absent from disk."\n'
+                printf '  context: "main_repo: %s, branch: %s"\n' "$_main_repo" "$MERGE_BRANCH"
+                printf '  created_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                printf '  resolved: false\n'
+                printf '  resolution: ""\n'
+              } > "$_esc_dir/${_stale_esc_id}.yaml" 2>/dev/null || true
+              echo "Escalation written: $_stale_esc_id" >&2
+            fi
           fi
         else
           echo "Advisory: Main repo is on '$_main_branch', not 'main' — cannot merge from worktree. Merge manually." >&2
