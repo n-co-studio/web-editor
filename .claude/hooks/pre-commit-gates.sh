@@ -1212,16 +1212,64 @@ if [ -n "$STAGED_FILES" ] && [ -d "$DECISIONS_DIR" ]; then
     # Index format: decision_id|path_regex|keywords (pipe-delimited)
     # Eliminates per-file grep/sed expansion (~80 forks → ~5-10 typical)
 
-    # Staleness guard: warn if any decision file is newer than the index
-    # Check both t-*.md (template decisions, Decision 0022) and 0*.md (child decisions)
+    # Staleness guard: two-tier content-digest check.
+    # Tier 1 (cheap): mtime pre-filter. If no decision file is newer than the index,
+    # the index is definitely current — stop here (common case after a real regenerate).
+    # Tier 2 (only when Tier 1 fires): compare the digest stored in the index header
+    # against a freshly-computed digest of all ## Triggers sections. Warn only when
+    # digests differ — i.e. when triggers have genuinely changed, not merely when git
+    # checkout shuffled mtimes (Decision t-0033: worktree is the default, making
+    # mtime-shuffling on checkout the common case, not the edge case).
+    _A1_MTIME_STALE=0
     for _A1_DF in "$DECISIONS_DIR"/t-*.md "$DECISIONS_DIR"/0*.md; do
       [ -f "$_A1_DF" ] || continue
       if [ "$_A1_DF" -nt "$A1_INDEX" ]; then
-        echo "A1 WARNING: .a1-trigger-index may be stale — regenerate (see index file header for command)" >&2
-        warn "A1_index_stale"
+        _A1_MTIME_STALE=1
         break
       fi
     done
+
+    if [ "$_A1_MTIME_STALE" = "1" ]; then
+      # Tier 2: compare freshly-computed digest to the stored digest in the index header.
+      _A1_STORED_DIGEST=$(grep '^# digest: ' "$A1_INDEX" 2>/dev/null | sed 's/^# digest: *//')
+      if [ -n "$_A1_STORED_DIGEST" ]; then
+        # Detect available sha256 tool (macOS: shasum; Linux/Docker: sha256sum).
+        _A1_DIGEST_TOOL=""
+        if command -v sha256sum >/dev/null 2>&1; then
+          _A1_DIGEST_TOOL="sha256sum"
+        elif command -v shasum >/dev/null 2>&1; then
+          _A1_DIGEST_TOOL="shasum -a 256"
+        fi
+
+        if [ -n "$_A1_DIGEST_TOOL" ]; then
+          # Locale-independent sort matches rebuild-trigger-index.sh exactly.
+          _A1_FRESH_DIGEST=$(
+            LC_ALL=C ls "$DECISIONS_DIR"/t-*.md "$DECISIONS_DIR"/0*.md 2>/dev/null \
+              | LC_ALL=C sort \
+              | while IFS= read -r _f; do
+                  [ -f "$_f" ] || continue
+                  grep -q '^## Triggers' "$_f" || continue
+                  sed -n '/^## Triggers/,/^## /{ /^## Triggers/d; /^## /d; p; }' "$_f"
+                done \
+              | $_A1_DIGEST_TOOL \
+              | awk '{print $1}'
+          )
+          if [ "$_A1_FRESH_DIGEST" != "$_A1_STORED_DIGEST" ]; then
+            echo "A1 WARNING: .a1-trigger-index may be stale — regenerate: bash .claude/.automation/lib/rebuild-trigger-index.sh" >&2
+            warn "A1_index_stale"
+          fi
+          # Digests match → mtimes were shuffled by checkout; index is current. No warning.
+        else
+          # No sha256 tool available — fall back to mtime-based warning.
+          echo "A1 WARNING: .a1-trigger-index may be stale — regenerate: bash .claude/.automation/lib/rebuild-trigger-index.sh" >&2
+          warn "A1_index_stale"
+        fi
+      else
+        # No stored digest (old index format without header) — fall back to mtime warning.
+        echo "A1 WARNING: .a1-trigger-index may be stale — regenerate: bash .claude/.automation/lib/rebuild-trigger-index.sh" >&2
+        warn "A1_index_stale"
+      fi
+    fi
 
     while IFS='|' read -r _A1_DID _A1_PATH _A1_KW; do
       # Skip comments and blank lines

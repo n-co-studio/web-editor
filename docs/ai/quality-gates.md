@@ -27,15 +27,15 @@ Gate A1's trigger parser is gated by the sentinel file `docs/ai/decisions/.a1-tr
 
 The trigger parser uses a compiled index at `docs/ai/decisions/.a1-trigger-index` for fast matching. When the index is present, the parser reads it instead of parsing each decision file individually (eliminates ~80 subprocess forks per commit). Falls back to file-by-file parsing when the index is absent.
 
-**Format:** `decision_id|path_regex|keywords` (pipe-delimited, one line per path pattern per decision). See the index file header for the full regeneration script.
+**Format:** The index begins with a header comment block (lines starting with `#`), followed by pipe-delimited data rows: `decision_id|path_regex|keywords`. The header includes the regenerate command and a `digest:` line used for content-based staleness detection (see below).
 
 **Regenerate after adding or modifying decision triggers:**
 
 ```bash
-.claude/.automation/lib/rebuild-trigger-index.sh
+bash .claude/.automation/lib/rebuild-trigger-index.sh
 ```
 
-A staleness warning is emitted when any decision file has a newer modification time than the index. The index should be committed (tracked, not gitignored).
+**Staleness detection:** A two-tier check runs on every commit. Tier 1 (cheap): if no decision file is newer than the index by mtime, the index is current and no digest is computed. Tier 2 (only when Tier 1 fires): the gate recomputes a SHA-256 digest over the `## Triggers` sections of all decision files (in locale-independent sorted order) and compares it to the digest stored in the index header. A warning fires only when the digests differ — i.e. when trigger content has genuinely changed. This eliminates false positives from git checkout mtime-shuffling (the common case in worktree sessions, Decision t-0033). When no sha256 tool is available, the gate falls back to mtime-only behaviour. The index should be committed (tracked, not gitignored).
 
 ## B) Push Gates
 
