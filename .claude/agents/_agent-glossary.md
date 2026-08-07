@@ -96,6 +96,7 @@ Advisory only (no gate, no state file). Labels used by Mode 3: **TOKEN-VIOLATION
 | Directory | Purpose | Access |
 |-----------|---------|--------|
 | `~/.local/share/repo-os-analytics/` | Centralized hook telemetry (NDJSON by repo/date). Outside repo tree | Analytics agent only — all others MUST NOT read |
+| `~/.local/share/repo-os-analytics/<repo>/evidence-manifest/` | Session-scoped governance evidence manifests (SHA-256 per evidence file at init_phase; refreshed by sanctioned writers; compared at pre-commit + session-close). One YAML file per session, keyed by sanitised session id. Outside repo tree — not reachable via in-repo Bash path bypass. Retention: deleted at session close by `cleanup_evidence_manifest()` | Governance hooks only (write: `_phase-helper.sh`; read: `compare_manifest()` in `pre-commit-gates.sh` + `session-close-check.sh`). All agents MUST NOT read or write directly |
 | `.claude/analytics/` (legacy) | Historical event data (pre-migration). Read-only | Analytics agent (historical reads only) |
 | `.claude/.automation/` | Automation layer (Decision 0017). Tracked: schemas, config, decision cache, templates, lib. Gitignored: queue, reports, escalations, briefs, logs | Runner process + Dev Orchestrator (reports only). All others MUST NOT write |
 

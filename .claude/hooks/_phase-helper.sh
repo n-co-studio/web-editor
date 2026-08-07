@@ -694,6 +694,7 @@ bundle_to_plan_approved() {
   printf 'timestamp: %s\nquestion_hash: %s\nlarge-scope: true\nmode: %s\nsession_id: %s\nsource: handoff-bundle\nbundle_brief_id: %s\nbundle_approved_at: %s\n' \
     "$ts" "$question_hash" "$mode" "$sid" "$brief_id" "$approved_at" \
     > "$state_dir/plan-approved" 2>/dev/null || true
+  refresh_manifest_entry "plan-approved" "$_REPO_OS_ROOT" 2>/dev/null || true
 }
 
 # --- bundle_to_pragmatist_signed ---
@@ -718,6 +719,7 @@ bundle_to_pragmatist_signed() {
   printf 'GATE_RESULT: %s\nsession_id: %s\nsource: handoff-bundle\nbundle_verdict: %s\n' \
     "$gate_result" "$sid" "$verdict" \
     > "$state_dir/pragmatist-signed" 2>/dev/null || true
+  refresh_manifest_entry "pragmatist-signed" "$_REPO_OS_ROOT" 2>/dev/null || true
 }
 
 # --- _bundle_field ---
@@ -1396,6 +1398,9 @@ init_phase() {
   # Decision 0042 — compute and cache phase gate verdicts. Silent on failure;
   # cache miss in hooks falls through to inline checks (BC by construction).
   compute_phase_gates || true
+
+  # Capture evidence manifest baseline (out-of-tree audit trail). Fail-silent.
+  write_evidence_manifest "$repo_root" || true
 
 }
 
@@ -2424,4 +2429,212 @@ record_dimension_verdict() {
     printf '    cycle: %s\n' "$cycle"
     printf '    timestamp: "%s"\n' "$ts"
   } >> "$cache_path"
+}
+
+# ============================================================
+# Evidence Manifest (governance integrity audit trail)
+# ============================================================
+# Capture: write_evidence_manifest() at init_phase (baseline).
+# Refresh: refresh_manifest_entry() called by every sanctioned writer.
+# Compare: compare_manifest() at pre-commit and session-close checkpoints.
+#
+# Location: ~/.local/share/repo-os-analytics/<repo>/evidence-manifest/<sid>.yaml
+# (out-of-tree — not reachable via in-repo Bash path bypass; earns the stronger
+# claim that findings indicate writes NOT made through a sanctioned hook.)
+#
+# Claim: detects writes not made through a sanctioned hook.
+# Does NOT prevent forgery — a sophisticated actor can update the manifest in the
+# same python3 call that forges the evidence file. See known-issues.md R2 and
+# Decision t-0012 §9 for the bounded guarantee.
+# Attestation (HMAC/signing) was deferred by the operator as too large.
+
+_EVIDENCE_FILES="plan-approved qa-verified cohesion-reviewed diff-review-complete pragmatist-signed functional-verified"
+
+# Return the evidence-manifest directory for the given repo.
+_get_evidence_manifest_dir() {
+  local repo_root="${1:-$_REPO_OS_ROOT}"
+  local repo_name
+  repo_name="$(basename "$repo_root")"
+  echo "$HOME/.local/share/repo-os-analytics/$repo_name/evidence-manifest"
+}
+
+# Return the path to the manifest file for the current session.
+# Returns 1 (non-zero) if session id is unavailable.
+_get_evidence_manifest_path() {
+  local sid="${1:-}"
+  local repo_root="${2:-$_REPO_OS_ROOT}"
+  if [ -z "$sid" ]; then
+    sid="$(get_session_id "$repo_root" 2>/dev/null)" || return 1
+  fi
+  [ -z "$sid" ] && return 1
+  local manifest_dir
+  manifest_dir="$(_get_evidence_manifest_dir "$repo_root")"
+  # Sanitise: replace / and .. sequences that could escape the directory.
+  local sid_safe="${sid//\//_}"
+  sid_safe="${sid_safe//\.\./_}"
+  echo "${manifest_dir}/${sid_safe}.yaml"
+}
+
+# Write the evidence manifest at init_phase.
+# Records path + sha256 + present for every monitored evidence file.
+# Mirrors the spec_snapshot path+sha pattern from drift_check (Decision t-0038).
+# Fails silently — governance never depends on this succeeding.
+write_evidence_manifest() {
+  local repo_root="${1:-$_REPO_OS_ROOT}"
+  local sid
+  sid="$(get_session_id "$repo_root" 2>/dev/null)" || return 0
+  local manifest_path
+  manifest_path="$(_get_evidence_manifest_path "$sid" "$repo_root")" || return 0
+  local manifest_dir
+  manifest_dir="$(dirname "$manifest_path")"
+  mkdir -p "$manifest_dir" 2>/dev/null || return 0
+
+  local state_dir
+  state_dir="$(get_session_state_dir)"
+  local ts
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  {
+    printf '# Governance evidence manifest — out-of-tree integrity audit trail\n'
+    printf '# Claim: detects writes not made through a sanctioned hook (out-of-tree).\n'
+    printf '# Does NOT prevent forgery. See known-issues.md R2 and Decision t-0012 §9.\n'
+    printf 'created_at: "%s"\n' "$ts"
+    printf 'session_id: "%s"\n' "$sid"
+    printf 'entries:\n'
+    local ev
+    for ev in $_EVIDENCE_FILES; do
+      local ev_path="$state_dir/$ev"
+      local sha=""
+      local present="false"
+      if [ -f "$ev_path" ]; then
+        present="true"
+        sha="$(portable_hash < "$ev_path" 2>/dev/null)" || sha=""
+      fi
+      printf '  - name: "%s"\n' "$ev"
+      printf '    path: "%s"\n' "$ev_path"
+      printf '    sha: "%s"\n' "$sha"
+      printf '    present: "%s"\n' "$present"
+    done
+  } > "$manifest_path" 2>/dev/null || true
+}
+
+# Refresh a single manifest entry after a sanctioned write.
+# Must be called immediately after the state file is written (including any appends).
+# Arguments:
+#   $1 — evidence file name (e.g. "plan-approved")
+#   $2 — repo_root (optional; defaults to $_REPO_OS_ROOT)
+# Fails silently — governance never depends on this succeeding.
+refresh_manifest_entry() {
+  local ev_name="$1"
+  local repo_root="${2:-$_REPO_OS_ROOT}"
+  local sid
+  sid="$(get_session_id "$repo_root" 2>/dev/null)" || return 0
+  local manifest_path
+  manifest_path="$(_get_evidence_manifest_path "$sid" "$repo_root")" || return 0
+  [ -f "$manifest_path" ] || return 0  # no manifest yet — skip (pre-feature session)
+
+  local state_dir
+  state_dir="$(get_session_state_dir)"
+  local ev_path="$state_dir/$ev_name"
+  local sha=""
+  local present="false"
+  if [ -f "$ev_path" ]; then
+    present="true"
+    sha="$(portable_hash < "$ev_path" 2>/dev/null)" || sha=""
+  fi
+
+  # Update the manifest entry for this file in-place via awk.
+  # Replaces the sha: and present: fields within the matching name: block.
+  local tmp="${manifest_path}.tmp.$$"
+  awk -v ev="$ev_name" -v new_sha="$sha" -v new_present="$present" '
+    /^  - name: "/ { in_entry = ($0 == "  - name: \"" ev "\"") }
+    in_entry && /^    sha:/ { print "    sha: \"" new_sha "\""; next }
+    in_entry && /^    present:/ { print "    present: \"" new_present "\""; next }
+    { print }
+  ' "$manifest_path" > "$tmp" 2>/dev/null \
+    && mv "$tmp" "$manifest_path" 2>/dev/null \
+    || rm -f "$tmp" 2>/dev/null
+}
+
+# Compare current evidence file hashes against the manifest at a checkpoint.
+# Reports any file whose hash differs from the manifest (out-of-band modification)
+# or that exists with no manifest entry (created after init without refresh).
+# Verdict: ADVISORY — never blocks (first deployment; false positives possible if
+# a sanctioned writer is missing from the refresh list).
+# Arguments:
+#   $1 — repo_root (optional; defaults to $_REPO_OS_ROOT)
+compare_manifest() {
+  local repo_root="${1:-$_REPO_OS_ROOT}"
+  local sid
+  sid="$(get_session_id "$repo_root" 2>/dev/null)" || return 0
+  local manifest_path
+  manifest_path="$(_get_evidence_manifest_path "$sid" "$repo_root")" || return 0
+  [ -f "$manifest_path" ] || return 0  # no manifest — skip (pre-feature session)
+
+  # Require portable_hash — cannot compare without a hash function.
+  if [ "$_REPO_OS_HASH_CMD" = "" ] || ! type portable_hash >/dev/null 2>&1; then
+    echo "Evidence manifest: hash function unavailable — integrity check skipped." >&2
+    return 0
+  fi
+
+  local state_dir
+  state_dir="$(get_session_state_dir)"
+  local findings=""
+
+  local ev
+  for ev in $_EVIDENCE_FILES; do
+    local ev_path="$state_dir/$ev"
+    [ -f "$ev_path" ] || continue  # file absent — no finding (not yet written or cleaned up)
+
+    # Compute current hash.
+    local current_sha
+    current_sha="$(portable_hash < "$ev_path" 2>/dev/null)" || continue
+    [ -z "$current_sha" ] && continue  # hash failed — skip rather than false-positive
+
+    # Read manifest entry sha (and detect missing entry).
+    local manifest_sha
+    manifest_sha=$(awk -v ev="$ev" '
+      /^  - name: "/ { in_entry = ($0 == "  - name: \"" ev "\""); if (in_entry) found=1 }
+      in_entry && /^    sha:/ {
+        gsub(/^[ ]*sha: *"/, ""); gsub(/"[ ]*$/, ""); print; exit
+      }
+      END { if (!found) print "__NOENTRY__" }
+    ' "$manifest_path" 2>/dev/null || echo "__PARSE_ERROR__")
+
+    if [ "$manifest_sha" = "__NOENTRY__" ] || [ "$manifest_sha" = "__PARSE_ERROR__" ]; then
+      findings="${findings}  $ev: present but not in manifest (created after init_phase without a manifest refresh).\n"
+    elif [ "$current_sha" != "$manifest_sha" ]; then
+      findings="${findings}  $ev: hash mismatch — manifest=${manifest_sha:0:16}... current=${current_sha:0:16}... (possible out-of-band modification).\n"
+    fi
+  done
+
+  if [ -n "$findings" ]; then
+    {
+      echo "INTEGRITY-ADVISORY: Evidence manifest mismatch detected at checkpoint."
+      printf '%b' "$findings"
+      echo "  This is advisory — not a hard block. The out-of-tree manifest detects"
+      echo "  writes not made through a sanctioned hook, but does NOT prevent forgery"
+      echo "  by a sophisticated actor. See known-issues.md R2 for the bounded guarantee."
+      echo "  Attestation (HMAC/signing) was deferred by the operator."
+    } >&2
+    log_hook_event "_phase-helper" "evidence-manifest" "" "warn" "0" "integrity_advisory" "$(printf '%b' "$findings" | tr '\n' ';' | cut -c1-120)" || true
+  fi
+  return 0
+}
+
+# Remove the evidence manifest for the closing session.
+# Called at session close after cleanup_session_files() (in-repo) has run.
+# Out-of-tree retention: delete at session close; no accumulation in the repo.
+# Arguments:
+#   $1 — repo_root (optional; defaults to $_REPO_OS_ROOT)
+#   $2 — session id (optional; resolved from state/env if absent)
+cleanup_evidence_manifest() {
+  local repo_root="${1:-$_REPO_OS_ROOT}"
+  local sid="${2:-}"
+  if [ -z "$sid" ]; then
+    sid="$(get_session_id "$repo_root" 2>/dev/null)" || return 0
+  fi
+  local manifest_path
+  manifest_path="$(_get_evidence_manifest_path "$sid" "$repo_root")" || return 0
+  rm -f "$manifest_path" 2>/dev/null || true
 }

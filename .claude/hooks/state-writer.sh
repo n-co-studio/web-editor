@@ -182,6 +182,8 @@ if [ "$CRITIC_COMBINED" = true ]; then
     advance_phase "verify" 2>/dev/null || true
   fi
 
+  refresh_manifest_entry "cohesion-reviewed" 2>/dev/null || true
+  refresh_manifest_entry "diff-review-complete" 2>/dev/null || true
   COMBINED_DETAIL=$(printf 'cohesion=%.20s diff=%.20s' "$COHESION_LAST" "$DIFF_REVIEW_LAST" | tr -d '\n' | cut -c1-64)
   log_hook_event "state-writer" "SubagentStop" "$AGENT_TYPE" "write" "$START_MS" "cohesion-reviewed+diff-review-complete" "$COMBINED_DETAIL"
   exit 0
@@ -233,6 +235,7 @@ if [ -n "$(get_phase)" ]; then
 fi
 
 # Capture GATE_RESULT value for analytics (truncate to 64 chars)
+refresh_manifest_entry "$STATE_FILE" 2>/dev/null || true
 GATE_RESULT_DETAIL=$(printf '%.64s' "$LAST_LINE")
 log_hook_event "state-writer" "SubagentStop" "$AGENT_TYPE" "write" "$START_MS" "$STATE_FILE" "$GATE_RESULT_DETAIL"
 exit 0

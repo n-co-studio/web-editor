@@ -139,6 +139,7 @@ QUESTION_HASH=$(printf '%s' "$QUESTIONS_TEXT" | portable_hash | cut -c1-12)
   printf 'mode: %s\n' "$DETECTED_MODE"
   printf 'session_id: %s\n' "$SID"
 } > "$STATE_DIR/plan-approved" 2>/dev/null || true
+refresh_manifest_entry "plan-approved" 2>/dev/null || true
 
 # Store plan hash in resume marker for content-addressed comparison at commit time.
 # At commit, pre-commit-gates.sh compares plan-approved.question_hash against

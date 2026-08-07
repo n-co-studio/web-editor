@@ -470,6 +470,7 @@ if [ "$SKIP_STATE" = false ]; then
           printf 'timestamp: %s\nsession_id: %s\nresult: PASSED\n' \
             "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_A34_CURRENT_SID" \
             > "$STATE_DIR/functional-verified"
+          refresh_manifest_entry "functional-verified" 2>/dev/null || true
         else
           # Blocking in headless/auto; advisory otherwise
           if [ "$IS_NO_REVIEW_BACKSTOP" = true ]; then
@@ -1661,6 +1662,15 @@ if [ -n "$STAGED_FILES" ]; then
       fi
     fi
   fi
+fi
+
+# ============================================================
+# Evidence Manifest Integrity Check (advisory — never blocks)
+# Runs after all gates so functional-verified is already written (A3.4).
+# Gated on SKIP_STATE to mirror the state-check block above.
+# ============================================================
+if [ "$SKIP_STATE" = false ]; then
+  compare_manifest 2>&1 | grep -v '^$' >&2 || true
 fi
 
 # ============================================================

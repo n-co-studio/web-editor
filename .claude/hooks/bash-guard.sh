@@ -208,6 +208,26 @@ if [ "$_DAEMON_BRANCH_BLOCK" = true ]; then
   exit 2
 fi
 
+# --- Write-detection pre-filter (pre-source inline copy) ---
+# Returns 0 (true) if the raw input string may contain write targets; 1 otherwise.
+# Canonical definition: _analytics-helper.sh::_is_bash_write_candidate(), adjacent
+# to extract_write_targets(). Keep this copy byte-for-byte identical.
+#
+# This copy exists because the Phase 1d write-check (~line 239) and combined
+# pre-source fast-exit (~line 310) run BEFORE the library sourcing at Phase 2.
+# Sourcing _analytics-helper.sh here would defeat the fast-exit
+# optimization (~14ms, ~56% of Bash calls). The inline copy is intentional —
+# NOT a drift risk, because the canonical definition is the single place to change.
+#
+# Tokens tested (must match what extract_write_targets() acts on):
+#   "file_path" — Edit/Write tool JSON field
+#   >           — shell redirect (including >>)
+#   tee         — tee pipe (tee or tee -a)
+_bg_is_write_candidate() {
+  local input="$1"
+  [[ "$input" == *'"file_path"'* ]] || [[ "$input" == *'>'* ]] || [[ "$input" == *'tee '* ]]
+}
+
 # --- Phase 1d: Inter-session governance version check (Decision 0041) ---
 # Fires on first Bash-write call of session. Predicate: governance evidence
 # files exist AND embedded spec_version matches manifest.json `active`.
@@ -217,7 +237,7 @@ fi
 # next Bash-write call until the operator re-runs Prompt 0 / Prompt A.
 # Advisory only — does not block. Gated to feature/fix/hotfix/release branches.
 _GV_IS_WRITE=false
-if [[ "$INPUT" == *'"file_path"'* ]] || [[ "$INPUT" == *'>'* ]] || [[ "$INPUT" == *'tee '* ]]; then
+if _bg_is_write_candidate "$INPUT"; then
   _GV_IS_WRITE=true
 fi
 # Skip Phase 1d entirely on recover, taskgroup-merge block, or when jq is
@@ -288,8 +308,7 @@ fi
 # --- Combined pre-source fast-exit ---
 # When no Gate 7 match AND no write patterns → exit 0 without sourcing.
 # Saves ~14ms sourcing overhead for the majority of Bash calls (~56%).
-if [ "$_TG_MERGE_BLOCK" = false ] \
-&& [[ "$INPUT" != *'"file_path"'* ]] && [[ "$INPUT" != *'>'* ]] && [[ "$INPUT" != *'tee '* ]]; then
+if [ "$_TG_MERGE_BLOCK" = false ] && ! _bg_is_write_candidate "$INPUT"; then
   exit 0
 fi
 
@@ -391,7 +410,7 @@ fi
 # Phase 5: Fast-exit for no-write-target Bash (post-sourcing)
 # ============================================================
 # Commands that triggered Gate 7 detection but weren't blocked land here.
-if [[ "$INPUT" != *'"file_path"'* ]] && [[ "$INPUT" != *'>'* ]] && [[ "$INPUT" != *'tee '* ]]; then
+if ! _bg_is_write_candidate "$INPUT"; then
   log_hook_event "bash-guard" "PreToolUse" "Bash" "allow" "$START_MS" "bash_no_write_target"
   exit 0
 fi

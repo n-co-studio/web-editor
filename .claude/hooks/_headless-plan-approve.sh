@@ -24,6 +24,7 @@ _headless_plan_approve() {
 
   printf 'timestamp: %s\nquestion_hash: headless-runner\nlarge-scope: true\nmode: auto\nsession_id: %s\n' \
     "$ts" "$sid" > "$state_dir/plan-approved"
+  refresh_manifest_entry "plan-approved" 2>/dev/null || true
 
   # Advance through approval to build
   advance_phase "approval" 2>/dev/null || true

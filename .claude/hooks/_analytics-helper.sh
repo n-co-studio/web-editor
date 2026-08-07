@@ -186,6 +186,30 @@ is_in_repo() {
   return 1
 }
 
+# --- Write-detection pre-filter ---
+# Returns 0 (true) if the raw input string may contain write targets; 1 otherwise.
+# Tests for the three token classes that extract_write_targets() acts on:
+#   "file_path" — Edit/Write tool JSON field
+#   >           — shell redirect (including >>)
+#   tee         — tee pipe (tee or tee -a)
+#
+# SYNC INVARIANT: This pre-filter and extract_write_targets() below share
+# responsibility for the same write-detection surface. Widening the extractor
+# without updating this pre-filter means commands containing the new pattern
+# never reach the extractor — a silent no-op. Update both together.
+#
+# bash-guard.sh carries a pre-source inline copy of this function
+# (_bg_is_write_candidate, defined before library sourcing). Update that copy
+# whenever changing these tokens or the logic below.
+#
+# Known non-goal: the detected set is deliberately narrow (Decision t-0012 §9,
+# known-issues.md R2). Do not widen this pre-filter without a corresponding
+# widening of extract_write_targets().
+_is_bash_write_candidate() {
+  local input="$1"
+  [[ "$input" == *'"file_path"'* ]] || [[ "$input" == *'>'* ]] || [[ "$input" == *'tee '* ]]
+}
+
 # --- Extract write targets from a Bash command string ---
 # Parses redirect (>, >>), file-descriptor redirects ([0-9]>, [0-9]>>), tee,
 # and cp/mv destination (last positional token via awk '{print $NF}') from a command.

@@ -1410,6 +1410,14 @@ if [ "$IS_RETRY" = false ]; then
   fi
 fi
 
+# --- Evidence Manifest Integrity Check (advisory — never blocks) ---
+# Compare current evidence file hashes against the manifest captured at init_phase.
+# Out-of-tree location earns the stronger claim: findings indicate writes not made
+# through a sanctioned hook. See known-issues.md R2 for the bounded guarantee.
+if [ "$IS_RETRY" = false ]; then
+  compare_manifest 2>&1 | grep -v '^$' >&2 || true
+fi
+
 # --- Analytics: log successful close and register repo ---
 SESSION_TYPE=$(infer_session_type)
 log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "session_complete" "$SESSION_TYPE" || true
@@ -1426,6 +1434,8 @@ update_baseline
 
 # --- Final cleanup ---
 cleanup_session
+# Clean out-of-tree evidence manifest (session-scoped; no accumulation in repo).
+cleanup_evidence_manifest "$REPO_ROOT" || true
 
 # --- KPI summary (Phase 3c) — normal close path ---
 _emit_kpi_summary 0 "$STOP_ATTEMPT" "" "$SESSION_TYPE"
