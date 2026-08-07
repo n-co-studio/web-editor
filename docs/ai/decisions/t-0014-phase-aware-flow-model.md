@@ -155,6 +155,18 @@ Add a phase-aware flow management system that tracks session progress through an
 
 11. **Lifecycle**: Phase-state is session-scoped and agent-initiated — the agent calls `init_phase` at session start, not a hook. Hooks cannot determine session type at launch, so phase-state creation is the agent's responsibility. When phase-state is absent or stale, hooks fail-open (backwards compatible). Cleaned by `cleanup_session()` in `session-close-check.sh` at session close (`rm -f "$state_dir/phase-state"`).
 
+12. **Dispatch-phase binding for governance verdict validation** (added 2026-08-07 — session `daemon-20260807-154632-79148`): Governance agent verdicts (critic, qa-verifier, reviewer, security-privacy, pragmatist) must be validated against the phase at **dispatch time**, not the phase at **arrival time**. Agents take minutes to run; the session phase can advance legitimately while they run. Validating against the current (post-advance) phase produces false rejections.
+
+    **Mechanism:**
+    - `pretooluse-permission.sh` calls `record_dispatch_phase "$AGENT_SUBTYPE"` at Agent PreToolUse time for governance agents. This writes `agent_type: phase=<p> cycle=<c> ts=<t>` into the `dispatch_records:` section of `session-resume.yaml`.
+    - `state-writer.sh` reads the dispatch record via `get_dispatch_phase "$AGENT_TYPE"` and validates the verdict against the **dispatch phase** when a record exists. Falls back to current phase when no dispatch record is present (backward compatibility — sessions without dispatch recording, or non-governance agents).
+    - On rejection, `state-writer.sh` emits a detailed stderr message naming the agent, verdict, dispatch phase, and current phase, and writes an escalation file to `.claude/.automation/escalations/`. A discarded verdict must never look like success.
+    - Governance verdict state files now include a `dispatch_phase:` field as dispatch evidence. `pre-commit-gates.sh` rejects verdict files (`qa-verified`, `cohesion-reviewed`, `diff-review-complete`) that lack this field — ensuring files must have been written by a real hook-mediated dispatch.
+
+    **Known limitation:** `SubagentStop` does NOT fire when a governance agent is resumed via `SendMessage`. Verdicts from resumed agents are lost with no error visible to the orchestrator. Workaround: always re-dispatch governance agents via the Task tool. See `docs/ai/logs/known-issues.md` R3.
+
+    **Preservation note:** `_headless-plan-approve.sh` writes `plan-approved` directly (sanctioned system auto-approval for headless plan phase) and is unaffected — it does not go through `state-writer.sh` and `plan-approved` is not subject to the `dispatch_phase:` check.
+
 ## Consequences
 - `.claude/hooks/_phase-helper.sh` added (new sourced helper)
 - `.claude/.state/phase-state` schema defined (session-scoped state file)
@@ -164,3 +176,8 @@ Add a phase-aware flow management system that tracks session progress through an
 - `docs/ai/quality-gates.md` gains `phase-state` in State File Dependencies table
 - No changes to `.claude/settings.json` (helper is sourced, not a standalone hook)
 - No changes to `write-guard.sh` (hook shell I/O already bypasses it)
+- **(2026-08-07)** `_phase-helper.sh` gains `record_dispatch_phase` and `get_dispatch_phase`; `write_resume_marker` preserves `dispatch_records:` section across phase advances
+- **(2026-08-07)** `pretooluse-permission.sh` calls `record_dispatch_phase` for governance agents at Agent PreToolUse
+- **(2026-08-07)** `state-writer.sh` validates verdicts against dispatch phase; rejects with loud stderr + escalation file; adds `dispatch_phase:` field to all verdict state files
+- **(2026-08-07)** `pre-commit-gates.sh` rejects `qa-verified`, `cohesion-reviewed`, `diff-review-complete` that lack `dispatch_phase:` field
+- **(2026-08-07)** `docs/ai/logs/known-issues.md` gains R3: SendMessage-resumed agents do not trigger SubagentStop

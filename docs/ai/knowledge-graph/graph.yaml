@@ -3,7 +3,7 @@
 # Seeded from governance metadata on 2026-03-31
 
 schema_version: 1
-last_updated: "2026-08-07T22:00:00Z"
+last_updated: "2026-08-07T23:00:00Z"
 
 nodes:
   # --- Decisions (from DIGEST.md) ---
@@ -52,7 +52,7 @@ nodes:
   - id: "decision-0014"
     type: "decision"
     path: "docs/ai/decisions/t-0014-phase-aware-flow-model.md"
-    description: "Phase-Aware Flow Model; hotfix gate profile updated 2026-08-07 (A2 enforced uniformly, A5 skipped)"
+    description: "Phase-Aware Flow Model; dispatch-phase binding added 2026-08-07 (verdict validation uses dispatch phase, not arrival phase; loud rejection + escalation on mismatch; dispatch_phase field in verdict state files)"
     last_verified: "2026-08-07"
     status: "active"
     layer: "template"

@@ -2173,27 +2173,22 @@ write_resume_marker() {
   local branch
   branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 
-  # Preserve existing agent_verdicts if resume file already exists
-  local existing_verdicts=""
+  # Preserve existing agent_verdicts and dispatch_records if resume file already exists
+  local existing_verdicts="" existing_dispatches=""
   if [ -f "$resume_file" ]; then
-    local in_verdicts=false
-    local _line
+    local _rm_section="" _line
     while IFS= read -r _line || [ -n "$_line" ]; do
-      if [ "$_line" = "agent_verdicts:" ]; then
-        in_verdicts=true
-        continue
-      fi
-      if [ "$in_verdicts" = true ]; then
-        case "$_line" in
-          "  "*)
-            existing_verdicts="${existing_verdicts}${_line}
-"
-            ;;
-          *)
-            break
-            ;;
-        esac
-      fi
+      case "$_line" in
+        "agent_verdicts:")   _rm_section="verdicts" ;;
+        "dispatch_records:") _rm_section="dispatches" ;;
+        "  "*)
+          case "$_rm_section" in
+            verdicts)   existing_verdicts="${existing_verdicts}${_line}"$'\n' ;;
+            dispatches) existing_dispatches="${existing_dispatches}${_line}"$'\n' ;;
+          esac
+          ;;
+        *) _rm_section="" ;;
+      esac
     done < "$resume_file"
   fi
 
@@ -2208,6 +2203,10 @@ write_resume_marker() {
     printf 'agent_verdicts:\n'
     if [ -n "$existing_verdicts" ]; then
       printf '%s' "$existing_verdicts"
+    fi
+    printf 'dispatch_records:\n'
+    if [ -n "$existing_dispatches" ]; then
+      printf '%s' "$existing_dispatches"
     fi
   } > "$resume_file" 2>/dev/null || true
 }
@@ -2298,6 +2297,119 @@ record_agent_verdict() {
   } > "$temp_file" 2>/dev/null || true
 
   mv "$temp_file" "$resume_file" 2>/dev/null || true
+}
+
+# --- Record dispatch-time phase for a governance agent ---
+# Writes agent_type -> "phase=<p> cycle=<c> ts=<t>" into the session-resume.yaml
+# dispatch_records section. Called from pretooluse-permission.sh when a governance
+# agent is dispatched, so the arriving verdict can be validated against the phase at
+# dispatch time rather than the (possibly advanced) phase at arrival.
+# Shell I/O — bypasses write-guard.sh (same pattern as record_agent_verdict).
+# Fail-silent: returns 0 on any error so the caller dispatch is never blocked.
+# Usage: record_dispatch_phase "qa-verifier"
+record_dispatch_phase() {
+  local agent_type="$1"
+  [ -z "$agent_type" ] && return 0
+
+  local state_dir
+  state_dir="$(get_session_state_dir)"
+  local resume_file="$state_dir/session-resume.yaml"
+  [ -f "$resume_file" ] || return 0  # No resume file — fail silently
+
+  local phase
+  phase="$(get_phase)"
+  [ -z "$phase" ] && return 0  # No phase state — can't record meaningfully
+
+  # Load phase-state for cycle number (_PS_CYCLE populated by _load_phase_state)
+  local state_file="$state_dir/phase-state"
+  _load_phase_state "$state_file" 2>/dev/null || true
+  local cycle="${_PS_CYCLE:-1}"
+
+  local ts
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  local entry="phase=${phase} cycle=${cycle} ts=${ts}"
+
+  local temp_file="$resume_file.tmp.$$"
+  local in_dispatches=false
+  local dispatch_written=false
+  local _line
+
+  {
+    while IFS= read -r _line || [ -n "$_line" ]; do
+      if [ "$_line" = "dispatch_records:" ]; then
+        in_dispatches=true
+        printf '%s\n' "$_line"
+        continue
+      fi
+      if [ "$in_dispatches" = true ]; then
+        case "$_line" in
+          "  ${agent_type}: "*)
+            # Update existing entry
+            printf '  %s: %s\n' "$agent_type" "$entry"
+            dispatch_written=true
+            continue
+            ;;
+          "  "*)
+            printf '%s\n' "$_line"
+            continue
+            ;;
+          *)
+            # Section ended — append new entry if not written yet
+            if [ "$dispatch_written" = false ]; then
+              printf '  %s: %s\n' "$agent_type" "$entry"
+              dispatch_written=true
+            fi
+            in_dispatches=false
+            printf '%s\n' "$_line"
+            continue
+            ;;
+        esac
+      fi
+      printf '%s\n' "$_line"
+    done < "$resume_file"
+
+    # Handle dispatch_records at end of file
+    if [ "$in_dispatches" = true ] && [ "$dispatch_written" = false ]; then
+      printf '  %s: %s\n' "$agent_type" "$entry"
+    fi
+  } > "$temp_file" 2>/dev/null || { rm -f "$temp_file" 2>/dev/null; return 0; }
+
+  mv -f "$temp_file" "$resume_file" 2>/dev/null || { rm -f "$temp_file" 2>/dev/null; return 0; }
+  return 0
+}
+
+# --- Get dispatch-time phase record for a governance agent ---
+# Reads from session-resume.yaml dispatch_records section.
+# Outputs "phase=<p> cycle=<c> ts=<t>" on stdout, empty string if not found.
+# Caller parses: dispatch_phase=$(get_dispatch_phase "qa-verifier" | grep -oE 'phase=[^ ]+' | cut -d= -f2)
+# Usage: entry=$(get_dispatch_phase "qa-verifier")
+get_dispatch_phase() {
+  local agent_type="$1"
+  [ -z "$agent_type" ] && return 0
+
+  local state_dir
+  state_dir="$(get_session_state_dir)"
+  local resume_file="$state_dir/session-resume.yaml"
+  [ -f "$resume_file" ] || return 0
+
+  local in_dispatches=false _line
+  while IFS= read -r _line || [ -n "$_line" ]; do
+    if [ "$_line" = "dispatch_records:" ]; then
+      in_dispatches=true
+      continue
+    fi
+    if [ "$in_dispatches" = true ]; then
+      case "$_line" in
+        "  ${agent_type}: "*)
+          echo "${_line#  ${agent_type}: }"
+          return 0
+          ;;
+        "  "*) continue ;;
+        *) break ;;
+      esac
+    fi
+  done < "$resume_file"
+  return 0
 }
 
 # --- Finish-loop dimension cache (Decision 0040) ---

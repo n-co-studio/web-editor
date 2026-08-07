@@ -521,6 +521,13 @@ if [ "$SKIP_STATE" = false ]; then
     log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_cohesion_stale_session"
   elif [ "$_A5_SKIP" = false ] && [ -f "$STATE_DIR/cohesion-reviewed" ] && \
        _validate_state_session_id "$STATE_DIR/cohesion-reviewed"; then
+    # Dispatch evidence check: reject verdict files lacking dispatch_phase field.
+    _PCG_COHESION_DISPATCH_PHASE=$(grep '^dispatch_phase:' "$STATE_DIR/cohesion-reviewed" 2>/dev/null | sed 's/^dispatch_phase: *//' | head -1 || true)
+    if [ -z "$_PCG_COHESION_DISPATCH_PHASE" ]; then
+      echo "GATE-RECOVERABLE: A5 cohesion-reviewed lacks dispatch_phase — not produced by a real agent dispatch. NEXT: Re-dispatch Critic in cohesion mode. (override: REPO_OS_RECOVER=1)" >&2
+      block "A5_cohesion_no_dispatch_evidence"
+      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A5_cohesion_no_dispatch_evidence"
+    fi
     # A5 hardening: block if cohesion-reviewed contains GATE_RESULT: BLOCKED
     # This enforces that critical cohesion findings were resolved before committing.
     _PCG_COHESION_RESULT=$(grep '^GATE_RESULT: ' "$STATE_DIR/cohesion-reviewed" 2>/dev/null | sed 's/^GATE_RESULT: *//' | awk '{print $1}' | head -1 || true)
@@ -552,6 +559,13 @@ if [ "$SKIP_STATE" = false ]; then
     log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_diff_review_stale_session"
   elif [ "$_A5_SKIP" = false ] && [ -f "$STATE_DIR/diff-review-complete" ] && \
        _validate_state_session_id "$STATE_DIR/diff-review-complete"; then
+    # Dispatch evidence check: reject verdict files lacking dispatch_phase field.
+    _PCG_DIFF_DISPATCH_PHASE=$(grep '^dispatch_phase:' "$STATE_DIR/diff-review-complete" 2>/dev/null | sed 's/^dispatch_phase: *//' | head -1 || true)
+    if [ -z "$_PCG_DIFF_DISPATCH_PHASE" ]; then
+      echo "GATE-RECOVERABLE: A5 diff-review-complete lacks dispatch_phase — not produced by a real agent dispatch. NEXT: Re-dispatch Critic in diff-review mode. (override: REPO_OS_RECOVER=1)" >&2
+      block "A5_diff_no_dispatch_evidence"
+      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A5_diff_no_dispatch_evidence"
+    fi
     _PCG_DIFF_REVIEW_RESULT=$(grep '^GATE_RESULT: ' "$STATE_DIR/diff-review-complete" 2>/dev/null | sed 's/^GATE_RESULT: *//' | awk '{print $1}' | head -1 || true)
     if [ "$_PCG_DIFF_REVIEW_RESULT" = "BLOCKED" ]; then
       echo "GATE-RECOVERABLE: A5 diff-review blocked — Critic found critical mechanical bugs. NEXT: Resolve all critical diff-review findings and re-run Critic in diff-review mode. (override: REPO_OS_RECOVER=1)" >&2
@@ -569,6 +583,16 @@ if [ "$SKIP_STATE" = false ]; then
     echo "GATE-RECOVERABLE: qa-verified state file has stale session_id. NEXT: Re-run QA verification in this session. (override: REPO_OS_RECOVER=1)" >&2
     block "state_qa_stale_session"
     log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_qa_stale_session"
+  elif [ -f "$STATE_DIR/qa-verified" ] && _validate_state_session_id "$STATE_DIR/qa-verified"; then
+    # Dispatch evidence check: reject verdict files lacking dispatch_phase field.
+    # Files written by state-writer.sh always contain this field (written since
+    # this fix). Absence means the file was not produced via a real agent dispatch.
+    _PCG_QA_DISPATCH_PHASE=$(grep '^dispatch_phase:' "$STATE_DIR/qa-verified" 2>/dev/null | sed 's/^dispatch_phase: *//' | head -1 || true)
+    if [ -z "$_PCG_QA_DISPATCH_PHASE" ]; then
+      echo "GATE-RECOVERABLE: qa-verified lacks dispatch_phase — not produced by a real agent dispatch. NEXT: Re-dispatch QA verification agent. (override: REPO_OS_RECOVER=1)" >&2
+      block "state_qa_no_dispatch_evidence"
+      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_qa_no_dispatch_evidence"
+    fi
   fi
 
   # A3.4 functional-verified binding gate (defense-in-depth for headless/auto)
