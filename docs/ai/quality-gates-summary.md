@@ -8,7 +8,7 @@
 | Gate | Summary | State File |
 |------|---------|-----------|
 | **A1 Decision Compliance** | All applicable decisions followed; conflicts → new decision record first. Trigger parser enforces mechanically (sentinel: `docs/ai/decisions/.a1-triggers-enforced`). | — (trigger index: `docs/ai/decisions/.a1-trigger-index`) |
-| **A2 Process** | Plan before code. Session log updated at close. Scope >100 lines requires `large-scope: true` in `plan-approved`. Hotfix: scope limit relaxed. | `plan-approved` |
+| **A2 Process** | Plan before code. Session log updated at close. Scope >100 lines requires `large-scope: true` in `plan-approved`. Enforced uniformly on all branch/session types. | `plan-approved` |
 | **A3 Quality** | Formatter, lint, build/compile pass (when tooling exists). **A3.3**: `tsc --noEmit --incremental` passes (skips without `tsconfig.json`; override: `SKIP_BUILD_CHECK=1`). **A3.4**: In headless/auto, runs `package.json` scripts (`build`, `build:pack`, `test`, `verify`) + `npm pack --dry-run`; blocking when no human backstop, advisory otherwise; writes `functional-verified`; override: `SKIP_FUNC_CHECK=1`; Decision 0044. | `functional-verified` (headless/auto only) |
 | **A4 Safety** | No secrets/PII. High-risk path/content detection → Reviewer + Security sign-off. Automation-specific: no unbriefed network calls, new deps, or out-of-repo writes. | `reviewer-signed`, `security-signed` |
 | **A5 Cohesion** _(session types with review phase only)_ | Two parallel checks — both APPROVED required. **Cohesion**: Critic (cohesion mode) clean; `GATE_RESULT: APPROVED` in `cohesion-reviewed`. **Diff-review**: Critic (diff-review mode) clean; `GATE_RESULT: APPROVED` in `diff-review-complete`. Contract `verification:` criteria evaluated (advisory). Completeness pass: each criterion scored COMPLETE/INCOMPLETE/PARTIAL; INCOMPLETE triggers loop-back to Builder (advisory, 2-round cap). Session-type-aware: skips for hotfix and other types without review phase. | `cohesion-reviewed`, `diff-review-complete` |
@@ -30,10 +30,10 @@
 | `main` | All gates (A + B). No direct commits. |
 | `release/*` | All gates + C gates (release checklist, full test suite, Reviewer + Security sign-off). |
 | `feature/*`, `fix/*` | Standard gates (A + B). |
-| `hotfix/*` | Expedited: A2 scope relaxed, A5 skipped (no review phase). A1, A3, A4, B1–B3 still apply. |
+| `hotfix/*` | Expedited: A2 enforced (large-scope: true satisfies it), A5 skipped (no review phase). A1, A3, A4, B1–B3 still apply. |
 | `experiment/*` | A4 only. Must not merge to main without full gates. |
 | `standard`, `taskgroup`, `taskgroup-merge` | Full gates (A1–A6, B1–B3). A5 includes cohesion + diff-review. A6 (including A6.3): taskgroup/taskgroup-merge only. |
-| `hotfix` session | A2 scope relaxed, A5 skipped. |
+| `hotfix` session | A2 enforced uniformly, A5 skipped. |
 | `experiment`, `prototype-*` | A4 safety only. |
 | `spec-fresh`, `spec-update`, `advisory-*` | Advisory only. |
 | `audit` | Read-only (no gates unless deferrals create file changes). |

@@ -632,10 +632,23 @@ if [ "$SKIP_MODE_GUARD" = false ]; then
 
       check_path() {
         local rel="$1" context="$2"
+        # Immune check first — unconditional, no override (structural anchor)
         if is_immune "$rel"; then
           log_hook_event "mode-guard" "PreToolUse" "Bash" "block" "$START_MS" "${context}_immune_path" "" "$rel"
           echo "GATE-FINAL: $rel is an immune path — cannot be modified in any mode. (no override)" >&2
           exit 2
+        fi
+        # Belt-and-suspenders: unresolved shell variable — cannot classify, fail-closed.
+        # The caller loop catches this first; this handles any path that slips through.
+        if has_unresolved_var "$rel"; then
+          log_hook_event "mode-guard" "PreToolUse" "Bash" "block" "$START_MS" "${context}_unresolved_var" "" "$rel"
+          echo "GATE-RECOVERABLE: write target '$rel' contains an unresolved shell variable — the mode guard cannot determine the target location. Use a literal path instead. (override: REPO_OS_SKIP_MODE_GUARD=1)" >&2
+          exit 2
+        fi
+        # Belt-and-suspenders: absolute path outside repo — no mode-guard jurisdiction.
+        if is_out_of_repo "$rel"; then
+          log_hook_event "mode-guard" "PreToolUse" "Bash" "allow" "$START_MS" "${context}_out_of_repo_bs" "" "$rel"
+          return 0
         fi
         if [ -n "${REPO_OS_UNLOCK_PATH:-}" ]; then
           UNLOCK_REL=$(make_relative "$REPO_OS_UNLOCK_PATH")
@@ -664,8 +677,17 @@ if [ "$SKIP_MODE_GUARD" = false ]; then
       if [ -n "$COMMAND" ]; then
         while IFS= read -r MG_WT; do
           [ -z "$MG_WT" ] && continue
+          # Sub-case 2: unresolved shell variable — cannot classify, fail-closed.
+          # Must check before resolve_path, which would misinterpret $VAR as relative.
+          if has_unresolved_var "$MG_WT"; then
+            log_hook_event "mode-guard" "PreToolUse" "Bash" "block" "$START_MS" "bash_unresolved_var" "" "$MG_WT"
+            echo "GATE-RECOVERABLE: write target '$MG_WT' contains an unresolved shell variable — the mode guard cannot determine the target location. Use a literal path instead. (override: REPO_OS_SKIP_MODE_GUARD=1)" >&2
+            exit 2
+          fi
           MG_WT_ABS=$(resolve_path "$MG_WT")
+          # Sub-case 1: path outside repo — no mode-guard jurisdiction; log and skip.
           if ! is_in_repo "$MG_WT_ABS" "$REPO_ROOT"; then
+            log_hook_event "mode-guard" "PreToolUse" "Bash" "allow" "$START_MS" "bash_out_of_repo_skip" "" "$MG_WT"
             continue
           fi
           MG_WT_REL=$(make_relative "$MG_WT")

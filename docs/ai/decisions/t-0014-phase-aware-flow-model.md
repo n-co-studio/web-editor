@@ -104,7 +104,7 @@ Add a phase-aware flow management system that tracks session progress through an
 4. **Phase-to-gate-profile mapping** — which gates apply varies by session type and is enforced at `verify`/`commit` phases:
    - `standard`, `taskgroup`, `taskgroup-merge`: Full gates (A1–A6, B1–B3). A6 applies only to taskgroup/taskgroup-merge
    - `editor-live`: A4 per-loop commit; full gates (A1–A5, B1–B3) at final review/verify. A6 n/a (not a task group type)
-   - `hotfix`: Expedited (A2 scope relaxed, A5 skipped)
+   - `hotfix`: Expedited (A2 enforced uniformly, A5 skipped)
    - `experiment`, `prototype-*`: A4 safety only
    - `spec-fresh`, `spec-update`: Advisory only (governance evidence at close)
    - `advisory-init`, `advisory-reinit`: Advisory only (governance evidence at close)

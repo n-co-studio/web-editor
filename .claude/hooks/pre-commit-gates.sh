@@ -708,9 +708,11 @@ fi
 
 # ============================================================
 # A2: Process — Scope Check (blocking with large-scope override)
-# Hotfix branches: A2 scope relaxed (skip check entirely)
+# Any diff over 100 lines requires large-scope: true in plan-approved.
+# Headless sessions: _headless-plan-approve.sh always writes large-scope: true.
+# Hotfix sessions: approval phase exists; interactive sessions can obtain approval.
 # ============================================================
-if [ "$SKIP_STATE" = false ] && [ "$IS_HOTFIX" = false ] && [ -n "$STAGED_FILES" ]; then
+if [ "$SKIP_STATE" = false ] && [ -n "$STAGED_FILES" ]; then
   LINES_CHANGED=$(git diff --cached --numstat | awk '{s+=$1+$2} END {print s+0}')
   # Emit scope metric event for trend analysis (even for passing commits)
   log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "A2_scope_check" "lines:$LINES_CHANGED"

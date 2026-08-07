@@ -9,10 +9,12 @@
 # _analytics-helper.sh before this file — do NOT re-source it here.
 #
 # Functions provided:
-#   make_relative  — normalize path relative to repo root
-#   is_immune      — check if path is never-modifiable (no override)
-#   is_governance  — check if path falls under governance prefixes
-#   is_carved_out  — check per-mode governance carve-outs
+#   make_relative     — normalize path relative to repo root
+#   is_out_of_repo    — returns 0 if path is definitively outside REPO_ROOT
+#   has_unresolved_var — returns 0 if path contains a literal '$' (unresolved variable)
+#   is_immune         — check if path is never-modifiable (no override)
+#   is_governance     — check if path falls under governance prefixes
+#   is_carved_out     — check per-mode governance carve-outs
 
 # Guard against direct execution
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
@@ -30,6 +32,44 @@ make_relative() {
   # Strip leading ./ if present
   p="${p#./}"
   echo "$p"
+}
+
+# --- Out-of-repo predicate ---
+# Returns 0 (true — outside) if the path is definitively outside REPO_ROOT.
+# Returns 1 (false — inside or undecidable) otherwise.
+#
+# Handles:
+#   • Absolute paths: checked against REPO_ROOT prefix (lexical, no symlink
+#     resolution — consistent with normalize_path/is_in_repo in _analytics-helper.sh).
+#   • Relative paths with ../ traversal: resolved against REPO_ROOT lexically,
+#     then checked. Uses normalize_path (python3-backed when .. present).
+#   • Clean relative paths: assumed in-repo by convention.
+#
+# Do NOT call with paths containing unresolved shell variables ($VAR / ${VAR}).
+# Call has_unresolved_var() first; bail if it returns 0.
+is_out_of_repo() {
+  local p="$1"
+  local abs_p
+  if [[ "$p" == /* ]]; then
+    # Absolute path — compare directly against REPO_ROOT
+    abs_p="$p"
+  elif [[ "$p" == *".."* ]]; then
+    # Relative with traversal — resolve against REPO_ROOT lexically
+    abs_p=$(normalize_path "$REPO_ROOT/$p") || abs_p="$REPO_ROOT/$p"
+  else
+    # Clean relative path — treat as in-repo
+    return 1
+  fi
+  # is_in_repo returns 0 (in repo) → NOT out; 1 (outside) → IS out
+  is_in_repo "$abs_p" "$REPO_ROOT" && return 1 || return 0
+}
+
+# --- Unresolved shell variable predicate ---
+# Returns 0 (true) if the path string contains a literal '$', indicating an
+# unresolved shell variable reference ($VAR or ${VAR}).
+# The mode guard cannot classify such targets and must block fail-closed.
+has_unresolved_var() {
+  [[ "$1" == *'$'* ]]
 }
 
 # --- Immune paths (never modifiable, no override) ---

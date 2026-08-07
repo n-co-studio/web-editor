@@ -48,7 +48,7 @@ Gates-B: B1-pass B2-n/a B3-n/a
 | Category | Gate Profile |
 |----------|-------------|
 | `feature/*`, `fix/*` | Standard (A + B) |
-| `hotfix/*` | Expedited: A2 relaxed, A5 skipped |
+| `hotfix/*` | Expedited: A2 enforced (large-scope: true satisfies it), A5 skipped |
 | `experiment/*` | A4 only; full gates required before merge to main |
 | `release/*` | All gates + C gates (release checklist, Reviewer + Security sign-off) |
 | `main` | All gates. No direct commits |

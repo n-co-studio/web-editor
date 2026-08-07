@@ -192,7 +192,7 @@ Session-type-specific phases (see sequences table): `interview`/`write` (Prompt 
 | Session type | Phase sequence | Notes |
 |-------------|----------------|-------|
 | standard | init→[drift-check]→[plan]→[approval]→build→review→verify→[user-review]→commit→[op-review]→close | drift-check (Decision 0038): valid bundle → forward-jump to build (skip plan/approval); otherwise fall through to legacy plan/approval. op-review skipped in auto |
-| hotfix | init→plan→approval→build→verify→commit→close | Loop: verify→build; A2 relaxed, A5 skip; max 3 cycles; bundle handling not applied |
+| hotfix | init→plan→approval→build→verify→commit→close | Loop: verify→build; A2 enforced (large-scope: true satisfies), A5 skip; max 3 cycles; bundle handling not applied |
 | editor-live | init→build→commit→review→verify→op-review→close | No plan gate; loop: commit→build; child mode only |
 | finish-loop | init→assess→fix→reassess→commit→close | Loop: reassess→fix; convergent quality assessment; cycle cap 5 |
 | advisory-init | init→tier-select→dispatch→synthesize→op-review→validate→governance→close | Advisory only |
