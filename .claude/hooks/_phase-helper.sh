@@ -734,6 +734,44 @@ bundle_to_pragmatist_signed() {
   refresh_manifest_entry "pragmatist-signed" "$(get_main_repo_root)" 2>/dev/null || true
 }
 
+# --- write_alignment_check_pragmatist_signed ---
+# Writes pragmatist-signed state file for the Orchestrator's deterministic
+# alignment-check path (Decision 0038 §7, Decision 0025 §9).
+# Called when deterministic_alignment_check returns 0 (aligned) and no bundle
+# is present (or the bundle lacks implementation_design — use
+# bundle_to_pragmatist_signed for the bundle path instead).
+#
+# Arguments:
+#   $1 — alignment_outcome: must be "aligned" (APPROVED) or "diverged" (BLOCKED).
+#        Absent or any other value is treated as an error — returns 1 without
+#        writing the file. Callers must not pass a default; unknown outcomes must
+#        not silently become approvals.
+#   $2 — (optional) session_id override
+# Shell I/O — same pattern as state-writer.sh and bundle_to_pragmatist_signed.
+write_alignment_check_pragmatist_signed() {
+  local outcome="$1"
+  local sid="${2:-$(get_session_id "$(get_main_repo_root)")}"
+  local state_dir
+  state_dir="$(get_session_state_dir)"
+  mkdir -p "$state_dir" 2>/dev/null || true
+
+  local gate_result
+  case "$outcome" in
+    aligned)   gate_result="APPROVED" ;;
+    diverged)  gate_result="BLOCKED"  ;;
+    *)
+      # Absent or unparseable outcome is an error — not an approval.
+      echo "write_alignment_check_pragmatist_signed: unrecognised outcome '${outcome}' — refusing to write pragmatist-signed" >&2
+      return 1
+      ;;
+  esac
+
+  printf 'GATE_RESULT: %s\nsession_id: %s\nsource: alignment-check\nalignment_outcome: %s\n' \
+    "$gate_result" "$sid" "$outcome" \
+    > "$state_dir/pragmatist-signed" 2>/dev/null || true
+  refresh_manifest_entry "pragmatist-signed" "$(get_main_repo_root)" 2>/dev/null || true
+}
+
 # --- _bundle_field ---
 # Extract a top-level scalar field from the bundle (e.g., brief_id, mode).
 # Returns empty string when field is absent.

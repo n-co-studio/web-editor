@@ -138,7 +138,7 @@ Governance evidence in `.claude/.state/`. Written by hooks via shell I/O (never 
 | `qa-verified` | `state-writer.sh` (qa-verifier) | State verification |
 | `reviewer-signed` | `state-writer.sh` (reviewer) | High-risk detection |
 | `security-signed` | `state-writer.sh` (security-privacy) | High-risk detection |
-| `pragmatist-signed` | `state-writer.sh` (pragmatist) | Plan-review verification |
+| `pragmatist-signed` | Three legitimate writers — each stamps a provenance marker: (1) `state-writer.sh` (pragmatist Plan-Gating dispatch) → `dispatch_phase:`; (2) `bundle_to_pragmatist_signed()` in `_phase-helper.sh` (Decision 0038 drift-check) → `source: handoff-bundle`; (3) `write_alignment_check_pragmatist_signed()` in `_phase-helper.sh` (deterministic alignment-check) → `source: alignment-check`. Gate rejects files with no recognised marker. Do NOT write by hand. | Plan-review verification — commit gate requires presence + valid session_id + provenance marker |
 | `functional-verified` | `pre-commit-gates.sh` (A3.4 inline) | A3.4 functional verification — written on script pass in headless/auto mode; required by binding gate when `_A34_APPLICABLE=true` and `IS_NO_REVIEW_BACKSTOP=true`. Decision 0044. |
 | `kg-updated` | `pre-commit-gates.sh` (KG Update Gate) | KG Update Gate — written on gate pass when staged governance files have graph nodes and graph is current. Session-scoped. Suppresses `session-close-check.sh` advisory when present. Override: `REPO_OS_SKIP_KG_GATE=1` (interactive only). Decision 0034 Amendment 7. |
 

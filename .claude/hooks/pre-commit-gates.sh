@@ -616,12 +616,28 @@ if [ "$SKIP_STATE" = false ]; then
   # Phase-state-aware: only enforce when phase-state exists (session initialized).
   # Sessions from before this gate was deployed won't have phase-state, providing
   # backward compatibility without a sentinel file.
-  # Provenance (Decision 0038): pragmatist-signed may be written by state-writer.sh
-  # (Pragmatist Plan-Gating dispatch), by bundle_to_pragmatist_signed (drift-check
-  # path), or by the Orchestrator's deterministic alignment check (Implementation
-  # Design alignment-aligned outcome). All three paths write the same schema with
-  # GATE_RESULT and session_id; the existing presence + session_id check covers
-  # all three uniformly.
+  #
+  # Provenance (Decision 0038 + this session): pragmatist-signed may be written by
+  # three legitimate paths, each stamping a distinct marker:
+  #   Writer 1 — state-writer.sh (Pragmatist Plan-Gating dispatch):
+  #              field: dispatch_phase:
+  #   Writer 2 — bundle_to_pragmatist_signed (Decision 0038 drift-check path):
+  #              field: source: handoff-bundle
+  #   Writer 3 — write_alignment_check_pragmatist_signed (Orchestrator deterministic
+  #              alignment-check, Decision 0038 §7):
+  #              field: source: alignment-check
+  #
+  # After session_id validation, at least one recognised provenance marker must be
+  # present. A file carrying none is rejected as hand-written / forged.
+  # Note: the marker is a provenance signal, not a cryptographic boundary — any
+  # process that can write the state file can write the marker. This raises the bar
+  # from "trivially forgeable" to "deliberately forgeable", which is the actual goal
+  # (Decision t-0004: mechanical enforcement deters, does not cryptographically prevent).
+  #
+  # Backward compatibility: the provenance check lives inside the same
+  # `has_plan_gate && [ -f phase-state ]` guard as the existing checks. Sessions
+  # that pre-date the phase-state sentinel (before this gate was deployed) will
+  # never enter this block, so pre-existing pragmatist-signed files are unaffected.
   if [ "$IS_EDITOR_LIVE_CLOSE" = true ]; then
     : # editor-live never has pragmatist-signed — skip silently
   elif [ "${REPO_OS_SKIP_PRAGMATIST_GATE:-0}" = "1" ]; then
@@ -637,6 +653,29 @@ if [ "$SKIP_STATE" = false ]; then
         echo "GATE-RECOVERABLE: pragmatist-signed state file has stale session_id. NEXT: Re-dispatch Pragmatist in this session. (override: REPO_OS_SKIP_PRAGMATIST_GATE=1)" >&2
         block "state_pragmatist_stale_session"
         log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_pragmatist_stale_session"
+      else
+        # Verdict check: block if Pragmatist verdict was BLOCKED (FUNDAMENTAL-MISMATCH).
+        # This enforces that a blocking pragmatist finding was resolved or overridden
+        # before committing, regardless of which writer produced the file.
+        _PCG_PRAG_RESULT=$(grep '^GATE_RESULT: ' "$STATE_DIR/pragmatist-signed" 2>/dev/null | sed 's/^GATE_RESULT: *//' | awk '{print $1}' | head -1 || true)
+        if [ "$_PCG_PRAG_RESULT" = "BLOCKED" ]; then
+          echo "GATE-RECOVERABLE: pragmatist-signed verdict is BLOCKED — Pragmatist found a FUNDAMENTAL-MISMATCH that was not resolved. NEXT: Revise the plan to address the finding, re-dispatch Pragmatist, or override (Decision 0025 auto-mode: log advisory and proceed requires REPO_OS_SKIP_PRAGMATIST_GATE=1 at commit). (override: REPO_OS_SKIP_PRAGMATIST_GATE=1)" >&2
+          block "state_pragmatist_blocked"
+          log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_pragmatist_blocked"
+        fi
+        # Provenance check: require at least one recognised writer marker.
+        # dispatch_phase: — Writer 1 (state-writer.sh / Pragmatist Plan-Gating dispatch)
+        # source: handoff-bundle — Writer 2 (bundle_to_pragmatist_signed, Decision 0038)
+        # source: alignment-check — Writer 3 (write_alignment_check_pragmatist_signed)
+        _PCG_PRAG_DISPATCH=$(grep '^dispatch_phase:' "$STATE_DIR/pragmatist-signed" 2>/dev/null | head -1 || true)
+        _PCG_PRAG_SOURCE=$(grep '^source:' "$STATE_DIR/pragmatist-signed" 2>/dev/null | sed 's/^source: *//' | head -1 || true)
+        if [ -z "$_PCG_PRAG_DISPATCH" ] && \
+           [ "$_PCG_PRAG_SOURCE" != "handoff-bundle" ] && \
+           [ "$_PCG_PRAG_SOURCE" != "alignment-check" ]; then
+          echo "GATE-RECOVERABLE: pragmatist-signed lacks a recognised provenance marker — not produced by a legitimate writer. Expected one of: dispatch_phase: (Pragmatist dispatch), source: handoff-bundle (bundle path), or source: alignment-check (deterministic alignment-check). NEXT: Dispatch Pragmatist in plan-gating mode (Decision 0025) or use write_alignment_check_pragmatist_signed / bundle_to_pragmatist_signed as appropriate. (override: REPO_OS_SKIP_PRAGMATIST_GATE=1)" >&2
+          block "state_pragmatist_no_provenance"
+          log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_pragmatist_no_provenance"
+        fi
       fi
     fi
   fi

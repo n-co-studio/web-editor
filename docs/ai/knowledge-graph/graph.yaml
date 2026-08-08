@@ -3,7 +3,7 @@
 # Seeded from governance metadata on 2026-03-31
 
 schema_version: 1
-last_updated: "2026-08-07T23:00:00Z"
+last_updated: "2026-08-07T23:45:00Z"
 
 nodes:
   # --- Decisions (from DIGEST.md) ---
@@ -66,7 +66,7 @@ nodes:
   - id: "decision-0025"
     type: "decision"
     path: "docs/ai/decisions/t-0025-pragmatist-agent.md"
-    description: "Pragmatist Agent"
+    description: "Pragmatist Agent — pragmatist-signed provenance requirement added 2026-08-07: gate accepts dispatch_phase (Writer 1), source: handoff-bundle (Writer 2), or source: alignment-check (Writer 3); write_alignment_check_pragmatist_signed() added to _phase-helper.sh"
     last_verified: "2026-08-07"
     status: "active"
     layer: "template"
@@ -1232,6 +1232,14 @@ edges:
     last_verified: "2026-08-07"
     status: "active"
     confidence: 0.7
+  - source: "decision-0025"
+    target: "hook-pre-commit-gates"
+    relation: "governs"
+    context: "Decision 0025 amendment 2026-08-07: pragmatist-signed provenance check enforced by pre-commit gate (dispatch_phase / source handoff-bundle / source alignment-check)"
+    source_type: "agent-inferred"
+    last_verified: "2026-08-07"
+    status: "active"
+    confidence: 0.9
   - source: "decision-0027"
     target: "hook-pretooluse-permission"
     relation: "implements"

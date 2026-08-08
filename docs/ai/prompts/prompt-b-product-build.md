@@ -115,8 +115,8 @@ When `bundle.implementation_design` (or contract `implementation_design:`) is pr
 deterministic_alignment_check "<plan_text>" "$REPO_ROOT/.claude/local/task-contract.yaml"
 ```
 
-- Output `aligned` (return 0) → write `pragmatist-signed` directly (`bundle_to_pragmatist_signed` if bundle is present, else a session-derived equivalent). No Task dispatch.
-- Output `diverged` (return 1) → surface the divergence to the operator. If operator confirms intentional divergence, write `pragmatist-signed`. Otherwise, dispatch full Pragmatist in plan-gating mode as a fallback.
+- Output `aligned` (return 0) → write `pragmatist-signed` directly: call `bundle_to_pragmatist_signed` if a bundle is present, else call `write_alignment_check_pragmatist_signed "aligned"` (both helpers are in `_phase-helper.sh`). No Task dispatch. Do NOT write the file by hand — the helpers stamp the required provenance marker that the commit gate verifies.
+- Output `diverged` (return 1) → surface the divergence to the operator. If operator confirms intentional divergence, call `write_alignment_check_pragmatist_signed "diverged"` — this writes `GATE_RESULT: BLOCKED`, which will block the commit unless the operator explicitly overrides. Otherwise, dispatch full Pragmatist in plan-gating mode as a fallback.
 - Output `missing-design` (return 2) → fall back to full Pragmatist dispatch (current behavior).
 
 ### Legacy Plan/Approval Path
