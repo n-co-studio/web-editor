@@ -4,8 +4,10 @@ import { getComputedProperty } from '../../shared/dom-utils';
 import { OVERLAY, TOOLBAR_WIDTH, HANDLE_COLORS } from '../../shared/constants';
 import type { TokenStore } from '../tokens/store';
 import type { PageValueStore, InferredOption } from '../tokens/page-value-store';
+import type { MatchedRule } from '../../shared/css-types';
+import { findOwningRule } from '../inspection/css-rules';
 import type { PreviewManager } from './preview';
-import { buildTokenSelect, extractUnit } from './token-select';
+import { buildTokenSelect, extractUnit, type RuleValueOption } from './token-select';
 import { pageValueHeading } from './colors';
 
 type ChangeCallback = (changes: PropertyChange[]) => void;
@@ -95,6 +97,13 @@ export class SpacingEditor {
     private readonly tokenStore: TokenStore,
     private readonly preview: PreviewManager,
     private readonly pageValueStore: PageValueStore,
+    /**
+     * Matched-rule accessor for the selected element (wired from the
+     * orchestrator so stylesheet exclusions and memoization are shared with
+     * the diff path). Rules matched via pseudo-classes (`:first-child`,
+     * `:nth-child(n)`) are included by the matching engine.
+     */
+    private readonly matchedRulesFor?: (el: Element) => readonly MatchedRule[],
   ) {}
 
   onClose(cb: () => void): void {
@@ -172,12 +181,23 @@ export class SpacingEditor {
       body.appendChild(pageValueHeading(this.tokenStore.hasDegradedDesignSystem()));
     }
 
+    // Matched CSS rules for the element, resolved once per render and shared
+    // by all 8 property cells. Includes pseudo-class-matched rules
+    // (`:first-child`, `:nth-child(n)`, …), which the engine matches natively.
+    let matchedRules: readonly MatchedRule[] = [];
+    try {
+      matchedRules = this.matchedRulesFor?.(element) ?? [];
+    } catch {
+      // Rule resolution is best-effort — the panel works without provenance.
+    }
+
     // Padding group
     body.appendChild(this.buildGroup(
       'Padding',
       HANDLE_COLORS.padding,
       ['padding-top', 'padding-right', 'padding-bottom', 'padding-left'],
       element,
+      matchedRules,
       onCommit,
     ));
 
@@ -187,6 +207,7 @@ export class SpacingEditor {
       HANDLE_COLORS.margin,
       ['margin-top', 'margin-right', 'margin-bottom', 'margin-left'],
       element,
+      matchedRules,
       onCommit,
     ));
 
@@ -223,6 +244,7 @@ export class SpacingEditor {
     color: string,
     properties: string[],
     element: Element,
+    matchedRules: readonly MatchedRule[],
     onCommit: ChangeCallback,
   ): HTMLDivElement {
     const group = createElement('div', {}, {
@@ -263,16 +285,47 @@ export class SpacingEditor {
     });
 
     for (const prop of properties) {
-      grid.appendChild(this.buildPropertyCell(prop, element, onCommit));
+      grid.appendChild(this.buildPropertyCell(prop, element, matchedRules, onCommit));
     }
 
     group.appendChild(grid);
     return group;
   }
 
+  /**
+   * Rule-assigned values for one property, cascade winner first, deduped by
+   * value. Inline styles are skipped (the current value already covers them).
+   * The trailing ` !important` marker from `extractDeclarations` is stripped
+   * so the option carries a plain, applicable CSS value.
+   */
+  private ruleOptionsFor(
+    matchedRules: readonly MatchedRule[],
+    property: string,
+  ): RuleValueOption[] {
+    if (matchedRules.length === 0) return [];
+    const owning = findOwningRule(matchedRules, property);
+    const ordered = owning
+      ? [owning, ...matchedRules.filter((r) => r !== owning)]
+      : matchedRules;
+
+    const out: RuleValueOption[] = [];
+    const seen = new Set<string>();
+    for (const rule of ordered) {
+      if (rule.isInline) continue;
+      const raw = rule.declarations.get(property);
+      if (raw == null) continue;
+      const value = raw.replace(/ !important$/, '');
+      if (!value || seen.has(value)) continue;
+      seen.add(value);
+      out.push({ value, selector: rule.selectorText, isOwning: rule === owning });
+    }
+    return out;
+  }
+
   private buildPropertyCell(
     property: string,
     element: Element,
+    matchedRules: readonly MatchedRule[],
     onCommit: ChangeCallback,
   ): HTMLDivElement {
     const cell = createElement('div', {}, {
@@ -292,16 +345,17 @@ export class SpacingEditor {
 
     const tokens = this.tokenStore.getForProperty(property);
     const currentValue = getComputedProperty(element, property);
+    const ruleOptions = this.ruleOptionsFor(matchedRules, property);
 
     if (tokens.length > 0) {
-      cell.appendChild(buildTokenSelect(property, tokens, currentValue, element, this.preview, onCommit));
+      cell.appendChild(buildTokenSelect(property, tokens, currentValue, element, this.preview, onCommit, ruleOptions));
     } else {
       // Freeform text input (feature-003 escape hatch — preserved), augmented
       // with a `<datalist>` of page-inferred spacing values for discoverability
       // (feature-011). A committed value that matches a harvested page value is
       // stamped `fromPageInference: true` (a grounded custom), never `toToken`.
       const pageOptions = this.pageValueStore.getForProperty(property);
-      cell.appendChild(this.buildValueInput(property, currentValue, element, pageOptions, onCommit));
+      cell.appendChild(this.buildValueInput(property, currentValue, element, pageOptions, ruleOptions, onCommit));
     }
 
     return cell;
@@ -312,6 +366,7 @@ export class SpacingEditor {
     currentValue: string,
     element: Element,
     pageOptions: readonly InferredOption[],
+    ruleOptions: readonly RuleValueOption[],
     onCommit: ChangeCallback,
   ): HTMLElement {
     const input = createElement('input', {
@@ -333,24 +388,41 @@ export class SpacingEditor {
 
     const pageValues = new Set(pageOptions.map((o) => o.value));
 
-    // Attach page-inferred suggestions via a native <datalist> (freeform typing
-    // remains fully available). The datalist lives in the same shadow tree.
+    // Attach rule-assigned and page-inferred suggestions via a native
+    // <datalist> (freeform typing remains fully available). Rule-assigned
+    // values come first, labeled with their selector — including rules
+    // matched via pseudo-classes. The datalist lives in the same shadow tree.
     let datalist: HTMLDataListElement | null = null;
-    if (pageOptions.length > 0) {
+    if (pageOptions.length > 0 || ruleOptions.length > 0) {
       const listId = `pv-spacing-${datalistSeq++}`;
       datalist = document.createElement('datalist');
       datalist.id = listId;
+      const listed = new Set<string>();
+      for (const r of ruleOptions) {
+        listed.add(r.value);
+        const opt = document.createElement('option');
+        opt.value = r.value;
+        opt.label = r.selector;
+        datalist.appendChild(opt);
+      }
       for (const o of pageOptions) {
+        if (listed.has(o.value)) continue;
         const opt = document.createElement('option');
         opt.value = o.value;
         datalist.appendChild(opt);
       }
       input.setAttribute('list', listId);
-      input.title = 'Type a value, or pick one already used on this page';
-      // Dashed "observed" border echoes the color-swatch page-inference treatment
-      // so provenance is legible at the input level, not just the panel header.
-      input.style.borderStyle = 'dashed';
-      input.style.borderColor = OVERLAY.textMuted;
+      input.title = ruleOptions.length > 0
+        ? 'Type a value, or pick one assigned by a CSS rule or used on this page'
+        : 'Type a value, or pick one already used on this page';
+      if (pageOptions.length > 0) {
+        // Dashed "observed" border echoes the color-swatch page-inference
+        // treatment so provenance is legible at the input level, not just the
+        // panel header. Rule-assigned values alone don't trigger it — they are
+        // exact assignments, not inferred observations.
+        input.style.borderStyle = 'dashed';
+        input.style.borderColor = OVERLAY.textMuted;
+      }
     }
 
     input.addEventListener('keydown', (e) => {

@@ -10,6 +10,18 @@ export interface TokenOption {
   readonly value: string;
 }
 
+/**
+ * A value assigned to the element by a matched CSS rule (including rules
+ * matched via pseudo-classes like `:first-child` / `:nth-child(n)`), surfaced
+ * as a selectable option labeled with its selector.
+ */
+export interface RuleValueOption {
+  readonly value: string;
+  readonly selector: string;
+  /** True when this rule is the cascade winner for the property. */
+  readonly isOwning: boolean;
+}
+
 type ChangeCallback = (changes: PropertyChange[]) => void;
 
 /** Extract the unit suffix (px, %, rem, …) from a CSS value, if any. */
@@ -22,9 +34,11 @@ export function extractUnit(value: string): string | undefined {
  * Build a token-aware <select> for a single CSS property. Shared by the Spacing
  * tool (padding/margin) and the Layout tool (gap/row-gap/column-gap).
  *
- * Offers `auto`, the current value (when it matches no token), and every token
- * value. On change it previews the value, then commits a PropertyChange
- * carrying the resolved `toToken` when the chosen value maps to a token.
+ * Offers `auto`, the current value (when it matches no token), every token
+ * value, and any rule-assigned values (`ruleOptions`) labeled with their
+ * selector — same `value (label)` convention as tokens. On change it previews
+ * the value, then commits a PropertyChange carrying the resolved `toToken`
+ * when the chosen value maps to a token.
  */
 export function buildTokenSelect(
   property: string,
@@ -33,6 +47,7 @@ export function buildTokenSelect(
   element: Element,
   preview: PreviewManager,
   onCommit: ChangeCallback,
+  ruleOptions: readonly RuleValueOption[] = [],
 ): HTMLSelectElement {
   const select = createElement('select', {}, {
     background: 'rgba(255, 255, 255, 0.1)',
@@ -55,13 +70,20 @@ export function buildTokenSelect(
   if (currentValue === 'auto') autoOpt.selected = true;
   select.appendChild(autoOpt);
 
-  // Surface the current value when it matches neither a token nor auto.
+  // Surface the current value when it matches neither a token nor auto,
+  // labeled with the assigning rule's selector when one is known.
   const hasMatch =
     currentValue === 'auto' || tokens.some((t) => t.value === currentValue);
   if (!hasMatch) {
+    const assigning =
+      ruleOptions.find((r) => r.isOwning && r.value === currentValue) ??
+      ruleOptions.find((r) => r.value === currentValue);
     const opt = document.createElement('option');
     opt.value = currentValue;
-    opt.textContent = currentValue;
+    opt.textContent = assigning
+      ? `${currentValue} (${assigning.selector})`
+      : currentValue;
+    opt.selected = true;
     select.appendChild(opt);
   }
 
@@ -70,6 +92,18 @@ export function buildTokenSelect(
     opt.value = token.value;
     opt.textContent = `${token.value} (${token.name})`;
     if (token.value === currentValue) opt.selected = true;
+    select.appendChild(opt);
+  }
+
+  // Rule-assigned values not already present as auto/current/token options.
+  const present = new Set<string>(['auto', ...tokens.map((t) => t.value)]);
+  if (!hasMatch) present.add(currentValue);
+  for (const ruleOpt of ruleOptions) {
+    if (present.has(ruleOpt.value)) continue;
+    present.add(ruleOpt.value);
+    const opt = document.createElement('option');
+    opt.value = ruleOpt.value;
+    opt.textContent = `${ruleOpt.value} (${ruleOpt.selector})`;
     select.appendChild(opt);
   }
 

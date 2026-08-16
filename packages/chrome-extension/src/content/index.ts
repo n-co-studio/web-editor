@@ -514,7 +514,10 @@ export async function activate(): Promise<void> {
   typographyEditor = new TypographyEditor(tokenStore, preview, pageValueStore);
   colorEditor = new ColorEditor(tokenStore, snapping, preview, pageValueStore);
   dimensionsEditor = new DimensionsEditor(preview);
-  spacingEditor = new SpacingEditor(tokenStore, preview, pageValueStore);
+  // Rule accessor shares the diff path's memo + shadow-host exclusion, so the
+  // spacing panel surfaces the same matched rules (pseudo-class rules included)
+  // that diff attribution already credits.
+  spacingEditor = new SpacingEditor(tokenStore, preview, pageValueStore, (el) => activeRulesFor(el).rules);
   layoutEditor = new LayoutEditor(tokenStore, preview, pageValueStore);
   positionEditor = new PositionEditor(shadow, preview);
 
