@@ -17,12 +17,13 @@ export class NotesEditor {
   private pickCb: ((noteIndex: number) => void) | null = null;
   private addSelectedCb: ((noteIndex: number) => void) | null = null;
   private hasSelectedCb: (() => boolean) | null = null;
+  private pendingRefsCb: (() => NoteElementRef[]) | null = null;
   private listEl: HTMLDivElement | null = null;
+  private pendingHintEl: HTMLDivElement | null = null;
   private highlights = new Map<string, HTMLDivElement>();
   private activePickIndex: number | null = null;
   private positionMode: NotePositionMode = 'toolbar';
   private anchoredElement: Element | null = null;
-  private anchoredElementRef: NoteElementRef | null = null;
   private resizeObserver: ResizeObserver | null = null;
 
   constructor(
@@ -54,6 +55,21 @@ export class NotesEditor {
     this.hasSelectedCb = cb;
   }
 
+  /**
+   * Register the provider for element refs auto-attached to a newly created
+   * note. Read live (not snapshotted) so the panel always reflects the current
+   * selection — including a multi-selection, which is the whole point: creating
+   * a note while N elements are selected attaches all N.
+   */
+  setPendingRefs(cb: () => NoteElementRef[]): void {
+    this.pendingRefsCb = cb;
+  }
+
+  /** Re-render the pending-attachment hint. Called when the selection changes. */
+  refreshPendingHint(): void {
+    this.renderPendingHint();
+  }
+
   /** Update pick mode active state (called from index.ts). */
   setPickActive(noteIndex: number | null): void {
     this.activePickIndex = noteIndex;
@@ -65,17 +81,19 @@ export class NotesEditor {
     return this.positionMode;
   }
 
-  /** Set the element to anchor to. Called from index.ts before render(). */
-  setAnchoredElement(element: Element, ref: NoteElementRef): void {
+  /**
+   * Set the element to anchor the panel to. Called from index.ts before
+   * render(). Positioning only — which elements a new note attaches comes from
+   * the `setPendingRefs` provider, not from the anchor.
+   */
+  setAnchoredElement(element: Element): void {
     this.anchoredElement = element;
-    this.anchoredElementRef = ref;
   }
 
   /** Clear element anchor (transitions to toolbar mode). */
   clearAnchoredElement(): void {
     this.disconnectResizeObserver();
     this.anchoredElement = null;
-    this.anchoredElementRef = null;
     this.positionMode = 'toolbar';
   }
 
@@ -95,10 +113,8 @@ export class NotesEditor {
   render(anchorPos: { x: number; y: number }): HTMLDivElement {
     // Save anchoring state before cleanup (which resets it)
     const savedElement = this.anchoredElement;
-    const savedRef = this.anchoredElementRef;
     this.cleanup();
     this.anchoredElement = savedElement;
-    this.anchoredElementRef = savedRef;
 
     let panelLeft: number;
     let panelTop: number;
@@ -112,7 +128,6 @@ export class NotesEditor {
     } else {
       this.positionMode = 'toolbar';
       this.anchoredElement = null;
-      this.anchoredElementRef = null;
       panelLeft = Math.min(
         anchorPos.x + TOOLBAR_WIDTH + 8,
         window.innerWidth - (NOTES_PANEL_WIDTH + 8),
@@ -201,11 +216,14 @@ export class NotesEditor {
     const addNote = () => {
       const value = input.value.trim();
       if (value) {
+        // Read the selection at commit time, not at panel-open time — the
+        // operator may add or drop elements while the note is being typed.
+        const refs = this.pendingRefsCb?.() ?? [];
         this.notesStore.add(value);
-        // Auto-assign the anchored element to the newly created note
-        if (this.anchoredElementRef) {
-          const noteIndex = this.notesStore.count - 1;
-          this.notesStore.addElementToNote(noteIndex, this.anchoredElementRef);
+        const noteIndex = this.notesStore.count - 1;
+        // addElementToNote dedupes by selector, so repeated refs are harmless
+        for (const ref of refs) {
+          this.notesStore.addElementToNote(noteIndex, ref);
         }
         input.value = '';
       }
@@ -226,6 +244,25 @@ export class NotesEditor {
     inputRow.appendChild(input);
     inputRow.appendChild(addBtn);
     container.appendChild(inputRow);
+
+    // Pending-attachment hint — what the next note will attach. Announced as a
+    // live region: the row changes in response to page selection rather than to
+    // input inside the panel, so it is otherwise silent for screen readers.
+    this.pendingHintEl = createElement('div', {
+      role: 'status',
+      'aria-live': 'polite',
+    }, {
+      display: 'none',
+      alignItems: 'center',
+      gap: '3px',
+      padding: '4px 10px',
+      borderBottom: `1px solid ${OVERLAY.border}`,
+      overflowX: 'auto',
+      overflowY: 'hidden',
+      flexShrink: '0',
+    });
+    this.renderPendingHint();
+    container.appendChild(this.pendingHintEl);
 
     // Notes list (scrollable)
     this.listEl = createElement('div', {}, {
@@ -259,10 +296,10 @@ export class NotesEditor {
     this.container?.remove();
     this.container = null;
     this.listEl = null;
+    this.pendingHintEl = null;
     this.activePickIndex = null;
     this.disconnectResizeObserver();
     this.anchoredElement = null;
-    this.anchoredElementRef = null;
     this.positionMode = 'toolbar';
     this.clearHighlights();
   }
@@ -327,6 +364,58 @@ export class NotesEditor {
   private refreshList(): void {
     if (!this.listEl) return;
     this.renderNotesList();
+  }
+
+  /**
+   * Render the row showing which elements the next note will attach. Hidden
+   * when nothing is selected, so an empty selection costs no vertical space.
+   */
+  private renderPendingHint(): void {
+    const hint = this.pendingHintEl;
+    if (!hint) return;
+
+    hint.innerHTML = '';
+    // Dedupe by selector to match what addElementToNote will actually keep —
+    // otherwise the count promises more attachments than the note receives.
+    const seen = new Set<string>();
+    const refs = (this.pendingRefsCb?.() ?? [])
+      .filter((ref) => !seen.has(ref.selector) && seen.add(ref.selector));
+
+    if (refs.length === 0) {
+      hint.style.display = 'none';
+      return;
+    }
+    hint.style.display = 'flex';
+
+    const label = createText(
+      'span',
+      `Attaches ${refs.length} element${refs.length === 1 ? '' : 's'}`,
+      'body',
+    );
+    label.style.fontSize = '9px';
+    label.style.color = OVERLAY.textMuted;
+    label.style.flexShrink = '0';
+    label.style.marginRight = '3px';
+    hint.appendChild(label);
+
+    for (const ref of refs) {
+      const pill = createElement('div', { title: ref.selector }, {
+        background: 'rgba(6, 182, 212, 0.1)',
+        border: `1px solid ${OVERLAY.border}`,
+        borderRadius: '3px',
+        padding: '1px 4px',
+        maxWidth: '70px',
+        flexShrink: '0',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+        fontSize: '9px',
+        fontFamily: OVERLAY.monoFamily,
+        color: OVERLAY.textMuted,
+      });
+      pill.textContent = getPillLabel(ref);
+      hint.appendChild(pill);
+    }
   }
 
   private renderNotesList(): void {

@@ -1155,3 +1155,27 @@ edges:
     last_verified: "2026-07-18"
     status: "active"
     confidence: 0.7
+  - source: "product-editing-notes"
+    target: "product-batching-notes-store"
+    relation: "consumes"
+    context: "NotesEditor.addNote() creates the note then attaches every pending element ref via NotesStore.addElementToNote, which dedupes by selector; renderPendingHint mirrors that same selector dedupe so the 'Attaches N elements' count matches what is actually stored"
+    source_type: "agent-inferred"
+    last_verified: "2026-08-16"
+    status: "active"
+    confidence: 0.7
+  - source: "product-content-index"
+    target: "product-editing-notes"
+    relation: "depends-on"
+    context: "index.ts registers the NotesEditor setPendingRefs provider (current selection -> NoteElementRef[]) and calls refreshPendingHint() from three selection funnels: multiSelect.onSelectionChange, selection.onSelect, selection.onDeselect"
+    source_type: "agent-inferred"
+    last_verified: "2026-08-16"
+    status: "active"
+    confidence: 0.7
+  - source: "product-editing-notes"
+    target: "product-selection-multi-select"
+    relation: "consumes"
+    context: "Indirect via the index.ts provider: MultiSelectManager.getAllElements(primary) supplies the element set a newly created note auto-attaches, so a note written during multi-select captures all N elements"
+    source_type: "agent-inferred"
+    last_verified: "2026-08-16"
+    status: "active"
+    confidence: 0.7

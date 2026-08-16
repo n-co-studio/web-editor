@@ -620,6 +620,11 @@ export async function activate(): Promise<void> {
     if (devtoolsPanel?.isOpen()) {
       devtoolsPanel.updateMultiProperties(allElements);
     }
+
+    // Keep the notes panel's pending-attachment hint in step with the selection
+    if (notesEditor?.isOpen()) {
+      notesEditor.refreshPendingHint();
+    }
   });
 
   // Show toolbar immediately (stays visible for entire active session)
@@ -689,6 +694,10 @@ export async function activate(): Promise<void> {
     preservedToolMode = null;
     const modeToApply = (previousMode && !disabled[previousMode]) ? previousMode : 'cursor';
     activateToolForElement(element, modeToApply);
+
+    if (notesEditor?.isOpen()) {
+      notesEditor.refreshPendingHint();
+    }
   });
 
   selection.onDeselect(() => {
@@ -723,9 +732,12 @@ export async function activate(): Promise<void> {
     toolbar!.setActiveMode('cursor');
     toolbar!.setDisabledTools({});
     // Transition notes panel from element → toolbar mode
-    if (notesEditor?.isOpen() && notesEditor.getPositionMode() === 'element') {
-      notesEditor.clearAnchoredElement();
-      notesEditor.reposition(toolbar!.getButtonPosition('notes'));
+    if (notesEditor?.isOpen()) {
+      if (notesEditor.getPositionMode() === 'element') {
+        notesEditor.clearAnchoredElement();
+        notesEditor.reposition(toolbar!.getButtonPosition('notes'));
+      }
+      notesEditor.refreshPendingHint();
     }
   });
 
@@ -938,7 +950,7 @@ export async function activate(): Promise<void> {
 
       // Element mode only for single selection (no multi-select)
       if (selectedEl && !isMulti) {
-        notesEditor!.setAnchoredElement(selectedEl, buildNoteElementRef(selectedEl));
+        notesEditor!.setAnchoredElement(selectedEl);
       } else {
         notesEditor!.clearAnchoredElement();
       }
@@ -1012,6 +1024,18 @@ export async function activate(): Promise<void> {
   // Wire notes "has selection" check
   notesEditor.setHasSelection(() => {
     return selection?.getSelectedElement() != null;
+  });
+
+  // Wire the refs auto-attached to a newly created note — the whole current
+  // selection, so writing a note while N elements are multi-selected attaches
+  // all N without a follow-up "+ Selected" click
+  notesEditor.setPendingRefs(() => {
+    const primary = selection?.getSelectedElement();
+    if (!primary) return [];
+    const elements = multiSelect?.isActive()
+      ? multiSelect.getAllElements(primary)
+      : [primary];
+    return elements.map(buildNoteElementRef);
   });
 
   notesStore.onChange(() => {
@@ -2869,7 +2893,7 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
         const selectedEl = selection?.getSelectedElement();
         const isMulti = multiSelect?.isActive();
         if (selectedEl && !isMulti) {
-          notesEditor!.setAnchoredElement(selectedEl, buildNoteElementRef(selectedEl));
+          notesEditor!.setAnchoredElement(selectedEl);
         } else {
           notesEditor!.clearAnchoredElement();
         }
