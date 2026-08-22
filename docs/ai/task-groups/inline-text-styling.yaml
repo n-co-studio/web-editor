@@ -13,7 +13,7 @@ briefs:
     sequence: 1
     session: daemon-20260821-180218-31544
     branch: feature/inline-text-styling
-    status: in_progress
+    status: complete
     next_brief: "Inline Text Styling — Build"
     boundaries:
       - docs/spec/compiled/v1/features/feature-012-inline-text-styling.md
@@ -99,4 +99,18 @@ session_decisions:
     decision: "Range mechanism: extractContents() + fragment wrap + insertNode() — not surroundContents() or execCommand"
     rationale: "surroundContents() throws on partial containment; execCommand deprecated and emits b/i"
 
-governance: []
+governance:
+  - brief_sequence: 1
+    gates_a:
+      A1: pass
+      A2: pass
+      A3: pass
+      A4: pass
+      A5: pass
+      A6: pass
+    gates_b:
+      B1: pass
+      B2: pass
+      B3: n/a
+    overrides_used: []
+    timestamp: "2026-08-21T00:00:00Z"
