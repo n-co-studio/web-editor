@@ -188,6 +188,82 @@ A **declarative descriptor** for a bounded JavaScript behavior. It does **not** 
 | throttle | "raf" | yes | The throttling strategy the generated handler uses. v1 fixes this to `"raf"` (one `requestAnimationFrame`-batched update per frame) so the descriptor cannot request unthrottled scroll work. |
 | scrollSource | string | yes | Which element's scrolling drives the effect. `"window"` for page/viewport scroll; otherwise a CSS selector for the scroll container (e.g. an inner overlay or `<main>` that scrolls while `body` does not — common in SPAs). The generated handler MUST attach its scroll listener to this source rather than assume `window`. The editor resolves it from the operator's "scroll source" choice (auto-detected nearest scroll container, explicit page, or explicit container). The pure-CSS `scroll-driven` mechanism reflects the same choice in its `animation-timeline` (`scroll(root)` for page vs `scroll()` for the nearest container). |
 
+### TextChange
+
+A text content change — modifies the `innerHTML` (and therefore `textContent`) of an element. Stored
+as a parallel array on `VisualDiff` (`textChanges`), separate from CSS `PropertyChange[]`. Introduced
+with basic plain-text editing; extended by feature-012 with additive-optional markup fields.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| type | `"text"` | yes | Discriminator literal — always `"text"`. |
+| fromText | string | yes | Plain-text content of the element before the edit session (from `element.textContent`). Always present; serves as the fallback for consumers that do not process markup. |
+| toText | string | yes | Plain-text content after the edit session (from `element.textContent` post-commit). Always present. |
+| fromHtml | string | no | `innerHTML` of the element captured at the moment text edit mode was activated. Present only when the pre-edit element contained markup (i.e. `innerHTML !== textContent`) or when the operator performed inline styling during the session. Absent when the pre-edit content was plain text and no inline styling occurred. |
+| toHtml | string | no | `innerHTML` after the edit session, after allowlist sanitization. Present when the committed result contains markup. Consumers MUST NOT crash when this field is absent — degrade to `toText`. |
+
+**Additive-optional contract amendment** (feature-012): `fromHtml` and `toHtml` are new optional
+fields. `fromText` and `toText` remain required plain-text fallbacks. Consumers that predate
+feature-012 ignore the new fields — **no `WS_PROTOCOL_VERSION` bump is required**. This follows
+the same additive-optional precedent as `batchId` and `layoutContainers` on `VisualDiff`.
+
+**Allowlist.** When `toHtml` is present, its markup has been sanitized through the extension's
+allowlist walker. Only the following tags survive, with **zero attributes**:
+
+| Tag | Semantic meaning |
+|-----|-----------------|
+| `<strong>` | Bold (WCAG H49 — `<b>` is remapped to `<strong>` during toggle) |
+| `<em>` | Italic (WCAG H49 — `<i>` is remapped to `<em>` during toggle) |
+| `<u>` | Underline |
+| `<s>` | Strikethrough |
+| `<br>` | Line break (Shift+Enter) |
+
+All other tags are stripped (text content preserved). All attributes are stripped.
+
+#### Source Rewrite Semantics (TextChange)
+
+How a downstream coding agent (Claude Code) reproduces a `TextChange` as project source.
+
+**When `toHtml` is absent or equal to `toText`:** Replace the element's text content with `toText`
+(plain string). This is the pre-feature-012 path; no inline markup involved.
+
+**When `toHtml` is present:** The agent receives:
+1. A one-line summary in the change description (plain text, may be truncated to 100 characters).
+2. A fenced verbatim HTML block (never truncated) — the serialized `toHtml` value:
+
+   ````
+   Full HTML content (reproduce markup exactly):
+   ```html
+   <toHtml value here>
+   ```
+   ````
+
+The agent MUST reproduce the inline markup in source, mapping tags 1:1:
+
+| HTML tag | JSX / template source |
+|----------|-----------------------|
+| `<strong>` | `<strong>` |
+| `<em>` | `<em>` |
+| `<u>` | `<u>` |
+| `<s>` | `<s>` |
+| `<br>` | `<br />` (JSX self-closing) or `<br>` (HTML) |
+
+**Interpolated expressions.** When the styled range in the DOM corresponds to content that is
+interpolated in source (e.g. `{name}`, `{item.label}`), the agent MUST wrap the expression — not
+inline its resolved value. Example:
+
+- DOM: `Hello <strong>World</strong>` where "World" came from `{greeting}`
+- Correct source: `Hello <strong>{greeting}</strong>`
+- Incorrect source: `Hello <strong>World</strong>` (value inlined — breaks dynamic content)
+
+Markup wraps only literal text runs without modification. The agent adds no `class` attributes,
+inline `style`, or other attributes to the wrapper elements.
+
+**Multi-line content.** `<br>` in `toHtml` maps to a line break in source. In JSX this is
+`<br />`. In plain HTML this is `<br>`. The agent chooses the form appropriate to the target file.
+
+---
+
 ### Source Rewrite Semantics (feature-009 change types)
 
 How Claude Code reproduces each new change type as project source. The reproducible-to-source requirement is a boundary condition (`boundaries.md`): every mechanism must round-trip to maintainable source, not a runtime patch.

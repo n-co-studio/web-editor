@@ -24,7 +24,8 @@
         "features/feature-008-component-awareness.md",
         "features/feature-009-parallax-editor.md",
         "features/feature-010-structural-contract.md",
-        "features/feature-011-page-value-inference.md"
+        "features/feature-011-page-value-inference.md",
+        "features/feature-012-inline-text-styling.md"
       ]
     }
   ],

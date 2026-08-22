@@ -1,0 +1,102 @@
+# Task Group Contract — inline-text-styling
+# Created by Brief 1 (Feature Spec & Contract Ratification)
+# Runner entry ID: 80ab51c4-98f5-4b12-bfd4-2e988e34cf8b
+
+identity:
+  group_name: inline-text-styling
+  created_by_session: daemon-20260821-180218-31544
+  created_date: "2026-08-21"
+  execution: sequential
+
+briefs:
+  - title: "Inline Text Styling — Feature Spec & Contract Ratification"
+    sequence: 1
+    session: daemon-20260821-180218-31544
+    branch: feature/inline-text-styling
+    status: in_progress
+    next_brief: "Inline Text Styling — Build"
+    boundaries:
+      - docs/spec/compiled/v1/features/feature-012-inline-text-styling.md
+      - docs/spec/compiled/v1/data-contracts.md
+      - docs/spec/compiled/manifest.json
+      - docs/ai/governance/
+
+  - title: "Inline Text Styling — Build"
+    sequence: 2
+    session: null
+    branch: feature/inline-text-styling
+    status: pending
+    next_brief: ""
+    boundaries:
+      - packages/chrome-extension/src/content/editing/text.ts
+      - packages/chrome-extension/src/content/editing/inline-toolbar.ts
+      - packages/chrome-extension/src/content/index.ts
+      - packages/chrome-extension/src/content/history.ts
+      - packages/chrome-extension/src/content/batching/prompt-serializer.ts
+      - packages/shared/src/diff.ts
+
+intent:
+  goal: >
+    Author the feature spec for sub-range inline text styling (feature-012) and
+    formally ratify the TextChange data contract — adding fromHtml/toHtml additive-optional
+    fields and Source Rewrite Semantics — so Brief 2 builds against a ratified target.
+  verification:
+    - "feature-012-inline-text-styling.md exists with Summary, User Flow, UI States, Edge Cases (all items from brief), Acceptance Criteria"
+    - "data-contracts.md has a ### TextChange section with fromHtml/toHtml marked additive-optional and a Source Rewrite Semantics subsection covering JSX interpolation"
+    - "manifest.json parses as valid JSON and lists feature-012"
+    - "Cross-references between feature-012, data-contracts.md, and feature-002 resolve (named sections exist)"
+  scope_files:
+    - docs/spec/compiled/v1/features/feature-012-inline-text-styling.md
+    - docs/spec/compiled/v1/data-contracts.md
+    - docs/spec/compiled/manifest.json
+  spec_references:
+    - docs/spec/compiled/v1/data-contracts.md
+    - docs/spec/compiled/v1/features/feature-002-visual-property-editing.md
+    - docs/spec/compiled/v1/design-system.md
+
+conventions:
+  naming:
+    - pattern: "Semantic inline tags only: strong, em, u, s — never b/i (WCAG H49)"
+      scope: "Inline markup throughout feature-012 and Build brief implementation"
+    - pattern: "fromHtml / toHtml — camelCase matching existing fromText/toText fields"
+      scope: "TextChange contract and all references"
+    - pattern: "normalizeInlineMarkup(el) — pure function name for post-toggle cleanup"
+      scope: "Build brief implementation"
+  patterns:
+    - pattern: "Additive-optional contract extension — new fields optional, existing plain-text fields remain required fallbacks"
+      rationale: "Established precedent (batchId, layoutContainers); no WS_PROTOCOL_VERSION bump required"
+    - pattern: "Fenced HTML block in prompt serializer for markup-carrying changes (outerHTML precedent)"
+      rationale: "InsertChange.outerHTML established pattern in prompt-serializer.ts; TextChange follows same serialization"
+    - pattern: "mousedown + preventDefault on toolbar buttons — prevents contenteditable blur"
+      rationale: "Click events blur the active contenteditable before the handler fires; mousedown fires first"
+  decisions:
+    - "0020"  # task contracts
+    - "0038"  # handoff bundles
+  boundaries:
+    - module: "Spec layer (feature-012 + data-contracts.md + manifest)"
+      owner_brief: "Inline Text Styling — Feature Spec & Contract Ratification"
+    - module: "Implementation (TextEditor, InlineToolbar, prompt-serializer)"
+      owner_brief: "Inline Text Styling — Build"
+
+integration_points:
+  - name: "TextChange ratified contract"
+    producer: "Inline Text Styling — Feature Spec & Contract Ratification"
+    consumer: "Inline Text Styling — Build"
+    artifact: "docs/spec/compiled/v1/data-contracts.md (### TextChange section)"
+  - name: "Feature-012 acceptance criteria"
+    producer: "Inline Text Styling — Feature Spec & Contract Ratification"
+    consumer: "Inline Text Styling — Build"
+    artifact: "docs/spec/compiled/v1/features/feature-012-inline-text-styling.md"
+
+session_decisions:
+  - session: daemon-20260821-180218-31544
+    decision: "Use fromHtml/toHtml additive-optional fields on TextChange; fromText/toText remain required"
+    rationale: "Matches InsertChange.outerHTML precedent; no protocol version bump needed; graceful degradation for consumers that ignore new fields"
+  - session: daemon-20260821-180218-31544
+    decision: "Allowlist-only serialization: strong, em, u, s, br — zero attributes; no DOMPurify dependency"
+    rationale: "Input is operator-driven; paste is forced to plain text; hand-rolled walker is sufficient and avoids new dependency"
+  - session: daemon-20260821-180218-31544
+    decision: "Range mechanism: extractContents() + fragment wrap + insertNode() — not surroundContents() or execCommand"
+    rationale: "surroundContents() throws on partial containment; execCommand deprecated and emits b/i"
+
+governance: []
