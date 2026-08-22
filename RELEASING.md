@@ -83,7 +83,7 @@ The release workflow (`.github/workflows/release.yml`) uses npm OIDC Trusted Pub
 1. Log in to [npmjs.com](https://www.npmjs.com) as the `@nco-studio` org admin
 2. Go to each package → **Settings** → **Publish Access** → **New Trusted Publisher**
 3. Set:
-   - **Repository:** `markpreston2/frontend-editor`
+   - **Repository:** `nco-studio/web-editor`
    - **Workflow file:** `.github/workflows/release.yml`
    - **Environment:** `release`
 4. Repeat for both `@nco-studio/web-editor-mcp` and `@nco-studio/web-editor-plugin`

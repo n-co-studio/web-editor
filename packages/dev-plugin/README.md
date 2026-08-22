@@ -1,6 +1,6 @@
 # @nco-studio/web-editor-plugin
 
-Vite and Babel plugin for [n'co studio Web Editor](https://github.com/markpreston2/frontend-editor). Injects `data-source-file` and `data-source-line` attributes onto every rendered DOM element during development — enabling the Chrome extension to map visual selections back to precise source file locations.
+Vite and Babel plugin for [n'co studio Web Editor](https://github.com/nco-studio/web-editor). Injects `data-source-file` and `data-source-line` attributes onto every rendered DOM element during development — enabling the Chrome extension to map visual selections back to precise source file locations.
 
 This is a standalone source-mapping primitive. n'co studio Web Editor is a first-party consumer; you can use it independently in any Vite or Babel project that needs element-to-source mapping.
 
@@ -93,6 +93,6 @@ The plugin exits early when `NODE_ENV === 'production'` (Babel path) or when Vit
 
 ## Links
 
-- [Repository](https://github.com/markpreston2/frontend-editor)
-- [Issues](https://github.com/markpreston2/frontend-editor/issues)
+- [Repository](https://github.com/nco-studio/web-editor)
+- [Issues](https://github.com/nco-studio/web-editor/issues)
 - [MCP Server](../mcp-server)

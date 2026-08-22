@@ -43,7 +43,7 @@ The content script does not read form data, passwords, cookies, or localStorage 
 If you discover a security vulnerability, please report it privately:
 
 - **Email:** hello@markpreston.co
-- **GitHub:** Open a [GitHub issue](https://github.com/markpreston2/frontend-editor/issues) with the label `security` for low-severity issues, or use GitHub's private vulnerability reporting for higher-severity issues.
+- **GitHub:** Open a [GitHub issue](https://github.com/nco-studio/web-editor/issues) with the label `security` for low-severity issues, or use GitHub's private vulnerability reporting for higher-severity issues.
 
 Please include:
 1. A description of the vulnerability

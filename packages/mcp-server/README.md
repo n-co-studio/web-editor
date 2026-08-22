@@ -1,6 +1,6 @@
 # @nco-studio/web-editor-mcp
 
-MCP server bridge for [n'co studio Web Editor](https://github.com/markpreston2/frontend-editor). Connects Claude Code to your browser via a local WebSocket, enabling visual UI editing directly in your running dev server.
+MCP server bridge for [n'co studio Web Editor](https://github.com/nco-studio/web-editor). Connects Claude Code to your browser via a local WebSocket, enabling visual UI editing directly in your running dev server.
 
 ## How It Fits the Loop
 
@@ -100,7 +100,7 @@ Token discovery parses `tailwind.config.ts` (and similar config files) by compil
 
 ## Links
 
-- [Repository](https://github.com/markpreston2/frontend-editor)
-- [Issues](https://github.com/markpreston2/frontend-editor/issues)
+- [Repository](https://github.com/nco-studio/web-editor)
+- [Issues](https://github.com/nco-studio/web-editor/issues)
 - [Chrome Extension](../../packages/chrome-extension)
 - [Dev Plugin](../dev-plugin)

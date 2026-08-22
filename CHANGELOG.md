@@ -51,4 +51,4 @@ Initial public release of n'co studio Web Editor.
 - **Token discovery executes user code.** Parsing `tailwind.config.ts` requires compiling and evaluating the config file via esbuild. This runs in the project's trust context.
 - **v1 supports JSX/TSX only.** Vue SFCs, Svelte components, and plain HTML fall back to "source unverified" mode for element-to-source mapping.
 
-[0.1.0]: https://github.com/markpreston2/frontend-editor/releases/tag/v0.1.0
+[0.1.0]: https://github.com/nco-studio/web-editor/releases/tag/v0.1.0
