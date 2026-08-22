@@ -110,6 +110,20 @@ briefs:
       - "packages/mcp-server/package.json"
       - "packages/dev-plugin/package.json"
 
+  - title: "Repo Rename References (frontend-editor -> nco-studio/web-editor)"
+    sequence: 9
+    session: daemon-20260821-175229-31544
+    branch: "feature/nco-studio-launch"
+    status: complete
+    next_brief: ""
+    boundaries:
+      - "RELEASING.md"
+      - "CHANGELOG.md"
+      - "SECURITY.md"
+      - "packages/mcp-server/README.md"
+      - "packages/dev-plugin/README.md"
+      - ".github/workflows/release.yml"
+
 intent:
   goal: >
     Rebrand the entire monorepo from @frontend-editor/* to @nco-studio/*,
@@ -273,6 +287,23 @@ session_decisions:
     rationale: "Initial Check 2 grep only covered src/dist/compiled-spec; cohesion review found markpreston2/frontend-editor in repository.url, homepage, bugs.url of both published packages. Corrected in this brief. Future rename verification should always include all package.json files."
 
 governance:
+  - brief_sequence: 9
+    gates_a:
+      A1: "pass"
+      A2: "pass"
+      A3: "n/a"
+      A4: "pass"
+      A5: "pass"
+      A6: "pass"
+    gates_b:
+      B1: "pass"
+      B2: "n/a"
+      B3: "pass"
+    overrides_used:
+      - "REPO_OS_SKIP_MODE_GUARD (child mode — .github/workflows/release.yml is product release infrastructure, comment-only change)"
+    notes: "Docs-only string replacement: markpreston2/frontend-editor → nco-studio/web-editor across 6 shipping docs/config files. No product code changed. Critic APPROVED, QA APPROVED, no gate failures."
+    timestamp: "2026-08-22T01:00:00Z"
+
   - brief_sequence: 8
     gates_a:
       A1: "pass"
