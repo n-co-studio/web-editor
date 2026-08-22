@@ -23,13 +23,14 @@ briefs:
 
   - title: "Inline Text Styling — Build"
     sequence: 2
-    session: null
+    session: daemon-20260821-194935-31544
     branch: feature/inline-text-styling
-    status: pending
+    status: complete
     next_brief: ""
     boundaries:
       - packages/chrome-extension/src/content/editing/text.ts
-      - packages/chrome-extension/src/content/editing/inline-toolbar.ts
+      - packages/chrome-extension/src/content/editing/inline-format.ts
+      - packages/chrome-extension/src/content/editing/inline-format.test.ts
       - packages/chrome-extension/src/content/index.ts
       - packages/chrome-extension/src/content/history.ts
       - packages/chrome-extension/src/content/batching/prompt-serializer.ts
@@ -98,6 +99,15 @@ session_decisions:
   - session: daemon-20260821-180218-31544
     decision: "Range mechanism: extractContents() + fragment wrap + insertNode() — not surroundContents() or execCommand"
     rationale: "surroundContents() throws on partial containment; execCommand deprecated and emits b/i"
+  - session: daemon-20260821-194935-31544
+    decision: "inline-format.ts (pure formatting module) created instead of inline-toolbar.ts — toolbar lifecycle lives in text.ts"
+    rationale: "Separates pure DOM logic (testable without shadow DOM) from session lifecycle; toolbar state is scoped to TextEditor"
+  - session: daemon-20260821-194935-31544
+    decision: "fromHtml condition: present when sanitizedOriginalHtml !== originalText (original had markup); toHtml: present when newHtml !== newText (result has markup)"
+    rationale: "Matches spec precisely — additive-optional, each field independently present; avoids over-inclusion"
+  - session: daemon-20260821-194935-31544
+    decision: "ShadowRoot.querySelector('#id') used for style deduplication instead of non-standard getElementById"
+    rationale: "ShadowRoot.getElementById does not exist in W3C DOM spec; querySelector is standard and available on ShadowRoot"
 
 governance:
   - brief_sequence: 1
@@ -114,3 +124,17 @@ governance:
       B3: n/a
     overrides_used: []
     timestamp: "2026-08-21T00:00:00Z"
+  - brief_sequence: 2
+    gates_a:
+      A1: pass
+      A2: pass
+      A3: pass
+      A4: pass
+      A5: pass
+      A6: pass
+    gates_b:
+      B1: pass
+      B2: pass
+      B3: pass
+    overrides_used: []
+    timestamp: "2026-08-22T00:00:00Z"
