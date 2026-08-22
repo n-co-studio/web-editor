@@ -81,6 +81,10 @@ interface TextHistoryEntry {
   readonly element: HTMLElement;
   readonly fromText: string;
   readonly toText: string;
+  /** Pre-edit innerHTML (feature-012). When present, undo restores innerHTML instead of textContent. */
+  readonly fromHtml?: string;
+  /** Post-edit innerHTML (feature-012). When present, redo restores innerHTML instead of textContent. */
+  readonly toHtml?: string;
   readonly diff: VisualDiff;
 }
 
@@ -175,7 +179,12 @@ export class EditHistory {
         }
         break;
       case 'text':
-        entry.element.textContent = entry.fromText;
+        // feature-012: restore innerHTML when markup fields are present (backward compat)
+        if (entry.fromHtml !== undefined) {
+          entry.element.innerHTML = entry.fromHtml;
+        } else {
+          entry.element.textContent = entry.fromText;
+        }
         break;
       case 'replace':
         // Undo: put the original element back in place of the new one.
@@ -248,7 +257,12 @@ export class EditHistory {
         }
         break;
       case 'text':
-        entry.element.textContent = entry.toText;
+        // feature-012: restore innerHTML when markup fields are present (backward compat)
+        if (entry.toHtml !== undefined) {
+          entry.element.innerHTML = entry.toHtml;
+        } else {
+          entry.element.textContent = entry.toText;
+        }
         break;
       case 'replace':
         // Redo: re-apply the swap (old → new).
@@ -328,7 +342,12 @@ export class EditHistory {
           }
           break;
         case 'text':
-          entry.element.textContent = entry.fromText;
+          // feature-012: restore innerHTML when markup fields are present (backward compat)
+          if (entry.fromHtml !== undefined) {
+            entry.element.innerHTML = entry.fromHtml;
+          } else {
+            entry.element.textContent = entry.fromText;
+          }
           break;
         case 'replace':
           if (entry.newEl.parentNode === entry.parent) {

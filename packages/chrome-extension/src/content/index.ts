@@ -531,7 +531,7 @@ export async function activate(): Promise<void> {
   reorderPanel = new ReorderPanel(shadow);
   reparentEditor = new ReparentEditor(shadow);
   insertEditor = new InsertEditor(shadow);
-  textEditor = new TextEditor();
+  textEditor = new TextEditor(shadow);
   mediaEditor = new MediaEditor(preview);
   MediaEditor.restoreHandle();
   effectsEditor = new EffectsEditor(preview);
@@ -1606,6 +1606,9 @@ function commitTextEdit(
     element,
     fromText: change.fromText,
     toText: change.toText,
+    // feature-012: pass optional markup fields through to history for markup-safe restore
+    ...(change.fromHtml !== undefined ? { fromHtml: change.fromHtml } : {}),
+    ...(change.toHtml !== undefined ? { toHtml: change.toHtml } : {}),
     diff,
   });
   badge!.update();

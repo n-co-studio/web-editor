@@ -243,6 +243,21 @@ export function serializeToPrompt(
         sections.push(
           `- \`${diff.element.selector}\`${lineInfo}: "${fromPreview}" \u2192 "${toPreview}"`,
         );
+        // feature-012: when markup is present, emit an un-truncated fenced HTML block
+        // following the InsertChange.outerHTML "reproduce exactly" pattern.
+        if (tc.toHtml !== undefined) {
+          sections.push('  Markup (reproduce exactly):');
+          if (tc.fromHtml !== undefined) {
+            sections.push('  Before:');
+            sections.push('  ```html');
+            sections.push(tc.fromHtml);
+            sections.push('  ```');
+          }
+          sections.push('  After:');
+          sections.push('  ```html');
+          sections.push(tc.toHtml);
+          sections.push('  ```');
+        }
       }
     }
     sections.push('');

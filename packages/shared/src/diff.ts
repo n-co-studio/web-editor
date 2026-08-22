@@ -509,11 +509,21 @@ export interface AttributeChange {
 /**
  * A text content change — modifies the textContent of an element.
  * Stored as a parallel array on VisualDiff (separate from CSS PropertyChange[]).
+ *
+ * fromHtml / toHtml — additive-optional (feature-012, inline text styling).
+ * Present only when the edit touched inline markup (bold, italic, underline,
+ * strikethrough). fromText / toText remain required plain-text fallbacks.
+ * Ratified by data-contracts.md § TextChange. No WS_PROTOCOL_VERSION bump
+ * (same additive-optional precedent as batchId, layoutContainers).
  */
 export interface TextChange {
   readonly type: 'text';
   readonly fromText: string;
   readonly toText: string;
+  /** Pre-edit innerHTML, allowlist-sanitized. Present only when markup was present before the session. */
+  readonly fromHtml?: string;
+  /** Post-edit innerHTML, allowlist-sanitized. Present only when the committed result contains markup. */
+  readonly toHtml?: string;
 }
 
 /**
