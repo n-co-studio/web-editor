@@ -117,6 +117,7 @@ export class TextEditor {
   private keydownHandler: ((e: KeyboardEvent) => void) | null = null;
   private selectionchangeHandler: (() => void) | null = null;
   private pasteHandler: ((e: ClipboardEvent) => void) | null = null;
+  private keyShieldHandler: ((e: KeyboardEvent) => void) | null = null;
   private toolbar: HTMLElement | null = null;
   private toolbarButtons: Map<FormatMark, HTMLButtonElement> = new Map();
 
@@ -170,9 +171,27 @@ export class TextEditor {
     this.pasteHandler = (e: ClipboardEvent) => this.handlePaste(e);
     this.selectionchangeHandler = () => this.repositionToolbar(element);
 
+    // Key shield: intercept key events at window capture phase so keys typed
+    // in the editor never reach page-level shortcut listeners (e.g. arrow-key
+    // overlay toggles). stopPropagation only — default caret/typing behavior
+    // is unaffected. Capture delivery precedes the target, so the shield also
+    // dispatches the editor's keydown logic (replaces the element binding).
+    this.keyShieldHandler = (e: KeyboardEvent) => {
+      const el = this.activeElement;
+      if (!el) return;
+      const target = e.target as Node | null;
+      if (!target || (target !== el && !el.contains(target))) return;
+      if (e.type === 'keydown') {
+        this.keydownHandler?.(e);
+      }
+      e.stopPropagation();
+    };
+
     element.addEventListener('blur', this.blurHandler);
-    element.addEventListener('keydown', this.keydownHandler);
     element.addEventListener('paste', this.pasteHandler);
+    window.addEventListener('keydown', this.keyShieldHandler, true);
+    window.addEventListener('keypress', this.keyShieldHandler, true);
+    window.addEventListener('keyup', this.keyShieldHandler, true);
     document.addEventListener('selectionchange', this.selectionchangeHandler);
     window.addEventListener('scroll', this.selectionchangeHandler, { passive: true });
     window.addEventListener('resize', this.selectionchangeHandler, { passive: true });
@@ -192,6 +211,7 @@ export class TextEditor {
     this.commitCb = null;
     this.blurHandler = null;
     this.keydownHandler = null;
+    this.keyShieldHandler = null;
     this.selectionchangeHandler = null;
     this.pasteHandler = null;
     this.toolbarButtons.clear();
@@ -321,8 +341,10 @@ export class TextEditor {
     if (this.blurHandler) {
       element.removeEventListener('blur', this.blurHandler);
     }
-    if (this.keydownHandler) {
-      element.removeEventListener('keydown', this.keydownHandler);
+    if (this.keyShieldHandler) {
+      window.removeEventListener('keydown', this.keyShieldHandler, true);
+      window.removeEventListener('keypress', this.keyShieldHandler, true);
+      window.removeEventListener('keyup', this.keyShieldHandler, true);
     }
     if (this.pasteHandler) {
       element.removeEventListener('paste', this.pasteHandler);
