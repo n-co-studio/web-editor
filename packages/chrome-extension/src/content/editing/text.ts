@@ -118,6 +118,7 @@ export class TextEditor {
   private selectionchangeHandler: (() => void) | null = null;
   private pasteHandler: ((e: ClipboardEvent) => void) | null = null;
   private keyShieldHandler: ((e: KeyboardEvent) => void) | null = null;
+  private pointerShieldHandler: ((e: MouseEvent) => void) | null = null;
   private toolbar: HTMLElement | null = null;
   private toolbarButtons: Map<FormatMark, HTMLButtonElement> = new Map();
 
@@ -192,6 +193,23 @@ export class TextEditor {
     window.addEventListener('keydown', this.keyShieldHandler, true);
     window.addEventListener('keypress', this.keyShieldHandler, true);
     window.addEventListener('keyup', this.keyShieldHandler, true);
+
+    // Pointer shield: clicks inside the edited element must place the caret
+    // (browser default), not re-trigger selection — hover.ts's document-capture
+    // click handler would otherwise re-enter editElement() and select-all.
+    // Window capture precedes document capture, so this fires first. Clicks
+    // outside the element are ignored (blur → commit → select flow unchanged).
+    this.pointerShieldHandler = (e: MouseEvent) => {
+      const el = this.activeElement;
+      if (!el) return;
+      const target = e.target as Node | null;
+      if (!target || (target !== el && !el.contains(target))) return;
+      e.stopPropagation();
+    };
+    window.addEventListener('mousedown', this.pointerShieldHandler, true);
+    window.addEventListener('mouseup', this.pointerShieldHandler, true);
+    window.addEventListener('click', this.pointerShieldHandler, true);
+    window.addEventListener('dblclick', this.pointerShieldHandler, true);
     document.addEventListener('selectionchange', this.selectionchangeHandler);
     window.addEventListener('scroll', this.selectionchangeHandler, { passive: true });
     window.addEventListener('resize', this.selectionchangeHandler, { passive: true });
@@ -212,6 +230,7 @@ export class TextEditor {
     this.blurHandler = null;
     this.keydownHandler = null;
     this.keyShieldHandler = null;
+    this.pointerShieldHandler = null;
     this.selectionchangeHandler = null;
     this.pasteHandler = null;
     this.toolbarButtons.clear();
@@ -345,6 +364,12 @@ export class TextEditor {
       window.removeEventListener('keydown', this.keyShieldHandler, true);
       window.removeEventListener('keypress', this.keyShieldHandler, true);
       window.removeEventListener('keyup', this.keyShieldHandler, true);
+    }
+    if (this.pointerShieldHandler) {
+      window.removeEventListener('mousedown', this.pointerShieldHandler, true);
+      window.removeEventListener('mouseup', this.pointerShieldHandler, true);
+      window.removeEventListener('click', this.pointerShieldHandler, true);
+      window.removeEventListener('dblclick', this.pointerShieldHandler, true);
     }
     if (this.pasteHandler) {
       element.removeEventListener('paste', this.pasteHandler);
