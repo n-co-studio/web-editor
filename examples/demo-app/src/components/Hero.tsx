@@ -37,7 +37,7 @@ export default function Hero() {
               marginTop: 'var(--space-5)',
             }}
           >
-            Design directly on the page.<br />AI build in the background.
+            Design directly on the page,<br />AI builds in the background.
           </h1>
 
           <p
