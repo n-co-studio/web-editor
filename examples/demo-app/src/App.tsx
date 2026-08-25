@@ -1,5 +1,14 @@
 import Logo from './components/Logo';
-import LavaBackground from './components/LavaBackground';
+import LavaBackground, { LAVA_CONFIG } from './components/LavaBackground';
+import type { LavaConfig } from './components/LavaBackground';
+
+// Page lava: operator-chosen green (#277910) as a tonal ramp so merging blobs
+// keep depth. Module-level const so the config identity is stable across
+// renders (it feeds a useMemo in LavaBackground).
+const PAGE_LAVA: LavaConfig = {
+  ...LAVA_CONFIG,
+  colors: ['#277910', '#3fae1c', '#1b5a0a', '#63cf35', '#144706', '#2f9114'],
+};
 import Hero from './components/Hero';
 import Benefits from './components/Benefits';
 import Walkthrough from './components/Walkthrough';
@@ -16,7 +25,7 @@ export default function App() {
     <div className="nco-paper nco-lava" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       {/* Animated lava field — fixed behind everything; decorative only. */}
       <div className="nco-lava-bg" aria-hidden="true">
-        <LavaBackground />
+        <LavaBackground config={PAGE_LAVA} />
       </div>
 
       <header
