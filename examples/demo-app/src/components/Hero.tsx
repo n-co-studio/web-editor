@@ -115,8 +115,8 @@ export default function Hero() {
 
         {/* Parallax image panel */}
         <div
-          className="nco-parallax"
-          style={{ border: '1px solid var(--color-divider)', height: 420, background: 'var(--color-bg)' }}
+          className="nco-parallax nco-frame nco-bleed-mobile"
+          style={{ height: 420, background: 'var(--color-bg)' }}
         >
           <div className="nco-parallax-layer">
             <HeroPlaceholder />

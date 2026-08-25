@@ -180,6 +180,23 @@ body {
   .nco-hero { grid-template-columns: 1fr; gap: var(--space-10); }
 }
 
+/* Hairline image/panel frame — class (not inline) so responsive rules below
+   can drop the side borders when the panel runs full-bleed. */
+.nco-frame { border: 1px solid var(--color-divider); }
+
+/* Images run full-bleed on mobile: break out of the padded content column to
+   the full viewport width (the 100vw trick pairs with .nco-paper's
+   overflow-x: clip, so no horizontal scrollbar). Frame keeps top/bottom
+   hairlines only — a bled edge with a side border reads as a mistake. */
+@media (max-width: 720px) {
+  .nco-bleed-mobile {
+    width: 100vw;
+    margin-left: calc(50% - 50vw);
+    border-left: none;
+    border-right: none;
+  }
+}
+
 /* Pure-CSS scroll-driven parallax (no JS). The clip box hides the overflow; the
    inner layer is taller than the box and drifts on scroll. Degrades to static
    where scroll-driven animations aren't supported, and honors reduced-motion. */
