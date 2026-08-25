@@ -236,6 +236,11 @@ body {
   --color-on-ink:       #0f0f0f;
   --color-on-ink-muted: rgba(15, 15, 15, 0.62);
   --color-hover-dark:   #e6e6e6;
+
+  /* Re-establish inherited text color inside the scope: elements with no
+     explicit color otherwise inherit body's COMPUTED color — resolved from
+     the :root ink token (black) outside this scope. */
+  color: var(--color-ink);
 }
 
 /* The lava field is the paper: drop the white fill + dot grid so the fixed
