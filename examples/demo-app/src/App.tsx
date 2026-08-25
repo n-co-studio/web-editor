@@ -10,14 +10,13 @@ const PAGE_LAVA: LavaConfig = {
   colors: ['#277910', '#3fae1c', '#1b5a0a', '#63cf35', '#144706', '#2f9114'],
 };
 import Hero from './components/Hero';
-import Benefits from './components/Benefits';
-import Walkthrough from './components/Walkthrough';
 import SetupGuide from './components/SetupGuide';
+import Faq from './components/Faq';
 import SiteFooter from './components/SiteFooter';
 
 const NAV: ReadonlyArray<[string, string]> = [
-  ['Using the editor', '#walkthrough'],
   ['Setup', '#setup'],
+  ['FAQ', '#faq'],
 ];
 
 export default function App() {
@@ -76,9 +75,8 @@ export default function App() {
         }}
       >
         <Hero />
-        <Benefits />
-        <Walkthrough />
         <SetupGuide />
+        <Faq />
       </main>
 
       <div className="nco-lava-content">

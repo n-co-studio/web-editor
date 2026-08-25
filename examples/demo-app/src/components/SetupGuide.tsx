@@ -87,7 +87,7 @@ const STEPS: Step[] = [
     title: 'Open localhost & activate',
     body: (
       <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
-        Visit your dev server, click the toolbar icon, and the built-in walkthrough above kicks in.
+        Visit your dev server, click the toolbar icon, and the editor's built-in walkthrough kicks in.
         A banner appears only if the extension and server versions disagree.
       </p>
     ),

@@ -58,7 +58,7 @@ export default function Hero() {
               color: 'var(--color-secondary)',
             }}
           >
-            n'co studio Web Editor — guide
+            n'co studio Web Editor — on the Chrome Extension Store
           </span>
 
           <h1
@@ -73,7 +73,7 @@ export default function Hero() {
               marginTop: 'var(--space-5)',
             }}
           >
-            Edit the page. Ship the code.
+            Design on the page. Hand off to your agent.
           </h1>
 
           <p
@@ -86,14 +86,15 @@ export default function Hero() {
               marginTop: 'var(--space-6)',
             }}
           >
-            A visual editing overlay for your local dev pages. Point at any element, adjust it on the
-            page, and send the changes to your AI coding agent as a structured diff. This guide walks
-            through the editor, then covers setup.
+            The Web Editor lets AI-native designers make precise frontend changes without touching
+            code — a drag-and-drop design interface on your local dev pages that hands reviewed
+            edits to the agent watching your dev environment. Built as a process tool for a
+            portfolio; now a feature-rich, production-ready product.
           </p>
 
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-6)', alignItems: 'center', marginTop: 'var(--space-8)' }}>
             <a
-              href="#walkthrough"
+              href="#setup"
               style={{
                 fontFamily: 'var(--font-sans)',
                 fontSize: 'var(--text-body-sm)',
@@ -104,10 +105,10 @@ export default function Hero() {
                 textDecoration: 'none',
               }}
             >
-              Walk through the editor
+              Set it up
             </a>
-            <a href="#setup" className="nco-link" style={{ fontSize: 'var(--text-body-sm)' }}>
-              Jump to setup
+            <a href="#faq" className="nco-link" style={{ fontSize: 'var(--text-body-sm)' }}>
+              Read the FAQ
             </a>
           </div>
         </div>
