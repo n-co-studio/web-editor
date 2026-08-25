@@ -33,7 +33,7 @@ export default function Hero() {
               lineHeight: 'var(--leading-tight)',
               letterSpacing: 'var(--tracking-tight)',
               color: '#ffffff',
-              maxWidth: '14ch',
+              maxWidth: '24ch',
               marginTop: 'var(--space-5)',
             }}
           >
@@ -46,7 +46,7 @@ export default function Hero() {
               fontWeight: 'var(--fw-book)',
               fontSize: 'var(--text-body)',
               color: 'var(--color-secondary)',
-              maxWidth: '46ch',
+              maxWidth: '70ch',
               marginTop: 'var(--space-6)',
             }}
           >
@@ -56,22 +56,6 @@ export default function Hero() {
             portfolio; now a feature-rich, production-ready product.
           </p>
 
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-6)', alignItems: 'center', marginTop: 'var(--space-8)' }}>
-            <a
-              href="#setup"
-              style={{
-                fontFamily: 'var(--font-sans)',
-                fontSize: 'var(--text-body-sm)',
-                fontWeight: 'var(--fw-book)',
-                color: 'var(--color-on-ink)',
-                background: 'var(--color-ink)',
-                padding: 'var(--space-3) var(--space-6)',
-                textDecoration: 'none',
-              }}
-            >
-              Set it up
-            </a>
-          </div>
       </div>
     </section>
   );
