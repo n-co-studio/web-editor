@@ -2,7 +2,6 @@ import LavaBackground, { LAVA_CONFIG } from './components/LavaBackground';
 import type { LavaConfig } from './components/LavaBackground';
 import Hero from './components/Hero';
 import GuideTabs from './components/GuideTabs';
-import SiteFooter from './components/SiteFooter';
 
 // Page lava: operator-chosen green (#277910) as a tonal ramp so merging blobs
 // keep depth. Module-level const so the config identity is stable across
@@ -35,9 +34,6 @@ export default function App() {
         <GuideTabs />
       </main>
 
-      <div className="nco-lava-content">
-        <SiteFooter />
-      </div>
     </div>
   );
 }
