@@ -22,7 +22,7 @@ export default function Hero() {
               color: 'var(--color-secondary)',
             }}
           >
-            n'co studio Web Editor — on the Chrome Extension Store
+            n'co studio Web Editor — by mark preston
           </span>
 
           <h1
@@ -37,7 +37,7 @@ export default function Hero() {
               marginTop: 'var(--space-5)',
             }}
           >
-            Design on the page. Hand off to your agent.
+            Design directly on the page.<br />AI build in the background.
           </h1>
 
           <p
