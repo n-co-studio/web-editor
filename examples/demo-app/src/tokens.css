@@ -226,16 +226,16 @@ body {
  * (hero CTA, footer) become the one light slab.
  * ------------------------------------------------------------------------- */
 .nco-lava {
-  --color-ink:          #f2f0ec;
-  --color-primary:      #f2f0ec;
-  --color-secondary:    rgba(242, 240, 236, 0.68);
+  --color-ink:          #ffffff;
+  --color-primary:      #ffffff;
+  --color-secondary:    #ffffff;
   --color-bg:           #0f0f0f;
   --color-surface:      rgba(15, 15, 15, 0.55);
-  --color-divider:      rgba(242, 240, 236, 0.24);
-  --color-border:       rgba(242, 240, 236, 0.16);
+  --color-divider:      rgba(255, 255, 255, 0.24);
+  --color-border:       rgba(255, 255, 255, 0.16);
   --color-on-ink:       #0f0f0f;
   --color-on-ink-muted: rgba(15, 15, 15, 0.62);
-  --color-hover-dark:   #dbd8d1;
+  --color-hover-dark:   #e6e6e6;
 }
 
 /* The lava field is the paper: drop the white fill + dot grid so the fixed
