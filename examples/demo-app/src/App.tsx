@@ -1,6 +1,7 @@
 import LavaBackground, { LAVA_CONFIG } from './components/LavaBackground';
 import type { LavaConfig } from './components/LavaBackground';
 import Hero from './components/Hero';
+import StepsRow from './components/StepsRow';
 import GuideTabs from './components/GuideTabs';
 
 // Page lava: operator-chosen green (#277910) as a tonal ramp so merging blobs
@@ -31,6 +32,7 @@ export default function App() {
         }}
       >
         <Hero />
+        <StepsRow />
         <GuideTabs />
       </main>
 
