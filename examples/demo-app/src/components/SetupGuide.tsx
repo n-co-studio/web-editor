@@ -10,8 +10,9 @@ function Code({ children }: { children: string }) {
     <pre
       style={{
         margin: 0,
-        background: 'var(--color-ink)',
-        color: 'var(--color-on-ink)',
+        background: 'var(--color-bg)',
+        color: 'var(--color-ink)',
+        border: '1px solid var(--color-border)',
         fontFamily: 'var(--font-mono)',
         fontSize: 'var(--text-body-sm)',
         lineHeight: 1.6,
