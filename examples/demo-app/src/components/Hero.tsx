@@ -68,7 +68,7 @@ export default function Hero() {
               fontSize: 'var(--text-display)',
               lineHeight: 'var(--leading-tight)',
               letterSpacing: 'var(--tracking-tight)',
-              color: 'var(--color-ink)',
+              color: '#ffffff',
               maxWidth: '14ch',
               marginTop: 'var(--space-5)',
             }}
@@ -106,9 +106,6 @@ export default function Hero() {
               }}
             >
               Set it up
-            </a>
-            <a href="#faq" className="nco-link" style={{ fontSize: 'var(--text-body-sm)' }}>
-              Read the FAQ
             </a>
           </div>
         </div>

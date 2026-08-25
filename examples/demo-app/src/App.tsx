@@ -11,12 +11,10 @@ const PAGE_LAVA: LavaConfig = {
 };
 import Hero from './components/Hero';
 import SetupGuide from './components/SetupGuide';
-import Faq from './components/Faq';
 import SiteFooter from './components/SiteFooter';
 
 const NAV: ReadonlyArray<[string, string]> = [
   ['Setup', '#setup'],
-  ['FAQ', '#faq'],
 ];
 
 export default function App() {
@@ -76,7 +74,6 @@ export default function App() {
       >
         <Hero />
         <SetupGuide />
-        <Faq />
       </main>
 
       <div className="nco-lava-content">
