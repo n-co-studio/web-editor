@@ -117,11 +117,8 @@ and acknowledge_visual_change tools.`}</Code>
 
 export default function SetupGuide() {
   return (
-    <section id="setup" style={{ paddingBottom: 'var(--space-16)', marginBottom: 'var(--space-20)', scrollMarginTop: 'var(--space-12)' }}>
-      <h2 style={{ fontFamily: 'var(--font-serif)', fontWeight: 'var(--fw-light)', fontSize: 'var(--text-h2)', letterSpacing: 'var(--tracking-tight)' }}>
-        Set it up
-      </h2>
-      <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)', maxWidth: 'var(--measure)', marginTop: 'var(--space-3)', marginBottom: 'var(--space-10)' }}>
+    <div>
+      <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)', maxWidth: 'var(--measure)', marginBottom: 'var(--space-10)' }}>
         Install it, point your agent at it, and activate. Everything runs locally — no data leaves your machine.
       </p>
 
@@ -160,6 +157,6 @@ export default function SetupGuide() {
         ))}
         </ol>
       </div>
-    </section>
+    </div>
   );
 }

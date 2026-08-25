@@ -1,7 +1,7 @@
 import LavaBackground, { LAVA_CONFIG } from './components/LavaBackground';
 import type { LavaConfig } from './components/LavaBackground';
 import Hero from './components/Hero';
-import SetupGuide from './components/SetupGuide';
+import GuideTabs from './components/GuideTabs';
 import SiteFooter from './components/SiteFooter';
 
 // Page lava: operator-chosen green (#277910) as a tonal ramp so merging blobs
@@ -32,7 +32,7 @@ export default function App() {
         }}
       >
         <Hero />
-        <SetupGuide />
+        <GuideTabs />
       </main>
 
       <div className="nco-lava-content">
