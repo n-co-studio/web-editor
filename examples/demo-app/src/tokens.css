@@ -197,31 +197,11 @@ body {
   }
 }
 
-/* Pure-CSS scroll-driven parallax (no JS). The clip box hides the overflow; the
-   inner layer is taller than the box and drifts on scroll. Degrades to static
-   where scroll-driven animations aren't supported, and honors reduced-motion. */
-.nco-parallax { overflow: hidden; }
-.nco-parallax-layer { height: 100%; }
-@supports (animation-timeline: view()) {
-  @media (prefers-reduced-motion: no-preference) {
-    .nco-parallax-layer {
-      height: 128%;
-      animation: nco-drift linear both;
-      animation-timeline: view();
-      animation-range: cover;
-      will-change: transform;
-    }
-  }
-}
-@keyframes nco-drift {
-  from { transform: translateY(-14%); }
-  to   { transform: translateY(8%); }
-}
 
 /* ---------------------------------------------------------------------------
  * Lava theme — the "/" guide page renders over the animated LavaBackground
- * (ported from markpreston playground). Scoped to .nco-lava so the /motion
- * page and the token :root set above stay untouched. The palette inverts:
+ * (ported from markpreston playground). Scoped to .nco-lava so the token
+ * :root set above stays untouched. The palette inverts:
  * ink → warm paper-white over the dark lava field; ink-filled elements
  * (hero CTA, footer) become the one light slab.
  * ------------------------------------------------------------------------- */
