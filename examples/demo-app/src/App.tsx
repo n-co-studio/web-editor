@@ -1,4 +1,5 @@
 import Logo from './components/Logo';
+import LavaBackground from './components/LavaBackground';
 import Hero from './components/Hero';
 import Benefits from './components/Benefits';
 import Walkthrough from './components/Walkthrough';
@@ -12,13 +13,17 @@ const NAV: ReadonlyArray<[string, string]> = [
 
 export default function App() {
   return (
-    <div className="nco-paper" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div className="nco-paper nco-lava" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+      {/* Animated lava field — fixed behind everything; decorative only. */}
+      <div className="nco-lava-bg" aria-hidden="true">
+        <LavaBackground />
+      </div>
+
       <header
         style={{
           position: 'sticky',
           top: 0,
           zIndex: 30,
-          borderBottom: '1px solid var(--color-divider)',
           padding: 'var(--space-4) var(--space-6)',
           display: 'flex',
           alignItems: 'center',
@@ -52,6 +57,7 @@ export default function App() {
 
       <main
         id="top"
+        className="nco-lava-content"
         style={{
           flex: 1,
           padding: 'var(--space-12) var(--space-6) var(--space-16)',
@@ -66,7 +72,9 @@ export default function App() {
         <SetupGuide />
       </main>
 
-      <SiteFooter />
+      <div className="nco-lava-content">
+        <SiteFooter />
+      </div>
     </div>
   );
 }
