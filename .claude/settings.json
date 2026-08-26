@@ -142,5 +142,14 @@
         ]
       }
     ]
+  },
+  "mcpServers": {
+    "nco-web-editor": {
+      "command": "node",
+      "args": [
+        "packages/mcp-server/dist/bin/cli.js"
+      ],
+      "type": "stdio"
+    }
   }
 }
