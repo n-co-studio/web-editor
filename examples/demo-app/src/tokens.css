@@ -149,6 +149,17 @@ body {
   .nco-link, .nco-card { transition: none; }
 }
 
+/* How-it-works grid — wide viewports breathe at space-10; below the
+   standard breakpoint (1280px) the columns tighten to space-5. */
+.nco-steps-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-10);
+}
+@media (max-width: 1280px) {
+  .nco-steps-grid { gap: var(--space-5); }
+}
+
 /* Walkthrough rows — alternating image / text, collapsing to a single column.
    Figure comes first in the DOM (so it stacks on top on mobile); on wide
    viewports, --reverse rows flip the figure to the right. */
