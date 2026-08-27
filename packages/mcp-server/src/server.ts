@@ -48,10 +48,13 @@ export async function createServer(): Promise<void> {
   });
 
   // 5. Create MCP server
-  const server = new McpServer({
-    name: 'nco-web-editor',
-    version: '0.1.0',
-  });
+  const server = new McpServer(
+    {
+      name: 'nco-web-editor',
+      version: '0.1.0',
+    },
+    { instructions: SERVER_INSTRUCTIONS },
+  );
 
   // 6. Register all tools
   registerTools(server, bridge);
@@ -74,6 +77,32 @@ export async function createServer(): Promise<void> {
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 }
+
+// ---------------------------------------------------------------------------
+// Server instructions
+// ---------------------------------------------------------------------------
+
+/**
+ * Surfaced to the client at initialize. This is the operating protocol for
+ * agents with no external workflow telling them how to run the loop — the
+ * queue mechanics (acknowledge, re-check) are not inferable from the tool
+ * list alone, and an agent that skips them silently re-does work.
+ */
+const SERVER_INSTRUCTIONS = `This server carries visual edits a designer made in their browser back to the source files those elements came from. You apply them.
+
+Per batch:
+
+1. get_pending_visual_changes returns the queued diffs. Each names element.sourceFile and element.sourceLine — the exact place to edit.
+2. Apply each diff there. Read that tool's description in full before your first one: diffs also express reorder, insert, remove, group, and reparent intents, and those mean editing structure in the source file, not setting a CSS property.
+3. Prefer the project's design tokens over the literal values. get_design_tokens lists what the project defines; resolve_to_token maps a value to the nearest one. A designer dragging a handle produces 61.73px — the token near it is what belongs in the code.
+4. Call acknowledge_visual_change for every diff you applied, or reject_visual_change with a reason for one you deliberately skipped. This is the only thing that removes a diff from the queue and tells the browser the edit landed. A diff you neither acknowledge nor reject stays queued and comes back to you next time, so an agent that applies without acknowledging will appear to loop.
+5. Call get_pending_visual_changes once more before you finish. Designers keep editing while you work, and a batch that arrived mid-apply is already waiting.
+
+Between batches the queue is idle, not closed. The server writes editor-queue-status.yaml in the project root on every queue change, reporting status and pending_count — watch that file rather than polling the tools.
+
+Never edit .nco-web-editor/pending-queue.json yourself. The server holds the queue in memory and overwrites that file; acknowledge and reject are the only ways to change it.
+
+One server runs per project directory, guarded by .nco-web-editor/server.lock. If your tools are missing, another agent session is holding it.`;
 
 // ---------------------------------------------------------------------------
 // Tool registration
@@ -235,7 +264,11 @@ function registerTools(server: McpServer, bridge: Bridge): void {
     {
       title: 'Acknowledge Visual Change',
       description:
-        'Marks a visual diff as applied and removes it from the pending queue.',
+        'Marks a visual diff as applied and removes it from the pending queue. Call this for ' +
+        'every diff you applied, as soon as the source edit is written — it is what removes the ' +
+        'diff from the queue and notifies the browser that the edit landed. A diff that is never ' +
+        'acknowledged (or rejected via reject_visual_change) stays pending and will be returned ' +
+        'by the next get_pending_visual_changes call, so skipping this makes the same work repeat.',
       inputSchema: z.object({
         diffId: z.string().describe('The unique ID of the diff to acknowledge'),
       }),

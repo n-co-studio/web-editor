@@ -6,9 +6,49 @@
 
 import type { ReactNode } from 'react';
 
+function Code({ children }: { children: string }) {
+  return (
+    <pre
+      style={{
+        margin: 0,
+        background: 'var(--color-bg)',
+        color: 'var(--color-ink)',
+        border: '1px solid var(--color-border)',
+        fontFamily: 'var(--font-mono)',
+        fontSize: 'var(--text-body-sm)',
+        lineHeight: 1.6,
+        padding: 'var(--space-3) var(--space-4)',
+        overflowX: 'auto',
+      }}
+    >
+      <code>{children}</code>
+    </pre>
+  );
+}
+
 type Step = { title: string; body: ReactNode };
 
 const STEPS: Step[] = [
+  {
+    title: 'Put your agent on watch',
+    body: (
+      <>
+        <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
+          Start an agent session in the project first — it launches the bridge, so nothing can reach
+          your code until one is running. Then hand it the loop:
+        </p>
+        <Code>{`Watch editor-queue-status.yaml for pending_count above
+zero. When a batch lands, read it with
+get_pending_visual_changes, apply each diff to the source file
+it names, then acknowledge_visual_change on each one — and
+re-check the queue before you go idle.`}</Code>
+        <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
+          Agents that read the server's own instructions already work this way; the prompt makes it
+          explicit for those that don't.
+        </p>
+      </>
+    ),
+  },
   {
     title: 'Activate the editor',
     body: (
