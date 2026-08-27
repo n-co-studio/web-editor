@@ -9,7 +9,6 @@ export default function Hero() {
       className="nco-section"
       style={{
         paddingTop: 'var(--space-8)',
-        marginBottom: 'var(--space-16)',
       }}
     >
       <div>

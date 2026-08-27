@@ -28,7 +28,7 @@ export default function StepsRow() {
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-          gap: 'var(--space-5)',
+          gap: 'var(--space-10)',
         }}
       >
         {BLOCKS.map((b, i) => (
