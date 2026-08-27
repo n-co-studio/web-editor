@@ -1,6 +1,6 @@
 /**
- * StepsRow — the three beats of using the editor as horizontal glass blocks
- * over the lava field: design on the page, send mapped edits over MCP, the
+ * StepsRow — the three beats of using the editor as bare text columns
+ * over the lava field — no card chrome: design on the page, send mapped edits over MCP, the
  * agent writes the code. Serif two-digit indices, sharp, flat.
  */
 
@@ -32,7 +32,7 @@ export default function StepsRow() {
         }}
       >
         {BLOCKS.map((b, i) => (
-          <article key={b.title} className="nco-card" style={{ padding: 'var(--space-6)' }}>
+          <article key={b.title}>
             <span
               style={{
                 fontFamily: 'var(--font-serif)',
