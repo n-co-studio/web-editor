@@ -47,6 +47,7 @@ export default function Hero() {
               color: 'var(--color-secondary)',
               maxWidth: '70ch',
               marginTop: 'var(--space-6)',
+              marginBottom: 'var(--space-16)',
             }}
           >
             The Web Editor lets AI-native designers make precise frontend changes without touching
