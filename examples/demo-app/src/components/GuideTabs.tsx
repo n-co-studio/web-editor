@@ -1,16 +1,19 @@
 /**
- * GuideTabs — the guide section with two tabs: "Set it up" (install +
- * connect) and "How to use" (the editing loop). Flat underline tabs in the
- * lava theme; sharp, no shadows.
+ * GuideTabs — the guide section with three tabs: "Set it up" (install +
+ * connect), "How to use" (the editing loop), and "Troubleshooting" (MCP
+ * connection problems and resets). Flat underline tabs in the lava theme;
+ * sharp, no shadows.
  */
 
 import { useState } from 'react';
 import SetupGuide from './SetupGuide';
 import HowToUse from './HowToUse';
+import Troubleshooting from './Troubleshooting';
 
 const TABS = [
   { id: 'setup', label: 'Set it up' },
   { id: 'use', label: 'How to use' },
+  { id: 'trouble', label: 'Troubleshooting' },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
@@ -20,7 +23,7 @@ export default function GuideTabs() {
 
   return (
     <section id="setup" style={{ paddingBottom: 'var(--space-16)', marginBottom: 'var(--space-20)', scrollMarginTop: 'var(--space-12)' }}>
-      <div role="tablist" aria-label="Guide" style={{ display: 'flex', gap: 'var(--space-8)', marginBottom: 'var(--space-10)' }}>
+      <div role="tablist" aria-label="Guide" style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-5) var(--space-8)', marginBottom: 'var(--space-10)' }}>
         {TABS.map((t) => {
           const active = t.id === tab;
           return (
@@ -54,7 +57,9 @@ export default function GuideTabs() {
       </div>
 
       <div role="tabpanel" id={`guide-panel-${tab}`} aria-labelledby={`guide-tab-${tab}`}>
-        {tab === 'setup' ? <SetupGuide /> : <HowToUse />}
+        {tab === 'setup' && <SetupGuide />}
+        {tab === 'use' && <HowToUse />}
+        {tab === 'trouble' && <Troubleshooting />}
       </div>
     </section>
   );
