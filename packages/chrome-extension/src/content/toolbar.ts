@@ -176,6 +176,14 @@ const ICONS: Record<string, string> = {
     <line x1="3" y1="9" x2="13" y2="9" stroke-dasharray="1.5 2"/>
     <line x1="3" y1="13" x2="13" y2="13" stroke-dasharray="1.5 2"/>
   </svg>`,
+
+  'chevron-down': `<svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="3,6 8,11 13,6"/>
+  </svg>`,
+
+  'chevron-right': `<svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="6,3 11,8 6,13"/>
+  </svg>`,
 };
 
 const TOOL_LABELS: Record<EditMode, string> = {
@@ -197,6 +205,32 @@ const TOOL_LABELS: Record<EditMode, string> = {
 };
 
 const TOOLBAR_STORAGE_KEY = 'nco-web-editor-toolbar-position';
+
+// ---------------------------------------------------------------------------
+// Collapsible sections
+// ---------------------------------------------------------------------------
+
+type ToolbarSectionId = 'view' | 'tools' | 'actions';
+
+/** Top-to-bottom visual order; auto-fit collapses in reverse (bottom-up). */
+const SECTION_ORDER: ToolbarSectionId[] = ['view', 'tools', 'actions'];
+
+const SECTION_LABELS: Record<ToolbarSectionId, string> = {
+  view: 'View utilities',
+  tools: 'Edit tools',
+  actions: 'Actions',
+};
+
+interface SectionState {
+  body: HTMLDivElement;
+  headerBtn: HTMLButtonElement;
+  chevron: HTMLElement;
+  collapsed: boolean;
+  /** True once the operator toggled this section explicitly — auto-fit then leaves it alone. */
+  manual: boolean;
+}
+
+const AUTO_FIT_DEBOUNCE_MS = 150;
 
 const TOOL_ORDER: EditMode[] = [
   'cursor',
@@ -245,7 +279,9 @@ export class FloatingToolbar {
 
   private reviewOpen = false;
   private contentWrapper: HTMLDivElement | null = null;
-  private toolsSection: HTMLDivElement | null = null;
+  private sections = new Map<ToolbarSectionId, SectionState>();
+  private autoFitTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly onWindowResize = (): void => this.scheduleSectionAutoFit();
   private toggleArrow: HTMLElement | null = null;
   private toggleBtn: HTMLButtonElement | null = null;
   private undoBtn: HTMLButtonElement | null = null;
@@ -345,6 +381,7 @@ export class FloatingToolbar {
     // Record the resting background so hover restore (mouseleave) keeps the
     // active highlight instead of clearing it to transparent.
     this.rulersBtn.dataset.restBg = this.rulersBtn.style.background;
+    this.updateSectionAutoFit();
   }
 
   onDelete(cb: VoidCallback): void {
@@ -407,6 +444,7 @@ export class FloatingToolbar {
       this.gridBtn.style.color = OVERLAY.textMuted;
     }
     this.gridBtn.dataset.restBg = this.gridBtn.style.background;
+    this.updateSectionAutoFit();
   }
 
   /** Set grid block reason (disables button with tooltip). */
@@ -428,6 +466,7 @@ export class FloatingToolbar {
   setInspectorOpen(mode: InspectorMode, open: boolean): void {
     if (open) this.activeInspectors.add(mode);
     else this.activeInspectors.delete(mode);
+    this.updateSectionAutoFit();
     const btn = this.inspectorButtons.get(mode);
     if (!btn) return;
     btn.setAttribute('aria-pressed', String(open));
@@ -483,6 +522,9 @@ export class FloatingToolbar {
   setActiveMode(mode: EditMode | null): void {
     this.activeMode = mode;
     this.refreshButtonStates();
+    // Activating a tool can make the tools section active — re-run fit
+    // synchronously so callers can measure the button straight after.
+    this.updateSectionAutoFit();
   }
 
   getActiveMode(): EditMode | null {
@@ -517,6 +559,30 @@ export class FloatingToolbar {
     else if (key === 'devtools') btn = this.inspectorButtons.get(key);
     else btn = this.toolButtons.get(key);
     if (!btn || !this.container) return this.getPosition();
+
+    // A button inside a collapsed section is display:none — its rect collapses
+    // to 0×0 at the origin, which would anchor a mini-panel to the top-left of
+    // the viewport. Callers read this position *before* activating the tool
+    // (index.ts activateToolForElement), so resolve the section here rather
+    // than relying on activation to re-expand it.
+    const sectionId = this.sectionForButton(btn);
+    const section = sectionId ? this.sections.get(sectionId) : undefined;
+    if (section?.collapsed) {
+      if (section.manual) {
+        // The operator collapsed this section deliberately — leave it closed
+        // and anchor to its header, which is the section's visible stand-in.
+        // The header is itself hidden when the whole toolbar is minimized.
+        if (section.headerBtn.offsetParent === null) return this.getPosition();
+        const containerRect = this.container.getBoundingClientRect();
+        return { x: containerRect.left, y: section.headerBtn.getBoundingClientRect().top };
+      }
+      // Auto-collapsed: reveal it so the anchor is accurate. The caller is
+      // about to activate this tool, which keeps the section open on the next
+      // auto-fit pass.
+      this.setSectionCollapsed(sectionId!, false, false);
+    }
+
+    if (btn.offsetParent === null) return this.getPosition();
     const containerRect = this.container.getBoundingClientRect();
     const btnRect = btn.getBoundingClientRect();
     return { x: containerRect.left, y: btnRect.top };
@@ -536,15 +602,24 @@ export class FloatingToolbar {
       container.style.left = `${saved.x}px`;
       container.style.top = `${saved.y}px`;
     }
+
+    // Auto-collapse sections when the viewport is shorter than the toolbar.
+    window.addEventListener('resize', this.onWindowResize);
+    this.updateSectionAutoFit();
   }
 
   hide(): void {
+    window.removeEventListener('resize', this.onWindowResize);
+    if (this.autoFitTimer !== null) {
+      clearTimeout(this.autoFitTimer);
+      this.autoFitTimer = null;
+    }
     this.confirmOverlay?.remove();
     this.confirmOverlay = null;
     this.container?.remove();
     this.container = null;
     this.contentWrapper = null;
-    this.toolsSection = null;
+    this.sections.clear();
     this.toolButtons.clear();
     this.toggleArrow = null;
     this.toggleBtn = null;
@@ -692,16 +767,10 @@ export class FloatingToolbar {
         }
       });
     }
-    // Tools section — grid, devtools, editing tools + separators, hidden during page mode
-    const toolsSection = createElement('div', {}, {
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      gap: '2px',
-    });
-    this.toolsSection = toolsSection;
+    // View section — inspection utilities (grid, rulers, screenshot, devtools)
+    const viewBody = this.buildSection('view', contentWrapper);
 
-    toolsSection.appendChild(this.gridBtn);
+    viewBody.appendChild(this.gridBtn);
 
     // Rulers toggle button
     this.rulersBtn = this.buildIconButton('ruler', 'Toggle rulers & guides', () => {
@@ -709,30 +778,24 @@ export class FloatingToolbar {
       this.setRulersEnabled(this.rulersEnabled);
       this.rulersToggleCb?.(this.rulersEnabled);
     });
-    toolsSection.appendChild(this.rulersBtn);
+    viewBody.appendChild(this.rulersBtn);
 
     // Screenshot button
     this.screenshotBtn = this.buildIconButton('camera', 'Capture full-page screenshot', () => {
       if (this.screenshotBusy) return;
       this.screenshotCb?.();
     });
-    toolsSection.appendChild(this.screenshotBtn);
+    viewBody.appendChild(this.screenshotBtn);
 
     // DevTools panel button (DOM inspector + properties + console)
     const devtoolsBtn = this.buildIconButton('devtools', 'DevTools panel', () => {
       this.inspectorToggleCbs.get('devtools')?.();
     });
     this.inspectorButtons.set('devtools', devtoolsBtn);
-    toolsSection.appendChild(devtoolsBtn);
+    viewBody.appendChild(devtoolsBtn);
 
-    // Separator
-    const sep = createElement('div', {}, {
-      width: '24px',
-      height: '1px',
-      background: OVERLAY.border,
-      margin: '2px 0',
-    });
-    toolsSection.appendChild(sep);
+    // Tools section — the editing tool radiogroup
+    const toolsBody = this.buildSection('tools', contentWrapper);
 
     // Tools wrapper — a radio group: exactly one editing tool is active at a time.
     const wrapper = createElement('div', { role: 'radiogroup', 'aria-label': 'Editing tool' }, {
@@ -762,18 +825,10 @@ export class FloatingToolbar {
       wrapper.appendChild(btn);
     }
 
-    toolsSection.appendChild(wrapper);
+    toolsBody.appendChild(wrapper);
 
-    // Separator after tools
-    const sep2 = createElement('div', {}, {
-      width: '24px',
-      height: '1px',
-      background: OVERLAY.border,
-      margin: '2px 0',
-    });
-    toolsSection.appendChild(sep2);
-
-    contentWrapper.appendChild(toolsSection);
+    // Actions section — undo/redo, reset, duplicate, delete
+    const actionsBody = this.buildSection('actions', contentWrapper);
 
     // Notes button (with count badge)
     this.notesBtn = this.buildIconButton('notes', 'Session notes', () => {
@@ -853,20 +908,20 @@ export class FloatingToolbar {
     this.redoBtn.style.height = '28px';
     undoRedoRow.appendChild(this.redoBtn);
 
-    toolsSection.appendChild(undoRedoRow);
+    actionsBody.appendChild(undoRedoRow);
 
     // Reset button
     this.resetBtn = this.buildIconButton('reset', 'Reset all changes', () => {
       this.showResetConfirmation();
     });
-    toolsSection.appendChild(this.resetBtn);
+    actionsBody.appendChild(this.resetBtn);
 
     // Duplicate element button
     this.duplicateBtn = this.buildIconButton('duplicate', 'Duplicate element (⌘D)', () => {
       if (this.duplicateBtn?.style.opacity !== '0.3') this.duplicateCb?.();
     });
     this.duplicateBtn.style.color = OVERLAY.textMuted;
-    toolsSection.appendChild(this.duplicateBtn);
+    actionsBody.appendChild(this.duplicateBtn);
     this.setDuplicateEnabled(false);
 
     // Delete element button
@@ -874,7 +929,7 @@ export class FloatingToolbar {
       if (this.deleteBtn?.style.opacity !== '0.3') this.deleteCb?.();
     });
     this.deleteBtn.style.color = OVERLAY.textMuted;
-    toolsSection.appendChild(this.deleteBtn);
+    actionsBody.appendChild(this.deleteBtn);
     this.setDeleteEnabled(false);
 
     container.appendChild(contentWrapper);
@@ -960,6 +1015,80 @@ export class FloatingToolbar {
     });
 
     return btn;
+  }
+
+  /**
+   * Build a collapsible section: a thin chevron header the operator can toggle,
+   * above a body that holds the section's buttons. The root is appended to
+   * `parent`; the body is returned for the caller to populate.
+   */
+  private buildSection(id: ToolbarSectionId, parent: HTMLElement): HTMLDivElement {
+    const label = SECTION_LABELS[id];
+
+    const root = createElement('div', {}, {
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: '2px',
+      width: '100%',
+    });
+
+    const headerBtn = createElement('button', {
+      title: `Collapse ${label}`,
+      'aria-label': `${label} section`,
+      'aria-expanded': 'true',
+    }, {
+      width: '32px',
+      height: '24px',
+      border: 'none',
+      borderTop: `1px solid ${OVERLAY.border}`,
+      borderRadius: OVERLAY.radiusSm,
+      background: 'transparent',
+      color: OVERLAY.textMuted,
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '0',
+      pointerEvents: 'auto',
+      transition: 'background 0.1s',
+    }) as HTMLButtonElement;
+
+    const chevron = createElement('span', { 'aria-hidden': 'true' }, {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: '10px',
+      height: '10px',
+    });
+    chevron.innerHTML = ICONS['chevron-down'] ?? '';
+    headerBtn.appendChild(chevron);
+
+    headerBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const state = this.sections.get(id);
+      if (state) this.setSectionCollapsed(id, !state.collapsed, true);
+    });
+    headerBtn.addEventListener('mouseenter', () => {
+      headerBtn.style.background = 'rgba(255, 255, 255, 0.08)';
+    });
+    headerBtn.addEventListener('mouseleave', () => {
+      headerBtn.style.background = 'transparent';
+    });
+
+    const body = createElement('div', {}, {
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: '2px',
+    });
+
+    root.appendChild(headerBtn);
+    root.appendChild(body);
+    parent.appendChild(root);
+
+    this.sections.set(id, { body, headerBtn, chevron, collapsed: false, manual: false });
+    return body;
   }
 
   // -----------------------------------------------------------------------
@@ -1088,7 +1217,120 @@ export class FloatingToolbar {
       }
 
       this.collapseCb?.(false);
+
+      // Content is measurable again — re-evaluate section fit.
+      this.updateSectionAutoFit();
     }
+  }
+
+  // -----------------------------------------------------------------------
+  // Collapsible sections — manual toggle + viewport-height auto-fit
+  // -----------------------------------------------------------------------
+
+  /** Collapse/expand one section. `manual` marks the operator's explicit choice. */
+  private setSectionCollapsed(id: ToolbarSectionId, collapsed: boolean, manual: boolean): void {
+    const state = this.sections.get(id);
+    if (!state) return;
+    if (manual) state.manual = true;
+    if (state.collapsed === collapsed) return;
+    state.collapsed = collapsed;
+
+    // Explicit 'flex' on expand — an empty string would revert to the CSS
+    // default (block) and destroy the column layout.
+    state.body.style.display = collapsed ? 'none' : 'flex';
+    state.chevron.innerHTML = ICONS[collapsed ? 'chevron-right' : 'chevron-down'] ?? '';
+    state.headerBtn.setAttribute('aria-expanded', String(!collapsed));
+    this.refreshSectionHeader(id);
+  }
+
+  /**
+   * Header tooltip + tint. A collapsed section whose tools are still engaged is
+   * tinted, so the operator keeps a visible signal that (say) the spacing tool
+   * is active even though its button is hidden.
+   */
+  private refreshSectionHeader(id: ToolbarSectionId): void {
+    const state = this.sections.get(id);
+    if (!state) return;
+    const label = SECTION_LABELS[id];
+    const active = this.isSectionActive(id);
+    const hiddenActive = state.collapsed && active;
+
+    state.headerBtn.title = hiddenActive
+      ? `Expand ${label} — in use`
+      : `${state.collapsed ? 'Expand' : 'Collapse'} ${label}`;
+    state.headerBtn.setAttribute(
+      'aria-label',
+      hiddenActive ? `${label} section, in use` : `${label} section`,
+    );
+    state.headerBtn.style.color = hiddenActive ? OVERLAY.primary : OVERLAY.textMuted;
+  }
+
+  /** Which section's body holds this button, if any. */
+  private sectionForButton(btn: HTMLElement): ToolbarSectionId | null {
+    for (const [id, state] of this.sections) {
+      if (state.body.contains(btn)) return id;
+    }
+    return null;
+  }
+
+  /**
+   * A section is "active" when a tool it hosts is currently engaged — auto-fit
+   * never collapses an active section (the operator still can, manually).
+   * `actions` is never active: undo/redo/reset are one-shot commands, not modes,
+   * so it stays the first candidate for the bottom-up collapse order.
+   */
+  private isSectionActive(id: ToolbarSectionId): boolean {
+    switch (id) {
+      case 'tools':
+        return this.activeMode !== null && this.activeMode !== 'cursor';
+      case 'view':
+        return this.gridEnabled || this.rulersEnabled || this.activeInspectors.size > 0;
+      case 'actions':
+        return false;
+    }
+  }
+
+  private scheduleSectionAutoFit(): void {
+    if (this.autoFitTimer !== null) clearTimeout(this.autoFitTimer);
+    this.autoFitTimer = setTimeout(() => {
+      this.autoFitTimer = null;
+      this.updateSectionAutoFit();
+    }, AUTO_FIT_DEBOUNCE_MS);
+  }
+
+  /**
+   * Auto-fit: when the viewport is shorter than the toolbar, collapse sections
+   * bottom-up (actions → tools → view), skipping active sections and sections
+   * the operator has toggled manually. When space allows again, auto-collapsed
+   * sections re-expand (top-down). Manually-toggled sections are never touched.
+   */
+  private updateSectionAutoFit(): void {
+    if (!this.container || !this.visible || this.collapsed) return;
+
+    // Start from the all-open baseline for auto-managed sections, then measure.
+    for (const id of SECTION_ORDER) {
+      const state = this.sections.get(id);
+      if (state && state.collapsed && !state.manual) {
+        this.setSectionCollapsed(id, false, false);
+      }
+    }
+
+    const fits = (): boolean => this.container!.offsetHeight <= window.innerHeight;
+
+    if (!fits()) {
+      for (let i = SECTION_ORDER.length - 1; i >= 0; i--) {
+        const id = SECTION_ORDER[i];
+        const state = this.sections.get(id);
+        if (!state || state.collapsed || state.manual || this.isSectionActive(id)) continue;
+        this.setSectionCollapsed(id, true, false);
+        if (fits()) break;
+      }
+    }
+
+    // Activity may have changed without any collapse state changing (a
+    // manually-collapsed section whose tool just became active), so refresh
+    // every header rather than relying on setSectionCollapsed.
+    for (const id of SECTION_ORDER) this.refreshSectionHeader(id);
   }
 
   // -----------------------------------------------------------------------
