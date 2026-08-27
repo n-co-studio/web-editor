@@ -24,13 +24,7 @@ const BLOCKS: Block[] = [
 export default function StepsRow() {
   return (
     <section style={{ marginBottom: 'var(--space-20)' }}>
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-          gap: 'var(--space-10)',
-        }}
-      >
+      <div className="nco-steps-grid">
         {BLOCKS.map((b, i) => (
           <article key={b.title}>
             <span
