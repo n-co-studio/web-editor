@@ -1,7 +1,9 @@
 /**
  * StepsRow — the three beats of using the editor as bare text columns
  * over the lava field — no card chrome: design on the page, send mapped edits over MCP, the
- * agent writes the code. Serif two-digit indices, sharp, flat.
+ * agent writes the code. Sans two-digit indices against serif titles — the
+ * page's heading idiom, so the row reads as headings rather than as labels.
+ * Sharp, flat.
  */
 
 type Block = { title: string; body: string };
@@ -29,8 +31,8 @@ export default function StepsRow() {
           <article key={b.title}>
             <span
               style={{
-                fontFamily: 'var(--font-serif)',
-                fontWeight: 'var(--fw-thin)',
+                fontFamily: 'var(--font-sans)',
+                fontWeight: 'var(--fw-light)',
                 fontSize: 'var(--text-h3)',
                 color: 'var(--color-secondary)',
                 lineHeight: 1,
@@ -40,9 +42,10 @@ export default function StepsRow() {
             </span>
             <h3
               style={{
-                fontFamily: 'var(--font-sans)',
-                fontWeight: 'var(--fw-regular)',
-                fontSize: 'var(--text-h3)',
+                fontFamily: 'var(--font-serif)',
+                fontWeight: 'var(--fw-light)',
+                fontSize: 'var(--text-h3-lg)',
+                letterSpacing: 'var(--tracking-tight)',
                 color: 'var(--color-ink)',
                 marginTop: 'var(--space-3)',
               }}
