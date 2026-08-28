@@ -58,7 +58,7 @@ const STEPS: Step[] = [
 }`}</Code>
         <ul style={{ listStyle: 'none', margin: 'var(--space-4) 0 0', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
           {([
-            ['Claude Code', '.claude/settings.json'],
+            ['Claude Code', '.mcp.json'],
             ['Cursor', '.cursor/mcp.json'],
             ['Windsurf', '~/.codeium/windsurf/mcp_config.json'],
             ['Any MCP client', 'its own mcpServers config'],
@@ -126,7 +126,7 @@ export default function SetupGuide() {
         {/* connector line behind the badges — sibling of the list, not inside it */}
         <span
           aria-hidden="true"
-          style={{ position: 'absolute', left: 15, top: 16, bottom: 16, width: 1, background: 'var(--color-divider)', zIndex: 1 }}
+          style={{ position: 'absolute', left: 15, top: 16, bottom: 16, width: 1, background: 'var(--color-divider)', zIndex: 'var(--z-base)' }}
         />
         <ol style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 'var(--space-8)' }}>
         {STEPS.map((s, i) => (
@@ -134,7 +134,7 @@ export default function SetupGuide() {
             <span
               style={{
                 position: 'relative',
-                zIndex: 10,
+                zIndex: 'var(--z-raised)',
                 width: 32,
                 height: 32,
                 borderRadius: 'var(--radius-full)',

@@ -116,8 +116,11 @@ ps -p <PID> -o ppid=,command=    # → which agent owns it`}</Code>
     ),
     fix: (
       <p>
-        Keep one declaration. For Claude Code, <Mono>.claude/settings.json</Mono> is the simpler of the
-        two: it is checked into the project and needs no separate approval step.
+        Keep one declaration, and put it where your agent actually reads it. Claude Code does{' '}
+        <em>not</em> read <Mono>mcpServers</Mono> from <Mono>.claude/settings.json</Mono> — a block
+        there is silently ignored, and the server simply never appears in <Mono>claude mcp list</Mono>.
+        Project-scoped servers belong in <Mono>.mcp.json</Mono> at the repo root; approve it once when
+        prompted and it loads on every session.
       </p>
     ),
   },

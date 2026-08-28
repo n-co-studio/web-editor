@@ -31,7 +31,7 @@ export default function Hero() {
               fontSize: 'var(--text-display)',
               lineHeight: 'var(--leading-tight)',
               letterSpacing: 'var(--tracking-tight)',
-              color: '#ffffff',
+              color: 'var(--color-ink)',
               maxWidth: '24ch',
               marginTop: 'var(--space-5)',
             }}

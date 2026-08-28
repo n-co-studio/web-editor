@@ -115,7 +115,7 @@ export default function HowToUse() {
       <div style={{ position: 'relative' }}>
         <span
           aria-hidden="true"
-          style={{ position: 'absolute', left: 15, top: 16, bottom: 16, width: 1, background: 'var(--color-divider)', zIndex: 1 }}
+          style={{ position: 'absolute', left: 15, top: 16, bottom: 16, width: 1, background: 'var(--color-divider)', zIndex: 'var(--z-base)' }}
         />
         <ol style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 'var(--space-8)' }}>
           {STEPS.map((s, i) => (
@@ -123,7 +123,7 @@ export default function HowToUse() {
               <span
                 style={{
                   position: 'relative',
-                  zIndex: 10,
+                  zIndex: 'var(--z-raised)',
                   width: 32,
                   height: 32,
                   borderRadius: 'var(--radius-full)',
