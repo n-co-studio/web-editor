@@ -29,7 +29,11 @@ Introduce a dual-mode Pragmatist agent that reviews implementation proposals for
 
 5. **Boundary with Reviewer**: Pragmatist does NOT check implementation-level code style, function length, naming conventions, or test coverage — those are Reviewer territory. Pragmatist operates on proposals and plans, not code.
 
-6. **State file**: `pragmatist-signed` — written by `state-writer.sh` on SubagentStop when Plan-Gating mode produces GATE_RESULT. Session-scoped, cleaned at close.
+6. **State file**: `pragmatist-signed` — written by one of three legitimate paths, each stamping a provenance marker; the commit gate (`pre-commit-gates.sh`) requires at least one recognised marker after session_id validation:
+   - **Writer 1** — `state-writer.sh` on SubagentStop (Pragmatist Plan-Gating dispatch): stamps `dispatch_phase:`.
+   - **Writer 2** — `bundle_to_pragmatist_signed()` in `_phase-helper.sh` (Decision 0038 drift-check path): stamps `source: handoff-bundle`.
+   - **Writer 3** — `write_alignment_check_pragmatist_signed()` in `_phase-helper.sh` (Orchestrator deterministic alignment-check, Decision 0038 §7): stamps `source: alignment-check`.
+   A file carrying none of these markers is rejected as hand-written. The marker is a provenance signal, not a cryptographic boundary — this raises the bar from "trivially forgeable" to "deliberately forgeable" (Decision t-0004). Session-scoped, cleaned at close. **Do not write this file by hand**; use the appropriate helper.
 
 7. **Triage guidance**: If a finding was addressed at Prompt T (Brief-Advisory), Prompt B mode should reference the prior resolution rather than re-flagging the same concern.
 
@@ -55,3 +59,13 @@ The dual-mode design follows the Critic precedent (spec mode, cohesion mode, hyp
 - `docs/ai/quality-gates.md` updated: plan-review gate added
 - `.claude/agents/orchestrator.md` updated: Pragmatist dispatch rules for both modes
 - `AI.md` updated: state-writer hook description includes `pragmatist-signed`
+
+### Amendment — Pragmatist-Signed Provenance (2026-08-07)
+
+Closed the forgery hole identified on 2026-08-07: the original gate checked only existence and `session_id`, which a hand-written file could satisfy. Three legitimate writers now each stamp a distinct provenance marker; the gate accepts any recognised marker and rejects a file carrying none.
+
+Changes:
+- `§6` above updated: provenance marker requirement documented for all three writers
+- `.claude/hooks/_phase-helper.sh` updated: `write_alignment_check_pragmatist_signed()` added (Writer 3 — alignment-check path)
+- `.claude/hooks/pre-commit-gates.sh` updated: pragmatist-signed gate now requires `dispatch_phase:` OR `source: handoff-bundle` OR `source: alignment-check`
+- `docs/ai/prompts/prompt-b-product-build.md` updated: "a session-derived equivalent" replaced with the named helper, with explicit guidance not to write the file by hand

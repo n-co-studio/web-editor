@@ -9,7 +9,7 @@ Verification details: `.claude/agents/qa-verifier.md`
 | Gate | Checks |
 |------|--------|
 | **A1 Decision Compliance** | All applicable decisions identified and followed. Conflicts → propose new decision record before committing. Mechanically enforced via trigger parser: decisions with `## Triggers` sections are matched against staged files and `+` diff lines — triggered decisions must be declared in `Decisions:` git trailer. Blocking (enforced by `docs/ai/decisions/.a1-triggers-enforced` sentinel). New decisions must include a `## Triggers` section. |
-| **A2 Process** | Plan exists before code. Changes explainable (what + why). Session log updated at close. Scope >100 lines blocks commit unless `plan-approved` state file contains `large-scope: true`. Hotfix branches: A2 scope relaxed (check skipped). |
+| **A2 Process** | Plan exists before code. Changes explainable (what + why). Session log updated at close. Scope >100 lines blocks commit unless `plan-approved` state file contains `large-scope: true`. Enforced uniformly on all branch types (including hotfix); headless sessions satisfy via `_headless-plan-approve.sh` which always writes `large-scope: true`. |
 | **A3 Quality** (if tooling exists) | Formatter run. Lint passes. Build/compile passes. **A3.3 Build verification**: TypeScript type-check passes (`tsc --noEmit --incremental`). Catches broken imports, missing exports, and type contract violations. Skips silently when `tsconfig.json` is absent. Override: `SKIP_BUILD_CHECK=1`. **A3.4 Functional verification**: In headless/auto mode (no human op-review backstop), runs build/pack/test scripts discovered from `package.json` (`build`, `build:pack`, `test`, `verify`) plus `npm pack --dry-run`. Blocking when `CLAUDE_HEADLESS=1` or phase mode is `auto`; advisory otherwise. Writes `functional-verified` state file on pass. Skips silently when `package.json` absent. Override: `SKIP_FUNC_CHECK=1`. Per-command timeout: `REPO_OS_FUNC_CHECK_TIMEOUT` (default 120s). Decision 0044. |
 | **A4 Safety** | No secrets (tokens, keys, credentials, private URLs). No PII in logs/fixtures. High-risk pattern detection: staged files matching risk paths (`auth`, `login`, `session`, `payment`, `billing`, `crypto`, `migration`, `schema`) or containing risk content (`password`, `secret`, `token`) require Reviewer + Security sign-off. Test/fixture/mock paths and governance docs (`docs/ai/`, `.claude/`, `AI.md`, `CLAUDE.md`, `repo-os-explainer.html`) excluded from high-risk scanning (A4 secret scanning still applies to all files). **Automation-specific (A4-auto)**: when `Automation: runner` trailer is present, A4 additionally covers outbound network calls added without brief justification (curl/wget/fetch), new package dependencies added without brief instruction, and writes outside the repository root. Mechanical enforcement via permission profile blocklists; review-time enforcement via security-privacy agent's Automation Runtime checks. |
 | **A5 Cohesion** (standard+ branches) | Two state files — both must be APPROVED. **Cohesion check**: Critic reviewed diff for internal codebase coherence. All critical findings resolved. Re-run clean after fixes. `cohesion-reviewed` state file must exist with `GATE_RESULT: APPROVED`. **Diff-review check**: Critic reviewed staged changes for mechanical bugs — broken imports, missing exports, type contract violations, null/undefined access, logic errors. `diff-review-complete` state file must exist with `GATE_RESULT: APPROVED`. **Default dispatch (Decision 0039)**: a single Critic call in combined mode emits both `## Cohesion Brief` and `## Diff-Review Brief` sections (each with its own `GATE_RESULT:`); `state-writer.sh` writes both state files from that one SubagentStop event. Single-mode dispatches (cohesion only, or diff-review only with `MODE: diff-review` sentinel) remain valid for targeted re-runs after a fix and as backward-compatible legacy outputs. When a task contract is present (Decision 0020), cohesion review also includes contract verification — Critic evaluates each `verification:` criterion as VERIFIED/UNVERIFIED/INCONCLUSIVE (advisory, not blocking). Session-type-aware: only enforced for session types whose phase sequence includes `review`. Override: `REPO_OS_RECOVER=1`. |
@@ -27,15 +27,15 @@ Gate A1's trigger parser is gated by the sentinel file `docs/ai/decisions/.a1-tr
 
 The trigger parser uses a compiled index at `docs/ai/decisions/.a1-trigger-index` for fast matching. When the index is present, the parser reads it instead of parsing each decision file individually (eliminates ~80 subprocess forks per commit). Falls back to file-by-file parsing when the index is absent.
 
-**Format:** `decision_id|path_regex|keywords` (pipe-delimited, one line per path pattern per decision). See the index file header for the full regeneration script.
+**Format:** The index begins with a header comment block (lines starting with `#`), followed by pipe-delimited data rows: `decision_id|path_regex|keywords`. The header includes the regenerate command and a `digest:` line used for content-based staleness detection (see below).
 
 **Regenerate after adding or modifying decision triggers:**
 
 ```bash
-.claude/.automation/lib/rebuild-trigger-index.sh
+bash .claude/.automation/lib/rebuild-trigger-index.sh
 ```
 
-A staleness warning is emitted when any decision file has a newer modification time than the index. The index should be committed (tracked, not gitignored).
+**Staleness detection:** A two-tier check runs on every commit. Tier 1 (cheap): if no decision file is newer than the index by mtime, the index is current and no digest is computed. Tier 2 (only when Tier 1 fires): the gate recomputes a SHA-256 digest over the `## Triggers` sections of all decision files (in locale-independent sorted order) and compares it to the digest stored in the index header. A warning fires only when the digests differ — i.e. when trigger content has genuinely changed. This eliminates false positives from git checkout mtime-shuffling (the common case in worktree sessions, Decision t-0033). When no sha256 tool is available, the gate falls back to mtime-only behaviour. The index should be committed (tracked, not gitignored).
 
 ## B) Push Gates
 
@@ -57,7 +57,7 @@ Branch type determines which gates apply and at what strictness.
 | `release/*` | Release candidates | All gates (A + B) + release checklist (C gates). Reviewer + Security required on every merge. |
 | `feature/*` | New functionality | Standard gates (A + B). Normal workflow. |
 | `fix/*` | Bug fixes | Standard gates (A + B). Normal workflow. |
-| `hotfix/*` | Urgent production fixes | Expedited: A2 scope limit relaxed, A5 skipped (no review phase in hotfix sequence). A1, A3, A4 still enforced. Push gates still apply. |
+| `hotfix/*` | Urgent production fixes | Expedited: A2 enforced (large-scope: true in plan-approved satisfies it; headless sessions get this automatically), A5 skipped (no review phase in hotfix sequence). A1, A3, A4 still enforced. Push gates still apply. |
 | `experiment/*` | Spikes, prototypes, exploration | A4 (safety) only. No push to main without full gates. Must not be merged — rewrite into `feature/*` branch. See Prompt 0.5 for prototyping tiers (Napkin / Spike / PoC). |
 
 **Naming convention:** `<category>/<short-description>` (e.g., `feature/user-auth`, `hotfix/stripe-webhook-fix`).
@@ -68,6 +68,11 @@ Branch type determines which gates apply and at what strictness.
 
 ### Conditional Gates
 Project-specific gates defined in decision records or project docs. When their trigger conditions are met, they block commits or pushes. Examples: performance benchmarks, API compatibility checks, migration validation.
+
+**KG Update Gate** (template mode only — Decision 0034 Amendment 7): When governance files (`.claude/hooks/`, `.claude/tools/`, `docs/ai/decisions/`, `docs/ai/prompts/`, `.claude/agents/`) are staged in a template-mode session:
+- **COVERAGE**: staged file has no node in `graph.yaml` or `product-graph.yaml` → blocked. Recovery: `.claude/tools/kg-cover.sh <file>...` then re-stage.
+- **FRESHNESS**: staged file has a node, but no graph file is staged and no `kg-updated` session marker present → blocked. Recovery: stage a graph update or run `kg-cover.sh`.
+Six-branch exemption matrix downgrades to advisory: audit session, parallel tg-delta, `experiment/*` branch, non-template mode, `REPO_OS_RECOVER=1`, `REPO_OS_SKIP_KG_GATE=1` (interactive only).
 
 ### Release Gates
 Apply to `release/*` branches before merge to `main`:
@@ -112,7 +117,7 @@ Which gates apply varies by session type. Enforced at `verify`/`commit` phases. 
 | Session Types | Gate Profile |
 |---------------|-------------|
 | `standard`, `taskgroup`, `taskgroup-merge` | Full gates (A1–A6, B1–B3). A5 includes both cohesion-reviewed and diff-review-complete. A6 (including A6.3) applies only to taskgroup/taskgroup-merge |
-| `hotfix` | Expedited (A2 scope relaxed, A5 skipped — no review phase in hotfix sequence) |
+| `hotfix` | Expedited (A2 enforced uniformly, A5 skipped — no review phase in hotfix sequence) |
 | `experiment`, `prototype-*` | A4 safety only |
 | `spec-fresh`, `spec-update`, `advisory-init`, `advisory-reinit` | Advisory only (governance evidence at close) |
 | `audit` | Read-only (no gates unless deferrals create file changes) |

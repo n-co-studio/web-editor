@@ -112,6 +112,7 @@ cleanup_session_files() {
     _delete_if_owned "$state_dir/security-signed" "$closing_sid"
     _delete_if_owned "$state_dir/pragmatist-signed" "$closing_sid"
     _delete_if_owned "$state_dir/functional-verified" "$closing_sid"
+    _delete_if_owned "$state_dir/kg-updated" "$closing_sid"
     _delete_if_owned "$state_dir/phase-state" "$closing_sid"
     _delete_if_owned "$state_dir/phase-state.gates" "$closing_sid"
 

@@ -757,6 +757,43 @@ _run_single_entry() {
     if git worktree add "$worktree_dir" "$_SETUP_BRANCH" 2>/dev/null; then
       _CURRENT_WORKTREE_DIR="$worktree_dir"
       launch_dir="$worktree_dir"
+      # Propagate the operating mode into the worktree. `.claude/repo-mode` is
+      # gitignored (Decision 0024 — child repos keep their own mode), so it is
+      # NOT carried over by `git worktree add`. Without it the mode guard falls
+      # back to its `child` default inside every headless worktree, which in a
+      # template repo blocks legitimate writes to `.claude/hooks/` and invites
+      # agents to route around write-guard instead. Copying preserves whatever
+      # the parent declares rather than hardcoding a mode; this runs in the
+      # runner before the session launches, so the immune-path rule in Decision
+      # t-0012 §4 (which governs agent tool-call writes) does not apply.
+      if [ -f "$REPO_ROOT/.claude/repo-mode" ]; then
+        mkdir -p "$worktree_dir/.claude" 2>/dev/null || true
+        if ! cp "$REPO_ROOT/.claude/repo-mode" "$worktree_dir/.claude/repo-mode" 2>/dev/null; then
+          # Warn loudly — silently continuing reproduces the exact bug this guards.
+          echo "WARNING: Failed to copy .claude/repo-mode into $worktree_dir — mode guard will default to 'child' in this session" >&2
+        fi
+      fi
+      # Mirror plan-approved into the worktree state dir.
+      # Decision 0028 (Amendment 2026-08-07): hooks inside the worktree session
+      # resolve _REPO_OS_ROOT to the worktree root (settings.json uses relative
+      # paths, so BASH_SOURCE[0] = worktree CWD). get_session_state_dir() in the
+      # agent therefore targets <worktree>/.claude/.state/wt-sessions/{sid}/,
+      # not the main repo path written by state_manager_setup above.
+      # Mirroring plan-approved closes the two-root divergence without requiring
+      # agents to fall back to a different root path.
+      local wt_state_dir="$worktree_dir/.claude/.state/wt-sessions/${REPO_OS_SESSION_ID}"
+      if mkdir -p "$wt_state_dir" 2>/dev/null; then
+        local main_plan_approved="${REPO_ROOT}/.claude/.state/wt-sessions/${REPO_OS_SESSION_ID}/plan-approved"
+        if [ -f "$main_plan_approved" ]; then
+          if ! cp "$main_plan_approved" "$wt_state_dir/plan-approved" 2>/dev/null; then
+            echo "WARNING: Failed to mirror plan-approved into worktree state dir $wt_state_dir — advance_phase(build) may require manual recovery" >&2
+          fi
+        else
+          echo "WARNING: main repo plan-approved not found at $main_plan_approved — state_manager_setup may not have run" >&2
+        fi
+      else
+        echo "WARNING: Failed to create worktree state dir $wt_state_dir — advance_phase(build) will find no plan-approved" >&2
+      fi
     else
       echo "ERROR: Failed to create worktree at $worktree_dir for branch $_SETUP_BRANCH" >&2
       _RESULT_OUTCOME="failed:worktree-creation"
@@ -947,6 +984,7 @@ _solo_merge_if_needed() {
         local _merge_ok=false
         local _merge_conflict=false
         local _conflict_files=""
+        local _pre_merge_sha=""
         if is_full_worktree_session; then
           # Worktree merge path (Decision 0030)
           local _main_repo="$REPO_ROOT"
@@ -977,6 +1015,7 @@ _solo_merge_if_needed() {
           local _main_br
           _main_br=$(git -C "$_main_repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
           if [ "$_main_br" = "main" ]; then
+            _pre_merge_sha=$(git -C "$_main_repo" rev-parse HEAD 2>/dev/null || echo "")
             if git -C "$_main_repo" merge --ff-only "$entry_current_branch" 2>/dev/null; then
               _merge_ok=true
             elif git -C "$_main_repo" merge --no-ff -m "Merge $entry_current_branch (auto)" "$entry_current_branch" 2>/dev/null; then
@@ -991,6 +1030,7 @@ _solo_merge_if_needed() {
           fi
           _release_runner_merge_lock
         elif git checkout main 2>/dev/null; then
+          _pre_merge_sha=$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo "")
           if git merge --ff-only "$entry_current_branch" 2>/dev/null; then
             _merge_ok=true
           else
@@ -1010,12 +1050,50 @@ _solo_merge_if_needed() {
             record_closed_branch "$entry_current_branch"
             delete_merged_session_branch "$entry_current_branch" "${_main_repo:-}"
           fi
+          # Detect ref-move anomaly: if main HEAD was unchanged by the merge,
+          # a 'git branch -f main' ref-move likely preceded this call. Log loudly.
+          local _post_merge_sha
+          _post_merge_sha=$(git -C "${_main_repo:-$REPO_ROOT}" rev-parse HEAD 2>/dev/null || echo "")
+          if [ -n "$_pre_merge_sha" ] && [ "$_pre_merge_sha" = "$_post_merge_sha" ]; then
+            echo "WARNING: Solo merge: 'Already up to date' — main HEAD unchanged by merge of '$entry_current_branch'. Possible prior ref-move by agent. Applying working-tree sync." >&2
+          fi
           echo "Solo merge: $entry_current_branch → main (success)" >&2
-          # Sync main repo index/working tree after worktree merge (Decision 0030)
-          # _main_repo is only set in the worktree branch — non-empty check is the discriminator
-          if [ -n "${_main_repo:-}" ]; then
-            git -C "$_main_repo" reset HEAD -- . 2>/dev/null || true
-            git -C "$_main_repo" checkout -- . 2>/dev/null || true
+          # Post-merge working-tree sync (unconditional — Decision 0030).
+          # Syncs the main repo index and working tree to HEAD. Critical when a
+          # worktree agent moved the main ref (ref-move): the ref pointer advances
+          # but the main working tree's index/content remain frozen at the old state.
+          # Uses git -C in all cases (_main_repo set = worktree path; absent = runner
+          # is already in REPO_ROOT which IS the main repo — both cases handled).
+          local _sync_dir="${_main_repo:-$REPO_ROOT}"
+          if ! git -C "$_sync_dir" reset HEAD -- . 2>/dev/null; then
+            echo "WARNING: Solo merge: post-merge index reset failed for '$_sync_dir'" >&2
+          fi
+          if ! git -C "$_sync_dir" checkout HEAD -- . 2>/dev/null; then
+            echo "WARNING: Solo merge: post-merge working tree restore failed for '$_sync_dir'" >&2
+          fi
+          # Stale-tree detection backstop (Decision 0030): after sync, verify main
+          # tree matches HEAD. A non-quiet result means sync could not repair the
+          # stale content — escalate rather than silently continue.
+          if ! git -C "$_sync_dir" diff HEAD --quiet 2>/dev/null; then
+            echo "ERROR: Main working tree still stale after post-merge sync — index/tree differ from HEAD. Merged code is committed but absent from disk. Repair: 'git -C $_sync_dir checkout HEAD -- . && git -C $_sync_dir clean -fd'" >&2
+            local _esc_dir="$REPO_ROOT/.claude/.automation/escalations"
+            mkdir -p "$_esc_dir" 2>/dev/null || true
+            local _stale_esc_id="esc-stale-main-$(date +%Y%m%d-%H%M%S)-$$"
+            {
+              printf 'escalation:\n'
+              printf '  id: "%s"\n' "$_stale_esc_id"
+              printf '  queue_entry_id: "%s"\n' "$brief_id"
+              printf '  type: "gate-failure"\n'
+              printf '  severity: "blocking"\n'
+              printf '  phase_at_exit: "close"\n'
+              printf '  tag_at_exit: "close"\n'
+              printf '  message: "Main working tree stale after solo merge sync — index/tree differ from HEAD. Merged code committed but absent from disk (likely caused by prior ref-move from worktree)."\n'
+              printf '  context: "sync_dir: %s, branch: %s"\n' "$_sync_dir" "$entry_current_branch"
+              printf '  created_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              printf '  resolved: false\n'
+              printf '  resolution: ""\n'
+            } > "$_esc_dir/${_stale_esc_id}.yaml" 2>/dev/null || true
+            echo "Escalation written: $_stale_esc_id" >&2
           fi
           # Push to remote — push_on_complete or advisory fallback
           local _repo_mode_file="$REPO_ROOT/.claude/repo-mode"

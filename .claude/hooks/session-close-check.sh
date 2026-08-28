@@ -1047,27 +1047,38 @@ if [ "$IS_RETRY" = false ]; then
   fi
 fi
 
-# --- Knowledge graph update reminder (Decision 0034, Amendment 3) ---
-# REQUIRE-attempt write stance: fires for Full (standard), Expedited (hotfix), Light (editor-live).
-# Audit (Prompt C, session type "audit") has no write requirement — excluded.
-# Two-graph architecture: check both template graph (graph.yaml) and product graph (product-graph.yaml)
+# --- Knowledge graph update check (Decision 0034, Amendment 7) ---
+# Blocking enforcement is at commit time (pre-commit-gates.sh KG Update Gate).
+# This close-check is advisory only: fires when modified files have KG nodes but no
+# kg-updated session marker is present (gate may not have been triggered yet).
+# Audit sessions excluded — no write requirement.
+# Two-graph architecture: check both template graph (graph.yaml) and product graph (product-graph.yaml).
 KG_SESSION_TYPE=$(infer_session_type)
 KG_TEMPLATE_GRAPH="$REPO_ROOT/docs/ai/knowledge-graph/graph.yaml"
 KG_PRODUCT_GRAPH="$REPO_ROOT/docs/ai/knowledge-graph/product-graph.yaml"
 if [ "$KG_SESSION_TYPE" != "audit" ] && { [ -f "$KG_TEMPLATE_GRAPH" ] || [ -f "$KG_PRODUCT_GRAPH" ]; }; then
-  # Check if any modified files have nodes in either graph
-  KG_MODIFIED_FILES=$(git -C "$REPO_ROOT" diff --cached --name-only 2>/dev/null || git -C "$REPO_ROOT" diff --name-only HEAD 2>/dev/null || true)
-  KG_HAS_GRAPH_NODE=false
-  for kgf in $KG_MODIFIED_FILES; do
-    for kg_file in "$KG_TEMPLATE_GRAPH" "$KG_PRODUCT_GRAPH"; do
-      if [ -f "$kg_file" ] && grep -q "path: \"${kgf}\"" "$kg_file" 2>/dev/null; then
-        KG_HAS_GRAPH_NODE=true
-        break 2
-      fi
+  # Suppress advisory when kg-updated session marker is present (gate passed this session)
+  _KG_PASS_MARKER="$_SESSION_STATE_DIR/kg-updated"
+  _KG_ALREADY_PASSED=false
+  if [ -f "$_KG_PASS_MARKER" ] && grep -q '^result: PASSED' "$_KG_PASS_MARKER" 2>/dev/null; then
+    _KG_ALREADY_PASSED=true
+  fi
+  if [ "$_KG_ALREADY_PASSED" = false ]; then
+    KG_MODIFIED_FILES=$(git -C "$REPO_ROOT" diff --cached --name-only 2>/dev/null || git -C "$REPO_ROOT" diff --name-only HEAD 2>/dev/null || true)
+    KG_HAS_GRAPH_NODE=false
+    KG_NODE_FILES=""
+    for kgf in $KG_MODIFIED_FILES; do
+      for kg_file in "$KG_TEMPLATE_GRAPH" "$KG_PRODUCT_GRAPH"; do
+        if [ -f "$kg_file" ] && grep -qF "path: \"${kgf}\"" "$kg_file" 2>/dev/null; then
+          KG_HAS_GRAPH_NODE=true
+          KG_NODE_FILES="${KG_NODE_FILES:+$KG_NODE_FILES }$kgf"
+          break
+        fi
+      done
     done
-  done
-  if [ "$KG_HAS_GRAPH_NODE" = true ]; then
-    _add_advisory "Advisory: Modified files have knowledge graph nodes — update the appropriate graph before close. Template files → graph.yaml, product files → product-graph.yaml. Cross-layer edges go in the source node's graph. See Decision 0034."
+    if [ "$KG_HAS_GRAPH_NODE" = true ]; then
+      _add_advisory "Advisory: Modified files have knowledge graph nodes but no kg-updated marker found — ensure graph.yaml/product-graph.yaml is updated before commit. Files: $KG_NODE_FILES. The KG Update Gate (Amendment 7) will block commit if graph not staged or updated this session. See Decision 0034."
+    fi
   fi
 fi
 
@@ -1263,6 +1274,8 @@ if [ "$SOLO" = "true" ] && [ "$BRANCH_SEALED" = false ]; then
         local _main_branch
         _main_branch=$(git -C "$_main_repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
         if [ "$_main_branch" = "main" ]; then
+          local _wt_pre_merge_sha
+          _wt_pre_merge_sha=$(git -C "$_main_repo" rev-parse HEAD 2>/dev/null || echo "")
           if git -C "$_main_repo" merge --ff-only "$MERGE_BRANCH" 2>/dev/null; then
             MERGE_OK=true
           elif git -C "$_main_repo" merge --no-ff -m "Merge $MERGE_BRANCH" "$MERGE_BRANCH" 2>/dev/null; then
@@ -1270,6 +1283,47 @@ if [ "$SOLO" = "true" ] && [ "$BRANCH_SEALED" = false ]; then
           fi
           if [ "$MERGE_OK" = false ]; then
             git -C "$_main_repo" merge --abort 2>/dev/null || true
+          fi
+          if [ "$MERGE_OK" = true ]; then
+            # Detect ref-move anomaly: unchanged HEAD means the branch was
+            # already an ancestor or a prior ref-move made main point there.
+            local _wt_post_merge_sha
+            _wt_post_merge_sha=$(git -C "$_main_repo" rev-parse HEAD 2>/dev/null || echo "")
+            if [ -n "$_wt_pre_merge_sha" ] && [ "$_wt_pre_merge_sha" = "$_wt_post_merge_sha" ]; then
+              echo "WARNING: stop-hook merge: 'Already up to date' — main HEAD unchanged by merge of '$MERGE_BRANCH'. Possible prior ref-move by agent. Applying working-tree sync." >&2
+            fi
+            # Post-merge working-tree sync (Decision 0030): sync main repo index
+            # and working tree to HEAD. A ref-move from the worktree leaves index/
+            # tree frozen at old state even though HEAD advanced. Errors are logged
+            # (not silenced) so staleness is never invisible.
+            if ! git -C "$_main_repo" reset HEAD -- . 2>/dev/null; then
+              echo "WARNING: stop-hook merge: post-merge index reset failed for '$_main_repo'" >&2
+            fi
+            if ! git -C "$_main_repo" checkout HEAD -- . 2>/dev/null; then
+              echo "WARNING: stop-hook merge: post-merge working tree restore failed for '$_main_repo'" >&2
+            fi
+            # Stale-tree detection backstop: verify sync was effective.
+            if ! git -C "$_main_repo" diff HEAD --quiet 2>/dev/null; then
+              echo "ERROR: Main working tree still stale after post-merge sync (stop hook) — index/tree differ from HEAD. Merged code committed but absent from disk. Repair: 'git -C $_main_repo checkout HEAD -- . && git -C $_main_repo clean -fd'" >&2
+              local _esc_dir="$_main_repo/.claude/.automation/escalations"
+              mkdir -p "$_esc_dir" 2>/dev/null || true
+              local _stale_esc_id="esc-stale-main-$(date +%Y%m%d-%H%M%S)-stop"
+              {
+                printf 'escalation:\n'
+                printf '  id: "%s"\n' "$_stale_esc_id"
+                printf '  queue_entry_id: "stop-hook"\n'
+                printf '  type: "gate-failure"\n'
+                printf '  severity: "blocking"\n'
+                printf '  phase_at_exit: "close"\n'
+                printf '  tag_at_exit: "close"\n'
+                printf '  message: "Main working tree stale after worktree solo merge sync (stop hook) — index/tree differ from HEAD. Merged code committed but absent from disk."\n'
+                printf '  context: "main_repo: %s, branch: %s"\n' "$_main_repo" "$MERGE_BRANCH"
+                printf '  created_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                printf '  resolved: false\n'
+                printf '  resolution: ""\n'
+              } > "$_esc_dir/${_stale_esc_id}.yaml" 2>/dev/null || true
+              echo "Escalation written: $_stale_esc_id" >&2
+            fi
           fi
         else
           echo "Advisory: Main repo is on '$_main_branch', not 'main' — cannot merge from worktree. Merge manually." >&2
@@ -1399,6 +1453,14 @@ if [ "$IS_RETRY" = false ]; then
   fi
 fi
 
+# --- Evidence Manifest Integrity Check (advisory — never blocks) ---
+# Compare current evidence file hashes against the manifest captured at init_phase.
+# Out-of-tree location earns the stronger claim: findings indicate writes not made
+# through a sanctioned hook. See known-issues.md R2 for the bounded guarantee.
+if [ "$IS_RETRY" = false ]; then
+  compare_manifest 2>&1 | grep -v '^$' >&2 || true
+fi
+
 # --- Analytics: log successful close and register repo ---
 SESSION_TYPE=$(infer_session_type)
 log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "session_complete" "$SESSION_TYPE" || true
@@ -1415,6 +1477,8 @@ update_baseline
 
 # --- Final cleanup ---
 cleanup_session
+# Clean out-of-tree evidence manifest (session-scoped; no accumulation in repo).
+cleanup_evidence_manifest "$REPO_ROOT" || true
 
 # --- KPI summary (Phase 3c) — normal close path ---
 _emit_kpi_summary 0 "$STOP_ATTEMPT" "" "$SESSION_TYPE"

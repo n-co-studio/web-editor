@@ -1,3 +1,6 @@
+# A1 trigger index — generated artifact. Do not hand-edit.
+# Regenerate: bash .claude/.automation/lib/rebuild-trigger-index.sh
+# digest: 4f6f5f839e5f12d9dbd0c14ff20cb923cfbf5351c647cbe74ac50e6e6184280e
 0001|AI\.md|prompt system, verification gate, session-based
 0001|docs/ai/prompts/prompt-.*\.md|prompt system, verification gate, session-based
 0002|docs/ai/decisions/.*\.md|mandatory, commit-blocking
@@ -91,3 +94,6 @@
 0044|\.claude/hooks/pre-commit-gates\.sh|functional-verified, SKIP_FUNC_CHECK, REPO_OS_FUNC_CHECK_TIMEOUT, IS_NO_REVIEW_BACKSTOP, A3.4
 0044|\.claude/hooks/_cleanup-helper\.sh|functional-verified, SKIP_FUNC_CHECK, REPO_OS_FUNC_CHECK_TIMEOUT, IS_NO_REVIEW_BACKSTOP, A3.4
 0044|\.claude/.state/functional-verified|functional-verified, SKIP_FUNC_CHECK, REPO_OS_FUNC_CHECK_TIMEOUT, IS_NO_REVIEW_BACKSTOP, A3.4
+0045|\.claude/hooks/_cleanup-helper\.sh|delete_merged_session_branch, merged branch cleanup, branch deletion on close, branch accumulation
+0045|\.claude/hooks/session-close-check\.sh|delete_merged_session_branch, merged branch cleanup, branch deletion on close, branch accumulation
+0045|\.claude/\.automation/runner\.sh|delete_merged_session_branch, merged branch cleanup, branch deletion on close, branch accumulation

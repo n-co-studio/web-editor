@@ -64,3 +64,32 @@ Decision 0028 **for full worktree sessions only**. Decision 0028 remains in effe
 
 ## Override
 `REPO_OS_SESSION_ID` — set by the worktree session launcher. Must not be set manually for subagent contexts.
+
+## Worktree Ref-Move Invariant (Amendment — 2026-08-07)
+
+**A worktree session MUST NEVER move a branch ref that is checked out in another worktree.**
+
+Specifically, the following commands are prohibited from a worktree when the target branch is `main` (which is always checked out in the main worktree):
+
+- `git branch -f main <ref>` / `git branch --force main <ref>`
+- `git checkout -B main`
+- `git update-ref refs/heads/main <ref>`
+- `git fetch . <ref>:main`
+
+### Why this is fatal
+
+When `main` is moved by a ref-update (not a `git checkout` or `git merge` that updates the worktree), only the commit pointer changes. The main working tree's index and content remain frozen at the prior state. `git status` on main then shows staged reverts of the newly-merged work, and the merged code is absent from disk — indistinguishable from a deliberate staged revert. This caused merged governance code to be silently inactive.
+
+### Correct close path for worktree sessions
+
+Worktree sessions should use one of:
+
+1. **Let the stop hook merge** (preferred for solo sessions): `session-close-check.sh` merges via `git -C <main-repo> merge` and syncs the main working tree. Call `write_merge_signal '<branch>'` to signal that the agent close phase is done and skip a redundant runner merge.
+
+2. **Runner merge**: `runner.sh::_solo_merge_if_needed()` merges via `git -C <main-repo> merge` with unconditional post-merge sync and stale-tree verification.
+
+Both paths run `git reset HEAD -- . && git checkout -- .` on the main repo after every merge (real or apparent) and verify via `git diff HEAD --quiet`. A stale result writes a `gate-failure` escalation.
+
+### Mechanical enforcement
+
+`bash-guard.sh` Phase 1e blocks the ref-move commands listed above with `GATE-RECOVERABLE` when the caller's `git rev-parse --git-dir` path contains `"worktrees"`. Recovery bypass: `REPO_OS_RECOVER=1`.

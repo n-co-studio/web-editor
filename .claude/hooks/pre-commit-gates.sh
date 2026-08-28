@@ -73,6 +73,17 @@ _REPO_OS_STDIN_SID="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev
 
 COMMIT_CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null || true)
 
+# --- Self-filter: skip the full gate chain for non-commit commands ---
+# The matcher is now "Bash" (fires on every Bash call); guard against running
+# A1-A6 + secret scan on unrelated commands like 'ls' or 'echo'.
+# Permissive match: cd ... && git commit, git -C . commit, etc. all pass.
+# Edge case: 'git commit' in a -m message string is accepted as a false positive
+# (cheap to re-run and full message parsing adds fragility).
+case "$COMMIT_CMD" in
+  *"git commit"*) ;;
+  *) exit 0 ;;
+esac
+
 # --- REPO_OS_RECOVER override (env var or file-based signal) ---
 RECOVER_SIGNAL_FILE="$REPO_ROOT/.claude/.state/.recover-signal"
 if [ "${REPO_OS_RECOVER:-0}" = "1" ]; then
@@ -148,7 +159,7 @@ if [ "$IS_EXPERIMENT" = true ]; then
   if [ "$FAILED" -ne 0 ]; then
     log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "$BLOCKED_REASONS"
     echo "Commit blocked by pre-commit gate check." >&2
-    exit 1
+    exit 2
   fi
   log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "experiment_branch"
   exit 0
@@ -178,7 +189,7 @@ if [ "$IS_EDITOR_LIVE_LOOP" = true ]; then
   if [ "$FAILED" -ne 0 ]; then
     log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "$BLOCKED_REASONS"
     echo "Commit blocked by pre-commit gate check." >&2
-    exit 1
+    exit 2
   fi
   log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "editor_live_loop"
   exit 0
@@ -459,6 +470,7 @@ if [ "$SKIP_STATE" = false ]; then
           printf 'timestamp: %s\nsession_id: %s\nresult: PASSED\n' \
             "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_A34_CURRENT_SID" \
             > "$STATE_DIR/functional-verified"
+          refresh_manifest_entry "functional-verified" 2>/dev/null || true
         else
           # Blocking in headless/auto; advisory otherwise
           if [ "$IS_NO_REVIEW_BACKSTOP" = true ]; then
@@ -509,6 +521,13 @@ if [ "$SKIP_STATE" = false ]; then
     log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_cohesion_stale_session"
   elif [ "$_A5_SKIP" = false ] && [ -f "$STATE_DIR/cohesion-reviewed" ] && \
        _validate_state_session_id "$STATE_DIR/cohesion-reviewed"; then
+    # Dispatch evidence check: reject verdict files lacking dispatch_phase field.
+    _PCG_COHESION_DISPATCH_PHASE=$(grep '^dispatch_phase:' "$STATE_DIR/cohesion-reviewed" 2>/dev/null | sed 's/^dispatch_phase: *//' | head -1 || true)
+    if [ -z "$_PCG_COHESION_DISPATCH_PHASE" ]; then
+      echo "GATE-RECOVERABLE: A5 cohesion-reviewed lacks dispatch_phase — not produced by a real agent dispatch. NEXT: Re-dispatch Critic in cohesion mode. (override: REPO_OS_RECOVER=1)" >&2
+      block "A5_cohesion_no_dispatch_evidence"
+      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A5_cohesion_no_dispatch_evidence"
+    fi
     # A5 hardening: block if cohesion-reviewed contains GATE_RESULT: BLOCKED
     # This enforces that critical cohesion findings were resolved before committing.
     _PCG_COHESION_RESULT=$(grep '^GATE_RESULT: ' "$STATE_DIR/cohesion-reviewed" 2>/dev/null | sed 's/^GATE_RESULT: *//' | awk '{print $1}' | head -1 || true)
@@ -540,6 +559,13 @@ if [ "$SKIP_STATE" = false ]; then
     log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_diff_review_stale_session"
   elif [ "$_A5_SKIP" = false ] && [ -f "$STATE_DIR/diff-review-complete" ] && \
        _validate_state_session_id "$STATE_DIR/diff-review-complete"; then
+    # Dispatch evidence check: reject verdict files lacking dispatch_phase field.
+    _PCG_DIFF_DISPATCH_PHASE=$(grep '^dispatch_phase:' "$STATE_DIR/diff-review-complete" 2>/dev/null | sed 's/^dispatch_phase: *//' | head -1 || true)
+    if [ -z "$_PCG_DIFF_DISPATCH_PHASE" ]; then
+      echo "GATE-RECOVERABLE: A5 diff-review-complete lacks dispatch_phase — not produced by a real agent dispatch. NEXT: Re-dispatch Critic in diff-review mode. (override: REPO_OS_RECOVER=1)" >&2
+      block "A5_diff_no_dispatch_evidence"
+      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A5_diff_no_dispatch_evidence"
+    fi
     _PCG_DIFF_REVIEW_RESULT=$(grep '^GATE_RESULT: ' "$STATE_DIR/diff-review-complete" 2>/dev/null | sed 's/^GATE_RESULT: *//' | awk '{print $1}' | head -1 || true)
     if [ "$_PCG_DIFF_REVIEW_RESULT" = "BLOCKED" ]; then
       echo "GATE-RECOVERABLE: A5 diff-review blocked — Critic found critical mechanical bugs. NEXT: Resolve all critical diff-review findings and re-run Critic in diff-review mode. (override: REPO_OS_RECOVER=1)" >&2
@@ -557,6 +583,16 @@ if [ "$SKIP_STATE" = false ]; then
     echo "GATE-RECOVERABLE: qa-verified state file has stale session_id. NEXT: Re-run QA verification in this session. (override: REPO_OS_RECOVER=1)" >&2
     block "state_qa_stale_session"
     log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_qa_stale_session"
+  elif [ -f "$STATE_DIR/qa-verified" ] && _validate_state_session_id "$STATE_DIR/qa-verified"; then
+    # Dispatch evidence check: reject verdict files lacking dispatch_phase field.
+    # Files written by state-writer.sh always contain this field (written since
+    # this fix). Absence means the file was not produced via a real agent dispatch.
+    _PCG_QA_DISPATCH_PHASE=$(grep '^dispatch_phase:' "$STATE_DIR/qa-verified" 2>/dev/null | sed 's/^dispatch_phase: *//' | head -1 || true)
+    if [ -z "$_PCG_QA_DISPATCH_PHASE" ]; then
+      echo "GATE-RECOVERABLE: qa-verified lacks dispatch_phase — not produced by a real agent dispatch. NEXT: Re-dispatch QA verification agent. (override: REPO_OS_RECOVER=1)" >&2
+      block "state_qa_no_dispatch_evidence"
+      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_qa_no_dispatch_evidence"
+    fi
   fi
 
   # A3.4 functional-verified binding gate (defense-in-depth for headless/auto)
@@ -580,12 +616,28 @@ if [ "$SKIP_STATE" = false ]; then
   # Phase-state-aware: only enforce when phase-state exists (session initialized).
   # Sessions from before this gate was deployed won't have phase-state, providing
   # backward compatibility without a sentinel file.
-  # Provenance (Decision 0038): pragmatist-signed may be written by state-writer.sh
-  # (Pragmatist Plan-Gating dispatch), by bundle_to_pragmatist_signed (drift-check
-  # path), or by the Orchestrator's deterministic alignment check (Implementation
-  # Design alignment-aligned outcome). All three paths write the same schema with
-  # GATE_RESULT and session_id; the existing presence + session_id check covers
-  # all three uniformly.
+  #
+  # Provenance (Decision 0038 + this session): pragmatist-signed may be written by
+  # three legitimate paths, each stamping a distinct marker:
+  #   Writer 1 — state-writer.sh (Pragmatist Plan-Gating dispatch):
+  #              field: dispatch_phase:
+  #   Writer 2 — bundle_to_pragmatist_signed (Decision 0038 drift-check path):
+  #              field: source: handoff-bundle
+  #   Writer 3 — write_alignment_check_pragmatist_signed (Orchestrator deterministic
+  #              alignment-check, Decision 0038 §7):
+  #              field: source: alignment-check
+  #
+  # After session_id validation, at least one recognised provenance marker must be
+  # present. A file carrying none is rejected as hand-written / forged.
+  # Note: the marker is a provenance signal, not a cryptographic boundary — any
+  # process that can write the state file can write the marker. This raises the bar
+  # from "trivially forgeable" to "deliberately forgeable", which is the actual goal
+  # (Decision t-0004: mechanical enforcement deters, does not cryptographically prevent).
+  #
+  # Backward compatibility: the provenance check lives inside the same
+  # `has_plan_gate && [ -f phase-state ]` guard as the existing checks. Sessions
+  # that pre-date the phase-state sentinel (before this gate was deployed) will
+  # never enter this block, so pre-existing pragmatist-signed files are unaffected.
   if [ "$IS_EDITOR_LIVE_CLOSE" = true ]; then
     : # editor-live never has pragmatist-signed — skip silently
   elif [ "${REPO_OS_SKIP_PRAGMATIST_GATE:-0}" = "1" ]; then
@@ -601,6 +653,29 @@ if [ "$SKIP_STATE" = false ]; then
         echo "GATE-RECOVERABLE: pragmatist-signed state file has stale session_id. NEXT: Re-dispatch Pragmatist in this session. (override: REPO_OS_SKIP_PRAGMATIST_GATE=1)" >&2
         block "state_pragmatist_stale_session"
         log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_pragmatist_stale_session"
+      else
+        # Verdict check: block if Pragmatist verdict was BLOCKED (FUNDAMENTAL-MISMATCH).
+        # This enforces that a blocking pragmatist finding was resolved or overridden
+        # before committing, regardless of which writer produced the file.
+        _PCG_PRAG_RESULT=$(grep '^GATE_RESULT: ' "$STATE_DIR/pragmatist-signed" 2>/dev/null | sed 's/^GATE_RESULT: *//' | awk '{print $1}' | head -1 || true)
+        if [ "$_PCG_PRAG_RESULT" = "BLOCKED" ]; then
+          echo "GATE-RECOVERABLE: pragmatist-signed verdict is BLOCKED — Pragmatist found a FUNDAMENTAL-MISMATCH that was not resolved. NEXT: Revise the plan to address the finding, re-dispatch Pragmatist, or override (Decision 0025 auto-mode: log advisory and proceed requires REPO_OS_SKIP_PRAGMATIST_GATE=1 at commit). (override: REPO_OS_SKIP_PRAGMATIST_GATE=1)" >&2
+          block "state_pragmatist_blocked"
+          log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_pragmatist_blocked"
+        fi
+        # Provenance check: require at least one recognised writer marker.
+        # dispatch_phase: — Writer 1 (state-writer.sh / Pragmatist Plan-Gating dispatch)
+        # source: handoff-bundle — Writer 2 (bundle_to_pragmatist_signed, Decision 0038)
+        # source: alignment-check — Writer 3 (write_alignment_check_pragmatist_signed)
+        _PCG_PRAG_DISPATCH=$(grep '^dispatch_phase:' "$STATE_DIR/pragmatist-signed" 2>/dev/null | head -1 || true)
+        _PCG_PRAG_SOURCE=$(grep '^source:' "$STATE_DIR/pragmatist-signed" 2>/dev/null | sed 's/^source: *//' | head -1 || true)
+        if [ -z "$_PCG_PRAG_DISPATCH" ] && \
+           [ "$_PCG_PRAG_SOURCE" != "handoff-bundle" ] && \
+           [ "$_PCG_PRAG_SOURCE" != "alignment-check" ]; then
+          echo "GATE-RECOVERABLE: pragmatist-signed lacks a recognised provenance marker — not produced by a legitimate writer. Expected one of: dispatch_phase: (Pragmatist dispatch), source: handoff-bundle (bundle path), or source: alignment-check (deterministic alignment-check). NEXT: Dispatch Pragmatist in plan-gating mode (Decision 0025) or use write_alignment_check_pragmatist_signed / bundle_to_pragmatist_signed as appropriate. (override: REPO_OS_SKIP_PRAGMATIST_GATE=1)" >&2
+          block "state_pragmatist_no_provenance"
+          log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_pragmatist_no_provenance"
+        fi
       fi
     fi
   fi
@@ -696,9 +771,11 @@ fi
 
 # ============================================================
 # A2: Process — Scope Check (blocking with large-scope override)
-# Hotfix branches: A2 scope relaxed (skip check entirely)
+# Any diff over 100 lines requires large-scope: true in plan-approved.
+# Headless sessions: _headless-plan-approve.sh always writes large-scope: true.
+# Hotfix sessions: approval phase exists; interactive sessions can obtain approval.
 # ============================================================
-if [ "$SKIP_STATE" = false ] && [ "$IS_HOTFIX" = false ] && [ -n "$STAGED_FILES" ]; then
+if [ "$SKIP_STATE" = false ] && [ -n "$STAGED_FILES" ]; then
   LINES_CHANGED=$(git diff --cached --numstat | awk '{s+=$1+$2} END {print s+0}')
   # Emit scope metric event for trend analysis (even for passing commits)
   log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "A2_scope_check" "lines:$LINES_CHANGED"
@@ -1198,16 +1275,64 @@ if [ -n "$STAGED_FILES" ] && [ -d "$DECISIONS_DIR" ]; then
     # Index format: decision_id|path_regex|keywords (pipe-delimited)
     # Eliminates per-file grep/sed expansion (~80 forks → ~5-10 typical)
 
-    # Staleness guard: warn if any decision file is newer than the index
-    # Check both t-*.md (template decisions, Decision 0022) and 0*.md (child decisions)
+    # Staleness guard: two-tier content-digest check.
+    # Tier 1 (cheap): mtime pre-filter. If no decision file is newer than the index,
+    # the index is definitely current — stop here (common case after a real regenerate).
+    # Tier 2 (only when Tier 1 fires): compare the digest stored in the index header
+    # against a freshly-computed digest of all ## Triggers sections. Warn only when
+    # digests differ — i.e. when triggers have genuinely changed, not merely when git
+    # checkout shuffled mtimes (Decision t-0033: worktree is the default, making
+    # mtime-shuffling on checkout the common case, not the edge case).
+    _A1_MTIME_STALE=0
     for _A1_DF in "$DECISIONS_DIR"/t-*.md "$DECISIONS_DIR"/0*.md; do
       [ -f "$_A1_DF" ] || continue
       if [ "$_A1_DF" -nt "$A1_INDEX" ]; then
-        echo "A1 WARNING: .a1-trigger-index may be stale — regenerate (see index file header for command)" >&2
-        warn "A1_index_stale"
+        _A1_MTIME_STALE=1
         break
       fi
     done
+
+    if [ "$_A1_MTIME_STALE" = "1" ]; then
+      # Tier 2: compare freshly-computed digest to the stored digest in the index header.
+      _A1_STORED_DIGEST=$(grep '^# digest: ' "$A1_INDEX" 2>/dev/null | sed 's/^# digest: *//')
+      if [ -n "$_A1_STORED_DIGEST" ]; then
+        # Detect available sha256 tool (macOS: shasum; Linux/Docker: sha256sum).
+        _A1_DIGEST_TOOL=""
+        if command -v sha256sum >/dev/null 2>&1; then
+          _A1_DIGEST_TOOL="sha256sum"
+        elif command -v shasum >/dev/null 2>&1; then
+          _A1_DIGEST_TOOL="shasum -a 256"
+        fi
+
+        if [ -n "$_A1_DIGEST_TOOL" ]; then
+          # Locale-independent sort matches rebuild-trigger-index.sh exactly.
+          _A1_FRESH_DIGEST=$(
+            LC_ALL=C ls "$DECISIONS_DIR"/t-*.md "$DECISIONS_DIR"/0*.md 2>/dev/null \
+              | LC_ALL=C sort \
+              | while IFS= read -r _f; do
+                  [ -f "$_f" ] || continue
+                  grep -q '^## Triggers' "$_f" || continue
+                  sed -n '/^## Triggers/,/^## /{ /^## Triggers/d; /^## /d; p; }' "$_f"
+                done \
+              | $_A1_DIGEST_TOOL \
+              | awk '{print $1}'
+          )
+          if [ "$_A1_FRESH_DIGEST" != "$_A1_STORED_DIGEST" ]; then
+            echo "A1 WARNING: .a1-trigger-index may be stale — regenerate: bash .claude/.automation/lib/rebuild-trigger-index.sh" >&2
+            warn "A1_index_stale"
+          fi
+          # Digests match → mtimes were shuffled by checkout; index is current. No warning.
+        else
+          # No sha256 tool available — fall back to mtime-based warning.
+          echo "A1 WARNING: .a1-trigger-index may be stale — regenerate: bash .claude/.automation/lib/rebuild-trigger-index.sh" >&2
+          warn "A1_index_stale"
+        fi
+      else
+        # No stored digest (old index format without header) — fall back to mtime warning.
+        echo "A1 WARNING: .a1-trigger-index may be stale — regenerate: bash .claude/.automation/lib/rebuild-trigger-index.sh" >&2
+        warn "A1_index_stale"
+      fi
+    fi
 
     while IFS='|' read -r _A1_DID _A1_PATH _A1_KW; do
       # Skip comments and blank lines
@@ -1427,44 +1552,183 @@ if [ "$SKIP_STATE" = false ] && [ -n "$STAGED_FILES" ]; then
 fi
 
 # ============================================================
-# KG Coverage Advisory (advisory, non-blocking)
-# Warns when committed governance files lack knowledge graph nodes.
-# Scopes to governance paths only — product files use folder-level nodes.
-# Template graph only (Decision 0034 Amendment 2).
-# Decision 0034 excludes KG blocking enforcement.
+# KG Update Gate (blocking — Decision 0034 Amendment 7)
+# Two-half check on staged governance files:
+#   COVERAGE  — a staged file has no node in the applicable graph (blocking).
+#   FRESHNESS — a staged file HAS a node, but no graph file is staged AND no
+#               session-scoped kg-updated marker is present (blocking).
+# Six-branch exemption matrix downgrades to advisory (never blocks):
+#   audit session | parallel tg-delta | experiment/* | graph not writable
+#   in current mode | REPO_OS_RECOVER | REPO_OS_SKIP_KG_GATE
+# FRESHNESS is a presence proxy: it verifies the graph was touched this
+# session, not that the touch was semantically accurate (accepted limitation).
 # ============================================================
 if [ "$SKIP_STATE" = false ] && [ -n "$STAGED_FILES" ]; then
   KG_GRAPH="$REPO_ROOT/docs/ai/knowledge-graph/graph.yaml"
+  KG_PRODUCT_GRAPH="$REPO_ROOT/docs/ai/knowledge-graph/product-graph.yaml"
+  KG_COVER_TOOL="$REPO_ROOT/.claude/tools/kg-cover.sh"
   if [ -f "$KG_GRAPH" ]; then
-    # Governance paths to check (space-delimited prefix list)
     KG_GOV_PATHS='.claude/hooks/ .claude/tools/ docs/ai/decisions/ docs/ai/prompts/ .claude/agents/'
 
-    KG_MISSING_NODES=""
+    # --- Build filtered list of staged governance files ---
+    # Non-entity exclusions: the graph models governance *entities* (hooks, tools,
+    # decisions, prompts, agents). Test artifacts, generated markers, and directory
+    # placeholders are not entities — graphing them yields stub nodes that dilute
+    # kg-relevance.sh scoring without adding signal. Note this forecloses populating
+    # the taxonomy's `tests` relation (Decision 0034 §5) via this gate; test-to-hook
+    # edges must be authored directly.
+    _KG_GOV_STAGED=""
     while IFS= read -r _kg_file; do
       [ -z "$_kg_file" ] && continue
-      # Skip lock/log files (generated artifacts that may land in governance paths)
       case "$_kg_file" in
-        *.lock|*.log) continue ;;
+        *.lock|*.log) continue ;;  # generated artifacts
+        */tests/*)    continue ;;  # test scripts and fixtures
+        */.gitkeep)   continue ;;  # directory placeholders
+        */.[!.]*)     continue ;;  # generated dotfile markers (.a1-trigger-index, etc.)
       esac
-      # Check if file is in a governance path
       _kg_in_gov=false
       for _kg_gov in $KG_GOV_PATHS; do
-        case "$_kg_file" in
-          "$_kg_gov"*) _kg_in_gov=true; break ;;
-        esac
+        case "$_kg_file" in "$_kg_gov"*) _kg_in_gov=true; break ;; esac
       done
       [ "$_kg_in_gov" = false ] && continue
-      # Check if an exact path entry exists in the template graph
-      if ! grep -qF "path: \"$_kg_file\"" "$KG_GRAPH" 2>/dev/null; then
-        KG_MISSING_NODES="${KG_MISSING_NODES:+$KG_MISSING_NODES }$_kg_file"
-      fi
+      _KG_GOV_STAGED="${_KG_GOV_STAGED:+$_KG_GOV_STAGED }$_kg_file"
     done <<< "$STAGED_FILES"
 
-    if [ -n "$KG_MISSING_NODES" ]; then
-      _kg_count=$(echo "$KG_MISSING_NODES" | wc -w | tr -d ' ')
-      echo "Advisory: KG coverage — $_kg_count governance file(s) lack nodes in graph.yaml. Add nodes at session close: $KG_MISSING_NODES" >&2
-      warn "kg_coverage_advisory"
-      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "warn" "$START_MS" "kg_coverage_advisory" "count:$_kg_count"
+    if [ -n "$_KG_GOV_STAGED" ]; then
+      # --- Exemption matrix (any hit → advisory, never block) ---
+      _KG_EXEMPT=false
+      _KG_EXEMPT_REASON=""
+
+      # Exemption 1: audit session (Prompt C read-only — Amendment 3 §3)
+      # get_session_type() comes from _phase-helper.sh (sourced above).
+      # Do NOT use infer_session_type() — it is defined only in
+      # session-close-check.sh, so under `set -euo pipefail` it aborts this
+      # hook with 127, which Claude Code treats as non-blocking. That silently
+      # disabled this gate and every check below it.
+      _KG_STYPE=$(get_session_type 2>/dev/null || echo "unknown")
+      if [ "$_KG_STYPE" = "audit" ]; then
+        _KG_EXEMPT=true; _KG_EXEMPT_REASON="audit_session"
+      fi
+
+      # Exemption 2: parallel task-group delta present (Amendment 5 — must not touch shared graph)
+      if [ "$_KG_EXEMPT" = false ]; then
+        for _kgd in "$REPO_ROOT/.claude/.state/tg-"*"-brief-"*".kg-delta.yaml"; do
+          if [ -f "$_kgd" ]; then
+            _KG_EXEMPT=true; _KG_EXEMPT_REASON="parallel_tg_delta"; break
+          fi
+        done
+      fi
+
+      # Exemption 3: experiment/* branch
+      if [ "$_KG_EXEMPT" = false ] && [ "$IS_EXPERIMENT" = true ]; then
+        _KG_EXEMPT=true; _KG_EXEMPT_REASON="experiment_branch"
+      fi
+
+      # Exemption 4: template graph not writable in current mode
+      # Child mode cannot write graph.yaml (_mode-guard-helper.sh:130 carve-out absent).
+      if [ "$_KG_EXEMPT" = false ]; then
+        _KG_MODE="${REPO_OS_MODE:-}"
+        if [ -z "$_KG_MODE" ] && [ -f "$REPO_ROOT/.claude/repo-mode" ]; then
+          _KG_MODE=$(cat "$REPO_ROOT/.claude/repo-mode" 2>/dev/null | tr -d '[:space:]')
+        fi
+        _KG_MODE="${_KG_MODE:-child}"
+        if [ "$_KG_MODE" != "template" ]; then
+          _KG_EXEMPT=true; _KG_EXEMPT_REASON="graph_not_writable_mode:$_KG_MODE"
+        fi
+      fi
+
+      # Exemption 5: REPO_OS_RECOVER=1 (belt-and-suspenders — SKIP_STATE already set above)
+      if [ "$_KG_EXEMPT" = false ] && [ "${REPO_OS_RECOVER:-0}" = "1" ]; then
+        _KG_EXEMPT=true; _KG_EXEMPT_REASON="repo_os_recover"
+      fi
+
+      # Exemption 6: REPO_OS_SKIP_KG_GATE=1 — interactive only; ignored in headless/auto
+      # (precedent: SKIP_FUNC_CHECK in Decision t-0044 Amendment 1)
+      if [ "$_KG_EXEMPT" = false ] && [ "${REPO_OS_SKIP_KG_GATE:-0}" = "1" ]; then
+        if [ "$IS_NO_REVIEW_BACKSTOP" = false ]; then
+          log_override "pre-commit-gates" "REPO_OS_SKIP_KG_GATE"
+          _KG_EXEMPT=true; _KG_EXEMPT_REASON="skip_kg_gate_override"
+        else
+          log_override "pre-commit-gates" "REPO_OS_SKIP_KG_GATE_IGNORED_HEADLESS"
+          echo "Advisory: REPO_OS_SKIP_KG_GATE=1 is ignored in headless/auto mode — KG gate still enforced." >&2
+        fi
+      fi
+
+      if [ "$_KG_EXEMPT" = true ]; then
+        warn "kg_update_advisory"
+        log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "warn" "$START_MS" "kg_update_advisory_exempt" "$_KG_EXEMPT_REASON"
+      else
+        # --- COVERAGE half: staged gov file lacks a node in either graph ---
+        _KG_MISSING_NODES=""
+        _KG_HAS_NODES=""
+        for _kg_file in $_KG_GOV_STAGED; do
+          if grep -qF "path: \"$_kg_file\"" "$KG_GRAPH" 2>/dev/null           || { [ -f "$KG_PRODUCT_GRAPH" ] && grep -qF "path: \"$_kg_file\"" "$KG_PRODUCT_GRAPH" 2>/dev/null; }; then
+            _KG_HAS_NODES="${_KG_HAS_NODES:+$_KG_HAS_NODES }$_kg_file"
+          else
+            _KG_MISSING_NODES="${_KG_MISSING_NODES:+$_KG_MISSING_NODES }$_kg_file"
+          fi
+        done
+
+        # --- FRESHNESS half: graphed file staged, no graph staged, no session marker ---
+        _KG_STALE=false
+        if [ -n "$_KG_HAS_NODES" ]; then
+          _KG_GRAPH_STAGED=false
+          case "$STAGED_FILES" in
+            *"docs/ai/knowledge-graph/graph.yaml"*)         _KG_GRAPH_STAGED=true ;;
+          esac
+          case "$STAGED_FILES" in
+            *"docs/ai/knowledge-graph/product-graph.yaml"*) _KG_GRAPH_STAGED=true ;;
+          esac
+          if [ "$_KG_GRAPH_STAGED" = false ]; then
+            if ! _validate_state_session_id "$STATE_DIR/kg-updated"; then
+              _KG_STALE=true
+            fi
+          fi
+        fi
+
+        # --- Emit block or pass ---
+        if [ -n "$_KG_MISSING_NODES" ] || [ "$_KG_STALE" = true ]; then
+          if [ -n "$_KG_MISSING_NODES" ]; then
+            _kg_count=$(echo "$_KG_MISSING_NODES" | wc -w | tr -d ' ')
+            if [ -f "$KG_COVER_TOOL" ]; then
+              echo "GATE-RECOVERABLE: KG update — $_kg_count governance file(s) staged without a graph node. NEXT: run .claude/tools/kg-cover.sh $_KG_MISSING_NODES then re-stage. (override: REPO_OS_SKIP_KG_GATE=1)" >&2
+            else
+              echo "GATE-RECOVERABLE: KG update — $_kg_count governance file(s) staged without a graph node. NEXT: add nodes to graph.yaml via shell I/O, then re-stage. (override: REPO_OS_SKIP_KG_GATE=1)" >&2
+            fi
+            log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "kg_update_coverage" "count:$_kg_count"
+          fi
+          if [ "$_KG_STALE" = true ]; then
+            echo "GATE-RECOVERABLE: KG update — governance file(s) have graph nodes but no graph file is staged and no kg-updated marker found for this session. NEXT: update graph.yaml/product-graph.yaml and re-stage (or run .claude/tools/kg-cover.sh to refresh). (override: REPO_OS_SKIP_KG_GATE=1)" >&2
+            log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "kg_update_freshness"
+          fi
+          # Headless/auto escalation (IS_NO_REVIEW_BACKSTOP pattern — A3.4 precedent ~lines 467-473)
+          if [ "$IS_NO_REVIEW_BACKSTOP" = true ]; then
+            _KG_ESC_DIR="$REPO_ROOT/.claude/.automation/escalations"
+            if [ -d "$_KG_ESC_DIR" ]; then
+              _KG_ESC_SID="${REPO_OS_SESSION_ID:-$(date -u +%Y%m%d-%H%M%S)}"
+              _KG_ESC_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+              printf 'escalation:\n  id: "esc-%s-%s"\n  queue_entry_id: "%s"\n  type: "gate-failure"\n  severity: "blocking"\n  phase_at_exit: "commit"\n  tag_at_exit: "agent"\n  message: "KG Update Gate blocked — governance files staged without a corresponding graph update"\n  context: "missing_nodes: %s stale: %s"\n  created_at: "%s"\n  resolved: false\n  resolution: ""\n' \
+                "$_KG_ESC_SID" "$(date -u +%Y%m%d-%H%M%S)" "$_KG_ESC_SID" \
+                "${_KG_MISSING_NODES:-none}" "$_KG_STALE" "$_KG_ESC_TS" \
+                > "$_KG_ESC_DIR/kg-update-fail-$(date -u +%Y%m%d-%H%M%S).yaml" 2>/dev/null || true
+            fi
+          fi
+          block "kg_update_violation"
+          log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "kg_update_violation"
+        else
+          # Both halves pass — write session-scoped kg-updated marker
+          _KG_SID=""
+          if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
+            _KG_SID="$REPO_OS_SESSION_ID"
+          else
+            _KG_SID=$(cat "$REPO_ROOT/.claude/.session-id" 2>/dev/null || echo "")
+          fi
+          printf 'timestamp: %s\nsession_id: %s\nresult: PASSED\n' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_KG_SID" \
+            > "$STATE_DIR/kg-updated" 2>/dev/null || true
+          log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "kg_update_passed"
+        fi
+      fi
     fi
   fi
 fi
@@ -1514,12 +1778,21 @@ if [ -n "$STAGED_FILES" ]; then
 fi
 
 # ============================================================
+# Evidence Manifest Integrity Check (advisory — never blocks)
+# Runs after all gates so functional-verified is already written (A3.4).
+# Gated on SKIP_STATE to mirror the state-check block above.
+# ============================================================
+if [ "$SKIP_STATE" = false ]; then
+  compare_manifest 2>&1 | grep -v '^$' >&2 || true
+fi
+
+# ============================================================
 # Final exit
 # ============================================================
 if [ "$FAILED" -ne 0 ]; then
   log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "$BLOCKED_REASONS"
   echo "Commit blocked by pre-commit gate check." >&2
-  exit 1
+  exit 2
 fi
 
 REASON="pass"

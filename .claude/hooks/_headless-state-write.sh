@@ -24,4 +24,5 @@ _headless_write_state() {
 
   printf 'timestamp: %s\nsession_id: %s\nGATE_RESULT: APPROVED\n' \
     "$ts" "$sid" > "$state_dir/$state_name"
+  refresh_manifest_entry "$state_name" 2>/dev/null || true
 }

@@ -14,6 +14,8 @@
 | State files missing (plan/cohesion/qa/pragmatist) | pre-commit-gates | Dispatch agents in order: Pragmatist plan-gating → plan approval → Critic cohesion → QA verify |
 | Phase re-init blocked | _phase-helper (init_phase) | Set `REPO_OS_ALLOW_REINIT=1` for crash recovery |
 | High-risk without sign-off | pre-commit-gates | Dispatch Reviewer + Security agents |
+| Gov file staged without KG node (COVERAGE) | pre-commit-gates | Run `.claude/tools/kg-cover.sh <file>...` then re-stage. `REPO_OS_SKIP_KG_GATE=1` (interactive only). Decision 0034 Amendment 7. |
+| Gov file staged, KG node exists, no graph updated this session (FRESHNESS) | pre-commit-gates | Stage `graph.yaml`/`product-graph.yaml` update, or run `kg-cover.sh` to refresh. `REPO_OS_SKIP_KG_GATE=1` (interactive only). Decision 0034 Amendment 7. |
 | Secret detected (A4) | pre-commit-gates / session-close-check | Remove secret from staged files. Pattern: `_secret-pattern.sh` (single source of truth) |
 | Cycle count >= 3 | _phase-helper (advance_phase) | Advisory only — review scope and complexity |
 | Cycle count >= 5 | _phase-helper (advance_phase) + bash-guard (Phase 3c) | Advisory + escalation marker in `.claude/.state/cycle-escalation`. Consider decomposing task or requesting operator input |

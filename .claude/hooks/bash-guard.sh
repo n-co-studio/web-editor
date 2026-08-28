@@ -13,7 +13,8 @@
 #      b. Override pre-checks (REPO_OS_SKIP_STATE_GUARD, REPO_OS_RECOVER, REPO_OS_SKIP_MODE_GUARD)
 #      c. Phase 1b: Knowledge graph search advisory (Decision 0034)
 #      d. Phase 1c: Daemon-safe branching guard (Decision 0036)
-#      e. Combined fast-exit: no Gate 7/daemon match AND no write patterns AND all guards skipped
+#      e. Phase 1e: Worktree ref-move guard (Decision 0030 — blocks git branch -f main etc. from worktrees)
+#      f. Combined fast-exit: no Gate 7/daemon match AND no write patterns AND all guards skipped
 #   2. Source libraries (single sourcing of _analytics-helper.sh + _phase-helper.sh)
 #   3. Gate 7 enforcement (task group merge protection — Decision 0018)
 #   4. Fast-exit for no-write-target Bash commands
@@ -208,6 +209,68 @@ if [ "$_DAEMON_BRANCH_BLOCK" = true ]; then
   exit 2
 fi
 
+# --- Phase 1e: Worktree ref-move guard (Decision 0030) ---
+# Blocks git commands that move the 'main' branch ref when running from a worktree:
+#   git branch -f main / --force main
+#   git checkout -B main
+#   git update-ref refs/heads/main
+#   git fetch . <ref>:main
+#
+# Moving the main ref from a worktree is silent data-loss: the ref pointer
+# advances to the new commit, but the main working tree's index and content
+# remain frozen at the old state. 'git status' on main then shows staged
+# reverts of the merged work, and merged code is absent from disk even though
+# 'git log' looks correct. This is how merged governance code has been
+# inactive without any alert.
+#
+# Correct path for worktree sessions: let session-close-check.sh (solo merge
+# path) or runner.sh handle the merge via 'git -C <main-repo> merge'. Call
+# write_merge_signal '<branch>' to signal that the agent close phase is done
+# and let the stop hook skip a redundant merge.
+#
+# Exempt: main repo context (not a worktree) — those callers are already in the
+# right working tree and a merge/ref-update is safe.
+# Exempt: REPO_OS_RECOVER=1 recovery bypass.
+if [ "${REPO_OS_RECOVER:-0}" != "1" ] && [ "$_RECOVER_VIA_SIGNAL" != true ]; then
+  _WRM_DETECTED=false
+  if [[ "$INPUT" == *'git branch -f main'* ]] \
+  || [[ "$INPUT" == *'git branch --force main'* ]] \
+  || [[ "$INPUT" == *'git checkout -B main'* ]] \
+  || [[ "$INPUT" == *'git update-ref refs/heads/main'* ]]; then
+    _WRM_DETECTED=true
+  elif [[ "$INPUT" == *'git fetch . '* ]] && [[ "$INPUT" == *':main'* ]]; then
+    _WRM_DETECTED=true
+  fi
+  if [ "$_WRM_DETECTED" = true ]; then
+    # Reuse _D_GIT_DIR if Phase 1c already computed it; otherwise compute fresh.
+    _WRM_GIT_DIR="${_D_GIT_DIR:-$(git rev-parse --git-dir 2>/dev/null || echo "")}"
+    if [[ "$_WRM_GIT_DIR" == *"worktrees"* ]]; then
+      echo "GATE-RECOVERABLE: Ref-move commands targeting 'main' are blocked from a worktree. Moving the main ref from a worktree leaves the main working tree stale (index/tree frozen at old state while HEAD advances — merged code is absent from disk). NEXT: Let session-close-check.sh handle the merge (solo=true is set), or use 'git -C <main-repo-path> merge <branch>' from the runner context. Call write_merge_signal '<branch>' to signal close completion. (Decision 0030; override: REPO_OS_RECOVER=1)" >&2
+      exit 2
+    fi
+  fi
+fi
+
+# --- Write-detection pre-filter (pre-source inline copy) ---
+# Returns 0 (true) if the raw input string may contain write targets; 1 otherwise.
+# Canonical definition: _analytics-helper.sh::_is_bash_write_candidate(), adjacent
+# to extract_write_targets(). Keep this copy byte-for-byte identical.
+#
+# This copy exists because the Phase 1d write-check (~line 239) and combined
+# pre-source fast-exit (~line 310) run BEFORE the library sourcing at Phase 2.
+# Sourcing _analytics-helper.sh here would defeat the fast-exit
+# optimization (~14ms, ~56% of Bash calls). The inline copy is intentional —
+# NOT a drift risk, because the canonical definition is the single place to change.
+#
+# Tokens tested (must match what extract_write_targets() acts on):
+#   "file_path" — Edit/Write tool JSON field
+#   >           — shell redirect (including >>)
+#   tee         — tee pipe (tee or tee -a)
+_bg_is_write_candidate() {
+  local input="$1"
+  [[ "$input" == *'"file_path"'* ]] || [[ "$input" == *'>'* ]] || [[ "$input" == *'tee '* ]]
+}
+
 # --- Phase 1d: Inter-session governance version check (Decision 0041) ---
 # Fires on first Bash-write call of session. Predicate: governance evidence
 # files exist AND embedded spec_version matches manifest.json `active`.
@@ -217,7 +280,7 @@ fi
 # next Bash-write call until the operator re-runs Prompt 0 / Prompt A.
 # Advisory only — does not block. Gated to feature/fix/hotfix/release branches.
 _GV_IS_WRITE=false
-if [[ "$INPUT" == *'"file_path"'* ]] || [[ "$INPUT" == *'>'* ]] || [[ "$INPUT" == *'tee '* ]]; then
+if _bg_is_write_candidate "$INPUT"; then
   _GV_IS_WRITE=true
 fi
 # Skip Phase 1d entirely on recover, taskgroup-merge block, or when jq is
@@ -288,8 +351,7 @@ fi
 # --- Combined pre-source fast-exit ---
 # When no Gate 7 match AND no write patterns → exit 0 without sourcing.
 # Saves ~14ms sourcing overhead for the majority of Bash calls (~56%).
-if [ "$_TG_MERGE_BLOCK" = false ] \
-&& [[ "$INPUT" != *'"file_path"'* ]] && [[ "$INPUT" != *'>'* ]] && [[ "$INPUT" != *'tee '* ]]; then
+if [ "$_TG_MERGE_BLOCK" = false ] && ! _bg_is_write_candidate "$INPUT"; then
   exit 0
 fi
 
@@ -391,7 +453,7 @@ fi
 # Phase 5: Fast-exit for no-write-target Bash (post-sourcing)
 # ============================================================
 # Commands that triggered Gate 7 detection but weren't blocked land here.
-if [[ "$INPUT" != *'"file_path"'* ]] && [[ "$INPUT" != *'>'* ]] && [[ "$INPUT" != *'tee '* ]]; then
+if ! _bg_is_write_candidate "$INPUT"; then
   log_hook_event "bash-guard" "PreToolUse" "Bash" "allow" "$START_MS" "bash_no_write_target"
   exit 0
 fi
@@ -570,10 +632,23 @@ if [ "$SKIP_MODE_GUARD" = false ]; then
 
       check_path() {
         local rel="$1" context="$2"
+        # Immune check first — unconditional, no override (structural anchor)
         if is_immune "$rel"; then
           log_hook_event "mode-guard" "PreToolUse" "Bash" "block" "$START_MS" "${context}_immune_path" "" "$rel"
           echo "GATE-FINAL: $rel is an immune path — cannot be modified in any mode. (no override)" >&2
           exit 2
+        fi
+        # Belt-and-suspenders: unresolved shell variable — cannot classify, fail-closed.
+        # The caller loop catches this first; this handles any path that slips through.
+        if has_unresolved_var "$rel"; then
+          log_hook_event "mode-guard" "PreToolUse" "Bash" "block" "$START_MS" "${context}_unresolved_var" "" "$rel"
+          echo "GATE-RECOVERABLE: write target '$rel' contains an unresolved shell variable — the mode guard cannot determine the target location. Use a literal path instead. (override: REPO_OS_SKIP_MODE_GUARD=1)" >&2
+          exit 2
+        fi
+        # Belt-and-suspenders: absolute path outside repo — no mode-guard jurisdiction.
+        if is_out_of_repo "$rel"; then
+          log_hook_event "mode-guard" "PreToolUse" "Bash" "allow" "$START_MS" "${context}_out_of_repo_bs" "" "$rel"
+          return 0
         fi
         if [ -n "${REPO_OS_UNLOCK_PATH:-}" ]; then
           UNLOCK_REL=$(make_relative "$REPO_OS_UNLOCK_PATH")
@@ -602,8 +677,17 @@ if [ "$SKIP_MODE_GUARD" = false ]; then
       if [ -n "$COMMAND" ]; then
         while IFS= read -r MG_WT; do
           [ -z "$MG_WT" ] && continue
+          # Sub-case 2: unresolved shell variable — cannot classify, fail-closed.
+          # Must check before resolve_path, which would misinterpret $VAR as relative.
+          if has_unresolved_var "$MG_WT"; then
+            log_hook_event "mode-guard" "PreToolUse" "Bash" "block" "$START_MS" "bash_unresolved_var" "" "$MG_WT"
+            echo "GATE-RECOVERABLE: write target '$MG_WT' contains an unresolved shell variable — the mode guard cannot determine the target location. Use a literal path instead. (override: REPO_OS_SKIP_MODE_GUARD=1)" >&2
+            exit 2
+          fi
           MG_WT_ABS=$(resolve_path "$MG_WT")
+          # Sub-case 1: path outside repo — no mode-guard jurisdiction; log and skip.
           if ! is_in_repo "$MG_WT_ABS" "$REPO_ROOT"; then
+            log_hook_event "mode-guard" "PreToolUse" "Bash" "allow" "$START_MS" "bash_out_of_repo_skip" "" "$MG_WT"
             continue
           fi
           MG_WT_REL=$(make_relative "$MG_WT")

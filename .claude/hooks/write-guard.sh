@@ -329,11 +329,25 @@ check_path() {
   local rel="$1"
   local context="$2"  # "file" or "bash"
 
-  # Immune paths — block unconditionally, no override
+  # Immune paths — block unconditionally, no override (structural anchor)
   if is_immune "$rel"; then
     log_hook_event "mode-guard" "PreToolUse" "" "block" "$START_MS" "${context}_immune_path" "" "$rel"
     echo "GATE-FINAL: $rel is an immune path — cannot be modified in any mode. (no override)" >&2
     exit 2
+  fi
+
+  # Belt-and-suspenders: unresolved shell variable — cannot classify, fail-closed.
+  # The caller loop catches this first; this handles any path that slips through.
+  if has_unresolved_var "$rel"; then
+    log_hook_event "mode-guard" "PreToolUse" "" "block" "$START_MS" "${context}_unresolved_var" "" "$rel"
+    echo "GATE-RECOVERABLE: write target '$rel' contains an unresolved shell variable — the mode guard cannot determine the target location. Use a literal path instead. (override: REPO_OS_SKIP_MODE_GUARD=1)" >&2
+    exit 2
+  fi
+
+  # Belt-and-suspenders: absolute path outside repo — no mode-guard jurisdiction.
+  if is_out_of_repo "$rel"; then
+    log_hook_event "mode-guard" "PreToolUse" "" "allow" "$START_MS" "${context}_out_of_repo_bs" "" "$rel"
+    return 0
   fi
 
   # REPO_OS_UNLOCK_PATH — single-file governance unlock
@@ -384,8 +398,17 @@ if [ -n "$COMMAND" ] && [ -z "$FILE_PATH" ]; then
   TARGETS="$_CACHED_WRITE_TARGETS"
   while IFS= read -r WT; do
     [ -z "$WT" ] && continue
+    # Sub-case 2: unresolved shell variable — cannot classify, fail-closed.
+    # Must check before resolve_path, which would misinterpret $VAR as relative.
+    if has_unresolved_var "$WT"; then
+      log_hook_event "mode-guard" "PreToolUse" "" "block" "$START_MS" "bash_unresolved_var" "" "$WT"
+      echo "GATE-RECOVERABLE: write target '$WT' contains an unresolved shell variable — the mode guard cannot determine the target location. Use a literal path instead. (override: REPO_OS_SKIP_MODE_GUARD=1)" >&2
+      exit 2
+    fi
     WT_ABS=$(resolve_path "$WT")
+    # Sub-case 1: path outside repo — no mode-guard jurisdiction; log and skip.
     if ! is_in_repo "$WT_ABS" "$REPO_ROOT"; then
+      log_hook_event "mode-guard" "PreToolUse" "" "allow" "$START_MS" "bash_out_of_repo_skip" "" "$WT"
       continue
     fi
     WT_REL=$(make_relative "$WT")

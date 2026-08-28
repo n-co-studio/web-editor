@@ -15,6 +15,38 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/_analytics-helper.sh"
 START_MS=$(now_ms)
 
+# --- jq presence guard (fail-open for push gate — B1 uses git, not jq) ---
+# jq is used only for self-filter payload parsing below.
+# If absent, skip self-filter (fail-open) so B1 branch-naming still runs.
+_PUSH_HAS_JQ=false
+if command -v jq &>/dev/null; then
+  _PUSH_HAS_JQ=true
+fi
+
+# --- Read hook payload (PreToolUse JSON on stdin) ---
+INPUT=$(cat)
+
+# --- Harness session_id plumbing ---
+export _REPO_OS_STDIN_SID
+if [ "$_PUSH_HAS_JQ" = true ]; then
+  _REPO_OS_STDIN_SID="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)"
+fi
+
+PUSH_CMD=""
+if [ "$_PUSH_HAS_JQ" = true ]; then
+  PUSH_CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null || true)
+fi
+
+# --- Self-filter: skip gate chain for non-push commands ---
+# The matcher is now "Bash" (fires on every Bash call); only run B1 when the
+# command is actually a git push. Permissive: cd ... && git push, git -C . push.
+if [ "$_PUSH_HAS_JQ" = true ]; then
+  case "$PUSH_CMD" in
+    *"git push"*) ;;
+    *) exit 0 ;;
+  esac
+fi
+
 FAILED=0
 
 # --- REPO_OS_RECOVER override (env var or file-based signal) ---
@@ -73,7 +105,7 @@ fi
 if [ "$FAILED" -ne 0 ]; then
   log_hook_event "pre-push-gates" "PreToolUse" "Bash" "block" "$START_MS" "B1_naming_violation" "branch:$CURRENT_BRANCH"
   echo "Push blocked by pre-push gate check." >&2
-  exit 1
+  exit 2
 fi
 
 log_hook_event "pre-push-gates" "PreToolUse" "Bash" "allow" "$START_MS" "pass"

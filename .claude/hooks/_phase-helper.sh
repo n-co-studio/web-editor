@@ -556,11 +556,22 @@ _resolve_brief_id() {
 # .claude/local/handoff-bundle.yaml — retained read-only for one release cycle.
 # Task groups continue to resolve their per-brief bundle path directly.
 _handoff_bundle_path() {
-  local repo_root="$_REPO_OS_ROOT"
+  # Use main repo root so bundles written by Prompt T (runner / main-repo context)
+  # are visible from within worktree sessions where _REPO_OS_ROOT = worktree root.
+  # get_main_repo_root() falls back to _REPO_OS_ROOT when not in a worktree.
+  local repo_root
+  repo_root="$(get_main_repo_root)"
   local brief_id="${1:-}"
   [ -z "$brief_id" ] && brief_id="$(_resolve_brief_id)"
   if [ -n "$brief_id" ]; then
-    printf '%s/.claude/local/handoff-bundles/%s.yaml\n' "$repo_root" "$brief_id"
+    local bundle_path
+    bundle_path="$(printf '%s/.claude/local/handoff-bundles/%s.yaml' "$repo_root" "$brief_id")"
+    if [ ! -f "$bundle_path" ] && is_worktree 2>/dev/null; then
+      echo "WARNING: handoff-bundle not found at expected path: $bundle_path" >&2
+      echo "  This may be because the bundle was written in a different context (main repo vs worktree)." >&2
+      echo "  If running a Prompt B in a worktree, ensure Prompt T ran and the bundle exists at the main repo path." >&2
+    fi
+    printf '%s\n' "$bundle_path"
   else
     printf '%s/.claude/local/handoff-bundle.yaml\n' "$repo_root"
   fi
@@ -579,7 +590,8 @@ _atomic_write_bundle() {
     echo "ERROR: _atomic_write_bundle requires a brief_id" >&2
     return 1
   fi
-  local repo_root="$_REPO_OS_ROOT"
+  local repo_root
+  repo_root="$(get_main_repo_root)"
   local dir="$repo_root/.claude/local/handoff-bundles"
   mkdir -p "$dir" 2>/dev/null || true
   local final="$dir/$brief_id.yaml"
@@ -659,7 +671,7 @@ bundle_expired() {
 # Shell I/O — same established pattern as plan-approval.sh.
 bundle_to_plan_approved() {
   local bundle="${1:-$(_handoff_bundle_path)}"
-  local sid="${2:-$(get_session_id "$_REPO_OS_ROOT")}"
+  local sid="${2:-$(get_session_id "$(get_main_repo_root)")}"
   local state_dir
   state_dir="$(get_session_state_dir)"
   mkdir -p "$state_dir" 2>/dev/null || true
@@ -694,6 +706,7 @@ bundle_to_plan_approved() {
   printf 'timestamp: %s\nquestion_hash: %s\nlarge-scope: true\nmode: %s\nsession_id: %s\nsource: handoff-bundle\nbundle_brief_id: %s\nbundle_approved_at: %s\n' \
     "$ts" "$question_hash" "$mode" "$sid" "$brief_id" "$approved_at" \
     > "$state_dir/plan-approved" 2>/dev/null || true
+  refresh_manifest_entry "plan-approved" "$(get_main_repo_root)" 2>/dev/null || true
 }
 
 # --- bundle_to_pragmatist_signed ---
@@ -702,7 +715,7 @@ bundle_to_plan_approved() {
 # Shell I/O — same pattern as state-writer.sh.
 bundle_to_pragmatist_signed() {
   local bundle="${1:-$(_handoff_bundle_path)}"
-  local sid="${2:-$(get_session_id "$_REPO_OS_ROOT")}"
+  local sid="${2:-$(get_session_id "$(get_main_repo_root)")}"
   local state_dir
   state_dir="$(get_session_state_dir)"
   mkdir -p "$state_dir" 2>/dev/null || true
@@ -718,6 +731,45 @@ bundle_to_pragmatist_signed() {
   printf 'GATE_RESULT: %s\nsession_id: %s\nsource: handoff-bundle\nbundle_verdict: %s\n' \
     "$gate_result" "$sid" "$verdict" \
     > "$state_dir/pragmatist-signed" 2>/dev/null || true
+  refresh_manifest_entry "pragmatist-signed" "$(get_main_repo_root)" 2>/dev/null || true
+}
+
+# --- write_alignment_check_pragmatist_signed ---
+# Writes pragmatist-signed state file for the Orchestrator's deterministic
+# alignment-check path (Decision 0038 §7, Decision 0025 §9).
+# Called when deterministic_alignment_check returns 0 (aligned) and no bundle
+# is present (or the bundle lacks implementation_design — use
+# bundle_to_pragmatist_signed for the bundle path instead).
+#
+# Arguments:
+#   $1 — alignment_outcome: must be "aligned" (APPROVED) or "diverged" (BLOCKED).
+#        Absent or any other value is treated as an error — returns 1 without
+#        writing the file. Callers must not pass a default; unknown outcomes must
+#        not silently become approvals.
+#   $2 — (optional) session_id override
+# Shell I/O — same pattern as state-writer.sh and bundle_to_pragmatist_signed.
+write_alignment_check_pragmatist_signed() {
+  local outcome="$1"
+  local sid="${2:-$(get_session_id "$(get_main_repo_root)")}"
+  local state_dir
+  state_dir="$(get_session_state_dir)"
+  mkdir -p "$state_dir" 2>/dev/null || true
+
+  local gate_result
+  case "$outcome" in
+    aligned)   gate_result="APPROVED" ;;
+    diverged)  gate_result="BLOCKED"  ;;
+    *)
+      # Absent or unparseable outcome is an error — not an approval.
+      echo "write_alignment_check_pragmatist_signed: unrecognised outcome '${outcome}' — refusing to write pragmatist-signed" >&2
+      return 1
+      ;;
+  esac
+
+  printf 'GATE_RESULT: %s\nsession_id: %s\nsource: alignment-check\nalignment_outcome: %s\n' \
+    "$gate_result" "$sid" "$outcome" \
+    > "$state_dir/pragmatist-signed" 2>/dev/null || true
+  refresh_manifest_entry "pragmatist-signed" "$(get_main_repo_root)" 2>/dev/null || true
 }
 
 # --- _bundle_field ---
@@ -1396,6 +1448,9 @@ init_phase() {
   # Decision 0042 — compute and cache phase gate verdicts. Silent on failure;
   # cache miss in hooks falls through to inline checks (BC by construction).
   compute_phase_gates || true
+
+  # Capture evidence manifest baseline (out-of-tree audit trail). Fail-silent.
+  write_evidence_manifest "$repo_root" || true
 
 }
 
@@ -2156,27 +2211,22 @@ write_resume_marker() {
   local branch
   branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 
-  # Preserve existing agent_verdicts if resume file already exists
-  local existing_verdicts=""
+  # Preserve existing agent_verdicts and dispatch_records if resume file already exists
+  local existing_verdicts="" existing_dispatches=""
   if [ -f "$resume_file" ]; then
-    local in_verdicts=false
-    local _line
+    local _rm_section="" _line
     while IFS= read -r _line || [ -n "$_line" ]; do
-      if [ "$_line" = "agent_verdicts:" ]; then
-        in_verdicts=true
-        continue
-      fi
-      if [ "$in_verdicts" = true ]; then
-        case "$_line" in
-          "  "*)
-            existing_verdicts="${existing_verdicts}${_line}
-"
-            ;;
-          *)
-            break
-            ;;
-        esac
-      fi
+      case "$_line" in
+        "agent_verdicts:")   _rm_section="verdicts" ;;
+        "dispatch_records:") _rm_section="dispatches" ;;
+        "  "*)
+          case "$_rm_section" in
+            verdicts)   existing_verdicts="${existing_verdicts}${_line}"$'\n' ;;
+            dispatches) existing_dispatches="${existing_dispatches}${_line}"$'\n' ;;
+          esac
+          ;;
+        *) _rm_section="" ;;
+      esac
     done < "$resume_file"
   fi
 
@@ -2191,6 +2241,10 @@ write_resume_marker() {
     printf 'agent_verdicts:\n'
     if [ -n "$existing_verdicts" ]; then
       printf '%s' "$existing_verdicts"
+    fi
+    printf 'dispatch_records:\n'
+    if [ -n "$existing_dispatches" ]; then
+      printf '%s' "$existing_dispatches"
     fi
   } > "$resume_file" 2>/dev/null || true
 }
@@ -2281,6 +2335,119 @@ record_agent_verdict() {
   } > "$temp_file" 2>/dev/null || true
 
   mv "$temp_file" "$resume_file" 2>/dev/null || true
+}
+
+# --- Record dispatch-time phase for a governance agent ---
+# Writes agent_type -> "phase=<p> cycle=<c> ts=<t>" into the session-resume.yaml
+# dispatch_records section. Called from pretooluse-permission.sh when a governance
+# agent is dispatched, so the arriving verdict can be validated against the phase at
+# dispatch time rather than the (possibly advanced) phase at arrival.
+# Shell I/O — bypasses write-guard.sh (same pattern as record_agent_verdict).
+# Fail-silent: returns 0 on any error so the caller dispatch is never blocked.
+# Usage: record_dispatch_phase "qa-verifier"
+record_dispatch_phase() {
+  local agent_type="$1"
+  [ -z "$agent_type" ] && return 0
+
+  local state_dir
+  state_dir="$(get_session_state_dir)"
+  local resume_file="$state_dir/session-resume.yaml"
+  [ -f "$resume_file" ] || return 0  # No resume file — fail silently
+
+  local phase
+  phase="$(get_phase)"
+  [ -z "$phase" ] && return 0  # No phase state — can't record meaningfully
+
+  # Load phase-state for cycle number (_PS_CYCLE populated by _load_phase_state)
+  local state_file="$state_dir/phase-state"
+  _load_phase_state "$state_file" 2>/dev/null || true
+  local cycle="${_PS_CYCLE:-1}"
+
+  local ts
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  local entry="phase=${phase} cycle=${cycle} ts=${ts}"
+
+  local temp_file="$resume_file.tmp.$$"
+  local in_dispatches=false
+  local dispatch_written=false
+  local _line
+
+  {
+    while IFS= read -r _line || [ -n "$_line" ]; do
+      if [ "$_line" = "dispatch_records:" ]; then
+        in_dispatches=true
+        printf '%s\n' "$_line"
+        continue
+      fi
+      if [ "$in_dispatches" = true ]; then
+        case "$_line" in
+          "  ${agent_type}: "*)
+            # Update existing entry
+            printf '  %s: %s\n' "$agent_type" "$entry"
+            dispatch_written=true
+            continue
+            ;;
+          "  "*)
+            printf '%s\n' "$_line"
+            continue
+            ;;
+          *)
+            # Section ended — append new entry if not written yet
+            if [ "$dispatch_written" = false ]; then
+              printf '  %s: %s\n' "$agent_type" "$entry"
+              dispatch_written=true
+            fi
+            in_dispatches=false
+            printf '%s\n' "$_line"
+            continue
+            ;;
+        esac
+      fi
+      printf '%s\n' "$_line"
+    done < "$resume_file"
+
+    # Handle dispatch_records at end of file
+    if [ "$in_dispatches" = true ] && [ "$dispatch_written" = false ]; then
+      printf '  %s: %s\n' "$agent_type" "$entry"
+    fi
+  } > "$temp_file" 2>/dev/null || { rm -f "$temp_file" 2>/dev/null; return 0; }
+
+  mv -f "$temp_file" "$resume_file" 2>/dev/null || { rm -f "$temp_file" 2>/dev/null; return 0; }
+  return 0
+}
+
+# --- Get dispatch-time phase record for a governance agent ---
+# Reads from session-resume.yaml dispatch_records section.
+# Outputs "phase=<p> cycle=<c> ts=<t>" on stdout, empty string if not found.
+# Caller parses: dispatch_phase=$(get_dispatch_phase "qa-verifier" | grep -oE 'phase=[^ ]+' | cut -d= -f2)
+# Usage: entry=$(get_dispatch_phase "qa-verifier")
+get_dispatch_phase() {
+  local agent_type="$1"
+  [ -z "$agent_type" ] && return 0
+
+  local state_dir
+  state_dir="$(get_session_state_dir)"
+  local resume_file="$state_dir/session-resume.yaml"
+  [ -f "$resume_file" ] || return 0
+
+  local in_dispatches=false _line
+  while IFS= read -r _line || [ -n "$_line" ]; do
+    if [ "$_line" = "dispatch_records:" ]; then
+      in_dispatches=true
+      continue
+    fi
+    if [ "$in_dispatches" = true ]; then
+      case "$_line" in
+        "  ${agent_type}: "*)
+          echo "${_line#  ${agent_type}: }"
+          return 0
+          ;;
+        "  "*) continue ;;
+        *) break ;;
+      esac
+    fi
+  done < "$resume_file"
+  return 0
 }
 
 # --- Finish-loop dimension cache (Decision 0040) ---
@@ -2424,4 +2591,212 @@ record_dimension_verdict() {
     printf '    cycle: %s\n' "$cycle"
     printf '    timestamp: "%s"\n' "$ts"
   } >> "$cache_path"
+}
+
+# ============================================================
+# Evidence Manifest (governance integrity audit trail)
+# ============================================================
+# Capture: write_evidence_manifest() at init_phase (baseline).
+# Refresh: refresh_manifest_entry() called by every sanctioned writer.
+# Compare: compare_manifest() at pre-commit and session-close checkpoints.
+#
+# Location: ~/.local/share/repo-os-analytics/<repo>/evidence-manifest/<sid>.yaml
+# (out-of-tree — not reachable via in-repo Bash path bypass; earns the stronger
+# claim that findings indicate writes NOT made through a sanctioned hook.)
+#
+# Claim: detects writes not made through a sanctioned hook.
+# Does NOT prevent forgery — a sophisticated actor can update the manifest in the
+# same python3 call that forges the evidence file. See known-issues.md R2 and
+# Decision t-0012 §9 for the bounded guarantee.
+# Attestation (HMAC/signing) was deferred by the operator as too large.
+
+_EVIDENCE_FILES="plan-approved qa-verified cohesion-reviewed diff-review-complete pragmatist-signed functional-verified"
+
+# Return the evidence-manifest directory for the given repo.
+_get_evidence_manifest_dir() {
+  local repo_root="${1:-$_REPO_OS_ROOT}"
+  local repo_name
+  repo_name="$(basename "$repo_root")"
+  echo "$HOME/.local/share/repo-os-analytics/$repo_name/evidence-manifest"
+}
+
+# Return the path to the manifest file for the current session.
+# Returns 1 (non-zero) if session id is unavailable.
+_get_evidence_manifest_path() {
+  local sid="${1:-}"
+  local repo_root="${2:-$_REPO_OS_ROOT}"
+  if [ -z "$sid" ]; then
+    sid="$(get_session_id "$repo_root" 2>/dev/null)" || return 1
+  fi
+  [ -z "$sid" ] && return 1
+  local manifest_dir
+  manifest_dir="$(_get_evidence_manifest_dir "$repo_root")"
+  # Sanitise: replace / and .. sequences that could escape the directory.
+  local sid_safe="${sid//\//_}"
+  sid_safe="${sid_safe//\.\./_}"
+  echo "${manifest_dir}/${sid_safe}.yaml"
+}
+
+# Write the evidence manifest at init_phase.
+# Records path + sha256 + present for every monitored evidence file.
+# Mirrors the spec_snapshot path+sha pattern from drift_check (Decision t-0038).
+# Fails silently — governance never depends on this succeeding.
+write_evidence_manifest() {
+  local repo_root="${1:-$_REPO_OS_ROOT}"
+  local sid
+  sid="$(get_session_id "$repo_root" 2>/dev/null)" || return 0
+  local manifest_path
+  manifest_path="$(_get_evidence_manifest_path "$sid" "$repo_root")" || return 0
+  local manifest_dir
+  manifest_dir="$(dirname "$manifest_path")"
+  mkdir -p "$manifest_dir" 2>/dev/null || return 0
+
+  local state_dir
+  state_dir="$(get_session_state_dir)"
+  local ts
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  {
+    printf '# Governance evidence manifest — out-of-tree integrity audit trail\n'
+    printf '# Claim: detects writes not made through a sanctioned hook (out-of-tree).\n'
+    printf '# Does NOT prevent forgery. See known-issues.md R2 and Decision t-0012 §9.\n'
+    printf 'created_at: "%s"\n' "$ts"
+    printf 'session_id: "%s"\n' "$sid"
+    printf 'entries:\n'
+    local ev
+    for ev in $_EVIDENCE_FILES; do
+      local ev_path="$state_dir/$ev"
+      local sha=""
+      local present="false"
+      if [ -f "$ev_path" ]; then
+        present="true"
+        sha="$(portable_hash < "$ev_path" 2>/dev/null)" || sha=""
+      fi
+      printf '  - name: "%s"\n' "$ev"
+      printf '    path: "%s"\n' "$ev_path"
+      printf '    sha: "%s"\n' "$sha"
+      printf '    present: "%s"\n' "$present"
+    done
+  } > "$manifest_path" 2>/dev/null || true
+}
+
+# Refresh a single manifest entry after a sanctioned write.
+# Must be called immediately after the state file is written (including any appends).
+# Arguments:
+#   $1 — evidence file name (e.g. "plan-approved")
+#   $2 — repo_root (optional; defaults to $_REPO_OS_ROOT)
+# Fails silently — governance never depends on this succeeding.
+refresh_manifest_entry() {
+  local ev_name="$1"
+  local repo_root="${2:-$_REPO_OS_ROOT}"
+  local sid
+  sid="$(get_session_id "$repo_root" 2>/dev/null)" || return 0
+  local manifest_path
+  manifest_path="$(_get_evidence_manifest_path "$sid" "$repo_root")" || return 0
+  [ -f "$manifest_path" ] || return 0  # no manifest yet — skip (pre-feature session)
+
+  local state_dir
+  state_dir="$(get_session_state_dir)"
+  local ev_path="$state_dir/$ev_name"
+  local sha=""
+  local present="false"
+  if [ -f "$ev_path" ]; then
+    present="true"
+    sha="$(portable_hash < "$ev_path" 2>/dev/null)" || sha=""
+  fi
+
+  # Update the manifest entry for this file in-place via awk.
+  # Replaces the sha: and present: fields within the matching name: block.
+  local tmp="${manifest_path}.tmp.$$"
+  awk -v ev="$ev_name" -v new_sha="$sha" -v new_present="$present" '
+    /^  - name: "/ { in_entry = ($0 == "  - name: \"" ev "\"") }
+    in_entry && /^    sha:/ { print "    sha: \"" new_sha "\""; next }
+    in_entry && /^    present:/ { print "    present: \"" new_present "\""; next }
+    { print }
+  ' "$manifest_path" > "$tmp" 2>/dev/null \
+    && mv "$tmp" "$manifest_path" 2>/dev/null \
+    || rm -f "$tmp" 2>/dev/null
+}
+
+# Compare current evidence file hashes against the manifest at a checkpoint.
+# Reports any file whose hash differs from the manifest (out-of-band modification)
+# or that exists with no manifest entry (created after init without refresh).
+# Verdict: ADVISORY — never blocks (first deployment; false positives possible if
+# a sanctioned writer is missing from the refresh list).
+# Arguments:
+#   $1 — repo_root (optional; defaults to $_REPO_OS_ROOT)
+compare_manifest() {
+  local repo_root="${1:-$_REPO_OS_ROOT}"
+  local sid
+  sid="$(get_session_id "$repo_root" 2>/dev/null)" || return 0
+  local manifest_path
+  manifest_path="$(_get_evidence_manifest_path "$sid" "$repo_root")" || return 0
+  [ -f "$manifest_path" ] || return 0  # no manifest — skip (pre-feature session)
+
+  # Require portable_hash — cannot compare without a hash function.
+  if [ "$_REPO_OS_HASH_CMD" = "" ] || ! type portable_hash >/dev/null 2>&1; then
+    echo "Evidence manifest: hash function unavailable — integrity check skipped." >&2
+    return 0
+  fi
+
+  local state_dir
+  state_dir="$(get_session_state_dir)"
+  local findings=""
+
+  local ev
+  for ev in $_EVIDENCE_FILES; do
+    local ev_path="$state_dir/$ev"
+    [ -f "$ev_path" ] || continue  # file absent — no finding (not yet written or cleaned up)
+
+    # Compute current hash.
+    local current_sha
+    current_sha="$(portable_hash < "$ev_path" 2>/dev/null)" || continue
+    [ -z "$current_sha" ] && continue  # hash failed — skip rather than false-positive
+
+    # Read manifest entry sha (and detect missing entry).
+    local manifest_sha
+    manifest_sha=$(awk -v ev="$ev" '
+      /^  - name: "/ { in_entry = ($0 == "  - name: \"" ev "\""); if (in_entry) found=1 }
+      in_entry && /^    sha:/ {
+        gsub(/^[ ]*sha: *"/, ""); gsub(/"[ ]*$/, ""); print; exit
+      }
+      END { if (!found) print "__NOENTRY__" }
+    ' "$manifest_path" 2>/dev/null || echo "__PARSE_ERROR__")
+
+    if [ "$manifest_sha" = "__NOENTRY__" ] || [ "$manifest_sha" = "__PARSE_ERROR__" ]; then
+      findings="${findings}  $ev: present but not in manifest (created after init_phase without a manifest refresh).\n"
+    elif [ "$current_sha" != "$manifest_sha" ]; then
+      findings="${findings}  $ev: hash mismatch — manifest=${manifest_sha:0:16}... current=${current_sha:0:16}... (possible out-of-band modification).\n"
+    fi
+  done
+
+  if [ -n "$findings" ]; then
+    {
+      echo "INTEGRITY-ADVISORY: Evidence manifest mismatch detected at checkpoint."
+      printf '%b' "$findings"
+      echo "  This is advisory — not a hard block. The out-of-tree manifest detects"
+      echo "  writes not made through a sanctioned hook, but does NOT prevent forgery"
+      echo "  by a sophisticated actor. See known-issues.md R2 for the bounded guarantee."
+      echo "  Attestation (HMAC/signing) was deferred by the operator."
+    } >&2
+    log_hook_event "_phase-helper" "evidence-manifest" "" "warn" "0" "integrity_advisory" "$(printf '%b' "$findings" | tr '\n' ';' | cut -c1-120)" || true
+  fi
+  return 0
+}
+
+# Remove the evidence manifest for the closing session.
+# Called at session close after cleanup_session_files() (in-repo) has run.
+# Out-of-tree retention: delete at session close; no accumulation in the repo.
+# Arguments:
+#   $1 — repo_root (optional; defaults to $_REPO_OS_ROOT)
+#   $2 — session id (optional; resolved from state/env if absent)
+cleanup_evidence_manifest() {
+  local repo_root="${1:-$_REPO_OS_ROOT}"
+  local sid="${2:-}"
+  if [ -z "$sid" ]; then
+    sid="$(get_session_id "$repo_root" 2>/dev/null)" || return 0
+  fi
+  local manifest_path
+  manifest_path="$(_get_evidence_manifest_path "$sid" "$repo_root")" || return 0
+  rm -f "$manifest_path" 2>/dev/null || true
 }

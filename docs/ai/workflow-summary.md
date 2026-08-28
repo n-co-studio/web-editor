@@ -20,9 +20,9 @@
 1. Knowledge graph update (advisory — Decision 0034): update the appropriate graph (`graph.yaml` for template, `product-graph.yaml` for product) via shell I/O if either exists — new nodes, new edges, updated `last_verified`. Cross-layer edges go in source node's graph. Non-blocking
 2. Update session log (product: `docs/ai/logs/sessions/session-{id}.md`; template: `.claude/local/sessions/session-{id}.md`)
 3. Commit all remaining changes including session log
-4. Solo merge: `git checkout main && git merge --ff-only <branch>` (fallback `--no-ff`)
-   - On success: `write_merge_signal "<branch>"`
-   - On failure: `git merge --abort && git checkout <branch>`, notify operator
+4. Solo merge: handled by `session-close-check.sh` (stop hook) and/or runner — see `docs/ai/workflow.md` § Close Sequence step 4 for full detail
+   - **Worktree sessions (default):** stop hook acquires merge lock, runs `git -C <main-repo-path> merge --ff-only <branch>` (fallback `--no-ff`), aborts on failure, syncs main working tree. Agent does NOT merge directly. Prohibited: `git checkout main`, `git branch -f main`, and other ref-move commands — they advance the pointer without updating the working tree (Decision t-0030)
+   - **Non-worktree sessions (rare):** `git checkout main && git merge --ff-only <branch>` (fallback `--no-ff`); on success `write_merge_signal "<branch>"`; on failure `git merge --abort && git checkout <branch>`, notify operator
    - Post-merge push: `git push origin main` (advisory, skip template mode / no remote, never force-push)
 5. Present closing summary — final agent message
 
@@ -48,7 +48,7 @@ Gates-B: B1-pass B2-n/a B3-n/a
 | Category | Gate Profile |
 |----------|-------------|
 | `feature/*`, `fix/*` | Standard (A + B) |
-| `hotfix/*` | Expedited: A2 relaxed, A5 skipped |
+| `hotfix/*` | Expedited: A2 enforced (large-scope: true satisfies it), A5 skipped |
 | `experiment/*` | A4 only; full gates required before merge to main |
 | `release/*` | All gates + C gates (release checklist, Reviewer + Security sign-off) |
 | `main` | All gates. No direct commits |

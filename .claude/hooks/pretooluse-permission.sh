@@ -91,10 +91,22 @@ if [ "$TOOL_NAME" = "Agent" ]; then
     _ptl_block "GATE-FINAL: Agent tool blocked — no phase-state (fail-closed). Initialize the session first. (override: REPO_OS_ALLOW_AGENT=1)"
   fi
 
+  # Extract subagent_type once (used for both allowlist check and dispatch recording)
+  AGENT_SUBTYPE=$(echo "$INPUT" | jq -r '.tool_input.subagent_type // empty' 2>/dev/null || true)
+
+  # Record dispatch-time phase for governance agents before allowing.
+  # This binding is consumed by state-writer.sh on SubagentStop so verdict
+  # validation uses the phase at dispatch, not the (possibly advanced) arrival phase.
+  # Fail-silent: record_dispatch_phase never blocks dispatch.
+  case "$AGENT_SUBTYPE" in
+    critic|qa-verifier|reviewer|security-privacy|pragmatist)
+      record_dispatch_phase "$AGENT_SUBTYPE" || true
+      ;;
+  esac
+
   # No-write session types: only read-only agents permitted
   case "$AGENT_SESSION_TYPE" in
     taskdef-query|taskdef-brief|audit|ephemeral|queue-triage|advisory-init|advisory-reinit|spec-fresh|spec-update)
-      AGENT_SUBTYPE=$(echo "$INPUT" | jq -r '.tool_input.subagent_type // empty' 2>/dev/null || true)
       if [ -z "$AGENT_SUBTYPE" ]; then
         _ptl_block "GATE-FINAL: Agent tool blocked — no subagent_type specified in $AGENT_SESSION_TYPE session. Only named read-only agents are permitted. (override: REPO_OS_ALLOW_AGENT=1)"
       fi

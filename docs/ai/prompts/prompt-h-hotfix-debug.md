@@ -1,7 +1,7 @@
 # Prompt H — Hotfix & Debug
 
 ## Purpose
-Reactive debugging and fix session for runtime errors, integration failures, and production incidents. Operates on `hotfix/*` branches with expedited gates (A2 relaxed, A5 skipped). Defines a structured workflow for diagnosing root causes, applying minimal fixes, iterating when fixes fail, and escalating when diagnosis stalls.
+Reactive debugging and fix session for runtime errors, integration failures, and production incidents. Operates on `hotfix/*` branches with expedited gates (A2 enforced, A5 skipped). Defines a structured workflow for diagnosing root causes, applying minimal fixes, iterating when fixes fail, and escalating when diagnosis stalls.
 
 ## Prompt
 
@@ -88,7 +88,7 @@ Common hotfix patterns from real sessions — check these early when symptoms ma
 ### Verify
 
 1. Run the reproduction steps to confirm the fix resolves the original issue
-2. QA gate verification: A1–A6 with A2 relaxed (scope limit) and A5 skipped (cohesion review)
+2. QA gate verification: A1–A6 with A2 enforced (large-scope: true in plan-approved satisfies it) and A5 skipped (cohesion review)
 3. If the fix doesn't work → re-enter build via `verify→build` loop with new evidence
 
 ### Iterative Fix-Test Cycle
@@ -157,9 +157,7 @@ After presenting the escalation report, wait for operator direction. The operato
 Execute close sequence per `docs/ai/workflow.md` § Session Lifecycle:
 1. Update session log (product: `docs/ai/logs/sessions/session-{id}.md`; template: `.claude/local/sessions/session-{id}.md`)
 2. Commit remaining changes including session log
-3. Merge to main (solo mode): `git checkout main && git merge --ff-only <branch>` (fallback `--no-ff`)
-   - On merge success: call `write_merge_signal "<branch>"` so the stop hook skips redundant merge
-   - On failure: `git merge --abort && git checkout <branch>`, notify operator
+3. Merge to main (solo mode): handled by stop hook and/or runner per `docs/ai/workflow.md` § Close Sequence step 4. In worktree sessions (default), do not merge directly — stop hook runs `git -C <main-repo-path> merge --ff-only <branch>` (fallback `--no-ff`) with post-merge working-tree sync. In non-worktree sessions: `git checkout main && git merge --ff-only <branch>` (fallback `--no-ff`); on success call `write_merge_signal "<branch>"`; on failure `git merge --abort && git checkout <branch>`, notify operator
 4. Present closing summary — include: root cause, fix applied, verification results
 
 ### Build Sequence — Agent Dispatch
@@ -169,7 +167,7 @@ Execute close sequence per `docs/ai/workflow.md` § Session Lifecycle:
 | plan (investigation) | **Explore** + **architect** + **exploration** | Parallel dispatch via Agent tool for root cause investigation |
 | plan (review) | **Pragmatist** (plan-gating mode) | Reviews fix strategy before operator approval |
 | build | Builder | Implements the fix |
-| verify | QA Verifier | Expedited gates (A2 relaxed, A5 skipped) |
+| verify | QA Verifier | Expedited gates (A2 enforced, A5 skipped) |
 | commit | Orchestrator | Commit with trailers |
 
 ### Inter-Session Governance
@@ -213,7 +211,7 @@ REQUIRE: attempt knowledge graph writes at close before the final commit per Dec
 - REQUIRE: solo mode — merge to main at close (hotfix branches always merge)
 - REQUIRE: attempt knowledge graph writes at close per Decision 0034 Amendment 3 (Expedited Profile)
 - BLOCK: A5 cohesion review is skipped for hotfix sessions (expedited gate profile)
-- GUIDE: A2 scope limit is relaxed — hotfix fixes may exceed 100 lines if the root cause requires it
+- GUIDE: A2 scope limit is enforced — hotfix fixes exceeding 100 lines require `large-scope: true` in `plan-approved` (headless sessions get this automatically; interactive sessions obtain it at the approval phase)
 - GUIDE: use HVST protocol when diagnosis is ambiguous (see `_agent-glossary.md` § HVST)
 - GUIDE: add debug logging gated behind dev-mode guards for async/timing issues — remove or gate before merge
 - GUIDE: check the Known Patterns table early when symptoms match a recognized pattern
