@@ -44,7 +44,8 @@ export default function StepsRow() {
               style={{
                 fontFamily: 'var(--font-serif)',
                 fontWeight: 'var(--fw-light)',
-                fontSize: 'var(--text-h3-lg)',
+                fontSize: 'var(--text-h2)',
+                lineHeight: 'var(--leading-tight)',
                 letterSpacing: 'var(--tracking-tight)',
                 color: 'var(--color-ink)',
                 marginTop: 'var(--space-3)',
