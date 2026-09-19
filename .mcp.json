@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "nco-web-editor": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["packages/mcp-server/dist/bin/cli.js"]
+    }
+  }
+}

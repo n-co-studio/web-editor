@@ -10,8 +10,9 @@ function Code({ children }: { children: string }) {
     <pre
       style={{
         margin: 0,
-        background: 'var(--color-ink)',
-        color: 'var(--color-on-ink)',
+        background: 'var(--color-bg)',
+        color: 'var(--color-ink)',
+        border: '1px solid var(--color-border)',
         fontFamily: 'var(--font-mono)',
         fontSize: 'var(--text-body-sm)',
         lineHeight: 1.6,
@@ -57,7 +58,7 @@ const STEPS: Step[] = [
 }`}</Code>
         <ul style={{ listStyle: 'none', margin: 'var(--space-4) 0 0', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
           {([
-            ['Claude Code', '.claude/settings.json'],
+            ['Claude Code', '.mcp.json'],
             ['Cursor', '.cursor/mcp.json'],
             ['Windsurf', '~/.codeium/windsurf/mcp_config.json'],
             ['Any MCP client', 'its own mcpServers config'],
@@ -87,7 +88,7 @@ const STEPS: Step[] = [
     title: 'Open localhost & activate',
     body: (
       <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
-        Visit your dev server, click the toolbar icon, and the built-in walkthrough above kicks in.
+        Visit your dev server, click the toolbar icon, and the editor's built-in walkthrough kicks in.
         A banner appears only if the extension and server versions disagree.
       </p>
     ),
@@ -116,11 +117,8 @@ and acknowledge_visual_change tools.`}</Code>
 
 export default function SetupGuide() {
   return (
-    <section id="setup" style={{ paddingBottom: 'var(--space-16)', marginBottom: 'var(--space-20)', scrollMarginTop: 'var(--space-12)' }}>
-      <h2 style={{ fontFamily: 'var(--font-serif)', fontWeight: 'var(--fw-light)', fontSize: 'var(--text-h2)', letterSpacing: 'var(--tracking-tight)' }}>
-        Set it up
-      </h2>
-      <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)', maxWidth: 'var(--measure)', marginTop: 'var(--space-3)', marginBottom: 'var(--space-10)' }}>
+    <div>
+      <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)', maxWidth: 'var(--measure)', marginBottom: 'var(--space-10)' }}>
         Install it, point your agent at it, and activate. Everything runs locally — no data leaves your machine.
       </p>
 
@@ -128,7 +126,7 @@ export default function SetupGuide() {
         {/* connector line behind the badges — sibling of the list, not inside it */}
         <span
           aria-hidden="true"
-          style={{ position: 'absolute', left: 15, top: 16, bottom: 16, width: 1, background: 'var(--color-divider)', zIndex: 1 }}
+          style={{ position: 'absolute', left: 15, top: 16, bottom: 16, width: 1, background: 'var(--color-divider)', zIndex: 'var(--z-base)' }}
         />
         <ol style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 'var(--space-8)' }}>
         {STEPS.map((s, i) => (
@@ -136,7 +134,7 @@ export default function SetupGuide() {
             <span
               style={{
                 position: 'relative',
-                zIndex: 10,
+                zIndex: 'var(--z-raised)',
                 width: 32,
                 height: 32,
                 borderRadius: 'var(--radius-full)',
@@ -159,6 +157,6 @@ export default function SetupGuide() {
         ))}
         </ol>
       </div>
-    </section>
+    </div>
   );
 }

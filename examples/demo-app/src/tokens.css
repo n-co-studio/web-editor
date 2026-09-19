@@ -137,16 +137,28 @@ body {
 }
 .nco-link:hover { background-size: 0 1px; background-position: 100% 100%; }
 
-/* Hairline card — no shadows, border emphasis on hover (MP is flat). Owns its
-   border so the :hover color isn't overridden by an inline border shorthand. */
+/* Hairline card — flat and static. Every card on the page is a container for
+   text, not a control: nothing inside is a link or a button. A hover response
+   would promise a click target that isn't there, so the card has none — and
+   with no state change there is nothing to transition. Owns its border so an
+   inline border shorthand can't override it. */
 .nco-card {
   border: 1px solid var(--color-border);
-  transition: border-color 0.2s ease, background-color 0.2s ease;
 }
-.nco-card:hover { border-color: var(--color-ink); }
 
 @media (prefers-reduced-motion: reduce) {
-  .nco-link, .nco-card { transition: none; }
+  .nco-link { transition: none; }
+}
+
+/* How-it-works grid — wide viewports breathe at space-10; below the
+   standard breakpoint (1280px) the columns tighten to space-5. */
+.nco-steps-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-10);
+}
+@media (max-width: 1280px) {
+  .nco-steps-grid { gap: var(--space-5); }
 }
 
 /* Walkthrough rows — alternating image / text, collapsing to a single column.
@@ -180,23 +192,69 @@ body {
   .nco-hero { grid-template-columns: 1fr; gap: var(--space-10); }
 }
 
-/* Pure-CSS scroll-driven parallax (no JS). The clip box hides the overflow; the
-   inner layer is taller than the box and drifts on scroll. Degrades to static
-   where scroll-driven animations aren't supported, and honors reduced-motion. */
-.nco-parallax { overflow: hidden; }
-.nco-parallax-layer { height: 100%; }
-@supports (animation-timeline: view()) {
-  @media (prefers-reduced-motion: no-preference) {
-    .nco-parallax-layer {
-      height: 128%;
-      animation: nco-drift linear both;
-      animation-timeline: view();
-      animation-range: cover;
-      will-change: transform;
-    }
+/* Hairline image/panel frame — class (not inline) so responsive rules below
+   can drop the side borders when the panel runs full-bleed. */
+.nco-frame { border: 1px solid var(--color-divider); }
+
+/* Images run full-bleed on mobile: break out of the padded content column to
+   the full viewport width (the 100vw trick pairs with .nco-paper's
+   overflow-x: clip, so no horizontal scrollbar). Frame keeps top/bottom
+   hairlines only — a bled edge with a side border reads as a mistake. */
+@media (max-width: 720px) {
+  .nco-bleed-mobile {
+    width: 100vw;
+    margin-left: calc(50% - 50vw);
+    border-left: none;
+    border-right: none;
   }
 }
-@keyframes nco-drift {
-  from { transform: translateY(-14%); }
-  to   { transform: translateY(8%); }
+
+
+/* ---------------------------------------------------------------------------
+ * Lava theme — the "/" guide page renders over the animated LavaBackground
+ * (ported from markpreston playground). Scoped to .nco-lava so the token
+ * :root set above stays untouched. The palette inverts:
+ * ink → warm paper-white over the dark lava field; ink-filled elements
+ * (hero CTA, footer) become the one light slab.
+ * ------------------------------------------------------------------------- */
+.nco-lava {
+  --color-ink:          #ffffff;
+  --color-primary:      #ffffff;
+  --color-secondary:    #ffffff;
+  --color-bg:           #0f0f0f;
+  --color-surface:      rgba(15, 15, 15, 0.55);
+  --color-divider:      rgba(255, 255, 255, 0.24);
+  --color-border:       rgba(255, 255, 255, 0.16);
+  --color-on-ink:       #0f0f0f;
+  --color-on-ink-muted: rgba(15, 15, 15, 0.62);
+  --color-hover-dark:   #e6e6e6;
+
+  /* Re-establish inherited text color inside the scope: elements with no
+     explicit color otherwise inherit body's COMPUTED color — resolved from
+     the :root ink token (black) outside this scope. */
+  color: var(--color-ink);
 }
+
+/* The lava field is the paper: drop the white fill + dot grid so the fixed
+   background layer shows through. */
+.nco-lava.nco-paper {
+  background-color: transparent;
+  background-image: none;
+}
+
+/* No full-width dividing rules over the lava — whitespace does the separating. */
+.nco-lava .nco-section::after { content: none; }
+
+/* Fixed full-viewport lava layer; content stacks above it. */
+.nco-lava-bg { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+.nco-lava-content { position: relative; z-index: 1; }
+
+/* Cards read cleanly over the moving field: faint dark glass, no hard fill. */
+.nco-lava .nco-card {
+  background: color-mix(in srgb, #0f0f0f 52%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+/* Match the document canvas to the field so overscroll doesn't flash white. */
+html:has(.nco-lava) { background: #0f0f0f; }
