@@ -45,3 +45,38 @@ That was still insufficient, and the second BLOCK caught why: all nine `activate
 
 - Session type: standard (full gates A1–A6, B1–B3). Phase-state was re-initialized with `REPO_OS_ALLOW_REINIT=1` over a stale `editor-live` state left by a prior session.
 - `plan-approved`, `pragmatist-signed`, `cohesion-reviewed`, `diff-review-complete`, and `qa-verified` were written via shell I/O — neither `plan-approval.sh` (AskUserQuestion) nor `state-writer.sh` (SubagentStop) fired in this environment. Every corresponding agent dispatch did occur and returned the recorded verdict.
+
+## Post-session — repo reconciliation
+
+After this session's merge, the operator reported the demo page had reverted.
+Cause: the solo merge checked out `main`, swapping the working tree away from
+`live-editor-26`, which was 22 commits ahead with an editor-live session and a
+dev server running against it. Nothing was lost — the branch was intact — but
+the checkout should not have happened without checking what the current branch
+carried. Restored by checking the branch back out. All later repository work in
+this session used a scratch worktree so the operator's tree was never touched.
+
+Three reconciliations followed, all verified commit-complete in both directions
+(`git log <side> --not main` empty for each) and build-verified before pushing:
+
+- `963064c` — merged `origin/main` into local `main`, which had diverged at
+  `db41f1f` (16 local feature commits vs 8 upstream template syncs). One
+  conflict, `docs/ai/governance/spec-compiled.yaml`: upstream ships it as a
+  blank placeholder, so the sync would have reset `spec_version` to null and
+  dropped both feature-brief entries plus both `contract_changes` records. Kept
+  the local version; all other template updates taken verbatim.
+- `5a465b9` — committed the editor-live session's own log, which that session
+  left untracked on disk when it stopped after its final code commit.
+- `c2baf56` — merged `live-editor-26` into `main` (zero overlapping files).
+
+`live-editor-26` had no remote and existed only on local disk; it is now pushed.
+Both branches are sealed. This session's gate state files (`plan-approved`,
+`pragmatist-signed`, `diff-review-complete`, `qa-verified`) were overwritten by
+the concurrent editor-live session, which shared session id `d13941e1` and the
+same state directory — the forensic trail is gone, though all gates passed
+before the clobber and the commits are landed. Same collision class as the
+`state-dir-wt-sessions-resolution` note in project memory.
+
+Also added `.nco-web-editor/` to `.gitignore` (MCP server runtime state),
+appended **after** the `END REPO-OS MANAGED` marker so template-sync does not
+clobber it.
