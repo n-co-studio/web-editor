@@ -154,6 +154,32 @@ re-review that resolves a PARTIAL should count.
 The tool never guesses which diff belongs to which change, and never infers a
 verification state for an EC that declared no linkage.
 
+### 7. Human-facing labels ship as data
+
+`status_label` and `verification_label` accompany the enums, so every consumer
+says the same thing and the copy cannot drift apart across a UI, a close
+summary and a report.
+
+| enum | label |
+|---|---|
+| `not-started` | **Nothing claimed this** |
+| `in-progress` | In progress |
+| `delivered` | Delivered |
+| `verified` | Checked |
+| `unverified` | Reviewer found a problem |
+| `inconclusive` | Reviewer could not confirm |
+| `pending` | Review not run yet |
+| `not-linked` | No check defined |
+
+The load-bearing one is `not-started`. Because attribution is recorded rather
+than inferred, a missing `Changes:` trailer yields `not-started` on work that
+was genuinely finished. Labelling that **"Not done"** would assert something
+the data cannot support — the honest claim is only that nothing *claimed* the
+outcome. The same reasoning applies to `not-linked` and `pending`: neither is
+a failure, and neither should be rendered as one.
+
+The enums remain the stable machine contract; the labels are presentation.
+
 ## Consequences
 
 - A brief now states its outcome twice: once for the Critic (`Verification`,

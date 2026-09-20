@@ -188,6 +188,37 @@ if [ -n "$VERDICTS" ] && [ -f "$VERDICTS" ]; then
   ' "$VERDICTS" 2>/dev/null)
 fi
 
+# --- Human-facing labels ---------------------------------------------------
+# Shipped as data so every consumer says the same thing. The enum values are
+# the stable machine contract; these are the words a person reads.
+#
+# The important one is not-started. It means "no commit claimed this outcome",
+# NOT "nobody did the work" — attribution here is recorded, never inferred, so
+# a missing trailer produces not-started on genuinely finished work. Labelling
+# it "Not done" would state something the data cannot support.
+_status_label() {
+  case "$1" in
+    delivered)   echo "Delivered" ;;
+    in-progress) echo "In progress" ;;
+    not-started) echo "Nothing claimed this" ;;
+    *)           echo "$1" ;;
+  esac
+}
+
+# Likewise: not-linked means no check was ever defined for this outcome, and
+# pending means a check exists but has not run. Neither is a failure, and
+# neither should read as one.
+_verification_label() {
+  case "$1" in
+    verified)     echo "Checked" ;;
+    unverified)   echo "Reviewer found a problem" ;;
+    inconclusive) echo "Reviewer could not confirm" ;;
+    pending)      echo "Review not run yet" ;;
+    not-linked)   echo "No check defined" ;;
+    *)            echo "$1" ;;
+  esac
+}
+
 # Aggregate a verification state across the criteria an EC points at.
 # Worst verdict wins — a single UNVERIFIED is not cancelled out by four
 # VERIFIEDs, and reporting otherwise would overstate confidence.
@@ -299,9 +330,10 @@ _files_for() {  # files touched by a list of shas on stdin
 
       [ "$first" = "0" ] && printf ',\n'
       first=0
-      printf '    {"id": %s, "statement": %s, "status": %s, "verification": %s, "commit_count": %s,\n' \
+      printf '    {"id": %s, "statement": %s, "status": %s, "status_label": %s, "verification": %s, "verification_label": %s, "commit_count": %s,\n' \
         "$(jq -Rn --arg v "$id" '$v')" "$(jq -Rn --arg v "$stmt" '$v')" \
-        "$(jq -Rn --arg v "$status" '$v')" "$(jq -Rn --arg v "$vstate" '$v')" "$n"
+        "$(jq -Rn --arg v "$status" '$v')" "$(jq -Rn --arg v "$(_status_label "$status")" '$v')" \
+        "$(jq -Rn --arg v "$vstate" '$v')" "$(jq -Rn --arg v "$(_verification_label "$vstate")" '$v')" "$n"
       printf '     "criteria": %s,\n' "$crit_json"
       printf '     "commits": %s,\n' \
         "$(awk -F'\t' -v i="$id" '$1==i{print $2"\t"$3}' "$_tmp.att" \
@@ -336,7 +368,7 @@ else
     (if (.expected_changes|length) == 0 then "  (none declared)" else
       (.expected_changes[] |
         "  [\(if .status=="delivered" then "x" elif .status=="in-progress" then "~" else " " end)] \(.id): \(.statement)" +
-        "\n      status: \(.status)   verification: \(.verification)" +
+        "\n      \(.status_label)   ·   \(.verification_label)" +
         (if .commit_count > 0 then "\n      \(.commit_count) commit(s), \(.files|length) file(s)" else "" end) +
         (if (.criteria|length) > 0 then
           ([.criteria[] | "\n      · criterion \(.index): \(.contract_verification)/\(.completeness)"] | join(""))
