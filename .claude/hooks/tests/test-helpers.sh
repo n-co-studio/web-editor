@@ -145,13 +145,51 @@ assert_ok() {
 
 # assert_fail <exit_code> <description>
 # Pass if exit_code is non-zero.
+# Generic "returned non-zero" assertion. CORRECT for shell FUNCTION return
+# codes (has_plan_gate, bundle_valid, ...), where any non-zero means false.
+#
+# DO NOT use this for a HOOK's exit status. Hooks obey a different contract:
+# Claude Code blocks a tool call on exit 2 ONLY, and treats every other
+# non-zero as a non-blocking error that lets the call PROCEED. Asserting mere
+# non-zero on a hook is how a gate script that CRASHED with exit 1 scored green
+# as "blocks the commit", hiding a total fail-open of the commit gate.
+# Use assert_hook_blocks() for hook exit codes.
 assert_fail() {
   local rc="$1"
   local desc="$2"
   if [ "$rc" -ne 0 ]; then
     _tap_pass "$desc"
   else
-    _tap_fail "$desc" "expected non-zero exit, got 0"
+    _tap_fail "$desc" "expected non-zero return, got 0"
+  fi
+}
+
+# assert_hook_blocks <hook_exit_code> <description>
+# Pass ONLY on exit 2 — the single status that blocks a tool call.
+# Distinguishes "blocked deliberately" from "crashed", which bare non-zero
+# cannot do. Use for every hook invocation; use assert_fail() for functions.
+assert_hook_blocks() {
+  local rc="$1"
+  local desc="$2"
+  if [ "$rc" -eq 2 ]; then
+    _tap_pass "$desc"
+  elif [ "$rc" -eq 0 ]; then
+    _tap_fail "$desc" "expected blocking exit 2, got 0 — the hook allowed the call"
+  else
+    _tap_fail "$desc" "expected blocking exit 2, got $rc — a non-2 non-zero does NOT block; the tool call proceeds. This usually means the hook crashed rather than blocking deliberately."
+  fi
+}
+
+# assert_exit <expected_code> <actual_code> <description>
+# Explicit exact-status assertion for cases that are neither 0 nor 2.
+assert_exit() {
+  local expected="$1"
+  local actual="$2"
+  local desc="$3"
+  if [ "$actual" -eq "$expected" ]; then
+    _tap_pass "$desc"
+  else
+    _tap_fail "$desc" "expected exit $expected, got $actual"
   fi
 }
 
@@ -277,6 +315,60 @@ setup_hook_sandbox() {
   # Create a dummy source file for edit/write tests
   mkdir -p "$_SANDBOX_DIR/src"
   echo "module.exports = {}" > "$_SANDBOX_DIR/src/foo.ts"
+
+  scaffold_sandbox_decisions
+}
+
+# --- Scaffold a production-SHAPED decisions directory -----------------------
+# The sandbox previously had no docs/ai/decisions/ at all. pre-commit-gates.sh
+# guards its entire A1 block with `[ -d "$DECISIONS_DIR" ]`, so that block —
+# roughly a quarter of the gate script, including the trailer enforcement and
+# the digest staleness path — never executed under test. A crash inside it was
+# therefore invisible to this suite.
+#
+# Shape matters as much as presence: the real repo contains t-*.md decisions
+# and ZERO 0*.md files, which is exactly what made A1's
+# `ls "$DECISIONS_DIR"/t-*.md "$DECISIONS_DIR"/0*.md` return non-zero and abort
+# the script under `set -euo pipefail`. A sandbox that creates both prefixes
+# would mask the very defect it should catch. Keep it t-*.md only.
+scaffold_sandbox_decisions() {
+  local dir="$_SANDBOX_DIR/docs/ai/decisions"
+  mkdir -p "$dir"
+
+  local id slug
+  for pair in "0001:baseline" "0004:mechanical-enforcement" "0012:file-edit-restrictions"; do
+    id="${pair%%:*}"
+    slug="${pair##*:}"
+    cat > "$dir/t-${id}-${slug}.md" <<EOF
+# Decision ${id} — ${slug}
+
+## Status
+Accepted
+
+## Triggers
+
+- type: file
+- path: \`.claude/hooks/.*\.sh\`
+- keywords: \`PreToolUse, PostToolUse, phase-state\`
+
+## Decision
+
+Sandbox fixture decision record.
+EOF
+  done
+
+  # A1 enforcement sentinel — blocking mode, as in the real repo.
+  : > "$dir/.a1-triggers-enforced"
+
+  # Compiled index with a deliberately non-matching digest, and an mtime older
+  # than the decision files, so the staleness/recompute path is exercised.
+  {
+    echo "# A1 trigger index — generated artifact. Do not hand-edit."
+    echo "# Regenerate: bash .claude/.automation/lib/rebuild-trigger-index.sh"
+    echo "# digest: 0000000000000000000000000000000000000000000000000000000000000000"
+    echo '0001|\.claude/hooks/.*\.sh|PreToolUse, PostToolUse, phase-state'
+  } > "$dir/.a1-trigger-index"
+  touch -t 202001010000 "$dir/.a1-trigger-index"
 }
 
 # --- Run a hook script in the sandbox, capturing output ---
@@ -308,12 +400,18 @@ run_hook_rc() {
 # Handles both legacy exit-2 blocks and Phase 2a JSON blocks (exit 0 + JSON).
 assert_blocked() {
   local desc="$1"
-  if [ "$_LAST_RC" -ne 0 ]; then
+  # Two legitimate ways to block: exit 2, or exit 0 carrying a JSON
+  # decision:block payload (Phase 2a). Any OTHER non-zero is a crash, not a
+  # block — the tool call proceeds — so it must fail here. Accepting bare
+  # non-zero is what let a fail-open commit gate score green in this suite.
+  if [ "$_LAST_RC" -eq 2 ]; then
     _tap_pass "$desc"
-  elif printf '%s' "$_LAST_OUTPUT" | grep -q '"decision".*"block"' 2>/dev/null; then
+  elif [ "$_LAST_RC" -eq 0 ] && printf '%s' "$_LAST_OUTPUT" | grep -q '"decision".*"block"' 2>/dev/null; then
     _tap_pass "$desc"
+  elif [ "$_LAST_RC" -eq 0 ]; then
+    _tap_fail "$desc" "expected block, got exit 0 with no decision:block payload"
   else
-    _tap_fail "$desc" "expected block (exit!=0 or decision:block), got exit $_LAST_RC"
+    _tap_fail "$desc" "expected block (exit 2, or exit 0 + decision:block), got exit $_LAST_RC — a non-2 non-zero does NOT block; the tool call proceeds."
   fi
 }
 

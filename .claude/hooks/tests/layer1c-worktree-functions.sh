@@ -62,6 +62,40 @@ else
 fi
 unset REPO_OS_SESSION_ID
 
+# Signal 2: phase-state present + simulated worktree → true (EnterWorktree path)
+# Simulate is_worktree()=true via cache, create phase-state in resolved state dir.
+_CACHED_IS_WORKTREE="true"
+_CACHED_SESSION_ID=""
+_CACHED_SESSION_STATE_DIR=""
+unset REPO_OS_SESSION_ID 2>/dev/null || true
+_fws_sid=$(get_session_id "$SB")
+_fws_state_dir=$(get_session_state_dir)
+mkdir -p "$_fws_state_dir" 2>/dev/null || true
+printf 'session_id: %s\nsession_type: standard\n' "$_fws_sid" > "$_fws_state_dir/phase-state"
+_CACHED_SESSION_STATE_DIR=""
+if is_full_worktree_session; then
+  _tap_pass "is_full_worktree_session true when is_worktree and phase-state exists (EnterWorktree path)"
+else
+  _tap_fail "is_full_worktree_session true when is_worktree and phase-state exists (EnterWorktree path)"
+fi
+rm -f "$_fws_state_dir/phase-state"
+_CACHED_IS_WORKTREE=""
+_CACHED_SESSION_STATE_DIR=""
+
+# Signal 2: is_worktree but no phase-state → false (subagent worktree path)
+_CACHED_IS_WORKTREE="true"
+_CACHED_SESSION_ID=""
+_CACHED_SESSION_STATE_DIR=""
+unset REPO_OS_SESSION_ID 2>/dev/null || true
+# Ensure phase-state does not exist (cleaned above)
+if is_full_worktree_session; then
+  _tap_fail "is_full_worktree_session false when is_worktree but no phase-state (subagent path)"
+else
+  _tap_pass "is_full_worktree_session false when is_worktree but no phase-state (subagent path)"
+fi
+_CACHED_IS_WORKTREE=""
+_CACHED_SESSION_STATE_DIR=""
+
 # ============================================================
 # L1c.3 — get_session_state_dir routing
 # ============================================================

@@ -47,7 +47,7 @@ Decision 0027 (Agent Tool Governance Gate) is the primary defense — it prevent
 ## Override
 None — the worktree guard is unconditional for subagent worktrees. If a worktree subagent's verdict needs to be recorded, re-dispatch the agent without worktree isolation.
 
-**Note**: Decision 0030 supersedes this decision **for full worktree sessions** (`claude --worktree` with `REPO_OS_SESSION_ID` set). The subagent worktree block defined here remains in effect.
+**Note**: Decision 0030 supersedes this decision **for full worktree sessions** (either `claude --worktree` with `REPO_OS_SESSION_ID` set, OR sessions launched via the harness `EnterWorktree` tool which use the `phase-state` presence signal — see Decision 0030 Amendment 2026-08-31). The subagent worktree block defined here remains in effect.
 
 ## Gitignored Governance Path Disposition Table (Amendment — 2026-08-07)
 

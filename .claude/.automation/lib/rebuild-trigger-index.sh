@@ -64,8 +64,14 @@ elif command -v shasum >/dev/null 2>&1; then
 fi
 
 if [ -n "$_DIGEST_ALGO" ]; then
+  # `ls` exits non-zero when EITHER glob matches nothing, and a repo with only
+  # t-*.md decisions (the template's own state) always trips the 0*.md glob.
+  # Under `set -euo pipefail` that aborted this script before it wrote the
+  # index — so the regenerate command advertised by pre-commit-gates.sh was a
+  # silent no-op and the stored digest could never be refreshed. Must stay
+  # byte-identical to the digest computation in pre-commit-gates.sh.
   _DIGEST=$(
-    LC_ALL=C ls "$DECISIONS_DIR"/t-*.md "$DECISIONS_DIR"/0*.md 2>/dev/null \
+    { LC_ALL=C ls "$DECISIONS_DIR"/t-*.md "$DECISIONS_DIR"/0*.md 2>/dev/null || true; } \
       | LC_ALL=C sort \
       | while IFS= read -r f; do
           [ -f "$f" ] || continue

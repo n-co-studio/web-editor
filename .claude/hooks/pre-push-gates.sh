@@ -10,6 +10,8 @@
 #   REPO_OS_RECOVER=1 — skip all checks (emergency recovery)
 
 set -euo pipefail
+# NOTE: errtrace (-E) is enabled conditionally next to _push_gate_abort()
+# below — only safe where $BASHPID exists. Do not add -E here.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/_analytics-helper.sh"
@@ -48,6 +50,32 @@ if [ "$_PUSH_HAS_JQ" = true ]; then
 fi
 
 FAILED=0
+
+# --- Fail-closed abort guard (blocking) ---
+# Same class of defect as pre-commit-gates.sh: under `set -euo pipefail` an
+# unhandled non-zero command aborts with exit 1, and the Claude Code hook
+# protocol blocks on exit 2 ONLY — so a crash would silently let the push
+# through. Fail closed instead. See the fuller note in pre-commit-gates.sh.
+# Subshell guard: errtrace propagates into command substitutions, where a
+# non-zero status is the caller's to handle (see the fuller note in
+# pre-commit-gates.sh). Fail closed in the main shell only.
+_push_gate_abort() {
+  local rc=$?
+  local line="${1:-unknown}"
+  if [ "${BASHPID:-$$}" != "$$" ]; then
+    return "$rc"
+  fi
+  echo "GATE-FINAL: pre-push gate aborted unexpectedly at line ${line} (exit ${rc}) — failing closed rather than letting the push through. NEXT: this is a gate defect; verify with 'bash .claude/tools/gate-conformance.sh'. (no override)" >&2
+  log_hook_event "pre-push-gates" "PreToolUse" "Bash" "block" "$START_MS" "gate_script_abort" "line:${line} rc:${rc}" 2>/dev/null || true
+  exit 2
+}
+trap '_push_gate_abort "$LINENO"' ERR
+
+# Only enable errtrace where the subshell guard can work ($BASHPID is bash
+# 4.0+; macOS ships 3.2). See the fuller note in pre-commit-gates.sh.
+if [ -n "${BASHPID:-}" ]; then
+  set -E
+fi
 
 # --- REPO_OS_RECOVER override (env var or file-based signal) ---
 RECOVER_SIGNAL_FILE="$(get_repo_root)/.claude/.state/.recover-signal"

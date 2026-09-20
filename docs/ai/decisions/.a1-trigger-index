@@ -1,6 +1,6 @@
 # A1 trigger index — generated artifact. Do not hand-edit.
 # Regenerate: bash .claude/.automation/lib/rebuild-trigger-index.sh
-# digest: 4f6f5f839e5f12d9dbd0c14ff20cb923cfbf5351c647cbe74ac50e6e6184280e
+# digest: 160563479aef0a08e90acd4cb81b511dc07b24e83aecc9f8d8244623314e9acd
 0001|AI\.md|prompt system, verification gate, session-based
 0001|docs/ai/prompts/prompt-.*\.md|prompt system, verification gate, session-based
 0002|docs/ai/decisions/.*\.md|mandatory, commit-blocking
@@ -97,3 +97,15 @@
 0045|\.claude/hooks/_cleanup-helper\.sh|delete_merged_session_branch, merged branch cleanup, branch deletion on close, branch accumulation
 0045|\.claude/hooks/session-close-check\.sh|delete_merged_session_branch, merged branch cleanup, branch deletion on close, branch accumulation
 0045|\.claude/\.automation/runner\.sh|delete_merged_session_branch, merged branch cleanup, branch deletion on close, branch accumulation
+0046|\.claude/\.automation/schemas/eval-|eval study, evaluation study, lineage_id, study_id, cell_id, arm, n_reps, blinding, shuffle-manifest, eval-study, eval-cell, eval-suite, pre-registration, decision rule, raw-data-complete
+0046|docs/spec/_templates/_eval-|eval study, evaluation study, lineage_id, study_id, cell_id, arm, n_reps, blinding, shuffle-manifest, eval-study, eval-cell, eval-suite, pre-registration, decision rule, raw-data-complete
+0046|docs/ai/prompts/prompt-eval-study\.md|eval study, evaluation study, lineage_id, study_id, cell_id, arm, n_reps, blinding, shuffle-manifest, eval-study, eval-cell, eval-suite, pre-registration, decision rule, raw-data-complete
+0046|docs/ai/eval/_nomenclature\.md|eval study, evaluation study, lineage_id, study_id, cell_id, arm, n_reps, blinding, shuffle-manifest, eval-study, eval-cell, eval-suite, pre-registration, decision rule, raw-data-complete
+0048|\.claude/hooks/state-writer\.sh|criteria-verdicts, _capture_criteria_verdicts, contract_verification, completeness verdict, repo-os/criteria-verdicts
+0048|\.claude/hooks/_cleanup-helper\.sh|criteria-verdicts, _capture_criteria_verdicts, contract_verification, completeness verdict, repo-os/criteria-verdicts
+0048|docs/ai/governance/criteria-verdicts/|criteria-verdicts, _capture_criteria_verdicts, contract_verification, completeness verdict, repo-os/criteria-verdicts
+0049|\.claude/hooks/pre-commit-gates\.sh|exit 2, exit code, fail-closed, fail-open, errtrace, set -E, ERR trap, _gate_abort, assert_fail, assert_blocked, gate-conformance, conformance harness
+0049|\.claude/hooks/pre-push-gates\.sh|exit 2, exit code, fail-closed, fail-open, errtrace, set -E, ERR trap, _gate_abort, assert_fail, assert_blocked, gate-conformance, conformance harness
+0049|\.claude/hooks/tests/test-helpers\.sh|exit 2, exit code, fail-closed, fail-open, errtrace, set -E, ERR trap, _gate_abort, assert_fail, assert_blocked, gate-conformance, conformance harness
+0049|\.claude/tools/gate-conformance\.sh|exit 2, exit code, fail-closed, fail-open, errtrace, set -E, ERR trap, _gate_abort, assert_fail, assert_blocked, gate-conformance, conformance harness
+0049|\.claude/\.automation/git-hooks/|exit 2, exit code, fail-closed, fail-open, errtrace, set -E, ERR trap, _gate_abort, assert_fail, assert_blocked, gate-conformance, conformance harness

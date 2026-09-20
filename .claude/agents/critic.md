@@ -124,6 +124,15 @@ Report contract verification in the Cohesion Brief after the Findings section:
 2. [next criterion...]
 ```
 
+REQUIRE: this layout and the `### Completeness` layout below are a **machine-read
+contract**, not just a human-readable convention — `state-writer.sh` parses both into
+`criteria-verdicts.yaml` and the durable record under
+`docs/ai/governance/criteria-verdicts/` (Decision t-0048). Keep the section headers at
+column 0, keep one `N. ` numbered line per criterion, and end each numbered line with
+the bare verdict token. Evidence lines must stay in the `- Evidence: ` form directly
+beneath their criterion. Malformed rows degrade to `verdict: ABSENT` in the record;
+they never block the commit, so a drifted format fails silently rather than loudly.
+
 ### Completeness Pass
 
 After the Contract Verification section, evaluate each `verification:` criterion against the current codebase state (not just the diff — read files, check existence, verify behavior). This pass is distinct from Contract Verification: it evaluates whether the work is *done*, not whether structural evidence exists in the diff.
@@ -141,7 +150,7 @@ Report the completeness pass in the Cohesion Brief after the Contract Verificati
 
 ```
 ### Completeness
-1. [criterion text] — COMPLETE | INCOMPLETE | PARTIAL
+1. [criterion text] — COMPLETE | INCOMPLETE | PARTIAL | N/A
    - Evidence: [what was found or what is missing]
 2. [next criterion...]
 ```
@@ -239,7 +248,7 @@ GATE_RESULT: APPROVED
    - Evidence: [file:line or "none found"]
 
 ### Completeness
-1. [criterion text] — COMPLETE | INCOMPLETE | PARTIAL
+1. [criterion text] — COMPLETE | INCOMPLETE | PARTIAL | N/A
    - Evidence: [what was found or what is missing]
 
 ### Summary

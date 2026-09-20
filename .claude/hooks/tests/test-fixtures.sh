@@ -146,6 +146,14 @@ fixture_stop() {
   fi
 }
 
+# --- SessionEnd ---
+# Consumer: session-close-check.sh
+# Fields parsed:
+#   .hook_event_name  (routes Stop vs SessionEnd destructive cleanup path — Decision 0047)
+fixture_session_end() {
+  printf '{"hook_event_name":"SessionEnd"}'
+}
+
 # --- HVST event (PostToolUse / PostToolUseFailure) ---
 # Consumer: hvst-failure-tracker.sh
 # Fields parsed:
@@ -192,6 +200,9 @@ _fixtures_self_test() {
 
   json=$(fixture_stop)
   echo "$json" | jq -e '.' >/dev/null 2>&1 || { echo "FAIL: fixture_stop"; failures=$((failures + 1)); }
+
+  json=$(fixture_session_end)
+  echo "$json" | jq -e '.hook_event_name == "SessionEnd"' >/dev/null 2>&1 || { echo "FAIL: fixture_session_end"; failures=$((failures + 1)); }
 
   json=$(fixture_hvst_event "PostToolUseFailure")
   echo "$json" | jq -e '.hook_event_name == "PostToolUseFailure"' >/dev/null 2>&1 || { echo "FAIL: fixture_hvst_event"; failures=$((failures + 1)); }

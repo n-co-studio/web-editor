@@ -1,0 +1,129 @@
+schema: repo-os/criteria-verdicts@1
+session_id: "693a8736-de98-44fc-8152-7f30bb6ce464"
+rounds:
+  - round: 1
+    timestamp: "2026-09-15T21:06:13Z"
+    dispatch_phase: "review"
+    dispatch_cycle: 1
+    completeness_score: "3/7 criteria met"
+    completeness_gate: NEEDS_WORK
+    criteria:
+      - index: 1
+        criterion: "Both the Contract Verification and Completeness verdicts are captured per criterion and kept as separate fields, never merged into a single verdict"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`.claude/hooks/state-writer.sh:328-333` (`contract_verification:` and `completeness:` emitted as distinct nested keys per `index`)"
+        completeness:
+          verdict: COMPLETE
+          evidence: "same as Contract Verification #1; codebase state matches diff."
+      - index: 2
+        criterion: "All six verdict tokens parse correctly, and criterion text containing dashes is not truncated"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`.claude/hooks/state-writer.sh:293` (closed alternation `VERIFIED|UNVERIFIED|INCONCLUSIVE|INCOMPLETE|COMPLETE|PARTIAL|N\\/A`, anchored on a required leading space so `INCOMPLETE` cannot be mis-split as `COMPLETE`); `:299-300` (trailing-dash strip only removes the separator after the verdict has already been removed, not embedded dashes in `txt`)"
+        completeness:
+          verdict: PARTIAL
+          evidence: "logic is structurally sound on inspection, but no committed test exercises the parser (see Contract Verification #7) and this review had no Bash tool to run the scratchpad harness that was built specifically to demonstrate this. Static confidence is high; empirical confirmation is missing."
+      - index: 3
+        criterion: "Both emitted artifacts are valid YAML that a standard parser loads without error"
+        contract_verification:
+          verdict: INCONCLUSIVE
+          evidence: "structural indentation traced by hand (`.claude/hooks/state-writer.sh:344-359`, `:378-387`) is consistent (list items nested deeper than their parent key in both sidecar and durable/`sed`-indented forms), but this Critic invocation has no Bash tool available to execute the provided harness (`/private/tmp/.../scratchpad/t.sh`) or a YAML parser against it — no runtime confirmation obtained."
+        completeness:
+          verdict: PARTIAL
+          evidence: "same gap as Contract Verification #3 — hand-traced indentation is consistent but unexecuted."
+      - index: 4
+        criterion: "A second Critic dispatch appends a new rounds block to the durable record rather than overwriting the first"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`.claude/hooks/state-writer.sh:368-377` (`if [ ! -f \"$_cv_durable\" ]` writes the header once; else computes `_cv_round` from existing count and the block is `>>`-appended, never truncated)"
+        completeness:
+          verdict: COMPLETE
+          evidence: "code path confirmed; see Contract Verification #4. (Concurrent-dispatch race noted separately as Finding 3 — a distinct concern from sequential correctness, which this criterion asks about.)"
+      - index: 5
+        criterion: "The sidecar is deleted at session close by `_delete_if_owned` for the owning session and retained for a foreign session id"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`.claude/hooks/_cleanup-helper.sh:118` (`_delete_if_owned \"$state_dir/criteria-verdicts.yaml\" \"$closing_sid\"`); `.claude/hooks/state-writer.sh:351` writes `session_id: %s` **unquoted**, matching `_delete_if_owned`'s `sed 's/^session_id: *//'` (`.claude/hooks/_cleanup-helper.sh:33`), which strips the prefix but not quotes — an unquoted value is required for the string comparison at `_cleanup-helper.sh:39` to succeed"
+        completeness:
+          verdict: COMPLETE
+          evidence: "confirmed by reading both consumer and producer; unquoted `session_id:` format matches exactly."
+      - index: 6
+        criterion: "The capture is advisory: a malformed or absent brief section never blocks a commit and never aborts state-writer.sh under `set -euo pipefail`"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "every risky command in `_capture_criteria_verdicts` is `|| true`-guarded or a plain variable assignment (`.claude/hooks/state-writer.sh:274-389`); `grep -q` for pre-commit-gates.sh shows no reference to `criteria-verdicts` anywhere in that file (confirmed via repo-wide grep) — `COMPLETENESS_GATE` remains the only signal `pre-commit-gates.sh:539-547` reads"
+        completeness:
+          verdict: COMPLETE
+          evidence: "no gate consumer references `criteria-verdicts`; every command path in the function is guarded."
+      - index: 7
+        criterion: "No existing hook test regresses relative to the pre-change baseline"
+        contract_verification:
+          verdict: INCONCLUSIVE
+          evidence: "no test in `.claude/hooks/tests/*.sh` invokes `state-writer.sh`'s cohesion/combined write paths or `_capture_criteria_verdicts` (grepped `layer3-hook-integration.sh` and the full tests directory — no matches), so there is nothing in the tracked suite that could regress; this Critic invocation has no Bash tool to actually execute `run-phase-tests.sh` and confirm a clean pass."
+        completeness:
+          verdict: PARTIAL
+          evidence: "trivially unregressed (nothing touches the new code path), but no new test was added to the tracked suite either — the only verification artifact is an ungitted scratchpad harness. Recommend adding a fixture-based test under `.claude/hooks/tests/` before this becomes load-bearing for anything beyond advisory display."
+  - round: 2
+    timestamp: "2026-09-15T21:19:04Z"
+    dispatch_phase: "review"
+    dispatch_cycle: 2
+    completeness_score: "5/7 criteria met"
+    completeness_gate: APPROVED
+    criteria:
+      - index: 1
+        criterion: "Both the Contract Verification and Completeness verdicts are captured per criterion and kept as separate fields, never merged into a single verdict"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`.claude/hooks/state-writer.sh:328-333` — `contract_verification:` and `completeness:` emitted as distinct nested keys under each `index`."
+        completeness:
+          verdict: COMPLETE
+          evidence: "same as Contract Verification #1; static structure confirms this on inspection, no runtime dependency."
+      - index: 2
+        criterion: "All six verdict tokens parse correctly, and criterion text containing dashes is not truncated"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`.claude/hooks/state-writer.sh:293` (closed alternation anchored on a required leading space, `INCOMPLETE` ordered before `COMPLETE` in the alternation); `:299-300` (trailing separator stripped only after the verdict token is already removed, so embedded dashes in criterion text survive). `.claude/hooks/tests/layer7-criteria-verdicts.sh:102-112` (L7.2/L7.3) exercises exactly this with a fixture criterion containing an embedded dash."
+        completeness:
+          verdict: COMPLETE
+          evidence: "dedicated fixture test (`layer7-criteria-verdicts.sh:57-88`, L7.2/L7.3) now exists and is wired into the runner, closing the gap flagged in round 1 (\"no committed test exercises the parser\"). Logic hand-traced correct."
+      - index: 3
+        criterion: "Both emitted artifacts are valid YAML that a standard parser loads without error"
+        contract_verification:
+          verdict: INCONCLUSIVE
+          evidence: "indentation hand-traced consistent at `.claude/hooks/state-writer.sh:344-359` (sidecar) and `:384-393` (durable, `sed 's/^/    /'` re-indent); `.claude/hooks/tests/layer7-criteria-verdicts.sh:114-125` (L7.4/L7.5) asserts this via `python3 -c \"import yaml\"` when available. No runtime confirmation obtained this dispatch (no Bash tool)."
+        completeness:
+          verdict: PARTIAL
+          evidence: "dedicated YAML-parse assertion now exists (L7.4, conditional on `python3`+`pyyaml`), closing part of the round-1 gap, but still unexecuted by this reviewer. Remains PARTIAL rather than COMPLETE until actually run."
+      - index: 4
+        criterion: "A second Critic dispatch appends a new rounds block to the durable record rather than overwriting the first"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`.claude/hooks/state-writer.sh:373-383` (`_cv_append_round` — header written once via `[ ! -f ... ]`, else `_cv_round` computed from existing count and appended via `>>`); the actual durable artifact `docs/ai/governance/criteria-verdicts/693a8736-....yaml` on disk shows exactly one `rounds:` block containing `round: 1` from a prior dispatch, consistent with append-not-overwrite semantics (only one round exists because the second dispatch was the phase-mismatched one that never reached the write path at all — itself confirming the phase-guard, not the append logic, blocked that write)."
+        completeness:
+          verdict: COMPLETE
+          evidence: "code path confirmed by inspection (Contract Verification #4); `layer7-criteria-verdicts.sh:127-135` (L7.6) directly exercises two sequential dispatches and asserts round-count and header-once behavior."
+      - index: 5
+        criterion: "The sidecar is deleted at session close by `_delete_if_owned` for the owning session and retained for a foreign session id"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`.claude/hooks/_cleanup-helper.sh:116-118` calls `_delete_if_owned \"$state_dir/criteria-verdicts.yaml\" \"$closing_sid\"`; `.claude/hooks/state-writer.sh:351` writes `session_id: %s` unquoted, matching `_delete_if_owned`'s `sed 's/^session_id: *//'` (`_cleanup-helper.sh:33`) which strips the prefix but not quotes."
+        completeness:
+          verdict: COMPLETE
+          evidence: "confirmed by inspection (Contract Verification #5); `layer7-criteria-verdicts.sh:137-145` (L7.7) directly exercises both branches of `_delete_if_owned`."
+      - index: 6
+        criterion: "The capture is advisory: a malformed or absent brief section never blocks a commit and never aborts state-writer.sh under `set -euo pipefail`"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "every risky command in `_capture_criteria_verdicts` is `|| true`-guarded (`state-writer.sh:274-407`); `grep -c criteria-verdicts .claude/hooks/pre-commit-gates.sh` returns no matches — `COMPLETENESS_GATE` remains the sole gate signal, confirmed unchanged in this diff."
+        completeness:
+          verdict: COMPLETE
+          evidence: "confirmed by inspection (Contract Verification #6); `layer7-criteria-verdicts.sh:147-158` (L7.8) exercises both the no-section and malformed-input paths and asserts `_rc` stays 0."
+      - index: 7
+        criterion: "No existing hook test regresses relative to the pre-change baseline"
+        contract_verification:
+          verdict: INCONCLUSIVE
+          evidence: "`.claude/hooks/tests/layer7-criteria-verdicts.sh` is additive (new file, own sandbox via `setup_sandbox`), and `run-phase-tests.sh:302-307` folds its exit code into `overall` alongside Layers 1–6 unchanged. No prior test file references `_capture_criteria_verdicts` or the new write paths, so there is nothing pre-existing that this diff could regress by construction — but I cannot execute the suite to confirm Layer 1–6 still pass with this diff applied (no Bash tool). The prompt states Layer 3 has 7 pre-existing failures independent of this work; I cannot independently re-confirm that baseline this dispatch either."
+        completeness:
+          verdict: PARTIAL
+          evidence: "the gap this criterion originally flagged in round 1 (\"no fixture-based test... Recommend adding one\") has been directly acted on — `layer7-criteria-verdicts.sh` now exists and is wired into `run-phase-tests.sh`'s exit aggregation. Remains PARTIAL, not COMPLETE, because neither this dispatch nor the prior one could execute it to confirm an actual passing run."

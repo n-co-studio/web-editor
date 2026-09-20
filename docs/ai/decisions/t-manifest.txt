@@ -54,3 +54,6 @@ t-0043-handoff-bundle-per-brief-paths.md
 t-0044-functional-verification-gate.md
 t-0045-merged-branch-cleanup.md
 t-0046-evaluation-study-infrastructure.md
+t-0047-session-lifecycle-stop-sessionend-split.md
+t-0048-criteria-verdict-persistence.md
+t-0049-gate-exit-contract.md

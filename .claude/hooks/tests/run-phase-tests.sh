@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Phase Model Cohesion Tests — Main Runner
-# Orchestrates Layer 1 (pure function) and Layer 2 (lifecycle walk) tests.
+# Orchestrates Layer 1 (pure function) through Layer 7 (criteria verdict capture) tests.
 # Reports TAP output per layer with summary and phase matrix visualization.
 #
 # Usage: ./run-phase-tests.sh
@@ -107,6 +107,20 @@ printf '%s\n' "------------------------------------------"
 
 l5_exit=0
 bash "$SCRIPT_DIR/layer5-live-editor-numbering.sh" || l5_exit=$?
+
+printf "\n"
+printf '%s\n' "${BOLD}Layer 6: Stop/SessionEnd Split Tests${RESET}"
+printf '%s\n' "------------------------------------"
+
+l6_exit=0
+bash "$SCRIPT_DIR/layer6-stop-sessionend-split.sh" || l6_exit=$?
+
+printf "\n"
+printf '%s\n' "${BOLD}Layer 7: Per-Criterion Verdict Capture Tests${RESET}"
+printf '%s\n' "-------------------------------------------"
+
+l7_exit=0
+bash "$SCRIPT_DIR/layer7-criteria-verdicts.sh" || l7_exit=$?
 
 printf "\n"
 
@@ -275,6 +289,20 @@ if [ "$l5_exit" -eq 0 ]; then
   printf "Layer 5 (Editor-Live Counter): ${GREEN}PASS${RESET}\n"
 else
   printf "Layer 5 (Editor-Live Counter): ${RED}FAIL${RESET}\n"
+  overall=1
+fi
+
+if [ "$l6_exit" -eq 0 ]; then
+  printf "Layer 6 (Stop/SessionEnd Split): ${GREEN}PASS${RESET}\n"
+else
+  printf "Layer 6 (Stop/SessionEnd Split): ${RED}FAIL${RESET}\n"
+  overall=1
+fi
+
+if [ "$l7_exit" -eq 0 ]; then
+  printf "Layer 7 (Criteria Verdict Capture): ${GREEN}PASS${RESET}\n"
+else
+  printf "Layer 7 (Criteria Verdict Capture): ${RED}FAIL${RESET}\n"
   overall=1
 fi
 

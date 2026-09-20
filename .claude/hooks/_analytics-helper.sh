@@ -164,6 +164,20 @@ is_worktree() {
     local git_dir common_dir
     git_dir=$(git rev-parse --git-dir 2>/dev/null || echo "")
     common_dir=$(git rev-parse --git-common-dir 2>/dev/null || echo "")
+    # Resolve both to absolute physical paths before comparing. git returns
+    # these in DIFFERENT formats depending on cwd: from a subdirectory
+    # --git-dir is absolute (/repo/.git) while --git-common-dir stays relative
+    # (../../.git). Comparing the raw strings therefore reported "worktree" for
+    # an ordinary repo whenever a hook ran with cwd below the root — which
+    # routed session state to .claude/.state/wt-sessions/ instead of sessions/.
+    # (--path-format=absolute would do this in one call but needs git 2.31+;
+    # this repo runs 2.19, so resolve by cd'ing instead.)
+    if [ -n "$git_dir" ]; then
+      git_dir=$(cd "$git_dir" 2>/dev/null && pwd -P) || git_dir=""
+    fi
+    if [ -n "$common_dir" ]; then
+      common_dir=$(cd "$common_dir" 2>/dev/null && pwd -P) || common_dir=""
+    fi
     if [ -n "$git_dir" ] && [ -n "$common_dir" ] && [ "$git_dir" != "$common_dir" ]; then
       _CACHED_IS_WORKTREE="true"
     else
@@ -173,12 +187,37 @@ is_worktree() {
   [ "$_CACHED_IS_WORKTREE" = "true" ]
 }
 
-# --- Full worktree session detection (Decision 0030) ---
-# Returns 0 if the current process is a full worktree session (launched via
-# claude --worktree with REPO_OS_SESSION_ID set). Distinguishes from subagent
-# worktrees which have is_worktree()=true but no REPO_OS_SESSION_ID.
+# --- Full worktree session detection (Decision 0030, amended 2026-08-31) ---
+# Returns 0 if the current process is a full worktree session with an
+# independent governance lifecycle. Distinguishes from subagent worktrees
+# (isolation: "worktree") which also have is_worktree()=true but no
+# independent session — they are spawned into fresh worktrees and never
+# call init_phase, so no phase-state file exists in their resolved state dir.
+#
+# Two signals (either suffices):
+#   1. REPO_OS_SESSION_ID env var — set by `claude --worktree` launcher.
+#      Preserved as primary/override for backward compatibility.
+#   2. phase-state file present in resolved state dir — written by init_phase
+#      at session start. A subagent worktree never calls init_phase, so no
+#      phase-state exists in its _REPO_OS_ROOT-rooted state dir.
+#      Covers sessions launched via EnterWorktree (harness tool) that do not
+#      inject REPO_OS_SESSION_ID. See Decision 0030 Amendment 2026-08-31.
 is_full_worktree_session() {
-  is_worktree && [ -n "${REPO_OS_SESSION_ID:-}" ]
+  is_worktree || return 1
+  # Signal 1: REPO_OS_SESSION_ID (canonical override — claude --worktree)
+  [ -n "${REPO_OS_SESSION_ID:-}" ] && return 0
+  # Signal 2: phase-state exists in resolved state dir (written by init_phase).
+  # get_session_state_dir() routes to _REPO_OS_ROOT/.claude/.state/wt-sessions/{sid}/
+  # For EnterWorktree sessions: _REPO_OS_ROOT = worktree root, init_phase creates
+  # the phase-state here. For subagent worktrees: no init_phase has run in the
+  # fresh worktree, so the dir/file does not exist — correctly returns false.
+  # get_session_state_dir always returns 0 (returns a path even when the dir is
+  # absent — the caller handles that via the [ -f ... ] check below). The || return 1
+  # guard is a forward-compatible safety net for if get_session_state_dir gains a
+  # failure path in future. Stderr suppressed to keep state-writer.sh non-blocking.
+  local _fws_state_dir
+  _fws_state_dir=$(get_session_state_dir 2>/dev/null) || return 1
+  [ -f "${_fws_state_dir}/phase-state" ]
 }
 
 # --- Portable path normalization (macOS-safe) ---

@@ -141,6 +141,16 @@
           }
         ]
       }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/session-close-check.sh"
+          }
+        ]
+      }
     ]
   }
 }

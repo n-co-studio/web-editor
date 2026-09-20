@@ -4,6 +4,22 @@
 **Date**: 2026-07-01
 **Session**: daemon-20260701-134124-67409 (eval-study-infrastructure brief 1)
 
+## Triggers
+
+- type: file
+- path: `\.claude/\.automation/schemas/eval-`
+- path: `docs/spec/_templates/_eval-`
+- path: `docs/ai/prompts/prompt-eval-study\.md`
+- path: `docs/ai/eval/_nomenclature\.md`
+- keywords: `eval study, evaluation study, lineage_id, study_id, cell_id, arm, n_reps, blinding, shuffle-manifest, eval-study, eval-cell, eval-suite, pre-registration, decision rule, raw-data-complete`
+
+<!--
+Scoped to the eval data model itself — schemas, templates, prompt, nomenclature —
+not to `docs/ai/eval/{study_id}/` study records. Writing a study record *uses*
+this convention; it does not change it, and a per-cell data commit demanding a
+Decisions: trailer would make the trailer noise rather than signal.
+-->
+
 ---
 
 ## Context

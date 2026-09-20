@@ -113,6 +113,9 @@ cleanup_session_files() {
     _delete_if_owned "$state_dir/pragmatist-signed" "$closing_sid"
     _delete_if_owned "$state_dir/functional-verified" "$closing_sid"
     _delete_if_owned "$state_dir/kg-updated" "$closing_sid"
+    # Live per-criterion sidecar (Decision t-0048). The durable copy under
+    # docs/ai/governance/criteria-verdicts/ is tracked and deliberately survives.
+    _delete_if_owned "$state_dir/criteria-verdicts.yaml" "$closing_sid"
     _delete_if_owned "$state_dir/phase-state" "$closing_sid"
     _delete_if_owned "$state_dir/phase-state.gates" "$closing_sid"
 

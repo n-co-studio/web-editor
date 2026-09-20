@@ -14,15 +14,25 @@ Enable full independent Claude Code sessions running in git worktrees (`claude -
 
 ### Discrimination: Full Worktree Sessions vs Subagent Worktrees
 
-The key discriminator is the `REPO_OS_SESSION_ID` environment variable:
+**Amended 2026-08-31:** The original implementation used `REPO_OS_SESSION_ID` as the sole discriminator between full worktree sessions and subagent worktrees. This was insufficient: sessions launched via the harness `EnterWorktree` tool do not inject `REPO_OS_SESSION_ID`, so they were misclassified as subagent worktrees, and their governance verdicts were silently discarded. See Decision 0030 § Amendment 2026-08-31 below.
 
-| Context | `is_worktree()` | `REPO_OS_SESSION_ID` | Treatment |
-|---------|-----------------|---------------------|-----------|
-| Normal session (main repo) | false | unset | Per-session state dir — independent governance |
-| Subagent worktree (`isolation: "worktree"`) | true | unset | Decision 0028 applies — state writes blocked |
-| Full worktree session (`claude --worktree`) | true | set | Per-session state dir — independent governance |
+The correct discriminator is **session identity** — specifically, whether `init_phase` was called in this worktree context. A full worktree session always calls `init_phase`, which creates `phase-state` in the resolved state dir. A subagent worktree (spawned into a fresh worktree by the Agent tool) never calls `init_phase`, so no `phase-state` exists.
 
-`is_full_worktree_session()` returns true when both conditions hold.
+`is_full_worktree_session()` uses two signals (either suffices):
+
+| Signal | Mechanism | Covers |
+|--------|-----------|--------|
+| `REPO_OS_SESSION_ID` env var set | Set by `claude --worktree` launcher | Legacy `claude --worktree` path (backward compat) |
+| `phase-state` file in resolved state dir | Written by `init_phase` at session start | Sessions launched via `EnterWorktree` (harness tool) |
+
+| Context | `is_worktree()` | `REPO_OS_SESSION_ID` | `phase-state` in state dir | Treatment |
+|---------|-----------------|---------------------|---------------------------|-----------|
+| Normal session (main repo) | false | unset | n/a | `is_worktree()` false — normal governance |
+| Subagent worktree (`isolation: "worktree"`) | true | unset | absent (no init_phase) | Decision 0028 applies — state writes blocked |
+| Full worktree session (`claude --worktree`) | true | set | present | Per-session state dir — independent governance |
+| Full worktree session (`EnterWorktree`) | true | unset | present (init_phase ran) | Per-session state dir — independent governance |
+
+`is_full_worktree_session()` returns true when `is_worktree()` is true AND either `REPO_OS_SESSION_ID` is set OR `phase-state` exists in the resolved state dir.
 
 ### Per-Session State Directories
 
@@ -93,3 +103,36 @@ Both paths run `git reset HEAD -- . && git checkout -- .` on the main repo after
 ### Mechanical enforcement
 
 `bash-guard.sh` Phase 1e blocks the ref-move commands listed above with `GATE-RECOVERABLE` when the caller's `git rev-parse --git-dir` path contains `"worktrees"`. Recovery bypass: `REPO_OS_RECOVER=1`.
+
+## Amendment — 2026-08-31: EnterWorktree Detection Gap
+
+### Problem
+
+`is_full_worktree_session()` originally tested only `is_worktree() && [ -n "${REPO_OS_SESSION_ID:-}" ]`. The `REPO_OS_SESSION_ID` env var is set by `claude --worktree` but NOT by the harness `EnterWorktree` tool. Sessions launched via `EnterWorktree` are legitimate full worktree sessions (they call `init_phase`, manage their own governance lifecycle, and produce real verdicts), but were being misclassified as subagent worktrees.
+
+The effect: `state-writer.sh:48` (`if is_worktree && ! is_full_worktree_session`) discarded all verdicts from `EnterWorktree` sessions — `pragmatist-signed`, `cohesion-reviewed`, `diff-review-complete`, and `qa-verified` were never written. Governance evidence existed only in prose session logs, defeating the purpose of mechanical state files.
+
+Observed in three consecutive sessions in child repo `markpreston.co` (8969e3a8, b8ad0ab0, 3bd3c950). Each required a `.recover-signal` file with verdicts quoted in the session log to unblock commits.
+
+### Root Cause
+
+The detection tested **launch method** (env var injected at launch), not **session identity** (whether the session has an independent governance lifecycle). Launch method is not session identity.
+
+The env var cannot be set from inside a running session: hooks execute in the Claude Code process, not in the session's Bash child, so an `ENV=1 command` prefix never reaches them.
+
+### Fix
+
+`is_full_worktree_session()` now uses two signals (either suffices):
+
+1. **`REPO_OS_SESSION_ID`** — preserved as primary signal for `claude --worktree` sessions (backward compatible).
+2. **`phase-state` file in resolved state dir** — written by `init_phase` at session start. A subagent worktree (Agent tool, `isolation: "worktree"`) spawns a fresh worktree and never calls `init_phase`, so no `phase-state` exists in `_REPO_OS_ROOT/.claude/.state/wt-sessions/{sid}/`. An `EnterWorktree` session calls `init_phase`, so the file exists.
+
+### Invariant Preserved
+
+The Decision 0028 protection (subagent worktrees must not write governance verdicts) is preserved: subagent worktrees have no `phase-state` in their `_REPO_OS_ROOT`-rooted state dir (they run in a fresh worktree, `init_phase` is never called there), so `is_full_worktree_session()` correctly returns false for them.
+
+### Files Changed
+
+- `.claude/hooks/_analytics-helper.sh` — `is_full_worktree_session()` updated
+- `.claude/hooks/tests/layer1c-worktree-functions.sh` — two new test cases added (L1c.2)
+- `docs/ai/decisions/t-0030-worktree-session-isolation.md` — this amendment

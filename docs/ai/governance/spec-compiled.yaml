@@ -1,30 +1,9 @@
-timestamp: "2026-07-18T07:00:08Z"
-session: "d6c1a9f1-513d-4c9f-b705-1e5d6997e411"
-spec_version: "v1"
+timestamp: "2026-03-04T00:00:00Z"
+session: null
+spec_version: null
 feature_briefs:
   - name: "pm-advisory-agent"
     path: "docs/spec/_templates/feature-brief-pm-advisor.md"
     status: complete
     created_date: "2026-03-04"
-  - name: "page-value-inference"
-    path: "docs/spec/compiled/v1/features/feature-011-page-value-inference.md"
-    status: complete
-    created_date: "2026-07-18"
-    note: "Authors the page-inferred fallback tier (source tier 5) — a client-side last-resort tier that harvests values already in use on the page when token sources 1-4 are empty. Held in a separate PageValueStore of InferredOption records (never DesignToken / never the token registry); page-inferred PropertyChanges carry fromPageInference:true and never populate toToken, so get_token_drift_report never counts them as token matches; real tokens always win and drop page values on TOKEN_DATA/TOKEN_UPDATE. Two-brief task group (page-value-inference): Brief 1 authors feature-011 + amends feature-003 (5th tier + Page Defaults UI state) — this entry; Brief 2 implements the harvester + store + editor wiring. feature-011 IS a numbered feature spec, so it IS registered in manifest.json featureFiles (consistent with feature-007..010)."
-  - name: "inline-text-styling"
-    path: "docs/spec/compiled/v1/features/feature-012-inline-text-styling.md"
-    status: complete
-    created_date: "2026-08-21"
-    note: "Authors feature-012 (sub-range inline text styling via floating mini-toolbar). Ratifies the TextChange contract with additive-optional fromHtml/toHtml fields and Source Rewrite Semantics subsection in data-contracts.md. Semantic tags only (strong/em/u/s) — WCAG H49. Two-brief task group (inline-text-styling): Brief 1 is this spec + contract ratification; Brief 2 implements TextEditor upgrade, InlineToolbar component, and prompt-serializer HTML serialization."
-contract_changes:
-  - name: "PropertyChange.fromPageInference (defined in feature-011)"
-    path: "docs/spec/compiled/v1/features/feature-011-page-value-inference.md"
-    wired_into: "PropertyChange.fromPageInference — additive-optional provenance marker for page-inferred edits"
-    note: "Defined authoritatively in feature-011 Data Model (this brief's scope deliberately excludes data-contracts.md). Additive-optional flag distinguishing an observed-reality page value from a design-token match; no toToken is ever set alongside it, so get_token_drift_report never counts it as a token match. No WS_PROTOCOL_VERSION bump. Wiring the field into data-contracts.md PropertyChange + packages/shared/src/diff.ts is a Brief 2 (page-value-inference build) deliverable."
-    created_date: "2026-07-18"
-  - name: "TextChange.fromHtml / TextChange.toHtml (feature-012)"
-    path: "docs/spec/compiled/v1/data-contracts.md"
-    wired_into: "TextChange — additive-optional fromHtml and toHtml fields + Source Rewrite Semantics subsection"
-    note: "fromHtml and toHtml are optional HTML-carrying fields on TextChange. fromText/toText remain required plain-text fallbacks. Allowlist: strong, em, u, s, br — zero attributes. No WS_PROTOCOL_VERSION bump (same additive-optional precedent as batchId/layoutContainers). Source Rewrite Semantics section defines JSX interpolation handling for downstream coding agents."
-    created_date: "2026-08-21"
 status: complete

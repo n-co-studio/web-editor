@@ -33,6 +33,15 @@ docs/spec/prototypes/
 docs/ai/knowledge-graph/product-graph.yaml
 
 # Workflow files (repo-specific; GITHUB_TOKEN cannot push workflow changes)
+#
+# GitHub refuses a push from a GitHub App / GITHUB_TOKEN that creates or
+# updates anything under .github/workflows/ without the `workflows` permission,
+# which GITHUB_TOKEN cannot be granted (it is a PAT scope, not one of the
+# workflow `permissions:` keys). Every workflow file added to this template
+# MUST be listed here, or child sync fails at the push step with:
+#   ! [remote rejected] main -> main (refusing to allow a GitHub App to
+#     create or update workflow `...` without `workflows` permission)
+# Children that want one of these run it by installing the file manually.
 .github/workflows/template-sync.yml
 .github/workflows/auto-version-tag.yml
 .github/workflows/gate-conformance.yml

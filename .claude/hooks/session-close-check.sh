@@ -1,27 +1,29 @@
 #!/usr/bin/env bash
-# Session close check (blocking)
-# Runs via Stop hook in .claude/settings.json.
+# Session close check — Stop (advisory/blocking) and SessionEnd (cleanup) handler.
+# Wired to both Stop and SessionEnd hooks in .claude/settings.json (Decision 0047).
 #
-# Behavior:
-#   - Single-pass failure collection: all blocking checks run; failures are
-#     collected and reported together (no early exit per check).
-#   - Solo merge path: when solo=true, feature/fix/hotfix branches are merged
-#     directly to main at session close.
-#   - Task group branch lifecycle: non-final brief sessions skip branch seal
-#     so the branch stays open for the next brief in the group. Finality is
-#     determined by next_brief (empty = final), not status: pending presence.
-#   - Empty session type guard: when session type is missing/stale, checks
-#     whether the current branch belongs to an active task group contract
-#     before sealing (prevents accidental seal on state file loss).
-#   - 3-attempt counter guard: replaces infinite-loop guard; after 3 stop
-#     attempts the hook exits unconditionally (safety valve).
+# Event split (Decision 0047):
+#   Stop    — fires at the end of every assistant turn. Runs advisory/blocking
+#             checks only. Never performs destructive close work (cleanup, seal,
+#             merge). The 3-attempt safety valve unblocks without cleanup.
+#   SessionEnd — fires exactly once at true session termination. Runs all
+#             destructive close work: merge, seal, state cleanup. Exit code is
+#             informational only (Claude Code ignores it). No blocking checks.
 #
-# Blocking checks (all collected before reporting):
+# Stop blocking checks (all collected before reporting):
 #   1. Session log not updated
 #   2. Uncommitted changes
-# Advisory checks (non-blocking, reported in systemMessage):
-#   3. HVST failures but known-issues.md not updated (Phase 2b — downgraded from blocking)
-#   4. Deferrals pending but known-issues.md not updated (Phase 2b — downgraded from blocking)
+# Stop advisory checks (non-blocking, reported in systemMessage):
+#   3. HVST failures but known-issues.md not updated (Phase 2b)
+#   4. Deferrals pending but known-issues.md not updated (Phase 2b)
+#
+# SessionEnd cleanup actions:
+#   - Agent-merge signal detection (merge-source-branch file)
+#   - Editor-live fallback branch seal
+#   - Solo merge safety net (solo=true sessions)
+#   - Branch sealing (Decision 0013)
+#   - State file cleanup (cleanup_session)
+#   - Baseline SHA update
 #
 # Output format (Phase 2a): JSON stdout with decision/reason/systemMessage.
 #   Block: {"decision":"block","reason":"<concise for Claude>","systemMessage":"<full for operator>"}
@@ -48,6 +50,13 @@ INPUT=$(cat)
 # identity stable across turns without relying on file persistence alone.
 export _REPO_OS_STDIN_SID
 _REPO_OS_STDIN_SID="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)"
+
+# --- Detect hook event (Stop vs SessionEnd — Decision 0047) ---
+# Stop fires at the end of every assistant turn (may fire many times per session).
+# SessionEnd fires exactly once at true session termination (informational only;
+# exit code is ignored by Claude Code). Destructive close work lives in SessionEnd.
+HOOK_EVENT="$(printf '%s' "$INPUT" | jq -r '.hook_event_name // "Stop"' 2>/dev/null || echo "Stop")"
+export HOOK_EVENT
 
 # --- Zero-change fast exit (before library sourcing — builtins + git only) ---
 # Compute repo root using same logic as _analytics-helper.sh (including test seam).
@@ -125,7 +134,8 @@ if [ -z "$_ZC_UNCOMMITTED" ] && [ -z "$_ZC_STAGED" ] && [ -z "$_ZC_RECENT" ]; th
   # Zero-change session with no pending state — skip sourcing entirely.
   # Guard: only fast-exit when no agent merge signal and no phase-state
   # (sessions that initialized need sourced functions for proper cleanup/seal).
-  if [ ! -f "$_ZC_MERGE_FILE" ] && [ ! -f "$_ZC_PHASE_FILE" ]; then
+  # SessionEnd must always proceed to cleanup even for zero-change sessions.
+  if [ ! -f "$_ZC_MERGE_FILE" ] && [ ! -f "$_ZC_PHASE_FILE" ] && [ "${HOOK_EVENT:-Stop}" != "SessionEnd" ]; then
     git rev-parse HEAD > "$_ZC_BASELINE_FILE" 2>/dev/null || true
     exit 0
   fi
@@ -137,6 +147,7 @@ source "$SCRIPT_DIR/_phase-helper.sh"
 source "$SCRIPT_DIR/_cleanup-helper.sh"
 source "$SCRIPT_DIR/_secret-pattern.sh"
 START_MS=$(now_ms)
+
 
 # --- Retry detection via stop_hook_active (Phase 1 optimization) ---
 # On retry (stop_hook_active=true), skip advisory-only checks but run all
@@ -340,11 +351,18 @@ advisory_push_to_remote() {
 # Session-bind guard (Decision 0013): skips seal if another session is active
 # on the current branch (is_session_active check).
 seal_branch_if_applicable() {
+  # Guard (Decision 0047): sealing is owned by the SessionEnd path only.
+  # This belt-and-suspenders check prevents mid-turn seal if call sites are
+  # ever re-wired. Called legitimately only from the SessionEnd dispatch above.
+  if [ "${HOOK_EVENT:-Stop}" != "SessionEnd" ]; then
+    log_hook_event "session-close-check" "${HOOK_EVENT:-Stop}" "" "allow" "$START_MS" "seal_deferred_to_sessionend" || true
+    return 0
+  fi
   # Guard: skip seal if another session is active on this branch
   local seal_branch
   seal_branch=$(get_branch)
   if [ -n "$seal_branch" ] && [ "$seal_branch" != "main" ] && is_session_active "$seal_branch"; then
-    log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "seal_skipped_active_session" "" "$seal_branch" || true
+    log_hook_event "session-close-check" "${HOOK_EVENT:-Stop}" "" "allow" "$START_MS" "seal_skipped_active_session" "" "$seal_branch" || true
     return 0
   fi
 
@@ -578,6 +596,333 @@ _emit_kpi_summary() {
     "${stype:-unknown}" "$START_MS" || true
 }
 
+# --- Close-path escalation writer (Decision 0030 / Decision t-0047) ---
+# SessionEnd cannot block (Decision t-0047 §2: exit code is informational), so a
+# failure on the destructive close path has nowhere to surface in-band. Before
+# t-0047 the Stop path could _output_block and force the operator to resolve a
+# merge conflict before the turn ended; that lever is gone. A durable escalation
+# file is the replacement — without one, merge-lock failures and stale main
+# working trees are silent by construction, which is the exact incident class
+# Decision 0030 exists to prevent.
+# Args: <id-prefix> <message> <context>
+_write_close_escalation() {
+  local _esc_prefix="$1" _esc_msg="$2" _esc_ctx="$3"
+  # Escape for double-quoted YAML scalars. Branch names reach these fields and
+  # may legally contain '"' and '\', which would otherwise terminate the scalar
+  # early and let adjacent keys be injected (e.g. a forged 'resolved: true' that
+  # silently suppresses the escalation). Backslashes first, then quotes.
+  _esc_msg="${_esc_msg//\\/\\\\}"; _esc_msg="${_esc_msg//\"/\\\"}"
+  _esc_ctx="${_esc_ctx//\\/\\\\}"; _esc_ctx="${_esc_ctx//\"/\\\"}"
+  local _esc_dir="${_SE_MAIN_REPO:-$REPO_ROOT}/.claude/.automation/escalations"
+  mkdir -p "$_esc_dir" 2>/dev/null || true
+  local _esc_id="${_esc_prefix}-$(date +%Y%m%d-%H%M%S)"
+  {
+    printf 'escalation:\n'
+    printf '  id: "%s"\n' "$_esc_id"
+    printf '  queue_entry_id: "session-end-hook"\n'
+    printf '  type: "gate-failure"\n'
+    printf '  severity: "blocking"\n'
+    printf '  phase_at_exit: "close"\n'
+    printf '  tag_at_exit: "close"\n'
+    printf '  message: "%s"\n' "$_esc_msg"
+    printf '  context: "%s"\n' "$_esc_ctx"
+    printf '  created_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf '  resolved: false\n'
+    printf '  resolution: ""\n'
+  } > "$_esc_dir/${_esc_id}.yaml" 2>/dev/null || true
+  echo "Escalation written: $_esc_id" >&2
+}
+
+# --- Foreign live state detection (identity-churn safety) ---
+# Returns 0 when the state dir this process resolved to is owned by a DIFFERENT,
+# independently-live process. See the long-form rationale at the Stop-path call
+# site below; both paths share this one implementation so they cannot drift.
+#
+# Discriminator vs. legitimate context-window turnover (which ALSO makes the live
+# harness stdin sid differ from the resolved state's session_id): a turned-over
+# session's state still belongs to THIS claude process. register_session() stores
+# the durable claude PID ($PPID) as the session's pid, so the resolved state's
+# registry pid == our $PPID and this returns 1. Only a genuinely separate, live
+# process (pid != $PPID, still alive) returns 0. A dead/orphaned foreign state
+# (owner not live) is intentionally NOT caught — callers fall through to their
+# existing zero-change / no-session-type exit paths.
+#
+# Only meaningful for interactive sessions: headless/worktree sessions set
+# REPO_OS_SESSION_ID and therefore never alias on the shared .session-id file.
+_is_foreign_live_state() {
+  [ -z "${REPO_OS_SESSION_ID:-}" ] || return 1
+  [ -n "${_REPO_OS_STDIN_SID:-}" ] || return 1
+  local _fls_sid _fls_reg _fls_pid
+  _fls_sid=$(_read_phase_field "session_id" "$_SESSION_STATE_DIR/phase-state" 2>/dev/null || true)
+  [ -n "$_fls_sid" ] || return 1
+  [ "$_fls_sid" != "$_REPO_OS_STDIN_SID" ] || return 1
+  _fls_reg="$REPO_ROOT/.claude/.state/sessions/${_fls_sid}.yaml"
+  [ -f "$_fls_reg" ] || return 1
+  _fls_pid=$(grep '^pid: ' "$_fls_reg" 2>/dev/null | sed 's/^pid: *//' | tr -d '[:space:]')
+  [ -n "$_fls_pid" ] || return 1
+  [ "$_fls_pid" != "${PPID:-0}" ] || return 1
+  kill -0 "$_fls_pid" 2>/dev/null || return 1
+  # Export the offending sid for the caller's log line.
+  _FOREIGN_STATE_SID="$_fls_sid"
+  return 0
+}
+
+# --- SessionEnd event dispatch (Decision t-0047) ---
+# Placed AFTER the function definitions above, not before them: this block
+# calls _acquire_merge_lock, _release_merge_lock, update_baseline,
+# advisory_push_to_remote, seal_branch_if_applicable, cleanup_session and
+# _emit_kpi_summary. Bash resolves function names at call time against what
+# has been defined so far, so dispatching earlier in the file made every one
+# of them a 'command not found' and killed the whole SessionEnd path.
+# Keep this block below every function it calls.
+#
+# SessionEnd fires exactly once at true session termination. This path runs
+# all destructive close work (merge, seal, state cleanup). No blocking checks —
+# SessionEnd is informational only (exit code is not used by Claude Code), so
+# failures here are surfaced via _write_close_escalation, not via exit status.
+#
+# The Stop path (below) is advisory/blocking checks only; destructive actions
+# moved here so mid-turn Stop firings cannot corrupt live session state.
+if [ "$HOOK_EVENT" = "SessionEnd" ]; then
+  REPO_ROOT="$_REPO_OS_ROOT"
+  IS_TEMPLATE=false
+  [ "$(get_mode)" = "template" ] && IS_TEMPLATE=true
+  _SESSION_STATE_DIR="$(get_session_state_dir)"
+  MERGE_STATE_FILE="$_SESSION_STATE_DIR/merge-source-branch"
+  BASELINE_SHA_FILE="$REPO_ROOT/.claude/.session-baseline-sha"
+  CURRENT_BRANCH=$(get_branch)
+  SOLO=$(get_solo)
+  BRANCH_SEALED=false
+
+  # --- Foreign-state guard (identity-churn safety) ---
+  # MUST run before any destructive action. The Stop path has always had this
+  # guard; when Decision t-0047 moved merge/seal/cleanup here, the guard was left
+  # behind at its original position further down the file, which this dispatch
+  # exits before ever reaching. That is not merely a skipped check: cleanup_session()
+  # resolves close_sid via get_session_id() against the same shared, first-writer-wins
+  # .claude/.session-id, so a SessionEnd firing for process A would unregister
+  # session B and delete B's session-scoped state — including B's phase-state —
+  # while B is still running. Decision 0019 fail-closed enforcement blocks all edits
+  # without phase-state, so that abruptly breaks a live, unrelated session mid-flight.
+  # Bail out entirely: another live process owns this state and will close it itself.
+  if _is_foreign_live_state; then
+    log_hook_event "session-close-check" "SessionEnd" "" "allow" "$START_MS" \
+      "foreign_state_skip" "${_FOREIGN_STATE_SID:-}" || true
+    exit 0
+  fi
+
+  # Agent-merge signal detection — agent ran merge+signal before session ended
+  if [ -f "$MERGE_STATE_FILE" ]; then
+    _SE_MERGED=$(cat "$MERGE_STATE_FILE" 2>/dev/null || true)
+    if [ -n "$_SE_MERGED" ]; then
+      # The signal's contract is "the agent already merged" — this path only
+      # seals, pushes and deletes, it does not merge. Verify the merge really
+      # happened before sealing: a session that wrote the signal WITHOUT
+      # merging (or whose merge failed) would otherwise get its branch sealed
+      # and its work stranded on a branch governance then forbids reusing.
+      # When unverified, leave BRANCH_SEALED=false so the solo merge safety
+      # net below picks it up instead.
+      _SE_MERGE_VERIFIED=false
+      if is_full_worktree_session; then
+        git -C "$_REPO_OS_ROOT" merge-base --is-ancestor "$_SE_MERGED" main >/dev/null 2>&1 \
+          && _SE_MERGE_VERIFIED=true
+      else
+        git merge-base --is-ancestor "$_SE_MERGED" main >/dev/null 2>&1 \
+          && _SE_MERGE_VERIFIED=true
+      fi
+    fi
+    if [ -n "$_SE_MERGED" ] && [ "$_SE_MERGE_VERIFIED" = true ]; then
+      record_closed_branch "$_SE_MERGED"
+      BRANCH_SEALED=true
+      advisory_push_to_remote
+      if is_full_worktree_session; then
+        delete_merged_session_branch "$_SE_MERGED" "$_REPO_OS_ROOT"
+      else
+        delete_merged_session_branch "$_SE_MERGED"
+      fi
+      log_hook_event "session-close-check" "SessionEnd" "" "allow" "$START_MS" "agent_merged" "" "$_SE_MERGED" || true
+    elif [ -n "$_SE_MERGED" ]; then
+      log_hook_event "session-close-check" "SessionEnd" "" "allow" "$START_MS" "agent_merge_signal_unverified" "" "$_SE_MERGED" || true
+    fi
+  fi
+
+  # Editor-live fallback: seal orphaned live-editor branch (Decision 0023 Amendment 2)
+  if [ "$BRANCH_SEALED" = false ]; then
+    _SE_STYPE=$(get_session_type)
+    if [ "$_SE_STYPE" = "editor-live" ]; then
+      if is_full_worktree_session; then
+        seal_orphaned_editor_live_branches "$_REPO_OS_ROOT"
+      else
+        seal_orphaned_editor_live_branches
+      fi
+      BRANCH_SEALED=true
+    fi
+  fi
+
+  # Solo merge safety net — runs when agent did not merge (no merge-source-branch signal)
+  if [ "$SOLO" = "true" ] && [ "$BRANCH_SEALED" = false ]; then
+    _SE_SESSION_TYPE=$(get_session_type)
+    _SE_MERGE_BRANCH="$CURRENT_BRANCH"
+    _SE_SHOULD_MERGE=true
+    case "$_SE_MERGE_BRANCH" in
+      feature/*|fix/*|hotfix/*|live-editor-[0-9]*)
+        if [ "$_SE_SESSION_TYPE" = "taskgroup" ]; then
+          _SE_IS_FINAL=$(is_final_brief)
+          [ "$_SE_IS_FINAL" != "true" ] && _SE_SHOULD_MERGE=false
+        elif [ "$_SE_SESSION_TYPE" = "taskgroup-merge" ]; then
+          : # always merge
+        fi
+        ;;
+      *) _SE_SHOULD_MERGE=false ;;
+    esac
+
+    if [ "$_SE_SHOULD_MERGE" = true ]; then
+      _SE_MERGE_OK=false
+      # Two SEPARATE concerns — do not merge them into one variable.
+      #   _SE_FAIL_REASON  : why the merge did not happen, set at EVERY throw site.
+      #                      Preserves the per-failure-mode granularity the
+      #                      pre-t-0047 code carried in five distinct log tags.
+      #   _SE_ESC_WRITTEN  : whether a throw site already wrote its own escalation.
+      #                      Only the sites that actually call _write_close_escalation
+      #                      set this. The generic handler below writes exactly when
+      #                      it is false, so every failure path yields exactly one
+      #                      escalation — never zero, never two.
+      _SE_FAIL_REASON=""
+      _SE_ESC_WRITTEN=false
+      if is_full_worktree_session; then
+        _SE_MAIN_REPO="$_REPO_OS_ROOT"
+        _SE_MERGE_LOCK="$_SE_MAIN_REPO/.claude/.state/.merge-lock"
+        if _acquire_merge_lock "$_SE_MERGE_LOCK"; then
+          _SE_MAIN_BRANCH=""
+          _SE_MAIN_BRANCH=$(git -C "$_SE_MAIN_REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+          if [ "$_SE_MAIN_BRANCH" = "main" ]; then
+            _SE_PRE_SHA=$(git -C "$_SE_MAIN_REPO" rev-parse HEAD 2>/dev/null || echo "")
+            if git -C "$_SE_MAIN_REPO" merge --ff-only "$_SE_MERGE_BRANCH" 2>/dev/null || \
+               git -C "$_SE_MAIN_REPO" merge --no-ff -m "Merge $_SE_MERGE_BRANCH" "$_SE_MERGE_BRANCH" 2>/dev/null; then
+              _SE_MERGE_OK=true
+              # Ref-move anomaly detection (Decision 0030): an unchanged HEAD means
+              # the branch was already an ancestor, or a prior ref-move from the
+              # worktree made main point there without syncing the working tree.
+              _SE_POST_SHA=$(git -C "$_SE_MAIN_REPO" rev-parse HEAD 2>/dev/null || echo "")
+              if [ -n "$_SE_PRE_SHA" ] && [ "$_SE_PRE_SHA" = "$_SE_POST_SHA" ]; then
+                echo "WARNING: SessionEnd merge: 'Already up to date' — main HEAD unchanged by merge of '$_SE_MERGE_BRANCH'. Possible prior ref-move by agent. Applying working-tree sync." >&2
+              fi
+              # Post-merge working-tree sync (Decision 0030): a ref-move from the
+              # worktree leaves index/tree frozen at the old state even though HEAD
+              # advanced. Errors are reported, never silenced — staleness must not
+              # be invisible.
+              if ! git -C "$_SE_MAIN_REPO" reset HEAD -- . 2>/dev/null; then
+                echo "WARNING: SessionEnd merge: post-merge index reset failed for '$_SE_MAIN_REPO'" >&2
+              fi
+              if ! git -C "$_SE_MAIN_REPO" checkout HEAD -- . 2>/dev/null; then
+                echo "WARNING: SessionEnd merge: post-merge working tree restore failed for '$_SE_MAIN_REPO'" >&2
+              fi
+              # Stale-tree detection backstop: verify the sync actually worked.
+              if ! git -C "$_SE_MAIN_REPO" diff HEAD --quiet 2>/dev/null; then
+                echo "ERROR: Main working tree still stale after post-merge sync (SessionEnd) — index/tree differ from HEAD. Merged code committed but absent from disk. Repair: 'git -C $_SE_MAIN_REPO checkout HEAD -- . && git -C $_SE_MAIN_REPO clean -fd'" >&2
+                _write_close_escalation "esc-stale-main" \
+                  "Main working tree stale after worktree solo merge sync (SessionEnd) — index/tree differ from HEAD. Merged code committed but absent from disk." \
+                  "main_repo: $_SE_MAIN_REPO, branch: $_SE_MERGE_BRANCH"
+              fi
+            else
+              git -C "$_SE_MAIN_REPO" merge --abort 2>/dev/null || true
+              _SE_FAIL_REASON="worktree merge of '$_SE_MERGE_BRANCH' into main failed (conflicts) — merge aborted"
+            fi
+          else
+            echo "Advisory: Main repo is on '$_SE_MAIN_BRANCH', not 'main' — cannot merge from worktree. Merge manually." >&2
+            _SE_FAIL_REASON="main repo checked out on '$_SE_MAIN_BRANCH', not 'main' — worktree merge not attempted"
+            _SE_ESC_WRITTEN=true
+            _write_close_escalation "esc-wt-not-main" \
+              "Worktree solo merge skipped at SessionEnd — main repo is not on the main branch" \
+              "main_repo_branch: $_SE_MAIN_BRANCH, branch: $_SE_MERGE_BRANCH"
+            log_hook_event "session-close-check" "SessionEnd" "" "allow" "$START_MS" "wt_merge_skip_not_main" "" "$_SE_MERGE_BRANCH" || true
+          fi
+          _release_merge_lock
+        else
+          # Fail-closed (Decision 0030 C3): lock acquisition failed after retries.
+          # SessionEnd cannot block, so the escalation file is the only durable
+          # record the operator will ever see.
+          echo "ERROR: Merge blocked — lock acquisition failed after 3 attempts." >&2
+          _SE_FAIL_REASON="merge lock acquisition failed after 3 attempts (fail-closed)"
+          _SE_ESC_WRITTEN=true
+          _write_close_escalation "esc-merge-lock" \
+            "Merge lock acquisition failed after 3 attempts — merge blocked (fail-closed)" \
+            "lock_path: $_SE_MERGE_LOCK, branch: $_SE_MERGE_BRANCH"
+          log_hook_event "session-close-check" "SessionEnd" "" "allow" "$START_MS" "merge_lock_failed" "" "$_SE_MERGE_BRANCH" || true
+        fi
+      else
+        if git checkout main 2>/dev/null; then
+          if git merge --ff-only "$_SE_MERGE_BRANCH" 2>/dev/null || \
+             git merge --no-ff -m "Merge $_SE_MERGE_BRANCH" "$_SE_MERGE_BRANCH" 2>/dev/null; then
+            _SE_MERGE_OK=true
+          else
+            git merge --abort 2>/dev/null || true
+            git checkout "$_SE_MERGE_BRANCH" 2>/dev/null || true
+            _SE_FAIL_REASON="merge of '$_SE_MERGE_BRANCH' into main failed (conflicts) — merge aborted, returned to branch"
+          fi
+        else
+          _SE_FAIL_REASON="'git checkout main' failed — merge never attempted"
+        fi
+      fi
+
+      if [ "$_SE_MERGE_OK" = true ]; then
+        record_closed_branch "$_SE_MERGE_BRANCH"
+        BRANCH_SEALED=true
+        advisory_push_to_remote
+        if is_full_worktree_session; then
+          delete_merged_session_branch "$_SE_MERGE_BRANCH" "$_REPO_OS_ROOT"
+        else
+          delete_merged_session_branch "$_SE_MERGE_BRANCH"
+        fi
+        log_hook_event "session-close-check" "SessionEnd" "" "allow" "$START_MS" "solo_merge_success" "" "$_SE_MERGE_BRANCH" || true
+      else
+        # Merge did not happen. Pre-t-0047 the Stop path called _output_block here,
+        # forcing the operator to resolve before the turn could end. SessionEnd has
+        # no such lever, so record it durably instead of losing it to an analytics
+        # line. Deliberately does NOT seal: an unmerged branch must stay reusable
+        # (Decision 0013 §6) — sealing would strand the work.
+        echo "ERROR: Solo merge of '$_SE_MERGE_BRANCH' into main did not complete: ${_SE_FAIL_REASON:-reason not recorded}. Resolve manually: git checkout main && git merge '$_SE_MERGE_BRANCH'" >&2
+        # Write here unless a throw site already escalated. Keyed on _SE_ESC_WRITTEN,
+        # NOT on _SE_FAIL_REASON: the reason is set at every throw site, so keying on
+        # it would suppress this handler for the three paths that have no escalation
+        # of their own (worktree merge conflict, non-worktree merge conflict, failed
+        # 'git checkout main') and those failures would produce no durable signal at
+        # all. Every _SE_MERGE_OK=false path must yield exactly one escalation.
+        if [ "$_SE_ESC_WRITTEN" = false ]; then
+          _write_close_escalation "esc-solo-merge" \
+            "Solo merge into main did not complete at SessionEnd — branch left unsealed for retry" \
+            "branch: $_SE_MERGE_BRANCH, repo: ${_SE_MAIN_REPO:-$REPO_ROOT}, reason: ${_SE_FAIL_REASON:-unclassified}"
+        fi
+        log_hook_event "session-close-check" "SessionEnd" "" "allow" "$START_MS" "solo_merge_failed" "" "$_SE_MERGE_BRANCH" || true
+      fi
+    fi
+  fi
+
+  # Seal branch (Decision 0013)
+  # No-init guard: a session that never called init_phase did no governed work
+  # (Decision 0019 fail-closed enforcement blocks every edit without phase-state),
+  # so it must not seal a branch — sealing retires a branch nobody finished with,
+  # stranding whatever is on it. State cleanup below still runs. Mirrors the Stop
+  # path's no-init fast exit, which defers to SessionEnd for cleanup but never
+  # intends it to seal.
+  if [ "$BRANCH_SEALED" = false ] && [ -f "$_SESSION_STATE_DIR/phase-state" ]; then
+    seal_branch_if_applicable
+  fi
+
+  # Update baseline for next session
+  update_baseline
+
+  # Final cleanup
+  cleanup_session
+  cleanup_evidence_manifest "$REPO_ROOT" || true
+
+  SESSION_TYPE=$(infer_session_type)
+  log_hook_event "session-close-check" "SessionEnd" "" "allow" "$START_MS" "session_complete" "$SESSION_TYPE" || true
+  register_repo "$REPO_ROOT" || true
+  _emit_kpi_summary 0 0 "" "$SESSION_TYPE"
+  exit 0
+fi
+
 # --- Foreign-state guard (identity-churn safety) ---
 # Interactive sessions (REPO_OS_SESSION_ID unset) resolve their per-session state
 # dir via the shared repo-global .claude/.session-id file (first-writer-wins in
@@ -600,18 +945,12 @@ _emit_kpi_summary() {
 # separate, live process (pid != $PPID, still alive) trips it. A dead/orphaned
 # foreign state (owner not live) is intentionally NOT caught here — it falls
 # through to the existing zero-change / no-session-type exit paths below.
-if [ -z "${REPO_OS_SESSION_ID:-}" ] && [ -n "${_REPO_OS_STDIN_SID:-}" ]; then
-  _FS_STATE_SID=$(_read_phase_field "session_id" "$_SESSION_STATE_DIR/phase-state" 2>/dev/null || true)
-  if [ -n "$_FS_STATE_SID" ] && [ "$_FS_STATE_SID" != "$_REPO_OS_STDIN_SID" ]; then
-    _FS_REG="$REPO_ROOT/.claude/.state/sessions/${_FS_STATE_SID}.yaml"
-    if [ -f "$_FS_REG" ]; then
-      _FS_PID=$(grep '^pid: ' "$_FS_REG" 2>/dev/null | sed 's/^pid: *//' | tr -d '[:space:]')
-      if [ -n "$_FS_PID" ] && [ "$_FS_PID" != "${PPID:-0}" ] && kill -0 "$_FS_PID" 2>/dev/null; then
-        log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "foreign_state_skip" "$_FS_STATE_SID" || true
-        exit 0
-      fi
-    fi
-  fi
+# Shared with the SessionEnd dispatch above via _is_foreign_live_state() so the
+# two close paths cannot drift apart (Decision t-0047 hardening, 2026-09-01).
+if _is_foreign_live_state; then
+  log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" \
+    "foreign_state_skip" "${_FOREIGN_STATE_SID:-}" || true
+  exit 0
 fi
 
 # --- Pause vs close detection for interactive sessions ---
@@ -695,41 +1034,20 @@ if [ "$STOP_ATTEMPT" -ge 3 ]; then
   fi
   log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "attempt_limit" "$STOP_ATTEMPT" || true
   _emit_kpi_summary 0 "$STOP_ATTEMPT" "" "$(infer_session_type)"
-  # Guard: if solo merge was expected but never completed (still on feature
-  # branch), do NOT seal — sealing would permanently lock the branch.
-  _SV_SOLO=$(get_solo)
-  _SV_BRANCH=$(get_branch)
-  if [ "$_SV_SOLO" = "true" ] && [ "$_SV_BRANCH" != "main" ]; then
-    log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "solo_merge_incomplete" "" "$_SV_BRANCH" || true
-    cleanup_session
-    _output_allow "Solo merge of '$_SV_BRANCH' into main never completed after $STOP_ATTEMPT attempts.\n  Resolve manually: git checkout main && git merge '$_SV_BRANCH'"
-    exit 0
-  fi
-  seal_branch_if_applicable
-  cleanup_session
+  # Decision 0047: destructive close work (cleanup, seal, merge) moved to SessionEnd.
+  # The safety valve on Stop only unblocks — SessionEnd will handle cleanup when the
+  # session truly terminates. Emit advisory so operator knows unresolved issues remain.
+  _output_allow "Safety valve fired after $STOP_ATTEMPT Stop attempts — blocking checks could not be satisfied. SessionEnd will seal and clean up when the session ends. Review session log and any uncommitted changes manually."
   exit 0
 fi
 
 # --- No-init fast exit: session never called init_phase() ---
 # If phase-state is absent, the session never initialized. Decision 0019
 # fail-closed enforcement blocks all edits without phase-state, so no file
-# changes could have occurred. Safe to exit after cleanup.
+# changes could have occurred. Exit cleanly — SessionEnd will handle cleanup
+# when the session terminates (Decision 0047).
 if [ ! -f "$_SESSION_STATE_DIR/phase-state" ]; then
   log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "no_phase_state" || true
-  # Seal before cleanup — honour agent-merge signals from prior context windows
-  # and seal the current branch (seal_branch_if_applicable uses the
-  # _branch_in_active_contract guard when session type is unknown).
-  if [ -f "$MERGE_STATE_FILE" ]; then
-    _noinit_merged=$(cat "$MERGE_STATE_FILE" 2>/dev/null || true)
-    if [ -n "$_noinit_merged" ]; then
-      record_closed_branch "$_noinit_merged"
-      advisory_push_to_remote
-      delete_merged_session_branch "$_noinit_merged"
-      log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "agent_merged" "" "$_noinit_merged" || true
-    fi
-  fi
-  seal_branch_if_applicable
-  cleanup_session
   exit 0
 fi
 
@@ -754,10 +1072,8 @@ if [ -z "$EPHEMERAL_STYPE" ]; then
   # and .claude/.automation/ which may be written by the runner daemon).
   _FB_UNSTAGED=$(git diff --name-only 2>/dev/null | grep -v '^\.claude/\.state/\|^\.claude/\.automation/' || echo "")
   if [ -z "$_FB_RECENT" ] && [ -z "$_FB_STAGED" ] && [ -z "$_FB_UNSTAGED" ]; then
-    # No seal needed — matches ephemeral exit pattern (line 562): ephemeral
-    # sessions must NOT trigger solo merge or branch seal.
+    # No seal needed — no work was done. SessionEnd handles cleanup (Decision 0047).
     log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "no_session_type_zero_change" || true
-    cleanup_session
     exit 0
   fi
 fi
@@ -773,8 +1089,8 @@ case "$EPHEMERAL_STYPE" in
   taskdef-query|taskdef-brief|audit|ephemeral|queue-triage)
     # Ephemeral sessions (Phase 3b) have no blocking close checks.
     # They must NOT trigger solo merge (Decision 0015) or branch seal.
+    # SessionEnd handles cleanup (Decision 0047).
     log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "ephemeral_exempt" "$EPHEMERAL_STYPE" || true
-    cleanup_session
     exit 0
     ;;
   spec-fresh|spec-update|prototype-napkin|prototype-spike|prototype-poc)
@@ -800,9 +1116,7 @@ if [ "${SKIP_SESSION_LOG:-0}" = "1" ]; then
     fi
   fi
   log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "skip_override" || true
-  seal_branch_if_applicable
-  update_baseline
-  cleanup_session
+  # Decision 0047: no seal/cleanup on Stop — SessionEnd owns destructive close work.
   _output_allow "${_OVR_MSG:-}"
   exit 0
 fi
@@ -847,25 +1161,12 @@ else
 fi
 
 if [ -z "$UNCOMMITTED" ] && [ -z "$STAGED" ] && [ -z "$RECENT_COMMITS" ]; then
-  # Zero-change session — no blocking
+  # Zero-change session — no blocking. SessionEnd handles cleanup (Decision 0047).
   if [ "$SESSION_LOG_MODIFIED" = false ]; then
     _ZC_MSG="Advisory: No code changes detected (zero-change session). Session log not updated."
   fi
   SESSION_TYPE=$(infer_session_type)
   log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "zero_change" "$SESSION_TYPE" || true
-  # Seal before cleanup — honour agent-merge signals and seal current branch.
-  if [ -f "$MERGE_STATE_FILE" ]; then
-    _zc_merged=$(cat "$MERGE_STATE_FILE" 2>/dev/null || true)
-    if [ -n "$_zc_merged" ]; then
-      record_closed_branch "$_zc_merged"
-      advisory_push_to_remote
-      delete_merged_session_branch "$_zc_merged"
-      log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "agent_merged" "" "$_zc_merged" || true
-    fi
-  fi
-  seal_branch_if_applicable
-  cleanup_session
-  update_baseline
   _output_allow "${_ZC_MSG:-}"
   exit 0
 fi
@@ -1164,220 +1465,13 @@ if [ "$IS_RETRY" = false ] && [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
   fi
 fi
 
-# --- Agent-merge detection ---
-# If the agent already merged in the close phase (via write_merge_signal),
-# skip the hook's own merge logic. The agent writes merge-source-branch
-# after a successful git checkout main && git merge.
-if [ -f "$MERGE_STATE_FILE" ]; then
-  AGENT_MERGED_BRANCH=$(cat "$MERGE_STATE_FILE" 2>/dev/null || true)
-  if [ -n "$AGENT_MERGED_BRANCH" ]; then
-    record_closed_branch "$AGENT_MERGED_BRANCH"
-    BRANCH_SEALED=true
-    advisory_push_to_remote
-    # Merged branch cleanup (Decision 0045): delete the now-redundant local ref.
-    delete_merged_session_branch "$AGENT_MERGED_BRANCH"
-    log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "agent_merged" "" "$AGENT_MERGED_BRANCH" || true
-  fi
-fi
+# --- Decision 0047: merge/seal/cleanup moved to SessionEnd dispatch (above) ---
+# Agent-merge detection, editor-live seal, solo merge, branch seal, cleanup,
+# and update_baseline are no longer performed on the Stop event. They run
+# exactly once when SessionEnd fires at true session termination.
 
-# --- Editor-live fallback: seal orphaned merged live-editor branch (Decision 0023 Amendment 2) ---
-# If an editor-live session merged to main manually but did NOT call
-# write_merge_signal, the agent-merge detection above found no signal and the
-# live-editor-N branch is still unsealed while HEAD is on main (where
-# record_closed_branch skips main). Seal + delete the merged ref so the close
-# never silently strands it. Editor-live-scoped, and only when no merge signal
-# was recorded (BRANCH_SEALED still false) — the normal signal path is untouched.
-if [ "$BRANCH_SEALED" = false ]; then
-  _EL_CLOSE_STYPE=$(get_session_type)
-  if [ "$_EL_CLOSE_STYPE" = "editor-live" ]; then
-    if is_full_worktree_session; then
-      seal_orphaned_editor_live_branches "$_REPO_OS_ROOT"
-    else
-      seal_orphaned_editor_live_branches
-    fi
-    # The orphaned merged live-editor-N branch (if any) is now sealed; the
-    # session is closing on main, so mark sealing handled — keeps the downstream
-    # seal_branch_if_applicable a deliberate no-op rather than a coincidental one.
-    BRANCH_SEALED=true
-  fi
-fi
+# (Editor-live fallback and solo merge moved to SessionEnd dispatch — Decision 0047)
 
-# --- Solo merge path ---
-# When solo=true and on a mergeable branch, merge directly to main instead
-# Task group non-final briefs skip the merge to keep the
-# branch open for the next brief. Experiment branches are excluded.
-# Safety net: runs only when agent did not merge (merge-source-branch absent).
-# SOLO and CURRENT_BRANCH are already set above.
-if [ "$SOLO" = "true" ] && [ "$BRANCH_SEALED" = false ]; then
-  SESSION_TYPE_PHASE=$(get_session_type)
-  MERGE_BRANCH="$CURRENT_BRANCH"
-  SHOULD_MERGE=true
-
-  case "$MERGE_BRANCH" in
-    feature/*|fix/*|hotfix/*|live-editor-[0-9]*)
-      # Check for non-final task group brief — if so, skip merge
-      if [ "$SESSION_TYPE_PHASE" = "taskgroup" ]; then
-        IS_FINAL=$(is_final_brief)
-        if [ "$IS_FINAL" != "true" ]; then
-          SHOULD_MERGE=false
-        fi
-      elif [ "$SESSION_TYPE_PHASE" = "taskgroup-merge" ]; then
-        : # always merge — merge brief is always the final brief
-      fi
-      ;;
-    *)
-      # experiment/*, release/*, or anything else — not a solo merge candidate
-      SHOULD_MERGE=false
-      ;;
-  esac
-
-  if [ "$SHOULD_MERGE" = true ]; then
-    MERGE_OK=false
-    if is_full_worktree_session; then
-      # Worktree merge path (Decision 0030): use git -C to operate on main repo
-      local _main_repo="$_REPO_OS_ROOT"
-      # Merge lock is intentionally in the shared (flat) .state/ dir, not session-scoped —
-      # it must serialize across all concurrent worktree sessions.
-      local _merge_lock="$_main_repo/.claude/.state/.merge-lock"
-      if ! _acquire_merge_lock "$_merge_lock"; then
-        # Fail-closed (C3): write escalation and skip merge
-        local _esc_dir="$_main_repo/.claude/.automation/escalations"
-        mkdir -p "$_esc_dir" 2>/dev/null || true
-        local _esc_id="esc-merge-lock-$(date +%Y%m%d-%H%M%S)"
-        {
-          printf 'escalation:\n'
-          printf '  id: "%s"\n' "$_esc_id"
-          printf '  queue_entry_id: "stop-hook"\n'
-          printf '  type: "gate-failure"\n'
-          printf '  severity: "blocking"\n'
-          printf '  phase_at_exit: "close"\n'
-          printf '  tag_at_exit: "agent"\n'
-          printf '  message: "Merge lock acquisition failed after 3 attempts — merge blocked (fail-closed)"\n'
-          printf '  context: "lock_path: %s, branch: %s"\n' "$_merge_lock" "$MERGE_BRANCH"
-          printf '  created_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          printf '  resolved: false\n'
-          printf '  resolution: ""\n'
-        } > "$_esc_dir/${_esc_id}.yaml" 2>/dev/null || true
-        echo "ERROR: Merge blocked — lock acquisition failed. Escalation written: $_esc_id" >&2
-        # Seal branch on lock failure — session is closing, branch is terminal (Leak Point 4)
-        record_closed_branch "$MERGE_BRANCH"
-        BRANCH_SEALED=true
-        log_hook_event "session-close-check" "Stop" "" "block" "$START_MS" "merge_lock_failed" "" "$MERGE_BRANCH" || true
-        _release_merge_lock
-        SHOULD_MERGE=false
-      fi
-    fi
-
-    if [ "$SHOULD_MERGE" = true ]; then
-      if is_full_worktree_session; then
-        # Verify main repo is on the main branch
-        local _main_branch
-        _main_branch=$(git -C "$_main_repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-        if [ "$_main_branch" = "main" ]; then
-          local _wt_pre_merge_sha
-          _wt_pre_merge_sha=$(git -C "$_main_repo" rev-parse HEAD 2>/dev/null || echo "")
-          if git -C "$_main_repo" merge --ff-only "$MERGE_BRANCH" 2>/dev/null; then
-            MERGE_OK=true
-          elif git -C "$_main_repo" merge --no-ff -m "Merge $MERGE_BRANCH" "$MERGE_BRANCH" 2>/dev/null; then
-            MERGE_OK=true
-          fi
-          if [ "$MERGE_OK" = false ]; then
-            git -C "$_main_repo" merge --abort 2>/dev/null || true
-          fi
-          if [ "$MERGE_OK" = true ]; then
-            # Detect ref-move anomaly: unchanged HEAD means the branch was
-            # already an ancestor or a prior ref-move made main point there.
-            local _wt_post_merge_sha
-            _wt_post_merge_sha=$(git -C "$_main_repo" rev-parse HEAD 2>/dev/null || echo "")
-            if [ -n "$_wt_pre_merge_sha" ] && [ "$_wt_pre_merge_sha" = "$_wt_post_merge_sha" ]; then
-              echo "WARNING: stop-hook merge: 'Already up to date' — main HEAD unchanged by merge of '$MERGE_BRANCH'. Possible prior ref-move by agent. Applying working-tree sync." >&2
-            fi
-            # Post-merge working-tree sync (Decision 0030): sync main repo index
-            # and working tree to HEAD. A ref-move from the worktree leaves index/
-            # tree frozen at old state even though HEAD advanced. Errors are logged
-            # (not silenced) so staleness is never invisible.
-            if ! git -C "$_main_repo" reset HEAD -- . 2>/dev/null; then
-              echo "WARNING: stop-hook merge: post-merge index reset failed for '$_main_repo'" >&2
-            fi
-            if ! git -C "$_main_repo" checkout HEAD -- . 2>/dev/null; then
-              echo "WARNING: stop-hook merge: post-merge working tree restore failed for '$_main_repo'" >&2
-            fi
-            # Stale-tree detection backstop: verify sync was effective.
-            if ! git -C "$_main_repo" diff HEAD --quiet 2>/dev/null; then
-              echo "ERROR: Main working tree still stale after post-merge sync (stop hook) — index/tree differ from HEAD. Merged code committed but absent from disk. Repair: 'git -C $_main_repo checkout HEAD -- . && git -C $_main_repo clean -fd'" >&2
-              local _esc_dir="$_main_repo/.claude/.automation/escalations"
-              mkdir -p "$_esc_dir" 2>/dev/null || true
-              local _stale_esc_id="esc-stale-main-$(date +%Y%m%d-%H%M%S)-stop"
-              {
-                printf 'escalation:\n'
-                printf '  id: "%s"\n' "$_stale_esc_id"
-                printf '  queue_entry_id: "stop-hook"\n'
-                printf '  type: "gate-failure"\n'
-                printf '  severity: "blocking"\n'
-                printf '  phase_at_exit: "close"\n'
-                printf '  tag_at_exit: "close"\n'
-                printf '  message: "Main working tree stale after worktree solo merge sync (stop hook) — index/tree differ from HEAD. Merged code committed but absent from disk."\n'
-                printf '  context: "main_repo: %s, branch: %s"\n' "$_main_repo" "$MERGE_BRANCH"
-                printf '  created_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-                printf '  resolved: false\n'
-                printf '  resolution: ""\n'
-              } > "$_esc_dir/${_stale_esc_id}.yaml" 2>/dev/null || true
-              echo "Escalation written: $_stale_esc_id" >&2
-            fi
-          fi
-        else
-          echo "Advisory: Main repo is on '$_main_branch', not 'main' — cannot merge from worktree. Merge manually." >&2
-          log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "wt_merge_skip_not_main" "" "$MERGE_BRANCH" || true
-        fi
-
-        _release_merge_lock
-      else
-        # Standard (non-worktree) merge path — unchanged
-        if git checkout main 2>/dev/null; then
-          if git merge --ff-only "$MERGE_BRANCH" 2>/dev/null; then
-            MERGE_OK=true
-          elif git merge --no-ff -m "Merge $MERGE_BRANCH" "$MERGE_BRANCH" 2>/dev/null; then
-            MERGE_OK=true
-          fi
-        else
-          # Checkout main failed — seal branch, merge never attempted (Leak Point 5)
-          record_closed_branch "$MERGE_BRANCH"
-          BRANCH_SEALED=true
-          log_hook_event "session-close-check" "Stop" "" "block" "$START_MS" "checkout_main_failed" "" "$MERGE_BRANCH" || true
-        fi
-      fi
-    fi
-
-    if [ "$MERGE_OK" = false ] && ! is_full_worktree_session; then
-      git merge --abort 2>/dev/null || true
-      git checkout "$MERGE_BRANCH" 2>/dev/null || true
-      # Seal branch on non-conflict merge failure — branch is terminal (Leak Point 1)
-      record_closed_branch "$MERGE_BRANCH"
-      BRANCH_SEALED=true
-      log_hook_event "session-close-check" "Stop" "" "block" "$START_MS" "solo_merge_failed" "" "$MERGE_BRANCH" || true
-      _output_block "Solo merge failed — resolve conflicts manually" "ERROR: Solo merge of '$MERGE_BRANCH' into main failed.\n  Resolve manually: git checkout main && git merge '$MERGE_BRANCH'"
-    fi
-
-    if [ "$MERGE_OK" = true ]; then
-      record_closed_branch "$MERGE_BRANCH"
-      BRANCH_SEALED=true
-      advisory_push_to_remote
-      # Merged branch cleanup (Decision 0045): delete the now-redundant local ref.
-      if is_full_worktree_session; then
-        delete_merged_session_branch "$MERGE_BRANCH" "$_REPO_OS_ROOT"
-      else
-        delete_merged_session_branch "$MERGE_BRANCH"
-      fi
-      log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "solo_merge_success" "" "$MERGE_BRANCH" || true
-    elif is_full_worktree_session; then
-      # Worktree merge failed or skipped — seal branch (Leak Point 2)
-      # Branch is terminal in worktree context; operator starts fresh on failure.
-      record_closed_branch "$MERGE_BRANCH"
-      BRANCH_SEALED=true
-      log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "wt_merge_failed" "" "$MERGE_BRANCH" || true
-    fi
-  fi
-fi
 
 # --- Task group next-brief reminder (advisory — first attempt only) ---
 # If a task group contract exists with pending briefs, remind about next brief.
@@ -1461,26 +1555,14 @@ if [ "$IS_RETRY" = false ]; then
   compare_manifest 2>&1 | grep -v '^$' >&2 || true
 fi
 
-# --- Analytics: log successful close and register repo ---
+# --- Analytics: log Stop-path completion and register repo ---
+# Note: session_complete is now emitted by the SessionEnd dispatch (Decision 0047).
+# This records that the Stop advisory/blocking checks passed.
 SESSION_TYPE=$(infer_session_type)
-log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "session_complete" "$SESSION_TYPE" || true
+log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "stop_checks_passed" "$SESSION_TYPE" || true
 register_repo "$REPO_ROOT" || true
 
-# --- Seal branch (Decision 0013) ---
-# Conditional: task group non-final briefs skip seal; solo merge already sealed.
-if [ "$BRANCH_SEALED" = false ]; then
-  seal_branch_if_applicable
-fi
-
-# --- Update baseline for next session ---
-update_baseline
-
-# --- Final cleanup ---
-cleanup_session
-# Clean out-of-tree evidence manifest (session-scoped; no accumulation in repo).
-cleanup_evidence_manifest "$REPO_ROOT" || true
-
-# --- KPI summary (Phase 3c) — normal close path ---
+# --- KPI summary (Phase 3c) — Stop close path ---
 _emit_kpi_summary 0 "$STOP_ATTEMPT" "" "$SESSION_TYPE"
 
 # --- JSON stdout: emit collected advisories (Phase 2a) ---

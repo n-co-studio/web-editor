@@ -35,6 +35,9 @@
 #   editor-live   — per-loop: A4 only; close: full gates minus plan-approved
 
 set -euo pipefail
+# NOTE: errtrace (-E) is enabled conditionally, next to _gate_abort() below —
+# it is only safe where $BASHPID exists to distinguish subshells. Do not add
+# -E here.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/_analytics-helper.sh"
@@ -55,6 +58,65 @@ fi
 REPO_ROOT="$(get_repo_root)"
 STATE_DIR="$(get_session_state_dir)"
 DECISIONS_DIR="$REPO_ROOT/docs/ai/decisions"
+
+# --- Fail-closed abort guard (blocking) ---
+# Every gate below records failure in $FAILED and defers to the single `exit 2`
+# at the end of this file. Under `set -euo pipefail`, any unhandled non-zero
+# command aborts the script *before* that exit with status 1 — and the Claude
+# Code hook protocol blocks on exit 2 ONLY, treating any other non-zero as a
+# non-blocking error that lets the tool call proceed. A crash therefore became
+# a silent, total bypass of every gate in this file.
+#
+# This trap converts that class of failure from fail-open to fail-closed: an
+# unexpected abort now blocks the commit and says where it happened. It is a
+# backstop, not a licence to leave real aborts unfixed — each one should be
+# diagnosed and repaired at its source.
+#
+# errtrace (-E) widens the trap to shell functions, so an abort inside a
+# sourced helper fails closed instead of exiting 1. It is enabled BELOW, and
+# only when $BASHPID exists, for the reason that follows.
+#
+# errtrace also propagates into SUBSHELLS and COMMAND SUBSTITUTIONS, and
+# there the trap is actively wrong. Gates deliberately capture failing exit
+# codes, e.g.
+#     A33_OUTPUT=$(cd "$REPO_ROOT" && npx tsc --noEmit) || A33_EXIT=$?
+# The `||` protects the outer assignment from errexit, but the inner command's
+# failure fires ERR *inside the substitution's subshell*. An unguarded trap
+# exits that subshell with 2, so the gate reads the wrong status (a tsc/npm
+# failure of 1 arrives as 2), prints a spurious "gate defect" message, and
+# logs a false gate_script_abort. A plain type error or schema violation would
+# tell the operator the gate itself is broken.
+#
+# So: fail closed in the main shell (top level AND functions, which share
+# $BASHPID), and stay out of the way in subshells, where a non-zero status is
+# the caller's to handle. errexit still terminates the subshell with its
+# original status, which is exactly what the `||` capture expects.
+_gate_abort() {
+  local rc=$?
+  local line="${1:-unknown}"
+  if [ "${BASHPID:-$$}" != "$$" ]; then
+    return "$rc"
+  fi
+  echo "GATE-FINAL: pre-commit gate aborted unexpectedly at line ${line} (exit ${rc}) — failing closed rather than letting the commit through. NEXT: this is a gate defect; re-run with 'bash -x .claude/hooks/pre-commit-gates.sh' to locate it, and verify with 'bash .claude/tools/gate-conformance.sh'. (no override)" >&2
+  log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "gate_script_abort" "line:${line} rc:${rc}" 2>/dev/null || true
+  exit 2
+}
+trap '_gate_abort "$LINENO"' ERR
+
+# Enable errtrace ONLY where the subshell guard above can actually work.
+# $BASHPID is a bash 4.0+ feature; macOS ships bash 3.2.57, where it is unset
+# and `$$` reports the parent's PID even inside a subshell — leaving no way to
+# tell a command substitution from the main shell. Enabling -E there would
+# hijack every deliberately-captured failure (a tsc/npm exit of 1 arriving as
+# 2, plus a false "gate defect" message).
+#
+# Without -E the trap still covers this script's top level, which is where the
+# fail-open this decision exists to fix actually occurred. Aborts inside
+# sourced helper functions remain exit-1 on bash 3.2 — a known, narrower gap,
+# recorded in Decision t-0049 rather than papered over.
+if [ -n "${BASHPID:-}" ]; then
+  set -E
+fi
 
 FAILED=0
 BLOCKED_REASONS=""
@@ -386,7 +448,17 @@ if [ "$SKIP_STATE" = false ]; then
         printf '%s\n' "$A33_OUTPUT" >&2
         block "A3.3_type_error"
         log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A3.3_type_error"
+      else
+        log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "A3.3_pass"
       fi
+    else
+      # Make the skip VISIBLE. A gate that is documented as blocking but
+      # silently no-ops is indistinguishable from a gate that ran and passed —
+      # in the output and in telemetry. That ambiguity is how a dead gate stays
+      # dead unnoticed. Not a warning: absence of tsconfig.json is a correct,
+      # expected state for a non-TypeScript repo (the template itself).
+      echo "A3.3 SKIPPED: no tsconfig.json at repo root — TypeScript build verification is inactive in this repo." >&2
+      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "A3.3_skipped_no_tsconfig"
     fi
   fi
 
@@ -409,6 +481,13 @@ if [ "$SKIP_STATE" = false ]; then
           "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
           > "$_A34_ESC_DIR_SKIP/a34-skip-ignored-$(date -u +%Y%m%d-%H%M%S).yaml" 2>/dev/null || true
       fi
+    fi
+    if [ "$_A34_SKIP_EFFECTIVE" = false ] && [ ! -f "$REPO_ROOT/package.json" ]; then
+      # Make the skip VISIBLE — see the A3.3 note above. A3.4 is documented as
+      # blocking in headless/auto; with no package.json it does nothing, and
+      # silence made that identical to having run and passed.
+      echo "A3.4 SKIPPED: no package.json at repo root — functional verification is inactive in this repo." >&2
+      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "A3.4_skipped_no_package_json"
     fi
     if [ "$_A34_SKIP_EFFECTIVE" = false ] && [ -f "$REPO_ROOT/package.json" ]; then
       _A34_TIMEOUT="${REPO_OS_FUNC_CHECK_TIMEOUT:-120}"
@@ -1306,8 +1385,15 @@ if [ -n "$STAGED_FILES" ] && [ -d "$DECISIONS_DIR" ]; then
 
         if [ -n "$_A1_DIGEST_TOOL" ]; then
           # Locale-independent sort matches rebuild-trigger-index.sh exactly.
+          # `ls` exits non-zero when EITHER glob matches nothing — and the real
+          # decisions dir holds only t-*.md, so the 0*.md glob never matches.
+          # Under `set -euo pipefail` that failure propagated out of the command
+          # substitution and aborted the whole gate script. Tolerate it: the
+          # byte stream is unchanged when files exist, empty when none do.
+          # rebuild-trigger-index.sh computes this digest the same way and must
+          # be kept byte-identical, or the digests can never agree.
           _A1_FRESH_DIGEST=$(
-            LC_ALL=C ls "$DECISIONS_DIR"/t-*.md "$DECISIONS_DIR"/0*.md 2>/dev/null \
+            { LC_ALL=C ls "$DECISIONS_DIR"/t-*.md "$DECISIONS_DIR"/0*.md 2>/dev/null || true; } \
               | LC_ALL=C sort \
               | while IFS= read -r _f; do
                   [ -f "$_f" ] || continue

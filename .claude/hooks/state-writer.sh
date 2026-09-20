@@ -84,12 +84,72 @@ if [ "$AGENT_TYPE" = "critic" ]; then
   fi
 fi
 
+# --- Verdict-rejection escalation writer (shared by all rejection paths) ---
+# Every path that discards an earned verdict must report it identically. Before
+# 2026-09-01 only the phase-mismatch path wrote an escalation; the two formatting
+# rejections logged an NDJSON 'skip' line and nothing else, so a lost review was
+# indistinguishable from an agent that had not finished yet.
+#
+# Deliberately tolerant of unset context: this is callable from the sentinel check,
+# which runs before STATE_SID, TIMESTAMP, CURRENT_PHASE, DISPATCH_PHASE,
+# DISPATCH_CYCLE, EXPECTED_PHASE and PHASE_SOURCE are assigned. (STATE_FILE is
+# already routed by then, so its default is belt-and-braces rather than load-bearing.)
+# Every interpolation is defaulted — the script runs under `set -euo pipefail`, so an
+# undefaulted unset variable here would abort the hook and lose the report entirely.
+#
+# NOTE: writing an escalation is necessary but NOT sufficient. Two escalations of
+# exactly this kind were written during the original t-0047 work, carried real
+# BLOCKED verdicts, and were never read — the sessions still recorded success. See
+# .claude/.automation/briefs/20260901-state-writer-verdict-loss.md item 2, which
+# remains open: a discarded verdict must eventually change an outcome, not just
+# leave a file behind.
+# Args: <reason-slug> <human message>
+_write_verdict_rejection() {
+  local _vr_reason="$1" _vr_msg="$2"
+  local _vr_dir _vr_ts _vr_file
+  _vr_dir="$(get_main_repo_root)/.claude/.automation/escalations"
+  mkdir -p "$_vr_dir" 2>/dev/null || true
+  _vr_ts=$(date -u +%Y%m%dT%H%M%SZ)
+  _vr_file="$_vr_dir/verdict-rejected-${AGENT_TYPE}-${_vr_ts}.yaml"
+  # Escape for double-quoted YAML scalars: agent output reaches these fields.
+  _vr_msg="${_vr_msg//\\/\\\\}"; _vr_msg="${_vr_msg//\"/\\\"}"
+  local _vr_ctx="reason=${_vr_reason} agent=${AGENT_TYPE} dispatch_phase=${DISPATCH_PHASE:-(none)} dispatch_cycle=${DISPATCH_CYCLE:--} expected_phase=${EXPECTED_PHASE:-(n/a)} current_phase=${CURRENT_PHASE:-(unknown)} phase_source=${PHASE_SOURCE:-(n/a)} state_file=${STATE_FILE:-(unresolved)}"
+  _vr_ctx="${_vr_ctx//\\/\\\\}"; _vr_ctx="${_vr_ctx//\"/\\\"}"
+  {
+    printf 'escalation:\n'
+    printf '  id: "esc-verdict-rejected-%s-%s"\n' "$AGENT_TYPE" "$_vr_ts"
+    printf '  queue_entry_id: "%s"\n' "${STATE_SID:-unknown}"
+    printf '  type: "gate-failure"\n'
+    printf '  severity: "blocking"\n'
+    printf '  phase_at_exit: "%s"\n' "${CURRENT_PHASE:-(unknown)}"
+    printf '  tag_at_exit: "%s"\n' "$(get_tag 2>/dev/null || echo unknown)"
+    printf '  message: "%s"\n' "$_vr_msg"
+    printf '  context: "%s"\n' "$_vr_ctx"
+    printf '  created_at: "%s"\n' "${TIMESTAMP:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+    printf '  resolved: false\n'
+    printf '  resolution: ""\n'
+  } > "$_vr_file" 2>/dev/null || true
+}
+
 # --- Extract last non-empty line ---
 LAST_LINE=$(echo "$LAST_MESSAGE" | awk 'NF{line=$0} END{print line}')
 
 # --- Check for GATE_RESULT: sentinel ---
+# The terminal position of GATE_RESULT: is a deliberate contract (Decision t-0039;
+# documented to the agent at critic.md:158) — a rejection here means the agent
+# violated its own output contract, not that the parser is too strict. Do not relax.
 if [[ "$LAST_LINE" != GATE_RESULT:* ]]; then
-  echo "WARNING: $AGENT_TYPE completed without GATE_RESULT sentinel — state file not written" >&2
+  {
+    printf '=== VERDICT REJECTED: %s ===\n' "$AGENT_TYPE"
+    printf '  agent:   %s\n' "$AGENT_TYPE"
+    printf '  reason:  no GATE_RESULT: sentinel on the final non-empty line\n'
+    printf '  saw:     %s\n' "${LAST_LINE:-(empty output)}"
+    printf 'NEXT: Re-dispatch %s. Its output must END with the GATE_RESULT: line —\n' "$AGENT_TYPE"
+    printf '      no trailing prose, footer, or separator after it. Do NOT forge a verdict file.\n'
+    printf '=== END VERDICT REJECTED ===\n'
+  } >&2
+  _write_verdict_rejection "no_sentinel" \
+    "Verdict from $AGENT_TYPE discarded — no GATE_RESULT: sentinel on the final non-empty line (saw: ${LAST_LINE:-empty}). State file NOT written."
   log_hook_event "state-writer" "SubagentStop" "$AGENT_TYPE" "skip" "$START_MS" "no_sentinel"
   exit 0
 fi
@@ -131,19 +191,28 @@ VALIDATE_PHASE="${DISPATCH_PHASE:-$CURRENT_PHASE}"
 PHASE_SOURCE="current"
 [ -n "$DISPATCH_PHASE" ] && PHASE_SOURCE="dispatch"
 PHASE_OK=true
+# EXPECTED_PHASE records which phase THIS agent type must be dispatched from, so
+# the rejection message can name it. Without this the message compared dispatch
+# against current and printed neither expectation, producing lines that read as a
+# self-contradiction ("dispatch=review:current=review") for what was in fact a
+# correct rejection of a review-phase security-privacy dispatch that belongs in verify.
+EXPECTED_PHASE=""
 if [ -n "$VALIDATE_PHASE" ]; then
   case "$AGENT_TYPE" in
     critic)
       # critic writes cohesion-reviewed (cohesion mode) or diff-review-complete (diff-review mode)
       # both during the review phase — STATE_FILE is already routed correctly above
+      EXPECTED_PHASE="review"
       [ "$VALIDATE_PHASE" != "review" ] && PHASE_OK=false
       ;;
     qa-verifier)
       # qa-verifier writes qa-verified during verify phase
+      EXPECTED_PHASE="verify"
       [ "$VALIDATE_PHASE" != "verify" ] && PHASE_OK=false
       ;;
     reviewer|security-privacy)
       # reviewer/security-privacy write during verify phase
+      EXPECTED_PHASE="verify"
       [ "$VALIDATE_PHASE" != "verify" ] && PHASE_OK=false
       ;;
     pragmatist)
@@ -151,6 +220,7 @@ if [ -n "$VALIDATE_PHASE" ]; then
       # Also allowed in synthesize phase: taskdef-brief dispatches pragmatist during synthesize for the
       # approval gate — without this, the gate is unsatisfiable in that session type.
       # plan/review/build covers Prompt B (product build); synthesize covers taskdef-brief only.
+      EXPECTED_PHASE="plan|review|build|synthesize"
       [ "$VALIDATE_PHASE" != "plan" ] && [ "$VALIDATE_PHASE" != "review" ] && [ "$VALIDATE_PHASE" != "build" ] && [ "$VALIDATE_PHASE" != "synthesize" ] && PHASE_OK=false
       ;;
   esac
@@ -164,37 +234,177 @@ if [ "$PHASE_OK" = false ]; then
     printf '  agent:          %s\n' "$AGENT_TYPE"
     printf '  verdict:        %s\n' "$LAST_LINE"
     printf '  dispatch phase: %s (cycle %s) [from %s]\n' "${DISPATCH_PHASE:-(none recorded)}" "${DISPATCH_CYCLE:--}" "$PHASE_SOURCE"
+    printf '  expected phase: %s\n' "${EXPECTED_PHASE:-(unknown)}"
     printf '  current phase:  %s\n' "${CURRENT_PHASE:-(unknown)}"
     printf '  state file:     %s (NOT written)\n' "$STATE_FILE"
-    printf 'NEXT: Re-dispatch %s from the correct phase (%s). Do NOT forge a verdict file.\n' "$AGENT_TYPE" "$VALIDATE_PHASE"
+    printf 'NEXT: Re-dispatch %s from %s. Do NOT forge a verdict file.\n' "$AGENT_TYPE" "${EXPECTED_PHASE:-the correct phase}"
     printf '=== END VERDICT REJECTED ===\n'
   } >&2
 
   # --- Write escalation file so the runner / operator can detect the loss ---
-  _sw_esc_dir="$(get_main_repo_root)/.claude/.automation/escalations"
-  mkdir -p "$_sw_esc_dir" 2>/dev/null || true
-  _sw_esc_ts=$(date -u +%Y%m%dT%H%M%SZ)
-  _sw_esc_file="$_sw_esc_dir/verdict-rejected-${AGENT_TYPE}-${_sw_esc_ts}.yaml"
-  {
-    printf 'escalation:\n'
-    printf '  id: "esc-verdict-rejected-%s-%s"\n' "$AGENT_TYPE" "$_sw_esc_ts"
-    printf '  queue_entry_id: "%s"\n' "${STATE_SID:-unknown}"
-    printf '  type: "gate-failure"\n'
-    printf '  severity: "blocking"\n'
-    printf '  phase_at_exit: "%s"\n' "${CURRENT_PHASE:-(unknown)}"
-    printf '  tag_at_exit: "%s"\n' "$(get_tag 2>/dev/null || echo unknown)"
-    printf '  message: "Verdict from %s discarded — phase mismatch. Agent dispatched from %s (cycle %s), arrived during %s. Verdict: %s. State file NOT written."\n' \
-      "$AGENT_TYPE" "${DISPATCH_PHASE:-(no record)}" "${DISPATCH_CYCLE:--}" "${CURRENT_PHASE:-(unknown)}" "$LAST_LINE"
-    printf '  context: "dispatch_phase=%s dispatch_cycle=%s current_phase=%s phase_source=%s agent=%s state_file=%s"\n' \
-      "${DISPATCH_PHASE:-(none)}" "${DISPATCH_CYCLE:--}" "${CURRENT_PHASE:-(unknown)}" "$PHASE_SOURCE" "$AGENT_TYPE" "$STATE_FILE"
-    printf '  created_at: "%s"\n' "$TIMESTAMP"
-    printf '  resolved: false\n'
-    printf '  resolution: ""\n'
-  } > "$_sw_esc_file" 2>/dev/null || true
+  _write_verdict_rejection "phase_mismatch" \
+    "Verdict from $AGENT_TYPE discarded — phase mismatch. Dispatched from ${DISPATCH_PHASE:-(no record)} (cycle ${DISPATCH_CYCLE:--}), but this agent must be dispatched from ${EXPECTED_PHASE:-(unknown)}; arrived during ${CURRENT_PHASE:-(unknown)}. Verdict: $LAST_LINE. State file NOT written."
 
-  log_hook_event "state-writer" "SubagentStop" "$AGENT_TYPE" "skip" "$START_MS" "phase_mismatch:dispatch=${DISPATCH_PHASE:-none}:current=${CURRENT_PHASE:-unknown}"
+  log_hook_event "state-writer" "SubagentStop" "$AGENT_TYPE" "skip" "$START_MS" "phase_mismatch:agent=${AGENT_TYPE}:dispatch=${DISPATCH_PHASE:-none}:expected=${EXPECTED_PHASE:-unknown}:current=${CURRENT_PHASE:-unknown}"
   exit 0
 fi
+
+# --- Per-criterion verdict capture (Decision t-0048) ---
+# The cohesion brief carries two independent per-criterion tables:
+#   ### Contract Verification — VERIFIED|UNVERIFIED|INCONCLUSIVE, judged on diff evidence
+#   ### Completeness          — COMPLETE|INCOMPLETE|PARTIAL|N/A, judged on codebase state
+# Before t-0048 only the two aggregate sentinels (COMPLETENESS:, COMPLETENESS_GATE:)
+# survived this hook; the per-criterion rows lived and died in the agent transcript,
+# so a consumer that needed to show WHICH criterion failed had nothing to bind to.
+#
+# Both tables are captured and kept separate, never merged: a criterion can be
+# UNVERIFIED in the diff yet COMPLETE in the codebase (it was already satisfied
+# before this session touched anything), and that divergence is signal rather than
+# contradiction.
+#
+# ADVISORY ONLY — deliberately not gate-bearing. A parse miss degrades the sidecar;
+# it never blocks a commit. COMPLETENESS_GATE remains the sole enforcement signal.
+# Every write is best-effort so a malformed brief cannot abort the hook under
+# `set -euo pipefail` and cost the session its real verdict files.
+# Args: <cohesion message text>
+_capture_criteria_verdicts() {
+  local _cv_text="$1"
+  local _cv_rows _cv_score _cv_gate _cv_durable_dir _cv_durable _cv_round _cv_lock
+
+  if ! echo "$_cv_text" | grep -q '^### Contract Verification' && \
+     ! echo "$_cv_text" | grep -q '^### Completeness'; then
+    return 0
+  fi
+
+  # Parse both tables in one pass, keyed by each criterion's ordinal within its
+  # section. Emits pre-escaped YAML list items on stdout.
+  _cv_rows=$(echo "$_cv_text" | awk '
+    function esc(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return s }
+    # Anchor on the trailing VERDICT token rather than on the "text — VERDICT"
+    # separator: criterion text routinely contains dashes, and the separator is an
+    # em dash whose substr() width differs between byte- and character-oriented
+    # awk builds. The verdict vocabulary is closed, so matching it is exact.
+    # INCOMPLETE precedes COMPLETE in the alternation and the required leading
+    # space keeps "INCOMPLETE" from matching as "...IN" + "COMPLETE".
+    function split_row(line,   txt, vrd) {
+      sub(/^[0-9]+\.[ \t]*/, "", line)
+      sub(/[ \t]+$/, "", line)
+      vrd = ""
+      if (match(line, /[ \t](VERIFIED|UNVERIFIED|INCONCLUSIVE|INCOMPLETE|COMPLETE|PARTIAL|N\/A)$/)) {
+        vrd = substr(line, RSTART + 1)
+        txt = substr(line, 1, RSTART - 1)
+      } else {
+        txt = line
+      }
+      sub(/[ \t]*[-—]+[ \t]*$/, "", txt)
+      sub(/[ \t]+$/, "", txt)
+      CRIT = txt; VERD = vrd
+    }
+    /^### Contract Verification/ { sec = "cv"; cur = 0; next }
+    /^### Completeness/          { sec = "cp"; cur = 0; next }
+    /^#+ /                       { sec = ""; cur = 0; next }
+    /^COMPLETENESS(_GATE)?: /    { sec = ""; cur = 0; next }
+    sec != "" && /^[0-9]+\./ {
+      idx = $0 + 0
+      split_row($0)
+      if (idx > max) max = idx
+      if (text[idx] == "") text[idx] = CRIT
+      if (sec == "cv") cvv[idx] = VERD; else cpv[idx] = VERD
+      cur = idx; cursec = sec
+      next
+    }
+    sec != "" && cur > 0 && /^[ \t]*-[ \t]*Evidence:/ {
+      e = $0
+      sub(/^[ \t]*-[ \t]*Evidence:[ \t]*/, "", e)
+      sub(/[ \t]+$/, "", e)
+      if (cursec == "cv") cve[cur] = e; else cpe[cur] = e
+      next
+    }
+    END {
+      for (i = 1; i <= max; i++) {
+        if (text[i] == "" && cvv[i] == "" && cpv[i] == "") continue
+        printf "  - index: %d\n", i
+        printf "    criterion: \"%s\"\n", esc(text[i])
+        printf "    contract_verification:\n"
+        printf "      verdict: %s\n", (cvv[i] == "" ? "ABSENT" : cvv[i])
+        printf "      evidence: \"%s\"\n", esc(cve[i])
+        printf "    completeness:\n"
+        printf "      verdict: %s\n", (cpv[i] == "" ? "ABSENT" : cpv[i])
+        printf "      evidence: \"%s\"\n", esc(cpe[i])
+      }
+    }
+  ' 2>/dev/null || true)
+
+  [ -n "$_cv_rows" ] || return 0
+
+  _cv_score=$(echo "$_cv_text" | grep -E '^COMPLETENESS: ' | tail -1 | sed 's/^COMPLETENESS: *//' || true)
+  _cv_gate=$(echo "$_cv_text" | grep -E '^COMPLETENESS_GATE: ' | tail -1 | sed 's/^COMPLETENESS_GATE: *//' || true)
+  _cv_score="${_cv_score//\\/\\\\}"; _cv_score="${_cv_score//\"/\\\"}"
+
+  # --- Live sidecar: latest dispatch only, session-scoped, cleaned at close ---
+  {
+    printf 'schema: repo-os/criteria-verdicts@1\n'
+    printf 'timestamp: "%s"\n' "$TIMESTAMP"
+    # Unquoted, matching every other state file: _cleanup-helper.sh::_delete_if_owned
+    # strips the `session_id: ` prefix but not surrounding quotes, so a quoted value
+    # would never equal the closing sid and the sidecar would survive session close.
+    printf 'session_id: %s\n' "$STATE_SID"
+    printf 'agent: critic\n'
+    printf 'dispatch_phase: "%s"\n' "${DISPATCH_PHASE:-${CURRENT_PHASE:-unknown}}"
+    printf 'dispatch_cycle: %s\n' "${DISPATCH_CYCLE:-1}"
+    printf 'completeness_score: "%s"\n' "$_cv_score"
+    printf 'completeness_gate: %s\n' "${_cv_gate:-ABSENT}"
+    printf 'criteria:\n'
+    printf '%s\n' "$_cv_rows"
+  } > "$STATE_DIR/criteria-verdicts.yaml" 2>/dev/null || true
+
+  # --- Durable artifact: one file per session, one block per Critic dispatch ---
+  # Remediation re-dispatches Critic, so rounds accumulate rather than overwrite.
+  # That append is what makes the round-over-round view (a criterion going
+  # INCOMPLETE -> COMPLETE) reconstructable after the state dir is cleaned at close.
+  _cv_durable_dir="$(get_main_repo_root)/docs/ai/governance/criteria-verdicts"
+  mkdir -p "$_cv_durable_dir" 2>/dev/null || true
+  _cv_durable="$_cv_durable_dir/${STATE_SID}.yaml"
+
+  # Counting existing rounds and appending the next one are two steps; without a
+  # lock two overlapping dispatches can read the same count and both append a
+  # `round: N`, or interleave partial writes. Same read-modify-append hazard
+  # `record_closed_branch()` in _cleanup-helper.sh guards, so reuse its pattern.
+  _cv_append_round() {
+    if [ ! -f "$_cv_durable" ]; then
+      {
+        printf 'schema: repo-os/criteria-verdicts@1\n'
+        printf 'session_id: "%s"\n' "$STATE_SID"
+        printf 'rounds:\n'
+      } > "$_cv_durable" 2>/dev/null || true
+      _cv_round=1
+    else
+      _cv_round=$(( $(grep -c '^  - round: ' "$_cv_durable" 2>/dev/null || echo 0) + 1 ))
+    fi
+    {
+      printf '  - round: %s\n' "$_cv_round"
+      printf '    timestamp: "%s"\n' "$TIMESTAMP"
+      printf '    dispatch_phase: "%s"\n' "${DISPATCH_PHASE:-${CURRENT_PHASE:-unknown}}"
+      printf '    dispatch_cycle: %s\n' "${DISPATCH_CYCLE:-1}"
+      printf '    completeness_score: "%s"\n' "$_cv_score"
+      printf '    completeness_gate: %s\n' "${_cv_gate:-ABSENT}"
+      printf '    criteria:\n'
+      printf '%s\n' "$_cv_rows" | sed 's/^/    /'
+    } >> "$_cv_durable" 2>/dev/null || true
+  }
+
+  _cv_lock="$(get_main_repo_root)/.claude/.state/.criteria-verdicts-lock"
+  mkdir -p "$(dirname "$_cv_lock")" 2>/dev/null || true
+  if command -v flock > /dev/null 2>&1; then
+    (
+      flock -w 5 9 2>/dev/null || true
+      _cv_append_round
+    ) 9>"$_cv_lock"
+  else
+    # No flock — best-effort, matching record_closed_branch()'s fallback.
+    _cv_append_round
+  fi
+}
 
 # --- Combined output write (critic dual-section) ---
 # When CRITIC_COMBINED=true, split LAST_MESSAGE at the '## Diff-Review Brief'
@@ -208,7 +418,20 @@ if [ "$CRITIC_COMBINED" = true ]; then
   DIFF_REVIEW_LAST=$(echo "$DIFF_REVIEW_PART" | awk 'NF{line=$0} END{print line}')
 
   if [[ "$COHESION_LAST" != GATE_RESULT:* ]] || [[ "$DIFF_REVIEW_LAST" != GATE_RESULT:* ]]; then
-    echo "WARNING: critic combined output missing GATE_RESULT in one or both sections — state files not written" >&2
+    # Per Decision t-0039 each section must terminate with its own GATE_RESULT:.
+    # A separator or trailing prose between the sections makes the cohesion half's
+    # last non-empty line something else, and BOTH verdicts are discarded.
+    {
+      printf '=== VERDICT REJECTED: %s (combined) ===\n' "$AGENT_TYPE"
+      printf '  cohesion section ends with:    %s\n' "${COHESION_LAST:-(empty)}"
+      printf '  diff-review section ends with: %s\n' "${DIFF_REVIEW_LAST:-(empty)}"
+      printf 'NEXT: Re-dispatch. Each section must END with its own GATE_RESULT: line —\n'
+      printf '      nothing between the cohesion GATE_RESULT: and the Diff-Review header,\n'
+      printf '      and nothing after the final GATE_RESULT:. Do NOT forge a verdict file.\n'
+      printf '=== END VERDICT REJECTED ===\n'
+    } >&2
+    _write_verdict_rejection "combined_no_sentinel" \
+      "Both verdicts from $AGENT_TYPE discarded — combined output missing a terminal GATE_RESULT: in one or both sections (cohesion ended with: ${COHESION_LAST:-empty}; diff-review ended with: ${DIFF_REVIEW_LAST:-empty}). Neither state file written."
     log_hook_event "state-writer" "SubagentStop" "$AGENT_TYPE" "skip" "$START_MS" "combined_no_sentinel"
     exit 0
   fi
@@ -225,6 +448,8 @@ if [ "$CRITIC_COMBINED" = true ]; then
   if [ -n "$COMBINED_COMPLETENESS_GATE_LINE" ]; then
     printf '%s\n' "$COMBINED_COMPLETENESS_GATE_LINE" >> "$STATE_DIR/cohesion-reviewed" 2>/dev/null || true
   fi
+
+  _capture_criteria_verdicts "$COHESION_PART"
 
   printf 'timestamp: %s\nagent: %s\nsession_id: %s\ndispatch_phase: %s\n%s\n' \
     "$TIMESTAMP" "$AGENT_TYPE" "$STATE_SID" "${DISPATCH_PHASE:-$CURRENT_PHASE}" "$DIFF_REVIEW_LAST" \
@@ -261,6 +486,8 @@ if [ "$AGENT_TYPE" = "critic" ] && [ "$STATE_FILE" = "cohesion-reviewed" ]; then
   if [ -n "$COMPLETENESS_GATE_LINE" ]; then
     printf '%s\n' "$COMPLETENESS_GATE_LINE" >> "$STATE_DIR/$STATE_FILE" 2>/dev/null || true
   fi
+
+  _capture_criteria_verdicts "$LAST_MESSAGE"
 fi
 
 # --- Phase advancement based on agent verdict ---

@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# pre-commit — git-level safety net, independent of the Claude Code hook chain.
+#
+# WHY THIS EXISTS
+# ---------------
+# Until this hook, every commit-time gate in this repo lived exclusively in the
+# Claude Code PreToolUse chain (.claude/settings.json → pre-commit-gates.sh).
+# That chain only exists while Claude Code is driving. A `git commit` typed in a
+# terminal, run from an IDE, or issued by a script passed through ZERO checks —
+# including the secret scan, which is the one gate documented as unconditional.
+#
+# This hook re-implements the single highest-value, lowest-coupling check —
+# A4 secret scanning — at the git layer, where it binds every committer.
+# It deliberately does NOT try to reproduce the phase/state/evidence gates:
+# those depend on Claude Code session state that does not exist for a human
+# committer, and faking it would be theatre.
+#
+# PROTOCOL NOTE: git hooks block on ANY non-zero exit. This is the opposite of
+# the Claude Code hook protocol, where only exit 2 blocks and other non-zero
+# statuses are non-blocking errors. Do not copy exit-code conventions between
+# the two layers — that mismatch is exactly what produced a silent fail-open in
+# pre-commit-gates.sh.
+#
+# Escape hatch: `git commit --no-verify` (intentionally left available — a git
+# hook cannot be the last line of defence for a determined committer, and
+# blocking an emergency commit outright causes worse workarounds).
+#
+# Install: .claude/.automation/lib/install-hooks.sh
+
+set -uo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+PATTERN_FILE="$REPO_ROOT/.claude/hooks/_secret-pattern.sh"
+
+# Single source of truth for the pattern — shared with pre-commit-gates.sh (A4)
+# and session-close-check.sh. If it is missing, this repo predates the shared
+# pattern; do not invent a weaker local copy, just stand down.
+# Say so rather than vanishing. REPO_ROOT is derived from $0, so a hook copied
+# to an unexpected location would silently make this scan a no-op — a secret
+# gate that quietly does nothing is the failure mode this whole change exists
+# to remove. Warn, but do not block: a missing pattern file is a local install
+# problem, not evidence of a secret.
+if [ ! -f "$PATTERN_FILE" ]; then
+  echo "WARNING: pre-commit secret scan inactive — pattern file not found at $PATTERN_FILE" >&2
+  echo "         Reinstall with: .claude/.automation/lib/install-hooks.sh" >&2
+  exit 0
+fi
+# shellcheck disable=SC1090
+. "$PATTERN_FILE"
+
+if [ -z "${_REPO_OS_SECRET_PATTERN:-}" ]; then
+  exit 0
+fi
+
+# Scan ADDED lines only, so pre-existing content is not re-flagged on every
+# commit. Skip the pattern file itself, which necessarily contains the tokens.
+ADDED_LINES=$(git diff --cached -U0 --diff-filter=ACM 2>/dev/null | awk '
+  /^\+\+\+ / { file=substr($0,5); next }
+  /^\+/ && !/^\+\+\+/ && file !~ /_secret-pattern\.sh$/ { print file ": " substr($0,2) }
+')
+
+MATCHES=$(printf '%s\n' "$ADDED_LINES" | grep -iE "$_REPO_OS_SECRET_PATTERN" 2>/dev/null || true)
+
+if [ -n "$MATCHES" ]; then
+  {
+    echo "BLOCKED: possible secret in staged changes."
+    echo
+    printf '%s\n' "$MATCHES" | sed 's/^b\// /' | head -10
+    echo
+    echo "Remove the secret from the staged files, then commit again."
+    echo "If this is a false positive, review .claude/hooks/_secret-pattern.sh"
+    echo "or bypass this one commit with: git commit --no-verify"
+  } >&2
+  exit 1
+fi
+
+exit 0
