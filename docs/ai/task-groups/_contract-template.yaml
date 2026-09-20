@@ -31,6 +31,13 @@ intent:
   goal: ""                    # what this task accomplishes (1-2 sentences)
   verification:               # falsifiable criteria for completion
     - ""
+  expected_changes:           # Decision t-0050 — outcomes in plain language.
+    # Optional. What a person who will not read the diff can do or observe.
+    # Commits reference these IDs in a `Changes:` trailer; ec-report.sh joins
+    # them to diffs. Not a restatement of verification: that is falsifiable
+    # criteria for the Critic, this is the promise in the operator's language.
+    - id: ""                  # EC-1, EC-2, ... stable for the life of the brief
+      statement: ""           # "People can sign in with a Google account"
   scope_files:                # files likely affected
     - ""
   spec_references:            # paths to relevant spec files

@@ -40,6 +40,9 @@ contract:                         # inlined Task Contract (Decision 0020 schema)
   scope_modules: []
   approach: []
   verification: []
+  expected_changes:              # optional — Decision t-0050 (intent-to-diff mapping)
+    - id: "EC-1"
+      statement: "outcome in plain language, for someone who will not read the diff"
   spec_references: []
   constraints: []
   implementation_design:         # optional — present when brief has ### Implementation Design

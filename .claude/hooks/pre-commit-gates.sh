@@ -1558,6 +1558,35 @@ if [ -n "$STAGED_FILES" ] && [ -d "$DECISIONS_DIR" ]; then
 fi
 
 # ============================================================
+# Expected Changes trailer (advisory — NEVER blocks; Decision t-0050)
+# ============================================================
+# When the active brief declares expected_changes, nudge for a `Changes: EC-n`
+# trailer so ec-report.sh can join intent to diffs.
+#
+# Deliberately advisory. Blocking would push people to staple an ID onto chore
+# and session-log commits, and an unattributed commit is a RESULT here — it is
+# reported as an "additional change", which is the most informative row in the
+# report. Forcing attribution would destroy exactly the signal this exists for.
+if [ "$SKIP_STATE" = false ] && [ -n "$STAGED_FILES" ]; then
+  _EC_SRC=""
+  for _ec_cand in "$REPO_ROOT"/.claude/local/handoff-bundles/*.yaml \
+                  "$REPO_ROOT/.claude/local/task-contract.yaml"; do
+    [ -f "$_ec_cand" ] || continue
+    if grep -q '^[[:space:]]*expected_changes:[[:space:]]*$' "$_ec_cand" 2>/dev/null \
+       && grep -qE '^[[:space:]]*-[[:space:]]*id:[[:space:]]*["'"'"']?EC-' "$_ec_cand" 2>/dev/null; then
+      _EC_SRC="$_ec_cand"
+      break
+    fi
+  done
+  if [ -n "$_EC_SRC" ]; then
+    if ! echo "$COMMIT_CMD" | grep -qiE 'Changes:[[:space:]]*EC-'; then
+      echo "Advisory: brief declares expected_changes but this commit has no 'Changes: EC-n' trailer — it will be reported as an additional change. Add one if it delivers a declared outcome. (bash .claude/tools/ec-report.sh --text)" >&2
+      warn "ec_trailer_absent"
+    fi
+  fi
+fi
+
+# ============================================================
 # Override Trailer Check (advisory — mode-guard overrides)
 # ============================================================
 # When mode-guard overrides were used this session, advise including

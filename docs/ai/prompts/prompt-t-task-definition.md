@@ -310,6 +310,19 @@ Follow docs/ai/prompts/prompt-b-product-build.md.
 2. [Step]
 3. ...
 
+### Expected Changes
+[What a person who will never read the diff can do or observe once this lands. Decision t-0050.]
+
+- EC-1: [outcome in plain language]
+- EC-2: [outcome in plain language]
+
+**Rules:**
+- Write for a non-engineer. No file paths, no symbol names, no schema jargon. "People can sign in with a Google account" — not "adds GoogleProvider to auth/providers.ts".
+- One observable outcome per line. If a line needs "and", it is two changes.
+- IDs are stable for the life of the brief. Never renumber once work has begun — commits reference them by ID.
+- Typically 2–6. A brief needing many more is usually two briefs.
+- This is NOT a restatement of `Verification`. Verification is falsifiable criteria for the Critic; Expected Changes is what was promised, in the operator's language. Both are required, and they read differently on purpose.
+
 ### Implementation Design
 [Optional — present only when scope exceeds Small Scope and the Architect produced an Implementation Design block. Omit entirely for small-scope tasks.]
 
