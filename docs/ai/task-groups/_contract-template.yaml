@@ -38,6 +38,10 @@ intent:
     # criteria for the Critic, this is the promise in the operator's language.
     - id: ""                  # EC-1, EC-2, ... stable for the life of the brief
       statement: ""           # "People can sign in with a Google account"
+      verified_by: []         # 1-based indices into verification[] that back this
+                              # outcome. Drives verified/unverified/inconclusive in
+                              # ec-report.sh from Critic verdicts (t-0048).
+                              # Omit -> status reports as not-linked.
   scope_files:                # files likely affected
     - ""
   spec_references:            # paths to relevant spec files

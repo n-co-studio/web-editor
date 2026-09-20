@@ -114,9 +114,45 @@ downstream consumers (a UI, a report, a close summary):
 }
 ```
 
-Status is derived only from what is recorded: `delivered` when at least one
-commit carries the ID, `not-started` otherwise. The tool never guesses which
-diff belongs to which change.
+### 6. Status is two independent axes, never one enum
+
+An outcome can be delivered *and* unverified, or verified *and* still in
+progress. Collapsing those into a single enum forces a precedence order that
+silently discards one of them, so the report emits both:
+
+**`status` — lifecycle, from attribution plus a closure signal:**
+
+| value | meaning |
+|---|---|
+| `not-started` | no commit carries the ID |
+| `in-progress` | commits carry it, but the brief is not closed |
+| `delivered` | commits carry it, and the brief is closed |
+
+"Closed" is itself derived, never assumed: a task-group completion marker
+exists, or the branch is merged (HEAD is an ancestor of `main`). Absent both,
+work is recorded but unfinished — `in-progress`, not `delivered`.
+
+**`verification` — from the Critic's per-criterion verdicts (Decision t-0048):**
+
+| value | meaning |
+|---|---|
+| `verified` | every linked criterion VERIFIED and COMPLETE (or N/A) |
+| `inconclusive` | any linked criterion INCONCLUSIVE or PARTIAL |
+| `unverified` | any linked criterion UNVERIFIED or INCOMPLETE |
+| `pending` | linked, but no verdicts recorded yet |
+| `not-linked` | the EC declares no `verified_by` |
+
+Linkage is explicit: each Expected Change names the `verification` criteria
+indices that back it via `verified_by`. Without it the EC reports `not-linked`
+rather than being silently assumed verified.
+
+Aggregation is **worst-verdict-wins**. One UNVERIFIED is not cancelled out by
+four VERIFIEDs; reporting otherwise would overstate confidence. Where a
+criterion has been re-reviewed across rounds, the **latest round wins** — a
+re-review that resolves a PARTIAL should count.
+
+The tool never guesses which diff belongs to which change, and never infers a
+verification state for an EC that declared no linkage.
 
 ## Consequences
 

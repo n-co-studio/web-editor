@@ -313,10 +313,11 @@ Follow docs/ai/prompts/prompt-b-product-build.md.
 ### Expected Changes
 [What a person who will never read the diff can do or observe once this lands. Decision t-0050.]
 
-- EC-1: [outcome in plain language]
-- EC-2: [outcome in plain language]
+- EC-1: [outcome in plain language] — verified_by: [1, 3]
+- EC-2: [outcome in plain language] — verified_by: [2]
 
 **Rules:**
+- `verified_by` lists the 1-based indices of the `### Verification` criteria that back this outcome. It is how a Critic verdict becomes a user-facing status: `ec-report.sh` reads the per-criterion verdicts (Decision t-0048) and reports the EC as verified / unverified / inconclusive. Omit it and the EC reports as `not-linked` — honest, but the UI can then only say "someone committed against this".
 - Write for a non-engineer. No file paths, no symbol names, no schema jargon. "People can sign in with a Google account" — not "adds GoogleProvider to auth/providers.ts".
 - One observable outcome per line. If a line needs "and", it is two changes.
 - IDs are stable for the life of the brief. Never renumber once work has begun — commits reference them by ID.
