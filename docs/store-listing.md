@@ -10,7 +10,10 @@ This document contains all copy and metadata needed to submit n'co studio Web Ed
 n'co studio Web Editor
 
 ### Short description (132 chars max)
-Point, adjust, generate — visual editing overlay for your local dev pages that feeds structured diffs to Claude Code.
+
+Select elements on your localhost dev page, adjust them visually, and send structured diffs to Claude Code via a local MCP server.
+
+> The store shows the `description` field from `manifest.json` as the summary; keep the two identical.
 
 ### Detailed description
 
@@ -19,8 +22,8 @@ Point, adjust, generate — visual editing overlay for your local dev pages that
 **How it works:**
 
 1. Start your dev server (`npm run dev` or equivalent).
-2. Run the companion MCP server: `npx @nco-studio/web-editor-mcp@latest`
-3. Open your project in Claude Code with the MCP server configured.
+2. Run the companion MCP server: `npx @nco-studio/web-editor-mcp@^0`
+3. Open your project in Claude Code with the MCP server configured in `.mcp.json`.
 4. Click the n'co studio Web Editor toolbar icon to activate the overlay.
 5. Click any element to inspect it, adjust spacing/color/typography/layout visually, then hit "Apply" — Claude Code receives a structured diff and writes the code changes.
 
@@ -39,7 +42,7 @@ Point, adjust, generate — visual editing overlay for your local dev pages that
 - `@nco-studio/web-editor-mcp` npm package running locally (free, open-source)
 - Claude Code with the MCP server configured
 - A locally-running dev server at `localhost` or `127.0.0.1`
-- `@nco-studio/dev-plugin` (optional, enables source-file mapping)
+- `@nco-studio/web-editor-plugin` (optional, enables source-file mapping)
 
 **Architecture:**
 
@@ -53,7 +56,7 @@ These justifications are required for Chrome Web Store review. Copy them verbati
 
 ### `activeTab`
 
-> n'co studio Web Editor needs `activeTab` to read the current tab's DOM and URL in order to render the visual selection overlay and identify which elements the developer is inspecting. The overlay is only activated when the user explicitly clicks the toolbar icon on a localhost page — the extension does not access any tab automatically.
+> n'co studio Web Editor needs `activeTab` to read the current tab's DOM and URL in order to render the visual selection overlay and identify which elements the developer is inspecting. The overlay is only activated when the user explicitly clicks the toolbar icon on a localhost page — the extension does not access any tab automatically. `activeTab` also lets the extension capture the visible tab (`chrome.tabs.captureVisibleTab`) when the developer uses the full-page screenshot tool; the image is saved to the developer's own machine and never uploaded.
 
 ### `storage`
 
@@ -81,12 +84,12 @@ n'co studio Web Editor is a developer tool that overlays a visual inspection and
 
 **Prerequisites:**
 
-1. Node.js 18+ installed.
+1. Node.js 20+ installed.
 2. Run the MCP server:
    ```
-   npx @nco-studio/web-editor-mcp@latest
+   npx @nco-studio/web-editor-mcp@^0
    ```
-   The server listens on a local WebSocket port (default range: 3700–3710).
+   The server listens on a local WebSocket port (default port 7890; falls back through 7899).
 
 3. A simple demo app to test against — any local dev server will do:
    ```
@@ -131,7 +134,7 @@ The Web Store requires up to 5 screenshots at **1280×800** pixels (PNG or JPEG)
 |-------|---------|-------|
 | **Frame 1** — Live Edit Loop | Cyan selection ring around a card component; properties panel open at bottom showing spacing controls; a visible `--fe-primary` token snap indicator; "Apply Changes" button visible. | Captures the core value prop: point → inspect → adjust → send. |
 | **Frame 2** — Change Request Queue | Queue side-panel open on the right showing 2–3 queued diffs with descriptions; toolbar icon showing orange badge; "Review" and "Send All" buttons visible. | Shows the batching / zero-setup workflow. |
-| **Frame 3** — Architecture / Zero-Setup | Split view: browser with overlay active on the left, terminal showing `npx @nco-studio/web-editor-mcp@latest` output on the right. | Shows the one-command setup and local-only architecture for reviewers and skeptical users. |
+| **Frame 3** — Architecture / Zero-Setup | Split view: browser with overlay active on the left, terminal showing `npx @nco-studio/web-editor-mcp@^0` output on the right. | Shows the one-command setup and local-only architecture for reviewers and skeptical users. |
 
 ### Promo tile
 
@@ -140,6 +143,11 @@ The Web Store requires up to 5 screenshots at **1280×800** pixels (PNG or JPEG)
 - **Note:** Producing the actual image files is an operator step. This document specifies the content.
 
 ---
+
+## Support
+
+- **Support URL:** https://github.com/n-co-studio/web-editor/issues
+- **Homepage URL:** https://github.com/n-co-studio/web-editor
 
 ## Category and Tags
 
@@ -151,10 +159,8 @@ The Web Store requires up to 5 screenshots at **1280×800** pixels (PNG or JPEG)
 
 ## Privacy Policy URL
 
-Publish `docs/privacy-policy.md` at a stable URL, e.g.:
-
 ```
-https://nco-studio.github.io/web-editor/privacy-policy
+https://nco.studio/web-editor/privacy
 ```
 
-or via GitHub Pages from this repository. The URL must remain live for the duration of the extension's availability on the store.
+Content source: `docs/privacy-policy.md`. The page is hosted on the n'co studio website and must remain live for as long as the extension is available on the store.

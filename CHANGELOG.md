@@ -4,6 +4,41 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-09-21
+
+First public release: Chrome Web Store extension 0.2.0 and both npm packages at 0.2.0.
+
+### Added
+
+- **Inline text styling** — style ranges of text inside an edited element; changes travel as `TextChange` diffs
+- **Structural editing** — auto-layout aware insert, reorder, and reparent, plus a toolbar-anchored drag-to-reorder list panel
+- **Parallax editor** — detect, adopt, and tune existing parallax effects across four mechanisms
+- **Page-value inference** — when no design tokens are loaded, controls offer values already used on the page ("On this page"), with freeform color input as the final fallback
+- **Stable element identity** — `data-fe-uid` anchors diffs and inserts; every element reference carries a resolved asset path and label
+- **Batch identity** — each dispatch is grouped under a `batchId` surfaced through the MCP tools
+- **Notes** — a new note auto-attaches the whole current selection
+- **Toolbar** — per-section collapse with viewport-height auto-fit
+- **MCP server instructions** — the server describes its workflow to agents that have no project-specific guidance
+- Token discovery from `tailwind.config.ts` / `.mts` / `.cts`
+
+### Changed
+
+- MCP setup guidance now uses `.mcp.json` at the project root (Claude Code reads project MCP servers from there) and pins `@^0`
+- Image sources in diffs resolve to project paths; base64 payloads are no longer embedded
+- Accessibility: radio-group tool semantics, modal focus trap, keyboard resizers, tab/region semantics
+- Repository moved to `github.com/n-co-studio/web-editor`
+
+### Fixed
+
+- Rule-assigned spacing values (including pseudo-class rules) now appear in the spacing panel
+- Clicks inside a text element being edited place the caret instead of reselecting
+- Popup on/off indicator updates in real time
+
+### Security
+
+- WebSocket bridge hardened: the extension confirms the MCP peer before disclosing identifiers, and asset writes are confined to the project
+- Untrusted markup is sanitized and runtime messages are authenticated in the extension
+
 ## [0.1.0] - 2026-06-17
 
 Initial public release of n'co studio Web Editor.
@@ -51,4 +86,5 @@ Initial public release of n'co studio Web Editor.
 - **Token discovery executes user code.** Parsing `tailwind.config.ts` requires compiling and evaluating the config file via esbuild. This runs in the project's trust context.
 - **v1 supports JSX/TSX only.** Vue SFCs, Svelte components, and plain HTML fall back to "source unverified" mode for element-to-source mapping.
 
-[0.1.0]: https://github.com/nco-studio/web-editor/releases/tag/v0.1.0
+[0.2.0]: https://github.com/n-co-studio/web-editor/releases/tag/v0.2.0
+[0.1.0]: https://github.com/n-co-studio/web-editor/releases/tag/v0.1.0

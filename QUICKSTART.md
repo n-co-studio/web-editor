@@ -13,7 +13,7 @@ Get from zero to your first visual edit in about five minutes.
 
 ## Step 1 — Add the MCP server to Claude Code
 
-In your project (or globally), add the `nco-web-editor` server to `.claude/settings.json`:
+Add the `nco-web-editor` server to `.mcp.json` at your project root:
 
 ```json
 {
@@ -29,7 +29,7 @@ In your project (or globally), add the `nco-web-editor` server to `.claude/setti
 
 **Verification:** Reload Claude Code. Open the MCP panel — `nco-web-editor` should appear with a green connected indicator.
 
-> The `@^0` pin means Claude Code will auto-update within the `0.x` range. For locked environments use an exact version: `@nco-studio/web-editor-mcp@0.1.0`.
+> The `@^0` pin means Claude Code will auto-update within the `0.x` range. For locked environments use an exact version: `@nco-studio/web-editor-mcp@0.2.0`.
 
 ---
 
@@ -68,7 +68,7 @@ The plugin runs in `dev` mode only — it is a no-op in production builds.
 
 ## Step 3 — Install the Chrome extension
 
-Download `nco-web-editor-v0.2.0.zip` from the [latest release](../../releases/latest) and install it:
+Install **n'co studio Web Editor** from the Chrome Web Store. To install it manually instead, download `nco-studio-web-editor-0.2.0.zip` from the [latest release](https://github.com/n-co-studio/web-editor/releases/latest) and load it unpacked:
 
 1. Unzip the archive
 2. Open `chrome://extensions`
@@ -129,28 +129,16 @@ Download `nco-web-editor-v0.2.0.zip` from the [latest release](../../releases/la
 
 - Open the MCP panel in Claude Code and confirm `nco-web-editor` shows connected
 - Check the MCP server output in Claude Code for connection errors
-- Verify both the extension and MCP server use the same port (default: `3742`)
+- Confirm the MCP server bound a port in the `7890`–`7899` range (the extension only scans that range)
 
 ### Port conflict
 
-The MCP server listens on port `3742` by default. To use a different port:
+The MCP server binds the first free port from `7890` to `7899`, and the extension scans the same range, so a busy port is skipped automatically. If all ten ports are taken, free one up and restart the server.
+
+`NCO_WEB_EDITOR_PORT` changes the port the server starts scanning from. The extension only looks in `7890`–`7899`, so keep any override inside that range:
 
 ```sh
-NCO_WEB_EDITOR_PORT=3800 npx @nco-studio/web-editor-mcp@^0
-```
-
-Update your MCP server args accordingly:
-
-```json
-{
-  "mcpServers": {
-    "nco-web-editor": {
-      "command": "npx",
-      "args": ["--yes", "@nco-studio/web-editor-mcp@^0", "-p", "3800"],
-      "type": "stdio"
-    }
-  }
-}
+NCO_WEB_EDITOR_PORT=7895 npx @nco-studio/web-editor-mcp@^0
 ```
 
 ---

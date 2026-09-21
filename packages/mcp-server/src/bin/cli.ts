@@ -21,19 +21,19 @@ const HELP_TEXT = `
 nco-web-editor-mcp — MCP server bridge for n'co studio Web Editor
 
 USAGE
-  npx --yes @nco-studio/web-editor-mcp@^1   (add to .claude/settings.json)
+  npx --yes @nco-studio/web-editor-mcp@^0   (add to .mcp.json)
   nco-web-editor-mcp                         (after global install)
   nco-web-editor-mcp --version
   nco-web-editor-mcp --help
 
-CLAUDE CODE SETTINGS SNIPPET
-  Add this to your project's .claude/settings.json:
+CLAUDE CODE CONFIG SNIPPET
+  Add this to .mcp.json at your project root:
 
   {
     "mcpServers": {
       "nco-web-editor": {
         "command": "npx",
-        "args": ["--yes", "@nco-studio/web-editor-mcp@^1"]
+        "args": ["--yes", "@nco-studio/web-editor-mcp@^0"]
       }
     }
   }

@@ -1,6 +1,6 @@
 {
   "name": "@nco-studio/web-editor-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "MCP server bridge for n'co studio Web Editor — connects Claude Code to your browser via WebSocket",
   "type": "module",
   "bin": {
@@ -27,7 +27,6 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.2",
-    "@nco-studio/shared": "0.1.0",
     "chokidar": "^4.0.0",
     "esbuild": "^0.25.0",
     "react-docgen": "^7.0.0",
@@ -35,6 +34,7 @@
     "zod": "^3.23.0"
   },
   "devDependencies": {
+    "@nco-studio/shared": "0.2.0",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.5.0",
     "tsup": "^8.0.0",
@@ -47,12 +47,12 @@
   "author": "n'co studio (Mark Preston) <hello@markpreston.co>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nco-studio/web-editor.git",
+    "url": "git+https://github.com/n-co-studio/web-editor.git",
     "directory": "packages/mcp-server"
   },
-  "homepage": "https://github.com/nco-studio/web-editor/tree/main/packages/mcp-server#readme",
+  "homepage": "https://github.com/n-co-studio/web-editor/tree/main/packages/mcp-server#readme",
   "bugs": {
-    "url": "https://github.com/nco-studio/web-editor/issues"
+    "url": "https://github.com/n-co-studio/web-editor/issues"
   },
   "keywords": [
     "mcp",

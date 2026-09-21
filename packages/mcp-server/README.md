@@ -1,6 +1,6 @@
 # @nco-studio/web-editor-mcp
 
-MCP server bridge for [n'co studio Web Editor](https://github.com/nco-studio/web-editor). Connects Claude Code to your browser via a local WebSocket, enabling visual UI editing directly in your running dev server.
+MCP server bridge for [n'co studio Web Editor](https://github.com/n-co-studio/web-editor). Connects Claude Code to your browser via a local WebSocket, enabling visual UI editing directly in your running dev server.
 
 ## How It Fits the Loop
 
@@ -23,14 +23,14 @@ Browser (Chrome Extension)
 
 ### Option A — npx (no install, slower cold start)
 
-Add to your project's `.claude/settings.json`:
+Add to `.mcp.json` at your project root:
 
 ```json
 {
   "mcpServers": {
     "nco-web-editor": {
       "command": "npx",
-      "args": ["--yes", "@nco-studio/web-editor-mcp@^1"]
+      "args": ["--yes", "@nco-studio/web-editor-mcp@^0"]
     }
   }
 }
@@ -42,7 +42,7 @@ Add to your project's `.claude/settings.json`:
 npm install -g @nco-studio/web-editor-mcp
 ```
 
-Then in `.claude/settings.json`:
+Then in `.mcp.json`:
 
 ```json
 {
@@ -100,7 +100,7 @@ Token discovery parses `tailwind.config.ts` (and similar config files) by compil
 
 ## Links
 
-- [Repository](https://github.com/nco-studio/web-editor)
-- [Issues](https://github.com/nco-studio/web-editor/issues)
+- [Repository](https://github.com/n-co-studio/web-editor)
+- [Issues](https://github.com/n-co-studio/web-editor/issues)
 - [Chrome Extension](../../packages/chrome-extension)
 - [Dev Plugin](../dev-plugin)

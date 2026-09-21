@@ -51,7 +51,7 @@ export async function createServer(): Promise<void> {
   const server = new McpServer(
     {
       name: 'nco-web-editor',
-      version: '0.1.0',
+      version: '0.2.0',
     },
     { instructions: SERVER_INSTRUCTIONS },
   );

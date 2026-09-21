@@ -9,9 +9,9 @@ n'co studio Web Editor uses a typed WebSocket protocol (`WS_PROTOCOL_VERSION`) b
 | Component | Current version | npm package |
 |-----------|----------------|-------------|
 | Protocol | **0.4.0** | (defined in `@nco-studio/shared`) |
-| MCP server | **0.1.0** | `@nco-studio/web-editor-mcp` |
+| MCP server | **0.2.0** | `@nco-studio/web-editor-mcp` |
 | Chrome extension | **0.2.0** | (Chrome Web Store / manual install) |
-| Dev plugin | **0.1.0** | `@nco-studio/web-editor-plugin` |
+| Dev plugin | **0.2.0** | `@nco-studio/web-editor-plugin` |
 
 ---
 
@@ -19,7 +19,7 @@ n'co studio Web Editor uses a typed WebSocket protocol (`WS_PROTOCOL_VERSION`) b
 
 | `WS_PROTOCOL_VERSION` | Min extension version | Min mcp-server version | Notes |
 |-----------------------|-----------------------|------------------------|-------|
-| `0.4.0` | 0.2.0 | 0.1.0 | Current — component awareness, status protocol |
+| `0.4.0` | 0.2.0 | 0.2.0 | Current — component awareness, status protocol |
 | `0.3.x` | 0.1.x | 0.0.x | Token push, TOKEN_UPDATE messages |
 | `0.2.x` | 0.1.x | 0.0.x | Keepalive, error messages |
 | `0.1.x` | 0.1.x | 0.0.x | Initial VISUAL_DIFF_BATCH protocol |
@@ -35,7 +35,7 @@ When the protocol version sent by the extension in `EXTENSION_HELLO` does not ma
 **What to do:**
 
 1. **Extension is older than server** — update the Chrome extension via Chrome Web Store or by downloading the latest package from Releases
-2. **Server is older than extension** — run `npx @nco-studio/web-editor-mcp@^0` (the `@^1` pin auto-updates within the `1.x` range)
+2. **Server is older than extension** — run `npx @nco-studio/web-editor-mcp@^0` (the `@^0` pin auto-updates within the `0.x` range)
 
 Do not ignore the banner — a mismatched protocol means some features may silently not work.
 
@@ -62,7 +62,7 @@ A major version bump signals a breaking protocol change. At that point you will 
 
 ### Upgrading the MCP server
 
-Update the pin in `.claude/settings.json`:
+Update the pin in `.mcp.json`:
 
 ```json
 "args": ["--yes", "@nco-studio/web-editor-mcp@^2"]

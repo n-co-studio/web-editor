@@ -52,7 +52,7 @@ const STEPS: Step[] = [
   "mcpServers": {
     "nco-web-editor": {
       "command": "npx",
-      "args": ["--yes", "@nco-studio/web-editor-mcp@^1"]
+      "args": ["--yes", "@nco-studio/web-editor-mcp@^0"]
     }
   }
 }`}</Code>

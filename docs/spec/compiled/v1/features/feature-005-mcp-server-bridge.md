@@ -4,7 +4,7 @@
 Local Node.js process that bridges the Chrome extension to Claude Code. Runs a WebSocket server for the extension and exposes MCP tools for Claude Code. Handles token discovery from project files and pushes token data to the extension. Content script owns the WebSocket connection (not the service worker) to avoid MV3 termination risk.
 
 ## User Flow
-1. Operator adds MCP server to `.claude/settings.json`
+1. Operator adds MCP server to `.mcp.json` at the project root
 2. Claude Code starts → MCP server starts automatically
 3. MCP server opens WebSocket on configurable port — extension tries ports 7890–7899, uses first that accepts
 4. Chrome extension content script connects directly on page load (not via service worker relay)
@@ -73,7 +73,7 @@ MCP server writes pending queue to `.nco-web-editor/pending-queue.json` on each 
   "mcpServers": {
     "nco-web-editor": {
       "command": "npx",
-      "args": ["--yes", "@nco-studio/web-editor-mcp"]
+      "args": ["--yes", "@nco-studio/web-editor-mcp@^0"]
     }
   }
 }

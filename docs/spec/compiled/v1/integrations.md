@@ -12,13 +12,13 @@ None. n'co studio Web Editor - Repo OS is fully local with no external service d
 
 - **Purpose**: Bridge between Chrome extension and Claude Code — receives visual diffs from the extension and exposes them as MCP tools
 - **Server**: `@nco-studio/web-editor-mcp` (npm package)
-- **Configuration in target project's `.claude/settings.json`**:
+- **Configuration in target project's `.mcp.json`**:
 ```json
 {
   "mcpServers": {
     "nco-web-editor": {
       "command": "npx",
-      "args": ["--yes", "@nco-studio/web-editor-mcp"]
+      "args": ["--yes", "@nco-studio/web-editor-mcp@^0"]
     }
   }
 }

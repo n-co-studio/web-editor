@@ -1,6 +1,6 @@
 # Privacy Policy — n'co studio Web Editor
 
-**Last updated:** 2026-06-17
+**Last updated:** 2026-09-21
 
 ## Summary
 
@@ -36,7 +36,7 @@ The extension requires a companion MCP server process (`@nco-studio/web-editor-m
 
 | Permission | Purpose |
 |------------|---------|
-| `activeTab` | Read the current tab's URL and DOM structure to enable element selection on the active developer page. |
+| `activeTab` | Read the current tab's URL and DOM structure to enable element selection on the active developer page, and capture the visible tab when you use the screenshot tool. Screenshots are saved to your machine only. |
 | `storage` | Persist the pending diff queue locally across page reloads using `chrome.storage.session` (session-scoped, cleared when Chrome closes). |
 | `scripting` | Inject the overlay content script into localhost pages when the extension is activated. |
 | `http://localhost/*`, `http://127.0.0.1/*`, `https://localhost/*` | Restrict all extension activity to local development servers only. The extension never activates on production or public websites. |
@@ -56,4 +56,4 @@ If this policy changes in a material way, the updated version will be published 
 ## Contact
 
 Questions about this privacy policy may be directed to the project repository:
-[github.com/nco-studio/web-editor](https://github.com/nco-studio/web-editor)
+[github.com/n-co-studio/web-editor](https://github.com/n-co-studio/web-editor)

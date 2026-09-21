@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "n'co studio Web Editor",
-  "description": "Point, adjust, generate — select any element on your live dev page, tweak it visually, and send structured diffs to Claude Code. Requires the @nco-studio/web-editor-mcp server (npx @nco-studio/web-editor-mcp@latest).",
+  "description": "Select elements on your localhost dev page, adjust them visually, and send structured diffs to Claude Code via a local MCP server.",
   "version": "0.2.0",
   "author": "n'co studio",
-  "homepage_url": "https://github.com/nco-studio/web-editor",
+  "homepage_url": "https://github.com/n-co-studio/web-editor",
   "minimum_chrome_version": "116",
   "permissions": ["activeTab", "storage", "scripting"],
   "action": {

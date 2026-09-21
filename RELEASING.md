@@ -34,7 +34,7 @@ The Chrome extension and the two npm packages share a common release gate:
 - **Bump all three together** when the WebSocket protocol changes (see above).
 - After publishing, record the pairing in `COMPATIBILITY.md`:
   ```
-  | 0.4.0 | 0.2.0 | 0.1.0 | Current — component awareness, status protocol |
+  | 0.4.0 | 0.2.0 | 0.2.0 | Current — component awareness, status protocol |
   ```
 - The extension ZIP filename encodes its version (`nco-studio-web-editor-{version}.zip`). Update `packages/chrome-extension/manifest.json` version field to match.
 
@@ -76,14 +76,22 @@ Recommended order (mcp-server first, as it's the primary consumer touchpoint):
 
 ---
 
+## First release: publish manually
+
+npm only lets you attach a Trusted Publisher to a package that already exists, so the **first** version of each package (v0.2.0) is published by hand. Use the manual steps under "Manual fallback" below, logged in with `npm login` on an account with 2FA that belongs to the `@nco-studio` org. After both packages exist on the registry, set up OIDC (next section) and use the tag-triggered workflow for later releases.
+
+`--provenance` only works when publishing from a CI run on a **public** repository; for the manual first publish, drop the flag.
+
+---
+
 ## OIDC Trusted Publishing setup (one-time, operator)
 
-The release workflow (`.github/workflows/release.yml`) uses npm OIDC Trusted Publishing — **no stored long-lived token** is required once configured.
+The release workflow (`.github/workflows/release.yml`) uses npm OIDC Trusted Publishing — **no stored long-lived token** is required once configured. Provenance statements require the GitHub repository to be public.
 
 1. Log in to [npmjs.com](https://www.npmjs.com) as the `@nco-studio` org admin
 2. Go to each package → **Settings** → **Publish Access** → **New Trusted Publisher**
 3. Set:
-   - **Repository:** `nco-studio/web-editor`
+   - **Repository:** `n-co-studio/web-editor`
    - **Workflow file:** `.github/workflows/release.yml`
    - **Environment:** `release`
 4. Repeat for both `@nco-studio/web-editor-mcp` and `@nco-studio/web-editor-plugin`
@@ -105,25 +113,23 @@ Until this is done the publish job returns `401 Unauthorized`. The workflow is i
 2. Tag the commit:
    ```sh
    git tag v0.2.0
-   git push origin feature/nco-studio-launch   # or main after merge
+   git push origin main
    git push origin v0.2.0
    ```
-3. The `v*` tag push triggers `.github/workflows/release.yml`.
+3. The `v*` tag push triggers `.github/workflows/release.yml`. **First release only:** 0.2.0 was already published by hand, so the workflow's publish job fails with "cannot publish over the previously published version". That failure is expected; the tag and GitHub Release are still valid.
 4. Once the workflow completes successfully, create a GitHub Release:
    - Go to **Releases** → **Draft a new release**
    - Tag: `v0.2.0`
    - Title: `v0.2.0 — <brief description>`
    - Body: paste from `CHANGELOG.md`
-   - Attach: `dist-zip/nco-studio-web-editor-{version}.zip` (Chrome extension ZIP from `scripts/package-extension.mjs`)
+   - Attach: `packages/chrome-extension/dist-zip/nco-studio-web-editor-{version}.zip` (Chrome extension ZIP from `node packages/chrome-extension/scripts/package-extension.mjs`)
 5. Upload the extension ZIP to the Chrome Web Store (operator-only — see `docs/store-listing.md`).
 
 ---
 
 ## Manual fallback (if OIDC is not configured)
 
-If the trusted publisher is not yet set up, publish manually using a **short-lived granular token**:
-
-> **Note:** npm Classic tokens (granular or legacy) expire in ≤ 90 days. Rotate before each release if needed.
+If the trusted publisher is not yet set up (including the first release), publish manually from a machine logged in with `npm login` (2FA prompts for a one-time code on each publish):
 
 ```sh
 # 1. Build
@@ -133,14 +139,14 @@ npm run build --workspaces --if-present
 node scripts/smoke-test.mjs
 node scripts/publish-dry-run.mjs
 
-# 3. Publish (with provenance — requires Node 18+)
+# 3. Publish (no --provenance: provenance is only generated from supported CI runs)
 cd packages/mcp-server
-npm publish --access public --provenance
+npm publish --access public
 cd ../../packages/dev-plugin
-npm publish --access public --provenance
+npm publish --access public
 ```
 
-Set `NPM_TOKEN` in your shell before publishing:
+Alternatively, use a **short-lived granular token** instead of an interactive login (tokens expire in ≤ 90 days; rotate before each release if needed). Set `NPM_TOKEN` in your shell before publishing:
 ```sh
 export NPM_TOKEN=<your-granular-token>
 npm config set //registry.npmjs.org/:_authToken "${NPM_TOKEN}"

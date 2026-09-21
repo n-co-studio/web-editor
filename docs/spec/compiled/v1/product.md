@@ -50,7 +50,7 @@ Operators working on projects inspect the front end and identify visual adjustme
 - Source element location (file and line) is deterministic when dev-plugin is installed. CSS rule location may require Claude Code resolution for CSS-in-separate-files patterns (CSS Modules, plain CSS).
 - Token snapping resolves correctly for 95%+ of edits when tokens are available
 - Works with JSX/TSX projects using Tailwind, plain CSS, and CSS Modules. Dev-plugin required for deterministic source mapping.
-- Zero configuration in the target project beyond one MCP server entry in settings.json
+- Zero configuration in the target project beyond one MCP server entry in `.mcp.json`
 
 ## What This Product Is NOT
 

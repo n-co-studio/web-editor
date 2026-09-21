@@ -7,7 +7,7 @@
 #   1. Go to npmjs.com -> your org (@nco-studio) -> Packages -> each package
 #      -> Settings -> Publish Access -> New Trusted Publisher
 #   2. Set:
-#        Repository: nco-studio/web-editor
+#        Repository: n-co-studio/web-editor
 #        Workflow:   .github/workflows/release.yml
 #        Environment: release
 #   Repeat for both packages (@nco-studio/web-editor-mcp, @nco-studio/web-editor-plugin).

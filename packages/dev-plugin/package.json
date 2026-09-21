@@ -1,6 +1,6 @@
 {
   "name": "@nco-studio/web-editor-plugin",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Vite and Babel plugin for n'co studio Web Editor — injects source location metadata for in-browser editing",
   "type": "module",
   "exports": {
@@ -60,12 +60,12 @@
   "author": "n'co studio (Mark Preston) <hello@markpreston.co>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nco-studio/web-editor.git",
+    "url": "git+https://github.com/n-co-studio/web-editor.git",
     "directory": "packages/dev-plugin"
   },
-  "homepage": "https://github.com/nco-studio/web-editor/tree/main/packages/dev-plugin#readme",
+  "homepage": "https://github.com/n-co-studio/web-editor/tree/main/packages/dev-plugin#readme",
   "bugs": {
-    "url": "https://github.com/nco-studio/web-editor/issues"
+    "url": "https://github.com/n-co-studio/web-editor/issues"
   },
   "keywords": [
     "vite-plugin",
