@@ -1,0 +1,98 @@
+schema: repo-os/criteria-verdicts@1
+session_id: "daemon-20260921-215728-42449"
+rounds:
+  - round: 1
+    timestamp: "2026-09-22T05:10:41Z"
+    dispatch_phase: "review"
+    dispatch_cycle: 1
+    completeness_score: "11/11 criteria met"
+    completeness_gate: APPROVED
+    criteria:
+      - index: 1
+        criterion: "`GUIDE_URL` constant added to `shared/constants.ts` in a new \"Onboarding links\" section"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`packages/chrome-extension/src/shared/constants.ts:174-178`"
+        completeness:
+          verdict: COMPLETE
+          evidence: "`packages/chrome-extension/src/shared/constants.ts:173-178` present in repo"
+      - index: 2
+        criterion: "`handleInstalled` extracted into `src/service-worker/handle-installed.ts`, imported by `service-worker/index.ts`"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`packages/chrome-extension/src/service-worker/handle-installed.ts:1-8`, `service-worker/index.ts:18,147`"
+        completeness:
+          verdict: COMPLETE
+          evidence: "`handle-installed.ts` exists; `index.ts:18` imports it; `index.ts:147` registers it"
+      - index: 3
+        criterion: "Unit test in `service-worker/oninstalled.test.ts` uses chrome stub and imports from `handle-installed.ts`"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`oninstalled.test.ts:36` imports `./handle-installed.js`; global chrome stub set at line 33 before import"
+        completeness:
+          verdict: COMPLETE
+          evidence: "`oninstalled.test.ts:48-68` — four test cases; test runner auto-discovers `*.test.ts` via `run-tests.mjs`"
+      - index: 4
+        criterion: "`popup.html` adds a Setup guide anchor link"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`packages/chrome-extension/src/popup/popup.html:108-119`"
+        completeness:
+          verdict: COMPLETE
+          evidence: "`popup.html:108-119` — static anchor rendered in all popup states"
+      - index: 5
+        criterion: "`popup.ts` imports `GUIDE_URL` and uses it in `renderUnavailable` hint text"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`packages/chrome-extension/src/popup/popup.ts:12,60`"
+        completeness:
+          verdict: COMPLETE
+          evidence: "`popup.ts:60`"
+      - index: 6
+        criterion: "`manifest.json` `homepage_url` updated"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`packages/chrome-extension/manifest.json:7`"
+        completeness:
+          verdict: COMPLETE
+          evidence: "`manifest.json:7`"
+      - index: 7
+        criterion: "`vite.config.ts` adds `base: process.env.VITE_BASE_PATH ?? '/'`"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`examples/demo-app/vite.config.ts:7`"
+        completeness:
+          verdict: COMPLETE
+          evidence: "`vite.config.ts:7`"
+      - index: 8
+        criterion: "`package.json` `build:site` script present"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`examples/demo-app/package.json:9`"
+        completeness:
+          verdict: COMPLETE
+          evidence: "`package.json:9`"
+      - index: 9
+        criterion: "`index.html` favicon uses `%BASE_URL%favicon.svg`"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`examples/demo-app/index.html:7`"
+        completeness:
+          verdict: COMPLETE
+          evidence: "`index.html:7`"
+      - index: 10
+        criterion: "`examples/demo-app/public/favicon.svg` created"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "file exists at `examples/demo-app/public/favicon.svg`"
+        completeness:
+          verdict: COMPLETE
+          evidence: "file present on disk"
+      - index: 11
+        criterion: "README, CHANGELOG, privacy-policy.md, store-listing.md, product.md updated"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "all five files appear in the diff with relevant additions"
+        completeness:
+          verdict: COMPLETE
+          evidence: "README, CHANGELOG, privacy-policy.md, store-listing.md, product.md all updated per diff"
