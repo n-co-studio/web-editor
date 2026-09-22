@@ -84,20 +84,20 @@ Install **n'co studio Web Editor** from the Chrome Web Store. To install it manu
 
 1. Start your dev server: `npm run dev`
 2. Open `http://localhost:5173` (or your configured port) in Chrome
-3. Click the n'co studio Web Editor icon → toggle the extension **On**
-4. Hover over elements — a cyan highlight appears on hover
-5. Click an element — the property panel opens at the bottom of the page
-6. Adjust a property (e.g., change padding or a color)
-7. Click **Add to Queue** — the edit appears in the right-side Change Request Queue
+3. Click the n'co studio Web Editor icon in the toolbar — a popup appears
+4. Click **Extension** in the popup to toggle it **On** — the overlay activates
+5. Hover over elements — a cyan highlight appears on hover
+6. Click an element — the property panel opens at the bottom of the page
+7. Adjust a property (e.g., change padding or a color) — the edit queues automatically
 
-**Verification:** The queue panel shows your pending edit with the source file and line number.
+**Verification:** The badge on the toolbar icon shows a count. Click **Review changes** in the toolbar (or **Open Change Queue** in the popup) — your pending edit appears in the right-side panel with the source file and line number.
 
 ---
 
 ## Step 5 — Send the change to Claude Code
 
 1. In the queue panel, review your edits
-2. Click **Send to Claude Code**
+2. Click **Apply Changes** to dispatch the batch to the MCP server
 3. Switch to VS Code — Claude Code processes the structured diff and applies the edit
 4. The dev server hot-reloads and you see the change in the browser
 

@@ -24,8 +24,8 @@ Select elements on your localhost dev page, adjust them visually, and send struc
 1. Start your dev server (`npm run dev` or equivalent).
 2. Run the companion MCP server: `npx @nco-studio/web-editor-mcp@^0`
 3. Open your project in Claude Code with the MCP server configured in `.mcp.json`.
-4. Click the n'co studio Web Editor toolbar icon to activate the overlay.
-5. Click any element to inspect it, adjust spacing/color/typography/layout visually, then hit "Apply" — Claude Code receives a structured diff and writes the code changes.
+4. Click the n'co studio Web Editor toolbar icon — a popup opens. Click **Extension** in the popup to toggle it **On** and activate the overlay.
+5. Click any element to inspect it, adjust spacing/color/typography/layout visually — each edit queues automatically. Click **Review changes** in the toolbar (or **Open Change Queue** in the popup) to see your pending edits, then click **Apply Changes** — Claude Code receives a structured diff and writes the code changes.
 
 **What you can edit:**
 
@@ -101,11 +101,13 @@ n'co studio Web Editor is a developer tool that overlays a visual inspection and
 
 1. Load the extension as an unpacked extension from the `dist/` directory (or install from the store).
 2. Navigate to `http://localhost:3000` (or your local dev server).
-3. Click the n'co studio Web Editor icon in the Chrome toolbar.
-4. The overlay activates — you should see a cyan selection highlight as you hover over elements.
+3. Click the n'co studio Web Editor icon in the Chrome toolbar — a small popup appears with two buttons: **Extension** (toggle On/Off) and **Open Change Queue**.
+4. Click **Extension** in the popup to toggle it **On** — the overlay activates. You should see a cyan selection highlight as you hover over elements.
 5. Click an element to inspect it. The properties panel appears at the bottom of the viewport.
-6. Adjust a spacing or color value — the live preview updates instantly.
-7. Click "Apply Changes" to send the diff to the MCP server.
+6. Adjust a spacing or color value — the live preview updates instantly and the edit queues automatically.
+7. Click **Apply Changes** to send the diff to the MCP server.
+
+`chrome.tabs.query` and `chrome.tabs.sendMessage` are called only from the user-opened popup (to read the active tab's state and toggle the overlay), and `chrome.tabs.captureVisibleTab` is called only when the developer explicitly triggers a screenshot — both are scoped to the active tab via `activeTab`, so no `tabs` permission is requested.
 
 **Protocol version safety:**
 

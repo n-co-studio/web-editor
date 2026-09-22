@@ -98,7 +98,7 @@ const STEPS: Step[] = [
     body: (
       <>
         <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
-          Edit visually, <strong>Add to Queue</strong>, review, and hit <strong>Send</strong>. A connected agent
+          Edit visually — each change queues automatically. Click <strong>Review changes</strong> in the toolbar (or <strong>Open Change Queue</strong> in the popup) to see pending edits, then hit <strong>Apply Changes</strong>. A connected agent
           applies the diff from there. Without an integrated setup, give it an explicit instruction that names the
           server and tools — it reads their descriptions and applies each diff to the right file:
         </p>

@@ -32,6 +32,10 @@ docs/spec/prototypes/
 # Product knowledge graph (child-owned, never overwritten by template sync)
 docs/ai/knowledge-graph/product-graph.yaml
 
+# Product README — child-owned; never overwritten by template sync
+README.md
+
+
 # Workflow files (repo-specific; GITHUB_TOKEN cannot push workflow changes)
 #
 # GitHub refuses a push from a GitHub App / GITHUB_TOKEN that creates or

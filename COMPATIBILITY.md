@@ -28,9 +28,13 @@ n'co studio Web Editor uses a typed WebSocket protocol (`WS_PROTOCOL_VERSION`) b
 
 ## What the mismatch banner means
 
-When the protocol version sent by the extension in `EXTENSION_HELLO` does not match the protocol version the MCP server expects, the extension displays a banner at the top of the page:
+When the protocol version sent by the extension in `EXTENSION_HELLO` does not match the protocol version the MCP server expects, the extension displays a persistent banner at the top of the page. The banner heading and detail text read:
 
-> **n'co studio: Protocol mismatch.** Extension is version X.Y.Z, server expects A.B.C. Update one or both to resolve.
+> **n'co studio Web Editor — Protocol Version Mismatch**
+>
+> Extension expects protocol {clientVersion} but the MCP server sent {serverVersion}. The WebSocket connection has been closed to prevent data corruption.
+
+The banner also shows a fix hint: `npx --yes @nco-studio/web-editor-mcp@latest`.
 
 **What to do:**
 
