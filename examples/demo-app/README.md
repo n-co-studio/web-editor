@@ -13,6 +13,10 @@ npm install
 npm run dev
 ```
 
+## Publish
+
+This page is also the hosted guide at https://nco.studio/web-editor/. From the repo root, `npm run deploy:site` builds it for that sub-path and syncs the output into the nco.studio site repo; commit and push there to deploy.
+
 The dev server starts at `http://localhost:5173`. There is a single page — no router.
 
 With the n'co studio Web Editor extension enabled, inspect any element in DevTools — you'll see `data-source-file` and `data-source-line` attributes injected by the plugin:

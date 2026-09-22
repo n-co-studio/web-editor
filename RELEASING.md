@@ -123,7 +123,8 @@ Until this is done the publish job returns `401 Unauthorized`. The workflow is i
    - Title: `v0.2.0 — <brief description>`
    - Body: paste from `CHANGELOG.md`
    - Attach: `packages/chrome-extension/dist-zip/nco-studio-web-editor-{version}.zip` (Chrome extension ZIP from `node packages/chrome-extension/scripts/package-extension.mjs`)
-5. Upload the extension ZIP to the Chrome Web Store (operator-only — see `docs/store-listing.md`).
+5. Publish the guide page: `npm run deploy:site` builds `examples/demo-app` for `/web-editor/` and syncs it into the nco.studio site repo (`NCO_SITE_DIR` overrides the path). It replaces whatever the guide build emits (today `index.html`, `assets/`, `favicon.svg`) under `web-editor/`, never touching `web-editor/privacy/` or anything else in that repo — review, commit and push there to deploy. The guide must be live at https://nco.studio/web-editor/ before the store submission, because the extension opens it on first install.
+6. Upload the extension ZIP to the Chrome Web Store (operator-only — see `docs/store-listing.md`).
 
 ---
 

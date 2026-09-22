@@ -13,6 +13,7 @@
   "scripts": {
     "build": "tsc --build",
     "clean": "tsc --build --clean",
-    "audit": "npm audit --audit-level=high"
+    "audit": "npm audit --audit-level=high",
+    "deploy:site": "node scripts/deploy-guide.mjs"
   }
 }
