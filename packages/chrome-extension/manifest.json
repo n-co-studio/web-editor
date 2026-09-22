@@ -4,7 +4,7 @@
   "description": "Select elements on your localhost dev page, adjust them visually, and send structured diffs to Claude Code via a local MCP server.",
   "version": "0.2.0",
   "author": "n'co studio",
-  "homepage_url": "https://github.com/n-co-studio/web-editor",
+  "homepage_url": "https://nco.studio/web-editor/",
   "minimum_chrome_version": "116",
   "permissions": ["activeTab", "storage", "scripting"],
   "action": {

@@ -4,6 +4,7 @@ import { ncoWebEditor } from '@nco-studio/web-editor-plugin';
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  base: process.env.VITE_BASE_PATH ?? '/',
   plugins: [
     react(),
     ncoWebEditor(),

@@ -9,6 +9,8 @@
  * injected programmatically before the message is retried.
  */
 
+import { GUIDE_URL } from '../shared/constants';
+
 interface EditorState {
   active: boolean;
   queueOpen: boolean;
@@ -55,7 +57,7 @@ function render(state: EditorState): void {
 function renderUnavailable(): void {
   extBtn.disabled = true;
   queueBtn.disabled = true;
-  hint.textContent = "n'co studio Web Editor is unavailable on this page. Open a localhost dev page to use it.";
+  hint.textContent = `n'co studio Web Editor is unavailable on this page. Open a localhost dev page to use it. See the setup guide at ${GUIDE_URL}`;
 }
 
 async function init(): Promise<void> {

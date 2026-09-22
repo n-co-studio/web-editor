@@ -16,6 +16,10 @@ n'co studio Web Editor is a Chrome extension that overlays a visual editing inte
 
 **None.** The extension does not collect, store, or transmit any personal information, browsing history, page content, or usage analytics to any external party.
 
+## First-install onboarding
+
+On first install, the extension opens the setup guide at https://nco.studio/web-editor/ in a new browser tab. This is a static informational page; the extension sends it no data.
+
 ## Network activity
 
 All network communication is **strictly local**:

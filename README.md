@@ -80,7 +80,9 @@ Install **n'co studio Web Editor** from the Chrome Web Store, or download the la
 
 ## Try it
 
-Clone this repo and run the demo app — a minimal token-driven task board, pre-wired and ready to edit:
+The hosted guide at **https://nco.studio/web-editor/** doubles as a live practice target. You can also run it locally:
+
+Clone this repo and run the demo app — a guide page pre-wired with design tokens and live editing, ready to practice on:
 
 ```sh
 cd examples/demo-app

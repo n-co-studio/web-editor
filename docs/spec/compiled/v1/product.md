@@ -16,6 +16,12 @@ Operators working on projects inspect the front end and identify visual adjustme
 
 ## Core User Flows
 
+### Flow 0: First Install
+1. Operator installs the extension from the Chrome Web Store
+2. Extension opens the setup guide at https://nco.studio/web-editor/ in a new tab
+3. Operator reads the guide and configures the MCP server
+4. Operator returns to their dev server to begin Flow 1
+
 ### Flow 1: Visual Edit → Code Change
 1. Operator opens their project's dev server in Chrome
 2. Activates n'co studio Web Editor - Repo OS extension (toolbar-icon popup → toggle on, or keyboard shortcut)
@@ -57,7 +63,7 @@ Operators working on projects inspect the front end and identify visual adjustme
 - An opinionated, editing-focused element inspection UI — not a full browser DevTools replacement, but the operator's primary interface for element inspection and visual manipulation during editing sessions
 - Not a CSS editor — generates structured change requests, not raw stylesheets
 - Not a component library or design system manager — does not author, catalogue, or manage component variants, prop types, or design tokens independently of the host project. It surfaces project-local components as insertable elements only.
-- Not a hosted service — everything runs locally
+- Not a hosted service — the editor overlay and MCP server run entirely on the operator's machine; no runtime data is sent to any remote endpoint. The static onboarding site at https://nco.studio/web-editor/ is links-only and is not a runtime data path.
 - Not for production use — dev tooling only
 - Does not handle JavaScript behavior changes — visual/CSS properties only. **Exception:** a single enumerated `parallax-scroll` script behavior is permitted under the constrained boundary allowance in `boundaries.md` (feature-009); this does not generalise to other JS behavior editing.
 - Can insert, delete, and move (reorder within a container, reparent across containers) elements within and across scoped flex/grid containers — see boundaries.md for expansion details

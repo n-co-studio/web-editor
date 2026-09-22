@@ -80,6 +80,8 @@ These notes help the Chrome Web Store review team understand how to test the ext
 
 n'co studio Web Editor is a developer tool that overlays a visual inspection and editing UI on locally-running web pages. It requires a locally-installed companion MCP server. It does not work on public websites.
 
+On first install, the extension opens the setup guide at https://nco.studio/web-editor/ in a new tab. This is a static page; no data is sent to it. Subsequent installs (update, reinstall) do not open a tab.
+
 ### How to test
 
 **Prerequisites:**
@@ -149,7 +151,7 @@ The Web Store requires up to 5 screenshots at **1280×800** pixels (PNG or JPEG)
 ## Support
 
 - **Support URL:** https://github.com/n-co-studio/web-editor/issues
-- **Homepage URL:** https://github.com/n-co-studio/web-editor
+- **Homepage URL:** https://nco.studio/web-editor/
 
 ## Category and Tags
 

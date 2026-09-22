@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:site": "VITE_BASE_PATH=/web-editor/ sh -c 'tsc --noEmit && vite build'",
     "preview": "vite preview"
   },
   "dependencies": {

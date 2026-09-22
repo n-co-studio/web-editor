@@ -15,6 +15,7 @@
  */
 
 import type { IconStatus } from '../shared/types';
+import { handleInstalled } from './handle-installed';
 
 // ---------------------------------------------------------------------------
 // Status icon paths (bundled to dist/icons/status by esbuild.config.js)
@@ -143,6 +144,4 @@ chrome.runtime.onMessage.addListener(
 // Install / update
 // ---------------------------------------------------------------------------
 
-chrome.runtime.onInstalled.addListener(() => {
-  console.log('[nco-web-editor] Extension installed');
-});
+chrome.runtime.onInstalled.addListener(handleInstalled);

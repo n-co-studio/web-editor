@@ -171,6 +171,13 @@ export const PANEL_TIER_COMPACT_MAX = 180;
 export const PANEL_TIER_STANDARD_MAX = 300;
 
 // ---------------------------------------------------------------------------
+// Onboarding links
+// ---------------------------------------------------------------------------
+
+/** Hosted setup guide — opened on first install and linked from the popup. */
+export const GUIDE_URL = 'https://nco.studio/web-editor/';
+
+// ---------------------------------------------------------------------------
 // Guide overlay
 // ---------------------------------------------------------------------------
 

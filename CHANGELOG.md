@@ -10,6 +10,8 @@ First public release: Chrome Web Store extension 0.2.0 and both npm packages at 
 
 ### Added
 
+- **First-install onboarding** — the extension opens the setup guide at https://nco.studio/web-editor/ once on first install
+- **Popup setup guide link** — "Setup guide" link in the toolbar popup opens the hosted guide in a new tab
 - **Inline text styling** — style ranges of text inside an edited element; changes travel as `TextChange` diffs
 - **Structural editing** — auto-layout aware insert, reorder, and reparent, plus a toolbar-anchored drag-to-reorder list panel
 - **Parallax editor** — detect, adopt, and tune existing parallax effects across four mechanisms
