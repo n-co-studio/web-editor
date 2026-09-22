@@ -38,6 +38,7 @@ First public release: Chrome Web Store extension 0.2.0 and both npm packages at 
 
 - WebSocket bridge hardened: the extension confirms the MCP peer before disclosing identifiers, and asset writes are confined to the project
 - Untrusted markup is sanitized and runtime messages are authenticated in the extension
+- Resolved 13 transitive dependency advisories (8 high, 4 moderate, 1 low) via `npm audit fix`; no behavior change. One remaining low-severity finding in tsup's nested esbuild (Windows dev-server only) is escalated — not fixable without `--force` or a major tsup upgrade that does not yet exist.
 
 ## [0.1.0] - 2026-06-17
 
