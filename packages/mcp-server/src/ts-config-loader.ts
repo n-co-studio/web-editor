@@ -1,4 +1,5 @@
-import { readFile, writeFile, unlink } from 'node:fs/promises';
+import { readFile, writeFile, mkdtemp } from 'node:fs/promises';
+import { rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -6,6 +7,30 @@ import { pathToFileURL } from 'node:url';
 import { transform } from 'esbuild';
 
 const DEFAULT_TIMEOUT_MS = 5000;
+
+// ---------------------------------------------------------------------------
+// Private per-process temp directory
+// ---------------------------------------------------------------------------
+
+/** Lazily-initialised private temp dir. Created once per process, mode 0700. */
+let privateTmpDirPromise: Promise<string> | null = null;
+
+function getPrivateTmpDir(): Promise<string> {
+  if (!privateTmpDirPromise) {
+    privateTmpDirPromise = mkdtemp(join(tmpdir(), 'nco-web-editor-')).then((dir) => {
+      // Best-effort synchronous cleanup on exit (sync-only exit handlers).
+      process.once('exit', () => {
+        try {
+          rmSync(dir, { recursive: true, force: true });
+        } catch {
+          // non-fatal — OS will reclaim on reboot
+        }
+      });
+      return dir;
+    });
+  }
+  return privateTmpDirPromise;
+}
 
 /**
  * Compile a TypeScript config file (e.g. `tailwind.config.ts/.mts/.cts`) with
@@ -24,7 +49,9 @@ const DEFAULT_TIMEOUT_MS = 5000;
  * server. On any failure (compile error, eval throw, or timeout) the error
  * propagates to the caller; `parseTokenSource` records it as an errored
  * `TokenSourceStatus` (feature-005 error isolation) without crashing the WS/MCP
- * transport. The compiled temp file is always removed in `finally`.
+ * transport. The compiled temp file persists in a private per-process directory
+ * (created once by `getPrivateTmpDir` via `mkdtemp`) and is cleaned up at
+ * process exit via a `process.once('exit', rmSync(...))` handler.
  *
  * Note: esbuild `transform` (not `build`) does NOT resolve or bundle imports.
  * A config that imports sibling modules (`import colors from './colors'`) will
@@ -53,31 +80,37 @@ export async function loadTsConfig(
   // When the config changes (chokidar rebuild), the hash changes → a fresh URL
   // → a fresh import, so there is no stale-cache hazard across edits.
   const hash = createHash('sha256').update(code).digest('hex').slice(0, 16);
-  const tmpPath = join(tmpdir(), `nco-web-editor-tw-config-${hash}.mjs`);
-  await writeFile(tmpPath, code, 'utf-8');
+  // Write into a private per-process directory (mode 0700, created by mkdtemp)
+  // so no other process can predict or race the temp file path.
+  const dir = await getPrivateTmpDir();
+  const tmpPath = join(dir, `tw-config-${hash}.mjs`);
 
+  // 'wx' = exclusive create: fails with EEXIST if the file is already present.
+  // Same hash → same content → the existing file is a valid cache entry; treat
+  // EEXIST as a hit and skip the write.
   try {
-    const mod = await withTimeout(
-      import(pathToFileURL(tmpPath).href),
-      timeoutMs,
-      `evaluating ${filePath}`,
-    );
-    // Export duality: an ESM `export default config` surfaces on `.default`;
-    // fall back to the namespace object for configs that attach the shape
-    // directly.
-    const record = mod as Record<string, unknown>;
-    return record.default ?? record;
-  } finally {
-    await unlink(tmpPath).catch(() => {
-      /* best-effort cleanup — a leaked temp file must not fail token discovery */
-    });
+    await writeFile(tmpPath, code, { encoding: 'utf-8', flag: 'wx' });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    // Cache hit — file already written by this process for this content hash.
   }
+
+  const mod = await withTimeout(
+    import(pathToFileURL(tmpPath).href),
+    timeoutMs,
+    `evaluating ${filePath}`,
+  );
+  // Export duality: an ESM `export default config` surfaces on `.default`;
+  // fall back to the namespace object for configs that attach the shape
+  // directly.
+  const record = mod as Record<string, unknown>;
+  return record.default ?? record;
 }
 
 /**
  * Reject with a timeout error if `p` has not settled within `ms`. The underlying
- * promise is abandoned (not cancellable), but the temp file is still cleaned up
- * by the caller's `finally`.
+ * promise is abandoned (not cancellable); the compiled temp file persists in the
+ * private per-process directory and is cleaned up at process exit.
  */
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {

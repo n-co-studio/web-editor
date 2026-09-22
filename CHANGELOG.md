@@ -33,12 +33,15 @@ First public release: Chrome Web Store extension 0.2.0 and both npm packages at 
 - Rule-assigned spacing values (including pseudo-class rules) now appear in the spacing panel
 - Clicks inside a text element being edited place the caret instead of reselecting
 - Popup on/off indicator updates in real time
+- Service worker `onMessage` no longer holds a reply channel open for unrecognized message types; `return true` (async-wait) is now scoped only to `CAPTURE_VIEWPORT`, which is the sole asynchronous branch
 
 ### Security
 
 - WebSocket bridge hardened: the extension confirms the MCP peer before disclosing identifiers, and asset writes are confined to the project
 - Untrusted markup is sanitized and runtime messages are authenticated in the extension
 - Resolved 13 transitive dependency advisories (8 high, 4 moderate, 1 low) via `npm audit fix`; no behavior change. One remaining low-severity finding in tsup's nested esbuild (Windows dev-server only) is escalated — not fixable without `--force` or a major tsup upgrade that does not yet exist.
+- MCP bridge security tests: `isAllowedOrigin`, `confineToProject`, and `resolveAssetDir` rejection paths are now covered by automated tests (look-alike hosts, path traversal, absolute-outside-project, and empty/missing origin)
+- Tailwind config loader writes compiled configs to a private per-process directory created by `mkdtemp` (mode 0700), preventing TOCTOU races on the previously predictable shared temp path; files within the directory are written with the `wx` flag so a content-hash collision is treated as a safe cache hit
 
 ## [0.1.0] - 2026-06-17
 

@@ -95,16 +95,18 @@ chrome.runtime.onMessage.addListener(
     // triggers a full-tab screenshot — without this guard another installed
     // extension could silently capture the active tab. Reject foreign senders.
     if (sender.id !== chrome.runtime.id) return false;
+
     if (msg.type === 'CAPTURE_VIEWPORT') {
+      // Async: keep the channel open and resolve it in the promise callbacks.
       const windowId = sender.tab?.windowId;
       if (windowId == null) {
         sendResponse({ error: 'No window ID' });
-        return true;
+        return false;
       }
       chrome.tabs.captureVisibleTab(windowId, { format: 'png' })
         .then((dataUrl) => sendResponse({ dataUrl }))
         .catch((err) => sendResponse({ error: String(err) }));
-      return true;
+      return true; // async — keep channel open until captureVisibleTab resolves
     }
 
     if (msg.type === 'UPDATE_BADGE') {
@@ -118,6 +120,7 @@ chrome.runtime.onMessage.addListener(
       });
 
       sendResponse({ success: true });
+      return false; // sync — channel already resolved
     }
 
     if (msg.type === 'UPDATE_ICON') {
@@ -128,8 +131,11 @@ chrome.runtime.onMessage.addListener(
         // Tab may have navigated away — non-fatal
       });
       sendResponse({ success: true });
+      return false; // sync — channel already resolved
     }
-    return true; // keep sendResponse channel open
+
+    // Unrecognized message type — do not hold the reply channel open.
+    return false;
   },
 );
 
