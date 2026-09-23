@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "n'co studio Web Editor",
-  "description": "Select elements on your localhost dev page, adjust them visually, and send structured diffs to Claude Code via a local MCP server.",
+  "name": "Visual Web Editor for AI Agents",
+  "description": "Design on the real page — adjust any element visually and your AI coding agent applies the change in your source files.",
   "version": "0.2.0",
   "author": "n'co studio",
   "homepage_url": "https://nco.studio/web-editor/",
@@ -13,7 +13,7 @@
       "48": "icons/status/nco-web-editor-icon-disabled.png",
       "128": "icons/status/nco-web-editor-icon-disabled.png"
     },
-    "default_title": "n'co studio Web Editor",
+    "default_title": "Visual Web Editor for AI Agents",
     "default_popup": "popup.html"
   },
   "icons": {

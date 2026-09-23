@@ -21,7 +21,7 @@ export default function Hero() {
               color: 'var(--color-secondary)',
             }}
           >
-            n'co studio Web Editor — by mark preston
+            Visual Web Editor for AI Agents — by n'co studio
           </span>
 
           <h1

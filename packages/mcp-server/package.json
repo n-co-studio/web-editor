@@ -1,7 +1,7 @@
 {
   "name": "@nco-studio/web-editor-mcp",
   "version": "0.2.0",
-  "description": "MCP server bridge for n'co studio Web Editor — connects Claude Code to your browser via WebSocket",
+  "description": "MCP server bridge for Visual Web Editor for AI Agents — connects Claude Code to your browser via WebSocket",
   "type": "module",
   "bin": {
     "nco-web-editor-mcp": "dist/bin/cli.js"

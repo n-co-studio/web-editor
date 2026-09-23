@@ -2,13 +2,13 @@
 
 ## Third-Party Services
 
-None. n'co studio Web Editor - Repo OS is fully local with no external service dependencies.
+None. Visual Web Editor for AI Agents is fully local with no external service dependencies.
 
 ---
 
 ## MCP Connections
 
-### n'co studio Web Editor MCP Server (this project)
+### Visual Web Editor for AI Agents MCP Server (this project)
 
 - **Purpose**: Bridge between Chrome extension and Claude Code — receives visual diffs from the extension and exposes them as MCP tools
 - **Server**: `@nco-studio/web-editor-mcp` (npm package)

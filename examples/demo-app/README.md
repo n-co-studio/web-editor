@@ -1,6 +1,6 @@
 # n'co studio Demo App
 
-A Vite + React **guide** for the n'co studio Web Editor: a hero, a three-step "how it works" row, and a tabbed guide covering setup, day-to-day use, and troubleshooting.
+A Vite + React **guide** for the Visual Web Editor for AI Agents: a hero, a three-step "how it works" row, and a tabbed guide covering setup, day-to-day use, and troubleshooting.
 
 The design follows the **Mark Preston** brand system: two Adobe Typekit faces — `minion-3-display` (serif, display) and `hero-new` (sans, body) loaded via kit `ivy7roo` — thin/light weights, **sharp corners** (no border-radius), **no shadows**, generous whitespace and hairline dividers. The page renders over an animated green lava field ([`src/components/LavaBackground.tsx`](src/components/LavaBackground.tsx)), a decorative canvas layer that sits behind all content and inverts the text scope to paper-on-ink.
 
@@ -19,7 +19,7 @@ This page is also the hosted guide at https://nco.studio/web-editor/. From the r
 
 The dev server starts at `http://localhost:5173`. There is a single page — no router.
 
-With the n'co studio Web Editor extension enabled, inspect any element in DevTools — you'll see `data-source-file` and `data-source-line` attributes injected by the plugin:
+With the Visual Web Editor for AI Agents extension enabled, inspect any element in DevTools — you'll see `data-source-file` and `data-source-line` attributes injected by the plugin:
 
 ```html
 <div data-source-file="src/components/StepsRow.tsx" data-source-line="..." ...>

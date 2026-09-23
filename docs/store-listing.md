@@ -1,31 +1,36 @@
-# Chrome Web Store Listing — n'co studio Web Editor
+# Chrome Web Store Listing — Visual Web Editor for AI Agents
 
-This document contains all copy and metadata needed to submit n'co studio Web Editor to the Chrome Web Store, plus reviewer notes and asset specifications.
+This document contains all copy and metadata needed to submit Visual Web Editor for AI Agents (published by n'co studio) to the Chrome Web Store, plus reviewer notes and asset specifications.
 
 ---
 
 ## Store Metadata
 
 ### Name
-n'co studio Web Editor
+Visual Web Editor for AI Agents
+
+### Publisher
+n'co studio
 
 ### Short description (132 chars max)
 
-Select elements on your localhost dev page, adjust them visually, and send structured diffs to Claude Code via a local MCP server.
+Design on the real page — adjust any element visually and your AI coding agent applies the change in your source files.
 
 > The store shows the `description` field from `manifest.json` as the summary; keep the two identical.
 
 ### Detailed description
 
-**n'co studio Web Editor** is a developer productivity tool that closes the gap between visual intent and code. It overlays an inspection and editing UI directly on your locally-running web page, so you can point at any element, tweak its visual properties, and send a structured diff to Claude Code — all without leaving the browser.
+**Visual Web Editor for AI Agents** is for designers who work with AI coding agents. You design on the page itself — point at any element in your running app, adjust spacing, colour, type and layout by eye — and your agent turns those adjustments into real code changes in the right files. No screenshots to annotate, no describing a change in prose and hoping the result matches, no hunting for the component that owns a style.
+
+Your edits snap to the design tokens your project already defines, so what you change stays inside your system instead of drifting into one-off values.
 
 **How it works:**
 
 1. Start your dev server (`npm run dev` or equivalent).
 2. Run the companion MCP server: `npx @nco-studio/web-editor-mcp@^0`
-3. Open your project in Claude Code with the MCP server configured in `.mcp.json`.
-4. Click the n'co studio Web Editor toolbar icon — a popup opens. Click **Extension** in the popup to toggle it **On** and activate the overlay.
-5. Click any element to inspect it, adjust spacing/color/typography/layout visually — each edit queues automatically. Click **Review changes** in the toolbar (or **Open Change Queue** in the popup) to see your pending edits, then click **Apply Changes** — Claude Code receives a structured diff and writes the code changes.
+3. Open your project in your AI coding agent (Claude Code) with the MCP server configured in `.mcp.json`.
+4. Click the toolbar icon — a popup opens. Click **Extension** in the popup to toggle it **On** and activate the overlay.
+5. Click any element to inspect it, adjust spacing/color/typography/layout visually — each edit queues automatically. Click **Review changes** in the toolbar (or **Open Change Queue** in the popup) to see your pending edits, then click **Apply Changes** — your agent receives a structured diff — file paths, line numbers, the exact change — and writes it into your source.
 
 **What you can edit:**
 
@@ -40,7 +45,7 @@ Select elements on your localhost dev page, adjust them visually, and send struc
 **Requirements:**
 
 - `@nco-studio/web-editor-mcp` npm package running locally (free, open-source)
-- Claude Code with the MCP server configured
+- An AI coding agent that speaks MCP (built and tested with Claude Code)
 - A locally-running dev server at `localhost` or `127.0.0.1`
 - `@nco-studio/web-editor-plugin` (optional, enables source-file mapping)
 
@@ -56,7 +61,7 @@ These justifications are required for Chrome Web Store review. Copy them verbati
 
 ### `activeTab`
 
-> n'co studio Web Editor needs `activeTab` to read the current tab's DOM and URL in order to render the visual selection overlay and identify which elements the developer is inspecting. The overlay is only activated when the user explicitly clicks the toolbar icon on a localhost page — the extension does not access any tab automatically. `activeTab` also lets the extension capture the visible tab (`chrome.tabs.captureVisibleTab`) when the developer uses the full-page screenshot tool; the image is saved to the developer's own machine and never uploaded.
+> Visual Web Editor for AI Agents needs `activeTab` to read the current tab's DOM and URL in order to render the visual selection overlay and identify which elements the developer is inspecting. The overlay is only activated when the user explicitly clicks the toolbar icon on a localhost page — the extension does not access any tab automatically. `activeTab` also lets the extension capture the visible tab (`chrome.tabs.captureVisibleTab`) when the developer uses the full-page screenshot tool; the image is saved to the developer's own machine and never uploaded.
 
 ### `storage`
 
@@ -78,7 +83,7 @@ These notes help the Chrome Web Store review team understand how to test the ext
 
 ### What this extension does
 
-n'co studio Web Editor is a developer tool that overlays a visual inspection and editing UI on locally-running web pages. It requires a locally-installed companion MCP server. It does not work on public websites.
+This extension is a developer tool that overlays a visual inspection and editing UI on locally-running web pages. It requires a locally-installed companion MCP server. It does not work on public websites.
 
 On first install, the extension opens the setup guide at https://nco.studio/web-editor/ in a new tab. This is a static page; no data is sent to it. Subsequent installs (update, reinstall) do not open a tab.
 
@@ -103,7 +108,7 @@ On first install, the extension opens the setup guide at https://nco.studio/web-
 
 1. Load the extension as an unpacked extension from the `dist/` directory (or install from the store).
 2. Navigate to `http://localhost:3000` (or your local dev server).
-3. Click the n'co studio Web Editor icon in the Chrome toolbar — a small popup appears with two buttons: **Extension** (toggle On/Off) and **Open Change Queue**.
+3. Click the extension's icon in the Chrome toolbar — a small popup appears with two buttons: **Extension** (toggle On/Off) and **Open Change Queue**.
 4. Click **Extension** in the popup to toggle it **On** — the overlay activates. You should see a cyan selection highlight as you hover over elements.
 5. Click an element to inspect it. The properties panel appears at the bottom of the viewport.
 6. Adjust a spacing or color value — the live preview updates instantly and the edit queues automatically.

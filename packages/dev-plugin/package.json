@@ -1,7 +1,7 @@
 {
   "name": "@nco-studio/web-editor-plugin",
   "version": "0.2.0",
-  "description": "Vite and Babel plugin for n'co studio Web Editor — injects source location metadata for in-browser editing",
+  "description": "Vite and Babel plugin for Visual Web Editor for AI Agents — injects source location metadata for in-browser editing",
   "type": "module",
   "exports": {
     ".": {

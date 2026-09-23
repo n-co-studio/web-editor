@@ -1,16 +1,16 @@
-# Privacy Policy — n'co studio Web Editor
+# Privacy Policy — Visual Web Editor for AI Agents
 
 **Last updated:** 2026-09-21
 
 ## Summary
 
-n'co studio Web Editor is a developer tool. It collects no personal data, transmits no data to any remote server, and requires no account.
+Visual Web Editor for AI Agents is a developer tool. It collects no personal data, transmits no data to any remote server, and requires no account.
 
 ---
 
 ## What the extension does
 
-n'co studio Web Editor is a Chrome extension that overlays a visual editing interface on locally-running web pages (development servers at `localhost` / `127.0.0.1`). It lets developers select DOM elements, adjust visual properties, and send structured diffs to Claude Code via a locally-installed MCP server.
+Visual Web Editor for AI Agents is a Chrome extension that overlays a visual editing interface on locally-running web pages (development servers at `localhost` / `127.0.0.1`). It lets developers select DOM elements, adjust visual properties, and send structured diffs to Claude Code via a locally-installed MCP server.
 
 ## Data collection
 

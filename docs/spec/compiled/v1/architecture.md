@@ -12,7 +12,7 @@
 ## Project Structure
 
 ```
-nco-studio-web-editor/
+web-editor/
 ├── packages/
 │   ├── chrome-extension/
 │   │   ├── manifest.json
@@ -63,7 +63,7 @@ N/A — communication is WebSocket (extension ↔ server) + MCP JSON-RPC 2.0 (se
 - Dev-plugin is automatically disabled in production builds
 - Error isolation: token discovery/parsing wrapped in try/catch — failures degrade to 'no tokens' mode without crashing WebSocket or MCP transport
 - Protocol versioning: extension sends protocolVersion on connect, server rejects or warns on mismatch. Current `WS_PROTOCOL_VERSION` is `0.4.0` (bumped in feature-008 to introduce `COMPONENT_DATA` / `COMPONENT_UPDATE`).
-- Dev-plugin published as a standalone source-mapping primitive — n'co studio Web Editor is a first-party consumer
+- Dev-plugin published as a standalone source-mapping primitive — Visual Web Editor for AI Agents is a first-party consumer
 
 ## Shared Package Scope
 

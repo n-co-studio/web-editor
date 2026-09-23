@@ -1,8 +1,8 @@
-# n'co studio Web Editor
+# Visual Web Editor for AI Agents
 
 **Point at an element. Adjust it visually. Get a precise code change — no hunting through files, no manual prompting.**
 
-A Chrome extension + local MCP server that closes the loop between browser inspection and source code. Operators make visual adjustments live; Claude Code receives structured diffs with exact file paths and line numbers and applies them in seconds.
+A Chrome extension and a local MCP server that close the loop between design intent and source code. You adjust the running page by eye; your AI coding agent receives a structured diff — exact file paths, line numbers, the change itself — and applies it in seconds. Built and tested with Claude Code.
 
 ---
 
@@ -74,7 +74,7 @@ export default defineConfig({
 
 ### 3. Chrome extension
 
-Install **n'co studio Web Editor** from the Chrome Web Store, or download the latest `.zip` from [Releases](https://github.com/n-co-studio/web-editor/releases/latest) and load it unpacked.
+Install **Visual Web Editor for AI Agents** from the Chrome Web Store, or download the latest `.zip` from [Releases](https://github.com/n-co-studio/web-editor/releases/latest) and load it unpacked.
 
 ---
 

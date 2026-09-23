@@ -8,7 +8,7 @@
 
 ## Security Model
 
-n'co studio Web Editor is a **fully local tool**. It has no external network communication, no telemetry, no user accounts, and no cloud services.
+Visual Web Editor for AI Agents is a **fully local tool**. It has no external network communication, no telemetry, no user accounts, and no cloud services.
 
 - All communication between the Chrome extension and the MCP server is via **localhost WebSocket only**.
 - No data leaves your machine.

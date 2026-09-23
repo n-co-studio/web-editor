@@ -1,6 +1,6 @@
 # Compatibility Matrix
 
-n'co studio Web Editor uses a typed WebSocket protocol (`WS_PROTOCOL_VERSION`) between the Chrome extension and the MCP server. This document maps protocol versions to minimum package versions and explains what happens when they do not match.
+Visual Web Editor for AI Agents uses a typed WebSocket protocol (`WS_PROTOCOL_VERSION`) between the Chrome extension and the MCP server. This document maps protocol versions to minimum package versions and explains what happens when they do not match.
 
 ---
 
@@ -30,7 +30,7 @@ n'co studio Web Editor uses a typed WebSocket protocol (`WS_PROTOCOL_VERSION`) b
 
 When the protocol version sent by the extension in `EXTENSION_HELLO` does not match the protocol version the MCP server expects, the extension displays a persistent banner at the top of the page. The banner heading and detail text read:
 
-> **n'co studio Web Editor — Protocol Version Mismatch**
+> **Visual Web Editor for AI Agents — Protocol Version Mismatch**
 >
 > Extension expects protocol {clientVersion} but the MCP server sent {serverVersion}. The WebSocket connection has been closed to prevent data corruption.
 
