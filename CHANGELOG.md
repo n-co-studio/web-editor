@@ -22,6 +22,7 @@ First public release: Chrome Web Store extension 0.2.0 and both npm packages at 
 - **Toolbar** — per-section collapse with viewport-height auto-fit
 - **MCP server instructions** — the server describes its workflow to agents that have no project-specific guidance
 - Token discovery from `tailwind.config.ts` / `.mts` / `.cts`
+- Guidance for Chrome's Local Network Access prompt: the Review changes panel explains the permission when nothing has ever connected, and the quickstart, store reviewer notes and guide troubleshooting cover it
 
 ### Changed
 

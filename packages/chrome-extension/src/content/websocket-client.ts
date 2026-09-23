@@ -61,6 +61,16 @@ export class WebSocketClient {
   // HACK-008: a candidate connection is not "confirmed" until the peer proves it
   // speaks the MCP protocol. No identifiers are sent before confirmation.
   private handshakeConfirmed = false;
+
+  /**
+   * True once a peer has completed the MCP handshake in this page session.
+   * Distinguishes "never reached the server" (where Chrome's Local Network
+   * Access permission is a plausible cause) from "was connected, then dropped"
+   * (where the server itself is the likely cause). Chrome reports a denied
+   * local-network permission as an ordinary WebSocket error, so this is the
+   * only signal available.
+   */
+  private everConnected = false;
   private handshakeTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly cb: WebSocketClientCallbacks) {}
@@ -227,6 +237,7 @@ export class WebSocketClient {
   private confirmHandshake(): void {
     if (this.handshakeConfirmed) return;
     this.handshakeConfirmed = true;
+    this.everConnected = true;
     if (this.handshakeTimer != null) {
       clearTimeout(this.handshakeTimer);
       this.handshakeTimer = null;
@@ -372,6 +383,11 @@ export class WebSocketClient {
       this.retryTimer = null;
       this.connect();
     }, delay);
+  }
+
+  /** Whether an MCP handshake has ever completed in this page session. */
+  get hasEverConnected(): boolean {
+    return this.everConnected;
   }
 
   /** Reset retry counter and attempt immediate reconnect. */

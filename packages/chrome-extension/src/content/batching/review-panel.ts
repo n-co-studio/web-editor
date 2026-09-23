@@ -362,6 +362,23 @@ export class ReviewPanel {
       ? 'Demo mode — this is a public embed, so change-request funnels are disconnected. Play around freely; a page refresh resets everything.'
       : 'Not connected to MCP server \u2014 check that Claude Code is running with the nco-web-editor MCP configured (port 7890).';
 
+    if (!demoMode && !this.wsClient.hasEverConnected) {
+      // Nothing has ever connected in this page session, so Chrome's Local
+      // Network Access prompt (shipped in Chrome 142, extended to WebSockets
+      // in 147) is a plausible cause: the editor reaches the MCP server over
+      // ws://localhost, and a denied or dismissed prompt fails like any other
+      // connection error. Worded as a hint, not a diagnosis — Chrome gives no
+      // distinguishable signal.
+      const lnaHint = createElement('div', {}, {
+        marginTop: '6px',
+        fontSize: '11px',
+        opacity: '0.9',
+      });
+      lnaHint.textContent =
+        'If Chrome asked to allow access to devices on your local network and it was blocked or dismissed, allow it in site settings and reload the page — the editor connects to the MCP server over ws://localhost.';
+      banner.appendChild(lnaHint);
+    }
+
     if (!demoMode) {
       const retryBtn = createButton('Retry', 'ghost', () => {
         this.wsClient.retryNow();

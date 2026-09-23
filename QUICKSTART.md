@@ -131,6 +131,12 @@ Install **Visual Web Editor for AI Agents** from the Chrome Web Store. To instal
 - Check the MCP server output in Claude Code for connection errors
 - Confirm the MCP server bound a port in the `7890`–`7899` range (the extension only scans that range)
 
+### Chrome asks to allow access to devices on your network
+
+Chrome 142 and later ask before any page reaches a local address. The editor connects to the MCP server over `ws://localhost`, so the prompt is expected — click **Allow**.
+
+If it was blocked or dismissed, the extension cannot reach the server and the Review changes panel stays disconnected. Re-allow it from the address bar's site settings (the icon left of the URL) → **Local network access**, then reload the page.
+
 ### Port conflict
 
 The MCP server binds the first free port from `7890` to `7899`, and the extension scans the same range, so a busy port is skipped automatically. If all ten ports are taken, free one up and restart the server.

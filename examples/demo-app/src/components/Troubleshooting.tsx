@@ -3,7 +3,7 @@
  * inside GuideTabs. Symptom / cause / fix entries over the lava field: glass
  * cards, sharp corners, no shadows.
  *
- * The failure modes here all trace back to one rule: exactly one server per
+ * Most failure modes here trace back to one rule: exactly one server per
  * project directory, guarded by .nco-web-editor/server.lock.
  */
 
@@ -36,6 +36,23 @@ function Mono({ children }: { children: ReactNode }) {
 type Entry = { symptom: string; cause: ReactNode; fix: ReactNode };
 
 const ENTRIES: Entry[] = [
+  {
+    symptom: 'Chrome asks to allow access to devices on your network',
+    cause: (
+      <p>
+        Expected. Chrome 142 and later ask before a page reaches a local address, and the editor talks
+        to the MCP server over <Mono>ws://localhost</Mono>. Blocking or dismissing the prompt leaves the
+        editor unable to reach the server, and the panel reports it as disconnected — the same symptom
+        as a server that is not running.
+      </p>
+    ),
+    fix: (
+      <p>
+        Click <strong>Allow</strong>. If it was already blocked, open site settings from the icon left of
+        the address bar, set <strong>Local network access</strong> to Allow, and reload the page.
+      </p>
+    ),
+  },
   {
     symptom: 'Your agent says the tools don’t exist',
     cause: (
@@ -137,8 +154,9 @@ export default function Troubleshooting() {
           marginBottom: 'var(--space-10)',
         }}
       >
-        Almost every connection problem is the same problem: one server per project directory, and your
-        agent is not the one holding it. Everything below is local — no accounts, nothing to sign in to.
+        Most connection problems are the same problem: one server per project directory, and your
+        agent is not the one holding it. The other is Chrome asking permission to reach it. Everything
+        below is local — no accounts, nothing to sign in to.
       </p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)', maxWidth: 'var(--measure)' }}>

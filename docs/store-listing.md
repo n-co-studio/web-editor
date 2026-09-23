@@ -110,6 +110,7 @@ On first install, the extension opens the setup guide at https://nco.studio/web-
 2. Navigate to `http://localhost:3000` (or your local dev server).
 3. Click the extension's icon in the Chrome toolbar — a small popup appears with two buttons: **Extension** (toggle On/Off) and **Open Change Queue**.
 4. Click **Extension** in the popup to toggle it **On** — the overlay activates. You should see a cyan selection highlight as you hover over elements.
+   - Chrome asks to allow access to other devices and apps on your local network. **Click Allow.** This is Chrome's Local Network Access permission (Chrome 142+, extended to WebSockets in 147); the extension needs it to reach the MCP server on `ws://localhost`. If it is denied, the extension cannot connect and will appear inert.
 5. Click an element to inspect it. The properties panel appears at the bottom of the viewport.
 6. Adjust a spacing or color value — the live preview updates instantly and the edit queues automatically.
 7. Click **Apply Changes** to send the diff to the MCP server.
@@ -124,6 +125,7 @@ If the extension and MCP server versions are incompatible, a persistent red bann
 
 - The WebSocket connection is opened by the **content script** (`content.js`), not the service worker. This is intentional: MV3 service workers are terminated after ~30 seconds of inactivity, which would break a persistent WebSocket. The content script remains alive as long as the page is open.
 - All WebSocket traffic goes to `ws://localhost:<port>` — the locally-installed MCP server. No external network calls are made.
+- Because that WebSocket targets a loopback address, Chrome's Local Network Access permission prompt appears on first connect. Allowing it is required for the extension to function; it grants access to the developer's own machine only, and the extension makes no requests beyond `localhost`.
 - The extension uses a Shadow DOM overlay to avoid style conflicts with the host page. All extension UI is isolated inside the shadow root.
 - The extension ID assigned by the Web Store will differ from the sideloaded dev-install ID. This is expected and acceptable for a new extension — no ID-dependent behavior is present.
 
