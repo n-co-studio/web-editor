@@ -62,6 +62,22 @@ export interface LavaConfig {
    */
   seed?: number;
   /**
+   * Hover-scatter (ported from the nco.studio landing page). When
+   * `scatterEase` is set, any `[data-lava-scatter]` element inside the field's
+   * `[data-lava-scope]` ancestor sends every blob out to the canvas edge while
+   * it is hovered or keyboard-focused, clearing the middle. Omit these and the
+   * behaviour — and its listeners — are never attached.
+   *
+   * Each blob's centre lands this many CSS pixels in from the edge, a fresh
+   * random value per blob per hover.
+   */
+  scatterInsetMin?: number;
+  scatterInsetMax?: number;
+  /** Blob radius multiplier while scattered — a slight loosening of the field. */
+  scatterScale?: number;
+  /** Per-frame easing toward/away from the scattered layout (0–1). ~0.011 ≈ 3–4s. */
+  scatterEase?: number;
+  /**
    * Wide multi-bundle layout. When set, the canvas is `regions.length` VB-units
    * wide (rendered with preserveAspectRatio="none" so each bundle maps to its
    * own on-screen band) and each bundle clusters its own palette. Overrides
@@ -102,6 +118,50 @@ interface Blob {
   seedShape: number;
   /** Parallax depth — how strongly this blob leans toward the cursor. */
   depth: number;
+  /** Hover-scatter target, resolved per hover (see rollScatterTargets). */
+  edgeSide?: 'left' | 'right' | 'top' | 'bottom';
+  /** 0–1 position along the chosen edge. */
+  edgeAlong?: number;
+  /** Inset from that edge, held in CSS pixels so it survives a resize. */
+  insetPx?: number;
+  edgeX?: number;
+  edgeY?: number;
+}
+
+/**
+ * Roll a fresh scatter target per blob: each goes to whichever edge it is
+ * already nearest — so the field stays spread around the perimeter and no blob
+ * makes a long diagonal trip — but to a random position along that edge,
+ * re-rolled on every hover, so it never lands the same way twice.
+ */
+function rollScatterTargets(blobs: Blob[], config: LavaConfig, vbw: number): void {
+  const lo = config.scatterInsetMin ?? 0;
+  const hi = config.scatterInsetMax ?? 40;
+  for (const b of blobs) {
+    const dLeft = b.homeX;
+    const dRight = vbw - b.homeX;
+    const dTop = b.homeY;
+    const dBottom = VB - b.homeY;
+    const nearest = Math.min(dLeft, dRight, dTop, dBottom);
+    b.edgeSide =
+      nearest === dLeft ? 'left' : nearest === dRight ? 'right' : nearest === dTop ? 'top' : 'bottom';
+    b.edgeAlong = Math.random();
+    b.insetPx = lo + Math.random() * (hi - lo);
+  }
+}
+
+/** Resolve each blob's stored scatter choice into viewBox coordinates. */
+function applyEdgeTargets(blobs: Blob[], vbw: number, pxToVb: number): void {
+  for (const b of blobs) {
+    const inset = (b.insetPx ?? 0) * pxToVb;
+    if (b.edgeSide === 'left' || b.edgeSide === 'right') {
+      b.edgeX = b.edgeSide === 'left' ? inset : vbw - inset;
+      b.edgeY = (b.edgeAlong ?? 0.5) * VB;
+    } else {
+      b.edgeX = (b.edgeAlong ?? 0.5) * vbw;
+      b.edgeY = b.edgeSide === 'top' ? inset : VB - inset;
+    }
+  }
 }
 
 const VB = 100; // viewBox is 0 0 VB VB
@@ -295,6 +355,33 @@ export default function LavaBackground({
       config.pointerStrength > 0 &&
       window.matchMedia('(pointer: fine), (pointer: coarse)').matches;
 
+    // Hover-scatter: only attached when the config asks for it AND the field
+    // sits inside a [data-lava-scope] container, so one field's triggers never
+    // move another's blobs (the page-wide field has no scope ancestor).
+    const scatterEase = config.scatterEase ?? 0;
+    const scope = scatterEase > 0 ? svgRef.current?.closest('[data-lava-scope]') ?? null : null;
+    const triggers: Element[] = scope
+      ? Array.from(scope.querySelectorAll('[data-lava-scatter]'))
+      : [];
+    let scatter = 0;
+    let scatterTo = 0;
+
+    const pxToVb = () => vbw / Math.max(svgRef.current?.clientWidth ?? 1, 1);
+    const onScatterIn = () => {
+      rollScatterTargets(blobs, config, vbw);
+      applyEdgeTargets(blobs, vbw, pxToVb());
+      scatterTo = 1;
+    };
+    const onScatterOut = () => {
+      scatterTo = 0;
+    };
+    for (const trigger of triggers) {
+      trigger.addEventListener('pointerenter', onScatterIn);
+      trigger.addEventListener('focus', onScatterIn);
+      trigger.addEventListener('pointerleave', onScatterOut);
+      trigger.addEventListener('blur', onScatterOut);
+    }
+
     // Drop any refs left over from a longer previous blob set.
     pathRefs.current.length = blobs.length;
 
@@ -396,6 +483,10 @@ export default function LavaBackground({
 
       curX += (targetX - curX) * 0.05;
       curY += (targetY - curY) * 0.05;
+      scatter += (scatterTo - scatter) * scatterEase;
+      // Ease the blend itself (smoothstep) so the departure and the return both
+      // start and finish gently rather than yanking at the extremes.
+      const s = scatter * scatter * (3 - 2 * scatter);
 
       for (let i = 0; i < blobs.length; i++) {
         const b = blobs[i];
@@ -421,11 +512,19 @@ export default function LavaBackground({
           cx = bx + curX * b.depth;
           cy = by + curY * b.depth;
         }
+        // Blend toward the parked edge position while a trigger is hovered. At
+        // s = 1 the blob sits on its edge target, so the cursor repel and the
+        // drift above fade out rather than fighting it.
+        if (s > 0.001) {
+          cx += ((b.edgeX ?? cx) - cx) * s;
+          cy += ((b.edgeY ?? cy) - cy) * s;
+        }
         // Per-point outline morph — each lobe bulges on its own noise track, so
         // the shape churns like liquid instead of scaling uniformly.
+        const r = b.radius + (b.radius * (config.scatterScale ?? 1) - b.radius) * s;
         for (let p = 0; p < k; p++) {
           const wobble = noiseR(b.seedShape + p * 1.7, t + p * 0.35) * config.morph;
-          radii[p] = b.radius * (b.shape[p] + wobble);
+          radii[p] = r * (b.shape[p] + wobble);
         }
         el.setAttribute('d', blobPath(cx, cy, radii, angles));
       }
@@ -435,6 +534,12 @@ export default function LavaBackground({
 
     return () => {
       cancelAnimationFrame(raf);
+      for (const trigger of triggers) {
+        trigger.removeEventListener('pointerenter', onScatterIn);
+        trigger.removeEventListener('focus', onScatterIn);
+        trigger.removeEventListener('pointerleave', onScatterOut);
+        trigger.removeEventListener('blur', onScatterOut);
+      }
       if (canTrack) {
         window.removeEventListener('pointermove', onPointerMove);
         window.removeEventListener('scroll', onScroll);

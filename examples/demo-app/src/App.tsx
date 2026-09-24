@@ -3,6 +3,7 @@ import type { LavaConfig } from './components/LavaBackground';
 import Hero from './components/Hero';
 import StepsRow from './components/StepsRow';
 import GuideTabs from './components/GuideTabs';
+import TopBanner from './components/TopBanner';
 
 // Page lava: operator-chosen green (#277910) as a tonal ramp so merging blobs
 // keep depth. Module-level const so the config identity is stable across
@@ -19,6 +20,8 @@ export default function App() {
       <div className="nco-lava-bg" aria-hidden="true">
         <LavaBackground config={PAGE_LAVA} />
       </div>
+
+      <TopBanner />
 
       <main
         id="top"
