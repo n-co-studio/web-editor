@@ -23,6 +23,7 @@ First public release: Chrome Web Store extension 0.2.0 and both npm packages at 
 - **MCP server instructions** — the server describes its workflow to agents that have no project-specific guidance
 - Token discovery from `tailwind.config.ts` / `.mts` / `.cts`
 - Guidance for Chrome's Local Network Access prompt: the Review changes panel explains the permission when nothing has ever connected, and the quickstart, store reviewer notes and guide troubleshooting cover it
+- Localhost-only activation is now enforced in code, not just declared: the popup refuses to inject into non-local pages and the content script refuses to activate on them (the public web-embed demo is exempt by design)
 
 ### Changed
 

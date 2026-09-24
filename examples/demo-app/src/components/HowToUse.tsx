@@ -53,8 +53,9 @@ re-check the queue before you go idle.`}</Code>
     title: 'Activate the editor',
     body: (
       <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
-        On your localhost page, click the toolbar icon. The editor toolbar appears — drag the grip to
-        move it, collapse it to browse the page normally, press <kbd style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-caption)', border: '1px solid var(--color-border)', padding: '0 4px' }}>ESC</kbd> to exit.
+        On your localhost page, click the pinned icon and click <strong>Extension</strong> in the popup to
+        toggle it <strong>On</strong>. The editor toolbar appears — drag the grip to move it, collapse it to
+        browse the page normally, press <kbd style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-caption)', border: '1px solid var(--color-border)', padding: '0 4px' }}>ESC</kbd> to exit.
       </p>
     ),
   },

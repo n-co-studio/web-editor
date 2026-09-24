@@ -81,6 +81,8 @@ import { PROTOCOL_VERSION } from '@nco-studio/shared';
 import type { VisualDiff, PropertyChange, AttributeChange, TextChange, ReorderChange, ReparentChange, GroupChange, RemoveChange, StylesheetChange, ScriptBehaviorChange, LayoutContainerDescriptor } from '@nco-studio/shared';
 import { parseLayoutSignal, classifyLayoutRole } from '@nco-studio/shared/layout';
 import type { ExtensionMode, ConnectionStatus, EditMode, IconStatus } from '../shared/types';
+import { isLocalDevHost } from '../shared/is-local-host';
+import { isDemoMode } from './web-env';
 
 // ---------------------------------------------------------------------------
 // State
@@ -327,8 +329,31 @@ function teardownHarvest(): void {
 // Lifecycle
 // ---------------------------------------------------------------------------
 
+/**
+ * The editor is documented as running only on the developer's own machine —
+ * the store listing, the privacy policy and the `scripting` permission
+ * justification all say so. The manifest's content_scripts.matches enforces
+ * that for automatic injection and the popup checks the tab URL before the
+ * programmatic path; this is the content script's own guard, so the claim
+ * holds no matter how the bundle is reached.
+ *
+ * The web-embed bundle is the deliberate exception: it is loaded by the
+ * marketing site on a public page, where demo mode already replaces the
+ * chrome.* APIs and disables MCP submission.
+ */
+function isSupportedPage(): boolean {
+  if (isDemoMode()) return true;
+  return isLocalDevHost(window.location.hostname);
+}
+
 export async function activate(): Promise<void> {
   if (mode !== 'inactive') return;
+  if (!isSupportedPage()) {
+    console.warn(
+      '[nco-web-editor] Not a local development page — the editor only runs on localhost or 127.0.0.1.',
+    );
+    return;
+  }
 
   // Get or create tab session ID
   tabId = await getOrCreateTabId();

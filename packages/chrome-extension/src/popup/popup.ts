@@ -10,6 +10,7 @@
  */
 
 import { GUIDE_URL } from '../shared/constants';
+import { isLocalDevUrl } from '../shared/is-local-host';
 
 interface EditorState {
   active: boolean;
@@ -26,9 +27,22 @@ const hint = document.getElementById('hint') as HTMLDivElement;
 
 let currentState: EditorState = { active: false, queueOpen: false };
 
-async function getActiveTabId(): Promise<number | undefined> {
+async function getActiveTab(): Promise<chrome.tabs.Tab | undefined> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tab?.id;
+  return tab;
+}
+
+/**
+ * The extension is documented as running only on the developer's own machine.
+ * The manifest's content_scripts.matches enforces that for automatic
+ * injection; this check enforces it for the programmatic path below, so the
+ * popup never injects the editor into a public page. `activeTab` gives us the
+ * URL of the tab the user opened the popup on.
+ */
+async function getLocalDevTabId(): Promise<number | undefined> {
+  const tab = await getActiveTab();
+  if (tab?.id == null) return undefined;
+  return isLocalDevUrl(tab.url) ? tab.id : undefined;
 }
 
 /** Send a message to the content script, injecting it first if not present. */
@@ -61,7 +75,7 @@ function renderUnavailable(): void {
 }
 
 async function init(): Promise<void> {
-  const tabId = await getActiveTabId();
+  const tabId = await getLocalDevTabId();
   if (tabId == null) {
     renderUnavailable();
     return;
@@ -75,7 +89,7 @@ async function init(): Promise<void> {
 }
 
 extBtn.addEventListener('click', async () => {
-  const tabId = await getActiveTabId();
+  const tabId = await getLocalDevTabId();
   if (tabId == null) return;
   try {
     const state = await sendToTab(tabId, { type: 'TOGGLE_EXTENSION' });
@@ -87,7 +101,7 @@ extBtn.addEventListener('click', async () => {
 });
 
 queueBtn.addEventListener('click', async () => {
-  const tabId = await getActiveTabId();
+  const tabId = await getLocalDevTabId();
   if (tabId == null) return;
   try {
     await sendToTab(tabId, { type: 'TOGGLE_QUEUE_PANEL' });
