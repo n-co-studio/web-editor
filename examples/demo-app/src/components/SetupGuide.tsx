@@ -29,11 +29,19 @@ type Step = { title: string; body: ReactNode };
 
 const STEPS: Step[] = [
   {
-    title: 'Install the extension',
+    title: 'Install and pin the extension',
     body: (
       <>
         <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
-          From the Chrome Web Store, or load it unpacked for development:
+          Install from the Chrome Web Store, then <strong>pin it to your toolbar</strong> — click the
+          puzzle-piece icon in Chrome’s toolbar and hit the pin beside the editor. The icon is how you
+          switch the editor on and off, so you want it visible. It is built for your own dev server —
+          pages served from <code style={{ fontFamily: 'var(--font-mono)' }}>localhost</code> or{' '}
+          <code style={{ fontFamily: 'var(--font-mono)' }}>127.0.0.1</code> — where the source mapping and
+          design tokens it relies on come from.
+        </p>
+        <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
+          Developing on the extension itself? Load it unpacked instead:
         </p>
         <Code>{`chrome://extensions → Developer mode → Load unpacked
 → select packages/chrome-extension/dist`}</Code>
@@ -85,12 +93,20 @@ const STEPS: Step[] = [
     ),
   },
   {
-    title: 'Open localhost & activate',
+    title: 'Switch it on',
     body: (
-      <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
-        Visit your dev server, click the toolbar icon, and the editor's built-in walkthrough kicks in.
-        A banner appears only if the extension and server versions disagree.
-      </p>
+      <>
+        <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
+          Open your dev server in Chrome, click the pinned icon, and click <strong>Extension</strong> in the
+          popup to toggle it <strong>On</strong>. The overlay appears and elements highlight as you hover.
+        </p>
+        <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
+          Chrome asks to allow access to devices on your local network the first time it connects —{' '}
+          <strong>allow it</strong>. That is the editor reaching your MCP server over{' '}
+          <code style={{ fontFamily: 'var(--font-mono)' }}>ws://localhost</code>; nothing leaves your machine.
+          A banner appears only if the extension and server versions disagree.
+        </p>
+      </>
     ),
   },
   {
