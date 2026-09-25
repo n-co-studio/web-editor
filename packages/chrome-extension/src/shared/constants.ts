@@ -35,7 +35,16 @@ export const TEXT_CONTENT_TRUNCATE_LENGTH = 80;
 // ---------------------------------------------------------------------------
 
 export const SNAP_EASE_MS = 125;
-export const TOOLBAR_WIDTH = 40;
+/**
+ * Outer width of the floating toolbar, and the offset every editing panel
+ * anchors off (`anchorPos.x + TOOLBAR_WIDTH + 8`). Two 32px button columns,
+ * a 2px gap, 4px padding each side: 32 + 2 + 32 + 8 = 74.
+ */
+export const TOOLBAR_WIDTH = 74;
+/** One button cell — the grid track width sections lay out against. */
+export const TOOLBAR_BUTTON_SIZE = 32;
+/** Columns per toolbar section. Arrow-key navigation steps by this for Up/Down. */
+export const TOOLBAR_COLUMNS = 2;
 export const NOTES_PANEL_MAX_HEIGHT = 320;
 export const NOTES_PANEL_WIDTH = 260;
 

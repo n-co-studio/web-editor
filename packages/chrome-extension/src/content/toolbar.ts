@@ -1,5 +1,5 @@
 import { createElement, createButton, makeDraggable } from '../shared/ui-utils';
-import { OVERLAY, TOOLBAR_WIDTH } from '../shared/constants';
+import { OVERLAY, TOOLBAR_WIDTH, TOOLBAR_BUTTON_SIZE, TOOLBAR_COLUMNS } from '../shared/constants';
 import type { EditMode, InspectorMode, PanelPosition } from '../shared/types';
 
 type ToolSelectCallback = (mode: EditMode) => void;
@@ -798,10 +798,13 @@ export class FloatingToolbar {
     const toolsBody = this.buildSection('tools', contentWrapper);
 
     // Tools wrapper — a radio group: exactly one editing tool is active at a time.
+    // The radiogroup is itself the tools grid, so it spans the section's own
+    // two tracks rather than sitting inside one of them.
     const wrapper = createElement('div', { role: 'radiogroup', 'aria-label': 'Editing tool' }, {
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
+      gridColumn: '1 / -1',
+      display: 'grid',
+      gridTemplateColumns: `repeat(${TOOLBAR_COLUMNS}, ${TOOLBAR_BUTTON_SIZE}px)`,
+      justifyContent: 'center',
       gap: '2px',
     });
 
@@ -826,6 +829,16 @@ export class FloatingToolbar {
     }
 
     toolsBody.appendChild(wrapper);
+
+    // Notes and Review sit outside the collapsible sections so they stay
+    // reachable when everything is collapsed. They share one two-column row of
+    // their own rather than taking a full-width row each.
+    const alwaysOnRow = createElement('div', {}, {
+      display: 'grid',
+      gridTemplateColumns: `repeat(${TOOLBAR_COLUMNS}, ${TOOLBAR_BUTTON_SIZE}px)`,
+      justifyContent: 'center',
+      gap: '2px',
+    });
 
     // Actions section — undo/redo, reset, duplicate, delete
     const actionsBody = this.buildSection('actions', contentWrapper);
@@ -856,7 +869,7 @@ export class FloatingToolbar {
       pointerEvents: 'none',
     }) as HTMLSpanElement;
     this.notesBtn.appendChild(this.notesBadge);
-    contentWrapper.appendChild(this.notesBtn);
+    alwaysOnRow.appendChild(this.notesBtn);
 
     // Review changes button (always visible, with count badge)
     this.reviewBtn = this.buildIconButton('review', 'Review changes', () => {
@@ -885,30 +898,20 @@ export class FloatingToolbar {
       pointerEvents: 'none',
     }) as HTMLSpanElement;
     this.reviewBtn.appendChild(this.reviewBadge);
-    contentWrapper.appendChild(this.reviewBtn);
+    alwaysOnRow.appendChild(this.reviewBtn);
 
-    // Undo/Redo row
-    const undoRedoRow = createElement('div', {}, {
-      display: 'flex',
-      gap: '0px',
-      alignItems: 'center',
-    });
-
+    // Undo and redo are ordinary cells now: the two-column grid already pairs
+    // them on one row, so they no longer need to be squeezed into a 20px-wide
+    // sub-row to save vertical space.
     this.undoBtn = this.buildIconButton('undo', 'Undo', () => {
       if (this.undoBtn?.style.opacity !== '0.3') this.undoCb?.();
     });
-    this.undoBtn.style.width = '20px';
-    this.undoBtn.style.height = '28px';
-    undoRedoRow.appendChild(this.undoBtn);
+    actionsBody.appendChild(this.undoBtn);
 
     this.redoBtn = this.buildIconButton('redo', 'Redo', () => {
       if (this.redoBtn?.style.opacity !== '0.3') this.redoCb?.();
     });
-    this.redoBtn.style.width = '20px';
-    this.redoBtn.style.height = '28px';
-    undoRedoRow.appendChild(this.redoBtn);
-
-    actionsBody.appendChild(undoRedoRow);
+    actionsBody.appendChild(this.redoBtn);
 
     // Reset button
     this.resetBtn = this.buildIconButton('reset', 'Reset all changes', () => {
@@ -932,6 +935,7 @@ export class FloatingToolbar {
     actionsBody.appendChild(this.deleteBtn);
     this.setDeleteEnabled(false);
 
+    contentWrapper.appendChild(alwaysOnRow);
     container.appendChild(contentWrapper);
 
     this.refreshButtonStates();
@@ -1038,7 +1042,9 @@ export class FloatingToolbar {
       'aria-label': `${label} section`,
       'aria-expanded': 'true',
     }, {
-      width: '32px',
+      // Spans both button columns so its top border reads as a divider across
+      // the whole section rather than a stub over the first column.
+      width: `${TOOLBAR_COLUMNS * TOOLBAR_BUTTON_SIZE + 2}px`,
       height: '24px',
       border: 'none',
       borderTop: `1px solid ${OVERLAY.border}`,
@@ -1076,10 +1082,13 @@ export class FloatingToolbar {
       headerBtn.style.background = 'transparent';
     });
 
+    // Two columns, so a section is half as tall as it is long. The literal
+    // 'grid' is mirrored in setSectionCollapsed's expand branch — see the note
+    // there before changing either.
     const body = createElement('div', {}, {
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
+      display: 'grid',
+      gridTemplateColumns: `repeat(${TOOLBAR_COLUMNS}, ${TOOLBAR_BUTTON_SIZE}px)`,
+      justifyContent: 'center',
       gap: '2px',
     });
 
@@ -1151,23 +1160,36 @@ export class FloatingToolbar {
     const n = TOOL_ORDER.length;
     let dir: number;
     let start = TOOL_ORDER.indexOf(current);
+    // The tools are laid out in TOOLBAR_COLUMNS columns, so Up/Down move a
+    // whole visual row while Left/Right move one cell. Home/End still step by
+    // one, since they seek the first or last enabled tool rather than a
+    // neighbour. `dir` is also the fallback step when a cell is disabled, so a
+    // vertical move that lands on a disabled tool walks on by rows, not cells.
     switch (e.key) {
-      case 'ArrowDown': case 'ArrowRight': dir = 1; break;
-      case 'ArrowUp': case 'ArrowLeft': dir = -1; break;
+      case 'ArrowDown': dir = TOOLBAR_COLUMNS; break;
+      case 'ArrowUp': dir = -TOOLBAR_COLUMNS; break;
+      case 'ArrowRight': dir = 1; break;
+      case 'ArrowLeft': dir = -1; break;
       case 'Home': dir = 1; start = -1; break;
       case 'End': dir = -1; start = n; break;
       default: return;
     }
     e.preventDefault();
-    let idx = start;
+    // First hop uses the full step — a whole row for Up/Down. If that cell is
+    // disabled, the search continues one cell at a time rather than by rows, so
+    // it walks every tool exactly once whatever the tool count and column count
+    // are. (Repeating a ±TOOLBAR_COLUMNS step instead would reach only half the
+    // tools whenever the columns divide the tool count.)
+    const step = Math.sign(dir) || 1;
+    let idx = (start + dir + n * Math.abs(dir)) % n;
     for (let i = 0; i < n; i++) {
-      idx = (idx + dir + n) % n;
       const mode = TOOL_ORDER[idx];
       if (!this.disabledTools.has(mode)) {
         this.toolCb?.(mode);
         this.toolButtons.get(mode)?.focus();
         return;
       }
+      idx = (idx + step + n) % n;
     }
   }
 
@@ -1235,9 +1257,11 @@ export class FloatingToolbar {
     if (state.collapsed === collapsed) return;
     state.collapsed = collapsed;
 
-    // Explicit 'flex' on expand — an empty string would revert to the CSS
-    // default (block) and destroy the column layout.
-    state.body.style.display = collapsed ? 'none' : 'flex';
+    // Explicit 'grid' on expand — an empty string would revert to the CSS
+    // default (block), and 'flex' (what this used to be, before sections went
+    // two-column) would silently restore a single column. Must match the
+    // display buildSection sets.
+    state.body.style.display = collapsed ? 'none' : 'grid';
     state.chevron.innerHTML = ICONS[collapsed ? 'chevron-right' : 'chevron-down'] ?? '';
     state.headerBtn.setAttribute('aria-expanded', String(!collapsed));
     this.refreshSectionHeader(id);
