@@ -58,3 +58,4 @@ t-0047-session-lifecycle-stop-sessionend-split.md
 t-0048-criteria-verdict-persistence.md
 t-0049-gate-exit-contract.md
 t-0050-expected-changes.md
+t-0051-template-sync-ownership.md

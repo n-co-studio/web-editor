@@ -1,177 +1,138 @@
-# Visual Web Editor for AI Agents
+# Repo OS
 
-**Point at an element. Adjust it visually. Get a precise code change — no hunting through files, no manual prompting.**
+AI-native project governance for Claude Code. Enforces quality gates, decision compliance, and session-based workflows through mechanical hooks — not convention alone. Open [repo-os-explainer.html](repo-os-explainer.html) in a browser for the interactive visual overview.
 
-A Chrome extension and a local MCP server that close the loop between design intent and source code. You adjust the running page by eye; your AI coding agent receives a structured diff — exact file paths, line numbers, the change itself — and applies it in seconds. Built and tested with Claude Code.
+## Quick Start
 
----
+1. **Create a repo** from this template (GitHub "Use this template")
+2. Run **Prompt 0** — builds your project specification in `docs/spec/compiled/`
+3. Run **Prompt A** (Initialize) — advisory board reviews your spec, sets up governance
+4. Run **Prompt B** with a task brief — plan, build, verify, commit
 
-## The loop
+Child repos default to `child` mode automatically (no `.claude/repo-mode` file needed).
 
-```
-Browser (you)                   Extension              Claude Code
-────────────────────────────────────────────────────────────────────
-Click the toolbar icon    →  Popup opens
-Toggle "Extension" On     →  Overlay activates
-Click an element          →  Select + show panel
-Drag a value              →  Snap to design token
-                          →  Edit queues automatically
-Click "Review changes"    →  Review queue panel opens
-Click "Apply Changes"     →  WebSocket → MCP server  →  Apply the edit
-                                                         ↓
-                         Hot-reload ←───────────────── Done
-```
+Prompts live in `docs/ai/prompts/`. See [AI.md](AI.md) for the full authority model.
 
-**Design → source in under 30 seconds.** Deterministic source mapping — the right file, the right line, every time.
+## Operating Modes
 
----
+Resolved via three-tier chain: `REPO_OS_MODE` env var > `.claude/repo-mode` file > default `child`. File is gitignored — child repos get `child` mode automatically without any setup.
 
-## What you get
+| Mode | File Access | Use Case |
+|------|-------------|----------|
+| `template` | Governance only (no product code) | Upstream template development |
+| `child` | Product code + limited governance | Default for downstream projects |
+| `autonomous` | Product code + minimal governance | Headless / CI operation |
 
-Three pieces, all local, all open-source:
+See [Decision 0012](docs/ai/decisions/t-0012-file-edit-restrictions.md) for carve-out details.
 
-| Component | Package | What it does |
-|-----------|---------|--------------|
-| Chrome extension | Chrome Web Store / Releases | Overlay UI, property panel, change queue |
-| MCP server | `@nco-studio/web-editor-mcp` | stdio MCP + WebSocket relay to Claude Code |
-| Dev plugin | `@nco-studio/web-editor-plugin` | Vite plugin — injects `data-source-file` / `data-source-line` for deterministic source mapping |
+## Prompt Chain
 
----
+| Prompt | Name | Purpose |
+|--------|------|---------|
+| **0** | Spec Builder | Build complete project specification through structured conversation |
+| **0.5** | Rapid Prototype | Lightweight experiments on `experiment/*` branches (Napkin / Spike / PoC) |
+| **A** | Repo OS Init | Advisory board spec review + governance evidence setup |
+| **B** | Product Build | Implementation loop: plan, build, verify, commit |
+| **T** | Task Definition | Exploration and task planning (produces briefs for Prompt B) |
+| **C** | Project Audit | Menu-driven audit across configurable dimensions |
 
-## Install
+## Hook Chain
 
-See **[QUICKSTART.md](QUICKSTART.md)** for the full step-by-step guide. In brief:
+All hooks live in `.claude/hooks/` and are wired via `.claude/settings.json`.
 
-### 1. MCP server — one entry in `.mcp.json`
+| Hook | Lifecycle | Role |
+|------|-----------|------|
+| `write-guard.sh` | PreToolUse (Edit/Write/Bash) | Blocks `.state/` writes, enforces mode-based file restrictions; Section 3 blocks main edits, enforces plan gate, session branch isolation |
+| `bash-guard.sh` | PreToolUse (Bash) | Consolidated Bash guard (Phase 3a): state-guard, mode-guard, plan gate, main protection, session branch isolation, task group merge protection, ephemeral fast-exit |
+| `plan-approval.sh` | PostToolUse (AskUserQuestion) | Captures plan approvals as state |
+| `hvst-failure-tracker.sh` | PostToolUse (Bash) | Tracks consecutive failures for HVST escalation |
+| `agent-git-guard.sh` | PreToolUse (git commit/push) | Blocks subagent commits and pushes |
+| `pre-commit-gates.sh` | PreToolUse (git commit) | Enforces A1, A2, A4, A5, A6 gates |
+| `pre-push-gates.sh` | PreToolUse (git push) | Enforces B1 branch naming convention |
+| `state-writer.sh` | SubagentStop | Captures governance agent verdicts as state files |
+| `session-close-check.sh` | Stop | Session log check, override audit, state cleanup |
 
-```json
-{
-  "mcpServers": {
-    "nco-web-editor": {
-      "command": "npx",
-      "args": ["--yes", "@nco-studio/web-editor-mcp@^0"],
-      "type": "stdio"
-    }
-  }
-}
-```
+## Quality Gates
 
-The MCP server listens on a WebSocket port in the `7890`–`7899` range; the extension scans the same range automatically.
+Full definitions in [quality-gates.md](docs/ai/quality-gates.md).
 
-### 2. Dev plugin — one line in `vite.config.ts`
+**Commit (A)** — enforced by `pre-commit-gates.sh`:
+
+| Gate | Checks |
+|------|--------|
+| A1 | Decision compliance (trigger parser matches staged files to decision triggers) |
+| A2 | Process and scope (plan exists, under 100 lines or large-scope approved) |
+| A3 | Quality (formatter, linter, build — if tooling exists) |
+| A4 | Safety (no secrets, no PII, high-risk pattern detection) |
+| A5 | Cohesion review (Critic verified diff for internal coherence) |
+| A6 | Task group contract compliance (if applicable) |
+
+**Push (B)** — enforced by `pre-push-gates.sh`:
+
+| Gate | Checks |
+|------|--------|
+| B1 | Branch naming convention (`category/description`) |
+| B2 | Tests and typecheck pass (if tooling exists) |
+| B3 | No debug flags left enabled, dependency audit if deps changed |
+
+**Release (C)** — checked during release merges:
+
+| Gate | Checks |
+|------|--------|
+| C1 | Version bumped, changelog updated, release notes drafted |
+| C2 | Full test suite passes, all A + B gates |
+| C3 | Reviewer + Security sign-off |
+
+## Branch Naming
+
+Enforced by gate B1 at push time. Format: `category/short-description`.
+
+| Category | Purpose | Gate Profile |
+|----------|---------|-------------|
+| `main` | Production-ready | All gates. Direct merge at session close (solo mode) |
+| `release/*` | Release candidates | All gates + C1–C3 |
+| `feature/*` | New functionality | Standard (A + B) |
+| `fix/*` | Bug fixes | Standard (A + B) |
+| `hotfix/*` | Urgent production fixes | Expedited (A2 relaxed, A5 skipped) |
+| `experiment/*` | Spikes and prototypes | A4 only (safety) |
+
+## Team Setup
+
+### Discussions
+
+Enable GitHub Discussions and create these categories: **Announcements** (team updates), **Decision Proposals** (RFCs for new decisions), **Q&A** (usage questions), **Ideas** (feature brainstorming), **Show & Tell** (demos and learnings).
+
+### Labels
+
+Import labels from [.github/labels.json](.github/labels.json):
 
 ```sh
-npm install --save-dev @nco-studio/web-editor-plugin
+cat .github/labels.json | jq -c '.[]' | while read label; do
+  gh label create "$(echo $label | jq -r .name)" \
+    --color "$(echo $label | jq -r .color)" \
+    --description "$(echo $label | jq -r .description)" \
+    --force
+done
 ```
 
-```ts
-import { ncoWebEditor } from '@nco-studio/web-editor-plugin';
+### Decision Numbering
 
-export default defineConfig({
-  plugins: [react(), ncoWebEditor()],
-});
-```
+- **`t-*`** — Template-owned decisions (`t-` prefix). Synced from upstream, locked in child/autonomous modes.
+- **0100+** — Project-specific decisions. Editable in child mode.
 
-### 3. Chrome extension
+## For Template Contributors
 
-Install **Visual Web Editor for AI Agents** from the Chrome Web Store, or download the latest `.zip` from [Releases](https://github.com/n-co-studio/web-editor/releases/latest) and load it unpacked.
+- **Versioning:** CalVer git tags (`vYYYY.MM.MICRO`), auto-created on merge to `main` when Repo OS files change
+- **Template sync:** Child repos sync from this template automatically. Protected paths listed in [`.templatesyncignore`](.templatesyncignore)
+- **Template mode:** Governance paths only — use `REPO_OS_UNLOCK_PATH` for one-off product path access
+- **Visual guide:** Open [`repo-os-explainer.html`](repo-os-explainer.html) in a browser for the interactive system diagram
 
----
+## Links
 
-## Try it
-
-The hosted guide at **https://nco.studio/web-editor/** doubles as a live practice target. You can also run it locally:
-
-Clone this repo and run the demo app — a guide page pre-wired with design tokens and live editing, ready to practice on:
-
-```sh
-cd examples/demo-app
-npm install
-npm run dev
-```
-
-Open `http://localhost:5173` in Chrome with the extension enabled. Click the toolbar icon, toggle **Extension** On, click any card element, drag a value, then click "Review changes" and "Apply Changes".
-
----
-
-## What you can edit
-
-- Spacing, dimensions, and position
-- Colors and backgrounds
-- Typography (font family, size, weight, line-height)
-- Flex and grid layout
-- CSS visual effects (filter, mix-blend-mode, clip-path)
-- Design token snapping (Tailwind, CSS variables)
-- Element insertion, deletion, reorder, and reparenting
-- Inline text styling
-- Parallax effects
-
----
-
-## Architecture
-
-```
-packages/
-  chrome-extension/    Chrome extension (MV3 service worker + Shadow DOM overlay)
-  mcp-server/          @nco-studio/web-editor-mcp — stdio MCP server + WebSocket relay
-  dev-plugin/          @nco-studio/web-editor-plugin — Vite plugin (JSX transform)
-  shared/              Protocol types + design tokens (bundled into mcp-server, not published)
-examples/
-  demo-app/            Vite + React demo, pre-wired with the dev plugin
-```
-
-**Data flow:**
-
-```
-Extension (content.js)
-  ↓ WebSocket (ws://localhost:7890–7899)
-MCP server (@nco-studio/web-editor-mcp)
-  ↓ MCP stdio transport
-Claude Code
-  ↓ file edit
-Dev server hot-reload
-```
-
-The protocol version (`WS_PROTOCOL_VERSION = 0.4.0`) is checked on connection. A version mismatch shows a persistent banner. See [COMPATIBILITY.md](COMPATIBILITY.md).
-
-All processing is local — no data leaves your machine.
-
----
-
-## Known limitations
-
-- **Dev tooling only** — do not install on production pages
-- **Chrome 116+** — uses MV3 service worker
-- **Vite projects with JSX/TSX** — the dev plugin is Vite-only; source mapping is not available for Webpack or plain CSS projects
-- **Visual properties only** — spacing, color, typography, layout. JavaScript behavior changes are out of scope.
-- **Localhost only** — the extension activates on `localhost` and `127.0.0.1` origins
-
----
-
-## Documentation
-
-| Doc | Contents |
-|-----|---------|
-| [QUICKSTART.md](QUICKSTART.md) | Step-by-step: MCP server → dev plugin → extension → first edit |
-| [COMPATIBILITY.md](COMPATIBILITY.md) | Protocol version matrix, mismatch banner, upgrade guidance |
-| [CHANGELOG.md](CHANGELOG.md) | What changed in each version |
-| [SECURITY.md](SECURITY.md) | Security model, scope, responsible disclosure |
-| [Privacy Policy](https://nco.studio/web-editor/privacy) | Data handling policy |
-| [packages/mcp-server/README.md](packages/mcp-server/README.md) | MCP server config, port, env vars |
-| [packages/dev-plugin/README.md](packages/dev-plugin/README.md) | Plugin options |
-
----
-
-## Contributing and support
-
-- **Bug reports:** [GitHub Issues](https://github.com/n-co-studio/web-editor/issues) — include extension version, Chrome version, MCP server version
-- **Questions and ideas:** [GitHub Discussions](https://github.com/n-co-studio/web-editor/discussions)
-- **Security issues:** See [SECURITY.md](SECURITY.md) for the responsible disclosure process
-
-For contributors: governance and session workflow are documented in [AI.md](AI.md).
-
----
-
-## License
-
-MIT — see [LICENSE](LICENSE).
+- [AI.md](AI.md) — Canonical governance index and authority model
+- [Workflow](docs/ai/workflow.md) — Session lifecycle, HVST protocol, git trailer convention
+- [Quality Gates](docs/ai/quality-gates.md) — Gate definitions, branch profiles, state files
+- [Decisions](docs/ai/decisions/) — Accepted governance decisions (`t-*` template-synced)
+- [Prompts](docs/ai/prompts/) — All session prompts (0, 0.5, A, B, T, C)
+- [Agent Glossary](.claude/agents/_agent-glossary.md) — Scope definitions, risk levels, protocols
+- [Visual Explainer](repo-os-explainer.html) — Interactive system overview
