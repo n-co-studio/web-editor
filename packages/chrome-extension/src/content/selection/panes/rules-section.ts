@@ -226,7 +226,7 @@ export class RulesSection {
     // Specificity badge (not for inline styles — they're always highest)
     if (!isInlineBlock && isFinite(rule.specificity[0])) {
       const specBadge = createElement('span', {}, {
-        background: 'rgba(255, 255, 255, 0.08)',
+        background: OVERLAY.hover,
         border: `1px solid ${OVERLAY.border}`,
         borderRadius: '3px',
         padding: '0 4px',
@@ -445,7 +445,7 @@ export class RulesSection {
     });
 
     const btn = createElement('button', {}, {
-      background: 'rgba(255, 255, 255, 0.08)',
+      background: OVERLAY.hover,
       border: `1px solid ${OVERLAY.border}`,
       borderRadius: OVERLAY.radiusSm,
       padding: '4px 12px',

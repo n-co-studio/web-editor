@@ -41,7 +41,7 @@ The extension requires a companion MCP server process (`@nco-studio/web-editor-m
 | Permission | Purpose |
 |------------|---------|
 | `activeTab` | Read the current tab's URL and DOM structure to enable element selection on the active developer page, and capture the visible tab when you use the screenshot tool. Screenshots are saved to your machine only. |
-| `storage` | Persist the pending diff queue locally across page reloads using `chrome.storage.session` (session-scoped, cleared when Chrome closes). |
+| `storage` | Persist the pending diff queue locally across page reloads using `chrome.storage.session` (session-scoped, cleared when Chrome closes), and remember your Light / Dark / System theme preference using `chrome.storage.local`. |
 | `scripting` | Inject the overlay content script into localhost pages when the extension is activated. |
 | `http://localhost/*`, `http://127.0.0.1/*`, `https://localhost/*` | Restrict all extension activity to local development servers only. The extension never activates on production or public websites. |
 

@@ -94,7 +94,7 @@ export function showProtocolMismatchBanner(
   Object.assign(fixCmd.style, {
     fontFamily: 'var(--fe-mono)',
     fontSize: '11px',
-    background: 'rgba(255,255,255,0.08)',
+    background: 'var(--fe-hover)',
     padding: '2px 6px',
     borderRadius: '3px',
     color: 'var(--fe-warning)',

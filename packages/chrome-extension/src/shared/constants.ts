@@ -56,7 +56,7 @@ export const QUEUE_PANEL_MAX_WIDTH_RATIO = 0.5;
 // ---------------------------------------------------------------------------
 
 export const OVERLAY = {
-  // Typography
+  // Typography (static — not themed, not var())
   fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
   monoFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
   headingSize: '13px',
@@ -66,27 +66,34 @@ export const OVERLAY = {
   monoSize: '11px',
   monoWeight: '400',
 
-  // Colors
-  bg: 'rgba(0, 0, 0, 0.85)',
-  bgSubtle: 'rgba(0, 0, 0, 0.65)',
-  text: '#ffffff',
-  textMuted: '#a1a1aa',
-  border: 'rgba(255, 255, 255, 0.15)',
+  // Chrome colors — CSS custom property references.
+  // Safe because every overlay element lives inside the shadow root, so
+  // var() resolves against the :host token block. NOT safe for canvas
+  // fillStyle, color-math helpers, or string comparisons — use resolved
+  // computed values in those contexts (see ruler-overlay.ts).
+  bg: 'var(--fe-bg)',
+  bgSubtle: 'var(--fe-bg-subtle)',
+  bgRaised: 'var(--fe-bg-raised)',
+  text: 'var(--fe-text)',
+  textMuted: 'var(--fe-text-muted)',
+  border: 'var(--fe-border)',
+  hover: 'var(--fe-hover)',
+  active: 'var(--fe-active)',
 
-  // Brand
-  primary: '#06b6d4',
-  primaryHover: '#0891b2',
-  primaryLight: '#cffafe',
-  accent: '#fb7185',
-  accentHover: '#f43f5e',
+  // Brand — UI accent only (see SELECTION.ring for the on-page indicator)
+  primary: 'var(--fe-primary)',
+  primaryHover: 'var(--fe-primary-hover)',
+  primaryLight: 'var(--fe-primary-light)',
+  accent: 'var(--fe-accent)',
+  accentHover: 'var(--fe-accent-hover)',
 
   // Semantic
-  destructive: '#ef4444',
-  success: '#22c55e',
-  warning: '#f59e0b',
-  info: '#3b82f6',
+  destructive: 'var(--fe-destructive)',
+  success: 'var(--fe-success)',
+  warning: 'var(--fe-warning)',
+  info: 'var(--fe-info)',
 
-  // Guide overlay
+  // Guide overlay (on-page — not themed, mode-coded to read over page content)
   guide: '#8b5cf6',
 
   // Spacing base unit
@@ -98,12 +105,22 @@ export const OVERLAY = {
   radiusLg: '12px',
 
   // Shadows
-  shadowMd: '0 4px 6px rgba(0, 0, 0, 0.07)',
-  shadowLg: '0 10px 15px rgba(0, 0, 0, 0.10)',
+  shadowMd: 'var(--fe-shadow-md)',
+  shadowLg: 'var(--fe-shadow-lg)',
 
   // Breakpoints (overlay layout, not project tokens)
   compactBreakpoint: 1024,
   standardBreakpoint: 1280,
+} as const;
+
+// ---------------------------------------------------------------------------
+// Selection / indicator colors — on-page, mode-coded, NOT themed
+// ---------------------------------------------------------------------------
+
+/** On-page selection ring color. Kept separate from OVERLAY.primary so the
+ *  themed UI accent can be adjusted for light mode without changing the ring. */
+export const SELECTION = {
+  ring: '#06b6d4',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -156,7 +173,7 @@ export const INSERT_PANEL_MAX_HEIGHT = 420;
 // Box model diagram colors (reuses zone overlay palette)
 export const BOX_MODEL = {
   marginFill: 'rgba(251, 113, 133, 0.20)',
-  borderFill: 'rgba(255, 255, 255, 0.12)',
+  borderFill: OVERLAY.active,
   paddingFill: 'rgba(245, 158, 11, 0.20)',
   contentFill: 'rgba(6, 182, 212, 0.20)',
   marginText: '#fb7185',

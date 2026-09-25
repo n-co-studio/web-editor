@@ -129,7 +129,7 @@ export function createButton(
       ? OVERLAY.primaryHover
       : variant === 'destructive'
         ? '#dc2626'
-        : 'rgba(255, 255, 255, 0.08)';
+        : OVERLAY.hover;
 
   btn.addEventListener('mouseenter', () => {
     btn.style.background = hoverBg;

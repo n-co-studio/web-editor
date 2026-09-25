@@ -10,6 +10,14 @@
  *                                        nothing persists across reloads —
  *                                        matches the demo's "refresh resets
  *                                        everything" promise)
+ *   - chrome.storage.local.get/set    → same in-memory Map (demo mode only;
+ *                                        theme preference does not persist
+ *                                        across reloads — consistent with the
+ *                                        demo's "refresh resets everything" promise)
+ *   - chrome.storage.onChanged        → no-op-safe addListener/removeListener
+ *                                        (popup writes are same-origin only in
+ *                                        the real extension, so the demo doesn't
+ *                                        need cross-context notification)
  *   - chrome.runtime.sendMessage      → noop that resolves with `{ ok: false }`
  *   - chrome.runtime.onMessage        → registry-backed dispatch (broadcast()
  *                                        fires all listeners synchronously)
@@ -121,15 +129,25 @@ export function installChromeShim(): void {
   purgeLegacyLocalStorage();
 
   const existing = w.chrome || {};
+  const sharedStorage = {
+    get: storageGet,
+    set: storageSet,
+    remove: storageRemove,
+  };
   w.chrome = {
     ...existing,
     __NCO_WEB_EDITOR_SHIM__: true,
     storage: {
       ...(existing.storage || {}),
-      session: {
-        get: storageGet,
-        set: storageSet,
-        remove: storageRemove,
+      session: sharedStorage,
+      // chrome.storage.local — backed by the same in-memory map in demo mode;
+      // theme preference is resolved and applied live but does not persist across reloads.
+      local: sharedStorage,
+      // chrome.storage.onChanged — no-op-safe; popup writes are same-origin only,
+      // so the demo does not need cross-context notification.
+      onChanged: {
+        addListener: (_listener: unknown) => { /* no-op in demo */ },
+        removeListener: (_listener: unknown) => { /* no-op in demo */ },
       },
     },
     runtime: {

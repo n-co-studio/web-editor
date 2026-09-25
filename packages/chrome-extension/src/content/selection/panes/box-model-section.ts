@@ -119,7 +119,7 @@ export class BoxModelSection {
     const box = createElement('div', {}, {
       position: 'relative',
       background: fill,
-      border: `1px dashed rgba(255, 255, 255, 0.15)`,
+      border: `1px dashed ${OVERLAY.border}`,
       padding: '14px 20px',
       textAlign: 'center',
     });
@@ -185,7 +185,7 @@ export class BoxModelSection {
   private buildContentBox(snapshot: ComputedStyleSnapshot): HTMLDivElement {
     const box = createElement('div', {}, {
       background: BOX_MODEL.contentFill,
-      border: `1px dashed rgba(255, 255, 255, 0.15)`,
+      border: `1px dashed ${OVERLAY.border}`,
       padding: '6px 8px',
       textAlign: 'center',
       minHeight: '24px',

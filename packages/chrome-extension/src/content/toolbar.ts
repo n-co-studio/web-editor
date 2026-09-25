@@ -994,7 +994,7 @@ export class FloatingToolbar {
 
     btn.addEventListener('mouseenter', () => {
       if (btn.style.opacity !== '0.3') {
-        btn.style.background = 'rgba(255, 255, 255, 0.08)';
+        btn.style.background = OVERLAY.hover;
       }
     });
     btn.addEventListener('mouseleave', () => {
@@ -1070,7 +1070,7 @@ export class FloatingToolbar {
       if (state) this.setSectionCollapsed(id, !state.collapsed, true);
     });
     headerBtn.addEventListener('mouseenter', () => {
-      headerBtn.style.background = 'rgba(255, 255, 255, 0.08)';
+      headerBtn.style.background = OVERLAY.hover;
     });
     headerBtn.addEventListener('mouseleave', () => {
       headerBtn.style.background = 'transparent';

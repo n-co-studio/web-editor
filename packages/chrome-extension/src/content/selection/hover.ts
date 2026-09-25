@@ -1,6 +1,6 @@
 import { createElement } from '../../shared/ui-utils';
 import { getTopElementAt, isElementVisible } from '../../shared/dom-utils';
-import { OVERLAY } from '../../shared/constants';
+import { OVERLAY, SELECTION } from '../../shared/constants';
 import { createZoneOverlays } from '../editing/zone-overlays';
 
 /**
@@ -28,7 +28,7 @@ export class HoverHighlight {
     this.overlay = createElement('div', {}, {
       position: 'fixed',
       pointerEvents: 'none',
-      border: `2px solid ${OVERLAY.primary}`,
+      border: `2px solid ${SELECTION.ring}`,
       background: 'rgba(6, 182, 212, 0.08)',
       borderRadius: OVERLAY.radiusSm,
       transition: 'all 0.05s ease',

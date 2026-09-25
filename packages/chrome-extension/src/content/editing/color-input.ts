@@ -86,7 +86,7 @@ export function buildColorInput(
   // Text input for manual entry (hex, rgb(), named colors).
   const textInput = createElement('input', { type: 'text', value: currentValue }, {
     padding: '4px 6px',
-    background: 'rgba(255, 255, 255, 0.08)',
+    background: OVERLAY.hover,
     border: `1px solid ${OVERLAY.border}`,
     borderRadius: OVERLAY.radiusSm,
     color: OVERLAY.text,

@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Light / Dark / System theme toggle** — the toolbar-icon popup now has a three-way theme control (Light / Dark / System). The preference persists via `chrome.storage.local` and applies live without reloading the overlay. System mode follows the OS `prefers-color-scheme` setting and is the default.
+
 ## [0.2.0] - 2026-09-21
 
 First public release: Chrome Web Store extension 0.2.0 and both npm packages at 0.2.0.

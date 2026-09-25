@@ -427,7 +427,7 @@ export class AppearanceEditor {
       fontSize: '10px',
       border: `1px solid ${shadow.inset ? OVERLAY.primary : OVERLAY.border}`,
       borderRadius: OVERLAY.radiusSm,
-      background: shadow.inset ? 'rgba(6, 182, 212, 0.12)' : 'rgba(255, 255, 255, 0.08)',
+      background: shadow.inset ? 'rgba(6, 182, 212, 0.12)' : OVERLAY.hover,
       color: shadow.inset ? OVERLAY.primary : OVERLAY.textMuted,
       cursor: 'pointer',
       fontFamily: OVERLAY.monoFamily,
@@ -437,7 +437,7 @@ export class AppearanceEditor {
       shadow.inset = !shadow.inset;
       insetToggle.textContent = shadow.inset ? 'On' : 'Off';
       insetToggle.style.borderColor = shadow.inset ? OVERLAY.primary : OVERLAY.border;
-      insetToggle.style.background = shadow.inset ? 'rgba(6, 182, 212, 0.12)' : 'rgba(255, 255, 255, 0.08)';
+      insetToggle.style.background = shadow.inset ? 'rgba(6, 182, 212, 0.12)' : OVERLAY.hover;
       insetToggle.style.color = shadow.inset ? OVERLAY.primary : OVERLAY.textMuted;
       this.preview.revert();
       const fromValue = getComputedProperty(element, 'box-shadow');
@@ -489,7 +489,7 @@ export class AppearanceEditor {
     const styleSelect = createElement('select', {}, {
       width: '100%',
       padding: '4px 6px',
-      background: 'rgba(255, 255, 255, 0.08)',
+      background: OVERLAY.hover,
       border: `1px solid ${OVERLAY.border}`,
       borderRadius: OVERLAY.radiusSm,
       color: OVERLAY.text,

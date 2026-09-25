@@ -16,6 +16,17 @@
       --on: #22c55e;
       --off: #71717a;
     }
+    /* Light-theme popup (when document has data-fe-theme="light") */
+    :root[data-fe-theme="light"] {
+      --bg: rgba(255, 255, 255, 0.97);
+      --text: #18181b;
+      --muted: #52525b;
+      --border: rgba(0, 0, 0, 0.14);
+      --hover: rgba(0, 0, 0, 0.06);
+      --primary: #0e7490;
+      --on: #166534;
+      --off: #71717a;
+    }
     * { box-sizing: border-box; }
     html, body {
       margin: 0;
@@ -85,6 +96,45 @@
       color: var(--muted);
       line-height: 1.4;
     }
+    /* Theme radio group */
+    .theme-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 10px;
+    }
+    .theme-row .icon {
+      width: 16px;
+      text-align: center;
+      flex-shrink: 0;
+      color: var(--muted);
+    }
+    .theme-row .label { flex: 1; font-size: 13px; }
+    .theme-group {
+      display: flex;
+      gap: 2px;
+      flex-shrink: 0;
+    }
+    .theme-opt {
+      padding: 2px 8px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .theme-opt:hover { background: var(--hover); color: var(--text); }
+    .theme-opt[aria-checked="true"] {
+      background: var(--hover);
+      color: var(--primary);
+      border-color: var(--primary);
+    }
+    .theme-opt:focus-visible {
+      outline: 2px solid var(--primary);
+      outline-offset: 1px;
+    }
   </style>
 </head>
 <body>
@@ -105,6 +155,44 @@
     </button>
   </div>
   <div class="hint" id="hint">Works on localhost dev pages.</div>
+  <div style="border-top: 1px solid var(--border);">
+    <!-- Theme preference — always enabled, even on non-localhost pages -->
+    <div class="theme-row">
+      <span class="icon" aria-hidden="true">&#9788;</span>
+      <span class="label">Theme</span>
+      <div
+        class="theme-group"
+        role="radiogroup"
+        aria-label="Theme preference"
+        id="theme-group"
+      >
+        <button
+          class="theme-opt"
+          role="radio"
+          aria-checked="false"
+          data-theme="light"
+          id="theme-light"
+          type="button"
+        >Light</button>
+        <button
+          class="theme-opt"
+          role="radio"
+          aria-checked="false"
+          data-theme="dark"
+          id="theme-dark"
+          type="button"
+        >Dark</button>
+        <button
+          class="theme-opt"
+          role="radio"
+          aria-checked="false"
+          data-theme="system"
+          id="theme-system"
+          type="button"
+        >System</button>
+      </div>
+    </div>
+  </div>
   <div class="menu" style="border-top: 1px solid var(--border); padding-top: 2px;">
     <a
       class="item"

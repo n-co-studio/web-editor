@@ -56,11 +56,16 @@ const OVERLAY_CSS = /* css */ `
     --fe-mono-size: 11px;
     --fe-mono-weight: 400;
 
+    /* Dark theme (default) */
     --fe-bg: rgba(0, 0, 0, 0.85);
     --fe-bg-subtle: rgba(0, 0, 0, 0.65);
+    --fe-bg-raised: rgba(30, 30, 35, 0.90);
     --fe-text: #ffffff;
     --fe-text-muted: #a1a1aa;
+    --fe-text-inverse: #ffffff;
     --fe-border: rgba(255, 255, 255, 0.15);
+    --fe-hover: rgba(255, 255, 255, 0.08);
+    --fe-active: rgba(255, 255, 255, 0.12);
 
     --fe-primary: #06b6d4;
     --fe-primary-hover: #0891b2;
@@ -80,6 +85,37 @@ const OVERLAY_CSS = /* css */ `
 
     --fe-shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
     --fe-shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.10);
+  }
+
+  /* Light theme — redefine only chrome tokens; on-page indicator tokens are unchanged */
+  :host([data-fe-theme="light"]) {
+    --fe-bg: rgba(255, 255, 255, 0.95);
+    --fe-bg-subtle: rgba(248, 248, 250, 0.92);
+    --fe-bg-raised: rgba(255, 255, 255, 1);
+    --fe-text: #18181b;
+    --fe-text-muted: #52525b;
+    --fe-text-inverse: #000000;
+    --fe-border: rgba(0, 0, 0, 0.14);
+    --fe-hover: rgba(0, 0, 0, 0.06);
+    --fe-active: rgba(0, 0, 0, 0.10);
+
+    /* Primary darkened for 4.5:1 AA on light background: #0e7490 = 5.33:1 vs white */
+    --fe-primary: #0e7490;
+    --fe-primary-hover: #0c6479;
+    --fe-primary-light: #cffafe;
+
+    /* Semantic colors adjusted for AA on light backgrounds */
+    /* --fe-destructive: #dc2626 = 4.87:1 vs white ✓ */
+    --fe-destructive: #dc2626;
+    /* --fe-success: #166534 = 7.24:1 vs white ✓ */
+    --fe-success: #166534;
+    /* --fe-warning: #b45309 = 5.02:1 vs white ✓ */
+    --fe-warning: #b45309;
+    /* --fe-info: #1d4ed8 = 6.77:1 vs white ✓ */
+    --fe-info: #1d4ed8;
+
+    --fe-shadow-md: 0 4px 6px rgba(0, 0, 0, 0.08);
+    --fe-shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.12);
   }
 
   *, *::before, *::after {

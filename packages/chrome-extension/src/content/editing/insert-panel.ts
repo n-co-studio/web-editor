@@ -325,7 +325,7 @@ export class InsertPanel {
         fontFamily: OVERLAY.fontFamily,
         fontWeight: isActive ? "600" : "500",
         border: "none",
-        background: isActive ? "rgba(255, 255, 255, 0.06)" : "transparent",
+        background: isActive ? OVERLAY.hover : "transparent",
         borderBottom: `2px solid ${isActive ? INSERT_INDICATOR.color : "transparent"}`,
         color: enabled ? (isActive ? OVERLAY.text : OVERLAY.textMuted) : "rgba(255,255,255,0.25)",
         cursor: enabled ? "pointer" : "not-allowed",
@@ -365,7 +365,7 @@ export class InsertPanel {
       const isActive = this.activeTab === tab;
       btn.setAttribute("aria-selected", String(isActive));
       btn.style.fontWeight = isActive ? "600" : "500";
-      btn.style.background = isActive ? "rgba(255, 255, 255, 0.06)" : "transparent";
+      btn.style.background = isActive ? OVERLAY.hover : "transparent";
       btn.style.borderBottom = `2px solid ${isActive ? INSERT_INDICATOR.color : "transparent"}`;
       btn.style.color = enabled
         ? (isActive ? OVERLAY.text : OVERLAY.textMuted)
@@ -414,7 +414,7 @@ export class InsertPanel {
       {
         width: "100%",
         padding: "6px 8px",
-        background: "rgba(255, 255, 255, 0.08)",
+        background: OVERLAY.hover,
         border: `1px solid ${OVERLAY.border}`,
         borderRadius: OVERLAY.radiusSm,
         color: OVERLAY.text,
@@ -725,7 +725,7 @@ export class InsertPanel {
 
     row.addEventListener("mouseenter", () => {
       if (!this.isEntrySelected(entry)) {
-        row.style.background = "rgba(255, 255, 255, 0.08)";
+        row.style.background = OVERLAY.hover;
       }
     });
     row.addEventListener("mouseleave", () => {
@@ -810,7 +810,7 @@ export class InsertPanel {
     // Hover effects (only when not selected)
     btn.addEventListener("mouseenter", () => {
       if (!this.isEntrySelected(entry)) {
-        btn.style.background = "rgba(255, 255, 255, 0.08)";
+        btn.style.background = OVERLAY.hover;
       }
     });
 
@@ -949,7 +949,7 @@ export class InsertPanel {
           padding: "2px 4px",
           fontSize: "10px",
           fontFamily: OVERLAY.monoFamily,
-          background: "rgba(255, 255, 255, 0.08)",
+          background: OVERLAY.hover,
           border: `1px solid ${OVERLAY.border}`,
           borderRadius: "3px",
           color: OVERLAY.text,
@@ -1038,7 +1038,7 @@ export class InsertPanel {
           padding: "2px 4px",
           fontSize: "10px",
           fontFamily: OVERLAY.monoFamily,
-          background: "rgba(255, 255, 255, 0.08)",
+          background: OVERLAY.hover,
           border: `1px solid ${OVERLAY.border}`,
           borderRadius: "3px",
           color: OVERLAY.text,

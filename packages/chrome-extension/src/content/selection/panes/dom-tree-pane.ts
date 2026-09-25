@@ -256,7 +256,7 @@ export class DomTreePane {
     }
 
     labelArea.addEventListener('mouseenter', () => {
-      if (!isSelected) row.style.background = 'rgba(255, 255, 255, 0.06)';
+      if (!isSelected) row.style.background = OVERLAY.hover;
       this.elementHoverCb?.(element);
     });
     labelArea.addEventListener('mouseleave', () => {
@@ -297,7 +297,7 @@ export class DomTreePane {
       fontSize: '10px',
       fontFamily: OVERLAY.monoFamily,
       color: OVERLAY.textMuted,
-      background: 'rgba(255, 255, 255, 0.08)',
+      background: OVERLAY.hover,
       borderRadius: '3px',
       padding: '0 4px',
       lineHeight: '14px',
@@ -354,7 +354,7 @@ export class DomTreePane {
     const countBadge = createText('span', `${attrs.length}`, 'mono');
     countBadge.style.fontSize = '9px';
     countBadge.style.color = OVERLAY.textMuted;
-    countBadge.style.background = 'rgba(255, 255, 255, 0.06)';
+    countBadge.style.background = OVERLAY.hover;
     countBadge.style.borderRadius = '3px';
     countBadge.style.padding = '0 3px';
     header.appendChild(countBadge);
@@ -460,7 +460,7 @@ export class DomTreePane {
 
     // Hover effect
     row.addEventListener('mouseenter', () => {
-      row.style.background = 'rgba(255, 255, 255, 0.06)';
+      row.style.background = OVERLAY.hover;
     });
     row.addEventListener('mouseleave', () => {
       row.style.background = 'transparent';

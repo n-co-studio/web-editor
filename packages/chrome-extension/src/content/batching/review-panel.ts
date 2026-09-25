@@ -348,7 +348,7 @@ export class ReviewPanel {
     const demoMode = (globalThis as any).__NCO_WEB_EDITOR_DEMO__ === true;
 
     const banner = createElement('div', {}, {
-      background: demoMode ? 'rgba(255, 255, 255, 0.06)' : 'rgba(245, 158, 11, 0.15)',
+      background: demoMode ? OVERLAY.hover : 'rgba(245, 158, 11, 0.15)',
       border: `1px solid ${demoMode ? 'rgba(255, 255, 255, 0.2)' : OVERLAY.warning}`,
       borderRadius: OVERLAY.radiusSm,
       padding: '8px 12px',

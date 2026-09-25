@@ -287,7 +287,7 @@ export class PositionEditor {
 
     btn.addEventListener('mouseenter', () => {
       if (btn.style.opacity !== '0.3' && !this.moveActive) {
-        btn.style.background = 'rgba(255, 255, 255, 0.08)';
+        btn.style.background = OVERLAY.hover;
       }
     });
     btn.addEventListener('mouseleave', () => {
