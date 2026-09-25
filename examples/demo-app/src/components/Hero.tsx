@@ -1,6 +1,8 @@
 /**
- * Hero — thin-weight serif display headline + sans subhead on the white
- * paper ground. Text only: no header above it, no image panel beside it.
+ * Hero — a thin-weight serif display headline on the white paper ground,
+ * and nothing else: no eyebrow above it, no standfirst below it, no image
+ * panel beside it. The masthead strip names the product; this states the
+ * page's purpose and hands straight over to the tabs.
  */
 
 export default function Hero() {
@@ -23,31 +25,15 @@ export default function Hero() {
               lineHeight: 'var(--leading-tight)',
               letterSpacing: 'var(--tracking-tight)',
               color: 'var(--color-ink)',
-              // Wide enough to hold the headline on one line at full size;
-              // a max (not a fixed width) so it still reflows on narrow screens.
-              maxWidth: '733px',
+              // Deliberately narrow, so the headline breaks over several lines
+              // rather than running the width of the column. A max (not a fixed
+              // width) so it still reflows on narrow screens.
+              maxWidth: '472px',
               marginTop: 'var(--space-5)',
             }}
           >
-            Setup your new AI design tool
+            Get to know your new AI design tool.
           </h1>
-
-          <p
-            style={{
-              fontFamily: 'var(--font-sans)',
-              fontWeight: 'var(--fw-book)',
-              fontSize: 'var(--text-body)',
-              color: 'var(--color-secondary)',
-              maxWidth: '70ch',
-              marginTop: 'var(--space-6)',
-              marginBottom: 'var(--space-16)',
-            }}
-          >
-            The Web Editor lets AI-native designers make precise frontend changes without touching
-            code — a drag-and-drop design interface on your local dev pages that hands reviewed
-            edits to the agent watching your dev environment. Built as a process tool for a
-            portfolio; now a feature-rich, production-ready product.
-          </p>
 
       </div>
     </section>
