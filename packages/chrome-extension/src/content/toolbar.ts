@@ -281,7 +281,29 @@ export class FloatingToolbar {
   private contentWrapper: HTMLDivElement | null = null;
   private sections = new Map<ToolbarSectionId, SectionState>();
   private autoFitTimer: ReturnType<typeof setTimeout> | null = null;
-  private readonly onWindowResize = (): void => this.scheduleSectionAutoFit();
+  /** Pending rAF for the resize clamp — cancelled on hide so it cannot fire after teardown. */
+  private clampFrame: number | null = null;
+  /**
+   * Clamp on its own schedule, then let the debounced auto-fit run. The clamp
+   * must not ride on auto-fit alone: updateSectionAutoFit early-returns when the
+   * toolbar is collapsed, so a collapsed toolbar would never be re-pinned — and
+   * a collapsed toolbar pushed off-screen leaves nothing to click to get it
+   * back. Auto-fit clamps again afterwards, once collapsing has settled height.
+   *
+   * Coalesced to one clamp per frame. `resize` can fire many times a second
+   * while a window is dragged, and clampToViewport reads offsetWidth/Height,
+   * which forces layout — this code runs inside someone else's page, so it
+   * should not add a forced layout per event to their resize path.
+   */
+  private readonly onWindowResize = (): void => {
+    if (this.clampFrame === null) {
+      this.clampFrame = requestAnimationFrame(() => {
+        this.clampFrame = null;
+        this.clampToViewport();
+      });
+    }
+    this.scheduleSectionAutoFit();
+  };
   private toggleArrow: HTMLElement | null = null;
   private toggleBtn: HTMLButtonElement | null = null;
   private undoBtn: HTMLButtonElement | null = null;
@@ -606,10 +628,20 @@ export class FloatingToolbar {
     // Auto-collapse sections when the viewport is shorter than the toolbar.
     window.addEventListener('resize', this.onWindowResize);
     this.updateSectionAutoFit();
+
+    // Auto-fit may have changed the height, so clamp after it, not before.
+    // A position saved on a larger window can otherwise land the toolbar
+    // off-screen — and it is the only way to switch tools, so being unable to
+    // reach it strands the whole editor.
+    this.clampToViewport();
   }
 
   hide(): void {
     window.removeEventListener('resize', this.onWindowResize);
+    if (this.clampFrame !== null) {
+      cancelAnimationFrame(this.clampFrame);
+      this.clampFrame = null;
+    }
     if (this.autoFitTimer !== null) {
       clearTimeout(this.autoFitTimer);
       this.autoFitTimer = null;
@@ -1355,6 +1387,46 @@ export class FloatingToolbar {
     // manually-collapsed section whose tool just became active), so refresh
     // every header rather than relying on setSectionCollapsed.
     for (const id of SECTION_ORDER) this.refreshSectionHeader(id);
+
+    // Collapsing changed the height, and the window that triggered this may
+    // have shrunk — re-pin before handing control back.
+    this.clampToViewport();
+  }
+
+  /**
+   * Pin the toolbar inside the viewport.
+   *
+   * `makeDraggable` clamps while you drag, but two paths bypass it: a position
+   * restored from storage, and a window that shrinks after the toolbar was
+   * placed. Either can leave the toolbar wholly off-screen, and since it is the
+   * only surface for switching tools, an unreachable toolbar strands the editor
+   * with no way back short of a reload.
+   *
+   * When the toolbar is larger than the viewport the max goes negative and the
+   * `Math.max(0, …)` pins it to the top-left corner, which is the reachable
+   * edge — better than honouring an offset that puts it out of view.
+   *
+   * Reads the inline `left`/`top` it will write back, rather than a measured
+   * rect. The NaN guard is narrow on purpose: buildToolbar sets both to literal
+   * values, so it only fires if they are ever cleared — at which point doing
+   * nothing is right, since coercing an empty string to 0 would yank a
+   * correctly-placed toolbar into the corner.
+   */
+  private clampToViewport(): void {
+    const el = this.container;
+    if (!el || !this.visible) return;
+
+    const left = parseFloat(el.style.left);
+    const top = parseFloat(el.style.top);
+    if (Number.isNaN(left) || Number.isNaN(top)) return;
+
+    const maxLeft = Math.max(0, window.innerWidth - el.offsetWidth);
+    const maxTop = Math.max(0, window.innerHeight - el.offsetHeight);
+    const clampedLeft = Math.min(Math.max(0, left), maxLeft);
+    const clampedTop = Math.min(Math.max(0, top), maxTop);
+
+    if (clampedLeft !== left) el.style.left = `${clampedLeft}px`;
+    if (clampedTop !== top) el.style.top = `${clampedTop}px`;
   }
 
   // -----------------------------------------------------------------------
