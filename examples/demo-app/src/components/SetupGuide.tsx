@@ -144,7 +144,9 @@ function CopyPromptButton({ text }: { text: string }) {
         {state === 'copied'
           ? 'Copied'
           : state === 'failed'
-            ? 'Copy failed — select the text above'
+            ? // Names the prompt rather than pointing at it, so reordering the
+              // step cannot make this message wrong. It once said "above".
+              'Copy failed — select the prompt text and copy it manually'
             : ''}
       </span>
     </div>
@@ -227,7 +229,19 @@ function ConnectYourAgent() {
       </div>
 
       <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
-        Add this to{' '}
+        Easiest way — let {provider.name} set itself up. Copy this and paste it in:
+      </p>
+      <CopyPromptButton text={mcpPrompt(provider)} />
+      <Code>{mcpPrompt(provider)}</Code>
+
+      <p
+        style={{
+          fontSize: 'var(--text-body-sm)',
+          color: 'var(--color-secondary)',
+          marginTop: 'var(--space-3)',
+        }}
+      >
+        Or add it yourself, to{' '}
         <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-ink)' }}>
           {provider.configPath}
         </code>
@@ -242,21 +256,10 @@ function ConnectYourAgent() {
   }
 }`}</Code>
       <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
-        There is nothing to install first: <code style={{ fontFamily: 'var(--font-mono)' }}>npx</code>{' '}
-        fetches the server the first time your agent starts it, then reuses the cached copy.
+        Either way there is nothing to install first:{' '}
+        <code style={{ fontFamily: 'var(--font-mono)' }}>npx</code> fetches the server the first time
+        your agent starts it, then reuses the cached copy.
       </p>
-
-      <p
-        style={{
-          fontSize: 'var(--text-body-sm)',
-          color: 'var(--color-secondary)',
-          marginTop: 'var(--space-3)',
-        }}
-      >
-        Or let {provider.name} do it — paste this in:
-      </p>
-      <Code>{mcpPrompt(provider)}</Code>
-      <CopyPromptButton text={mcpPrompt(provider)} />
     </>
   );
 }
