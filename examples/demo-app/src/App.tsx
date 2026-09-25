@@ -1,5 +1,4 @@
 import Hero from './components/Hero';
-import StepsRow from './components/StepsRow';
 import GuideTabs from './components/GuideTabs';
 import TopBanner from './components/TopBanner';
 
@@ -22,7 +21,6 @@ export default function App() {
         }}
       >
         <Hero />
-        <StepsRow />
         <GuideTabs />
       </main>
 

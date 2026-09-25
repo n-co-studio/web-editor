@@ -15,7 +15,7 @@ export default function Hero() {
           <span
             style={{
               fontSize: 'var(--text-caption)',
-              fontFamily: 'var(--font-mono)',
+              fontFamily: 'var(--font-serif)',
               textTransform: 'uppercase',
               letterSpacing: 'var(--tracking-wide)',
               color: 'var(--color-secondary)',
@@ -32,11 +32,13 @@ export default function Hero() {
               lineHeight: 'var(--leading-tight)',
               letterSpacing: 'var(--tracking-tight)',
               color: 'var(--color-ink)',
-              maxWidth: '24ch',
+              // Wide enough to hold the headline on one line at full size;
+              // a max (not a fixed width) so it still reflows on narrow screens.
+              maxWidth: '733px',
               marginTop: 'var(--space-5)',
             }}
           >
-            Design directly on the page,<br />AI builds in the background.
+            Setup your new AI design tool!
           </h1>
 
           <p

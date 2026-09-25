@@ -34,13 +34,12 @@ Rendered from [`src/App.tsx`](src/App.tsx), in order:
 | [`TopBanner`](src/components/TopBanner.tsx) | Masthead strip — product name, nco.studio credit, and the lava field |
 | └ [`LavaBackground`](src/components/LavaBackground.tsx) | Decorative animated canvas field, scoped to the strip |
 | [`Hero`](src/components/Hero.tsx) | Headline and subhead |
-| [`StepsRow`](src/components/StepsRow.tsx) | The three beats — design, send over MCP, agent writes the code |
 | [`GuideTabs`](src/components/GuideTabs.tsx) | Tab shell for the three guide panels below |
 | ├ [`SetupGuide`](src/components/SetupGuide.tsx) | "Set it up" — install, connect the agent, run |
 | ├ [`HowToUse`](src/components/HowToUse.tsx) | "How to use" — the editing loop |
 | └ [`Troubleshooting`](src/components/Troubleshooting.tsx) | Connection resets, port conflicts, duplicate config |
 
-`Logo.tsx` is used by `TopBanner`. `Faq.tsx`, `Benefits.tsx`, `Walkthrough.tsx`, and `SiteFooter.tsx` remain in `src/components/` but are **not rendered** — they are leftovers from earlier versions of the page, kept for reference.
+`Logo.tsx` is used by `TopBanner`. `StepsRow.tsx`, `Faq.tsx`, `Benefits.tsx`, `Walkthrough.tsx`, and `SiteFooter.tsx` remain in `src/components/` but are **not rendered** — they are leftovers from earlier versions of the page, kept for reference.
 
 ## Edit targets
 
