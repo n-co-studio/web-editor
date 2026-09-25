@@ -40,11 +40,6 @@ const STEPS: Step[] = [
           <code style={{ fontFamily: 'var(--font-mono)' }}>127.0.0.1</code> — where the source mapping and
           design tokens it relies on come from.
         </p>
-        <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
-          Developing on the extension itself? Load it unpacked instead:
-        </p>
-        <Code>{`chrome://extensions → Developer mode → Load unpacked
-→ select packages/chrome-extension/dist`}</Code>
       </>
     ),
   },

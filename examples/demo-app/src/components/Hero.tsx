@@ -4,26 +4,17 @@
  */
 
 export default function Hero() {
+  // Deliberately not .nco-section: that class draws a full-bleed rule at the
+  // section's bottom edge, and the guide reads better with whitespace alone
+  // between the headline and the tabs. Its padding-bottom is kept inline.
   return (
     <section
-      className="nco-section"
       style={{
         paddingTop: 'var(--space-8)',
+        paddingBottom: 'var(--space-16)',
       }}
     >
       <div>
-          <span
-            style={{
-              fontSize: 'var(--text-caption)',
-              fontFamily: 'var(--font-serif)',
-              textTransform: 'uppercase',
-              letterSpacing: 'var(--tracking-wide)',
-              color: 'var(--color-secondary)',
-            }}
-          >
-            Visual Web Editor for AI Agents — by n'co studio
-          </span>
-
           <h1
             style={{
               fontFamily: 'var(--font-serif)',
@@ -38,7 +29,7 @@ export default function Hero() {
               marginTop: 'var(--space-5)',
             }}
           >
-            Setup your new AI design tool!
+            Setup your new AI design tool
           </h1>
 
           <p
