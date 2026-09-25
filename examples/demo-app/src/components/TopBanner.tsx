@@ -6,8 +6,8 @@
  * The strip carries the nco.studio landing page's own background: the same lava
  * field, the same forest-green palette on black, and the same blob dispersal
  * when the logo link is hovered or focused. `data-lava-scope` bounds that
- * dispersal to this strip's field, so the page's own (brighter) lava behind the
- * guide is untouched.
+ * dispersal to this strip's field — the guide below is ink on white paper, and
+ * this strip is the page's only dark surface.
  *
  * One deliberate divergence from the landing page: a 35% black scrim sits
  * between the field and the text here. The landing page has none, but its copy

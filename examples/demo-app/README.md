@@ -2,7 +2,7 @@
 
 A Vite + React **guide** for the Visual Web Editor for AI Agents: a hero, a three-step "how it works" row, and a tabbed guide covering setup, day-to-day use, and troubleshooting.
 
-The design follows the **Mark Preston** brand system: two Adobe Typekit faces — `minion-3-display` (serif, display) and `hero-new` (sans, body) loaded via kit `ivy7roo` — thin/light weights, **sharp corners** (no border-radius), **no shadows**, generous whitespace and hairline dividers. The page renders over an animated green lava field ([`src/components/LavaBackground.tsx`](src/components/LavaBackground.tsx)), a decorative canvas layer that sits behind all content and inverts the text scope to paper-on-ink.
+The design follows the **Mark Preston** brand system: two Adobe Typekit faces — `minion-3-display` (serif, display) and `hero-new` (sans, body) loaded via kit `ivy7roo` — thin/light weights, **sharp corners** (no border-radius), **no shadows**, generous whitespace and hairline dividers. The guide itself is ink on white paper (a faint dot grid, `.nco-paper`). The one dark surface is the masthead strip at the top ([`src/components/TopBanner.tsx`](src/components/TopBanner.tsx)), which carries the nco.studio landing page's animated green lava field ([`src/components/LavaBackground.tsx`](src/components/LavaBackground.tsx)) — scoped to the strip, not behind the page.
 
 The page **owns its own design tokens** in [`src/tokens.css`](src/tokens.css): the MCP server discovers those CSS custom properties and snaps edits to them — there is no separate "default" token set to override (see `packages/mcp-server/src/tokens.ts`). Edit a token here and it *is* what the tool offers.
 
@@ -31,7 +31,8 @@ Rendered from [`src/App.tsx`](src/App.tsx), in order:
 
 | Component | Role |
 |-----------|------|
-| [`LavaBackground`](src/components/LavaBackground.tsx) | Decorative animated canvas field behind the page |
+| [`TopBanner`](src/components/TopBanner.tsx) | Masthead strip — product name, nco.studio credit, and the lava field |
+| └ [`LavaBackground`](src/components/LavaBackground.tsx) | Decorative animated canvas field, scoped to the strip |
 | [`Hero`](src/components/Hero.tsx) | Headline and subhead |
 | [`StepsRow`](src/components/StepsRow.tsx) | The three beats — design, send over MCP, agent writes the code |
 | [`GuideTabs`](src/components/GuideTabs.tsx) | Tab shell for the three guide panels below |
@@ -39,7 +40,7 @@ Rendered from [`src/App.tsx`](src/App.tsx), in order:
 | ├ [`HowToUse`](src/components/HowToUse.tsx) | "How to use" — the editing loop |
 | └ [`Troubleshooting`](src/components/Troubleshooting.tsx) | Connection resets, port conflicts, duplicate config |
 
-`Faq.tsx`, `Benefits.tsx`, `Walkthrough.tsx`, `SiteFooter.tsx`, and `Logo.tsx` remain in `src/components/` but are **not rendered** — they are leftovers from earlier versions of the page, kept for reference.
+`Logo.tsx` is used by `TopBanner`. `Faq.tsx`, `Benefits.tsx`, `Walkthrough.tsx`, and `SiteFooter.tsx` remain in `src/components/` but are **not rendered** — they are leftovers from earlier versions of the page, kept for reference.
 
 ## Edit targets
 

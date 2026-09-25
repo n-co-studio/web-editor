@@ -1,7 +1,7 @@
 /**
  * GuideTabs — the guide section with three tabs: "Set it up" (install +
  * connect), "How to use" (the editing loop), and "Troubleshooting" (MCP
- * connection problems and resets). Flat underline tabs in the lava theme;
+ * connection problems and resets). Flat underline tabs in ink on white;
  * sharp, no shadows.
  */
 

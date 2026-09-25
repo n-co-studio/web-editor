@@ -1,6 +1,6 @@
 /**
  * StepsRow — the three beats of using the editor as bare text columns
- * over the lava field — no card chrome: design on the page, send mapped edits over MCP, the
+ * on white — no card chrome: design on the page, send mapped edits over MCP, the
  * agent writes the code. Sans two-digit indices against serif titles — the
  * page's heading idiom, so the row reads as headings rather than as labels.
  * Sharp, flat.

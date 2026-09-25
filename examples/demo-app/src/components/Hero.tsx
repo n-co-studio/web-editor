@@ -1,6 +1,6 @@
 /**
- * Hero — thin-weight serif display headline + sans subhead over the lava
- * field. Text only: no header above it, no image panel beside it.
+ * Hero — thin-weight serif display headline + sans subhead on the white
+ * paper ground. Text only: no header above it, no image panel beside it.
  */
 
 export default function Hero() {

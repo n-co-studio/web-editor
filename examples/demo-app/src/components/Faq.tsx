@@ -1,7 +1,7 @@
 /**
  * FAQ — grounded in how the editor actually works: build-time element tags,
  * token-restricted editing, the review queue, and the change-compression
- * layer. Glass cards over the lava field; sharp, flat, no shadows.
+ * layer. Hairline cards on white; sharp, flat, no shadows.
  */
 
 type Qa = { q: string; a: string };

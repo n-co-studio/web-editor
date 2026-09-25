@@ -1,6 +1,6 @@
 /**
  * Troubleshooting — connection and reset guidance for the MCP bridge, as a tab
- * inside GuideTabs. Symptom / cause / fix entries over the lava field: glass
+ * inside GuideTabs. Symptom / cause / fix entries on white: hairline
  * cards, sharp corners, no shadows.
  *
  * Most failure modes here trace back to one rule: exactly one server per
