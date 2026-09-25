@@ -25,7 +25,46 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# --- Re-exec from a private copy (MUST stay first) ---------------------------
+#
+# This script syncs the template into the child — and the template ships THIS
+# FILE, so sync_files() overwrites the engine while bash is still executing it.
+#
+# Bash reads a script incrementally by BYTE OFFSET, not by line. When the file
+# underneath changes length, bash resumes at its saved offset inside the new
+# content and executes whatever fragment begins there. The t-0051 sync grew the
+# engine from 317 to 485 lines and every child's run ended:
+#
+#     template-sync-engine.sh: line 318: ignore: command not found
+#     Process completed with exit code 127
+#
+# That run had already committed and pushed, so the damage was a red workflow
+# on a successful sync. It is luck that it was harmless: a different length
+# delta resumes mid-function and runs arbitrary fragments of shell — inside a
+# script whose job is deleting and overwriting files.
+#
+# Copying the script and re-execing makes the running bytes immutable: the copy
+# lives outside the repo, so sync can replace the original freely. Any future
+# change to this file is therefore safe to sync.
+#
+# The guard MUST precede everything that touches the repo, and $0 in the copy
+# points at the temp file, so the original directory is passed through
+# explicitly for SCRIPT_DIR below.
+if [ "${_REPOSYNC_REEXEC:-}" != "1" ]; then
+  _self_dir="$(cd "$(dirname "$0")" && pwd)"
+  _self_copy="$(mktemp "${TMPDIR:-/tmp}/reposync-engine.XXXXXX")"
+  cat "$0" > "$_self_copy"
+  export _REPOSYNC_REEXEC=1
+  export _REPOSYNC_ORIG_DIR="$_self_dir"
+  bash "$_self_copy" "$@"
+  _rc=$?
+  rm -f "$_self_copy"
+  exit "$_rc"
+fi
+
+# In the re-exec'd copy $0 is the temp file, so prefer the original directory
+# handed over above. Falls back to dirname $0 when run without the guard.
+SCRIPT_DIR="${_REPOSYNC_ORIG_DIR:-$(cd "$(dirname "$0")" && pwd)}"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 
 # --- Arguments ---

@@ -225,6 +225,60 @@ assert_grep "refusing to sweep" "$SANDBOX/engine.log" "refuses to sweep on an em
 assert_file "$CHILD/.claude/hooks/kept-hook.sh"       "no files deleted when manifest is empty"
 assert_file "$CHILD/.claude/agents/critic.md"         "no agents deleted when manifest is empty"
 
+# === Sync 4: the template ships a LONGER engine than the one running =======
+#
+# Regression for the t-0051 rollout failure. The template ships the engine, so
+# sync overwrites it mid-execution; bash resumes at its saved byte offset in
+# the new content and runs whatever fragment starts there. Growing the engine
+# by 168 lines produced "line 318: ignore: command not found" and exit 127 in
+# every child — after a successful commit and push.
+printf '\n## sync 4 — template replaces the running engine mid-sync\n'
+
+# Put a real engine in the template, padded so the file length changes a lot.
+mkdir -p "$TPL/.claude/.automation/lib"
+{
+  head -1 "$ENGINE"
+  # a large comment block: same behaviour, very different length
+  i=0; while [ "$i" -lt 400 ]; do printf '# pad %03d — shifts every byte offset after this point\n' "$i"; i=$((i+1)); done
+  tail -n +2 "$ENGINE"
+} > "$TPL/.claude/.automation/lib/template-sync-engine.sh"
+
+write_manifest "$TPL" \
+  ".claude/.automation/lib/child-sync-decisions.sh" \
+  ".claude/.automation/lib/rebuild-trigger-index.sh" \
+  ".claude/.automation/lib/template-sync-engine.sh" \
+  ".claude/.automation/machinery-manifest.txt" \
+  ".claude/agents/critic.md" \
+  ".claude/hooks/kept-hook.sh" \
+  ".templatesyncignore" \
+  "docs/ai/decisions/t-0001-template-decision.md" \
+  "docs/ai/decisions/t-manifest.txt"
+git_q "$TPL" add -A
+git_q "$TPL" commit -m "template v4 — engine grows by 400 lines"
+
+# Run the CHILD's own copy of the engine, as CI does — that is the copy the
+# sync replaces underneath itself.
+cp "$ENGINE" "$CHILD/.claude/.automation/lib/template-sync-engine.sh"
+git_q "$CHILD" add -A
+git_q "$CHILD" commit -m "child: engine in place"
+( cd "$CHILD" && bash .claude/.automation/lib/template-sync-engine.sh "file://$TPL" main ) \
+  > "$SANDBOX/engine-selfreplace.log" 2>&1
+rc=$?
+
+if [ "$rc" -eq 0 ]; then
+  ok "survives being overwritten mid-run (exit 0)"
+else
+  nok "survives being overwritten mid-run (exit 0)" "rc=$rc: $(tail -3 "$SANDBOX/engine-selfreplace.log")"
+fi
+assert_no_grep "command not found" "$SANDBOX/engine-selfreplace.log" \
+               "no stray fragment executed after the overwrite"
+assert_grep    "Sync complete" "$SANDBOX/engine-selfreplace.log" "sync still ran to completion"
+if [ "$(wc -l < "$CHILD/.claude/.automation/lib/template-sync-engine.sh" | tr -d ' ')" -gt 400 ]; then
+  ok "child received the longer engine"
+else
+  nok "child received the longer engine" "engine was not replaced"
+fi
+
 # === Branch guard ==========================================================
 printf '\n## branch guard\n'
 git_q "$CHILD" checkout -b not-main

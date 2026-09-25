@@ -1,6 +1,6 @@
 # A1 trigger index — generated artifact. Do not hand-edit.
 # Regenerate: bash .claude/.automation/lib/rebuild-trigger-index.sh
-# digest: 906cf4a80f73a4f6877adb7fc88c0604f5002c4bb656abb2d6a48357022e4e0c
+# digest: 2a3a4bf015f140e392beae7e9eb636cd29bd3e462c44f667f86c91ea65502328
 0001|AI\.md|prompt system, verification gate, session-based
 0001|docs/ai/prompts/prompt-.*\.md|prompt system, verification gate, session-based
 0002|docs/ai/decisions/.*\.md|mandatory, commit-blocking
@@ -112,3 +112,40 @@
 0050|\.claude/tools/ec-report\.sh|expected_changes, Expected Changes, EC-, Changes: trailer, additional change, intent-to-diff, ec-report
 0050|docs/ai/prompts/prompt-t-task-definition\.md|expected_changes, Expected Changes, EC-, Changes: trailer, additional change, intent-to-diff, ec-report
 0050|docs/ai/task-groups/_contract-template\.yaml|expected_changes, Expected Changes, EC-, Changes: trailer, additional change, intent-to-diff, ec-report
+0051|\.claude/\.automation/lib/template-sync-engine\.sh|template sync, machinery manifest, withdrawn file, orphan sweep, templatesyncignore, a1-trigger-index, sync-conformance, child sync
+0051|\.claude/\.automation/lib/rebuild-machinery-manifest\.sh|template sync, machinery manifest, withdrawn file, orphan sweep, templatesyncignore, a1-trigger-index, sync-conformance, child sync
+0051|\.claude/\.automation/machinery-manifest\.txt|template sync, machinery manifest, withdrawn file, orphan sweep, templatesyncignore, a1-trigger-index, sync-conformance, child sync
+0051|\.claude/tools/sync-conformance\.sh|template sync, machinery manifest, withdrawn file, orphan sweep, templatesyncignore, a1-trigger-index, sync-conformance, child sync
+0051|\.templatesyncignore|template sync, machinery manifest, withdrawn file, orphan sweep, templatesyncignore, a1-trigger-index, sync-conformance, child sync
+0001|AI\.md|prompt system, verification gate, session-based
+0001|docs/ai/prompts/prompt-.*\.md|prompt system, verification gate, session-based
+0002|docs/ai/decisions/.*\.md|mandatory, commit-blocking
+0003|\.claude/agents/.*\.md|frontmatter, disallowedTools, tools:, model:
+0004|\.claude/hooks/.*\.sh|PreToolUse, PostToolUse, SubagentStop, Stop, phase-state, _phase-helper
+0004|\.claude/settings\.json|PreToolUse, PostToolUse, SubagentStop, Stop, phase-state, _phase-helper
+0006|docs/ai/prompts/prompt-0\.5|experiment, prototype, napkin, spike, prototype-napkin, prototype-spike, prototype-poc
+0006|docs/spec/_templates/_experiment|experiment, prototype, napkin, spike, prototype-napkin, prototype-spike, prototype-poc
+0007|\.claude/agents/_advisory-board.*\.md|advisory, tier, specialist, refinement
+0008|\.claude/agents/_cohesion-review\.md|cohesion, A5
+0008|\.claude/agents/critic\.md|cohesion, A5
+0009|\.local/share/repo-os-analytics|analytics, telemetry, ndjson, log_hook_event
+0009|\.claude/hooks/_analytics|analytics, telemetry, ndjson, log_hook_event
+0010|docs/ai/prompts/prompt-t|task definition, Brief mode, Query mode, significant feature, taskdef-query, taskdef-brief
+0011|docs/ai/task-groups/|task.group, contract, A6, next_brief, pre-approval, one.branch.per.group, parallel, execution, completion_markers, merge_brief, boundaries
+0011|\.claude/local/task-groups/|task.group, contract, A6, next_brief, pre-approval, one.branch.per.group, parallel, execution, completion_markers, merge_brief, boundaries
+0012|\.claude/hooks/write-guard\.sh|write-guard, mode-guard, REPO_OS_MODE, REPO_OS_UNLOCK_PATH, REPO_OS_SKIP_MODE_GUARD, is_in_repo
+0012|\.claude/repo-mode|write-guard, mode-guard, REPO_OS_MODE, REPO_OS_UNLOCK_PATH, REPO_OS_SKIP_MODE_GUARD, is_in_repo
+0014|\.claude/hooks/_phase-helper\.sh|phase, session_type, init_phase, advance_phase, assert_phase, phase-state, get_phase, get_tag, taskgroup-merge
+0014|\.claude/\.state/phase-state|phase, session_type, init_phase, advance_phase, assert_phase, phase-state, get_phase, get_tag, taskgroup-merge
+0016|\.claude/agents/auditor\.md|auditor, audit, dimension, co-audit, workshop, escalation, tech-debt, cohesion-drift
+0016|docs/ai/prompts/prompt-c-project-audit\.md|auditor, audit, dimension, co-audit, workshop, escalation, tech-debt, cohesion-drift
+0017|\.claude/\.automation/|automation, headless, runner, queue, escalation, blocker, claude -p, enabled
+0018|\.claude/hooks/(branch-guard|pre-commit-gates)\.sh|taskgroup, task.group, contract, merge, A6_contract_missing, tg_merge_blocked, SKIP_MERGE_GUARD
+0019|\.claude/hooks/(branch-guard|branch-guard-edit)\.sh|fail-closed, no_phase_state, phase_gate_no_state, .fail-closed-enforced
+0019|docs/ai/decisions/\.fail-closed-enforced|fail-closed, no_phase_state, phase_gate_no_state, .fail-closed-enforced
+0020|\.claude/\.state/task-contract\.yaml|task-contract, task_contract, intent:, verification:
+0020|docs/ai/task-groups/.*\.yaml|task-contract, task_contract, intent:, verification:
+0020|\.claude/local/task-groups/.*\.yaml|task-contract, task_contract, intent:, verification:
+0020|\.claude/agents/_cohesion-review\.md|task-contract, task_contract, intent:, verification:
+0020|\.claude/agents/critic\.md|task-contract, task_contract, intent:, verification:
+0021|\.claude/agents/_user-review-tier-[1-3]\.md|user-review, persona, tier
