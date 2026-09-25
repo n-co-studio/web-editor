@@ -83,6 +83,13 @@ import { parseLayoutSignal, classifyLayoutRole } from '@nco-studio/shared/layout
 import type { ExtensionMode, ConnectionStatus, EditMode, IconStatus } from '../shared/types';
 import { isLocalDevHost } from '../shared/is-local-host';
 import { isDemoMode } from './web-env';
+import {
+  THEME_STORAGE_KEY,
+  DEFAULT_THEME_PREFERENCE,
+  isThemePreference,
+  resolveTheme,
+} from '../shared/theme';
+import type { ThemePreference } from '../shared/theme';
 
 // ---------------------------------------------------------------------------
 // State
@@ -162,6 +169,94 @@ let preservedToolMode: EditMode | null = null;
 
 // Tab session ID — stable for the tab's lifetime
 let tabId: string | null = null;
+
+// ---------------------------------------------------------------------------
+// Theme management
+// ---------------------------------------------------------------------------
+
+/** Currently active preference (kept in sync with storage). */
+let themePreference: ThemePreference = DEFAULT_THEME_PREFERENCE;
+
+/** MediaQueryList for prefers-color-scheme: dark — reused across activations. */
+let themeMq: MediaQueryList | null = null;
+
+/** Listener bound to themeMq change events (only while preference === 'system'). */
+let themeMqListener: ((e: MediaQueryListEvent) => void) | null = null;
+
+/** Listener bound to chrome.storage.onChanged for the theme key. */
+let themeStorageListener: ((changes: Record<string, chrome.storage.StorageChange>, area: string) => void) | null = null;
+
+/**
+ * Stamp `data-fe-theme` on the shadow host element.
+ * CSS selects on `:host([data-fe-theme="light"])` for the light palette;
+ * absent attribute or `data-fe-theme="dark"` keeps the default dark palette.
+ * Also redraws ruler canvases — their colors are resolved from computed style
+ * at draw time and must be refreshed after the host attribute changes.
+ */
+function applyThemeToHost(pref: ThemePreference): void {
+  if (!host) return;
+  const resolved = resolveTheme(pref, themeMq?.matches ?? false);
+  host.setAttribute('data-fe-theme', resolved);
+  // Redraw ruler canvases so their tick/label colors pick up the new palette.
+  rulerOverlay?.refreshGuides();
+}
+
+/** Subscribe the matchMedia listener when preference is 'system', unsubscribe otherwise. */
+function syncMqSubscription(pref: ThemePreference): void {
+  if (!themeMq) return;
+  if (pref === 'system') {
+    if (!themeMqListener) {
+      themeMqListener = () => applyThemeToHost(themePreference);
+      themeMq.addEventListener('change', themeMqListener);
+    }
+  } else {
+    if (themeMqListener) {
+      themeMq.removeEventListener('change', themeMqListener);
+      themeMqListener = null;
+    }
+  }
+}
+
+/** Read the stored theme preference, apply it, and wire storage + matchMedia listeners. */
+async function initTheme(): Promise<void> {
+  themeMq = window.matchMedia('(prefers-color-scheme: dark)');
+
+  // Read persisted preference (swallow storage errors — theme is best-effort)
+  try {
+    const result = await chrome.storage.local.get(THEME_STORAGE_KEY);
+    const stored = result[THEME_STORAGE_KEY];
+    themePreference = isThemePreference(stored) ? stored : DEFAULT_THEME_PREFERENCE;
+  } catch {
+    themePreference = DEFAULT_THEME_PREFERENCE;
+  }
+
+  applyThemeToHost(themePreference);
+  syncMqSubscription(themePreference);
+
+  // Subscribe to storage changes so popup writes apply live to every open tab
+  themeStorageListener = (changes, area) => {
+    if (area !== 'local' || !(THEME_STORAGE_KEY in changes)) return;
+    const next = changes[THEME_STORAGE_KEY].newValue;
+    themePreference = isThemePreference(next) ? next : DEFAULT_THEME_PREFERENCE;
+    applyThemeToHost(themePreference);
+    syncMqSubscription(themePreference);
+  };
+  chrome.storage.onChanged.addListener(themeStorageListener);
+}
+
+/** Tear down all theme listeners. Called from deactivate(). */
+function teardownTheme(): void {
+  if (themeStorageListener) {
+    chrome.storage.onChanged.removeListener(themeStorageListener);
+    themeStorageListener = null;
+  }
+  if (themeMq && themeMqListener) {
+    themeMq.removeEventListener('change', themeMqListener);
+    themeMqListener = null;
+  }
+  themeMq = null;
+  themePreference = DEFAULT_THEME_PREFERENCE;
+}
 
 // --- Status icon state (drives chrome.action.setIcon via the service worker) ---
 let lastConnectionStatus: ConnectionStatus = 'disconnected';
@@ -362,6 +457,10 @@ export async function activate(): Promise<void> {
   const mounted = mountShadowHost();
   host = mounted.host;
   shadow = mounted.shadow;
+
+  // Apply theme before any UI is rendered so the first paint uses the correct palette.
+  // Errors are swallowed — theme is never worth blocking activation.
+  await initTheme();
 
   // Initialize subsystems
   tokenStore = new TokenStore();
@@ -1261,6 +1360,9 @@ export function deactivate(): void {
   document.removeEventListener('keydown', handleGlobalKeydown, true);
   document.removeEventListener('scroll', handleScroll, true);
   document.body.style.cursor = '';
+
+  // Tear down theme listeners (before unmounting shadow DOM)
+  teardownTheme();
 
   // Tear down subsystems
   exitNotePickMode();

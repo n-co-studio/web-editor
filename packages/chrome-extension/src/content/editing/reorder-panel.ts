@@ -381,7 +381,7 @@ export class ReorderPanel {
         height: '16px',
         objectFit: 'cover',
         borderRadius: '2px',
-        background: 'rgba(255,255,255,0.06)',
+        background: OVERLAY.hover,
       }) as HTMLImageElement;
       // Broken/unreachable asset → degrade to label-only.
       thumb.addEventListener('error', () => thumb.remove());

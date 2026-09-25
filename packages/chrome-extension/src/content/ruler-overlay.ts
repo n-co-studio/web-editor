@@ -40,8 +40,8 @@ const GUIDE_HIT_WIDTH = 6;
 const STORAGE_PREFIX = 'fe-guides-';
 const TICK_FALLBACK_SPACING = 8;
 
-const TICK_COLOR = 'rgba(255, 255, 255, 0.35)';
-const LABEL_COLOR = 'rgba(255, 255, 255, 0.6)';
+// TICK_COLOR and LABEL_COLOR were dark-theme-only literals; they are now resolved
+// at draw time from the shadow host's computed custom properties (see getCanvasColors).
 const LABEL_FONT = '8px ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace';
 
 // ---------------------------------------------------------------------------
@@ -87,6 +87,27 @@ export class RulerOverlay {
     private readonly getGridSettings: () => GridSettings,
     private readonly isGridVisible: () => boolean,
   ) {}
+
+  // -----------------------------------------------------------------------
+  // Canvas color resolution
+  // -----------------------------------------------------------------------
+
+  /**
+   * Resolve ruler canvas colors from the shadow host's computed custom properties.
+   * Canvas 2D fillStyle cannot take var() — we must resolve at draw time so both
+   * themes produce correct tick and label colors.
+   */
+  private getCanvasColors(): { tick: string; label: string; baseLine: string } {
+    const cs = getComputedStyle(this.shadow.host as HTMLElement);
+    const textMuted = cs.getPropertyValue('--fe-text-muted').trim();
+    const border = cs.getPropertyValue('--fe-border').trim();
+    // Fallback to dark-theme values if getComputedStyle is unavailable
+    return {
+      tick: textMuted || 'rgba(255, 255, 255, 0.35)',
+      label: textMuted || 'rgba(255, 255, 255, 0.6)',
+      baseLine: border || 'rgba(255, 255, 255, 0.15)',
+    };
+  }
 
   // -----------------------------------------------------------------------
   // Public API
@@ -300,12 +321,15 @@ export class RulerOverlay {
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, cssWidth, cssHeight);
 
+    // Resolve theme-aware colors at draw time (var() cannot be used in canvas fillStyle)
+    const { tick: TICK_COLOR, label: LABEL_COLOR, baseLine: BASE_LINE_COLOR } = this.getCanvasColors();
+
     // Viewport X range: startX..endX
     const startX = RULER_THICKNESS;
     const endX = startX + cssWidth;
 
     // 1px base ticks — thin line along bottom
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.fillStyle = BASE_LINE_COLOR;
     ctx.fillRect(0, cssHeight - 1, cssWidth, 1);
 
     ctx.fillStyle = TICK_COLOR;
@@ -335,13 +359,13 @@ export class RulerOverlay {
     const first100 = Math.ceil(startX / 100) * 100;
     for (let vx = first100; vx <= endX; vx += 100) {
       const cx = vx - startX;
+      ctx.fillStyle = TICK_COLOR;
       ctx.fillRect(cx, 0, 1, cssHeight);
       if (vx > 0) {
         ctx.fillStyle = LABEL_COLOR;
         ctx.font = LABEL_FONT;
         ctx.textAlign = 'left';
         ctx.fillText(`${vx}`, cx + 2, 9);
-        ctx.fillStyle = TICK_COLOR;
       }
     }
   }
@@ -360,13 +384,16 @@ export class RulerOverlay {
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, cssWidth, cssHeight);
 
+    // Resolve theme-aware colors at draw time (var() cannot be used in canvas fillStyle)
+    const { tick: TICK_COLOR, label: LABEL_COLOR, baseLine: BASE_LINE_COLOR } = this.getCanvasColors();
+
     // Page Y range visible in the ruler
     const scrollY = window.scrollY;
     const startPageY = RULER_THICKNESS + scrollY;
     const endPageY = startPageY + cssHeight;
 
     // 1px base ticks — thin line along right edge
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.fillStyle = BASE_LINE_COLOR;
     ctx.fillRect(cssWidth - 1, 0, 1, cssHeight);
 
     ctx.fillStyle = TICK_COLOR;
@@ -399,6 +426,7 @@ export class RulerOverlay {
     const first100 = Math.ceil(startPageY / 100) * 100;
     for (let py = first100; py <= endPageY; py += 100) {
       const cy = py - startPageY;
+      ctx.fillStyle = TICK_COLOR;
       ctx.fillRect(0, cy, cssWidth, 1);
       if (py > 0) {
         ctx.save();
@@ -409,7 +437,6 @@ export class RulerOverlay {
         ctx.textAlign = 'right';
         ctx.fillText(`${py}`, 0, 0);
         ctx.restore();
-        ctx.fillStyle = TICK_COLOR;
       }
     }
   }
@@ -685,7 +712,7 @@ export class RulerOverlay {
       this.hoveredGuideId = guide.id;
       // Visual hover feedback
       const dom = this.guideElements.get(guide.id);
-      if (dom) dom.line.style.background = OVERLAY.primaryHover;
+      if (dom) dom.line.style.background = '#0891b2'; // on-page guide hover — mode-coded, not themed
     });
     hitStrip.addEventListener('mouseleave', () => {
       if (this.hoveredGuideId === guide.id) this.hoveredGuideId = null;

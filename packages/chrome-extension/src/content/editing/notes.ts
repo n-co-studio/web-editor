@@ -517,7 +517,7 @@ export class NotesEditor {
       title: 'Click to point at an element on the page \u2014 it will be attached to this note as context for Claude',
       'aria-pressed': isPicking ? 'true' : 'false',
     }, {
-      background: isPicking ? OVERLAY.primary : 'rgba(255, 255, 255, 0.08)',
+      background: isPicking ? OVERLAY.primary : OVERLAY.hover,
       color: isPicking ? '#fff' : OVERLAY.textMuted,
       border: `1px solid ${isPicking ? OVERLAY.primary : OVERLAY.border}`,
       borderRadius: OVERLAY.radiusSm,
@@ -538,7 +538,7 @@ export class NotesEditor {
       const selBtn = createElement('button', {
         title: 'Add the currently selected element(s) to this note',
       }, {
-        background: 'rgba(255, 255, 255, 0.08)',
+        background: OVERLAY.hover,
         color: OVERLAY.textMuted,
         border: `1px solid ${OVERLAY.border}`,
         borderRadius: OVERLAY.radiusSm,

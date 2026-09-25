@@ -11,6 +11,13 @@
 
 import { GUIDE_URL } from '../shared/constants';
 import { isLocalDevUrl } from '../shared/is-local-host';
+import {
+  THEME_STORAGE_KEY,
+  DEFAULT_THEME_PREFERENCE,
+  isThemePreference,
+  resolveTheme,
+} from '../shared/theme';
+import type { ThemePreference } from '../shared/theme';
 
 interface EditorState {
   active: boolean;
@@ -24,8 +31,74 @@ const queueLabel = document.getElementById('queue-label') as HTMLSpanElement;
 const queueStateEl = document.getElementById('queue-state') as HTMLSpanElement;
 const extBtn = document.getElementById('toggle-extension') as HTMLButtonElement;
 const hint = document.getElementById('hint') as HTMLDivElement;
+const themeGroup = document.getElementById('theme-group') as HTMLDivElement;
+const themeOpts = Array.from(
+  themeGroup.querySelectorAll<HTMLButtonElement>('[data-theme]'),
+);
 
 let currentState: EditorState = { active: false, queueOpen: false };
+
+// ---------------------------------------------------------------------------
+// Theme
+// ---------------------------------------------------------------------------
+
+const popupMq = window.matchMedia('(prefers-color-scheme: dark)');
+
+function applyThemeToPopup(pref: ThemePreference): void {
+  const resolved = resolveTheme(pref, popupMq.matches);
+  document.documentElement.setAttribute('data-fe-theme', resolved);
+}
+
+function renderTheme(pref: ThemePreference): void {
+  for (const btn of themeOpts) {
+    btn.setAttribute('aria-checked', String(btn.dataset.theme === pref));
+  }
+  applyThemeToPopup(pref);
+}
+
+async function initThemePopup(): Promise<void> {
+  let pref: ThemePreference = DEFAULT_THEME_PREFERENCE;
+  try {
+    const result = await chrome.storage.local.get(THEME_STORAGE_KEY);
+    const stored = result[THEME_STORAGE_KEY];
+    pref = isThemePreference(stored) ? stored : DEFAULT_THEME_PREFERENCE;
+  } catch {
+    /* storage unavailable — use default */
+  }
+  renderTheme(pref);
+
+  // Re-resolve when OS flips while the popup is open
+  popupMq.addEventListener('change', () => {
+    const current = themeOpts.find(b => b.getAttribute('aria-checked') === 'true')?.dataset.theme;
+    applyThemeToPopup(isThemePreference(current) ? current : DEFAULT_THEME_PREFERENCE);
+  });
+}
+
+// Theme button clicks
+themeGroup.addEventListener('click', async (e) => {
+  const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-theme]');
+  if (!btn) return;
+  const pref = btn.dataset.theme;
+  if (!isThemePreference(pref)) return;
+  renderTheme(pref);
+  try {
+    await chrome.storage.local.set({ [THEME_STORAGE_KEY]: pref });
+  } catch {
+    /* non-fatal */
+  }
+});
+
+// Keyboard navigation (arrow keys within radiogroup)
+themeGroup.addEventListener('keydown', (e) => {
+  if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+  const idx = themeOpts.findIndex(b => b === document.activeElement);
+  if (idx === -1) return;
+  e.preventDefault();
+  const dir = (e.key === 'ArrowRight' || e.key === 'ArrowDown') ? 1 : -1;
+  const next = themeOpts[(idx + dir + themeOpts.length) % themeOpts.length];
+  next.focus();
+  next.click();
+});
 
 async function getActiveTab(): Promise<chrome.tabs.Tab | undefined> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -75,6 +148,9 @@ function renderUnavailable(): void {
 }
 
 async function init(): Promise<void> {
+  // Theme is always initialized regardless of whether the tab is a localhost page
+  void initThemePopup();
+
   const tabId = await getLocalDevTabId();
   if (tabId == null) {
     renderUnavailable();

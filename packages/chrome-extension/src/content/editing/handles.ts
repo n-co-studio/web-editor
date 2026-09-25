@@ -4,6 +4,7 @@ import { getComputedProperty, buildElementInfo } from '../../shared/dom-utils';
 import { extractUnit } from './token-select';
 import {
   OVERLAY,
+  SELECTION,
   HANDLE_VISUAL_SIZE,
   HANDLE_HIT_AREA,
   SNAP_EASE_MS,
@@ -517,7 +518,7 @@ export class DragHandleManager {
     const label = MODE_LABELS[mode];
     if (!label) return;
 
-    const badgeColor = MODE_BADGE_COLORS[mode] ?? OVERLAY.primary;
+    const badgeColor = MODE_BADGE_COLORS[mode] ?? SELECTION.ring;
 
     const badge = createElement('div', {}, {
       position: 'fixed',

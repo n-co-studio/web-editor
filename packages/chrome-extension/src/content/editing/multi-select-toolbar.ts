@@ -329,7 +329,7 @@ export class MultiSelectToolbar {
       });
       btn.innerHTML = ALIGN_ICONS[op.key] ?? '';
       btn.addEventListener('click', (e) => { e.stopPropagation(); op.action(); });
-      btn.addEventListener('mouseenter', () => { btn.style.background = 'rgba(255, 255, 255, 0.08)'; });
+      btn.addEventListener('mouseenter', () => { btn.style.background = OVERLAY.hover; });
       btn.addEventListener('mouseleave', () => { btn.style.background = 'transparent'; });
       grid.appendChild(btn);
     }
@@ -368,7 +368,7 @@ export class MultiSelectToolbar {
       });
       btn.innerHTML = ALIGN_ICONS[op.key] ?? '';
       btn.addEventListener('click', (e) => { e.stopPropagation(); op.action(); });
-      btn.addEventListener('mouseenter', () => { btn.style.background = 'rgba(255, 255, 255, 0.08)'; });
+      btn.addEventListener('mouseenter', () => { btn.style.background = OVERLAY.hover; });
       btn.addEventListener('mouseleave', () => { btn.style.background = 'transparent'; });
       row.appendChild(btn);
     }

@@ -198,7 +198,7 @@ export class CssGroupsSection {
 
     for (const cls of classes) {
       const pill = createElement('span', {}, {
-        background: 'rgba(255, 255, 255, 0.08)',
+        background: OVERLAY.hover,
         border: `1px solid ${OVERLAY.border}`,
         borderRadius: '3px',
         padding: '1px 5px',
@@ -218,7 +218,7 @@ export class CssGroupsSection {
       const hovBtn = createElement('button', {
         title: 'Simulates CSS pseudo-class styles. Some effects may not be captured.',
       }, {
-        background: hasActive ? 'rgba(6, 182, 212, 0.12)' : 'rgba(255, 255, 255, 0.08)',
+        background: hasActive ? 'rgba(6, 182, 212, 0.12)' : OVERLAY.hover,
         border: `1px solid ${hasActive ? 'rgba(6, 182, 212, 0.4)' : OVERLAY.border}`,
         borderRadius: '3px',
         padding: '1px 5px',

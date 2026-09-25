@@ -65,7 +65,7 @@ These justifications are required for Chrome Web Store review. Copy them verbati
 
 ### `storage`
 
-> The extension uses `chrome.storage.session` (session-scoped, automatically cleared when Chrome closes) to persist the pending diff queue across page reloads. This ensures that diffs generated before a hot-reload are not lost. No personal data is stored. The extension does not use `chrome.storage.sync` or `chrome.storage.local`.
+> The extension uses `chrome.storage.session` (session-scoped, automatically cleared when Chrome closes) to persist the pending diff queue across page reloads, and `chrome.storage.local` to remember your Light / Dark / System theme preference. No personal data is stored. The extension does not use `chrome.storage.sync`.
 
 ### `scripting`
 
