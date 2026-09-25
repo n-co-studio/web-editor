@@ -1,0 +1,34 @@
+schema: repo-os/criteria-verdicts@1
+session_id: "9772a09d-50ca-4b17-bc9f-2fc087fd02bc"
+rounds:
+  - round: 1
+    timestamp: "2026-09-25T05:02:34Z"
+    dispatch_phase: "review"
+    dispatch_cycle: 1
+    completeness_score: "3/3 criteria met"
+    completeness_gate: APPROVED
+    criteria:
+      - index: 1
+        criterion: "Radiogroup keyboard support (arrow keys move selection + focus, wrap at both ends, roving tabindex)"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`SetupGuide.tsx:170-182` (`onKeyDown` computes `delta` from Arrow keys only, `e.preventDefault()` gated behind `delta !== 0` so it never suppresses other keys, `next = (index + delta + PROVIDERS.length) % PROVIDERS.length` — correct wrap arithmetic at both ends: index 0 with delta -1 → `(0-1+4)%4=3`; index 3 with delta +1 → `(3+1+4)%4=0`); `SetupGuide.tsx:181` calls `optionRefs.current[next]?.focus()`; `SetupGuide.tsx:205` sets `tabIndex={selected ? 0 : -1}` (roving tabindex tied to the same `selected` computation used for `aria-checked`)."
+        completeness:
+          verdict: COMPLETE
+          evidence: "`SetupGuide.tsx:170-182`, `205`; per the brief, additionally verified live over CDP."
+      - index: 2
+        criterion: "Windsurf global-scope disclosure"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`SetupGuide.tsx:68-74` — comment explains the rationale, and `promptLocation` text for the Windsurf provider explicitly states the file \"lives outside this project and applies to all your Windsurf workspaces, so ask me first if you need permission to write there.\" This flows into the agent-facing prompt via `mcpPrompt()` (`SetupGuide.tsx:87`), so the disclosure reaches the agent, not just the human-facing prose."
+        completeness:
+          verdict: COMPLETE
+          evidence: "`SetupGuide.tsx:68-74`."
+      - index: 3
+        criterion: "Timer leak (ref-held timeout, cleared on re-copy and unmount)"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`SetupGuide.tsx:103` (`resetTimer = useRef<number | undefined>(undefined)`), `SetupGuide.tsx:105` (`useEffect(() => () => window.clearTimeout(resetTimer.current), [])` — cleanup reads `resetTimer.current` at unmount time via closure over the ref object, not a stale captured primitive, so this is not the stale-ref-in-cleanup mistake), `SetupGuide.tsx:116-117` (clears then reassigns `resetTimer.current` on each `copy()` call, covering the re-copy-before-reset-fires case). Confirmed against the caller: `GuideTabs.tsx:60` (`{tab === 'setup' && <SetupGuide />}`) does conditionally unmount `SetupGuide` on tab switch, matching the comment's stated reason for needing this cleanup."
+        completeness:
+          verdict: COMPLETE
+          evidence: "`SetupGuide.tsx:103-117`."

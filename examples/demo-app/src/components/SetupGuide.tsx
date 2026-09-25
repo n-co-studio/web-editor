@@ -3,7 +3,15 @@
  * ink step badges; code blocks are flat ink panels. Sharp corners, no shadows.
  */
 
-import type { ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+
+/**
+ * The Web Store item URL is only minted when the extension is published, so
+ * this points at a store search until then. It is the single place the store
+ * is linked from — one line to change at submission.
+ */
+const CHROME_STORE_URL =
+  'https://chromewebstore.google.com/search/Visual%20Web%20Editor%20for%20AI%20Agents';
 
 function Code({ children }: { children: string }) {
   return (
@@ -25,6 +33,236 @@ function Code({ children }: { children: string }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Step 2 — agent connection
+// ---------------------------------------------------------------------------
+
+type Provider = {
+  /** Shown on the selector. */
+  name: string;
+  /** Where this agent reads MCP servers from. */
+  configPath: string;
+  /** How the prompt should describe that location to the agent. */
+  promptLocation: string;
+};
+
+/**
+ * The MCP config is byte-identical for every agent — only the file it belongs
+ * in differs. That difference is the whole point of the selector: an agent told
+ * to write the wrong file leaves you with a config nothing reads.
+ */
+const PROVIDERS: Provider[] = [
+  {
+    name: 'Claude Code',
+    configPath: '.mcp.json',
+    promptLocation: '.mcp.json at the root of this project (create it if it does not exist)',
+  },
+  {
+    name: 'Cursor',
+    configPath: '.cursor/mcp.json',
+    promptLocation: '.cursor/mcp.json in this project (create the folder and file if needed)',
+  },
+  {
+    name: 'Windsurf',
+    configPath: '~/.codeium/windsurf/mcp_config.json',
+    // Unlike the others this file is outside the project and applies to every
+    // Windsurf workspace. Say so in the prompt: agents are often sandboxed to
+    // the project directory and will need to ask before writing to $HOME.
+    promptLocation:
+      '~/.codeium/windsurf/mcp_config.json (create it if it does not exist). ' +
+      'Note that this file lives outside this project and applies to all your ' +
+      'Windsurf workspaces, so ask me first if you need permission to write there',
+  },
+  {
+    name: 'Any MCP client',
+    configPath: 'its own mcpServers config',
+    promptLocation:
+      'wherever this client reads its mcpServers config from — check its docs if you are unsure',
+  },
+];
+
+function mcpPrompt(p: Provider): string {
+  return `Set up the nco-web-editor MCP server for me.
+
+Add this entry to ${p.promptLocation}, merging it into any
+mcpServers block that is already there rather than replacing it:
+
+  "nco-web-editor": {
+    "command": "npx",
+    "args": ["--yes", "@nco-studio/web-editor-mcp@^0"]
+  }
+
+Then tell me what you changed, and whether I need to restart you
+for it to take effect.`;
+}
+
+function CopyPromptButton({ text }: { text: string }) {
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  // GuideTabs unmounts this whole step when you switch tabs, so a pending
+  // reset must be cancellable — otherwise it fires against a dead component.
+  const resetTimer = useRef<number | undefined>(undefined);
+
+  useEffect(() => () => window.clearTimeout(resetTimer.current), []);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setState('copied');
+    } catch {
+      // Clipboard access can be refused (permission, insecure context).
+      // Say so rather than showing a success that did not happen.
+      setState('failed');
+    }
+    window.clearTimeout(resetTimer.current);
+    resetTimer.current = window.setTimeout(() => setState('idle'), 2000);
+  }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+      <button
+        type="button"
+        onClick={copy}
+        style={{
+          fontFamily: 'var(--font-sans)',
+          fontSize: 'var(--text-body-sm)',
+          fontWeight: 'var(--fw-regular)',
+          color: 'var(--color-on-ink)',
+          background: 'var(--color-ink)',
+          border: '1px solid var(--color-ink)',
+          padding: 'var(--space-2) var(--space-4)',
+          cursor: 'pointer',
+        }}
+      >
+        Copy prompt
+      </button>
+      {/* Announced, not merely shown — the button's own label does not change. */}
+      <span
+        role="status"
+        aria-live="polite"
+        style={{ fontSize: 'var(--text-caption)', color: 'var(--color-secondary)' }}
+      >
+        {state === 'copied'
+          ? 'Copied'
+          : state === 'failed'
+            ? 'Copy failed — select the text above'
+            : ''}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Step 2's body. Stateful, unlike the other steps: the agent you pick drives
+ * both the config path named in the prose and the prompt below it, so you read
+ * one correct instruction rather than picking your line out of a table of four.
+ * The underline-tab idiom matches GuideTabs, the guide's own tab strip.
+ */
+function ConnectYourAgent() {
+  const [provider, setProvider] = useState<Provider>(PROVIDERS[0]);
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  /**
+   * A radiogroup owes its users arrow keys: assistive tech announces "1 of 4"
+   * and expects Left/Right/Up/Down to move the selection, wrapping at the ends.
+   * Paired with the roving tabindex below, so Tab enters and leaves the group
+   * once rather than stopping on all four options.
+   */
+  function onKeyDown(e: React.KeyboardEvent, index: number) {
+    const delta =
+      e.key === 'ArrowRight' || e.key === 'ArrowDown'
+        ? 1
+        : e.key === 'ArrowLeft' || e.key === 'ArrowUp'
+          ? -1
+          : 0;
+    if (delta === 0) return;
+    e.preventDefault();
+    const next = (index + delta + PROVIDERS.length) % PROVIDERS.length;
+    setProvider(PROVIDERS[next]);
+    optionRefs.current[next]?.focus();
+  }
+
+  return (
+    <>
+      <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
+        It’s a standard MCP server — the same config works with any MCP-compatible agent. Your agent
+        launches it, and it also serves the extension over WebSocket. Pick yours:
+      </p>
+
+      <div
+        role="radiogroup"
+        aria-label="Your agent"
+        style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-5)' }}
+      >
+        {PROVIDERS.map((p, i) => {
+          const selected = p.name === provider.name;
+          return (
+            <button
+              key={p.name}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              // Roving tabindex: only the checked option is a Tab stop.
+              tabIndex={selected ? 0 : -1}
+              ref={(el) => {
+                optionRefs.current[i] = el;
+              }}
+              onClick={() => setProvider(p)}
+              onKeyDown={(e) => onKeyDown(e, i)}
+              style={{
+                fontFamily: 'var(--font-sans)',
+                fontSize: 'var(--text-body-sm)',
+                fontWeight: 'var(--fw-book)',
+                color: selected ? 'var(--color-ink)' : 'var(--color-secondary)',
+                background: 'none',
+                border: 'none',
+                borderBottom: `1px solid ${selected ? 'var(--color-ink)' : 'transparent'}`,
+                padding: '0 0 2px',
+                cursor: 'pointer',
+              }}
+            >
+              {p.name}
+            </button>
+          );
+        })}
+      </div>
+
+      <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
+        Add this to{' '}
+        <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-ink)' }}>
+          {provider.configPath}
+        </code>
+        :
+      </p>
+      <Code>{`{
+  "mcpServers": {
+    "nco-web-editor": {
+      "command": "npx",
+      "args": ["--yes", "@nco-studio/web-editor-mcp@^0"]
+    }
+  }
+}`}</Code>
+      <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
+        There is nothing to install first: <code style={{ fontFamily: 'var(--font-mono)' }}>npx</code>{' '}
+        fetches the server the first time your agent starts it, then reuses the cached copy.
+      </p>
+
+      <p
+        style={{
+          fontSize: 'var(--text-body-sm)',
+          color: 'var(--color-secondary)',
+          marginTop: 'var(--space-3)',
+        }}
+      >
+        Or let {provider.name} do it — paste this in:
+      </p>
+      <Code>{mcpPrompt(provider)}</Code>
+      <CopyPromptButton text={mcpPrompt(provider)} />
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
 type Step = { title: string; body: ReactNode };
 
 const STEPS: Step[] = [
@@ -33,54 +271,60 @@ const STEPS: Step[] = [
     body: (
       <>
         <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
-          Install from the Chrome Web Store, then <strong>pin it to your toolbar</strong> — click the
-          puzzle-piece icon in Chrome’s toolbar and hit the pin beside the editor. The icon is how you
-          switch the editor on and off, so you want it visible. It is built for your own dev server —
-          pages served from <code style={{ fontFamily: 'var(--font-mono)' }}>localhost</code> or{' '}
+          <a className="nco-link" href={CHROME_STORE_URL} target="_blank" rel="noopener noreferrer">
+            Install from the Chrome Web Store
+          </a>
+          , then <strong>pin it to your toolbar</strong> — click the puzzle-piece icon in Chrome’s
+          toolbar and hit the pin beside the editor. The icon is how you switch the editor on and
+          off, so you want it visible. It is built for your own dev server — pages served from{' '}
+          <code style={{ fontFamily: 'var(--font-mono)' }}>localhost</code> or{' '}
           <code style={{ fontFamily: 'var(--font-mono)' }}>127.0.0.1</code> — where the source mapping and
           design tokens it relies on come from.
         </p>
+        {/* Placeholder for a screenshot not yet taken. 1280×800 is the Chrome
+            Web Store screenshot size, so one capture serves both. Deliberately
+            dashed: it should read as a gap, not as a design element. */}
+        <figure style={{ margin: 'var(--space-2) 0 0' }}>
+          <div
+            style={{
+              aspectRatio: '1280 / 800',
+              border: '1px dashed var(--color-divider)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 'var(--space-6)',
+            }}
+          >
+            <span
+              style={{
+                fontFamily: 'var(--font-mono)',
+                fontSize: 'var(--text-caption)',
+                color: 'var(--color-secondary)',
+                textAlign: 'center',
+                lineHeight: 1.5,
+              }}
+            >
+              Chrome’s puzzle-piece menu open, the editor listed, pin icon highlighted
+            </span>
+          </div>
+        </figure>
       </>
     ),
   },
   {
     title: 'Connect your agent',
-    body: (
-      <>
-        <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
-          It’s a standard MCP server — the same config works with any MCP-compatible agent. Add it wherever your
-          agent reads MCP servers (your agent launches it, and it also serves the extension over WebSocket):
-        </p>
-        <Code>{`{
-  "mcpServers": {
-    "nco-web-editor": {
-      "command": "npx",
-      "args": ["--yes", "@nco-studio/web-editor-mcp@^0"]
-    }
-  }
-}`}</Code>
-        <ul style={{ listStyle: 'none', margin: 'var(--space-4) 0 0', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-          {([
-            ['Claude Code', '.mcp.json'],
-            ['Cursor', '.cursor/mcp.json'],
-            ['Windsurf', '~/.codeium/windsurf/mcp_config.json'],
-            ['Any MCP client', 'its own mcpServers config'],
-          ] as ReadonlyArray<readonly [string, string]>).map(([name, path]) => (
-            <li key={name} style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-3)', fontSize: 'var(--text-body-sm)' }}>
-              <span style={{ minWidth: 116, color: 'var(--color-ink)', fontWeight: 'var(--fw-regular)' }}>{name}</span>
-              <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-secondary)' }}>{path}</code>
-            </li>
-          ))}
-        </ul>
-      </>
-    ),
+    body: <ConnectYourAgent />,
   },
   {
     title: 'Add the dev plugin (optional)',
     body: (
       <>
         <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
-          Enables source-file mapping so edits point at the exact line:
+          Enables source-file mapping so edits point at the exact line. Install it in your project:
+        </p>
+        <Code>{`npm install --save-dev @nco-studio/web-editor-plugin`}</Code>
+        <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
+          Then register it in your Vite config:
         </p>
         <Code>{`import { ncoWebEditor } from '@nco-studio/web-editor-plugin';
 // vite.config.ts → plugins: [react(), ncoWebEditor()]`}</Code>
