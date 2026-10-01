@@ -134,17 +134,17 @@ Dev server hot-reload
 
 The protocol version (`WS_PROTOCOL_VERSION = 0.4.0`) is checked on connection. A version mismatch shows a persistent banner. See [COMPATIBILITY.md](COMPATIBILITY.md).
 
-All processing is local — no data leaves your machine.
+All processing is local — the extension and MCP server send your data nowhere else. Your agent is the boundary: edits are handed to it, and most agents send what they read to a model provider. See [docs/privacy-policy.md](docs/privacy-policy.md) for what an edit carries.
 
 ---
 
 ## Known limitations
 
-- **Dev tooling only** — do not install on production pages
+- **Dev tooling** — built for your own dev server; it runs on other sites too, but without source mapping
 - **Chrome 116+** — uses MV3 service worker
 - **Vite projects with JSX/TSX** — the dev plugin is Vite-only; source mapping is not available for Webpack or plain CSS projects
 - **Visual properties only** — spacing, color, typography, layout. JavaScript behavior changes are out of scope.
-- **Localhost only** — the extension activates on `localhost` and `127.0.0.1` origins
+- **Automatic on localhost only** — the editor loads by itself on `localhost` and `127.0.0.1`. On any other page it loads when you click the toolbar icon, and edits stay in the browser: source mapping comes from the dev plugin at build time, so a production page has nothing to map back to.
 
 ---
 

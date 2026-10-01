@@ -51,7 +51,11 @@ Your edits snap to the design tokens your project already defines, so what you c
 
 **Architecture:**
 
-All processing is local. The extension communicates with a WebSocket server running on your own machine — no data leaves your computer. The extension activates only on `localhost` pages; it never runs on public websites.
+All processing is local. The extension communicates with a WebSocket server running on your own machine, and neither the extension nor that server sends your data anywhere else.
+
+One thing to be deliberate about: each edit carries the page's URL, the edited element's text and attributes, and your changed values to the local MCP server — and on to your agent, whose model provider then sees them, the same as any file you ask it to read. Point the editor at a page you are happy for your agent to see. (Screenshots are the exception: they stay in the browser.)
+
+The editor loads **automatically** only on `localhost` and `127.0.0.1`, your own dev servers. On any other page it loads only when you click the toolbar icon. There you can still inspect and adjust anything — useful for reviewing a live site or trying an idea against production — but the changes stay in the browser: writing them back to source needs the build-time tags the dev plugin adds, which a deployed page does not have.
 
 ---
 
@@ -61,7 +65,7 @@ These justifications are required for Chrome Web Store review. Copy them verbati
 
 ### `activeTab`
 
-> Visual Web Editor for AI Agents needs `activeTab` to read the current tab's DOM and URL in order to render the visual selection overlay and identify which elements the developer is inspecting. The overlay is only activated when the user explicitly clicks the toolbar icon on a localhost page — the extension does not access any tab automatically. `activeTab` also lets the extension capture the visible tab (`chrome.tabs.captureVisibleTab`) when the developer uses the full-page screenshot tool; the image is saved to the developer's own machine and never uploaded.
+> Visual Web Editor for AI Agents needs `activeTab` to read the current tab's DOM and URL in order to render the visual selection overlay and identify which elements the developer is inspecting. The overlay is activated only when the developer explicitly clicks the toolbar icon, and `activeTab` scopes that access to the tab they invoked it on — the extension does not access any tab automatically, and requests no host permissions for the pages a developer merely browses. `activeTab` also lets the extension capture the visible tab (`chrome.tabs.captureVisibleTab`) when the developer uses the full-page screenshot tool; the image is saved to the developer's own machine and never uploaded.
 
 ### `storage`
 
@@ -69,11 +73,11 @@ These justifications are required for Chrome Web Store review. Copy them verbati
 
 ### `scripting`
 
-> The extension uses the `scripting` API to programmatically inject the overlay content script into the active localhost tab when the developer clicks the toolbar icon. Injection is always user-initiated; the extension does not inject scripts automatically or into non-localhost pages.
+> The extension uses the `scripting` API to inject the overlay into the active tab when the developer clicks the toolbar icon. Injection is always user-initiated, under `activeTab`, and scoped to the tab the developer invoked it on — the extension never injects itself into pages the user is merely browsing. Automatic injection is declared separately and narrowly in `content_scripts.matches`, which covers `localhost` and `127.0.0.1` only.
 
 ### Host permission: `http://localhost/*`, `http://127.0.0.1/*`, `https://localhost/*`
 
-> These host matches are required for the content script to run on local development servers. The extension is a developer tool that operates exclusively on `localhost`/`127.0.0.1` — it never runs on public internet pages. The content script opens a WebSocket connection to a **locally-installed** MCP server process (`@nco-studio/web-editor-mcp`) running on the developer's own machine. No data leaves the machine. The WebSocket is opened by the **content script** (not the service worker) to avoid MV3 service-worker termination issues; this is a standard architecture for dev-tool extensions that need persistent WebSocket connections.
+> These host matches are what the extension loads on **automatically** — the developer's own local servers, where the editing loop it exists for actually works. No broad host permissions are requested: on any other page the overlay runs only when the developer clicks the toolbar icon, under `activeTab`, for that tab alone. The content script opens a WebSocket connection to a **locally-installed** MCP server process (`@nco-studio/web-editor-mcp`) running on the developer's own machine — the extension opens no other connection, and neither it nor that server transmits anything off the machine. (The MCP server's purpose is to hand edits to the developer's own AI agent, which is where they go next.) The WebSocket is opened by the **content script** (not the service worker) to avoid MV3 service-worker termination issues; this is a standard architecture for dev-tool extensions that need persistent WebSocket connections.
 
 ---
 
@@ -83,7 +87,9 @@ These notes help the Chrome Web Store review team understand how to test the ext
 
 ### What this extension does
 
-This extension is a developer tool that overlays a visual inspection and editing UI on locally-running web pages. It requires a locally-installed companion MCP server. It does not work on public websites.
+This extension is a developer tool that overlays a visual inspection and editing UI on a web page. It loads automatically only on the developer's own local servers (`content_scripts.matches`); on any other page it loads only when the developer clicks the toolbar icon, under `activeTab`, for that tab alone.
+
+Its full loop — visual edits written back into source files — requires a locally-installed companion MCP server and build-time tags added by the developer's dev plugin. On a page without those, the overlay still inspects and adjusts, but the changes stay in the browser and are never written anywhere.
 
 On first install, the extension opens the setup guide at https://nco.studio/web-editor/ in a new tab. This is a static page; no data is sent to it. Subsequent installs (update, reinstall) do not open a tab.
 
@@ -131,7 +137,8 @@ If the extension and MCP server versions are incompatible, a persistent red bann
 
 ### Known limitations
 
-- The extension activates only on `localhost` and `127.0.0.1` pages. It will not activate on production or staging URLs.
+- The editor loads automatically only on `localhost` and `127.0.0.1`. On other pages it loads when the toolbar icon is clicked, and edits cannot be written back to source — that requires the build-time tags the dev plugin adds, so on a deployed page the changes stay in the browser.
+- Chrome's own pages (`chrome://`, the Web Store), `file:` URLs and other extensions' pages cannot host the overlay; the popup says so rather than failing silently.
 - The companion MCP server must be running before the extension can connect. If the server is not running, the extension shows a "disconnected" status and retries automatically.
 - Page reloads clear the active editing session; pending diffs are restored from `chrome.storage.session`.
 

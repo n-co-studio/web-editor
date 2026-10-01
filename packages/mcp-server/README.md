@@ -89,7 +89,7 @@ The server writes the pending queue to `.nco-web-editor/pending-queue.json` on e
 
 ## Security Note
 
-Token discovery parses `tailwind.config.ts` (and similar config files) by compiling and evaluating them via esbuild. This executes project code inside the MCP server process. The server runs in your project's trust context, so this is the same trust level as running `vite` or `next dev`. No data leaves your machine — all communication is localhost-only. See [SECURITY.md](../../SECURITY.md) for the full disclosure.
+Token discovery parses `tailwind.config.ts` (and similar config files) by compiling and evaluating them via esbuild. This executes project code inside the MCP server process. The server runs in your project's trust context, so this is the same trust level as running `vite` or `next dev`. All communication is localhost-only — the server sends nothing anywhere else. Your edits do go to whichever agent connects to it, and most agents send what they read to a model provider. See [SECURITY.md](../../SECURITY.md) for the full disclosure.
 
 ## Known Limitations
 

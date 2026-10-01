@@ -9,6 +9,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - **Light / Dark / System theme toggle** — the toolbar-icon popup now has a three-way theme control (Light / Dark / System). The preference persists via `chrome.storage.local` and applies live without reloading the overlay. System mode follows the OS `prefers-color-scheme` setting and is the default.
+- **Two-column toolbar** — the floating toolbar lays its sections out in two columns, 608px tall instead of 978px, so it fits an ordinary viewport with every section open instead of auto-collapsing to cope.
+
+### Fixed
+
+- **Toolbar can no longer be stranded off-screen** — a position restored from a larger window, or a window resized after the toolbar was placed, could leave it entirely outside the viewport with no way to reach it short of a reload. It is now re-pinned inside the viewport on restore and on resize, including while collapsed.
 
 ## [0.2.0] - 2026-09-21
 
@@ -29,7 +34,7 @@ First public release: Chrome Web Store extension 0.2.0 and both npm packages at 
 - **MCP server instructions** — the server describes its workflow to agents that have no project-specific guidance
 - Token discovery from `tailwind.config.ts` / `.mts` / `.cts`
 - Guidance for Chrome's Local Network Access prompt: the Review changes panel explains the permission when nothing has ever connected, and the quickstart, store reviewer notes and guide troubleshooting cover it
-- Localhost-only activation is now enforced in code, not just declared: the popup refuses to inject into non-local pages and the content script refuses to activate on them (the public web-embed demo is exempt by design)
+- Two ways in, kept distinct in code: the editor loads **automatically** only on `localhost` / `127.0.0.1` (the manifest's `content_scripts.matches`), and on any other page it loads only when you click the toolbar icon, under `activeTab`, for that tab alone. Nothing loads into a site you are merely browsing, and no broad host permissions are requested.
 
 ### Changed
 

@@ -33,7 +33,7 @@ const QA: Qa[] = [
   },
   {
     q: 'Is it production-ready?',
-    a: 'It began as a process tool for a portfolio and grew into a feature-rich, production-ready product — now published on the Chrome Extension Store. Everything runs locally; no data leaves your machine.',
+    a: 'It began as a process tool for a portfolio and grew into a feature-rich, production-ready product — now published on the Chrome Extension Store. Everything runs on your machine; the editor and server send your data nowhere else, and your edits go to whichever agent you point it at.',
   },
 ];
 

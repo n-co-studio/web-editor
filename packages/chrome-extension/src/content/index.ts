@@ -81,8 +81,6 @@ import { PROTOCOL_VERSION } from '@nco-studio/shared';
 import type { VisualDiff, PropertyChange, AttributeChange, TextChange, ReorderChange, ReparentChange, GroupChange, RemoveChange, StylesheetChange, ScriptBehaviorChange, LayoutContainerDescriptor } from '@nco-studio/shared';
 import { parseLayoutSignal, classifyLayoutRole } from '@nco-studio/shared/layout';
 import type { ExtensionMode, ConnectionStatus, EditMode, IconStatus } from '../shared/types';
-import { isLocalDevHost } from '../shared/is-local-host';
-import { isDemoMode } from './web-env';
 import {
   THEME_STORAGE_KEY,
   DEFAULT_THEME_PREFERENCE,
@@ -425,30 +423,24 @@ function teardownHarvest(): void {
 // ---------------------------------------------------------------------------
 
 /**
- * The editor is documented as running only on the developer's own machine —
- * the store listing, the privacy policy and the `scripting` permission
- * justification all say so. The manifest's content_scripts.matches enforces
- * that for automatic injection and the popup checks the tab URL before the
- * programmatic path; this is the content script's own guard, so the claim
- * holds no matter how the bundle is reached.
+ * There is deliberately no page check here.
  *
- * The web-embed bundle is the deliberate exception: it is loaded by the
- * marketing site on a public page, where demo mode already replaces the
- * chrome.* APIs and disables MCP submission.
+ * The content script only ever reaches a page two ways, and both are already
+ * the user's decision: the manifest's `content_scripts.matches` loads it on
+ * localhost, and everywhere else it arrives because the user clicked the
+ * toolbar icon, which is what grants `activeTab` for that tab. Editing a site
+ * you are not synced to is a capability this product has on purpose, so
+ * refusing to run here would remove a feature, not protect anything.
+ *
+ * A previous version of this function rejected every non-localhost page to
+ * match privacy copy claiming the editor "never runs on public websites". The
+ * copy was wrong, not the product; it has been rewritten to describe both
+ * paths. What genuinely differs off a dev server is source mapping — see the
+ * popup's scope hint and `is-local-host.ts`, which informs rather than blocks.
  */
-function isSupportedPage(): boolean {
-  if (isDemoMode()) return true;
-  return isLocalDevHost(window.location.hostname);
-}
 
 export async function activate(): Promise<void> {
   if (mode !== 'inactive') return;
-  if (!isSupportedPage()) {
-    console.warn(
-      '[nco-web-editor] Not a local development page — the editor only runs on localhost or 127.0.0.1.',
-    );
-    return;
-  }
 
   // Get or create tab session ID
   tabId = await getOrCreateTabId();

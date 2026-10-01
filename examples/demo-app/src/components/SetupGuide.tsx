@@ -279,10 +279,16 @@ const STEPS: Step[] = [
           </a>
           , then <strong>pin it to your toolbar</strong> — click the puzzle-piece icon in Chrome’s
           toolbar and hit the pin beside the editor. The icon is how you switch the editor on and
-          off, so you want it visible. It is built for your own dev server — pages served from{' '}
-          <code style={{ fontFamily: 'var(--font-mono)' }}>localhost</code> or{' '}
-          <code style={{ fontFamily: 'var(--font-mono)' }}>127.0.0.1</code> — where the source mapping and
-          design tokens it relies on come from.
+          off, so you want it visible.
+        </p>
+        <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
+          On your dev server — <code style={{ fontFamily: 'var(--font-mono)' }}>localhost</code> or{' '}
+          <code style={{ fontFamily: 'var(--font-mono)' }}>127.0.0.1</code> — it loads on its own, and
+          that is where the whole loop works: the source mapping and design tokens it reads come from
+          your running project. You can also click the icon on <em>any</em> other page to edit it —
+          handy for picking apart a live site or trying an idea against production — but there the
+          changes stay in the browser. Writing them back to files needs the build-time tags the dev
+          plugin adds, and a deployed page has never had them.
         </p>
         {/* Placeholder for a screenshot not yet taken. 1280×800 is the Chrome
             Web Store screenshot size, so one capture serves both. Deliberately
@@ -345,8 +351,9 @@ const STEPS: Step[] = [
         <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
           Chrome asks to allow access to devices on your local network the first time it connects —{' '}
           <strong>allow it</strong>. That is the editor reaching your MCP server over{' '}
-          <code style={{ fontFamily: 'var(--font-mono)' }}>ws://localhost</code>; nothing leaves your machine.
-          A banner appears only if the extension and server versions disagree.
+          <code style={{ fontFamily: 'var(--font-mono)' }}>ws://localhost</code> — a connection that goes
+          no further than your own machine. A banner appears only if the extension and server versions
+          disagree.
         </p>
       </>
     ),
@@ -366,7 +373,7 @@ to, then mark it done — using the get_pending_visual_changes
 and acknowledge_visual_change tools.`}</Code>
         <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
           <code style={{ fontFamily: 'var(--font-mono)' }}>nco-web-editor</code> is the <code style={{ fontFamily: 'var(--font-mono)' }}>mcpServers</code> key
-          from step 2 — swap in whatever you named it. Everything stays local.
+          from step 2 — swap in whatever you named it. The server runs on your machine; your agent is the one that sees your edits, and most agents send what they read to a model provider.
         </p>
       </>
     ),
@@ -377,7 +384,7 @@ export default function SetupGuide() {
   return (
     <div>
       <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)', maxWidth: 'var(--measure)', marginBottom: 'var(--space-10)' }}>
-        Install it, point your agent at it, and activate. Everything runs locally — no data leaves your machine.
+        Install it, point your agent at it, and activate. It all runs on your machine — the editor talks only to your own MCP server, which hands your edits to your agent.
       </p>
 
       <div style={{ position: 'relative' }}>
