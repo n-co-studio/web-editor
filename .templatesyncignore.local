@@ -1,0 +1,9 @@
+# Files this repo owns. Template sync never overwrites these, and the
+# withdrawn-file sweep never removes them — see template decision t-0052.
+#
+# The template already excludes README.md as of t-0052, so this entry is
+# belt-and-braces: it keeps the product README safe independently of what the
+# template's own policy does next. The 2026-09-25 sync is why that matters —
+# it replaced this file's predecessor and then overwrote the README the
+# predecessor protected.
+README.md

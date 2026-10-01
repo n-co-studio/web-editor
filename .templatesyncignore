@@ -8,6 +8,15 @@ docs/ai/logs/
 # in template-sync-engine.sh (BEGIN/END REPO-OS MANAGED block)
 .gitignore
 
+# A1 trigger index — GENERATED, and generated per-repo. The template's copy is
+# built from the template's own decisions. Shipping it overwrote each child's
+# index, and the A1 gate reads the index EXCLUSIVELY (pre-commit-gates.sh falls
+# back to parsing decision files only when the index is ABSENT, which sync made
+# impossible). Every child's own decisions were therefore unenforceable —
+# markpreston had 22 of them. The sync engine now rebuilds the index in the
+# child after syncing decisions instead of delivering the template's.
+docs/ai/decisions/.a1-trigger-index
+
 # Decision records: NOT excluded. Template decisions (`t-*`) sync to child repos.
 # Child decisions (0100+) are safe — the sync engine operates add/update-only
 # (does not delete child-only files), so project-specific decisions remain untouched.
@@ -31,10 +40,6 @@ docs/spec/prototypes/
 
 # Product knowledge graph (child-owned, never overwritten by template sync)
 docs/ai/knowledge-graph/product-graph.yaml
-
-# Product README — child-owned; never overwritten by template sync
-README.md
-
 
 # Workflow files (repo-specific; GITHUB_TOKEN cannot push workflow changes)
 #

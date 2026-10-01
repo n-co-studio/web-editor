@@ -12,7 +12,6 @@
 # Node.js / TypeScript build artifacts
 node_modules/
 dist/
-dist-zip/
 *.tsbuildinfo
 
 # Claude Code personal settings
@@ -66,6 +65,14 @@ docs/ai/knowledge-graph/.product-graph-lock
 # Session worktree isolation (Decision 0033)
 .worktrees/
 # END REPO-OS MANAGED
+
+# Chrome Web Store package output (project-local, not template-managed)
+# package-extension.mjs builds the submission zip here. It was in the managed
+# block until the 2026-09-25 template sync dropped it, which left the built
+# zip showing as untracked and one `git add -A` away from being committed.
+# Kept below the markers so template sync cannot take it again.
+packages/chrome-extension/dist-zip/
+dist-zip/
 
 # MCP server runtime state (project-local, not template-managed)
 # server.lock holds the running server's PID; pending-queue.json is the
