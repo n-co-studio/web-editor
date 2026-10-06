@@ -59,6 +59,25 @@ _FAKE_AWS_KEY="AKIA""IOSFODNN7EXAMPLE"
 
 # --- Independent assertion: exact exit code. ---
 # Never "non-zero means blocked" -- that is the defect being corrected for.
+# Presence/absence assertion sharing expect_exit's counters, for the cases that
+# check a side effect on disk rather than an exit code.
+expect_file() {
+  local mode="$1" path="$2" desc="$3"   # mode: present | absent
+  local okflag=1
+  case "$mode" in
+    present) [ -f "$path" ] && okflag=0 ;;
+    absent)  [ -f "$path" ] || okflag=0 ;;
+  esac
+  if [ "$okflag" -eq 0 ]; then
+    PASS=$((PASS + 1))
+    printf 'ok   %-58s [%s]\n' "$desc" "$mode"
+  else
+    FAIL=$((FAIL + 1))
+    FAILED_CASES="${FAILED_CASES}    - ${desc} (expected ${mode}: ${path})"$'\n'
+    printf 'FAIL %-58s [expected %s]\n' "$desc" "$mode"
+  fi
+}
+
 expect_exit() {
   local expected="$1" actual="$2" desc="$3"
   if [ "$actual" = "$expected" ]; then
@@ -320,6 +339,54 @@ reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
 stage ".claude/hooks/probe-hook.sh" "# PreToolUse handler added here"
 rc=$(run_gate "pre-commit-gates.sh" "git commit -m chore-hookchange -m Decisions: 0004")
 expect_exit 0 "$rc" "A1 allows a triggered decision when the trailer names it"
+
+# C8a — the SAME change, trailer delivered via `git commit -F <file>`.
+#       This is the regression that mattered: C7/C8 only ever exercised -m, so
+#       a trailer in a -F file was invisible to the gate and A1 blocked a
+#       correct commit. Nothing in the prompts prescribes an invocation form,
+#       and a multi-line message naturally wants -F.
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+stage ".claude/hooks/probe-hook.sh" "# PreToolUse handler added here"
+printf 'chore: hook change\n\nDecisions: 0004\n' > "$SB/.git/COMMIT_MSG_PROBE"
+rc=$(run_gate "pre-commit-gates.sh" "git commit -F $SB/.git/COMMIT_MSG_PROBE")
+expect_exit 0 "$rc" "A1 allows a triggered decision when the trailer is in a -F file"
+
+# C8b — -F file WITHOUT the trailer must still block. Proves the fix reads the
+#       file's content rather than merely detecting that -F was used.
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+stage ".claude/hooks/probe-hook.sh" "# PreToolUse handler added here"
+printf 'chore: hook change\n\nno trailer here\n' > "$SB/.git/COMMIT_MSG_PROBE"
+rc=$(run_gate "pre-commit-gates.sh" "git commit -F $SB/.git/COMMIT_MSG_PROBE")
+expect_exit 2 "$rc" "A1 still blocks when the -F file carries no trailer"
+
+# C8c — the documented residual. PreToolUse fires before the command runs, so a
+#       -F file built by that same command line does not exist yet. Behaviour
+#       must fall back to today's: command string only, so A1 blocks. Asserted
+#       so the limit is a known property, not a surprise. See t-0053.
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+stage ".claude/hooks/probe-hook.sh" "# PreToolUse handler added here"
+rc=$(run_gate "pre-commit-gates.sh" "git commit -F $SB/.git/DOES_NOT_EXIST_YET")
+expect_exit 2 "$rc" "A1 blocks when the -F file is not yet written (documented limit)"
+
+# C8d — the recovery signal must SURVIVE a commit it did not unblock. It covers
+#       state-dependent gates only; A1 can still block afterwards, and deleting
+#       the token on sight spent it on a commit that never happened.
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+stage ".claude/hooks/probe-hook.sh" "# PreToolUse handler added here"
+mkdir -p "$SB/.claude/.state"; : > "$SB/.claude/.state/.recover-signal"
+rc=$(run_gate "pre-commit-gates.sh" "git commit -m chore-hookchange")
+expect_exit 2 "$rc" "blocked by A1 even with the recovery signal armed"
+expect_file present "$SB/.claude/.state/.recover-signal" \
+            "recovery signal survives a commit it did not unblock"
+
+# C8e — and it IS consumed when the commit actually proceeds.
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+stage ".claude/hooks/probe-hook.sh" "# PreToolUse handler added here"
+mkdir -p "$SB/.claude/.state"; : > "$SB/.claude/.state/.recover-signal"
+rc=$(run_gate "pre-commit-gates.sh" "git commit -m chore-hookchange -m Decisions: 0004")
+expect_exit 0 "$rc" "commit proceeds with the trailer present"
+expect_file absent "$SB/.claude/.state/.recover-signal" \
+            "recovery signal is consumed when the commit proceeds"
 
 # C9 — experiment branches are exempt from state checks by design, but A4 is
 #      documented as running on every branch.

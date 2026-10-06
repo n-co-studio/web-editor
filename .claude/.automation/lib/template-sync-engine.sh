@@ -122,6 +122,11 @@ read_syncignore() {
 # substitution inside the sync loop crashes bash 3.2 with SIGBUS (exit 138)
 # when that loop sits inside a command substitution — macOS ships 3.2.57.
 _SYNCIGNORE_PATTERNS=()
+# Paths the CHILD claims as its own (see _load_syncignore_patterns). A subset
+# of _SYNCIGNORE_PATTERNS, kept separately so the sweep can refuse to delete
+# them even when the template withdraws its own copy.
+_CHILD_CLAIM_PATTERNS=()
+CHILD_CLAIMS_REL=".templatesyncignore.local"
 _load_syncignore_patterns() {
   _SYNCIGNORE_PATTERNS=()
   local src="" tmp _p
@@ -155,7 +160,34 @@ _load_syncignore_patterns() {
     _SYNCIGNORE_PATTERNS[${#_SYNCIGNORE_PATTERNS[@]}]="$_p"
   done < "$src"
   rm -f "$tmp"
-  log "Loaded ${#_SYNCIGNORE_PATTERNS[@]} exclusion pattern(s)"
+  log "Loaded ${#_SYNCIGNORE_PATTERNS[@]} exclusion pattern(s) from the template"
+
+  # --- The child's own claims ---
+  #
+  # t-0051 made the template's list authoritative, which fixed a real bug (a
+  # child without the file excluded nothing) but removed the child's ability to
+  # protect anything the template did not already exclude. That cost both
+  # children their product README: the template ships one, so sync delivered
+  # the template's over theirs.
+  #
+  # A child claims a path by listing it in .templatesyncignore.local, which is
+  # itself excluded from sync so it cannot be overwritten. Claims ADD to the
+  # template's policy; they never subtract from it, so the first-sync hole
+  # t-0051 closed stays closed.
+  #
+  # Claims are tracked separately as well as merged, because exclusion alone is
+  # not enough: the sweep deletes by manifest diff, and a claimed path that the
+  # template later withdraws would otherwise be deleted out of the child. See
+  # sweep_withdrawn_files.
+  if [ -f "$REPO_ROOT/$CHILD_CLAIMS_REL" ]; then
+    while IFS= read -r _p; do
+      _p="$(printf '%s' "$_p" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+      case "$_p" in '#'*|'') continue ;; esac
+      _SYNCIGNORE_PATTERNS[${#_SYNCIGNORE_PATTERNS[@]}]="$_p"
+      _CHILD_CLAIM_PATTERNS[${#_CHILD_CLAIM_PATTERNS[@]}]="$_p"
+    done < "$REPO_ROOT/$CHILD_CLAIMS_REL"
+    log "Loaded ${#_CHILD_CLAIM_PATTERNS[@]} child-owned claim(s) from $CHILD_CLAIMS_REL"
+  fi
 }
 
 is_excluded() {
@@ -172,6 +204,29 @@ is_excluded() {
       fi
     else
       # Exact file match
+      if [ "$file_path" = "$pattern" ]; then
+        return 0
+      fi
+    fi
+  done
+
+  return 1
+}
+
+# True when the child has claimed this path in .templatesyncignore.local.
+# Mirrors is_excluded's matching rules so a claim behaves the same way an
+# exclusion does — same directory/exact-file semantics, no second dialect.
+is_child_claimed() {
+  local file_path="$1"
+
+  for pattern in ${_CHILD_CLAIM_PATTERNS[@]+"${_CHILD_CLAIM_PATTERNS[@]}"}; do
+    [ -z "$pattern" ] && continue
+    if [[ "$pattern" == */ ]]; then
+      local dir_prefix="${pattern%/}"
+      if [[ "$file_path" == "$dir_prefix/"* ]] || [ "$file_path" = "$dir_prefix" ]; then
+        return 0
+      fi
+    else
       if [ "$file_path" = "$pattern" ]; then
         return 0
       fi
@@ -367,6 +422,15 @@ sweep_withdrawn_files() {
   while IFS= read -r removed; do
     [ -z "$removed" ] && continue
     [ -e "$REPO_ROOT/$removed" ] || continue
+    # A path the child claimed is the child's, whatever the manifest says. The
+    # manifest is generated against the template's list and so still lists
+    # files the child has taken over; without this guard, withdrawing one from
+    # the template would delete the child's copy — turning the overwrite bug
+    # this mechanism fixes into a silent deletion, which is strictly worse.
+    if is_child_claimed "$removed"; then
+      log "  kept (child-owned): $removed"
+      continue
+    fi
     if git -C "$REPO_ROOT" rm -q --ignore-unmatch "$removed" 2>/dev/null; then
       log "  withdrawn: $removed"
     else

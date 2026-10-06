@@ -43,6 +43,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/_analytics-helper.sh"
 source "$SCRIPT_DIR/_phase-helper.sh"
 source "$SCRIPT_DIR/_secret-pattern.sh"
+source "$SCRIPT_DIR/_commit-message-helper.sh"
 START_MS=$(now_ms)
 
 # --- jq presence guard (fail-closed) ---
@@ -135,6 +136,7 @@ _REPO_OS_STDIN_SID="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev
 
 COMMIT_CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null || true)
 
+
 # --- Self-filter: skip the full gate chain for non-commit commands ---
 # The matcher is now "Bash" (fires on every Bash call); guard against running
 # A1-A6 + secret scan on unrelated commands like 'ls' or 'echo'.
@@ -146,8 +148,17 @@ case "$COMMIT_CMD" in
   *) exit 0 ;;
 esac
 
+# Text the trailer gates search: the command string, plus a -F file when one is
+# readable. Strictly a superset of COMMIT_CMD, so no invocation that works today
+# can regress. Computed AFTER the self-filter above — there is no reason to
+# resolve a message for the many Bash calls that are not commits at all.
+# See _commit-message-helper.sh and decision t-0053.
+COMMIT_TEXT=$(resolve_commit_text "$COMMIT_CMD")
+
 # --- REPO_OS_RECOVER override (env var or file-based signal) ---
 RECOVER_SIGNAL_FILE="$REPO_ROOT/.claude/.state/.recover-signal"
+# Set when the file-based signal was present. Consumed in _finish() on success.
+RECOVER_SIGNAL_ARMED=false
 if [ "${REPO_OS_RECOVER:-0}" = "1" ]; then
   log_override "pre-commit-gates" "REPO_OS_RECOVER"
   echo "REPO_OS_RECOVER=1 — skipping all state-dependent checks" >&2
@@ -161,12 +172,49 @@ if [ "${REPO_OS_RECOVER:-0}" = "1" ]; then
   SKIP_STATE=true
 elif [ -f "$RECOVER_SIGNAL_FILE" ]; then
   log_override "pre-commit-gates" "recover-signal-file"
-  rm -f "$RECOVER_SIGNAL_FILE"
-  echo "Recovery signal consumed — skipping all state-dependent checks" >&2
+  # NOT deleted here. The signal only suppresses state-dependent gates, so A1
+  # and others can still block afterwards — and deleting on sight spent the
+  # operator's one-shot token on a commit that never happened, with nothing
+  # saying so. It is consumed in _finish(), on a genuine success only. See
+  # decision t-0053.
+  RECOVER_SIGNAL_ARMED=true
+  echo "Recovery signal armed — state-dependent checks skipped (consumed only if this commit proceeds)" >&2
   SKIP_STATE=true
 else
   SKIP_STATE=false
 fi
+
+# --- Success exit (consumes the recovery signal) ---
+#
+# There is no single exit 0 in this script: the experiment branch and the
+# editor-live loop each have their own, plus the end of the gate chain. Every
+# one of them means "this commit is going ahead", and that is the only moment
+# the operator's one-shot token has actually done its job.
+#
+# Block exits do NOT call this, so a commit stopped by a gate the signal does
+# not cover leaves the token armed for the retry. Nor does _gate_abort: a
+# crash in the gate script is a defect, not a verdict, and burning the token on
+# it would cost the operator their bypass for a reason unrelated to what they
+# were recovering from.
+_finish() {
+  local reason="$1"
+  if [ "$RECOVER_SIGNAL_ARMED" = true ]; then
+    rm -f "$RECOVER_SIGNAL_FILE" 2>/dev/null || true
+    echo "Recovery signal consumed — the commit proceeded." >&2
+  fi
+  log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "$reason"
+  exit 0
+}
+
+# --- Block exit (leaves the recovery signal armed) ---
+_blocked() {
+  if [ "$RECOVER_SIGNAL_ARMED" = true ]; then
+    echo "Recovery signal left armed — it covers state-dependent checks only, and this commit was stopped by: ${BLOCKED_REASONS:-a later gate}. Fix that, then retry; the signal is still in place." >&2
+  fi
+  log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "$BLOCKED_REASONS"
+  echo "Commit blocked by pre-commit gate check." >&2
+  exit 2
+}
 
 # --- Branch detection ---
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
@@ -219,12 +267,9 @@ fi
 # --- Exit early for experiment branches (A4 only) ---
 if [ "$IS_EXPERIMENT" = true ]; then
   if [ "$FAILED" -ne 0 ]; then
-    log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "$BLOCKED_REASONS"
-    echo "Commit blocked by pre-commit gate check." >&2
-    exit 2
+    _blocked
   fi
-  log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "experiment_branch"
-  exit 0
+  _finish "experiment_branch"
 fi
 
 # --- Editor-live session type detection (uses shared is_session_closing predicate) ---
@@ -249,12 +294,9 @@ fi
 # Exit early for editor-live per-loop commits (A4 only — same as experiment)
 if [ "$IS_EDITOR_LIVE_LOOP" = true ]; then
   if [ "$FAILED" -ne 0 ]; then
-    log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "$BLOCKED_REASONS"
-    echo "Commit blocked by pre-commit gate check." >&2
-    exit 2
+    _blocked
   fi
-  log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "editor_live_loop"
-  exit 0
+  _finish "editor_live_loop"
 fi
 
 # ============================================================
@@ -1530,7 +1572,7 @@ if [ -n "$STAGED_FILES" ] && [ -d "$DECISIONS_DIR" ]; then
 
   # --- Trailer check (shared by both paths) ---
   if [ -n "$TRIGGERED_DECISIONS" ]; then
-    DECISIONS_TRAILER=$(echo "$COMMIT_CMD" | grep -oE 'Decisions:[^\n]+' || true)
+    DECISIONS_TRAILER=$(extract_trailer "$COMMIT_TEXT" 'Decisions')
     MISSING_DECISION_IDS=""
 
     IFS=', ' read -ra TRIGGERED_ARRAY <<< "$TRIGGERED_DECISIONS"
@@ -1579,7 +1621,7 @@ if [ "$SKIP_STATE" = false ] && [ -n "$STAGED_FILES" ]; then
     fi
   done
   if [ -n "$_EC_SRC" ]; then
-    if ! echo "$COMMIT_CMD" | grep -qiE 'Changes:[[:space:]]*EC-'; then
+    if ! printf '%s' "$COMMIT_TEXT" | grep -qiE 'Changes:[[:space:]]*EC-'; then
       echo "Advisory: brief declares expected_changes but this commit has no 'Changes: EC-n' trailer — it will be reported as an additional change. Add one if it delivers a declared outcome. (bash .claude/tools/ec-report.sh --text)" >&2
       warn "ec_trailer_absent"
     fi
@@ -1594,7 +1636,7 @@ fi
 if [ "$SKIP_STATE" = false ] && [ -f "$STATE_DIR/overrides.log" ]; then
   MODE_GUARD_OVERRIDES=$(grep "mode-guard" "$STATE_DIR/overrides.log" 2>/dev/null || true)
   if [ -n "$MODE_GUARD_OVERRIDES" ]; then
-    OVERRIDES_TRAILER=$(echo "$COMMIT_CMD" | grep -oE 'Overrides:[^\n]+' || true)
+    OVERRIDES_TRAILER=$(extract_trailer "$COMMIT_TEXT" 'Overrides')
     if [ -z "$OVERRIDES_TRAILER" ]; then
       echo "Advisory: mode-guard overrides used this session — consider adding Overrides: trailer (e.g., Overrides: mode-guard/REPO_OS_UNLOCK_PATH)" >&2
       warn "override_trailer_advisory"
@@ -1905,12 +1947,10 @@ fi
 # Final exit
 # ============================================================
 if [ "$FAILED" -ne 0 ]; then
-  log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "$BLOCKED_REASONS"
-  echo "Commit blocked by pre-commit gate check." >&2
-  exit 2
+  _blocked
 fi
 
 REASON="pass"
 [ "${REPO_OS_RECOVER:-0}" = "1" ] && REASON="recover_override"
 [ -n "$WARN_REASONS" ] && REASON="${REASON:+$REASON }$WARN_REASONS"
-log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "$REASON"
+_finish "$REASON"

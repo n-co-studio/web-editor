@@ -54,3 +54,16 @@ docs/ai/knowledge-graph/product-graph.yaml
 .github/workflows/template-sync.yml
 .github/workflows/auto-version-tag.yml
 .github/workflows/gate-conformance.yml
+
+# Product README — a child's README describes the CHILD's product; the
+# template's describes the template. Shipping ours replaced both children's
+# product READMEs with "# Repo OS" on 2026-09-25, on a repo days from a public
+# launch. Excluded here rather than claimed per-child so it also drops out of
+# the machinery manifest, keeping sync and the withdrawn-file sweep reasoning
+# about the same file set (see t-0051).
+README.md
+
+# A child's own claims (see _load_syncignore_patterns). Never synced: the whole
+# point is that the child controls it, so delivering the template's copy would
+# erase the claims on the sync that most needs them.
+.templatesyncignore.local
