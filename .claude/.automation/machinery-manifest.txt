@@ -112,6 +112,7 @@
 .claude/hooks/_analytics-helper.sh
 .claude/hooks/_automation-bridge.sh
 .claude/hooks/_cleanup-helper.sh
+.claude/hooks/_commit-message-helper.sh
 .claude/hooks/_cross-session-context.sh
 .claude/hooks/_headless-plan-approve.sh
 .claude/hooks/_headless-state-write.sh
@@ -139,6 +140,7 @@
 .claude/hooks/tests/headless/BRIEF.md
 .claude/hooks/tests/headless/layer-a-headless-sandbox.sh
 .claude/hooks/tests/headless/layer-b-headless-live.sh
+.claude/hooks/tests/layer0-commit-message-helper.sh
 .claude/hooks/tests/layer1-phase-functions.sh
 .claude/hooks/tests/layer1b-registry-functions.sh
 .claude/hooks/tests/layer1c-worktree-functions.sh
@@ -186,7 +188,6 @@
 .templatesyncignore
 AI.md
 CLAUDE.md
-README.md
 docs/README.md
 docs/ai/decisions/.a1-triggers-enforced
 docs/ai/decisions/.fail-closed-enforced
@@ -242,6 +243,8 @@ docs/ai/decisions/t-0048-criteria-verdict-persistence.md
 docs/ai/decisions/t-0049-gate-exit-contract.md
 docs/ai/decisions/t-0050-expected-changes.md
 docs/ai/decisions/t-0051-template-sync-ownership.md
+docs/ai/decisions/t-0052-child-owned-files.md
+docs/ai/decisions/t-0053-signal-fidelity.md
 docs/ai/decisions/t-manifest.txt
 docs/ai/eval/.gitkeep
 docs/ai/eval/_nomenclature.md

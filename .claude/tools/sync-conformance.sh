@@ -64,6 +64,9 @@ build_sandbox() {
 
   printf 'shipped hook v1\n'  > "$TPL/.claude/hooks/kept-hook.sh"
   printf 'withdrawn later\n'  > "$TPL/.claude/hooks/doomed-hook.sh"
+  # The template's own README, and a hook the child will claim as its own.
+  printf '# Repo OS\ntemplate readme\n' > "$TPL/README.md"
+  printf 'template version\n'           > "$TPL/.claude/hooks/claimed-hook.sh"
   printf 'agent\n'            > "$TPL/.claude/agents/critic.md"
   printf '# ignored by sync\n' > "$TPL/docs/ai/logs/session-log.md"
 
@@ -87,6 +90,8 @@ EOF
 docs/ai/logs/
 docs/ai/decisions/.a1-trigger-index
 .gitignore
+README.md
+.templatesyncignore.local
 EOF
 
   # manifest listing exactly what sync delivers
@@ -95,6 +100,7 @@ EOF
     ".claude/.automation/lib/rebuild-trigger-index.sh" \
     ".claude/.automation/machinery-manifest.txt" \
     ".claude/agents/critic.md" \
+    ".claude/hooks/claimed-hook.sh" \
     ".claude/hooks/doomed-hook.sh" \
     ".claude/hooks/kept-hook.sh" \
     ".templatesyncignore" \
@@ -115,6 +121,18 @@ EOF
   printf 'child hook\n'  > "$CHILD/.claude/hooks/child-only-hook.sh"
   printf 'child agent\n' > "$CHILD/.claude/agents/child-only-agent.md"
   printf 'product\n'     > "$CHILD/src/app.ts"
+
+  # The child's product README — the file both real children lost on 2026-09-25.
+  printf '# Visual Web Editor\nproduct readme\n' > "$CHILD/README.md"
+
+  # A file the template ALSO ships, which the child has taken ownership of.
+  # Exercises both halves of the claim: not overwritten by sync, and not
+  # deleted by the sweep when the template later withdraws its copy.
+  printf 'child version\n' > "$CHILD/.claude/hooks/claimed-hook.sh"
+  cat > "$CHILD/.templatesyncignore.local" <<'EOF'
+# child-owned
+.claude/hooks/claimed-hook.sh
+EOF
 
   # the child's own decision — its triggers must end up in the rebuilt index
   cat > "$CHILD/docs/ai/decisions/0100-child-decision.md" <<'EOF'
@@ -170,6 +188,14 @@ assert_file    "$CHILD/.claude/hooks/kept-hook.sh"        "delivers template fil
 assert_file    "$CHILD/.claude/hooks/doomed-hook.sh"      "delivers a file that will later be withdrawn"
 assert_no_file "$CHILD/docs/ai/logs/session-log.md"       "honours .templatesyncignore (docs/ai/logs/)"
 assert_file    "$CHILD/.claude/hooks/child-only-hook.sh"  "child's own hook survives"
+assert_grep    "product readme" "$CHILD/README.md" \
+               "child's product README survives (template excludes README.md)"
+assert_no_grep "template readme" "$CHILD/README.md" \
+               "template's README did NOT overwrite the child's"
+assert_grep    "child version" "$CHILD/.claude/hooks/claimed-hook.sh" \
+               "child-claimed file is not overwritten by sync"
+assert_file    "$CHILD/.templatesyncignore.local" \
+               "child's claims file is itself never synced away"
 if grep -qi "skipping withdrawn-file sweep" "$SANDBOX/engine.log"; then
   ok "skips sweep when no previous manifest (fail-safe)"
 else
@@ -192,8 +218,12 @@ assert_grep "hooks" "$CHILD/docs/ai/decisions/.a1-trigger-index" \
             "A1 index also indexes template decisions"
 
 # === Sync 2: template withdraws a file =====================================
-printf '\n## sync 2 — template withdraws doomed-hook.sh\n'
+printf '\n## sync 2 — template withdraws doomed-hook.sh and claimed-hook.sh\n'
 rm -f "$TPL/.claude/hooks/doomed-hook.sh"
+# Also withdraw the file the CHILD claimed. Without the sweep guard this is the
+# deletion hazard: it sits in the child's previous manifest and not the new one,
+# so a naive diff would remove the child's own copy.
+rm -f "$TPL/.claude/hooks/claimed-hook.sh"
 write_manifest "$TPL" \
   ".claude/.automation/lib/child-sync-decisions.sh" \
   ".claude/.automation/lib/rebuild-trigger-index.sh" \
@@ -212,6 +242,12 @@ assert_file    "$CHILD/.claude/hooks/kept-hook.sh"       "still-shipped template
 assert_file    "$CHILD/.claude/hooks/child-only-hook.sh" "SAFETY: child's own hook survives the sweep"
 assert_file    "$CHILD/.claude/agents/child-only-agent.md" "SAFETY: child's own agent survives the sweep"
 assert_file    "$CHILD/src/app.ts"                       "SAFETY: product code untouched"
+assert_file    "$CHILD/.claude/hooks/claimed-hook.sh" \
+               "SAFETY: child-claimed file survives the sweep after template withdrawal"
+assert_grep    "child version" "$CHILD/.claude/hooks/claimed-hook.sh" \
+               "SAFETY: child-claimed file still holds the CHILD's content"
+assert_grep    "product readme" "$CHILD/README.md" \
+               "SAFETY: child's README survives a sweep sync too"
 assert_file    "$CHILD/docs/ai/decisions/0100-child-decision.md" "SAFETY: child's own decision survives"
 
 # === Sync 3: malformed incoming manifest must not delete anything ==========

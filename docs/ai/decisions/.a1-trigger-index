@@ -1,6 +1,6 @@
 # A1 trigger index — generated artifact. Do not hand-edit.
 # Regenerate: bash .claude/.automation/lib/rebuild-trigger-index.sh
-# digest: 2a3a4bf015f140e392beae7e9eb636cd29bd3e462c44f667f86c91ea65502328
+# digest: 01a965c1271ccc67e8d78373f464c320a85626d921eacec50f89993562d89fa1
 0001|AI\.md|prompt system, verification gate, session-based
 0001|docs/ai/prompts/prompt-.*\.md|prompt system, verification gate, session-based
 0002|docs/ai/decisions/.*\.md|mandatory, commit-blocking
@@ -117,6 +117,13 @@
 0051|\.claude/\.automation/machinery-manifest\.txt|template sync, machinery manifest, withdrawn file, orphan sweep, templatesyncignore, a1-trigger-index, sync-conformance, child sync
 0051|\.claude/tools/sync-conformance\.sh|template sync, machinery manifest, withdrawn file, orphan sweep, templatesyncignore, a1-trigger-index, sync-conformance, child sync
 0051|\.templatesyncignore|template sync, machinery manifest, withdrawn file, orphan sweep, templatesyncignore, a1-trigger-index, sync-conformance, child sync
+0052|\.claude/\.automation/lib/template-sync-engine\.sh|child-owned, templatesyncignore.local, child claim, product README, template sync, withdrawn file sweep
+0052|\.templatesyncignore|child-owned, templatesyncignore.local, child claim, product README, template sync, withdrawn file sweep
+0052|\.templatesyncignore\.local|child-owned, templatesyncignore.local, child claim, product README, template sync, withdrawn file sweep
+0052|\.claude/tools/sync-conformance\.sh|child-owned, templatesyncignore.local, child claim, product README, template sync, withdrawn file sweep
+0053|\.claude/hooks/pre-commit-gates\.sh|commit trailer, Decisions trailer, recover-signal, COMMIT_CMD, commit message, one-shot signal, proxy
+0053|\.claude/hooks/_commit-message-helper\.sh|commit trailer, Decisions trailer, recover-signal, COMMIT_CMD, commit message, one-shot signal, proxy
+0053|\.claude/tools/gate-conformance\.sh|commit trailer, Decisions trailer, recover-signal, COMMIT_CMD, commit message, one-shot signal, proxy
 0001|AI\.md|prompt system, verification gate, session-based
 0001|docs/ai/prompts/prompt-.*\.md|prompt system, verification gate, session-based
 0002|docs/ai/decisions/.*\.md|mandatory, commit-blocking

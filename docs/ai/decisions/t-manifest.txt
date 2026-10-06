@@ -59,3 +59,5 @@ t-0048-criteria-verdict-persistence.md
 t-0049-gate-exit-contract.md
 t-0050-expected-changes.md
 t-0051-template-sync-ownership.md
+t-0052-child-owned-files.md
+t-0053-signal-fidelity.md
