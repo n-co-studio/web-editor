@@ -14,7 +14,7 @@ Visual Web Editor for AI Agents is a **fully local tool**. It has no external ne
 - Neither the extension nor the MCP server sends your data anywhere else.
 - The MCP server does not listen on any external interface.
 
-**Your agent is the boundary.** The MCP server exists to hand edits to an AI agent, and most agents send what they read to a model provider. So while nothing leaves your machine *by way of this tool*, the content of an edit does reach your agent's provider — as any file you ask it to read would. Since the editor now runs on any page you click the toolbar icon on, not only your dev server, choosing to edit a logged-in or production page means choosing to show that page's content to your agent. See [docs/privacy-policy.md](docs/privacy-policy.md) for exactly what each edit carries.
+**Your agent is the boundary.** The MCP server exists to hand edits to an AI agent, and most agents send what they read to a model provider. So while nothing leaves your machine *by way of this tool*, the content of an edit does reach your agent's provider — as any file you ask it to read would. Note that a local dev server is not automatically harmless: it is often pointed at a seeded database, a staging copy or a production dump, so the page you edit may hold real records. See [docs/privacy-policy.md](docs/privacy-policy.md) for exactly what each edit carries.
 
 ## Known Design Decisions With Security Implications
 
@@ -33,7 +33,7 @@ The MCP server discovers design tokens from project configuration files (`tailwi
 
 ### Chrome Extension Content Script
 
-The Chrome extension injects a content script automatically into browser tabs matching the manifest's `content_scripts.matches` — `http://localhost/*`, `http://127.0.0.1/*` and `https://localhost/*` (the manifest's `content_scripts.matches`). It can also be injected into any other ordinary page, but only when the user clicks the toolbar icon: that gesture grants `activeTab` for that one tab, and the extension requests no host permissions covering pages the user is merely browsing. Either way the script:
+The Chrome extension injects a content script into every browser tab matching the manifest's `content_scripts.matches` — `http://localhost/*`, `http://127.0.0.1/*` and `https://localhost/*`. No broader host permissions are requested, so the script is never injected into a site you are merely browsing. The script:
 - Reads and observes DOM structure
 - Intercepts pointer events on selected elements
 - Sends structured visual diffs (CSS property changes) to the MCP server via WebSocket

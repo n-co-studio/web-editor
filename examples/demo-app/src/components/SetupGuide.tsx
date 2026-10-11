@@ -279,16 +279,10 @@ const STEPS: Step[] = [
           </a>
           , then <strong>pin it to your toolbar</strong> — click the puzzle-piece icon in Chrome’s
           toolbar and hit the pin beside the editor. The icon is how you switch the editor on and
-          off, so you want it visible.
-        </p>
-        <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
-          On your dev server — <code style={{ fontFamily: 'var(--font-mono)' }}>localhost</code> or{' '}
-          <code style={{ fontFamily: 'var(--font-mono)' }}>127.0.0.1</code> — it loads on its own, and
-          that is where the whole loop works: the source mapping and design tokens it reads come from
-          your running project. You can also click the icon on <em>any</em> other page to edit it —
-          handy for picking apart a live site or trying an idea against production — but there the
-          changes stay in the browser. Writing them back to files needs the build-time tags the dev
-          plugin adds, and a deployed page has never had them.
+          off, so you want it visible. It is built for your own dev server — pages served from{' '}
+          <code style={{ fontFamily: 'var(--font-mono)' }}>localhost</code> or{' '}
+          <code style={{ fontFamily: 'var(--font-mono)' }}>127.0.0.1</code> — where the source mapping and
+          design tokens it relies on come from.
         </p>
         {/* Placeholder for a screenshot not yet taken. 1280×800 is the Chrome
             Web Store screenshot size, so one capture serves both. Deliberately
@@ -351,9 +345,8 @@ const STEPS: Step[] = [
         <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
           Chrome asks to allow access to devices on your local network the first time it connects —{' '}
           <strong>allow it</strong>. That is the editor reaching your MCP server over{' '}
-          <code style={{ fontFamily: 'var(--font-mono)' }}>ws://localhost</code> — a connection that goes
-          no further than your own machine. A banner appears only if the extension and server versions
-          disagree.
+          <code style={{ fontFamily: 'var(--font-mono)' }}>ws://localhost</code> — a connection that goes no further than your own machine.
+          A banner appears only if the extension and server versions disagree.
         </p>
       </>
     ),

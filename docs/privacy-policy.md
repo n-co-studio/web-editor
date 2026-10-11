@@ -26,8 +26,7 @@ All network communication is **strictly local**:
 
 - The extension's content script opens a WebSocket connection to `ws://localhost:<port>` — the locally-installed `@nco-studio/web-editor-mcp` server running on your own machine.
 - No data is sent to n'co studio servers, cloud services, third-party analytics platforms, or any remote endpoint.
-- The extension loads **automatically** on `http://localhost/*`, `http://127.0.0.1/*` and `https://localhost/*` only — your own dev servers. It never loads itself into a site you are merely browsing.
-- On any other page it runs only when you click the toolbar icon, on that tab alone. Wherever it runs, the extension itself talks only to your local MCP server and sends nothing anywhere else.
+- The extension operates on `http://localhost/*`, `http://127.0.0.1/*`, and `https://localhost/*` only. It does not run on public websites.
 
 ### What your agent sees
 
@@ -45,7 +44,7 @@ binding definition is the `VisualDiff` type in
 - **A second element, in full**, when your edit requires one — some changes have to touch a parent or sibling to work (adding `isolation: isolate` to a parent, say). That element travels with the same detail as the one you edited: tag, selector, text and every attribute.
 - **Any notes you typed**, verbatim, with the batch they belong to — along with the tag, selector and text of every element you attached them to. These are free text, so they contain whatever you wrote.
 - **The source file and line** each element maps to, where your dev plugin supplied them, the served path of any image on it (so filenames travel), plus the element's position and size on the page and an opaque per-tab id.
-- **Where the property you changed comes from** — the URL of the stylesheet that owns it, the CSS selector, its specificity, and any media query or cascade layer around it. Not only the rule in force: rules for *other* breakpoints are read and sent too, so CSS that only applies at screen sizes you are not looking at travels with the edit. On a live site that describes a real part of that site's CSS architecture.
+- **Where the property you changed comes from** — the URL of the stylesheet that owns it, the CSS selector, its specificity, and any media query or cascade layer around it. Not only the rule in force: rules for *other* breakpoints are read and sent too, so CSS that only applies at screen sizes you are not looking at travels with the edit.
 - **The viewport size** and the breakpoint your edit was made at.
 - **Full HTML of the element and everything inside it**, but only when you insert, duplicate or paste an element, or make a formatted-text edit. An ordinary spacing or colour change does not send subtree markup.
 - **Neighbouring and container elements** — for reorder, insert, group and reparent edits, the selector, mapped source location and resolved asset path of the siblings and containers involved, which can be several elements you did not touch directly.
@@ -54,9 +53,9 @@ binding definition is the `VisualDiff` type in
 
 Screenshots are the exception: they are stitched and saved in your browser and never go to the MCP server.
 
-The MCP server runs on your machine, but your agent is the next step, and most agents send what they read to a model provider. Claude Code, for example, is a local program whose model calls go to Anthropic's API — so content you edit reaches Anthropic the same way any file you ask it to read does. That was already true on your dev server. What changed is that you can now point the editor at any page, including a production site you are logged into, so the choice of what to put in front of your agent is yours alone.
+The MCP server runs on your machine, but your agent is the next step, and most agents send what they read to a model provider. Claude Code, for example, is a local program whose model calls go to Anthropic's API — so content you edit reaches Anthropic the same way any file you ask it to read does.
 
-Practically: treat editing a logged-in or production page the way you would treat pasting that page into a chat with your agent. If a page holds personal data, customer records or anything you would not paste, do not edit it there.
+Practically: a dev server is not automatically harmless. Local environments are often pointed at a seeded database, a staging copy or a production dump, and the page you are editing may hold real customer records. Treat editing a page the way you would treat pasting that page into a chat with your agent — because in substance that is what it is.
 
 ## The local MCP server
 
@@ -72,12 +71,14 @@ The extension requires a companion MCP server process (`@nco-studio/web-editor-m
 |------------|---------|
 | `activeTab` | Read the current tab's URL and DOM structure to enable element selection on the active developer page, and capture the visible tab when you use the screenshot tool. Screenshots are saved to your machine only. |
 | `storage` | Persist the pending diff queue locally across page reloads using `chrome.storage.session` (session-scoped, cleared when Chrome closes), and remember your Light / Dark / System theme preference using `chrome.storage.local`. |
-| `scripting` | Inject the overlay into the page you are on when you click the toolbar icon. Injection is always something you initiate — the extension never injects itself into a page you are only visiting. |
-| `http://localhost/*`, `http://127.0.0.1/*`, `https://localhost/*` | The only pages the editor loads on **automatically**, because they are your own dev servers. On any other site it loads only when you click the toolbar icon. |
+| `scripting` | Inject the overlay content script into localhost pages when the extension is activated. |
+| `http://localhost/*`, `http://127.0.0.1/*`, `https://localhost/*` | Restrict all extension activity to local development servers only. The extension never activates on production or public websites. |
 
 ## Data sharing
 
-No data is shared with any third party. There are no analytics, advertising, or tracking integrations.
+This extension shares no data with any third party. There are no analytics, advertising, or tracking integrations, and it transmits nothing beyond the localhost WebSocket described above.
+
+The one onward path is the one you create: the MCP server exists to hand your edits to your own AI agent, and most agents send what they read to their model provider. That provider is your agent's, chosen by you, under your agreement with them — this extension has no relationship with it and sends it nothing directly. See "What your agent sees" above for what an edit contains.
 
 ## Children's privacy
 

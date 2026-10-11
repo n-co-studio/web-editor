@@ -87,7 +87,7 @@ Types that cross the WebSocket boundary (used by both extension and MCP server) 
 ## Constraints
 
 - Chrome only (Manifest V3) — no Firefox/Safari
-- Built for a dev server: the editing loop's source mapping needs the dev plugin's build-time tags. The overlay itself runs on any ordinary page (toolbar-icon click, `activeTab`); without those tags, edits are queued in the browser and cannot be written to files.
+- Dev mode only — assumes localhost or dev server URLs
 - Extension UI must not conflict with any host page styles (Shadow DOM enforced)
 - WebSocket port must be configurable (default: 7890) to avoid conflicts
 - WebSocket port discovery: extension tries ports 7890-7899, uses first that accepts

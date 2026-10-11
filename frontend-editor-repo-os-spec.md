@@ -1,13 +1,5 @@
 # n'co studio Web Editor - Repo OS — Starting Spec Reference
 
-> **SUPERSEDED — historical input, not current product documentation.**
-> This was pre-research written to answer Prompt 0 when the repo was created. It
-> predates the rename to `@nco-studio/*` and describes constraints that have since
-> changed — notably, it says the editor is localhost-only, which is no longer true:
-> the overlay loads automatically on localhost and runs anywhere else on a
-> toolbar-icon click. For current behaviour see `docs/spec/compiled/v1/`,
-> `docs/store-listing.md` and `docs/privacy-policy.md`.
-
 > **What this is:** Pre-researched answers for Prompt 0 (Spec Builder).
 > When you create a new repo from the repo-OS template for this project,
 > paste Prompt 0 and reference this document when answering the interview questions.

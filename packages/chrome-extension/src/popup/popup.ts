@@ -9,8 +9,8 @@
  * injected programmatically before the message is retried.
  */
 
+import { GUIDE_URL } from '../shared/constants';
 import { isLocalDevUrl } from '../shared/is-local-host';
-import { isInjectableUrl } from '../shared/page-support';
 import {
   THEME_STORAGE_KEY,
   DEFAULT_THEME_PREFERENCE,
@@ -106,21 +106,16 @@ async function getActiveTab(): Promise<chrome.tabs.Tab | undefined> {
 }
 
 /**
- * The tab the editor can run in, or undefined if this page cannot host it.
- *
- * Clicking the toolbar icon is what grants `activeTab` for the current tab, so
- * the editor can run on any ordinary page — not just a dev server. The only
- * pages ruled out are the ones Chrome refuses to let extensions script at all
- * (see `isInjectableUrl`), where injecting would fail with an opaque error.
- *
- * Automatic injection is a separate matter and stays narrow: the manifest's
- * `content_scripts.matches` covers localhost only, so nothing runs uninvited on
- * a site you are merely visiting.
+ * The extension is documented as running only on the developer's own machine.
+ * The manifest's content_scripts.matches enforces that for automatic
+ * injection; this check enforces it for the programmatic path below, so the
+ * popup never injects the editor into a public page. `activeTab` gives us the
+ * URL of the tab the user opened the popup on.
  */
-async function getEditableTabId(): Promise<number | undefined> {
+async function getLocalDevTabId(): Promise<number | undefined> {
   const tab = await getActiveTab();
   if (tab?.id == null) return undefined;
-  return isInjectableUrl(tab.url) ? tab.id : undefined;
+  return isLocalDevUrl(tab.url) ? tab.id : undefined;
 }
 
 /** Send a message to the content script, injecting it first if not present. */
@@ -146,74 +141,50 @@ function render(state: EditorState): void {
   queueBtn.setAttribute('aria-pressed', String(state.queueOpen));
 }
 
-/**
- * Shown only where Chrome will not let any extension run — its own pages, the
- * Web Store, `file:` URLs. Not a policy message: on an ordinary page the editor
- * works, whether or not it is a dev server.
- */
 function renderUnavailable(): void {
   extBtn.disabled = true;
   queueBtn.disabled = true;
-  hint.textContent =
-    'Chrome does not allow extensions to run on this page. Open an ordinary web page — your dev server, or any site you want to work on.';
-}
-
-/**
- * What you get on this page. Off a dev server the editor still works — you can
- * select, adjust and queue changes — but the agent cannot write them back:
- * source mapping comes from `data-source-file` attributes the dev plugin adds
- * at build time, which a production page has never had.
- */
-function renderScopeHint(url: string | undefined): void {
-  hint.textContent = isLocalDevUrl(url)
-    ? 'Works on localhost dev pages.'
-    : 'Editing works here, but changes stay in the browser — source mapping needs your dev server.';
+  hint.textContent = `Visual Web Editor for AI Agents is unavailable on this page. Open a localhost dev page to use it. See the setup guide at ${GUIDE_URL}`;
 }
 
 async function init(): Promise<void> {
-  // Theme is always initialized, whatever page the popup was opened on.
+  // Theme is always initialized regardless of whether the tab is a localhost page
   void initThemePopup();
 
-  const tab = await getActiveTab();
-  const tabId = isInjectableUrl(tab?.url) && tab?.id != null ? tab.id : undefined;
+  const tabId = await getLocalDevTabId();
   if (tabId == null) {
     renderUnavailable();
     return;
   }
-  renderScopeHint(tab?.url);
   try {
     const state = await sendToTab(tabId, { type: 'GET_STATE' });
     if (state) render(state);
   } catch {
-    // The content script is not there yet — normal on a page where it has to be
-    // injected by a click. The buttons stay live; clicking one injects it.
+    renderUnavailable();
   }
 }
 
 extBtn.addEventListener('click', async () => {
-  const tabId = await getEditableTabId();
+  const tabId = await getLocalDevTabId();
   if (tabId == null) return;
   try {
     const state = await sendToTab(tabId, { type: 'TOGGLE_EXTENSION' });
     // TOGGLE_EXTENSION returns { active }; preserve known queue state.
     render({ active: state?.active ?? !currentState.active, queueOpen: currentState.queueOpen });
   } catch {
-    // Injection itself failed (sendToTab already retried once). Report that,
-    // rather than claiming the page is unsupported — it is, we just could not
-    // reach it.
-    hint.textContent = 'Could not start the editor on this page. Reload the page and try again.';
+    renderUnavailable();
   }
 });
 
 queueBtn.addEventListener('click', async () => {
-  const tabId = await getEditableTabId();
+  const tabId = await getLocalDevTabId();
   if (tabId == null) return;
   try {
     await sendToTab(tabId, { type: 'TOGGLE_QUEUE_PANEL' });
     // The panel now overlays the page — close the popup so it is visible.
     window.close();
   } catch {
-    hint.textContent = 'Could not open the change queue on this page. Reload the page and try again.';
+    renderUnavailable();
   }
 });
 
