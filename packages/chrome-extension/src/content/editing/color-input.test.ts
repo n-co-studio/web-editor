@@ -1,7 +1,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { isColorValue } from './snapping';
+import { isColorValue } from './color-input';
 
 // ---------------------------------------------------------------------------
 // isColorValue keeps mis-categorised tokens out of the colour swatch grid.

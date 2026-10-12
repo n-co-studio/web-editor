@@ -662,7 +662,7 @@ export async function activate(): Promise<void> {
   mediaEditor = new MediaEditor(preview);
   MediaEditor.restoreHandle();
   effectsEditor = new EffectsEditor(preview);
-  appearanceEditor = new AppearanceEditor(preview);
+  appearanceEditor = new AppearanceEditor(preview, tokenStore);
   gridSettingsPanel = new GridSettingsPanel(gridOverlay.getEffectiveSettings());
   measureOverlay = new MeasureOverlay(shadow, host);
   multiSelect = new MultiSelectManager(shadow, host);

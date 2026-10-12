@@ -291,7 +291,13 @@ export class ColorEditor {
     // colour tokens, a palette is a shortlist and picking a colour outside it
     // has to stay possible.
     body.appendChild(
-      buildColorInput(property, currentValue, element, this.preview, reflectPick),
+      buildColorInput(
+        property, currentValue, element, this.preview, reflectPick,
+        // Same tokens the swatch grid draws from; buildColorInput filters them
+        // through isColorValue, so a mis-categorised entry cannot reach the
+        // popover either.
+        this.tokenStore.getForCategory('colors'),
+      ),
     );
 
     container.appendChild(body);

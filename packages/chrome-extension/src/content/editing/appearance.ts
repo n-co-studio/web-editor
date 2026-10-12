@@ -3,7 +3,8 @@ import { createElement, createText, createButton, makeDraggable } from '../../sh
 import { getComputedProperty } from '../../shared/dom-utils';
 import { OVERLAY, TOOLBAR_WIDTH } from '../../shared/constants';
 import type { PreviewManager } from './preview';
-import { buildColorInput, toHex } from './color-input';
+import { buildColorInput, attachColorPopover } from './color-input';
+import type { TokenStore } from '../tokens/store';
 
 type ChangeCallback = (changes: PropertyChange[]) => void;
 
@@ -95,6 +96,8 @@ export class AppearanceEditor {
 
   constructor(
     private readonly preview: PreviewManager,
+    /** Optional: supplies colour tokens to the colour popovers. */
+    private readonly tokenStore?: TokenStore,
   ) {}
 
   onClose(cb: () => void): void {
@@ -219,7 +222,10 @@ export class AppearanceEditor {
     section.appendChild(sectionLabel);
 
     const currentValue = getComputedProperty(element, property);
-    section.appendChild(buildColorInput(property, currentValue, element, this.preview, onCommit));
+    section.appendChild(buildColorInput(
+      property, currentValue, element, this.preview, onCommit,
+      this.tokenStore?.getForCategory('colors') ?? [],
+    ));
 
     return section;
   }
@@ -326,37 +332,38 @@ export class AppearanceEditor {
     colorLabel.style.flexShrink = '0';
     colorRow.appendChild(colorLabel);
 
-    const colorSwatch = createElement('div', {}, {
+    const colorSwatch = createElement('div', { title: 'Open colour picker' }, {
       width: '20px',
       height: '20px',
       borderRadius: OVERLAY.radiusSm,
-      border: `1px solid ${OVERLAY.border}`,
+      border: `1px solid ${OVERLAY.swatchBorder}`,
       background: shadow.color,
       flexShrink: '0',
       cursor: 'pointer',
     });
 
-    const colorPicker = createElement('input', { type: 'color' }, {
-      position: 'absolute',
-      opacity: '0',
-      width: '0',
-      height: '0',
-      pointerEvents: 'none',
-    }) as HTMLInputElement;
-    colorPicker.value = toHex(shadow.color);
-
-    colorSwatch.addEventListener('click', () => colorPicker.click());
-    colorPicker.addEventListener('input', () => {
-      shadow.color = colorPicker.value;
-      colorSwatch.style.background = colorPicker.value;
-      applyPreview();
-    });
-    colorPicker.addEventListener('change', () => {
-      commitShadow();
+    // Popover, not a zero-size hidden input driven by .click(): Chromium
+    // anchors the native chooser to the input's box, so the old control could
+    // never open one. Commits go through commitShadow because the colour is
+    // one component of a serialised box-shadow, not a property of its own.
+    attachColorPopover(colorSwatch, {
+      label: 'box-shadow color',
+      initial: shadow.color,
+      tokens: this.tokenStore?.getForCategory('colors') ?? [],
+      onInput: (value) => {
+        shadow.color = value;
+        colorSwatch.style.background = value;
+        applyPreview();
+      },
+      onCommit: (value) => {
+        shadow.color = value;
+        colorSwatch.style.background = value;
+        applyPreview();
+        commitShadow();
+      },
     });
 
     colorRow.appendChild(colorSwatch);
-    colorRow.appendChild(colorPicker);
     section.appendChild(colorRow);
 
     // Numeric sliders
@@ -589,35 +596,34 @@ export class AppearanceEditor {
       width: '20px',
       height: '20px',
       borderRadius: OVERLAY.radiusSm,
-      border: `1px solid ${OVERLAY.border}`,
+      border: `1px solid ${OVERLAY.swatchBorder}`,
       background: currentColor,
       flexShrink: '0',
       cursor: 'pointer',
     });
 
-    const colorPicker = createElement('input', { type: 'color' }, {
-      position: 'absolute',
-      opacity: '0',
-      width: '0',
-      height: '0',
-      pointerEvents: 'none',
-    }) as HTMLInputElement;
-    colorPicker.value = toHex(currentColor);
-
-    colorSwatch.addEventListener('click', () => colorPicker.click());
-    colorPicker.addEventListener('input', () => {
-      colorSwatch.style.background = colorPicker.value;
-      this.preview.begin(element as HTMLElement);
-      this.preview.apply('outline-color', colorPicker.value);
-    });
-    colorPicker.addEventListener('change', () => {
-      const originals = this.preview.commit();
-      const fromValue = originals.get('outline-color') || currentColor;
-      onCommit([{ property: 'outline-color', fromValue, toValue: colorPicker.value }]);
+    // Same popover as every other colour control; the previous hidden input
+    // had no box for Chromium to anchor a chooser to, so it never opened.
+    attachColorPopover(colorSwatch, {
+      label: 'outline-color',
+      initial: currentColor,
+      tokens: this.tokenStore?.getForCategory('colors') ?? [],
+      onInput: (value) => {
+        colorSwatch.style.background = value;
+        this.preview.begin(element as HTMLElement);
+        this.preview.apply('outline-color', value);
+      },
+      onCommit: (value, token) => {
+        colorSwatch.style.background = value;
+        this.preview.begin(element as HTMLElement);
+        this.preview.apply('outline-color', value);
+        const originals = this.preview.commit();
+        const fromValue = originals.get('outline-color') || currentColor;
+        onCommit([{ property: 'outline-color', fromValue, toValue: value, toToken: token?.name }]);
+      },
     });
 
     colorRow.appendChild(colorSwatch);
-    colorRow.appendChild(colorPicker);
     section.appendChild(colorRow);
 
     return section;

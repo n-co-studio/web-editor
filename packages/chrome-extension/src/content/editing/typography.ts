@@ -375,29 +375,21 @@ export class TypographyEditor {
     }
 
     // Token mode — static preview chip + snap-to-token dropdown.
-    const chip = createElement('div', {}, {
-      width: '20px',
-      height: '20px',
-      borderRadius: OVERLAY.radiusSm,
-      border: `1px solid ${OVERLAY.swatchBorder}`,
-      background: currentValue,
-      flexShrink: '0',
-    });
-    row.appendChild(chip);
-
-    const select = this.buildTokenSelect(tokens, currentValue, (newValue, token) => {
-      this.preview.begin(element as HTMLElement);
-      this.preview.apply('color', newValue);
-      this.preview.commit();
-      chip.style.background = newValue;
-      onCommit([{
-        property: 'color',
-        fromValue: currentValue,
-        toValue: newValue,
-        toToken: token?.name,
-      }]);
-    });
-    row.appendChild(select);
+    // Colour uses the colour control, not the generic token <select>.
+    //
+    // The select listed everything `getForProperty('color')` returned, and the
+    // store indexes by `cssProperties`, which upstream populates loosely —
+    // so the colour dropdown offered `100 (fw-thin)`, `1 (z-base)`,
+    // `1052px (container-max)` and `cubic-bezier(…) (ease-link)` alongside
+    // actual colours. Picking one of those applied a value the CSSOM
+    // discarded, while still queuing a change for the agent.
+    //
+    // buildColorInput filters the same token list through `isColorValue` and
+    // presents what survives as swatches in its popover, so colour is picked
+    // the same way here as in the Colors and Appearance panels.
+    row.appendChild(
+      buildColorInput('color', currentValue, element, this.preview, onCommit, tokens),
+    );
 
     return row;
   }

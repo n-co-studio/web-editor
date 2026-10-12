@@ -1,36 +1,13 @@
 import type { DesignToken } from '@nco-studio/shared';
 import { createElement } from '../../shared/ui-utils';
 import { OVERLAY, SNAP_EASE_MS } from '../../shared/constants';
+import { isColorValue } from '../editing/color-input';
 import type { TokenStore } from './store';
 
 export interface SnapResult {
   readonly snappedValue: number;
   readonly token: DesignToken | null;
   readonly isCustom: boolean;
-}
-
-/**
- * True when the browser would accept `value` as a CSS colour.
- *
- * Used to keep mis-categorised tokens out of the colour swatch grid. A token's
- * `category` is assigned upstream and is not authoritative — an easing curve
- * arriving as `category: 'colors'` rendered as a swatch with no fill, and
- * clicking it queued a change the CSSOM had already discarded.
- *
- * `CSS.supports` is the browser's own parser, so this stays correct for colour
- * syntax the extension has never heard of (`oklch()`, `color-mix()`, relative
- * colours) rather than drifting behind a hand-written pattern. `var(...)`
- * references are accepted: the value is valid CSS and resolving it is the
- * page's business, not ours.
- *
- * Exported for tests; `CSS.supports` is feature-detected so a non-browser test
- * environment degrades to accepting everything rather than emptying the grid.
- */
-export function isColorValue(value: string): boolean {
-  const v = value.trim();
-  if (v === '') return false;
-  if (typeof CSS === 'undefined' || typeof CSS.supports !== 'function') return true;
-  return CSS.supports('color', v);
 }
 
 /**
