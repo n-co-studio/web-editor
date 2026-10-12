@@ -78,26 +78,53 @@ Recommended order (mcp-server first, as it's the primary consumer touchpoint):
 
 ## First release: publish manually
 
-npm only lets you attach a Trusted Publisher to a package that already exists, so the **first** version of each package (v0.2.0) is published by hand. Use the manual steps under "Manual fallback" below, logged in with `npm login` on an account with 2FA that belongs to the `@nco-studio` org. After both packages exist on the registry, set up OIDC (next section) and use the tag-triggered workflow for later releases.
+**Done for 0.2.0** — both packages were published by hand on 2026-10-12 and the
+registry now has them. This section is kept because it applies to any *new*
+package added to the repo later.
 
-`--provenance` only works when publishing from a CI run on a **public** repository; for the manual first publish, drop the flag.
+npm will not attach a Trusted Publisher to a package that does not exist
+([npm/cli#8544](https://github.com/npm/cli/issues/8544) is open; first-publish
+was deliberately scoped out of the OIDC MVP), so a new package's first version
+goes out by hand. Use "Manual fallback" below. Setting up trusted publishing on
+npmjs.com will also create a `0.0.0-stage` placeholder for a package that does
+not exist yet — harmless, but unpublish it within 72 hours or it stays on the
+package page forever as a deprecated version.
+
+`--provenance` only works from a CI run on a **public** repository. Do not pass
+it to a manual publish.
 
 ---
 
 ## OIDC Trusted Publishing setup (one-time, operator)
 
-The release workflow (`.github/workflows/release.yml`) uses npm OIDC Trusted Publishing — **no stored long-lived token** is required once configured. Provenance statements require the GitHub repository to be public.
+The release workflow (`.github/workflows/release.yml`) uses npm OIDC Trusted
+Publishing — **no stored long-lived token**. It *stages* rather than publishes;
+see "Tag + GitHub Release steps" for what that means in practice.
 
 1. Log in to [npmjs.com](https://www.npmjs.com) as the `@nco-studio` org admin
-2. Go to each package → **Settings** → **Publish Access** → **New Trusted Publisher**
+2. Go to each package → **Settings** → **Publishing access** → add a trusted publisher
 3. Set:
-   - **Repository:** `n-co-studio/web-editor`
-   - **Workflow file:** `.github/workflows/release.yml`
+   - **Organization or user:** `n-co-studio` — its own field, not part of the repository
+   - **Repository:** `web-editor` — the bare name, no owner prefix
+   - **Workflow filename:** `release.yml` — npm's docs: *"Enter only the filename,
+     not the full path."* `.github/workflows/release.yml` is rejected
    - **Environment:** `release`
+   - **Allowed actions:** leave **both** boxes unchecked
 4. Repeat for both `@nco-studio/web-editor-mcp` and `@nco-studio/web-editor-plugin`
-5. In the GitHub repo settings, create an **Environment** named `release` (Settings → Environments → New environment)
+5. In the GitHub repo settings, create an **Environment** named `release`
+   (Settings → Environments → New environment)
 
-Until this is done the publish job returns `401 Unauthorized`. The workflow is inert; no credentials are leaked.
+**On step 3's unchecked boxes.** `npm stage publish` is always permitted and
+cannot be switched off. The two boxes only *add* direct `npm publish` and
+`npm dist-tag` on top. Leaving both unchecked is what makes the configuration
+stage-only, so the registry refuses a direct publish from CI — which is the
+posture this workflow is written for. Nothing in this repo uses `dist-tag`, so
+that box has no purpose here either way.
+
+**A mismatch in step 3 fails as `404 Not Found`, not `401`.** The registry does
+not say which field is wrong, so check all four against the workflow before
+assuming the configuration is missing. The workflow is inert until this is
+done; no credentials are leaked.
 
 > **Why OIDC?** npm Classic tokens (long-lived) were deprecated in December 2025. Granular tokens expire in ≤ 90 days, breaking unattended runs. OIDC tokens are ephemeral — issued per-workflow-run, automatically revoked.
 
@@ -116,21 +143,48 @@ Until this is done the publish job returns `401 Unauthorized`. The workflow is i
    git push origin main
    git push origin v0.2.0
    ```
-3. The `v*` tag push triggers `.github/workflows/release.yml`. **First release only:** 0.2.0 was already published by hand, so the workflow's publish job fails with "cannot publish over the previously published version". That failure is expected; the tag and GitHub Release are still valid.
-4. Once the workflow completes successfully, create a GitHub Release:
+3. The `v*` tag push triggers `.github/workflows/release.yml`, which **stages**
+   both packages. Nothing is public when it finishes — a green run means the
+   tarballs are in npm's stage queue, not that anyone can install them.
+4. **Approve the staged versions.** This is the 2FA step, and it is the point of
+   staging: CI cannot release on its own.
+   - On npmjs.com: each package → **Staged Packages** → review → **Approve**
+   - Or from a trusted device:
+     ```sh
+     npm stage list @nco-studio/web-editor-mcp
+     npm stage approve <stage-id>
+     npm stage list @nco-studio/web-editor-plugin
+     npm stage approve <stage-id>
+     ```
+   Approval prompts for 2FA either way. `npm stage reject <stage-id>` discards a
+   staged version if the run produced something wrong — preferable to publishing
+   and then unpublishing. Verify with `npm view <pkg> version` before moving on:
+   until approval lands, `latest` still points at the previous release.
+5. Once both packages are approved and live, create a GitHub Release:
    - Go to **Releases** → **Draft a new release**
    - Tag: `v0.2.0`
    - Title: `v0.2.0 — <brief description>`
    - Body: paste from `CHANGELOG.md`
    - Attach: `packages/chrome-extension/dist-zip/nco-studio-web-editor-{version}.zip` (Chrome extension ZIP from `node packages/chrome-extension/scripts/package-extension.mjs`)
-5. Publish the guide page: `npm run deploy:site` builds `examples/demo-app` for `/web-editor/` and syncs it into the nco.studio site repo (`NCO_SITE_DIR` overrides the path). It replaces whatever the guide build emits (today `index.html`, `assets/`, `favicon.svg`) under `web-editor/`, never touching `web-editor/privacy/` or anything else in that repo — review, commit and push there to deploy. The guide must be live at https://nco.studio/web-editor/ before the store submission, because the extension opens it on first install.
-6. Upload the extension ZIP to the Chrome Web Store (operator-only — see `docs/store-listing.md`).
+6. Publish the guide page: `npm run deploy:site` builds `examples/demo-app` for `/web-editor/` and syncs it into the nco.studio site repo (`NCO_SITE_DIR` overrides the path). It replaces whatever the guide build emits (today `index.html`, `assets/`, `favicon.svg`) under `web-editor/`, never touching `web-editor/privacy/` or anything else in that repo — review, commit and push there to deploy. The guide must be live at https://nco.studio/web-editor/ before the store submission, because the extension opens it on first install.
+7. Upload the extension ZIP to the Chrome Web Store (operator-only — see `docs/store-listing.md`).
 
 ---
 
 ## Manual fallback (if OIDC is not configured)
 
-If the trusted publisher is not yet set up (including the first release), publish manually from a machine logged in with `npm login` (2FA prompts for a one-time code on each publish):
+If the trusted publisher is not yet set up (including a new package's first
+release), publish manually from a machine logged in with `npm login`.
+
+**How 2FA behaves depends on your method.** With an authenticator app you are
+prompted for a six-digit code. With a **passkey or security key there is no code
+to enter** — npm prints an `https://www.npmjs.com/auth/cli/<uuid>` URL, you
+authenticate in the browser, and the publish continues on its own. Both work
+from the CLI; only the TOTP method can be *configured* from the CLI.
+
+**Run it in an interactive terminal.** Neither flow can happen without a TTY, so
+a publish from a script, a background shell or a CI step fails with `EOTP`
+instead of prompting.
 
 ```sh
 # 1. Build
