@@ -18,7 +18,7 @@ function getVersion(): string {
 }
 
 const HELP_TEXT = `
-nco-web-editor-mcp — MCP server bridge for Visual Web Editor for AI Agents
+nco-web-editor-mcp — MCP server bridge for AI Agent Visual Editor
 
 USAGE
   npx --yes @nco-studio/web-editor-mcp@^0   (add to .mcp.json)

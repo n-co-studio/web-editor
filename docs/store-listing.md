@@ -1,13 +1,13 @@
-# Chrome Web Store Listing — Visual Web Editor for AI Agents
+# Chrome Web Store Listing — AI Agent Visual Editor
 
-This document contains all copy and metadata needed to submit Visual Web Editor for AI Agents (published by n'co studio) to the Chrome Web Store, plus reviewer notes and asset specifications.
+This document contains all copy and metadata needed to submit AI Agent Visual Editor (published by n'co studio) to the Chrome Web Store, plus reviewer notes and asset specifications.
 
 ---
 
 ## Store Metadata
 
 ### Name
-Visual Web Editor for AI Agents
+AI Agent Visual Editor
 
 ### Publisher
 n'co studio
@@ -20,7 +20,7 @@ Design on the real page — adjust any element visually and your AI coding agent
 
 ### Detailed description
 
-**Visual Web Editor for AI Agents** is for designers who work with AI coding agents. You design on the page itself — point at any element in your running app, adjust spacing, colour, type and layout by eye — and your agent turns those adjustments into real code changes in the right files. No screenshots to annotate, no describing a change in prose and hoping the result matches, no hunting for the component that owns a style.
+**AI Agent Visual Editor** is for designers who work with AI coding agents. You design on the page itself — point at any element in your running app, adjust spacing, colour, type and layout by eye — and your agent turns those adjustments into real code changes in the right files. No screenshots to annotate, no describing a change in prose and hoping the result matches, no hunting for the component that owns a style.
 
 Your edits snap to the design tokens your project already defines, so what you change stays inside your system instead of drifting into one-off values.
 
@@ -63,7 +63,7 @@ These justifications are required for Chrome Web Store review. Copy them verbati
 
 ### `activeTab`
 
-> Visual Web Editor for AI Agents needs `activeTab` to read the current tab's DOM and URL in order to render the visual selection overlay and identify which elements the developer is inspecting. The overlay is only activated when the user explicitly clicks the toolbar icon on a localhost page — the extension does not access any tab automatically. `activeTab` also lets the extension capture the visible tab (`chrome.tabs.captureVisibleTab`) when the developer uses the full-page screenshot tool; the image is saved to the developer's own machine and never uploaded.
+> AI Agent Visual Editor needs `activeTab` to read the current tab's DOM and URL in order to render the visual selection overlay and identify which elements the developer is inspecting. The overlay is only activated when the user explicitly clicks the toolbar icon on a localhost page — the extension does not access any tab automatically. `activeTab` also lets the extension capture the visible tab (`chrome.tabs.captureVisibleTab`) when the developer uses the full-page screenshot tool; the image is saved to the developer's own machine and never uploaded.
 
 ### `storage`
 

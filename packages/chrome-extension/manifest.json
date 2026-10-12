@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Visual Web Editor for AI Agents",
+  "name": "AI Agent Visual Editor",
   "description": "Design on the real page — adjust any element visually and your AI coding agent applies the change in your source files.",
   "version": "0.2.0",
   "author": "n'co studio",
@@ -13,7 +13,7 @@
       "48": "icons/status/nco-web-editor-icon-disabled.png",
       "128": "icons/status/nco-web-editor-icon-disabled.png"
     },
-    "default_title": "Visual Web Editor for AI Agents",
+    "default_title": "AI Agent Visual Editor",
     "default_popup": "popup.html"
   },
   "icons": {

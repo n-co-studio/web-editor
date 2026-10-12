@@ -1,5 +1,5 @@
 /**
- * Service worker for the Visual Web Editor for AI Agents Chrome extension.
+ * Service worker for the AI Agent Visual Editor Chrome extension.
  * Intentionally minimal — the content script owns the WebSocket
  * connection to avoid MV3 service worker termination risk.
  *

@@ -291,7 +291,7 @@ const STEPS: Step[] = [
         <figure style={{ margin: 'var(--space-2) 0 0' }}>
           <img
             src={`${import.meta.env.BASE_URL}images/web-editor-example-extension-pin.png`}
-            alt="Chrome’s puzzle-piece menu open, with Visual Web Editor for AI Agents listed and the pin icon highlighted"
+            alt="Chrome’s puzzle-piece menu open, with AI Agent Visual Editor listed and the pin icon highlighted"
             width={958}
             height={576}
             style={{

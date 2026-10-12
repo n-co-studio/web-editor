@@ -1,4 +1,4 @@
-# Visual Web Editor for AI Agents
+# AI Agent Visual Editor
 
 **Point at an element. Adjust it visually. Get a precise code change — no hunting through files, no manual prompting.**
 
@@ -74,7 +74,7 @@ export default defineConfig({
 
 ### 3. Chrome extension
 
-Install **Visual Web Editor for AI Agents** from the Chrome Web Store, or download the latest `.zip` from [Releases](https://github.com/n-co-studio/web-editor/releases/latest) and load it unpacked.
+Install **AI Agent Visual Editor** from the Chrome Web Store, or download the latest `.zip` from [Releases](https://github.com/n-co-studio/web-editor/releases/latest) and load it unpacked.
 
 ---
 

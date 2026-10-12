@@ -1,6 +1,6 @@
 # @nco-studio/web-editor-mcp
 
-MCP server bridge for [Visual Web Editor for AI Agents](https://github.com/n-co-studio/web-editor). Connects Claude Code to your browser via a local WebSocket, enabling visual UI editing directly in your running dev server.
+MCP server bridge for [AI Agent Visual Editor](https://github.com/n-co-studio/web-editor). Connects Claude Code to your browser via a local WebSocket, enabling visual UI editing directly in your running dev server.
 
 ## How It Fits the Loop
 

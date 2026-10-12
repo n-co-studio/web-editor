@@ -1,6 +1,6 @@
 # n'co studio Demo App
 
-A Vite + React **guide** for the Visual Web Editor for AI Agents: a hero, a three-step "how it works" row, and a tabbed guide covering setup, day-to-day use, and troubleshooting.
+A Vite + React **guide** for the AI Agent Visual Editor: a hero, a three-step "how it works" row, and a tabbed guide covering setup, day-to-day use, and troubleshooting.
 
 The design follows the **Mark Preston** brand system: two Adobe Typekit faces — `minion-3-display` (serif, display) and `hero-new` (sans, body) loaded via kit `ivy7roo` — thin/light weights, **sharp corners** (no border-radius), **no shadows**, generous whitespace and hairline dividers. The guide itself is ink on white paper (a faint dot grid, `.nco-paper`). The one dark surface is the masthead strip at the top ([`src/components/TopBanner.tsx`](src/components/TopBanner.tsx)), which carries the nco.studio landing page's animated green lava field ([`src/components/LavaBackground.tsx`](src/components/LavaBackground.tsx)) — scoped to the strip, not behind the page.
 
@@ -19,7 +19,7 @@ This page is also the hosted guide at https://nco.studio/web-editor/. From the r
 
 The dev server starts at `http://localhost:5173`. There is a single page — no router.
 
-With the Visual Web Editor for AI Agents extension enabled, inspect any element in DevTools — you'll see `data-source-file` and `data-source-line` attributes injected by the plugin:
+With the AI Agent Visual Editor extension enabled, inspect any element in DevTools — you'll see `data-source-file` and `data-source-line` attributes injected by the plugin:
 
 ```html
 <div data-source-file="src/components/StepsRow.tsx" data-source-line="..." ...>

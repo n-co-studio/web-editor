@@ -118,7 +118,7 @@ export default function TopBanner() {
             color: '#fff',
           }}
         >
-          Visual Web Editor for AI Agents
+          AI Agent Visual Editor
         </h2>
 
         <p

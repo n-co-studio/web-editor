@@ -72,7 +72,7 @@ export function showProtocolMismatchBanner(
     marginBottom: '4px',
     color: 'var(--fe-destructive)',
   } satisfies Partial<CSSStyleDeclaration>);
-  heading.textContent = "Visual Web Editor for AI Agents — Protocol Version Mismatch";
+  heading.textContent = "AI Agent Visual Editor — Protocol Version Mismatch";
 
   const detail = document.createElement('div');
   Object.assign(detail.style, {

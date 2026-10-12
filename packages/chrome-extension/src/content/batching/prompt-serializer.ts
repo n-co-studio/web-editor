@@ -19,7 +19,7 @@ export function serializeToPrompt(
 ): string {
   const sections: string[] = [];
 
-  sections.push("# Visual Changes from Visual Web Editor for AI Agents\n");
+  sections.push("# Visual Changes from AI Agent Visual Editor\n");
 
   if (hasResponsiveContext(diffs)) {
     sections.push(

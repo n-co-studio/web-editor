@@ -144,7 +144,7 @@ function render(state: EditorState): void {
 function renderUnavailable(): void {
   extBtn.disabled = true;
   queueBtn.disabled = true;
-  hint.textContent = `Visual Web Editor for AI Agents is unavailable on this page. Open a localhost dev page to use it. See the setup guide at ${GUIDE_URL}`;
+  hint.textContent = `AI Agent Visual Editor is unavailable on this page. Open a localhost dev page to use it. See the setup guide at ${GUIDE_URL}`;
 }
 
 async function init(): Promise<void> {

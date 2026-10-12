@@ -64,7 +64,7 @@ First public release: Chrome Web Store extension 0.2.0 and both npm packages at 
 
 ## [0.1.0] - 2026-06-17
 
-Initial public release of Visual Web Editor for AI Agents.
+Initial public release of AI Agent Visual Editor.
 
 ### Packages
 

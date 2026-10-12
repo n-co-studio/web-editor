@@ -2,7 +2,7 @@
 
 The visual language for the project. This is a developer tool overlay — minimal, utility-focused UI that contrasts with any host page.
 
-<!-- Tokens defined here can be consumed by companion tools (e.g., Visual Web Editor for AI Agents)
+<!-- Tokens defined here can be consumed by companion tools (e.g., AI Agent Visual Editor)
      that read this file to enable design-system-aware editing. Use the table format
      consistently: | Token | Value | Use | -->
 

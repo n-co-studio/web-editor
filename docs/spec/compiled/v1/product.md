@@ -1,13 +1,13 @@
 # Product Definition
 
 ## Product Name
-Visual Web Editor for AI Agents
+AI Agent Visual Editor
 
 ## One-Line Description
 Chrome extension + local MCP server that lets operators visually edit live front-end UI and feed deterministic change requests back to Claude Code in VS Code.
 
 ## Problem Statement
-Operators working on projects inspect the front end and identify visual adjustments — spacing, font sizes, colors, layout shifts. Translating those observations into code changes requires manually describing them in a prompt or hunting through source files. This breaks flow and loses precision. Visual Web Editor for AI Agents closes the loop: point, adjust, apply — with deterministic source mapping so changes land in the right file every time.
+Operators working on projects inspect the front end and identify visual adjustments — spacing, font sizes, colors, layout shifts. Translating those observations into code changes requires manually describing them in a prompt or hunting through source files. This breaks flow and loses precision. AI Agent Visual Editor closes the loop: point, adjust, apply — with deterministic source mapping so changes land in the right file every time.
 
 ## Target Users
 
@@ -24,7 +24,7 @@ Operators working on projects inspect the front end and identify visual adjustme
 
 ### Flow 1: Visual Edit → Code Change
 1. Operator opens their project's dev server in Chrome
-2. Activates Visual Web Editor for AI Agents extension (toolbar-icon popup → toggle on, or keyboard shortcut)
+2. Activates AI Agent Visual Editor extension (toolbar-icon popup → toggle on, or keyboard shortcut)
 3. Overlay appears — elements become selectable on hover
 4. Operator clicks an element → selection highlight + property panel appears
 5. Operator adjusts a property (drag to resize, pick a color, change font size)

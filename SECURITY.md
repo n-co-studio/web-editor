@@ -8,7 +8,7 @@
 
 ## Security Model
 
-Visual Web Editor for AI Agents is a **fully local tool**. It has no external network communication of its own, no telemetry, no user accounts, and no cloud services.
+AI Agent Visual Editor is a **fully local tool**. It has no external network communication of its own, no telemetry, no user accounts, and no cloud services.
 
 - All communication between the Chrome extension and the MCP server is via **localhost WebSocket only**.
 - Neither the extension nor the MCP server sends your data anywhere else.
