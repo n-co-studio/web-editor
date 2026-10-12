@@ -435,6 +435,17 @@ and acknowledge_visual_change tools.`}</Code>
           <code style={{ fontFamily: 'var(--font-mono)' }}>nco-web-editor</code> is the <code style={{ fontFamily: 'var(--font-mono)' }}>mcpServers</code> key
           from step 2 — swap in whatever you named it. The server runs on your machine; your agent is the one that sees your edits, and most agents send what they read to a model provider.
         </p>
+        <p
+          style={{
+            marginTop: 'var(--space-4)',
+            paddingLeft: 'var(--space-4)',
+            borderLeft: '2px solid var(--color-success)',
+            fontSize: 'var(--text-body-sm)',
+            color: 'var(--color-ink)',
+          }}
+        >
+          That’s setup complete — the loop is running. Everything after this is just using it.
+        </p>
       </>
     ),
   },
@@ -454,16 +465,24 @@ export default function SetupGuide() {
           style={{ position: 'absolute', left: 15, top: 16, bottom: 16, width: 1, background: 'var(--color-divider)', zIndex: 'var(--z-base)' }}
         />
         <ol style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 'var(--space-8)' }}>
-        {STEPS.map((s, i) => (
+        {STEPS.map((s, i) => {
+          // The last step is the finish line, marked green with a tick rather
+          // than another number. A numbered list gives no signal that it has
+          // ended — a reader who completes the final step has no way to tell
+          // whether setup is done or whether there is more below the fold.
+          const isLast = i === STEPS.length - 1;
+          return (
           <li key={s.title} style={{ position: 'relative', display: 'grid', gridTemplateColumns: '32px 1fr', gap: 'var(--space-5)', alignItems: 'start' }}>
             <span
+              aria-hidden={isLast ? undefined : true}
+              aria-label={isLast ? 'Setup complete' : undefined}
               style={{
                 position: 'relative',
                 zIndex: 'var(--z-raised)',
                 width: 32,
                 height: 32,
                 borderRadius: 'var(--radius-full)',
-                background: 'var(--color-ink)',
+                background: isLast ? 'var(--color-success, #166534)' : 'var(--color-ink)',
                 color: 'var(--color-on-ink)',
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -472,14 +491,15 @@ export default function SetupGuide() {
                 fontWeight: 'var(--fw-regular)',
               }}
             >
-              {i + 1}
+              {isLast ? '\u2713' : i + 1}
             </span>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', paddingTop: '3px', minWidth: 0, maxWidth: 'var(--measure)' }}>
               <h3 style={{ fontFamily: 'var(--font-sans)', fontWeight: 'var(--fw-regular)', fontSize: 'var(--text-h3)', color: 'var(--color-ink)' }}>{s.title}</h3>
               {s.body}
             </div>
           </li>
-        ))}
+          );
+        })}
         </ol>
       </div>
     </div>

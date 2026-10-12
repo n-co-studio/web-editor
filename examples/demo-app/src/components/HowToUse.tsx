@@ -120,20 +120,13 @@ re-check the queue before you go idle.`}</Code>
     ),
   },
   {
-    title: 'Queue and review',
+    title: 'Review and send',
     body: (
       <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
-        Add each edit to the queue. Changes collect with before-and-after values — review, prune, and
-        shape the batch before anything leaves the browser.
-      </p>
-    ),
-  },
-  {
-    title: 'Send to your agent',
-    body: (
-      <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
-        Submit the batch. Exploratory edits collapse to their latest state, and the agent watching
-        your local dev environment writes the real code changes.
+        Every edit queues as you make it, with before-and-after values — nothing to add by hand.
+        Open the queue to review and prune the batch, then send it. Exploratory edits collapse to
+        their latest state, and the agent watching your dev environment writes the real code
+        changes.
       </p>
     ),
   },
