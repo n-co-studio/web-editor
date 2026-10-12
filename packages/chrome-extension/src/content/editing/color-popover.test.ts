@@ -107,4 +107,78 @@ describe('attachColorPopover — attachment timing', () => {
     // cannot collect it — close has to.
     assert.equal(handle.popover.isConnected, false, 'close should detach');
   });
+  it('survives a retargeted pointerdown from inside a shadow root', async () => {
+    const { attachColorPopover } = await import('./color-input');
+
+    // Reproduce the real topology: the control lives in a shadow root, so a
+    // document-level listener sees events retargeted to the shadow HOST
+    // rather than the node that was actually clicked. linkedom does not
+    // retarget, so the retargeted event is dispatched explicitly here — that
+    // retargeting is the whole bug, and a test that skips it passes against
+    // broken code.
+    const hostEl = document.createElement('div');
+    document.body.appendChild(hostEl);
+    const shadow = (hostEl as unknown as { attachShadow(i: { mode: string }): ShadowRoot })
+      .attachShadow({ mode: 'open' });
+
+    const swatch = document.createElement('div');
+    shadow.appendChild(swatch);
+
+    let committed: string | null = null;
+    const handle = attachColorPopover(swatch as unknown as HTMLElement, {
+      label: 'color',
+      initial: '#000000',
+      tokens: [{ name: 'brand', value: '#06b6d4' }],
+      onInput: () => {},
+      onCommit: (v) => { committed = v; },
+    });
+
+    const W = window as never as { Event: typeof Event };
+    swatch.dispatchEvent(new W.Event('click', { bubbles: true }));
+    assert.equal(handle.popover.isConnected, true, 'popover should be open');
+
+    // The killer: a pointerdown whose target is the HOST, as the document
+    // sees it, while the real click is inside the popover. The old guard read
+    // e.target, decided the click was outside, and removed the popover before
+    // the click could land.
+    const pd = new W.Event('pointerdown', { bubbles: true });
+    Object.defineProperty(pd, 'target', { value: hostEl, configurable: true });
+    Object.defineProperty(pd, 'composedPath', {
+      value: () => [handle.popover, shadow, hostEl, document.body],
+      configurable: true,
+    });
+    document.dispatchEvent(pd);
+
+    assert.equal(
+      handle.popover.isConnected, true,
+      'a pointerdown originating inside the popover must not close it, even though the document sees it retargeted to the host',
+    );
+
+    // And the chip is still there to be clicked.
+    const chip = handle.popover.querySelector('[aria-label*="brand"]') as HTMLElement | null;
+    assert.ok(chip, 'token chip should still be in the popover');
+    chip!.dispatchEvent(new W.Event('click', { bubbles: true }));
+    assert.equal(committed, '#06b6d4', 'picking a token must commit its value');
+  });
+
+  it('still closes on a genuine outside pointerdown', async () => {
+    const { attachColorPopover } = await import('./color-input');
+    const swatch = document.createElement('div');
+    document.body.appendChild(swatch);
+    const handle = attachColorPopover(swatch as unknown as HTMLElement, {
+      label: 'color', initial: '#000000', onInput: () => {}, onCommit: () => {},
+    });
+    const W = window as never as { Event: typeof Event };
+    swatch.dispatchEvent(new W.Event('click', { bubbles: true }));
+    assert.equal(handle.popover.isConnected, true);
+
+    const outside = document.createElement('div');
+    document.body.appendChild(outside);
+    const pd = new W.Event('pointerdown', { bubbles: true });
+    Object.defineProperty(pd, 'target', { value: outside, configurable: true });
+    Object.defineProperty(pd, 'composedPath', { value: () => [outside, document.body], configurable: true });
+    document.dispatchEvent(pd);
+
+    assert.equal(handle.popover.isConnected, false, 'outside click must still dismiss');
+  });
 });

@@ -178,8 +178,31 @@ export function attachColorPopover(
     // gone and the popover is pointing at nothing — close on the next click
     // rather than leaving it floating.
     if (!swatch.isConnected) { close(); return; }
-    const t = e.target as Node | null;
-    if (t && (popover.contains(t) || swatch.contains(t))) return;
+
+    // composedPath(), not e.target.
+    //
+    // This listener is on `document`, and the popover lives inside a shadow
+    // root. The DOM retargets an event crossing a shadow boundary, so by the
+    // time it reaches a document-level listener `e.target` is the shadow HOST,
+    // never the node actually clicked. `popover.contains(target)` was
+    // therefore false for clicks *inside* the popover: pointerdown closed and
+    // removed it, and the click that followed never landed on the swatch the
+    // user was aiming at. Picking a colour did nothing, while the popover
+    // still opened — because show() binds this listener after the pointerdown
+    // that opened it.
+    //
+    // composedPath() reports the true path including nodes inside the shadow
+    // tree, so an inside-click is recognisable. Falling back to e.target keeps
+    // the guard working where composedPath is unavailable.
+    const path = typeof (e as Event & { composedPath?: () => EventTarget[] }).composedPath === 'function'
+      ? (e as Event & { composedPath: () => EventTarget[] }).composedPath()
+      : [];
+    if (path.length > 0) {
+      if (path.includes(popover) || path.includes(swatch)) return;
+    } else {
+      const t = e.target as Node | null;
+      if (t && (popover.contains(t) || swatch.contains(t))) return;
+    }
     close();
   };
   const onDocKeydown = (e: KeyboardEvent): void => {

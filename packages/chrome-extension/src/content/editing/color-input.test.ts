@@ -26,18 +26,16 @@ const NAMED = new Set([
   'red', 'blue', 'rebeccapurple', 'transparent', 'currentcolor', 'inherit',
 ]);
 
-declare global {
-  // eslint-disable-next-line no-var
-  var CSS: { supports(property: string, value: string): boolean } | undefined;
-}
-
 let hadCSS = false;
 let originalCSS: typeof globalThis.CSS;
 
 before(() => {
   hadCSS = typeof globalThis.CSS !== 'undefined';
   originalCSS = globalThis.CSS;
-  globalThis.CSS = {
+  // Cast through unknown: lib.dom types CSS.supports as an overload pair
+  // ((property, value) and (conditionText)), and the stub only implements the
+  // two-argument form that isColorValue uses.
+  (globalThis as { CSS?: unknown }).CSS = {
     supports(property: string, value: string): boolean {
       if (property !== 'color') return false;
       const v = value.trim().toLowerCase();
@@ -51,7 +49,7 @@ before(() => {
 });
 
 after(() => {
-  if (hadCSS) globalThis.CSS = originalCSS;
+  if (hadCSS) (globalThis as { CSS?: unknown }).CSS = originalCSS;
   else delete (globalThis as { CSS?: unknown }).CSS;
 });
 
@@ -117,7 +115,7 @@ describe('isColorValue', () => {
       assert.equal(isColorValue('cubic-bezier(0, 0.56, 0.26, 0.88)'), true);
       assert.equal(isColorValue(''), false, 'empty is still rejected without CSS');
     } finally {
-      globalThis.CSS = saved;
+      (globalThis as { CSS?: unknown }).CSS = saved;
     }
   });
 });

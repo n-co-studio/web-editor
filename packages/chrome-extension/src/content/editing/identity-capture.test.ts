@@ -69,6 +69,14 @@ class El {
   }
 }
 
+/**
+ * `El` is a minimal stand-in implementing only the surface these functions
+ * touch, so TypeScript rightly refuses it where a real `Element` is expected.
+ * Cast at the call boundary rather than widening the stub to all 150-odd
+ * Element members — the narrowness is the point of the stub.
+ */
+const asElement = (e: El): Element => e as unknown as Element;
+
 // Install globals the modules-under-test read at call time.
 (globalThis as any).Element = El;
 (globalThis as any).HTMLElement = El;
@@ -121,10 +129,10 @@ describe('stable element identity — capture layer (issue #27)', () => {
   it('generateSelector prefers [data-fe-uid] over data-source-* and #id', () => {
     const withUid = withSource(new El('div'), 'src/A.tsx', 3, 'fe-xyz');
     withUid.setAttribute('id', 'hero');
-    assert.equal(generateSelector(withUid), `[${FE_UID_ATTR}="fe-xyz"]`);
+    assert.equal(generateSelector(asElement(withUid)), `[${FE_UID_ATTR}="fe-xyz"]`);
 
     const sourceOnly = withSource(new El('div'), 'src/A.tsx', 7);
-    const sel = generateSelector(sourceOnly);
+    const sel = generateSelector(asElement(sourceOnly));
     assert.ok(sel.includes('data-source-file'), `expected data-source selector, got ${sel}`);
     assert.ok(!isUidSelector(sel));
   });
@@ -149,13 +157,13 @@ describe('stable element identity — capture layer (issue #27)', () => {
     const fig = makeFigure('src/Gallery.tsx', 42, 43, '/public/images/a.jpg');
     container.appendChild(fig);
 
-    const origFigUid = ensureUid(fig);
-    const origImgUid = ensureUid(fig.childNodes[0]);
+    const origFigUid = ensureUid(asElement(fig));
+    const origImgUid = ensureUid(asElement(fig.childNodes[0]));
 
     const result = duplicateElement(fig as unknown as HTMLElement);
     const clone = result.clone as unknown as El;
-    const cloneFigUid = readUid(clone)!;
-    const cloneImgUid = readUid(clone.childNodes[0])!;
+    const cloneFigUid = readUid(asElement(clone))!;
+    const cloneImgUid = readUid(asElement(clone.childNodes[0]))!;
 
     // Distinct identity for both twins, root and descendant.
     assert.notEqual(cloneFigUid, origFigUid);
@@ -190,7 +198,7 @@ describe('stable element identity — capture layer (issue #27)', () => {
       [],
     );
 
-    const origFigUid = readUid(fig)!; // stamped by buildInsertChange's anchor pass
+    const origFigUid = readUid(asElement(fig))!; // stamped by buildInsertChange's anchor pass
 
     const result = duplicateElement(fig as unknown as HTMLElement);
     const clone = result.clone as unknown as El;
@@ -207,7 +215,7 @@ describe('stable element identity — capture layer (issue #27)', () => {
     assert.equal(new Set(snapUids).size, snapUids.length, 'childSnapshot uids must be distinct');
 
     // (3) clone outerHTML carries fresh uids distinct from the original twin.
-    const cloneFigUid = readUid(clone)!;
+    const cloneFigUid = readUid(asElement(clone))!;
     assert.notEqual(cloneFigUid, origFigUid);
     assert.ok(insertChange.outerHTML!.includes(cloneFigUid));
 

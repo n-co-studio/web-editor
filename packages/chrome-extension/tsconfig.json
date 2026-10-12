@@ -9,7 +9,10 @@
     "declarationMap": false,
     "sourceMap": false,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["chrome"],
+    // "node" is here only so test files typecheck (they import node:test
+    // and node:assert). Product code is browser-targeted and must not use
+    // Node APIs; esbuild bundles for the browser and would fail on them.
+    "types": ["chrome", "node"],
     "paths": {
       "@nco-studio/shared": ["../shared/src/index.ts"],
       "@nco-studio/shared/diff": ["../shared/src/diff.ts"],
@@ -18,5 +21,9 @@
     }
   },
   "include": ["src"],
-  "exclude": ["src/**/*.test.ts"]
+  // Test files are deliberately INCLUDED. They used to be excluded, and that
+  // let a test import a symbol which had been moved to another module: tsc
+  // --noEmit passed, and only the test runner's esbuild caught it. A test that
+  // does not compile is not a test.
+  "exclude": []
 }
