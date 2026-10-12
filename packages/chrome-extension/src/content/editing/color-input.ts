@@ -174,6 +174,10 @@ export function attachColorPopover(
   };
 
   const onDocPointerDown = (e: Event): void => {
+    // If the owning panel was torn down while this was open, the swatch is
+    // gone and the popover is pointing at nothing — close on the next click
+    // rather than leaving it floating.
+    if (!swatch.isConnected) { close(); return; }
     const t = e.target as Node | null;
     if (t && (popover.contains(t) || swatch.contains(t))) return;
     close();
@@ -186,6 +190,11 @@ export function attachColorPopover(
     if (!open) return;
     open = false;
     popover.style.display = 'none';
+    // Removed from the DOM rather than just hidden. The popover lives in the
+    // shadow root, outside the panel that owns it, so panel teardown cannot
+    // collect it — taking it out on close is what makes a MutationObserver
+    // unnecessary and leaves nothing to orphan.
+    popover.remove();
     swatch.setAttribute('aria-expanded', 'false');
     document.removeEventListener('pointerdown', onDocPointerDown, true);
     document.removeEventListener('keydown', onDocKeydown, true);
@@ -194,6 +203,28 @@ export function attachColorPopover(
   function show(): void {
     if (open) return;
     open = true;
+    // Resolve the host HERE, not at construction.
+    //
+    // Panels build their whole subtree and append it to the shadow root last,
+    // so at the time this control is built the swatch is still detached and
+    // `getRootNode()` returns that detached subtree — not the ShadowRoot. An
+    // earlier version resolved the host once, up front, and silently appended
+    // the popover nowhere: clicking set display:flex on a node that was not in
+    // any document, so nothing appeared and nothing errored.
+    //
+    // By the time the swatch can be clicked it is connected, so resolving on
+    // open always finds the real root.
+    // `typeof` guards before each `instanceof`: a bare `x instanceof ShadowRoot`
+    // throws ReferenceError wherever the constructor is not defined, which
+    // turns a missing global into a crash inside a click handler rather than a
+    // graceful fallback.
+    const root = swatch.getRootNode() as ParentNode & { body?: HTMLElement | null };
+    const inShadow = typeof ShadowRoot !== 'undefined' && root instanceof ShadowRoot;
+    const host: ParentNode = inShadow ? root : (root.body ?? document.body);
+    // position:fixed, so it has to escape the owning panel's overflow:hidden —
+    // hence the shadow root rather than the panel.
+    host.appendChild(popover);
+
     popover.style.display = 'flex';
     swatch.setAttribute('aria-expanded', 'true');
     position();
@@ -213,19 +244,6 @@ export function attachColorPopover(
   swatch.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (open) close(); else show(); }
   });
-
-  // position:fixed, so it must escape the owning panel's overflow:hidden.
-  const root = swatch.getRootNode();
-  if (root instanceof ShadowRoot) root.appendChild(popover);
-
-  // Panels tear down by removing their container; without this the popover and
-  // its two document listeners would be orphaned in the shadow root.
-  if (typeof MutationObserver !== 'undefined') {
-    const mo = new MutationObserver(() => {
-      if (!swatch.isConnected) { close(); popover.remove(); mo.disconnect(); }
-    });
-    mo.observe(root instanceof ShadowRoot ? root : document, { childList: true, subtree: true });
-  }
 
   return {
     popover,
