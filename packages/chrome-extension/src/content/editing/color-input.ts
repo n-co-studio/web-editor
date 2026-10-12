@@ -123,42 +123,86 @@ export function attachColorPopover(
   // store indexes by `cssProperties`, which upstream fills loosely enough that
   // font weights and easing curves arrive under `color`.
   const colorTokens = (opts.tokens ?? []).filter((t) => isColorValue(t.value));
-  if (colorTokens.length > 0) {
-    const grid = createElement('div', {}, {
-      display: 'grid',
-      gridTemplateColumns: 'repeat(5, 1fr)',
-      gap: '4px',
+
+  // The grid renders unconditionally, because its first cell is "None" and
+  // clearing a colour has to be reachable whether or not the project has
+  // tokens.
+  const grid = createElement('div', {}, {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(5, 1fr)',
+    gap: '4px',
+  });
+
+  /**
+   * "No colour" — commits `transparent`.
+   *
+   * `transparent` rather than removing the property: this control's contract
+   * is a PropertyChange with a concrete `toValue`, and an agent can write
+   * `transparent` into source unambiguously. Removing the declaration instead
+   * would mean "fall back to whatever the cascade says", which is a different
+   * intent, not always achievable in the source file, and not what a swatch
+   * grid implies.
+   *
+   * Drawn as a diagonal stroke over a neutral ground, because a swatch filled
+   * with transparent is just an empty box — indistinguishable from a rendering
+   * failure, which is the same class of problem as the white-on-white swatches.
+   */
+  const noneChip = createElement('div', {
+    role: 'button',
+    tabindex: '0',
+    title: 'No colour (transparent)',
+    'aria-label': 'No colour, transparent',
+  }, {
+    width: '100%',
+    aspectRatio: '1',
+    borderRadius: OVERLAY.radiusSm,
+    border: `1px solid ${OVERLAY.swatchBorder}`,
+    background: `linear-gradient(to top right, transparent calc(50% - 1px), ${OVERLAY.destructive} calc(50% - 1px), ${OVERLAY.destructive} calc(50% + 1px), transparent calc(50% + 1px))`,
+    cursor: 'pointer',
+  });
+  const pickNone = (): void => {
+    // The native input cannot represent transparency, so it is parked at a
+    // neutral rather than left showing the previous colour as if still chosen.
+    colorInput.value = '#ffffff';
+    opts.onCommit('transparent');
+    close();
+  };
+  noneChip.addEventListener('click', pickNone);
+  noneChip.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pickNone(); }
+  });
+  grid.appendChild(noneChip);
+
+  for (const token of colorTokens) {
+    const chip = createElement('div', {
+      role: 'button',
+      tabindex: '0',
+      title: `${token.name}: ${token.value}`,
+      'aria-label': `${token.name}, ${token.value}`,
+    }, {
+      width: '100%',
+      aspectRatio: '1',
+      borderRadius: OVERLAY.radiusSm,
+      border: `1px solid ${OVERLAY.swatchBorder}`,
+      background: token.value,
+      cursor: 'pointer',
     });
-    for (const token of colorTokens) {
-      const chip = createElement('div', {
-        role: 'button',
-        tabindex: '0',
-        title: `${token.name}: ${token.value}`,
-        'aria-label': `${token.name}, ${token.value}`,
-      }, {
-        width: '100%',
-        aspectRatio: '1',
-        borderRadius: OVERLAY.radiusSm,
-        border: `1px solid ${OVERLAY.swatchBorder}`,
-        background: token.value,
-        cursor: 'pointer',
-      });
-      const pick = (): void => {
-        colorInput.value = toHex(token.value);
-        opts.onCommit(token.value, token);
-        close();
-      };
-      chip.addEventListener('click', pick);
-      chip.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); }
-      });
-      grid.appendChild(chip);
-    }
-    popover.appendChild(grid);
-    popover.appendChild(createElement('div', {}, {
-      height: '1px', background: OVERLAY.border, margin: '2px 0',
-    }));
+    const pick = (): void => {
+      colorInput.value = toHex(token.value);
+      opts.onCommit(token.value, token);
+      close();
+    };
+    chip.addEventListener('click', pick);
+    chip.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); }
+    });
+    grid.appendChild(chip);
   }
+
+  popover.appendChild(grid);
+  popover.appendChild(createElement('div', {}, {
+    height: '1px', background: OVERLAY.border, margin: '2px 0',
+  }));
 
   popover.appendChild(colorInput);
 

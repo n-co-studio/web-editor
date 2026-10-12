@@ -181,4 +181,38 @@ describe('attachColorPopover — attachment timing', () => {
 
     assert.equal(handle.popover.isConnected, false, 'outside click must still dismiss');
   });
+  it('offers a No colour option that commits transparent, with or without tokens', async () => {
+    const { attachColorPopover } = await import('./color-input');
+    const W = window as never as { Event: typeof Event };
+
+    for (const tokens of [
+      undefined,
+      [{ name: 'brand', value: '#06b6d4' }],
+    ]) {
+      const swatch = document.createElement('div');
+      document.body.appendChild(swatch);
+
+      let committed: string | null = null;
+      let committedToken: unknown = 'unset';
+      const handle = attachColorPopover(swatch as unknown as HTMLElement, {
+        label: 'color',
+        initial: '#123456',
+        tokens,
+        onInput: () => {},
+        onCommit: (v, t) => { committed = v; committedToken = t; },
+      });
+
+      swatch.dispatchEvent(new W.Event('click', { bubbles: true }));
+
+      // Reachable whether or not the project has tokens — clearing a colour
+      // must not depend on a design system being present.
+      const none = handle.popover.querySelector('[aria-label="No colour, transparent"]') as HTMLElement | null;
+      assert.ok(none, `No colour chip should exist (tokens: ${tokens ? 'yes' : 'none'})`);
+
+      none!.dispatchEvent(new W.Event('click', { bubbles: true }));
+      assert.equal(committed, 'transparent', 'must commit the literal transparent');
+      assert.equal(committedToken, undefined, 'No colour is not a token pick, so it carries no toToken');
+      assert.equal(handle.popover.isConnected, false, 'picking should close the popover');
+    }
+  });
 });
