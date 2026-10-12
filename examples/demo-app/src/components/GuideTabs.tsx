@@ -5,7 +5,7 @@
  * sharp, no shadows.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import SetupGuide from './SetupGuide';
 import HowToUse from './HowToUse';
 import Troubleshooting from './Troubleshooting';
@@ -18,8 +18,39 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]['id'];
 
+/**
+ * URL fragments that select a tab.
+ *
+ * Spelled out rather than derived from the ids so the links can read properly:
+ * the Chrome Web Store listing's Support URL points at `#troubleshooting`, and
+ * a support link that lands on "Set it up" is a support link that failed.
+ * The internal id stays short; the fragment is the public name.
+ */
+const HASH_TO_TAB: Record<string, TabId> = {
+  '#setup': 'setup',
+  '#how-to-use': 'use',
+  '#use': 'use',
+  '#troubleshooting': 'trouble',
+  '#trouble': 'trouble',
+};
+
 export default function GuideTabs() {
-  const [tab, setTab] = useState<TabId>('setup');
+  // Initialised from the fragment so a deep link renders the right tab on the
+  // first paint rather than flashing "Set it up" and then switching.
+  const [tab, setTab] = useState<TabId>(
+    () => (typeof window === 'undefined' ? 'setup' : HASH_TO_TAB[window.location.hash] ?? 'setup'),
+  );
+
+  // Follow later fragment changes too — the back button, and a second click on
+  // the same support link while the page is already open.
+  useEffect(() => {
+    const onHashChange = (): void => {
+      const next = HASH_TO_TAB[window.location.hash];
+      if (next) setTab(next);
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
 
   return (
     <section id="setup" style={{ paddingBottom: 'var(--space-16)', marginBottom: 'var(--space-20)', scrollMarginTop: 'var(--space-12)' }}>

@@ -9,6 +9,36 @@
 
 import type { ReactNode } from 'react';
 
+/**
+ * Support address and a prefilled report template.
+ *
+ * mailto rather than an issue tracker, deliberately. The repository is
+ * private, so the Support URL in the store listing currently 404s for anyone
+ * who clicks it; email is the one channel that actually reaches someone today.
+ * An issue tracker is worth setting up when there is enough volume for
+ * deduplication and public answers to pay for themselves — not before.
+ */
+const SUPPORT_EMAIL = 'hello@nco.studio';
+
+const SUPPORT_BODY = [
+  'What I expected:',
+  '',
+  'What happened instead:',
+  '',
+  'Chrome version / OS:',
+  'Extension version: 0.2.0',
+  'Agent (Claude Code, Cursor, …):',
+  'Editor connected? (toolbar dot):',
+  'MCP server output:',
+  '',
+].join('\n');
+
+const SUPPORT_MAILTO =
+  `mailto:${SUPPORT_EMAIL}` +
+  `?subject=${encodeURIComponent('AI Agent Visual Editor — help')}` +
+  `&body=${encodeURIComponent(SUPPORT_BODY)}`;
+
+
 function Code({ children }: { children: string }) {
   return (
     <pre
@@ -231,6 +261,40 @@ rm .nco-web-editor/pending-queue.json`}</Code>
           it reports <Mono>status</Mono> and <Mono>pending_count</Mono> so a watching agent can react the
           moment a batch arrives. Leave it to the server; it is rewritten on every queue change.
         </p>
+      </div>
+
+      {/* Still stuck — the last block, because it is the fallback for
+          everything above. A prefilled subject and body cost nothing and turn
+          "it doesn't work" into a report that can actually be acted on: the
+          four facts below are the ones every diagnosis starts from. */}
+      <div style={{ marginTop: 'var(--space-10)', paddingTop: 'var(--space-6)', borderTop: '1px solid var(--color-divider)' }}>
+        <h3
+          style={{
+            fontFamily: 'var(--font-sans)',
+            fontWeight: 'var(--fw-regular)',
+            fontSize: 'var(--text-h3)',
+            color: 'var(--color-ink)',
+          }}
+        >
+          Still stuck?
+        </h3>
+        <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)', marginTop: 'var(--space-3)' }}>
+          If your problem is not listed above, email{' '}
+          <a
+            href={SUPPORT_MAILTO}
+            style={{ color: 'var(--color-ink)', textDecoration: 'underline' }}
+          >
+            {SUPPORT_EMAIL}
+          </a>
+          . The link opens a message with the details below already in it — filling them in saves a
+          round trip, because they are the first things anyone would ask.
+        </p>
+        <ul style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)', marginTop: 'var(--space-3)', paddingLeft: 'var(--space-5)', lineHeight: 1.7 }}>
+          <li>What you expected, and what happened instead</li>
+          <li>Your Chrome version and operating system</li>
+          <li>Whether the editor connected (the toolbar dot) and what the MCP server printed</li>
+          <li>Which agent you are using</li>
+        </ul>
       </div>
     </div>
   );
