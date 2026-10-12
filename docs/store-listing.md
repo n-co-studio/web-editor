@@ -200,8 +200,34 @@ sees it in the screenshots directly below. The site's orange deliberately does
 not appear here — it belongs to nco.studio, not to this product, and the
 listing is judged against the icon and screenshots rather than the homepage.
 
-**Content:** n'co studio wordmark, the tagline "Point → Adjust → Generate",
-accent on the arrow glyphs.
+**Tagline — decided 2026-10-12:**
+
+> **Design it. Don't describe it.**
+
+Set it as two lines, centred, heavy weight, `#0F0F0F`, as large as the centre
+70% allows. It is the largest thing on the tile.
+
+It replaces "Point → Adjust → Generate". "Generate" was the weakest word in
+the set — vague, and it implies output appears somewhere unspecified when the
+actual claim is that code changes land in your own source files.
+
+The tagline deliberately does **not** restate the short description. In search
+results the description sits directly beneath the tile, so the two should do
+different jobs: the description explains the mechanic ("adjust any element
+visually and your AI coding agent applies the change in your source files"),
+and the tagline names the reason anyone would want that. Every visual editor
+can claim "design on the real page"; only this one is aimed at the problem of
+describing a visual change in prose to an agent and hoping the result matches.
+
+It is also the product spec's own framing. `docs/spec/compiled/v1/product.md`
+states the problem as making tweaks "without writing CSS by hand or describing
+changes in natural language" — the tagline is that sentence, shortened.
+
+**Other content:** n'co studio wordmark, and one abstracted gesture rather
+than a reproduction of the UI — an element with a selection ring and the
+pencil mark touching it. At the ~220px this renders at, real panels become
+texture; the three screenshots below the tile are what show the actual
+interface. Accent goes on the gesture, never on the type.
 
 **Contrast, measured against white.** Ink `#0F0F0F` is 19.2:1. Green `#609D53`
 is 3.3:1 and cyan `#06b6d4` is 2.4:1 — both below the 4.5:1 that normal text
