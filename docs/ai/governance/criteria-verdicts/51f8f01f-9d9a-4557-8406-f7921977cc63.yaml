@@ -1,0 +1,106 @@
+schema: repo-os/criteria-verdicts@1
+session_id: "51f8f01f-9d9a-4557-8406-f7921977cc63"
+rounds:
+  - round: 1
+    timestamp: "2026-10-07T00:22:54Z"
+    dispatch_phase: "review"
+    dispatch_cycle: 1
+    completeness_score: "9/12 criteria met"
+    completeness_gate: APPROVED
+    criteria:
+      - index: 1
+        criterion: "Brief 1 of a sequential group creates `.worktrees/tg-{group}`; brief 2 reuses the same path with no `git worktree add`"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`.claude/.automation/runner.sh:784-787` (create when absent) and `:1059-1068` (`_wt_added=true` without calling `git worktree add` when `_GWT_REUSE=true`)"
+        completeness:
+          verdict: COMPLETE
+          evidence: "as above; also exercised by `test-group-worktree-lifecycle.sh` (47/47 per operator evidence)"
+      - index: 2
+        criterion: "A gitignored file created in brief 1 still exists at brief 2 start"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`.claude/hooks/_cleanup-helper.sh:556-581` (`check_group_worktree_clean` uses `git status --porcelain`, which omits gitignored files without `--ignored`); confirmed by test fixture `.gitignore` + `ignored-dir/` in `layer8-group-worktree.sh:37`"
+        completeness:
+          verdict: COMPLETE
+          evidence: "as above"
+      - index: 3
+        criterion: "Brief 2 refuses to start and writes a `dirty-tree` escalation when the worktree has uncommitted tracked or untracked changes"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`.claude/.automation/runner.sh:821-832` (`esc-dirty-tree-*` escalation, `_GWT_BLOCK_OUTCOME=\"failed:group-worktree-dirty\"`, rc=2)"
+        completeness:
+          verdict: COMPLETE
+          evidence: ""
+      - index: 4
+        criterion: "Two sessions targeting the same group worktree: the second is blocked by the lock"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`.claude/.automation/runner.sh:765-782` (`acquire_group_worktree_lock` rc≠0 → `esc-group-worktree-locked`, rc=2); `.claude/hooks/_cleanup-helper.sh:384-424` (live-foreign-holder → return 1)"
+        completeness:
+          verdict: COMPLETE
+          evidence: ""
+      - index: 5
+        criterion: "A crash in a non-final brief leaves the worktree in place; a restart reuses it"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`.claude/.automation/runner.sh:278-290` (`_runner_crash_cleanup` preserves the worktree for `_CURRENT_WORKTREE_IS_GROUP=true`, only releases the lock)"
+        completeness:
+          verdict: COMPLETE
+          evidence: ""
+      - index: 6
+        criterion: "After the final brief merges and seals, the group worktree is removed and `git worktree list` no longer shows it"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`.claude/.automation/runner.sh:1516-1532` (`remove_group_worktree` on the sealed branch); `_cleanup-helper.sh:592-615` calls `git worktree remove --force` / `git worktree prune`"
+        completeness:
+          verdict: COMPLETE
+          evidence: ""
+      - index: 7
+        criterion: "A failed or abandoned work order removes its group worktree"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`.claude/.automation/runner.sh:2442-2447` (`wo_is_failed` → `remove_group_worktree`); abandonment covered via the stale sweep per the decision doc (`group-worktree-sweep.sh`)"
+        completeness:
+          verdict: COMPLETE
+          evidence: "explicit `wo_is_failed` path verified; \"abandoned\" path relies on the stale sweep (`group-worktree-sweep.sh`), which is destructive-but-guarded per item (g) scrutiny — lock-liveness and live-session checks confirmed correct, glob constrained to `tg-*` and round-tripped through `group_worktree_path`"
+      - index: 8
+        criterion: "Standalone sessions still create and remove `.worktrees/{session-id}` exactly as before"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`.claude/.automation/runner.sh:744-746` (`_resolve_group_worktree` returns 1 — not applicable — unless `session_type = \"taskgroup\"`), `:1046-1054` falls back to `${REPO_OS_SESSION_ID}` path when `_GWT_GROUP` is empty, `:1251-1255` unconditional removal for non-group worktrees"
+        completeness:
+          verdict: COMPLETE
+          evidence: ""
+      - index: 9
+        criterion: "Per-session state still lands in `wt-sessions/{session-id}/`, not a shared dir"
+        contract_verification:
+          verdict: VERIFIED
+          evidence: "`.claude/.automation/runner.sh:1098-1110` (plan-approved mirror written per-`REPO_OS_SESSION_ID` into `wt-sessions/${REPO_OS_SESSION_ID}` inside the shared worktree, re-written on every reuse)"
+        completeness:
+          verdict: COMPLETE
+          evidence: ""
+      - index: 10
+        criterion: "`bash -n` on runner.sh and every edited hook — INCONCLUSIVE (structurally)"
+        contract_verification:
+          verdict: ABSENT
+          evidence: "not independently re-run in this dispatch (no Bash tool available); operator-supplied evidence states this passed. No syntax anomalies observed during full-file reads of `runner.sh`, `_cleanup-helper.sh`, `group-worktree-sweep.sh`, `cleanup.sh`."
+        completeness:
+          verdict: PARTIAL
+          evidence: "not independently re-verified in this dispatch (no Bash tool); no syntax anomalies seen in full-file reads; relying on operator-supplied pass"
+      - index: 11
+        criterion: "`run-phase-tests.sh` full run with no new failures — INCONCLUSIVE (structurally)"
+        contract_verification:
+          verdict: ABSENT
+          evidence: "operator-supplied evidence (61 assertions, Layer 8 wired per `run-phase-tests.sh:127-131,318-320`); not independently re-run in this dispatch."
+        completeness:
+          verdict: PARTIAL
+          evidence: "not independently re-run in this dispatch; Layer 8 wiring confirmed structurally; relying on operator-supplied pass"
+      - index: 12
+        criterion: "Cross-session: `git log --oneline -10` reviewed"
+        contract_verification:
+          verdict: INCONCLUSIVE
+          evidence: "no Bash tool available in this dispatch to run `git log`; gitStatus context shows recent commits (997e755, bff7e8b, 54e882e, 6f81a80, 57e1be3) consistent with prior worktree-sync fixes, but this was not independently cross-checked against the brief's criterion."
+        completeness:
+          verdict: INCOMPLETE
+          evidence: "not independently performed in this dispatch (no Bash tool access to run `git log`)"

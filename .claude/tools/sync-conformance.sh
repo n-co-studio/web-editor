@@ -321,9 +321,9 @@ git_q "$CHILD" checkout -b not-main
 ( cd "$CHILD" && bash "$ENGINE" "file://$TPL" main ) > "$SANDBOX/engine-branch.log" 2>&1
 rc=$?
 if [ "$rc" -ne 0 ] && grep -q "Must be on 'main'" "$SANDBOX/engine-branch.log"; then
-  ok "refuses to run off main (git 2.19-safe branch detection)"
+  ok "refuses to run off main (floor-safe branch detection)"
 else
-  nok "refuses to run off main (git 2.19-safe branch detection)" "rc=$rc $(head -3 "$SANDBOX/engine-branch.log")"
+  nok "refuses to run off main (floor-safe branch detection)" "rc=$rc $(head -3 "$SANDBOX/engine-branch.log")"
 fi
 git_q "$CHILD" checkout main
 

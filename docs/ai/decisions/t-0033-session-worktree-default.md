@@ -37,7 +37,7 @@ Decision 0030 built per-session state directories (`wt-sessions/{sid}/`) and wor
 - Decision 0028 (subagent worktree state block) remains in effect
 - Decision 0030 (per-session state directories) used as-is
 - Decision 0032 (parallel task group worktree isolation) unchanged
-- Sequential task groups: unaffected (shared branch, worktree isolation is per-session)
+- Sequential task groups: unaffected (shared branch, worktree isolation is per-session) — **amended by Decision 0054; see § Amendment 2026-10-06 below**
 - All governance gates: unchanged (hooks fire in worktree context via absolute path registration)
 
 ## Consequences
@@ -79,3 +79,43 @@ if git worktree add "$worktree_dir" "$_SETUP_BRANCH" 2>/dev/null; then
 ```
 
 The code is correct. This note reconciles the decision text with the implementation.
+
+---
+
+## Amendment — 2026-10-06: Sequential Task Group Worktree Lifetime (Decision 0054)
+
+The "What This Does NOT Change" bullet above reads:
+
+> Sequential task groups: unaffected (shared branch, worktree isolation is per-session)
+
+That line is accurate as a description of what this decision implemented, but
+it was never a decision about sequential task groups — it recorded a side
+effect. Because worktree isolation is per-session and each brief in a group is
+its own session, a sequential group sharing one branch got a worktree created
+and force-removed for every brief. Two costs followed:
+
+- untracked and gitignored working files (dependency installs, build output,
+  caches) were rebuilt for every brief in the group; and
+- a crashed brief's worktree was force-removed along with the state an operator
+  would have wanted to inspect.
+
+**Decision 0054 supersedes this bullet for the worktree-lifetime question
+only.** A sequential task group now gets ONE worktree at
+`.worktrees/tg-{group_name}` for the whole life of its branch: brief 1 creates
+it, briefs 2…N reuse it behind a clean-start check and a single-occupancy lock,
+and it is removed only after the final brief merges and seals, when the group
+fails or is abandoned, or by the stale sweep.
+
+Everything else in this decision stands unchanged:
+
+- Worktree isolation remains the default for **all** session types.
+- Standalone sessions keep the per-session worktree at
+  `.worktrees/{session-id}` described here.
+- Parallel task groups keep Decision 0032's per-brief branches and worktrees.
+- `REPO_OS_WORKTREE_ISOLATE=0` remains the opt-out and disables group worktrees
+  along with everything else.
+- Per-session governance state stays at `wt-sessions/{sid}/` per Decision 0030,
+  so briefs sharing a group worktree still do not share phase-state or gate
+  evidence.
+
+See `docs/ai/decisions/t-0054-task-group-worktree-lifetime.md`.

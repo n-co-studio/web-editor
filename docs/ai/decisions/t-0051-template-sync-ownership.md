@@ -49,8 +49,11 @@ its session logs and its compiled specs wholesale.
 multi-line value through `awk -v`, a GNU extension; BSD awk rejects it and
 emits an empty file, which the old code then `mv`'d over the child's
 `.gitignore`. And the branch check used `git branch --show-current` (git
-2.22+), which on the operator's git 2.19.2 is not a flag and silently compares
-garbage. Both are invisible on `ubuntu-latest` and destructive on a Mac.
+2.22+), which is above the supported floor (AI.md § Tooling Floor); below 2.22
+it is not a flag and silently compares garbage. Both are invisible on
+`ubuntu-latest` and destructive on a Mac. (Observed at the time on the
+operator's then-installed git 2.19.2; the defect is the version assumption, not
+that particular version.)
 
 A fifth defect was introduced and caught by the new tests: the first draft of
 the sweep read its manifest with `grep -v '^#' | grep -v '^$'`, which exits 1

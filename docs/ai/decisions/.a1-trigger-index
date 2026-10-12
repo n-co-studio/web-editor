@@ -1,158 +1,160 @@
 # A1 trigger index — generated artifact. Do not hand-edit.
 # Regenerate: bash .claude/.automation/lib/rebuild-trigger-index.sh
-# digest: 01a965c1271ccc67e8d78373f464c320a85626d921eacec50f89993562d89fa1
-0001|AI\.md|prompt system, verification gate, session-based
-0001|docs/ai/prompts/prompt-.*\.md|prompt system, verification gate, session-based
-0002|docs/ai/decisions/.*\.md|mandatory, commit-blocking
-0003|\.claude/agents/.*\.md|frontmatter, disallowedTools, tools:, model:
-0004|\.claude/hooks/.*\.sh|PreToolUse, PostToolUse, SubagentStop, Stop, phase-state, _phase-helper
-0004|\.claude/settings\.json|PreToolUse, PostToolUse, SubagentStop, Stop, phase-state, _phase-helper
-0006|docs/ai/prompts/prompt-0\.5|experiment, prototype, napkin, spike, prototype-napkin, prototype-spike, prototype-poc
-0006|docs/spec/_templates/_experiment|experiment, prototype, napkin, spike, prototype-napkin, prototype-spike, prototype-poc
-0007|\.claude/agents/_advisory-board.*\.md|advisory, tier, specialist, refinement
-0008|\.claude/agents/_cohesion-review\.md|cohesion, A5
-0008|\.claude/agents/critic\.md|cohesion, A5
-0009|\.local/share/repo-os-analytics|analytics, telemetry, ndjson, log_hook_event
-0009|\.claude/hooks/_analytics|analytics, telemetry, ndjson, log_hook_event
-0010|docs/ai/prompts/prompt-t|task definition, Brief mode, Query mode, significant feature, taskdef-query, taskdef-brief
-0011|docs/ai/task-groups/|task.group, contract, A6, next_brief, pre-approval, one.branch.per.group, parallel, execution, completion_markers, merge_brief, boundaries
-0011|\.claude/local/task-groups/|task.group, contract, A6, next_brief, pre-approval, one.branch.per.group, parallel, execution, completion_markers, merge_brief, boundaries
-0012|\.claude/hooks/write-guard\.sh|write-guard, mode-guard, REPO_OS_MODE, REPO_OS_UNLOCK_PATH, REPO_OS_SKIP_MODE_GUARD, is_in_repo
-0012|\.claude/repo-mode|write-guard, mode-guard, REPO_OS_MODE, REPO_OS_UNLOCK_PATH, REPO_OS_SKIP_MODE_GUARD, is_in_repo
-0014|\.claude/hooks/_phase-helper\.sh|phase, session_type, init_phase, advance_phase, assert_phase, phase-state, get_phase, get_tag, taskgroup-merge, editor-live
-0014|\.claude/\.state/phase-state|phase, session_type, init_phase, advance_phase, assert_phase, phase-state, get_phase, get_tag, taskgroup-merge, editor-live
-0016|\.claude/agents/auditor\.md|auditor, audit, dimension, co-audit, workshop, escalation, tech-debt, cohesion-drift
-0016|docs/ai/prompts/prompt-c-project-audit\.md|auditor, audit, dimension, co-audit, workshop, escalation, tech-debt, cohesion-drift
-0017|\.claude/\.automation/|automation, headless, runner, queue, escalation, blocker, claude -p, enabled, permission-request, allowlist, scope-deviation, scope_classification
-0017|\.claude/hooks/permission-request\.sh|automation, headless, runner, queue, escalation, blocker, claude -p, enabled, permission-request, allowlist, scope-deviation, scope_classification
-0017|\.claude/hooks/_permission-allowlist\.sh|automation, headless, runner, queue, escalation, blocker, claude -p, enabled, permission-request, allowlist, scope-deviation, scope_classification
-0018|\.claude/hooks/(bash-guard|branch-guard|pre-commit-gates)\.sh|taskgroup, task.group, contract, merge, A6_contract_missing, tg_merge_blocked, SKIP_MERGE_GUARD
-0019|\.claude/hooks/(bash-guard|branch-guard|write-guard)\.sh|fail-closed, no_phase_state, phase_gate_no_state, .fail-closed-enforced
-0019|docs/ai/decisions/\.fail-closed-enforced|fail-closed, no_phase_state, phase_gate_no_state, .fail-closed-enforced
-0020|\.claude/local/task-contract\.yaml|task-contract, task_contract, intent:, verification:
-0020|docs/ai/task-groups/.*\.yaml|task-contract, task_contract, intent:, verification:
-0020|\.claude/local/task-groups/.*\.yaml|task-contract, task_contract, intent:, verification:
-0020|\.claude/agents/_cohesion-review\.md|task-contract, task_contract, intent:, verification:
-0020|\.claude/agents/critic\.md|task-contract, task_contract, intent:, verification:
-0021|\.claude/agents/_user-review-tier-[1-3]\.md|user-review, persona, tier
-0022|docs/ai/decisions/|t-prefix, t-manifest, template decision, decision naming, child-sync-decisions
-0022|.claude/hooks/write-guard.sh|t-prefix, t-manifest, template decision, decision naming, child-sync-decisions
-0022|.claude/hooks/pre-commit-gates.sh|t-prefix, t-manifest, template decision, decision naming, child-sync-decisions
-0022|.claude/.automation/lib/child-sync-decisions.sh|t-prefix, t-manifest, template decision, decision naming, child-sync-decisions
-0023|\.claude/hooks/_phase-helper\.sh|editor-live, fswatch, visual change, pending_visual_changes, acknowledge_visual_change, commit:build
-0023|\.claude/\.state/phase-state|editor-live, fswatch, visual change, pending_visual_changes, acknowledge_visual_change, commit:build
-0024|\.claude/repo-mode|repo-mode, get_mode, IS_TEMPLATE, child, template, REPO_OS_MODE
-0024|\.gitignore|repo-mode, get_mode, IS_TEMPLATE, child, template, REPO_OS_MODE
-0024|\.templatesyncignore|repo-mode, get_mode, IS_TEMPLATE, child, template, REPO_OS_MODE
-0024|\.claude/hooks/(session-close-check|pre-commit-gates|_automation-bridge)\.sh|repo-mode, get_mode, IS_TEMPLATE, child, template, REPO_OS_MODE
-0025|\.claude/agents/pragmatist\.md|pragmatist, over-engineer, yagni, plan-review
-0026|\.claude/hooks/(bash-guard|write-guard|_phase-helper)\.sh|taskgroup_brief_mismatch, brief-has-taskgroup, check_taskgroup_brief_mismatch, write_taskgroup_brief_signal, REPO_OS_SKIP_TASKGROUP_CHECK
-0027|\.claude/(hooks/(pretooluse-permission|_permission-allowlist)|settings\.json)|is_readonly_agent, _PERMISSION_READONLY_AGENTS, agent_gate, REPO_OS_ALLOW_AGENT, Agent PreToolUse
-0028|\.claude/hooks/(state-writer|_analytics-helper)\.sh|is_worktree, worktree_blocked, _CACHED_IS_WORKTREE, git-common-dir
-0029|\.claude/hooks/(_phase-helper|plan-approval)\.sh|approval, has_operator_gate, taskdef-brief, plan-approved
-0030|\.claude/hooks/(state-writer|_analytics-helper|_phase-helper|session-close-check|_cleanup-helper)\.sh|is_full_worktree_session, get_session_state_dir, REPO_OS_SESSION_ID, wt-sessions, merge-lock
-0031|\.claude/hooks/(bash-guard|write-guard|pre-commit-gates|pre-push-gates)\.sh|REPO_OS_RECOVER, recover-signal, recovery bypass
-0032|docs/ai/(workflow-appendix/session-type-task-group|prompts/prompt-t-task-definition|task-groups/_contract-template)\.|parallel, worktree, Execution: parallel, worktree isolation, per-brief branch
-0033|\.claude/(\.automation/runner|hooks/(session-close-check|_phase-helper|_cleanup-helper|_analytics-helper))\.sh|worktree, REPO_OS_WORKTREE_ISOLATE, --worktree, session isolation, concurrent session, .worktrees
-0034|docs/ai/knowledge-graph/|knowledge graph, knowledge-graph, graph.yaml, product-graph.yaml, schema.yaml, kg-seed, kg-relevance, semantic connection, edge type, staleness, two-graph
-0034|.claude/tools/kg-|knowledge graph, knowledge-graph, graph.yaml, product-graph.yaml, schema.yaml, kg-seed, kg-relevance, semantic connection, edge type, staleness, two-graph
-0035|docs/spec/compiled/|spec loading, spec digest, DIGEST.md, selective loading, manifest features, spec_digest_sha, feature index, token reduction, specialist dispatch
-0035|.claude/tools/spec-digest.sh|spec loading, spec digest, DIGEST.md, selective loading, manifest features, spec_digest_sha, feature index, token reduction, specialist dispatch
-0035|docs/spec/_templates/|spec loading, spec digest, DIGEST.md, selective loading, manifest features, spec_digest_sha, feature index, token reduction, specialist dispatch
-0036|.claude/.automation/runner.sh|daemon, branch switch, git checkout, git switch, git reset --hard, runner, worktree isolation, hotfix, daemon-pid
-0036|.claude/.automation/lib/|daemon, branch switch, git checkout, git switch, git reset --hard, runner, worktree isolation, hotfix, daemon-pid
-0036|.claude/hooks/bash-guard.sh|daemon, branch switch, git checkout, git switch, git reset --hard, runner, worktree isolation, hotfix, daemon-pid
-0037|\.claude/hooks/.*\.sh|governance packaging, content/enforcement split, hook lifecycle, enforcement standalone, content standalone
-0037|\.claude/\.automation/|governance packaging, content/enforcement split, hook lifecycle, enforcement standalone, content standalone
-0038|docs/ai/prompts/prompt-t-task-definition\.md|handoff bundle, drift-check, drift_check, bundle_valid, bundle_expired, deterministic alignment, handoff-bundle
-0038|docs/ai/prompts/prompt-b-product-build\.md|handoff bundle, drift-check, drift_check, bundle_valid, bundle_expired, deterministic alignment, handoff-bundle
-0038|\.claude/hooks/_phase-helper\.sh|handoff bundle, drift-check, drift_check, bundle_valid, bundle_expired, deterministic alignment, handoff-bundle
-0038|\.claude/local/handoff-bundle\.yaml|handoff bundle, drift-check, drift_check, bundle_valid, bundle_expired, deterministic alignment, handoff-bundle
-0038|\.claude/local/task-groups/.*\.bundle\.yaml|handoff bundle, drift-check, drift_check, bundle_valid, bundle_expired, deterministic alignment, handoff-bundle
-0039|\.claude/agents/critic\.md|critic combined mode, cohesion + diff-review consolidation, dual-section output, review-phase dispatch, MODE: diff-review
-0039|\.claude/hooks/state-writer\.sh|critic combined mode, cohesion + diff-review consolidation, dual-section output, review-phase dispatch, MODE: diff-review
-0040|docs/ai/prompts/prompt-f-finish-loop\.md|finish-loop cache, dimension input hash, cached_dimension_verdict, record_dimension_verdict, INHERITED verdict
-0040|\.claude/hooks/_phase-helper\.sh|finish-loop cache, dimension input hash, cached_dimension_verdict, record_dimension_verdict, INHERITED verdict
-0041|docs/ai/governance/spec-compiled|governance evidence, spec_version, governance-checked, governance-bash-fired, fast-skip predicate, inter-session governance
-0041|docs/ai/governance/advisory-reviewed|governance evidence, spec_version, governance-checked, governance-bash-fired, fast-skip predicate, inter-session governance
-0041|docs/spec/compiled/manifest\.json|governance evidence, spec_version, governance-checked, governance-bash-fired, fast-skip predicate, inter-session governance
-0041|docs/ai/prompts/prompt-0-spec-builder\.md|governance evidence, spec_version, governance-checked, governance-bash-fired, fast-skip predicate, inter-session governance
-0041|docs/ai/prompts/prompt-a-repo-os\.md|governance evidence, spec_version, governance-checked, governance-bash-fired, fast-skip predicate, inter-session governance
-0041|docs/ai/prompts/prompt-b-product-build\.md|governance evidence, spec_version, governance-checked, governance-bash-fired, fast-skip predicate, inter-session governance
-0041|\.claude/hooks/pre-commit-gates\.sh|governance evidence, spec_version, governance-checked, governance-bash-fired, fast-skip predicate, inter-session governance
-0041|\.claude/hooks/bash-guard\.sh|governance evidence, spec_version, governance-checked, governance-bash-fired, fast-skip predicate, inter-session governance
-0042|\.claude/hooks/_phase-helper\.sh|compute_phase_gates, read_phase_gates, phase-state.gates, hook hoist, GATES_SESSION_OVERLAP, GATES_BRANCH_ISOLATION
-0042|\.claude/hooks/bash-guard\.sh|compute_phase_gates, read_phase_gates, phase-state.gates, hook hoist, GATES_SESSION_OVERLAP, GATES_BRANCH_ISOLATION
-0042|\.claude/hooks/write-guard\.sh|compute_phase_gates, read_phase_gates, phase-state.gates, hook hoist, GATES_SESSION_OVERLAP, GATES_BRANCH_ISOLATION
-0042|\.claude/hooks/pre-commit-gates\.sh|compute_phase_gates, read_phase_gates, phase-state.gates, hook hoist, GATES_SESSION_OVERLAP, GATES_BRANCH_ISOLATION
-0042|\.claude/hooks/_cleanup-helper\.sh|compute_phase_gates, read_phase_gates, phase-state.gates, hook hoist, GATES_SESSION_OVERLAP, GATES_BRANCH_ISOLATION
-0043|\.claude/hooks/_phase-helper\.sh|handoff-bundles, per-brief bundle, _resolve_brief_id, _atomic_write_bundle, brief_id, handoff bundle path
-0043|\.claude/local/handoff-bundles/.*\.yaml|handoff-bundles, per-brief bundle, _resolve_brief_id, _atomic_write_bundle, brief_id, handoff bundle path
-0043|\.claude/local/handoff-bundle\.yaml|handoff-bundles, per-brief bundle, _resolve_brief_id, _atomic_write_bundle, brief_id, handoff bundle path
-0043|docs/ai/prompts/prompt-t-task-definition\.md|handoff-bundles, per-brief bundle, _resolve_brief_id, _atomic_write_bundle, brief_id, handoff bundle path
-0043|docs/ai/prompts/prompt-b-product-build\.md|handoff-bundles, per-brief bundle, _resolve_brief_id, _atomic_write_bundle, brief_id, handoff bundle path
-0044|\.claude/hooks/pre-commit-gates\.sh|functional-verified, SKIP_FUNC_CHECK, REPO_OS_FUNC_CHECK_TIMEOUT, IS_NO_REVIEW_BACKSTOP, A3.4
-0044|\.claude/hooks/_cleanup-helper\.sh|functional-verified, SKIP_FUNC_CHECK, REPO_OS_FUNC_CHECK_TIMEOUT, IS_NO_REVIEW_BACKSTOP, A3.4
-0044|\.claude/.state/functional-verified|functional-verified, SKIP_FUNC_CHECK, REPO_OS_FUNC_CHECK_TIMEOUT, IS_NO_REVIEW_BACKSTOP, A3.4
-0045|\.claude/hooks/_cleanup-helper\.sh|delete_merged_session_branch, merged branch cleanup, branch deletion on close, branch accumulation
-0045|\.claude/hooks/session-close-check\.sh|delete_merged_session_branch, merged branch cleanup, branch deletion on close, branch accumulation
-0045|\.claude/\.automation/runner\.sh|delete_merged_session_branch, merged branch cleanup, branch deletion on close, branch accumulation
-0046|\.claude/\.automation/schemas/eval-|eval study, evaluation study, lineage_id, study_id, cell_id, arm, n_reps, blinding, shuffle-manifest, eval-study, eval-cell, eval-suite, pre-registration, decision rule, raw-data-complete
-0046|docs/spec/_templates/_eval-|eval study, evaluation study, lineage_id, study_id, cell_id, arm, n_reps, blinding, shuffle-manifest, eval-study, eval-cell, eval-suite, pre-registration, decision rule, raw-data-complete
-0046|docs/ai/prompts/prompt-eval-study\.md|eval study, evaluation study, lineage_id, study_id, cell_id, arm, n_reps, blinding, shuffle-manifest, eval-study, eval-cell, eval-suite, pre-registration, decision rule, raw-data-complete
-0046|docs/ai/eval/_nomenclature\.md|eval study, evaluation study, lineage_id, study_id, cell_id, arm, n_reps, blinding, shuffle-manifest, eval-study, eval-cell, eval-suite, pre-registration, decision rule, raw-data-complete
-0048|\.claude/hooks/state-writer\.sh|criteria-verdicts, _capture_criteria_verdicts, contract_verification, completeness verdict, repo-os/criteria-verdicts
-0048|\.claude/hooks/_cleanup-helper\.sh|criteria-verdicts, _capture_criteria_verdicts, contract_verification, completeness verdict, repo-os/criteria-verdicts
-0048|docs/ai/governance/criteria-verdicts/|criteria-verdicts, _capture_criteria_verdicts, contract_verification, completeness verdict, repo-os/criteria-verdicts
-0049|\.claude/hooks/pre-commit-gates\.sh|exit 2, exit code, fail-closed, fail-open, errtrace, set -E, ERR trap, _gate_abort, assert_fail, assert_blocked, gate-conformance, conformance harness
-0049|\.claude/hooks/pre-push-gates\.sh|exit 2, exit code, fail-closed, fail-open, errtrace, set -E, ERR trap, _gate_abort, assert_fail, assert_blocked, gate-conformance, conformance harness
-0049|\.claude/hooks/tests/test-helpers\.sh|exit 2, exit code, fail-closed, fail-open, errtrace, set -E, ERR trap, _gate_abort, assert_fail, assert_blocked, gate-conformance, conformance harness
-0049|\.claude/tools/gate-conformance\.sh|exit 2, exit code, fail-closed, fail-open, errtrace, set -E, ERR trap, _gate_abort, assert_fail, assert_blocked, gate-conformance, conformance harness
-0049|\.claude/\.automation/git-hooks/|exit 2, exit code, fail-closed, fail-open, errtrace, set -E, ERR trap, _gate_abort, assert_fail, assert_blocked, gate-conformance, conformance harness
-0050|\.claude/tools/ec-report\.sh|expected_changes, Expected Changes, EC-, Changes: trailer, additional change, intent-to-diff, ec-report
-0050|docs/ai/prompts/prompt-t-task-definition\.md|expected_changes, Expected Changes, EC-, Changes: trailer, additional change, intent-to-diff, ec-report
-0050|docs/ai/task-groups/_contract-template\.yaml|expected_changes, Expected Changes, EC-, Changes: trailer, additional change, intent-to-diff, ec-report
-0051|\.claude/\.automation/lib/template-sync-engine\.sh|template sync, machinery manifest, withdrawn file, orphan sweep, templatesyncignore, a1-trigger-index, sync-conformance, child sync
-0051|\.claude/\.automation/lib/rebuild-machinery-manifest\.sh|template sync, machinery manifest, withdrawn file, orphan sweep, templatesyncignore, a1-trigger-index, sync-conformance, child sync
-0051|\.claude/\.automation/machinery-manifest\.txt|template sync, machinery manifest, withdrawn file, orphan sweep, templatesyncignore, a1-trigger-index, sync-conformance, child sync
-0051|\.claude/tools/sync-conformance\.sh|template sync, machinery manifest, withdrawn file, orphan sweep, templatesyncignore, a1-trigger-index, sync-conformance, child sync
-0051|\.templatesyncignore|template sync, machinery manifest, withdrawn file, orphan sweep, templatesyncignore, a1-trigger-index, sync-conformance, child sync
-0052|\.claude/\.automation/lib/template-sync-engine\.sh|child-owned, templatesyncignore.local, child claim, product README, template sync, withdrawn file sweep
-0052|\.templatesyncignore|child-owned, templatesyncignore.local, child claim, product README, template sync, withdrawn file sweep
-0052|\.templatesyncignore\.local|child-owned, templatesyncignore.local, child claim, product README, template sync, withdrawn file sweep
-0052|\.claude/tools/sync-conformance\.sh|child-owned, templatesyncignore.local, child claim, product README, template sync, withdrawn file sweep
-0053|\.claude/hooks/pre-commit-gates\.sh|commit trailer, Decisions trailer, recover-signal, COMMIT_CMD, commit message, one-shot signal, proxy
-0053|\.claude/hooks/_commit-message-helper\.sh|commit trailer, Decisions trailer, recover-signal, COMMIT_CMD, commit message, one-shot signal, proxy
-0053|\.claude/tools/gate-conformance\.sh|commit trailer, Decisions trailer, recover-signal, COMMIT_CMD, commit message, one-shot signal, proxy
-0001|AI\.md|prompt system, verification gate, session-based
-0001|docs/ai/prompts/prompt-.*\.md|prompt system, verification gate, session-based
-0002|docs/ai/decisions/.*\.md|mandatory, commit-blocking
-0003|\.claude/agents/.*\.md|frontmatter, disallowedTools, tools:, model:
-0004|\.claude/hooks/.*\.sh|PreToolUse, PostToolUse, SubagentStop, Stop, phase-state, _phase-helper
-0004|\.claude/settings\.json|PreToolUse, PostToolUse, SubagentStop, Stop, phase-state, _phase-helper
-0006|docs/ai/prompts/prompt-0\.5|experiment, prototype, napkin, spike, prototype-napkin, prototype-spike, prototype-poc
-0006|docs/spec/_templates/_experiment|experiment, prototype, napkin, spike, prototype-napkin, prototype-spike, prototype-poc
-0007|\.claude/agents/_advisory-board.*\.md|advisory, tier, specialist, refinement
-0008|\.claude/agents/_cohesion-review\.md|cohesion, A5
-0008|\.claude/agents/critic\.md|cohesion, A5
-0009|\.local/share/repo-os-analytics|analytics, telemetry, ndjson, log_hook_event
-0009|\.claude/hooks/_analytics|analytics, telemetry, ndjson, log_hook_event
-0010|docs/ai/prompts/prompt-t|task definition, Brief mode, Query mode, significant feature, taskdef-query, taskdef-brief
-0011|docs/ai/task-groups/|task.group, contract, A6, next_brief, pre-approval, one.branch.per.group, parallel, execution, completion_markers, merge_brief, boundaries
-0011|\.claude/local/task-groups/|task.group, contract, A6, next_brief, pre-approval, one.branch.per.group, parallel, execution, completion_markers, merge_brief, boundaries
-0012|\.claude/hooks/write-guard\.sh|write-guard, mode-guard, REPO_OS_MODE, REPO_OS_UNLOCK_PATH, REPO_OS_SKIP_MODE_GUARD, is_in_repo
-0012|\.claude/repo-mode|write-guard, mode-guard, REPO_OS_MODE, REPO_OS_UNLOCK_PATH, REPO_OS_SKIP_MODE_GUARD, is_in_repo
-0014|\.claude/hooks/_phase-helper\.sh|phase, session_type, init_phase, advance_phase, assert_phase, phase-state, get_phase, get_tag, taskgroup-merge
-0014|\.claude/\.state/phase-state|phase, session_type, init_phase, advance_phase, assert_phase, phase-state, get_phase, get_tag, taskgroup-merge
-0016|\.claude/agents/auditor\.md|auditor, audit, dimension, co-audit, workshop, escalation, tech-debt, cohesion-drift
-0016|docs/ai/prompts/prompt-c-project-audit\.md|auditor, audit, dimension, co-audit, workshop, escalation, tech-debt, cohesion-drift
-0017|\.claude/\.automation/|automation, headless, runner, queue, escalation, blocker, claude -p, enabled
-0018|\.claude/hooks/(branch-guard|pre-commit-gates)\.sh|taskgroup, task.group, contract, merge, A6_contract_missing, tg_merge_blocked, SKIP_MERGE_GUARD
-0019|\.claude/hooks/(branch-guard|branch-guard-edit)\.sh|fail-closed, no_phase_state, phase_gate_no_state, .fail-closed-enforced
-0019|docs/ai/decisions/\.fail-closed-enforced|fail-closed, no_phase_state, phase_gate_no_state, .fail-closed-enforced
-0020|\.claude/\.state/task-contract\.yaml|task-contract, task_contract, intent:, verification:
-0020|docs/ai/task-groups/.*\.yaml|task-contract, task_contract, intent:, verification:
-0020|\.claude/local/task-groups/.*\.yaml|task-contract, task_contract, intent:, verification:
-0020|\.claude/agents/_cohesion-review\.md|task-contract, task_contract, intent:, verification:
-0020|\.claude/agents/critic\.md|task-contract, task_contract, intent:, verification:
-0021|\.claude/agents/_user-review-tier-[1-3]\.md|user-review, persona, tier
+# format: 2
+# digest: 8b5e894557f99127328337fec1d385d5af7924ee26a5d7755b0b507eedc82b69
+0001AI\.mdprompt system, verification gate, session-based
+0001docs/ai/prompts/prompt-.*\.mdprompt system, verification gate, session-based
+0002docs/ai/decisions/.*\.mdmandatory, commit-blocking
+0003\.claude/agents/.*\.mdfrontmatter, disallowedTools, tools:, model:
+0004\.claude/hooks/.*\.shPreToolUse, PostToolUse, SubagentStop, Stop, phase-state, _phase-helper
+0004\.claude/settings\.jsonPreToolUse, PostToolUse, SubagentStop, Stop, phase-state, _phase-helper
+0006docs/ai/prompts/prompt-0\.5experiment, prototype, napkin, spike, prototype-napkin, prototype-spike, prototype-poc
+0006docs/spec/_templates/_experimentexperiment, prototype, napkin, spike, prototype-napkin, prototype-spike, prototype-poc
+0007\.claude/agents/_advisory-board.*\.mdadvisory, tier, specialist, refinement
+0008\.claude/agents/_cohesion-review\.mdcohesion, A5
+0008\.claude/agents/critic\.mdcohesion, A5
+0009\.local/share/repo-os-analyticsanalytics, telemetry, ndjson, log_hook_event
+0009\.claude/hooks/_analyticsanalytics, telemetry, ndjson, log_hook_event
+0010docs/ai/prompts/prompt-ttask definition, Brief mode, Query mode, significant feature, taskdef-query, taskdef-brief
+0011docs/ai/task-groups/task.group, contract, A6, next_brief, pre-approval, one.branch.per.group, parallel, execution, completion_markers, merge_brief, boundaries
+0011\.claude/local/task-groups/task.group, contract, A6, next_brief, pre-approval, one.branch.per.group, parallel, execution, completion_markers, merge_brief, boundaries
+0012\.claude/hooks/write-guard\.shwrite-guard, mode-guard, REPO_OS_MODE, REPO_OS_UNLOCK_PATH, REPO_OS_SKIP_MODE_GUARD, is_in_repo
+0012\.claude/repo-modewrite-guard, mode-guard, REPO_OS_MODE, REPO_OS_UNLOCK_PATH, REPO_OS_SKIP_MODE_GUARD, is_in_repo
+0014\.claude/hooks/_phase-helper\.shphase, session_type, init_phase, advance_phase, assert_phase, phase-state, get_phase, get_tag, taskgroup-merge, editor-live
+0014\.claude/\.state/phase-statephase, session_type, init_phase, advance_phase, assert_phase, phase-state, get_phase, get_tag, taskgroup-merge, editor-live
+0016\.claude/agents/auditor\.mdauditor, audit, dimension, co-audit, workshop, escalation, tech-debt, cohesion-drift
+0016docs/ai/prompts/prompt-c-project-audit\.mdauditor, audit, dimension, co-audit, workshop, escalation, tech-debt, cohesion-drift
+0017\.claude/\.automation/automation, headless, runner, queue, escalation, blocker, claude -p, enabled, permission-request, allowlist, scope-deviation, scope_classification
+0017\.claude/hooks/permission-request\.shautomation, headless, runner, queue, escalation, blocker, claude -p, enabled, permission-request, allowlist, scope-deviation, scope_classification
+0017\.claude/hooks/_permission-allowlist\.shautomation, headless, runner, queue, escalation, blocker, claude -p, enabled, permission-request, allowlist, scope-deviation, scope_classification
+0018\.claude/hooks/(bash-guard|branch-guard|pre-commit-gates)\.shtaskgroup, task.group, contract, merge, A6_contract_missing, tg_merge_blocked, SKIP_MERGE_GUARD
+0019\.claude/hooks/(bash-guard|branch-guard|write-guard)\.shfail-closed, no_phase_state, phase_gate_no_state, .fail-closed-enforced
+0019docs/ai/decisions/\.fail-closed-enforcedfail-closed, no_phase_state, phase_gate_no_state, .fail-closed-enforced
+0020\.claude/local/task-contract\.yamltask-contract, task_contract, intent:, verification:
+0020docs/ai/task-groups/.*\.yamltask-contract, task_contract, intent:, verification:
+0020\.claude/local/task-groups/.*\.yamltask-contract, task_contract, intent:, verification:
+0020\.claude/agents/_cohesion-review\.mdtask-contract, task_contract, intent:, verification:
+0020\.claude/agents/critic\.mdtask-contract, task_contract, intent:, verification:
+0021\.claude/agents/_user-review-tier-[1-3]\.mduser-review, persona, tier
+0022docs/ai/decisions/t-prefix, t-manifest, template decision, decision naming, child-sync-decisions
+0022.claude/hooks/write-guard.sht-prefix, t-manifest, template decision, decision naming, child-sync-decisions
+0022.claude/hooks/pre-commit-gates.sht-prefix, t-manifest, template decision, decision naming, child-sync-decisions
+0022.claude/.automation/lib/child-sync-decisions.sht-prefix, t-manifest, template decision, decision naming, child-sync-decisions
+0023\.claude/hooks/_phase-helper\.sheditor-live, fswatch, visual change, pending_visual_changes, acknowledge_visual_change, commit:build
+0023\.claude/\.state/phase-stateeditor-live, fswatch, visual change, pending_visual_changes, acknowledge_visual_change, commit:build
+0024\.claude/repo-moderepo-mode, get_mode, IS_TEMPLATE, child, template, REPO_OS_MODE
+0024\.gitignorerepo-mode, get_mode, IS_TEMPLATE, child, template, REPO_OS_MODE
+0024\.templatesyncignorerepo-mode, get_mode, IS_TEMPLATE, child, template, REPO_OS_MODE
+0024\.claude/hooks/(session-close-check|pre-commit-gates|_automation-bridge)\.shrepo-mode, get_mode, IS_TEMPLATE, child, template, REPO_OS_MODE
+0025\.claude/agents/pragmatist\.mdpragmatist, over-engineer, yagni, plan-review
+0026\.claude/hooks/(bash-guard|write-guard|_phase-helper)\.shtaskgroup_brief_mismatch, brief-has-taskgroup, check_taskgroup_brief_mismatch, write_taskgroup_brief_signal, REPO_OS_SKIP_TASKGROUP_CHECK
+0027\.claude/(hooks/(pretooluse-permission|_permission-allowlist)|settings\.json)is_readonly_agent, _PERMISSION_READONLY_AGENTS, agent_gate, REPO_OS_ALLOW_AGENT, Agent PreToolUse
+0028\.claude/hooks/(state-writer|_analytics-helper)\.shis_worktree, worktree_blocked, _CACHED_IS_WORKTREE, git-common-dir
+0029\.claude/hooks/(_phase-helper|plan-approval)\.shapproval, has_operator_gate, taskdef-brief, plan-approved
+0030\.claude/hooks/(state-writer|_analytics-helper|_phase-helper|session-close-check|_cleanup-helper)\.shis_full_worktree_session, get_session_state_dir, REPO_OS_SESSION_ID, wt-sessions, merge-lock
+0031\.claude/hooks/(bash-guard|write-guard|pre-commit-gates|pre-push-gates)\.shREPO_OS_RECOVER, recover-signal, recovery bypass
+0032docs/ai/(workflow-appendix/session-type-task-group|prompts/prompt-t-task-definition|task-groups/_contract-template)\.parallel, worktree, Execution: parallel, worktree isolation, per-brief branch
+0033\.claude/(\.automation/runner|hooks/(session-close-check|_phase-helper|_cleanup-helper|_analytics-helper))\.shworktree, REPO_OS_WORKTREE_ISOLATE, --worktree, session isolation, concurrent session, .worktrees
+0034docs/ai/knowledge-graph/knowledge graph, knowledge-graph, graph.yaml, product-graph.yaml, schema.yaml, kg-seed, kg-relevance, semantic connection, edge type, staleness, two-graph
+0034.claude/tools/kg-knowledge graph, knowledge-graph, graph.yaml, product-graph.yaml, schema.yaml, kg-seed, kg-relevance, semantic connection, edge type, staleness, two-graph
+0035docs/spec/compiled/spec loading, spec digest, DIGEST.md, selective loading, manifest features, spec_digest_sha, feature index, token reduction, specialist dispatch
+0035.claude/tools/spec-digest.shspec loading, spec digest, DIGEST.md, selective loading, manifest features, spec_digest_sha, feature index, token reduction, specialist dispatch
+0035docs/spec/_templates/spec loading, spec digest, DIGEST.md, selective loading, manifest features, spec_digest_sha, feature index, token reduction, specialist dispatch
+0036.claude/.automation/runner.shdaemon, branch switch, git checkout, git switch, git reset --hard, runner, worktree isolation, hotfix, daemon-pid
+0036.claude/.automation/lib/daemon, branch switch, git checkout, git switch, git reset --hard, runner, worktree isolation, hotfix, daemon-pid
+0036.claude/hooks/bash-guard.shdaemon, branch switch, git checkout, git switch, git reset --hard, runner, worktree isolation, hotfix, daemon-pid
+0037\.claude/hooks/.*\.shgovernance packaging, content/enforcement split, hook lifecycle, enforcement standalone, content standalone
+0037\.claude/\.automation/governance packaging, content/enforcement split, hook lifecycle, enforcement standalone, content standalone
+0038docs/ai/prompts/prompt-t-task-definition\.mdhandoff bundle, drift-check, drift_check, bundle_valid, bundle_expired, deterministic alignment, handoff-bundle
+0038docs/ai/prompts/prompt-b-product-build\.mdhandoff bundle, drift-check, drift_check, bundle_valid, bundle_expired, deterministic alignment, handoff-bundle
+0038\.claude/hooks/_phase-helper\.shhandoff bundle, drift-check, drift_check, bundle_valid, bundle_expired, deterministic alignment, handoff-bundle
+0038\.claude/local/handoff-bundle\.yamlhandoff bundle, drift-check, drift_check, bundle_valid, bundle_expired, deterministic alignment, handoff-bundle
+0038\.claude/local/task-groups/.*\.bundle\.yamlhandoff bundle, drift-check, drift_check, bundle_valid, bundle_expired, deterministic alignment, handoff-bundle
+0039\.claude/agents/critic\.mdcritic combined mode, cohesion + diff-review consolidation, dual-section output, review-phase dispatch, MODE: diff-review
+0039\.claude/hooks/state-writer\.shcritic combined mode, cohesion + diff-review consolidation, dual-section output, review-phase dispatch, MODE: diff-review
+0040docs/ai/prompts/prompt-f-finish-loop\.mdfinish-loop cache, dimension input hash, cached_dimension_verdict, record_dimension_verdict, INHERITED verdict
+0040\.claude/hooks/_phase-helper\.shfinish-loop cache, dimension input hash, cached_dimension_verdict, record_dimension_verdict, INHERITED verdict
+0041docs/ai/governance/spec-compiledgovernance evidence, spec_version, governance-checked, governance-bash-fired, fast-skip predicate, inter-session governance
+0041docs/ai/governance/advisory-reviewedgovernance evidence, spec_version, governance-checked, governance-bash-fired, fast-skip predicate, inter-session governance
+0041docs/spec/compiled/manifest\.jsongovernance evidence, spec_version, governance-checked, governance-bash-fired, fast-skip predicate, inter-session governance
+0041docs/ai/prompts/prompt-0-spec-builder\.mdgovernance evidence, spec_version, governance-checked, governance-bash-fired, fast-skip predicate, inter-session governance
+0041docs/ai/prompts/prompt-a-repo-os\.mdgovernance evidence, spec_version, governance-checked, governance-bash-fired, fast-skip predicate, inter-session governance
+0041docs/ai/prompts/prompt-b-product-build\.mdgovernance evidence, spec_version, governance-checked, governance-bash-fired, fast-skip predicate, inter-session governance
+0041\.claude/hooks/pre-commit-gates\.shgovernance evidence, spec_version, governance-checked, governance-bash-fired, fast-skip predicate, inter-session governance
+0041\.claude/hooks/bash-guard\.shgovernance evidence, spec_version, governance-checked, governance-bash-fired, fast-skip predicate, inter-session governance
+0042\.claude/hooks/_phase-helper\.shcompute_phase_gates, read_phase_gates, phase-state.gates, hook hoist, GATES_SESSION_OVERLAP, GATES_BRANCH_ISOLATION
+0042\.claude/hooks/bash-guard\.shcompute_phase_gates, read_phase_gates, phase-state.gates, hook hoist, GATES_SESSION_OVERLAP, GATES_BRANCH_ISOLATION
+0042\.claude/hooks/write-guard\.shcompute_phase_gates, read_phase_gates, phase-state.gates, hook hoist, GATES_SESSION_OVERLAP, GATES_BRANCH_ISOLATION
+0042\.claude/hooks/pre-commit-gates\.shcompute_phase_gates, read_phase_gates, phase-state.gates, hook hoist, GATES_SESSION_OVERLAP, GATES_BRANCH_ISOLATION
+0042\.claude/hooks/_cleanup-helper\.shcompute_phase_gates, read_phase_gates, phase-state.gates, hook hoist, GATES_SESSION_OVERLAP, GATES_BRANCH_ISOLATION
+0043\.claude/hooks/_phase-helper\.shhandoff-bundles, per-brief bundle, _resolve_brief_id, _atomic_write_bundle, brief_id, handoff bundle path
+0043\.claude/local/handoff-bundles/.*\.yamlhandoff-bundles, per-brief bundle, _resolve_brief_id, _atomic_write_bundle, brief_id, handoff bundle path
+0043\.claude/local/handoff-bundle\.yamlhandoff-bundles, per-brief bundle, _resolve_brief_id, _atomic_write_bundle, brief_id, handoff bundle path
+0043docs/ai/prompts/prompt-t-task-definition\.mdhandoff-bundles, per-brief bundle, _resolve_brief_id, _atomic_write_bundle, brief_id, handoff bundle path
+0043docs/ai/prompts/prompt-b-product-build\.mdhandoff-bundles, per-brief bundle, _resolve_brief_id, _atomic_write_bundle, brief_id, handoff bundle path
+0044\.claude/hooks/pre-commit-gates\.shfunctional-verified, SKIP_FUNC_CHECK, REPO_OS_FUNC_CHECK_TIMEOUT, IS_NO_REVIEW_BACKSTOP, A3.4
+0044\.claude/hooks/_cleanup-helper\.shfunctional-verified, SKIP_FUNC_CHECK, REPO_OS_FUNC_CHECK_TIMEOUT, IS_NO_REVIEW_BACKSTOP, A3.4
+0044\.claude/.state/functional-verifiedfunctional-verified, SKIP_FUNC_CHECK, REPO_OS_FUNC_CHECK_TIMEOUT, IS_NO_REVIEW_BACKSTOP, A3.4
+0045\.claude/hooks/_cleanup-helper\.shdelete_merged_session_branch, merged branch cleanup, branch deletion on close, branch accumulation
+0045\.claude/hooks/session-close-check\.shdelete_merged_session_branch, merged branch cleanup, branch deletion on close, branch accumulation
+0045\.claude/\.automation/runner\.shdelete_merged_session_branch, merged branch cleanup, branch deletion on close, branch accumulation
+0046\.claude/\.automation/schemas/eval-eval study, evaluation study, lineage_id, study_id, cell_id, arm, n_reps, blinding, shuffle-manifest, eval-study, eval-cell, eval-suite, pre-registration, decision rule, raw-data-complete
+0046docs/spec/_templates/_eval-eval study, evaluation study, lineage_id, study_id, cell_id, arm, n_reps, blinding, shuffle-manifest, eval-study, eval-cell, eval-suite, pre-registration, decision rule, raw-data-complete
+0046docs/ai/prompts/prompt-eval-study\.mdeval study, evaluation study, lineage_id, study_id, cell_id, arm, n_reps, blinding, shuffle-manifest, eval-study, eval-cell, eval-suite, pre-registration, decision rule, raw-data-complete
+0046docs/ai/eval/_nomenclature\.mdeval study, evaluation study, lineage_id, study_id, cell_id, arm, n_reps, blinding, shuffle-manifest, eval-study, eval-cell, eval-suite, pre-registration, decision rule, raw-data-complete
+0048\.claude/hooks/state-writer\.shcriteria-verdicts, _capture_criteria_verdicts, contract_verification, completeness verdict, repo-os/criteria-verdicts
+0048\.claude/hooks/_cleanup-helper\.shcriteria-verdicts, _capture_criteria_verdicts, contract_verification, completeness verdict, repo-os/criteria-verdicts
+0048docs/ai/governance/criteria-verdicts/criteria-verdicts, _capture_criteria_verdicts, contract_verification, completeness verdict, repo-os/criteria-verdicts
+0049\.claude/hooks/pre-commit-gates\.shexit 2, exit code, fail-closed, fail-open, errtrace, set -E, ERR trap, _gate_abort, assert_fail, assert_blocked, gate-conformance, conformance harness
+0049\.claude/hooks/pre-push-gates\.shexit 2, exit code, fail-closed, fail-open, errtrace, set -E, ERR trap, _gate_abort, assert_fail, assert_blocked, gate-conformance, conformance harness
+0049\.claude/hooks/tests/test-helpers\.shexit 2, exit code, fail-closed, fail-open, errtrace, set -E, ERR trap, _gate_abort, assert_fail, assert_blocked, gate-conformance, conformance harness
+0049\.claude/tools/gate-conformance\.shexit 2, exit code, fail-closed, fail-open, errtrace, set -E, ERR trap, _gate_abort, assert_fail, assert_blocked, gate-conformance, conformance harness
+0049\.claude/\.automation/git-hooks/exit 2, exit code, fail-closed, fail-open, errtrace, set -E, ERR trap, _gate_abort, assert_fail, assert_blocked, gate-conformance, conformance harness
+0050\.claude/tools/ec-report\.shexpected_changes, Expected Changes, EC-, Changes: trailer, additional change, intent-to-diff, ec-report
+0050docs/ai/prompts/prompt-t-task-definition\.mdexpected_changes, Expected Changes, EC-, Changes: trailer, additional change, intent-to-diff, ec-report
+0050docs/ai/task-groups/_contract-template\.yamlexpected_changes, Expected Changes, EC-, Changes: trailer, additional change, intent-to-diff, ec-report
+0051\.claude/\.automation/lib/template-sync-engine\.shtemplate sync, machinery manifest, withdrawn file, orphan sweep, templatesyncignore, a1-trigger-index, sync-conformance, child sync
+0051\.claude/\.automation/lib/rebuild-machinery-manifest\.shtemplate sync, machinery manifest, withdrawn file, orphan sweep, templatesyncignore, a1-trigger-index, sync-conformance, child sync
+0051\.claude/\.automation/machinery-manifest\.txttemplate sync, machinery manifest, withdrawn file, orphan sweep, templatesyncignore, a1-trigger-index, sync-conformance, child sync
+0051\.claude/tools/sync-conformance\.shtemplate sync, machinery manifest, withdrawn file, orphan sweep, templatesyncignore, a1-trigger-index, sync-conformance, child sync
+0051\.templatesyncignoretemplate sync, machinery manifest, withdrawn file, orphan sweep, templatesyncignore, a1-trigger-index, sync-conformance, child sync
+0052\.claude/\.automation/lib/template-sync-engine\.shchild-owned, templatesyncignore.local, child claim, product README, template sync, withdrawn file sweep
+0052\.templatesyncignorechild-owned, templatesyncignore.local, child claim, product README, template sync, withdrawn file sweep
+0052\.templatesyncignore\.localchild-owned, templatesyncignore.local, child claim, product README, template sync, withdrawn file sweep
+0052\.claude/tools/sync-conformance\.shchild-owned, templatesyncignore.local, child claim, product README, template sync, withdrawn file sweep
+0053\.claude/hooks/pre-commit-gates\.shcommit trailer, Decisions trailer, recover-signal, COMMIT_CMD, commit message, one-shot signal, proxy
+0053\.claude/hooks/_commit-message-helper\.shcommit trailer, Decisions trailer, recover-signal, COMMIT_CMD, commit message, one-shot signal, proxy
+0053\.claude/tools/gate-conformance\.shcommit trailer, Decisions trailer, recover-signal, COMMIT_CMD, commit message, one-shot signal, proxy
+0054\.claude/(\.automation/(runner|lib/group-worktree-sweep|lib/cleanup)|hooks/(_cleanup-helper|session-close-check))\.shgroup worktree, tg-, group_worktree_path, acquire_group_worktree_lock, remove_group_worktree, sweep_stale_group_worktrees, clean-start, worktree lifetime, worktree reuse
+0001AI\.mdprompt system, verification gate, session-based
+0001docs/ai/prompts/prompt-.*\.mdprompt system, verification gate, session-based
+0002docs/ai/decisions/.*\.mdmandatory, commit-blocking
+0003\.claude/agents/.*\.mdfrontmatter, disallowedTools, tools:, model:
+0004\.claude/hooks/.*\.shPreToolUse, PostToolUse, SubagentStop, Stop, phase-state, _phase-helper
+0004\.claude/settings\.jsonPreToolUse, PostToolUse, SubagentStop, Stop, phase-state, _phase-helper
+0006docs/ai/prompts/prompt-0\.5experiment, prototype, napkin, spike, prototype-napkin, prototype-spike, prototype-poc
+0006docs/spec/_templates/_experimentexperiment, prototype, napkin, spike, prototype-napkin, prototype-spike, prototype-poc
+0007\.claude/agents/_advisory-board.*\.mdadvisory, tier, specialist, refinement
+0008\.claude/agents/_cohesion-review\.mdcohesion, A5
+0008\.claude/agents/critic\.mdcohesion, A5
+0009\.local/share/repo-os-analyticsanalytics, telemetry, ndjson, log_hook_event
+0009\.claude/hooks/_analyticsanalytics, telemetry, ndjson, log_hook_event
+0010docs/ai/prompts/prompt-ttask definition, Brief mode, Query mode, significant feature, taskdef-query, taskdef-brief
+0011docs/ai/task-groups/task.group, contract, A6, next_brief, pre-approval, one.branch.per.group, parallel, execution, completion_markers, merge_brief, boundaries
+0011\.claude/local/task-groups/task.group, contract, A6, next_brief, pre-approval, one.branch.per.group, parallel, execution, completion_markers, merge_brief, boundaries
+0012\.claude/hooks/write-guard\.shwrite-guard, mode-guard, REPO_OS_MODE, REPO_OS_UNLOCK_PATH, REPO_OS_SKIP_MODE_GUARD, is_in_repo
+0012\.claude/repo-modewrite-guard, mode-guard, REPO_OS_MODE, REPO_OS_UNLOCK_PATH, REPO_OS_SKIP_MODE_GUARD, is_in_repo
+0014\.claude/hooks/_phase-helper\.shphase, session_type, init_phase, advance_phase, assert_phase, phase-state, get_phase, get_tag, taskgroup-merge
+0014\.claude/\.state/phase-statephase, session_type, init_phase, advance_phase, assert_phase, phase-state, get_phase, get_tag, taskgroup-merge
+0016\.claude/agents/auditor\.mdauditor, audit, dimension, co-audit, workshop, escalation, tech-debt, cohesion-drift
+0016docs/ai/prompts/prompt-c-project-audit\.mdauditor, audit, dimension, co-audit, workshop, escalation, tech-debt, cohesion-drift
+0017\.claude/\.automation/automation, headless, runner, queue, escalation, blocker, claude -p, enabled
+0018\.claude/hooks/(branch-guard|pre-commit-gates)\.shtaskgroup, task.group, contract, merge, A6_contract_missing, tg_merge_blocked, SKIP_MERGE_GUARD
+0019\.claude/hooks/(branch-guard|branch-guard-edit)\.shfail-closed, no_phase_state, phase_gate_no_state, .fail-closed-enforced
+0019docs/ai/decisions/\.fail-closed-enforcedfail-closed, no_phase_state, phase_gate_no_state, .fail-closed-enforced
+0020\.claude/\.state/task-contract\.yamltask-contract, task_contract, intent:, verification:
+0020docs/ai/task-groups/.*\.yamltask-contract, task_contract, intent:, verification:
+0020\.claude/local/task-groups/.*\.yamltask-contract, task_contract, intent:, verification:
+0020\.claude/agents/_cohesion-review\.mdtask-contract, task_contract, intent:, verification:
+0020\.claude/agents/critic\.mdtask-contract, task_contract, intent:, verification:
+0021\.claude/agents/_user-review-tier-[1-3]\.mduser-review, persona, tier

@@ -40,6 +40,7 @@ Gates-B: B1-pass B2-n/a B3-n/a
 | Rule | Detail |
 |------|--------|
 | **Init** | Create session branch first, before reading docs or writing files. Sessions run in worktrees by default (Decision 0033) |
+| **Group worktree** | Sequential task groups share ONE worktree at `.worktrees/tg-{group}` for the life of the branch — reused across briefs behind a clean-start check and an occupancy lock, removed on final seal / group failure / stale sweep (Decision 0054). Standalone + parallel unchanged |
 | **Branch isolation** | One session per branch; sealed at close (Decision 0013; task groups exempt) |
 | **Solo mode** | Merge to main at close for `feature/*`, `fix/*`, `hotfix/*`. Non-final task group briefs skip merge |
 | **Overlap** | Registry blocks same-branch overlap (task groups: advisory only) |

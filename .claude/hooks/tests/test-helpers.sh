@@ -480,6 +480,16 @@ assert_file_exists() {
   fi
 }
 
+assert_dir_exists() {
+  local dir="$1"
+  local desc="$2"
+  if [ -d "$dir" ]; then
+    _tap_pass "$desc"
+  else
+    _tap_fail "$desc" "directory not found: $dir"
+  fi
+}
+
 # --- Create a fake session registry entry ---
 # Usage: create_fake_session "other-sid" "standard" "feature/test" ["99999"] ["2026-01-01T00:00:00Z"]
 create_fake_session() {

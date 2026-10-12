@@ -31,9 +31,10 @@ MODE="child"
 # script under `set -e`. And when core.hooksPath is configured, git ignores
 # .git/hooks entirely, so installing there would report success for a hook
 # that can never run.
-# --path-format=absolute needs git 2.31+; this repo runs 2.19, where the flag
-# is echoed back as output instead of parsed. Use --git-path (git 2.5+) and
-# make it absolute by hand.
+# --path-format=absolute needs git 2.31+, above the supported floor (AI.md
+# § Tooling Floor). Below 2.31 the flag is echoed back as output instead of
+# parsed, so the result is garbage rather than an error. Use --git-path
+# (git 2.5+, at the floor) and make it absolute by hand.
 TARGET_DIR="$(git -C "$REPO_ROOT" rev-parse --git-path hooks 2>/dev/null || echo ".git/hooks")"
 case "$TARGET_DIR" in
   /*) ;;

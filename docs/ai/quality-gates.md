@@ -27,7 +27,11 @@ Gate A1's trigger parser is gated by the sentinel file `docs/ai/decisions/.a1-tr
 
 The trigger parser uses a compiled index at `docs/ai/decisions/.a1-trigger-index` for fast matching. When the index is present, the parser reads it instead of parsing each decision file individually (eliminates ~80 subprocess forks per commit). Falls back to file-by-file parsing when the index is absent.
 
-**Format:** The index begins with a header comment block (lines starting with `#`), followed by pipe-delimited data rows: `decision_id|path_regex|keywords`. The header includes the regenerate command and a `digest:` line used for content-based staleness detection (see below).
+**Format (version 2):** The index begins with a header comment block (lines starting with `#`), followed by data rows delimited by `0x1f` (US, the ASCII unit separator): `decision_id<US>path_regex<US>keywords`. The header includes the regenerate command, a `format: 2` line, and a `digest:` line used for content-based staleness detection (see below).
+
+The separator is `0x1f` rather than `|` because a path regex may legitimately contain `|` for alternation. Format 1 was pipe-delimited and parsed with a three-field `IFS='|' read`, which split such a regex across fields — the regex arrived at grep truncated mid-group, grep rejected it, the error was swallowed, and the row was skipped **before** the keyword check. Ten of the shipped decisions use alternation, so those decisions were never detected and A1 never required them in a commit trailer. `0x1f` cannot occur in a regex or a keyword list, so the field boundary is unambiguous by construction. See known-issue R6.
+
+**Reading both formats:** `pre-commit-gates.sh` detects the delimiter per row — `0x1f` when present, legacy `|` otherwise — so a child repo whose index predates this change keeps its existing behaviour until it regenerates, rather than silently matching nothing. A legacy row triggers a one-shot warning naming the regenerate command. The parser also distinguishes a grep *error* (exit ≥ 2, malformed pattern) from an honest no-match (exit 1) and warns on the former; the two were previously indistinguishable, which is what let R6 hide.
 
 **Regenerate after adding or modifying decision triggers:**
 

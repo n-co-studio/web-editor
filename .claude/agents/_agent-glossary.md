@@ -147,6 +147,8 @@ Governance evidence in `.claude/.state/`. Written by hooks via shell I/O (never 
 
 **Model-written files** (in `.claude/local/`, not `.state/` — state-guard allows): `task-contract.yaml` (orchestrator — intent + verification for cohesion review, Decision 0020), `scope-risk-gain` (orchestrator — risk/gain for unbriefed-in-scope files, Decision 0017).
 
+**Cross-session lock directories** (`.claude/.state/`, main repo — NOT session-scoped, never cleaned by `cleanup_session_files`): `.merge-lock` (`session-close-check.sh` / `runner.sh` — solo-merge serialization, Decision 0030), `.closed-branches-lock` (`record_closed_branch` — atomic ledger append), `.tg-worktree-{group}.lock.dir` (`runner.sh` via `_cleanup-helper.sh::acquire_group_worktree_lock` — task group worktree single-occupancy; holds `pid`, `session_id`, `acquired_at`; a lock whose holder pid is dead is broken on the next acquire; released at close by `release_group_worktree_lock_if_orphaned`, Decision 0054).
+
 **Other files:** `.pragmatist-enforced` (`.claude/local/` — gate deployment sentinel, persistent). Operational (`.claude/`): `.session-baseline-sha` (persistent baseline), `.session-id` (analytics, immune), `.session-type`, `.hvst-fail-count`, `.deferrals-pending`. Recovery: `.claude/.state/.recover-signal` (file-based `REPO_OS_RECOVER=1` alternative — single-use, auto-deletes). Registry: `.claude/.state/sessions/*.yaml` (session tracking — cleaned at close or after stale >24h/dead PID). Session-scoped files cleaned at close; per-session logs (`docs/ai/logs/sessions/session-{id}.md`) accumulate and are never auto-deleted.
 
 ### Worktree State Isolation (Decision 0028)
@@ -235,6 +237,7 @@ All overrides logged via `log_override()`.
 | `REPO_OS_SKIP_KG_GATE=1` | pre-commit-gates | KG Update Gate | Bypass KG Update Gate. **Interactive mode only** — ignored in headless/auto (IS_NO_REVIEW_BACKSTOP=true); gate still enforced. Use `REPO_OS_RECOVER=1` to bypass in headless/auto. Decision 0034 Amendment 7. |
 | `REPO_OS_FUNC_CHECK_TIMEOUT` | pre-commit-gates | A3.4 functional-verified | Per-command timeout in seconds for A3.4 script execution (default: 120). |
 | `REPO_OS_ALLOW_REINIT=1` | _phase-helper | double-init guard | Allow re-init of phase state (crash recovery) |
+| `REPO_OS_SKIP_GROUP_LOCK=1` | _phase-helper (`init_phase`) | Task group worktree single occupancy | Bypass the group worktree occupancy claim. Only reachable inside a `.worktrees/tg-*` worktree; a no-op everywhere else. Decision 0054 Amendment 2026-10-08. |
 
 ### Decision Naming Convention
 `t-NNNN-*.md` = template decisions (synced from upstream, locked in child/autonomous). `0100-*.md`+ = child decisions (editable in child mode). Enforced by mode-guard `t-` prefix check (Decision 0022). `t-manifest.txt` lists template decisions for orphan cleanup.

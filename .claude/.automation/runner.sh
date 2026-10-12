@@ -50,6 +50,10 @@ source "$LIB_DIR/permission-profiles.sh"
 source "$LIB_DIR/blocker-reporter.sh"
 # shellcheck source=lib/cohesion-trigger.sh
 source "$LIB_DIR/cohesion-trigger.sh"
+# shellcheck source=lib/group-worktree-sweep.sh
+# Sourced BEFORE cleanup.sh: run_cleanup() calls sweep_stale_group_worktrees
+# through a `type` guard, so the definition must already exist (Decision 0054).
+source "$LIB_DIR/group-worktree-sweep.sh"
 # shellcheck source=lib/cleanup.sh
 source "$LIB_DIR/cleanup.sh"
 # shellcheck source=lib/work-order-manager.sh
@@ -150,6 +154,15 @@ _CLAUDE_CHILD_PID=""
 
 # --- Worktree tracking (for cleanup on crash/FORCE-HALT) ---
 _CURRENT_WORKTREE_DIR=""
+
+# --- Task group worktree tracking (Decision 0054) ---
+# A sequential task group's worktree outlives the session that created it, so
+# every removal site must consult _CURRENT_WORKTREE_IS_GROUP before removing
+# _CURRENT_WORKTREE_DIR. _CURRENT_GROUP_NAME names the group whose occupancy
+# lock this runner holds; it is the handle the crash/FORCE-HALT paths use to
+# release that lock without removing the worktree.
+_CURRENT_WORKTREE_IS_GROUP=false
+_CURRENT_GROUP_NAME=""
 
 # --- Daemon lifecycle state ---
 _SHUTDOWN_REQUESTED=false
@@ -262,8 +275,28 @@ _runner_crash_cleanup() {
   if [ -n "$_qdir" ] && [ -d "$_qdir/running" ]; then
     rm -f "$_qdir/running/"*.heartbeat 2>/dev/null || true
   fi
-  # Clean up worktree if one was created (Decision 0033)
-  if [ -n "$_CURRENT_WORKTREE_DIR" ] && [ -d "$_CURRENT_WORKTREE_DIR" ]; then
+  # Release a held group worktree lock (Decision 0054).
+  # Keyed on _CURRENT_GROUP_NAME alone, NOT on _CURRENT_WORKTREE_IS_GROUP: the
+  # lock is acquired in _resolve_group_worktree, which runs before the worktree
+  # block that sets _CURRENT_WORKTREE_IS_GROUP. A crash in that window would
+  # otherwise skip this release. (A dead holder's lock is broken on the next
+  # acquire anyway, so this is belt-and-suspenders — but it makes "the lock is
+  # released on every crash path" true rather than merely self-correcting.)
+  if [ -n "$_CURRENT_GROUP_NAME" ]; then
+    release_group_worktree_lock "$_CURRENT_GROUP_NAME" "$$" "" 2>/dev/null || true
+    _CURRENT_GROUP_NAME=""
+  fi
+  # Clean up worktree if one was created (Decision 0033).
+  # Task group worktrees are exempt (Decision 0054): a crashed brief leaves its
+  # worktree in place so the operator can inspect what the crash left behind,
+  # and so the restart reuses the same tree.
+  if [ "$_CURRENT_WORKTREE_IS_GROUP" = true ]; then
+    if [ -n "$_CURRENT_WORKTREE_DIR" ]; then
+      echo "Task group worktree '$_CURRENT_WORKTREE_DIR' left in place for inspection (Decision 0054)" >&2
+    fi
+    _CURRENT_WORKTREE_DIR=""
+    _CURRENT_WORKTREE_IS_GROUP=false
+  elif [ -n "$_CURRENT_WORKTREE_DIR" ] && [ -d "$_CURRENT_WORKTREE_DIR" ]; then
     git worktree remove --force "$_CURRENT_WORKTREE_DIR" 2>/dev/null || true
     git worktree prune 2>/dev/null || true
     _CURRENT_WORKTREE_DIR=""
@@ -616,6 +649,233 @@ _is_final_taskgroup_entry() {
 }
 
 # ============================================================
+# Task group worktree resolution (Decision 0054)
+# ============================================================
+# A sequential task group gets ONE worktree for the whole life of its branch:
+# brief 1 creates `.worktrees/tg-<group>`, briefs 2..N reuse it. Standalone
+# entries keep the per-session worktree of Decision 0033; parallel task groups
+# keep the per-brief branches and worktrees of Decision 0032.
+#
+# Outputs (globals, reset on every call):
+#   _GWT_GROUP          group name ("" when not applicable)
+#   _GWT_DIR            resolved group worktree path
+#   _GWT_REUSE          true when an existing worktree is being reused, in which
+#                       case the caller MUST skip branch_manager_setup
+#   _GWT_BRANCH         sanitized group branch
+#   _GWT_BLOCK_OUTCOME  _RESULT_OUTCOME value to report when blocked
+_GWT_GROUP=""
+_GWT_DIR=""
+_GWT_REUSE=false
+_GWT_BRANCH=""
+_GWT_BLOCK_OUTCOME=""
+
+# --- Write a group-worktree escalation ---
+# Uses the existing `governance-block` type and the `esc-dirty-tree-` /
+# `esc-group-worktree-` id conventions rather than growing the escalation type
+# enum: the schema's 10 types already cover "hook enforcement prevented action",
+# and state-manager.sh already writes a dirty-tree escalation under that type.
+# Arguments:
+#   $1 — escalation id prefix
+#   $2 — brief_id (queue entry id)
+#   $3 — message
+#   $4 — context
+_write_group_worktree_escalation() {
+  local prefix="$1"
+  local brief_id="$2"
+  local message="$3"
+  local context="$4"
+  local esc_dir="$REPO_ROOT/.claude/.automation/escalations"
+  mkdir -p "$esc_dir" 2>/dev/null || true
+  local esc_id="${prefix}-$(date +%Y%m%d-%H%M%S)"
+  {
+    printf 'escalation:\n'
+    printf '  id: "%s"\n' "$esc_id"
+    printf '  queue_entry_id: "%s"\n' "$brief_id"
+    printf '  type: "governance-block"\n'
+    printf '  severity: "blocking"\n'
+    printf '  phase_at_exit: "init"\n'
+    printf '  tag_at_exit: "operator"\n'
+    printf '  message: "%s"\n' "$message"
+    printf '  context: "%s"\n' "$context"
+    printf '  created_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf '  resolved: false\n'
+    printf '  resolution: ""\n'
+  } > "$esc_dir/${esc_id}.yaml" 2>/dev/null || true
+  echo "$esc_id"
+}
+
+# --- Does this brief belong to a sequential task group? ---
+# Parallel groups are out of scope for Decision 0054 — they keep per-brief
+# branches (Decision 0032), so a shared group worktree would be wrong for them.
+# Arguments:
+#   $1 — brief path (repo-relative or absolute; may be empty)
+# Returns: 0 sequential, 1 parallel or undeterminable
+_brief_is_sequential_group() {
+  local brief_path="${1:-}"
+  [ -n "$brief_path" ] || return 1
+  local resolved=""
+  if [ -f "$REPO_ROOT/$brief_path" ]; then
+    resolved="$REPO_ROOT/$brief_path"
+  elif [ -f "$brief_path" ]; then
+    resolved="$brief_path"
+  else
+    return 1
+  fi
+  # Absence of an Execution: line means sequential (the documented default).
+  if grep -qE '^[[:space:]]*(-[[:space:]]*)?Execution:[[:space:]]*parallel' "$resolved" 2>/dev/null; then
+    return 1
+  fi
+  return 0
+}
+
+# --- Resolve (create-or-reuse) a sequential task group's worktree ---
+# Arguments:
+#   $1 — session_type
+#   $2 — brief_path
+#   $3 — existing_branch (the group branch)
+#   $4 — brief_id (for escalation context)
+# Returns: 0 applicable and ready, 1 not applicable (standalone / parallel),
+#          2 blocked — caller must abort the entry without launching
+_resolve_group_worktree() {
+  local session_type="$1"
+  local brief_path="$2"
+  local existing_branch="$3"
+  local brief_id="$4"
+
+  _GWT_GROUP=""
+  _GWT_DIR=""
+  _GWT_REUSE=false
+  _GWT_BRANCH=""
+  _GWT_BLOCK_OUTCOME=""
+
+  # Only sequential task group entries with a real group branch qualify.
+  [ "$session_type" = "taskgroup" ] || return 1
+  [ -n "$existing_branch" ] || return 1
+  [ "${REPO_OS_WORKTREE_ISOLATE:-1}" != "0" ] || return 1
+  _brief_is_sequential_group "$brief_path" || return 1
+
+  local group
+  group=$(_extract_group_name "$brief_path" 2>/dev/null || true)
+  if [ -z "$group" ]; then
+    # No group name means no stable worktree identity. Fall back to the
+    # per-session worktree rather than inventing one — correct, just without
+    # the brief-to-brief carry-over.
+    echo "WARNING: Task group entry $brief_id has no 'Group:' field — falling back to a per-session worktree (Decision 0054)" >&2
+    return 1
+  fi
+
+  local wt_dir
+  wt_dir=$(group_worktree_path "$group") || return 1
+  _GWT_GROUP="$group"
+  _GWT_DIR="$wt_dir"
+  _GWT_BRANCH=$(sanitize_branch_name "$existing_branch")
+
+  # --- Single occupant (Decision 0054) ---
+  # Blocking, unlike the registry's advisory task-group overlap warning: a
+  # shared worktree cannot tolerate two concurrent sessions the way a shared
+  # branch across sequential briefs can.
+  local lock_rc=0
+  acquire_group_worktree_lock "$group" "$$" "${REPO_OS_SESSION_ID:-}" || lock_rc=$?
+  if [ "$lock_rc" -ne 0 ]; then
+    local lock_dir holder_pid holder_sid esc_id
+    lock_dir=$(_group_worktree_lock_dir "$group" 2>/dev/null || echo "")
+    holder_pid=$(cat "$lock_dir/pid" 2>/dev/null || echo "unknown")
+    holder_sid=$(cat "$lock_dir/session_id" 2>/dev/null || echo "unknown")
+    esc_id=$(_write_group_worktree_escalation "esc-group-worktree-locked" "$brief_id" \
+      "Task group worktree already occupied — only one session may run in a group worktree at a time" \
+      "group: $group, worktree: $wt_dir, holder_pid: $holder_pid, holder_session: $holder_sid")
+    echo "ERROR: Group worktree for '$group' is occupied (holder pid $holder_pid) — escalation $esc_id" >&2
+    _GWT_BLOCK_OUTCOME="failed:group-worktree-locked"
+    return 2
+  fi
+
+  # --- Nothing there yet: brief 1 creates it ---
+  if [ ! -d "$wt_dir" ]; then
+    return 0
+  fi
+
+  # --- Something is there: it must be the group's worktree on the group branch ---
+  if ! is_registered_worktree "$wt_dir"; then
+    local esc_id
+    esc_id=$(_write_group_worktree_escalation "esc-group-worktree-unregistered" "$brief_id" \
+      "Path exists at the task group worktree location but git does not know it as a worktree — refusing to recreate it" \
+      "group: $group, path: $wt_dir, recovery: inspect the directory, then 'git worktree prune' and remove it by hand")
+    echo "ERROR: $wt_dir exists but is not a registered worktree — escalation $esc_id" >&2
+    release_group_worktree_lock "$group" "$$" "${REPO_OS_SESSION_ID:-}" || true
+    _GWT_BLOCK_OUTCOME="failed:group-worktree-unregistered"
+    return 2
+  fi
+
+  local wt_branch
+  wt_branch=$(group_worktree_branch "$wt_dir")
+  if [ "$wt_branch" != "$_GWT_BRANCH" ]; then
+    # Fail loudly, never silently recreate: a worktree on an unexpected branch
+    # means either two groups collided on one name or someone moved it, and
+    # both need a human.
+    local esc_id
+    esc_id=$(_write_group_worktree_escalation "esc-group-worktree-branch-mismatch" "$brief_id" \
+      "Task group worktree is checked out on an unexpected branch — refusing to recreate it" \
+      "group: $group, worktree: $wt_dir, expected_branch: $_GWT_BRANCH, actual_branch: ${wt_branch:-detached}")
+    echo "ERROR: Group worktree '$wt_dir' is on '${wt_branch:-detached}', expected '$_GWT_BRANCH' — escalation $esc_id" >&2
+    release_group_worktree_lock "$group" "$$" "${REPO_OS_SESSION_ID:-}" || true
+    _GWT_BLOCK_OUTCOME="failed:group-worktree-branch-mismatch"
+    return 2
+  fi
+
+  # --- Clean-start guarantee (Decision 0054) ---
+  # Each brief must still begin from a clean committed state. Gitignored files
+  # are exempt by construction (git status --porcelain omits them) — preserving
+  # them is the entire point of reusing the worktree.
+  local clean_rc=0 clean_reason=""
+  clean_reason=$(check_group_worktree_clean "$wt_dir" "$_GWT_BRANCH") || clean_rc=$?
+  if [ "$clean_rc" -ne 0 ]; then
+    local esc_id
+    esc_id=$(_write_group_worktree_escalation "esc-dirty-tree" "$brief_id" \
+      "Task group worktree is not at a clean committed state — brief not started" \
+      "group: $group, worktree: $wt_dir, branch: $_GWT_BRANCH, detail: $clean_reason, recovery: commit or discard the changes in the worktree, then requeue the brief")
+    echo "ERROR: Group worktree '$wt_dir' is not clean ($clean_reason) — escalation $esc_id" >&2
+    release_group_worktree_lock "$group" "$$" "${REPO_OS_SESSION_ID:-}" || true
+    _GWT_BLOCK_OUTCOME="failed:group-worktree-dirty"
+    return 2
+  fi
+
+  # --- Branch freshness, handled worktree-side ---
+  # branch_manager_setup()'s own freshness paths cannot run against a branch
+  # that is checked out in a live worktree: Case 1 does `git branch -D` and
+  # Case 3 does `git checkout`, and git refuses both. Mirror the same three
+  # cases here using `git -C <worktree>` instead, leaving branch-manager.sh
+  # untouched for every other entry type.
+  if git -C "$REPO_ROOT" merge-base --is-ancestor "$_GWT_BRANCH" main 2>/dev/null; then
+    # Case 1: fully merged into main — the group is finished (or its branch was
+    # merged out from under it). Retire the worktree and let the normal create
+    # path rebuild it from current main.
+    echo "Group branch $_GWT_BRANCH is an ancestor of main — retiring group worktree and recreating from current main" >&2
+    release_group_worktree_lock "$group" "$$" "${REPO_OS_SESSION_ID:-}" || true
+    remove_group_worktree "$group" "$$" "${REPO_OS_SESSION_ID:-}" || true
+    local relock_rc=0
+    acquire_group_worktree_lock "$group" "$$" "${REPO_OS_SESSION_ID:-}" || relock_rc=$?
+    if [ "$relock_rc" -ne 0 ]; then
+      _GWT_BLOCK_OUTCOME="failed:group-worktree-locked"
+      return 2
+    fi
+    return 0
+  fi
+
+  if ! git -C "$REPO_ROOT" merge-base --is-ancestor main "$_GWT_BRANCH" 2>/dev/null; then
+    # Case 3: has unique commits but is behind main — rebase inside the
+    # worktree. The tree is known clean (checked above), so a rebase is safe.
+    echo "Group branch $_GWT_BRANCH is behind main — rebasing inside $wt_dir" >&2
+    if ! git -C "$wt_dir" rebase main 2>/dev/null; then
+      echo "WARNING: Rebase of $_GWT_BRANCH onto main failed — aborting rebase, continuing branch as-is" >&2
+      git -C "$wt_dir" rebase --abort 2>/dev/null || true
+    fi
+  fi
+
+  # Case 2 (ahead of main, main is ancestor): nothing to do.
+  _GWT_REUSE=true
+  return 0
+}
+# ============================================================
 # ============================================================
 # Model routing — resolve CLI --model flag for claude -p
 # ============================================================
@@ -666,6 +926,8 @@ _RESULT_BRANCH=""
 #   $4 — existing_branch (optional, for task group)
 #   $5 — permission_profile (optional, default: "build")
 #   $6 — push_on_complete (optional, default: "false")
+#   $7 — brief_path (optional; required for sequential task group worktree
+#        reuse — Decision 0054 reads the Group: and Execution: fields from it)
 # Sets globals: _RESULT_OUTCOME, _RESULT_BASELINE, _RESULT_SOLO_MODE, _RESULT_BRANCH
 _run_single_entry() {
   local brief_id="$1"
@@ -674,12 +936,15 @@ _run_single_entry() {
   local existing_branch="${4:-}"
   local permission_profile="${5:-build}"
   local push_on_complete="${6:-false}"
+  local brief_path="${7:-}"
 
   # Reset globals
   _RESULT_OUTCOME=""
   _RESULT_BASELINE=""
   _RESULT_SOLO_MODE=""
   _RESULT_BRANCH=""
+  _CURRENT_WORKTREE_IS_GROUP=false
+  _CURRENT_GROUP_NAME=""
 
   # Generate per-session ID for state directory isolation (prevents daemon
   # sessions from overwriting interactive session phase-state). Exported so
@@ -694,8 +959,38 @@ _run_single_entry() {
   # Pre-launch setup
   state_manager_setup "$REPO_ROOT" "$session_type"
 
+  # Task group worktree resolution (Decision 0054) — MUST run before
+  # branch_manager_setup. When an existing group worktree is reused, the group
+  # branch is already checked out in it, and branch_manager_setup's freshness
+  # paths cannot operate on a checked-out branch (Case 1 does `git branch -D`,
+  # Case 3 does `git checkout`, and git refuses both). _resolve_group_worktree
+  # therefore handles freshness worktree-side and tells us to skip the branch
+  # manager entirely on the reuse path.
+  local _gwt_rc=0
+  _resolve_group_worktree "$session_type" "$brief_path" "$existing_branch" "$brief_id" || _gwt_rc=$?
+  if [ "$_gwt_rc" -eq 2 ]; then
+    # Blocked: occupied, dirty, or on an unexpected branch. The escalation is
+    # already written and the lock already released. Do not launch the session.
+    _RESULT_OUTCOME="$_GWT_BLOCK_OUTCOME"
+    _RESULT_BRANCH="$existing_branch"
+    unset REPO_OS_AUTOMATION_ENTRY 2>/dev/null || true
+    runner_external_cleanup "$REPO_ROOT" "$brief_id" "init" "" 2>/dev/null || true
+    unset REPO_OS_SESSION_ID
+    return
+  fi
+  if [ "$_gwt_rc" -eq 0 ] && [ -n "$_GWT_GROUP" ]; then
+    _CURRENT_GROUP_NAME="$_GWT_GROUP"
+  fi
+
   # Branch setup — sets _SETUP_BRANCH; when worktree-isolate active, does NOT checkout
-  branch_manager_setup "$brief_id" "$existing_branch"
+  if [ "$_GWT_REUSE" = true ]; then
+    # Reused group worktree: the branch already exists, is checked out, and has
+    # been freshness-checked above. Set the output variable the caller expects
+    # without touching the branch ref.
+    _SETUP_BRANCH="$_GWT_BRANCH"
+  else
+    branch_manager_setup "$brief_id" "$existing_branch"
+  fi
 
   # Record baseline SHA — when worktree-isolate active, HEAD is still main,
   # so use the branch ref directly
@@ -751,11 +1046,38 @@ _run_single_entry() {
   # branch so the session runs in isolation. Manual git worktree add is used
   # instead of --worktree flag because --worktree creates from the invoking
   # process's HEAD (main), not the target branch.
+  #
+  # Sequential task groups (Decision 0054) target the group-scoped path
+  # `.worktrees/tg-<group>` instead, and reuse it across briefs rather than
+  # creating one per session.
   local launch_dir="$REPO_ROOT"
   if [ "${REPO_OS_WORKTREE_ISOLATE:-1}" != "0" ] && [ -n "$_SETUP_BRANCH" ]; then
     local worktree_dir="${REPO_ROOT}/.worktrees/${REPO_OS_SESSION_ID}"
-    if git worktree add "$worktree_dir" "$_SETUP_BRANCH" 2>/dev/null; then
+    local _wt_is_group=false
+    local _wt_added=false
+    if [ -n "$_GWT_GROUP" ] && [ -n "$_GWT_DIR" ]; then
+      worktree_dir="$_GWT_DIR"
+      _wt_is_group=true
+    fi
+    # Reuse path (Decision 0054): the worktree already exists on the right
+    # branch and has passed the clean-start check, so `git worktree add` is
+    # skipped. Everything after this point is shared with the create path —
+    # notably the plan-approved mirror, which is per-SESSION and so must be
+    # re-written for every brief that reuses the worktree.
+    _wt_added=false
+    if [ "$_GWT_REUSE" = true ]; then
+      _wt_added=true
+      echo "Reusing task group worktree $worktree_dir (group: $_GWT_GROUP, branch: $_SETUP_BRANCH)" >&2
+    elif git worktree add "$worktree_dir" "$_SETUP_BRANCH" 2>/dev/null; then
+      _wt_added=true
+      if [ "$_wt_is_group" = true ]; then
+        echo "Created task group worktree $worktree_dir (group: $_GWT_GROUP, branch: $_SETUP_BRANCH)" >&2
+      fi
+    fi
+
+    if [ "$_wt_added" = true ]; then
       _CURRENT_WORKTREE_DIR="$worktree_dir"
+      _CURRENT_WORKTREE_IS_GROUP="$_wt_is_group"
       launch_dir="$worktree_dir"
       # Propagate the operating mode into the worktree. `.claude/repo-mode` is
       # gitignored (Decision 0024 — child repos keep their own mode), so it is
@@ -797,6 +1119,13 @@ _run_single_entry() {
     else
       echo "ERROR: Failed to create worktree at $worktree_dir for branch $_SETUP_BRANCH" >&2
       _RESULT_OUTCOME="failed:worktree-creation"
+      # Release the group lock taken in _resolve_group_worktree — the session
+      # never started, so holding it would wedge the group (Decision 0054).
+      if [ -n "$_CURRENT_GROUP_NAME" ]; then
+        release_group_worktree_lock "$_CURRENT_GROUP_NAME" "$$" "${REPO_OS_SESSION_ID:-}" 2>/dev/null || true
+        _CURRENT_GROUP_NAME=""
+      fi
+      _CURRENT_WORKTREE_IS_GROUP=false
       unset REPO_OS_AUTOMATION_ENTRY
       unset CLAUDE_HEADLESS
       [ -n "$stderr_file" ] && rm -f "$stderr_file" 2>/dev/null || true
@@ -919,10 +1248,19 @@ _run_single_entry() {
     _RESULT_BRANCH=$(git -C "$_CURRENT_WORKTREE_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
     # Outcome detection from worktree context
     _RESULT_OUTCOME=$(detect_outcome "$exit_code" "$_RESULT_BASELINE" "$_CURRENT_WORKTREE_DIR" "$brief_id" "$stderr_file")
-    # Remove worktree
-    git worktree remove --force "$_CURRENT_WORKTREE_DIR" 2>/dev/null || true
-    git worktree prune 2>/dev/null || true
-    _CURRENT_WORKTREE_DIR=""
+    if [ "$_CURRENT_WORKTREE_IS_GROUP" = true ]; then
+      # Task group worktree (Decision 0054): keep it for the next brief. The
+      # occupancy lock is deliberately NOT released here — it stays held across
+      # _solo_merge_if_needed so no other session can claim the worktree in the
+      # window where the final brief's merge may be about to remove it. The
+      # caller releases it after the merge/seal step.
+      echo "Keeping task group worktree $_CURRENT_WORKTREE_DIR for the next brief (group: $_CURRENT_GROUP_NAME)" >&2
+    else
+      # Remove worktree
+      git worktree remove --force "$_CURRENT_WORKTREE_DIR" 2>/dev/null || true
+      git worktree prune 2>/dev/null || true
+      _CURRENT_WORKTREE_DIR=""
+    fi
   else
     # Legacy path or worktree not created
     _RESULT_OUTCOME=$(detect_outcome "$exit_code" "$_RESULT_BASELINE" "$REPO_ROOT" "$brief_id" "$stderr_file")
@@ -968,6 +1306,8 @@ _run_single_entry() {
 #   $2 — push_on_complete ("true"/"false")
 #   $3 — brief_id (for escalation context)
 #   $4 — work_order_id (optional, for task group seal guard — Decision 0013)
+#   $5 — group_name (optional; when set and this is the final brief, the group
+#        worktree is removed after a successful seal — Decision 0054)
 # Reads: _RESULT_OUTCOME, _RESULT_SOLO_MODE
 # May modify: _RESULT_OUTCOME (on merge conflict → review:merge-conflict)
 _solo_merge_if_needed() {
@@ -975,6 +1315,7 @@ _solo_merge_if_needed() {
   local push_on_complete="${2:-false}"
   local brief_id="${3:-}"
   local work_order_id="${4:-}"
+  local group_name="${5:-}"
 
   local _outcome_type="${_RESULT_OUTCOME%%:*}"
 
@@ -1170,6 +1511,33 @@ _solo_merge_if_needed() {
       record_closed_branch "$entry_current_branch"
     fi
   fi
+
+  # --- Task group worktree lifetime (Decision 0054) ---
+  # The group worktree outlives individual briefs, so it is removed only once
+  # the final brief's branch has actually been sealed. The closed-branches
+  # ledger is the primary signal rather than a flag threaded through the five
+  # seal sites above: it is the same signal Decision 0013 uses, and it already
+  # encodes the case that matters most — a merge conflict deliberately leaves
+  # the branch unsealed for retry, so the worktree must survive too.
+  # Either way the occupancy lock is released here: it was held across the
+  # merge so no other session could claim the worktree mid-merge.
+  if [ -n "$group_name" ]; then
+    local _gwt_sealed=false
+    if [ -n "$entry_current_branch" ] \
+       && grep -qxF "$entry_current_branch" "$REPO_ROOT/.claude/local/closed-branches" 2>/dev/null \
+       && _is_final_taskgroup_entry "$brief_id" "$work_order_id"; then
+      _gwt_sealed=true
+    fi
+    if [ "$_gwt_sealed" = true ]; then
+      remove_group_worktree "$group_name" "$$" "${REPO_OS_SESSION_ID:-}" || true
+      echo "Removed task group worktree for '$group_name' — final brief merged and sealed" >&2
+      _CURRENT_WORKTREE_DIR=""
+      _CURRENT_WORKTREE_IS_GROUP=false
+    else
+      release_group_worktree_lock "$group_name" "$$" "${REPO_OS_SESSION_ID:-}" || true
+    fi
+    _CURRENT_GROUP_NAME=""
+  fi
 }
 
 # ============================================================
@@ -1209,10 +1577,13 @@ if [ "$DAEMON_MODE" = false ]; then
     "Entry $BRIEF_ID started (single-shot)" 2>/dev/null || true
 
   # Execute (direct call — no subshell, outcome in globals)
-  _run_single_entry "$BRIEF_ID" "$PROMPT" "$SESSION_TYPE" "$EXISTING_BRANCH" "${_QE_PERMISSION_PROFILE:-build}" "false"
+  # Single-shot mode builds a minimal prompt and has no brief path, so the
+  # Decision 0054 group-worktree path does not engage here — the entry falls
+  # back to a per-session worktree (Decision 0033).
+  _run_single_entry "$BRIEF_ID" "$PROMPT" "$SESSION_TYPE" "$EXISTING_BRANCH" "${_QE_PERMISSION_PROFILE:-build}" "false" "${_QE_BRIEF_PATH:-}"
 
   # Solo merge + branch seal (Phase 2: extracted from _run_single_entry)
-  _solo_merge_if_needed "$_RESULT_BRANCH" "false" "$BRIEF_ID" ""
+  _solo_merge_if_needed "$_RESULT_BRANCH" "false" "$BRIEF_ID" "" "$_CURRENT_GROUP_NAME"
 
   # Belt-and-suspenders: check globals are populated
   if [ -z "$_RESULT_OUTCOME" ]; then
@@ -1384,7 +1755,23 @@ while true; do
       fi
     fi
     # --- Clean up worktree if one was created (Decision 0033) ---
-    if [ -n "$_CURRENT_WORKTREE_DIR" ] && [ -d "$_CURRENT_WORKTREE_DIR" ]; then
+    # Task group worktrees survive a force-halt (Decision 0054): the group is
+    # mid-flight and its working state is what the operator will want on
+    # restart. Only the occupancy lock is released.
+    # Release the lock on _CURRENT_GROUP_NAME alone, for the same reason as
+    # _runner_crash_cleanup: the lock is taken before _CURRENT_WORKTREE_IS_GROUP
+    # is set, so gating the release on that flag would miss the window.
+    if [ -n "$_CURRENT_GROUP_NAME" ]; then
+      release_group_worktree_lock "$_CURRENT_GROUP_NAME" "$$" "${REPO_OS_SESSION_ID:-}" 2>/dev/null || true
+      _CURRENT_GROUP_NAME=""
+    fi
+    if [ "$_CURRENT_WORKTREE_IS_GROUP" = true ]; then
+      if [ -n "$_CURRENT_WORKTREE_DIR" ]; then
+        echo "FORCE-HALT: task group worktree '$_CURRENT_WORKTREE_DIR' left in place (Decision 0054)" >&2
+      fi
+      _CURRENT_WORKTREE_DIR=""
+      _CURRENT_WORKTREE_IS_GROUP=false
+    elif [ -n "$_CURRENT_WORKTREE_DIR" ] && [ -d "$_CURRENT_WORKTREE_DIR" ]; then
       git worktree remove --force "$_CURRENT_WORKTREE_DIR" 2>/dev/null || true
       git worktree prune 2>/dev/null || true
       _CURRENT_WORKTREE_DIR=""
@@ -1795,7 +2182,7 @@ while true; do
   # --- Execute (direct call — no subshell, outcome in globals) ---
   _CURRENT_ENTRY_ID="$ENTRY_ID"
   _write_health "running"
-  _run_single_entry "$ENTRY_ID" "$PROMPT" "$ENTRY_SESSION_TYPE" "$ENTRY_BRANCH" "$ENTRY_PERMISSION_PROFILE" "$ENTRY_PUSH"
+  _run_single_entry "$ENTRY_ID" "$PROMPT" "$ENTRY_SESSION_TYPE" "$ENTRY_BRANCH" "$ENTRY_PERMISSION_PROFILE" "$ENTRY_PUSH" "$ENTRY_BRIEF_PATH"
 
   # --- Stop heartbeat ---
   _stop_heartbeat
@@ -1816,7 +2203,12 @@ while true; do
   fi
 
   # --- Solo merge + branch seal (Phase 2: runs in main shell, not subshell) ---
-  _solo_merge_if_needed "$_RESULT_BRANCH" "$ENTRY_PUSH" "$ENTRY_ID" "$ENTRY_WORK_ORDER_ID"
+  # _CURRENT_GROUP_NAME is set by _resolve_group_worktree for sequential task
+  # group entries (Decision 0054) and empty for every other entry type; passing
+  # it makes the group worktree removal/lock release part of the same step that
+  # seals the branch.
+  _GWT_ENTRY_GROUP="$_CURRENT_GROUP_NAME"
+  _solo_merge_if_needed "$_RESULT_BRANCH" "$ENTRY_PUSH" "$ENTRY_ID" "$ENTRY_WORK_ORDER_ID" "$_GWT_ENTRY_GROUP"
 
   # --- Handle empty outcome (belt-and-suspenders guard on globals) ---
   if [ -z "$_RESULT_OUTCOME" ]; then
@@ -2048,6 +2440,25 @@ while true; do
       fi
       ;;
   esac
+
+# --- Task group worktree lifetime: group failure (Decision 0054) ---
+# A group worktree survives an individual brief's failure — the restart reuses
+# it, and its working state is what the operator inspects. It does NOT survive
+# the failure of the whole work order: at that point no further brief will run,
+# and the tree is only debris holding a branch checked out. Placed after the
+# outcome `case` rather than inside its three `failed)` arms so there is one
+# removal site keyed on the work order's actual terminal status, not on which
+# arm happened to run.
+# Abandonment reaches the same end by a different route: queue-cli.sh moves the
+# work order to a terminal status, and the next cleanup sweep removes any group
+# worktree whose branch is sealed or stale (group-worktree-sweep.sh).
+if [ -n "${_GWT_ENTRY_GROUP:-}" ] && [ -n "$ENTRY_WORK_ORDER_ID" ]; then
+  if wo_is_failed "$ENTRY_WORK_ORDER_ID" 2>/dev/null; then
+    remove_group_worktree "$_GWT_ENTRY_GROUP" "$$" "" 2>/dev/null || true
+    echo "Removed task group worktree for '$_GWT_ENTRY_GROUP' — work order $ENTRY_WORK_ORDER_ID failed" >&2
+  fi
+fi
+_GWT_ENTRY_GROUP=""
 
   # Configurable cooldown between sessions
   _cooldown=$(_parse_config_field "runner" "cooldown_between_sessions")

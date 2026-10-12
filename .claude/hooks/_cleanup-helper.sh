@@ -286,3 +286,359 @@ seal_orphaned_editor_live_branches() {
     fi
   done <<< "$merged"
 }
+
+# ============================================================
+# Task group worktree lifetime (Decision 0054)
+# ============================================================
+# A sequential task group gets ONE worktree for the whole life of its branch:
+# brief 1 creates it, briefs 2..N reuse it, and it is removed only after the
+# final brief merges and seals, when the group fails or is abandoned, or when
+# the stale sweep finds it orphaned. Standalone sessions keep the per-session
+# worktree of Decision 0033; parallel task groups keep the per-brief branches
+# and worktrees of Decision 0032.
+#
+# Paths resolve against the MAIN repo (get_main_repo_root) so the runner, the
+# daemon and every worktree session agree on one worktree and one lock.
+
+# --- Sanitize a task group name into one safe path component ---
+# Whitelist: [a-zA-Z0-9_-]. Everything else becomes -, consecutive dashes
+# collapse, leading/trailing dashes are stripped, result truncated to 80 chars.
+# Deliberately narrower than sanitize_branch_name() in branch-manager.sh: that
+# one keeps "/" because branch names are hierarchical, which here would silently
+# nest the worktree a level deeper than every lookup expects.
+# Arguments:
+#   $1 — raw group name
+# Output: sanitized name on stdout (empty when nothing survives)
+_sanitize_group_name() {
+  local clean
+  clean=$(printf '%s' "${1:-}" | tr -c 'a-zA-Z0-9_\-\n' '-')
+  while true; do
+    case "$clean" in
+      *--*) clean="${clean//--/-}" ;;
+      *) break ;;
+    esac
+  done
+  clean="${clean#-}"
+  clean="${clean%-}"
+  printf '%s' "${clean:0:80}"
+}
+
+# --- Resolve a task group's worktree path ---
+# Arguments:
+#   $1 — group name
+# Output: absolute path on stdout. Returns 1 when the group name is unusable.
+group_worktree_path() {
+  local group
+  group=$(_sanitize_group_name "${1:-}")
+  [ -z "$group" ] && return 1
+  printf '%s/.worktrees/tg-%s' "$(get_main_repo_root)" "$group"
+}
+
+# --- Resolve a task group's occupancy lock directory ---
+# Arguments:
+#   $1 — group name
+# Output: absolute path on stdout. Returns 1 when the group name is unusable.
+_group_worktree_lock_dir() {
+  local group _state
+  group=$(_sanitize_group_name "${1:-}")
+  [ -z "$group" ] && return 1
+  _state="$(get_main_repo_root)/.claude"
+  printf '%s/.state/.tg-worktree-%s.lock.dir' "$_state" "$group"
+}
+
+# --- Name of the group worktree the caller is standing in ---
+# Derived from the worktree root's basename (tg-<group>) rather than by parsing
+# the task group contract, so any hook can resolve it with no contract lookup.
+# Output: group name on stdout. Returns 1 when not inside a group worktree.
+current_group_worktree_name() {
+  local root base
+  root=$(git rev-parse --show-toplevel 2>/dev/null) || return 1
+  [ -n "$root" ] || return 1
+  base="${root##*/}"
+  case "$base" in
+    tg-?*) printf '%s' "${base#tg-}" ;;
+    *) return 1 ;;
+  esac
+}
+
+# --- Acquire a task group's single-occupancy lock ---
+# Only one session may run in a group worktree at a time. The session registry
+# writes one file per session id, so it can report overlap but cannot prevent
+# it — which is why its task-group overlap check is advisory. This lock supplies
+# the missing mutual exclusion.
+#
+# mkdir-based rather than the flock pattern used for the merge lock: that lock
+# is held for seconds inside a single process, whereas occupancy must persist
+# for a whole session and stay observable from short-lived hook processes that
+# cannot inherit a file descriptor. Liveness is therefore recorded, not implied
+# — a lock whose holder pid is gone is stale and broken on sight. Session
+# metadata is NOT duplicated here: the lock stores only a holder pointer (pid +
+# session id) and the registry remains the source of truth for the session.
+#
+# Arguments:
+#   $1 — group name
+#   $2 — holder pid (default: $$)
+#   $3 — session id (optional; recorded for release-by-session and diagnostics)
+# Returns: 0 acquired (or already held by this holder), 1 held by a live
+#          foreign session, 2 unusable group name
+acquire_group_worktree_lock() {
+  local group="${1:-}"
+  local holder_pid="${2:-$$}"
+  local sid="${3:-}"
+  local lock_dir
+  lock_dir=$(_group_worktree_lock_dir "$group") || return 2
+  mkdir -p "$(dirname "$lock_dir")" 2>/dev/null || true
+
+  local attempts=0
+  while [ "$attempts" -lt 3 ]; do
+    attempts=$((attempts + 1))
+    if mkdir "$lock_dir" 2>/dev/null; then
+      printf '%s\n' "$holder_pid" > "$lock_dir/pid" 2>/dev/null || true
+      printf '%s\n' "$sid" > "$lock_dir/session_id" 2>/dev/null || true
+      date -u +%Y-%m-%dT%H:%M:%SZ > "$lock_dir/acquired_at" 2>/dev/null || true
+      return 0
+    fi
+
+    local cur_pid
+    cur_pid=$(cat "$lock_dir/pid" 2>/dev/null || echo "")
+
+    # Re-entrant: this holder already owns the lock.
+    if [ -n "$cur_pid" ] && [ "$cur_pid" = "$holder_pid" ]; then
+      return 0
+    fi
+
+    # Stale: the recorded holder is gone (crash, kill, force-halt). Break and
+    # retry — without this a crashed brief would wedge its group permanently.
+    if [ -z "$cur_pid" ] || ! kill -0 "$cur_pid" 2>/dev/null; then
+      echo "WARNING: Breaking stale group worktree lock for '$group' (holder pid ${cur_pid:-unknown} not live)" >&2
+      rm -rf "$lock_dir" 2>/dev/null || true
+      continue
+    fi
+
+    # Live foreign holder — block immediately. Waiting is wrong here: the
+    # holder owns the worktree for a whole session, so the caller should defer
+    # or escalate rather than spin.
+    return 1
+  done
+  return 1
+}
+
+# --- Release a task group's occupancy lock ---
+# Releases when EITHER the recorded holder pid or the recorded session id
+# matches. The pid path covers the runner (one process across the brief); the
+# session-id path covers hooks, which run as separate short-lived processes and
+# can only identify themselves by session id.
+# Arguments:
+#   $1 — group name
+#   $2 — holder pid (optional)
+#   $3 — session id (optional)
+# Returns: 0 released or nothing to release, 1 held by a different session
+release_group_worktree_lock() {
+  local group="${1:-}"
+  local holder_pid="${2:-}"
+  local sid="${3:-}"
+  local lock_dir
+  lock_dir=$(_group_worktree_lock_dir "$group") || return 0
+  [ -d "$lock_dir" ] || return 0
+
+  local cur_pid cur_sid
+  cur_pid=$(cat "$lock_dir/pid" 2>/dev/null || echo "")
+  cur_sid=$(cat "$lock_dir/session_id" 2>/dev/null || echo "")
+
+  local owned=false
+  if [ -n "$holder_pid" ] && [ "$cur_pid" = "$holder_pid" ]; then
+    owned=true
+  elif [ -n "$sid" ] && [ -n "$cur_sid" ] && [ "$cur_sid" = "$sid" ]; then
+    owned=true
+  elif [ -z "$cur_pid" ] && [ -z "$cur_sid" ]; then
+    # Malformed lock (dir created, holder pointer never written) — reclaim it.
+    owned=true
+  fi
+
+  [ "$owned" = true ] || return 1
+  rm -rf "$lock_dir" 2>/dev/null || true
+  return 0
+}
+
+# --- Session id recorded against a group worktree's lock ---
+# Arguments:
+#   $1 — group name
+# Output: holder session id on stdout (empty when no lock or none recorded)
+group_worktree_lock_holder_session() {
+  local group="${1:-}"
+  local lock_dir
+  lock_dir=$(_group_worktree_lock_dir "$group" 2>/dev/null) || return 0
+  [ -d "$lock_dir" ] || return 0
+  cat "$lock_dir/session_id" 2>/dev/null || true
+}
+
+# --- Release a group worktree lock left behind by an ended session ---
+# Close-path net for a lock whose owning SESSION has ended. Two release
+# conditions, both scoped to a matching session id:
+#
+#   1. The recorded holder process is gone (orphan — crash, kill, force-halt).
+#   2. The recorded holder IS this session's own process (`owner_pid`).
+#
+# Condition 2 exists for interactive sessions (Decision 0054 Amendment): they
+# claim the lock in init_phase() under the durable claude pid, which is still
+# alive at SessionEnd, so condition 1 alone would never fire and the lock would
+# outlive every interactive brief.
+#
+# What neither condition releases is the headless case: `runner.sh` holds the
+# lock under the RUNNER's pid across its own post-session merge/seal step, so no
+# other session can claim the worktree mid-merge. That pid is live and is not
+# `owner_pid`, so this function leaves it alone and the runner releases it.
+# Arguments:
+#   $1 — group name
+#   $2 — closing session id
+#   $3 — owner pid (optional; this session's own durable pid)
+# Returns: 0 released or nothing to do, 1 left in place (held by someone else)
+release_group_worktree_lock_if_orphaned() {
+  local group="${1:-}"
+  local sid="${2:-}"
+  local owner_pid="${3:-}"
+  local lock_dir
+  lock_dir=$(_group_worktree_lock_dir "$group" 2>/dev/null) || return 0
+  [ -d "$lock_dir" ] || return 0
+
+  local cur_pid cur_sid
+  cur_pid=$(cat "$lock_dir/pid" 2>/dev/null || echo "")
+  cur_sid=$(cat "$lock_dir/session_id" 2>/dev/null || echo "")
+
+  # Not ours — leave it to whoever owns it.
+  if [ -n "$sid" ] && [ -n "$cur_sid" ] && [ "$cur_sid" != "$sid" ]; then
+    return 1
+  fi
+
+  # Our own process holds it (interactive claim) — release.
+  if [ -n "$owner_pid" ] && [ -n "$cur_pid" ] && [ "$cur_pid" = "$owner_pid" ]; then
+    rm -rf "$lock_dir" 2>/dev/null || true
+    return 0
+  fi
+
+  # Holder still running and not us — it will release the lock itself.
+  if [ -n "$cur_pid" ] && kill -0 "$cur_pid" 2>/dev/null; then
+    return 1
+  fi
+
+  rm -rf "$lock_dir" 2>/dev/null || true
+  return 0
+}
+
+# --- Is this path a worktree git knows about? ---
+# A bare directory at the worktree path (left by a hard crash, or created by
+# hand) is NOT a worktree and must never be treated as one.
+#
+# Compares PHYSICAL paths, not raw strings. `git worktree list` reports paths
+# with symlinks resolved, while the caller's path is built from
+# get_main_repo_root() and may carry a symlinked prefix (on macOS /tmp is a
+# symlink to /private/tmp). String comparison reported a perfectly good
+# worktree as unregistered, which made _resolve_group_worktree escalate
+# "unregistered" and refuse to start the brief. Same resolve-before-compare
+# treatment as is_worktree() in _analytics-helper.sh.
+# Arguments:
+#   $1 — worktree directory
+# Returns: 0 registered, 1 not
+is_registered_worktree() {
+  local wt_dir="${1:-}"
+  [ -n "$wt_dir" ] || return 1
+  local main_repo wt_phys listed line line_phys
+  main_repo="$(get_main_repo_root)"
+  wt_phys=$(cd "$wt_dir" 2>/dev/null && pwd -P) || wt_phys=""
+  listed=$(git -C "$main_repo" worktree list --porcelain 2>/dev/null \
+    | grep '^worktree ' | sed 's/^worktree //' || true)
+  [ -n "$listed" ] || return 1
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    [ "$line" = "$wt_dir" ] && return 0
+    if [ -n "$wt_phys" ]; then
+      line_phys=$(cd "$line" 2>/dev/null && pwd -P) || line_phys=""
+      if [ -n "$line_phys" ] && [ "$line_phys" = "$wt_phys" ]; then
+        return 0
+      fi
+    fi
+  done <<< "$listed"
+  return 1
+}
+
+# --- Branch currently checked out in a worktree ---
+# Arguments:
+#   $1 — worktree directory
+# Output: branch name on stdout (empty when detached or not a worktree)
+group_worktree_branch() {
+  local wt_dir="${1:-}"
+  [ -d "$wt_dir" ] || return 0
+  git -C "$wt_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || true
+}
+
+# --- Clean-start check for a reused group worktree ---
+# A brief must start from a clean committed state even when it inherits a
+# worktree. Tracked AND untracked changes both disqualify; gitignored files do
+# NOT (git status --porcelain omits them without --ignored), which is exactly
+# the point — dependency installs, build output and caches are what the reused
+# worktree exists to preserve.
+# Arguments:
+#   $1 — worktree directory
+#   $2 — expected branch (HEAD must equal this branch's tip)
+# Output: on failure, a one-line reason on stdout
+# Returns: 0 clean, 1 dirty or diverged
+check_group_worktree_clean() {
+  local wt_dir="${1:-}"
+  local branch="${2:-}"
+  if [ ! -d "$wt_dir" ]; then
+    echo "worktree directory missing: $wt_dir"
+    return 1
+  fi
+
+  local dirty
+  dirty=$(git -C "$wt_dir" status --porcelain 2>/dev/null || true)
+  if [ -n "$dirty" ]; then
+    echo "uncommitted changes: $(printf '%s' "$dirty" | tr '\n' ',' | sed 's/,$//')"
+    return 1
+  fi
+
+  if [ -n "$branch" ]; then
+    local head_sha branch_sha
+    head_sha=$(git -C "$wt_dir" rev-parse HEAD 2>/dev/null || echo "")
+    branch_sha=$(git -C "$wt_dir" rev-parse "$branch" 2>/dev/null || echo "")
+    if [ -z "$head_sha" ] || [ "$head_sha" != "$branch_sha" ]; then
+      echo "HEAD ($head_sha) does not match tip of $branch ($branch_sha)"
+      return 1
+    fi
+  fi
+  return 0
+}
+
+# --- Remove a task group's worktree and release its lock ---
+# Called only on terminal paths: final brief merged + sealed, work order failed
+# or abandoned, or the stale sweep. Refuses to remove the worktree the caller is
+# standing in — that case is left to the sweep.
+# Arguments:
+#   $1 — group name
+#   $2 — holder pid (optional, for lock release)
+#   $3 — session id (optional, for lock release)
+# Returns: 0 removed or nothing to remove, 1 refused (caller inside the tree)
+remove_group_worktree() {
+  local group="${1:-}"
+  local holder_pid="${2:-$$}"
+  local sid="${3:-}"
+  local wt_dir main_repo
+  wt_dir=$(group_worktree_path "$group") || return 0
+  main_repo="$(get_main_repo_root)"
+
+  if [ -d "$wt_dir" ]; then
+    case "$PWD" in
+      "$wt_dir"|"$wt_dir"/*)
+        echo "WARNING: Refusing to remove group worktree '$wt_dir' from inside it — left for the stale sweep" >&2
+        return 1
+        ;;
+    esac
+    git -C "$main_repo" worktree remove --force "$wt_dir" > /dev/null 2>&1 \
+      || rm -rf "$wt_dir" 2>/dev/null \
+      || true
+    git -C "$main_repo" worktree prune > /dev/null 2>&1 || true
+  fi
+
+  release_group_worktree_lock "$group" "$holder_pid" "$sid" || true
+  return 0
+}

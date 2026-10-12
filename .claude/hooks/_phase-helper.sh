@@ -1278,6 +1278,82 @@ read_phase_gates() {
 # --- Initialize phase state ---
 # Creates phase-state file with session_id from .session-id, sets current_phase to init.
 # Usage: init_phase "standard"
+
+# --- Claim the group worktree occupancy lock at session init (Decision 0054) ---
+# Decision t-0054 shipped the lock acquired and released by `runner.sh`, which
+# made occupancy BLOCK-level for headless briefs but only REQUIRE-level for an
+# operator entering the group worktree by hand. Its § Known Limitations named
+# closing that gap here. This is that closure (t-0054 Amendment 2026-10-08).
+#
+# Three outcomes:
+#   not in a tg-* worktree  -> no-op success (every standalone session)
+#   lock already ours       -> no-op success (see re-entrancy note below)
+#   live foreign holder     -> BLOCK (return 1), no phase-state written
+#
+# Re-entrancy is keyed on SESSION ID, never on pid. In a headless brief the
+# runner has already acquired this lock for this same session, recording the
+# RUNNER's pid — which is not the durable claude pid this function would use.
+# Keying on pid would therefore make every headless group brief block itself on
+# its own runner. The session id is the stable identity shared by both.
+#
+# Arguments:
+#   $1 — session id
+# Returns: 0 claimed / already held / not applicable, 1 blocked
+_claim_group_worktree_lock_at_init() {
+  local sid="${1:-}"
+  local repo_root="$_REPO_OS_ROOT"
+
+  # _phase-helper.sh does not source _cleanup-helper.sh at load (it would add
+  # cost to every hook that only needs phase state). Both depend solely on
+  # _analytics-helper.sh, so sourcing it here is acyclic. Guarded on `type` so a
+  # partial deployment degrades to the pre-amendment behaviour rather than
+  # aborting init.
+  if ! type current_group_worktree_name > /dev/null 2>&1; then
+    [ -f "$repo_root/.claude/hooks/_cleanup-helper.sh" ] || return 0
+    # shellcheck disable=SC1090
+    . "$repo_root/.claude/hooks/_cleanup-helper.sh" 2>/dev/null || return 0
+    type current_group_worktree_name > /dev/null 2>&1 || return 0
+  fi
+
+  local group=""
+  group=$(current_group_worktree_name 2>/dev/null) || return 0
+  [ -n "$group" ] || return 0
+
+  if [ "${REPO_OS_SKIP_GROUP_LOCK:-0}" = "1" ]; then
+    log_override "group-worktree-lock" "REPO_OS_SKIP_GROUP_LOCK" 2>/dev/null || true
+    return 0
+  fi
+
+  # Already recorded against this session — the runner claimed it for us.
+  local holder_sid=""
+  holder_sid=$(group_worktree_lock_holder_session "$group" 2>/dev/null || true)
+  if [ -n "$holder_sid" ] && [ "$holder_sid" = "$sid" ]; then
+    return 0
+  fi
+
+  local owner_pid
+  owner_pid=$(_resolve_durable_pid)
+
+  local _rc=0
+  acquire_group_worktree_lock "$group" "$owner_pid" "$sid" 2>/dev/null || _rc=$?
+  if [ "$_rc" -eq 0 ]; then
+    return 0
+  fi
+
+  # rc 2 means the group name was unusable — not a contention failure, and not
+  # something the operator can act on. Fall through rather than block.
+  if [ "$_rc" -eq 2 ]; then
+    return 0
+  fi
+
+  local lock_dir holder_pid
+  lock_dir=$(_group_worktree_lock_dir "$group" 2>/dev/null || echo "")
+  holder_pid=$(cat "$lock_dir/pid" 2>/dev/null || echo "unknown")
+  holder_sid=$(cat "$lock_dir/session_id" 2>/dev/null || echo "unknown")
+  echo "GATE-RECOVERABLE: Task group worktree '$group' is already occupied by session $holder_sid (pid $holder_pid) — only one session may run in a group worktree at a time. NEXT: Wait for that session to close, or run this brief after it finishes. If that session is gone, its lock is released automatically on the next attempt. (override: REPO_OS_SKIP_GROUP_LOCK=1)" >&2
+  log_hook_event "group-worktree-lock" "init_phase" "" "block" "0" "occupied" "$group" 2>/dev/null || true
+  return 1
+}
 init_phase() {
   local stype="$1"
   local repo_root="$_REPO_OS_ROOT"
@@ -1339,6 +1415,15 @@ init_phase() {
   # Read session ID (guaranteed to exist — _analytics-helper.sh sourced first)
   local sid
   sid=$(get_session_id "$repo_root")
+
+  # --- Task group worktree single occupancy (Decision 0054 Amendment) ---
+  # Deliberately placed BEFORE the phase-state write: a session blocked here
+  # never initialised, so it must not leave phase-state behind. Leaving it would
+  # trip the double-init guard on the operator's retry and make the recoverable
+  # "worktree occupied" message look like a corrupted session.
+  if ! _claim_group_worktree_lock_at_init "$sid"; then
+    return 1
+  fi
 
   # Get tag for init phase
   local tag

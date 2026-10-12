@@ -77,7 +77,7 @@ Hooks (`.claude/hooks/`) enforce governance automatically via phase-aware flow m
 
 Experiment branches: A4 only (all state checks skipped); ancestry check advisory only. Emergency recovery: `REPO_OS_RECOVER=1` skips all state-dependent checks, bash-guard gates, and ancestry check. File-based signal: `.claude/.state/.recover-signal` (single-use, consumed by first hook). See Decision 0031. Ancestry override: `REPO_OS_SKIP_ANCESTRY_CHECK=1` (logged via override audit).
 
-Automation layer (Decision 0017): optional headless runner in `.claude/.automation/` — toggle via `runner.enabled: true` in `config.yaml` or create a `HALT` file to stop immediately. Supports 10 escalation types (gate-failure, governance-block, phase-tag-escalation, ambiguity, scope-exceeded, dependency-missing, security-risk, structural-change, scope-deviation, stale-branch). Worktree isolation default for all sessions (Decision 0033); opt-out: `REPO_OS_WORKTREE_ISOLATE=0`. See `docs/ai/workflow-appendix/session-type-automation.md` for full lifecycle, parity contract, and integration surface.
+Automation layer (Decision 0017): optional headless runner in `.claude/.automation/` — toggle via `runner.enabled: true` in `config.yaml` or create a `HALT` file to stop immediately. Supports 10 escalation types (gate-failure, governance-block, phase-tag-escalation, ambiguity, scope-exceeded, dependency-missing, security-risk, structural-change, scope-deviation, stale-branch). Worktree isolation default for all sessions (Decision 0033); opt-out: `REPO_OS_WORKTREE_ISOLATE=0`. Sequential task groups are the one exception: the group shares ONE worktree at `.worktrees/tg-{group}` for the life of its branch, reused across briefs behind a clean-start check and a single-occupancy lock, removed on final seal / group failure / stale sweep (Decision 0054 — see `docs/ai/workflow-appendix/session-type-task-group.md` § Worktree Lifetime). See `docs/ai/workflow-appendix/session-type-automation.md` for full lifecycle, parity contract, and integration surface.
 
 ## Spec Convention
 - **Templates** (`docs/spec/_templates/`): Blank spec files with placeholder fields. Synced from the upstream template repo. Do not fill these directly.
@@ -100,6 +100,27 @@ Automation layer (Decision 0017): optional headless runner in `.claude/.automati
 - docs/ai/prompts/prompt-h-hotfix-debug.md
 - docs/ai/prompts/prompt-q-queue-triage.md
 - docs/ai/prompts/prompt-t-task-definition.md
+
+## Tooling Floor
+
+The hooks, automation layer and sync engine must run on child-repo machines whose tooling is not ours to assume. Two floors apply:
+
+| Tool | Floor | Why |
+|------|-------|-----|
+| **bash** | **3.2** | macOS ships 3.2 as `/bin/bash` and always has. No associative arrays, no `${var^^}`, no `mapfile`. |
+| **git** | **2.5** (2015) | The lowest version providing `rev-parse --git-common-dir` and `--git-path`, both of which worktree detection and hook installation depend on. |
+
+Features deliberately **not** used, with the version each would require:
+
+| Feature | Needs | Used instead |
+|---------|-------|--------------|
+| `git branch --show-current` | 2.22+ | `git rev-parse --abbrev-ref HEAD` |
+| `git restore` / `git switch` | 2.23+ | `git reset HEAD --` / `git checkout` |
+| `git rev-parse --path-format=absolute` | 2.31+ | `--git-path` plus `cd`-based resolution |
+
+The failure mode that makes this worth stating: below its introduction version, an unknown long option is **echoed back** by `git rev-parse`/`git branch` rather than rejected, so a version-sensitive check silently compares garbage instead of erroring. Workarounds in the codebase cite this section rather than any particular machine's version.
+
+**Verified floor vs. stated floor.** The suites are exercised on modern git (2.56 at time of writing) and were previously exercised on 2.19.2. The 2.5 floor is derived from the features the code actually calls, not from a test run on 2.5 — no such git is available here. Treat 2.5 as the intended contract and 2.19.2 as the lowest version with observed passing runs.
 
 ## Versioning
 Template versions use CalVer git tags (e.g., `v2026.02.1`). Tags are auto-created on merge to `main` when Repo OS files change (`.github/workflows/auto-version-tag.yml`). See GitHub Releases for changelog.

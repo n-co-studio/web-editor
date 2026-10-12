@@ -10,14 +10,32 @@
 # The index is used by pre-commit-gates.sh for fast trigger matching.
 # See docs/ai/quality-gates.md § A1 Trigger Index for format details.
 #
-# Index format:
+# Index format (version 2):
 #   Line 1:   # A1 trigger index — generated artifact. Do not hand-edit.
 #   Line 2:   # Regenerate: bash .claude/.automation/lib/rebuild-trigger-index.sh
-#   Line 3:   # digest: <sha256-hex>   (hex of concatenated ## Triggers sections, sorted)
-#   Line 4+:  decision_id|path_regex|keywords  (pipe-delimited data rows)
+#   Line 3:   # format: 2
+#   Line 4:   # digest: <sha256-hex>   (hex of concatenated ## Triggers sections, sorted)
+#   Line 5+:  decision_id<US>path_regex<US>keywords   (US = 0x1f, unit separator)
+#
+# Why 0x1f and not "|" (format 1 → 2, known-issue R6):
+#   Format 1 was pipe-delimited and read with a three-field `IFS='|' read`. A
+#   path regex using regex alternation — which ten of the shipped decisions use —
+#   was therefore split across fields: the regex was truncated mid-group and the
+#   remainder landed in the keywords field. The truncated fragment reached grep
+#   as an unbalanced-parenthesis pattern, grep errored, the error was swallowed
+#   by `|| true`, and the loop skipped the row BEFORE the keyword check. Those
+#   decisions were never detected at all, so A1 never required them in a commit
+#   trailer. 0x1f cannot occur in a regex or a keyword list, so the field
+#   boundary is unambiguous by construction.
+#
+# pre-commit-gates.sh reads both formats: it splits on 0x1f when a row contains
+# one and falls back to the legacy pipe split otherwise, so a child repo whose
+# index predates this change keeps its current behaviour until it regenerates.
 #
 # The digest line enables content-based staleness detection in pre-commit-gates.sh —
 # the mtime comparison is only a fast pre-filter; a digest mismatch is the real gate.
+# The digest covers the decision files' ## Triggers sections, NOT the encoding of
+# these rows, so the format change does not perturb it.
 
 set -euo pipefail
 
@@ -45,7 +63,8 @@ for f in "$DECISIONS_DIR"/t-*.md "$DECISIONS_DIR"/0*.md; do
   while IFS= read -r p; do
     p=$(echo "$p" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
     [ -z "$p" ] && continue
-    echo "${id}|${p}|${keywords}" >> "$_TMP_DATA"
+    # 0x1f field separator (format 2) — see the format note in the header.
+    printf '%s\037%s\037%s\n' "$id" "$p" "$keywords" >> "$_TMP_DATA"
     count=$((count + 1))
   done <<< "$paths"
 done
@@ -87,6 +106,7 @@ fi
 {
   echo "# A1 trigger index — generated artifact. Do not hand-edit."
   echo "# Regenerate: bash .claude/.automation/lib/rebuild-trigger-index.sh"
+  echo "# format: 2"
   if [ -n "$_DIGEST" ]; then
     echo "# digest: ${_DIGEST}"
   fi

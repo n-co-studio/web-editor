@@ -170,8 +170,9 @@ is_worktree() {
     # (../../.git). Comparing the raw strings therefore reported "worktree" for
     # an ordinary repo whenever a hook ran with cwd below the root — which
     # routed session state to .claude/.state/wt-sessions/ instead of sessions/.
-    # (--path-format=absolute would do this in one call but needs git 2.31+;
-    # this repo runs 2.19, so resolve by cd'ing instead.)
+    # (--path-format=absolute would do this in one call but needs git 2.31+,
+    # above the supported floor — see AI.md § Tooling Floor — so resolve by
+    # cd'ing instead.)
     if [ -n "$git_dir" ]; then
       git_dir=$(cd "$git_dir" 2>/dev/null && pwd -P) || git_dir=""
     fi

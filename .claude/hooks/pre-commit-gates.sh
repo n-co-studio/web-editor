@@ -1360,6 +1360,35 @@ _guarded_grep() {
   fi
 }
 
+# --- _guarded_grep with a malformed-pattern alarm ---
+# grep exit 1 is "no match" (normal and extremely common here); exit >= 2 means
+# the PATTERN itself was rejected or grep failed. Every call site wraps
+# _guarded_grep in `|| true`, which collapsed those two cases into one and made
+# a bad pattern indistinguishable from an honest no-match.
+#
+# That is the mechanism that hid known-issue R6 for months: a truncated regex
+# reached grep, grep errored "parentheses not balanced", `|| true` swallowed it,
+# and ten decisions silently stopped triggering with no signal anywhere. Fixing
+# the delimiter removes today's cause; this removes the blindness, so the next
+# malformed pattern is loud instead of silent.
+#
+# Still non-fatal by design — A1 must not block a commit because a decision
+# author wrote a bad regex — but it warns and records an analytics event.
+# Arguments: $1 — context label for the warning; rest — grep args
+_grep_or_warn() {
+  local ctx="$1"
+  shift
+  local _out _rc=0
+  _out=$(_guarded_grep "$@" 2>/dev/null) || _rc=$?
+  if [ "$_rc" -ge 2 ]; then
+    echo "A1 WARNING: pattern rejected by grep (exit $_rc) for $ctx — this trigger matched nothing and was skipped. Check the decision's Triggers regex, then regenerate: bash .claude/.automation/lib/rebuild-trigger-index.sh" >&2
+    warn "A1_pattern_invalid"
+    return "$_rc"
+  fi
+  printf '%s' "$_out"
+  return 0
+}
+
 # ============================================================
 # A1: Decision Trigger Parser (blocking — enforced by .a1-triggers-enforced sentinel)
 # Uses compiled index (.a1-trigger-index) when present for fast matching.
@@ -1462,13 +1491,47 @@ if [ -n "$STAGED_FILES" ] && [ -d "$DECISIONS_DIR" ]; then
       fi
     fi
 
-    while IFS='|' read -r _A1_DID _A1_PATH _A1_KW; do
+    # Dual-format row parsing (known-issue R6). Format 2 rows are 0x1f-delimited;
+    # format 1 rows are pipe-delimited. Detected per ROW rather than from the
+    # `# format:` header so a hand-patched or partially-regenerated index cannot
+    # desync the two. Reading the raw line and splitting explicitly (rather than
+    # letting `read` do it via IFS) is what makes a path regex containing "|"
+    # survive intact — the format-1 three-field read is exactly the bug.
+    _A1_LEGACY_SEEN=false
+    while IFS= read -r _A1_ROW; do
       # Skip comments and blank lines
-      case "$_A1_DID" in '#'*|'') continue ;; esac
+      case "$_A1_ROW" in '#'*|'') continue ;; esac
+
+      case "$_A1_ROW" in
+        *$'\037'*)
+          _A1_DID="${_A1_ROW%%$'\037'*}"
+          _A1_REST="${_A1_ROW#*$'\037'}"
+          _A1_PATH="${_A1_REST%%$'\037'*}"
+          case "$_A1_REST" in
+            *$'\037'*) _A1_KW="${_A1_REST#*$'\037'}" ;;
+            *)         _A1_KW="" ;;
+          esac
+          ;;
+        *)
+          # Legacy format 1: preserve today's behaviour verbatim, including its
+          # limitation, so an un-regenerated child index behaves exactly as it
+          # does now instead of silently matching nothing.
+          _A1_LEGACY_SEEN=true
+          _A1_DID="${_A1_ROW%%|*}"
+          _A1_REST="${_A1_ROW#*|}"
+          _A1_PATH="${_A1_REST%%|*}"
+          case "$_A1_REST" in
+            *'|'*) _A1_KW="${_A1_REST#*|}" ;;
+            *)     _A1_KW="" ;;
+          esac
+          ;;
+      esac
+
       [ -z "$_A1_PATH" ] && continue
 
-      # Match staged files against path pattern (guarded against ReDoS)
-      _A1_MATCHING=$(echo "$STAGED_FILES" | _guarded_grep -E "$_A1_PATH" || true)
+      # Match staged files against path pattern (guarded against ReDoS, and
+      # loud when the pattern itself is rejected)
+      _A1_MATCHING=$(echo "$STAGED_FILES" | _grep_or_warn "decision $_A1_DID path regex" -E "$_A1_PATH" || true)
       [ -z "$_A1_MATCHING" ] && continue
 
       # If keywords defined, check diff content in matching files
@@ -1479,7 +1542,7 @@ if [ -n "$STAGED_FILES" ] && [ -d "$DECISIONS_DIR" ]; then
           BEGIN { n=split(files, fa, "|"); for(i=1;i<=n;i++) wanted["b/"fa[i]]=1 }
           /^\+\+\+ / { f=substr($0,5); active=(f in wanted) ? 1 : 0; next }
           active && /^\+/ && !/^\+\+\+/ { print }
-        ' | _guarded_grep -iE "$_A1_KW_PAT" || true)
+        ' | _grep_or_warn "decision $_A1_DID keywords" -iE "$_A1_KW_PAT" || true)
         [ -z "$_A1_KW_HIT" ] && continue
       fi
 
@@ -1489,6 +1552,14 @@ if [ -n "$STAGED_FILES" ] && [ -d "$DECISIONS_DIR" ]; then
         *) TRIGGERED_DECISIONS="${TRIGGERED_DECISIONS:+$TRIGGERED_DECISIONS, }$_A1_DID" ;;
       esac
     done < "$A1_INDEX"
+
+    # A legacy-format row means this index predates the R6 delimiter fix, so any
+    # decision whose path regex uses alternation is still being skipped. Surface
+    # it once with the regenerate command rather than leaving the gap silent.
+    if [ "$_A1_LEGACY_SEEN" = true ]; then
+      echo "A1 WARNING: .a1-trigger-index uses the legacy pipe-delimited format — decisions whose path regex contains '|' are not detected. Regenerate: bash .claude/.automation/lib/rebuild-trigger-index.sh" >&2
+      warn "A1_index_legacy_format"
+    fi
 
   else
     # --- Fallback: parse decision files directly (no index) ---

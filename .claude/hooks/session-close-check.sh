@@ -909,6 +909,28 @@ if [ "$HOOK_EVENT" = "SessionEnd" ]; then
     seal_branch_if_applicable
   fi
 
+  # Release a task group worktree's occupancy lock (Decision 0054).
+  # The group worktree itself is NOT removed here: it outlives this session for
+  # the next brief, and a hook running inside the worktree cannot remove the
+  # tree it is standing in anyway. Removal belongs to the terminal paths —
+  # the runner after the final brief seals, work order failure, or the stale
+  # sweep.
+  #
+  # The durable pid is passed so an INTERACTIVE session releases the lock it
+  # claimed itself in init_phase (Decision 0054 Amendment) — that holder is
+  # still alive at SessionEnd, so the orphan condition alone would never fire.
+  # A runner-held lock carries the runner's pid instead, so it is still left
+  # alone and released by the runner after its post-session merge.
+  _SE_GROUP=""
+  if _SE_GROUP=$(current_group_worktree_name 2>/dev/null); then
+    if [ -n "$_SE_GROUP" ]; then
+      release_group_worktree_lock_if_orphaned "$_SE_GROUP" \
+        "$(get_session_id "$REPO_ROOT")" "$(_resolve_durable_pid)" \
+        && log_hook_event "session-close-check" "SessionEnd" "" "allow" "$START_MS" \
+             "group_worktree_lock_released" "" "$_SE_GROUP" || true
+    fi
+  fi
+
   # Update baseline for next session
   update_baseline
 

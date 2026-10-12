@@ -540,10 +540,11 @@ main() {
 
   # Ensure we're on main.
   # rev-parse --abbrev-ref, not `branch --show-current`: the latter needs git
-  # 2.22+ and this script is documented as runnable standalone on an operator
-  # machine (macOS ships git 2.19.2, where --show-current is not a flag but is
-  # echoed back as a branch name pattern, so the check silently compares
-  # garbage). --abbrev-ref works from git 1.7 and returns HEAD when detached.
+  # 2.22+, above the supported floor (AI.md § Tooling Floor), and this script is
+  # documented as runnable standalone on an operator machine whose git version
+  # is not ours to assume. Below 2.22 --show-current is not a flag but is echoed
+  # back as a branch name pattern, so the check silently compares garbage rather
+  # than failing. --abbrev-ref works from git 1.7 and returns HEAD when detached.
   local current_branch
   current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
   if [ "$current_branch" != "main" ]; then

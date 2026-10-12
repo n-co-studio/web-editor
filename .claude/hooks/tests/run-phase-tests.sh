@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Phase Model Cohesion Tests — Main Runner
-# Orchestrates Layer 1 (pure function) through Layer 7 (criteria verdict capture) tests.
+# Orchestrates Layer 1 (pure function) through Layer 8 (task group worktree
+# lifetime) tests.
 # Reports TAP output per layer with summary and phase matrix visualization.
 #
 # Usage: ./run-phase-tests.sh
@@ -121,6 +122,13 @@ printf '%s\n' "-------------------------------------------"
 
 l7_exit=0
 bash "$SCRIPT_DIR/layer7-criteria-verdicts.sh" || l7_exit=$?
+
+printf "\n"
+printf '%s\n' "${BOLD}Layer 8: Task Group Worktree Lifetime Tests${RESET}"
+printf '%s\n' "-------------------------------------------"
+
+l8_exit=0
+bash "$SCRIPT_DIR/layer8-group-worktree.sh" || l8_exit=$?
 
 printf "\n"
 
@@ -303,6 +311,13 @@ if [ "$l7_exit" -eq 0 ]; then
   printf "Layer 7 (Criteria Verdict Capture): ${GREEN}PASS${RESET}\n"
 else
   printf "Layer 7 (Criteria Verdict Capture): ${RED}FAIL${RESET}\n"
+  overall=1
+fi
+
+if [ "$l8_exit" -eq 0 ]; then
+  printf "Layer 8 (Group Worktree Lifetime): ${GREEN}PASS${RESET}\n"
+else
+  printf "Layer 8 (Group Worktree Lifetime): ${RED}FAIL${RESET}\n"
   overall=1
 fi
 

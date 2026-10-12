@@ -11,6 +11,7 @@
 #   - Resolved escalations older than escalation_days config
 #   - Stale heartbeat files older than 24h
 #   - Closed-branches compaction (branches no longer in reflog)
+#   - Stale task group worktrees (Decision 0054 — see group-worktree-sweep.sh)
 #
 # Depends on (sourced by runner.sh before this file):
 #   runner.sh sets REPO_ROOT, AUTOMATION_DIR, CONFIG_FILE
@@ -765,6 +766,18 @@ run_cleanup() {
   # Orphan automation branch detection (safety net)
   count=$(_detect_orphan_branches)
   [ "$count" -gt 0 ] && echo "cleanup: detected $count orphan automation branches (escalations written)" >&2
+
+  # Stale task group worktrees (Decision 0054). Group worktrees are deliberately
+  # exempt from the per-session removal of Decision 0033, so this sweep is their
+  # only backstop when a group's last brief ran interactively or its runner died
+  # before reaching a terminal removal path. Guarded on type: the sweep lives in
+  # group-worktree-sweep.sh, which runner.sh sources — skipped if absent so a
+  # partial deployment degrades rather than aborting cleanup.
+  if type sweep_stale_group_worktrees > /dev/null 2>&1; then
+    count=$(sweep_stale_group_worktrees)
+    total_deleted=$((total_deleted + count))
+    [ "$count" -gt 0 ] && echo "cleanup: removed $count stale task group worktrees" >&2
+  fi
 
   # Stale review-items/ subdirectories (>7 days)
   count=$(sweep_stale_review_items)
