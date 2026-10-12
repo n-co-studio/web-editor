@@ -9,22 +9,22 @@ Screenshots for the store listing. Chrome requires each to be **exactly
 | `02-inline-text.png` | Inline text editing, with the formatting bar |
 | `03-insert-elements.png` | The insert panel, choosing a layout to add |
 
-Generated from 3456×1994 captures by cropping to a 1.6 ratio from the centre
-(~7.7% of width) and scaling to 1280×800. The source captures are 1.733, so
-they cannot be scaled to spec without a crop; a centre crop is safe because
-the toolbar sits ~10% in from the left and the right side is open canvas.
+Generated from 3456×1992 captures. Retina captures are ~1.733, the store wants
+1.600, so a crop is unavoidable — about 7.7% of the width.
+
+**Crop from the left, not the centre.** Where the toolbar sits varies between
+captures, and a centred crop removes ~134px from each side, which is enough to
+slice the toolbar off when it is close to the left edge. A left-anchored crop
+keeps it, because the surplus is always on the right where the canvas is empty.
 
 To regenerate from a new capture:
 
-    h=$(sips -g pixelHeight shot.png | awk '/pixelHeight/{print $2}')
-    cw=$(python3 -c "print(round($h*1.6))")
-    sips -c $h $cw shot.png && sips -z 800 1280 shot.png
+    magick shot.png -crop 3187x1992+0+0 +repage -resize 1280x800 -strip out.png
 
-Known issue in `03-insert-elements.png`: the insert panel's layout-preset grid
-is clipped at the panel's own right edge ("50 / 50 (col", "2/3 + 1/3 (c").
-That is in the source capture, not the crop — the panel's content is wider
-than the panel. Worth fixing in the overlay and re-capturing before this
-screenshot is relied on.
+(`3187 = round(height × 1.6)` — recompute if the capture height differs.
+`-strip` drops EXIF, which a screenshot does not need and should not publish.)
+Open the result and check the toolbar and any open panel both survived before
+trusting it.
 
 ## Still needed
 
