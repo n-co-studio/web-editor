@@ -8,6 +8,7 @@ Screenshots for the store listing. Chrome requires each to be **exactly
 | `01-select-and-edit.png` | An element selected, with the dimension overlay and the toolbar |
 | `02-inline-text.png` | Inline text editing, with the formatting bar |
 | `03-insert-elements.png` | The insert panel, choosing a layout to add |
+| `promo-tile-440x280.png` | Small promo tile — store homepage, category pages, search |
 
 Generated from 3456×1992 captures. Retina captures are ~1.733, the store wants
 1.600, so a crop is unavoidable — about 7.7% of the width.
@@ -33,6 +34,15 @@ Open the result and check the toolbar and any open panel both survived before
 trusting it — where the toolbar sits moves between captures.
 
 ## Still needed
+
+- ~~**Small promo tile, 440×280.**~~ **Done** — `promo-tile-440x280.png`.
+  Supplied as a 440×280 PNG carrying an alpha channel (fully opaque, but an
+  alpha channel all the same, which Chrome rejects for promo tiles). Flattened
+  to 24-bit truecolour on a white matte and verified pixel-identical to the
+  original: `magick in.png -background white -alpha remove -alpha off -strip
+  -define png:color-type=2 out.png`. Re-run that on any replacement.
+
+  Original spec notes, kept for reference:
 
 - **Small promo tile, 440×280.** Not derivable from a screenshot — Google
   explicitly asks for brand artwork rather than a capture. Treat it as
