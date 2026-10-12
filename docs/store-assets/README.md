@@ -19,12 +19,18 @@ keeps it, because the surplus is always on the right where the canvas is empty.
 
 To regenerate from a new capture:
 
-    magick shot.png -crop 3187x1992+0+0 +repage -resize 1280x800 -strip out.png
+    magick shot.png -crop 3187x1992+0+0 +repage -resize 1280x800 \
+      +profile exif +profile xmp out.png
 
-(`3187 = round(height × 1.6)` — recompute if the capture height differs.
-`-strip` drops EXIF, which a screenshot does not need and should not publish.)
+(`3187 = round(height × 1.6)` — recompute if the capture height differs.)
+
+Drop EXIF and XMP, but **not** with `-strip`: that also removes the ICC colour
+profile, which leaves one screenshot rendering differently from the others in
+the same listing. `+profile exif +profile xmp` removes the metadata and keeps
+the profile.
+
 Open the result and check the toolbar and any open panel both survived before
-trusting it.
+trusting it — where the toolbar sits moves between captures.
 
 ## Still needed
 
