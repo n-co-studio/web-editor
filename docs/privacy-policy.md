@@ -32,11 +32,12 @@ All network communication is **strictly local**:
 
 The extension never sends your data off your machine. Your **agent** is a separate matter, and worth being deliberate about.
 
-Each edit you send carries, to your local MCP server, the following. This list is
-maintained by hand and kept in sync whenever the payload changes, but the
-binding definition is the `VisualDiff` type in
-[`packages/shared/src/diff.ts`](https://github.com/n-co-studio/web-editor/blob/main/packages/shared/src/diff.ts)
-— read it if you need certainty rather than a summary.
+Each edit you send carries, to your local MCP server, the following. The list
+is maintained by hand and kept in sync whenever the payload changes. The
+authoritative definition is the `VisualDiff` type in the extension's source;
+that source is not public yet, so if you need certainty rather than a summary,
+email [hello@nco.studio](mailto:hello@nco.studio) and we will tell you exactly
+what a given edit contains.
 
 - **The page's full URL**, with every edit — including any account id, order number or token in its path or query string.
 - **The element you edited**: its tag, a CSS selector for it, its text content, and *all* of its attributes — so a `data-customer-id` or a personalised `aria-label` goes too, even for a purely cosmetic change.
@@ -91,4 +92,4 @@ If this policy changes in a material way, the updated version will be published 
 ## Contact
 
 Questions about this privacy policy may be directed to the project repository:
-[github.com/n-co-studio/web-editor](https://github.com/n-co-studio/web-editor)
+[hello@nco.studio](mailto:hello@nco.studio)
