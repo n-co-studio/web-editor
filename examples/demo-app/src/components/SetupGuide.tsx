@@ -284,32 +284,23 @@ const STEPS: Step[] = [
           <code style={{ fontFamily: 'var(--font-mono)' }}>127.0.0.1</code> — where the source mapping and
           design tokens it relies on come from.
         </p>
-        {/* Placeholder for a screenshot not yet taken. 1280×800 is the Chrome
-            Web Store screenshot size, so one capture serves both. Deliberately
-            dashed: it should read as a gap, not as a design element. */}
+        {/* The src is built from BASE_URL, not written as a literal "/images/…".
+            The site build runs with base "/web-editor/" (see build:site), and Vite
+            does not rewrite absolute paths inside JSX — a literal would resolve to
+            nco.studio/images/… and 404 in production while working locally. */}
         <figure style={{ margin: 'var(--space-2) 0 0' }}>
-          <div
+          <img
+            src={`${import.meta.env.BASE_URL}images/web-editor-example-extension-pin.png`}
+            alt="Chrome’s puzzle-piece menu open, with Visual Web Editor for AI Agents listed and the pin icon highlighted"
+            width={958}
+            height={576}
             style={{
-              aspectRatio: '1280 / 800',
-              border: '1px dashed var(--color-divider)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: 'var(--space-6)',
+              display: 'block',
+              width: '100%',
+              height: 'auto',
+              borderRadius: 'var(--radius-sm, 4px)',
             }}
-          >
-            <span
-              style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: 'var(--text-caption)',
-                color: 'var(--color-secondary)',
-                textAlign: 'center',
-                lineHeight: 1.5,
-              }}
-            >
-              Chrome’s puzzle-piece menu open, the editor listed, pin icon highlighted
-            </span>
-          </div>
+          />
         </figure>
       </>
     ),

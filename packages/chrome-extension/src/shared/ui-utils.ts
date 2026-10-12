@@ -89,7 +89,7 @@ const BUTTON_BASE: Partial<CSSStyleDeclaration> = {
 const BUTTON_VARIANTS: Record<ButtonVariant, Partial<CSSStyleDeclaration>> = {
   primary: {
     background: OVERLAY.primary,
-    color: '#000000',
+    color: OVERLAY.onPrimary,
   },
   ghost: {
     background: 'transparent',
@@ -97,8 +97,8 @@ const BUTTON_VARIANTS: Record<ButtonVariant, Partial<CSSStyleDeclaration>> = {
     border: `1px solid ${OVERLAY.border}`,
   },
   destructive: {
-    background: OVERLAY.destructive,
-    color: OVERLAY.text,
+    background: OVERLAY.destructiveFill,
+    color: OVERLAY.onDestructive,
   },
 };
 
@@ -128,7 +128,7 @@ export function createButton(
     variant === 'primary'
       ? OVERLAY.primaryHover
       : variant === 'destructive'
-        ? '#dc2626'
+        ? OVERLAY.destructiveFillHover
         : OVERLAY.hover;
 
   btn.addEventListener('mouseenter', () => {
