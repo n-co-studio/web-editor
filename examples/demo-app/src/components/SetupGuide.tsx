@@ -190,21 +190,43 @@ function ConnectYourAgent() {
         launches it, and it also serves the extension over WebSocket.
       </p>
 
-      {/* Pills on a tinted strip, not underlined text.
-          These were set as plain body text with a 1px underline on the active
-          one, which made a control the reader has to act on look like prose
-          they can skim past — and the whole step is wrong if the wrong agent
-          is selected, because the config below changes with it. A label, a
-          surface and a filled active state make it read as a choice. */}
+      {/* Call-out, outside the block below and above it.
+          This is the instruction; the block is the thing being instructed
+          about. Keeping it inside made it read as a caption on the code. */}
+      <p
+        style={{
+          marginTop: 'var(--space-5)',
+          paddingLeft: 'var(--space-4)',
+          borderLeft: '2px solid var(--color-ink)',
+          fontSize: 'var(--text-body-sm)',
+          color: 'var(--color-ink)',
+        }}
+      >
+        <strong style={{ fontWeight: 'var(--fw-book)' }}>Easiest way</strong> — let{' '}
+        {provider.name} set itself up. Pick your agent, then copy the prompt and paste it in.
+      </p>
+
+      {/* One block: picker, prompt, copy button.
+          These are three parts of a single action, and they were reading as
+          three unrelated things stacked up — a row of text links, a button,
+          then a code sample. Sharing one surface makes the sequence legible,
+          and the copy button sits under the text it copies rather than above
+          it, where it referred to something the reader had not seen yet. */}
       <div
         style={{
           marginTop: 'var(--space-4)',
-          padding: 'var(--space-4)',
-          background: 'var(--color-surface)',
           border: '1px solid var(--color-border)',
           borderRadius: 'var(--radius-sm, 4px)',
+          overflow: 'hidden',
         }}
       >
+        <div
+          style={{
+            padding: 'var(--space-4)',
+            background: 'var(--color-surface)',
+            borderBottom: '1px solid var(--color-border)',
+          }}
+        >
         <div
           id="agent-picker-label"
           style={{
@@ -255,14 +277,16 @@ function ConnectYourAgent() {
             </button>
           );
         })}
-      </div>
-      </div>
+        </div>
+        </div>
 
-      <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
-        Easiest way — let {provider.name} set itself up. Copy this and paste it in:
-      </p>
-      <CopyPromptButton text={mcpPrompt(provider)} />
-      <Code>{mcpPrompt(provider)}</Code>
+        <div style={{ padding: 'var(--space-4)' }}>
+          <Code>{mcpPrompt(provider)}</Code>
+          <div style={{ marginTop: 'var(--space-4)' }}>
+            <CopyPromptButton text={mcpPrompt(provider)} />
+          </div>
+        </div>
+      </div>
 
       <p
         style={{
@@ -345,21 +369,14 @@ const STEPS: Step[] = [
       <>
         <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
           <strong style={{ color: 'var(--color-ink)', fontWeight: 'var(--fw-book)' }}>
-            This is the step that connects your edits to your code.
+            This is what connects your edits to your code.
           </strong>{' '}
-          The plugin tags every element at build time with the file and line it came from. Without
-          those tags the editor still works — you can select, adjust and queue — but your agent
-          receives a CSS selector and has to go looking for what it belongs to. It will guess, and
-          on a codebase with repeated components it will sometimes guess wrong.
+          It tags elements at build time with their file and line, so a change arrives naming the
+          exact component. Without it your agent gets a CSS selector and has to guess — and on
+          repeated components it will sometimes guess wrong.
         </p>
         <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
-          With the plugin, a change arrives naming the exact component and line, so the edit lands
-          where you meant it. Recommended rather than required: the editor runs without it, but
-          skipping it is the difference between an agent that knows what you clicked and one that
-          is inferring.
-        </p>
-        <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
-          It is a dev dependency and does nothing in a production build. Install it in your project:
+          Dev dependency only; it does nothing in a production build.
         </p>
         <Code>{`npm install --save-dev @nco-studio/web-editor-plugin`}</Code>
         <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
@@ -384,6 +401,20 @@ const STEPS: Step[] = [
           <code style={{ fontFamily: 'var(--font-mono)' }}>ws://localhost</code> — a connection that goes no further than your own machine.
           A banner appears only if the extension and server versions disagree.
         </p>
+        <figure style={{ margin: 'var(--space-4) 0 0' }}>
+          <img
+            src={`${import.meta.env.BASE_URL}images/web-editor-example-switch-on.png`}
+            alt="The extension popup before and after: Extension toggled from Off to On, and the toolbar icon turning from grey to green"
+            width={958}
+            height={576}
+            style={{
+              display: 'block',
+              width: '100%',
+              height: 'auto',
+              borderRadius: 'var(--radius-sm, 4px)',
+            }}
+          />
+        </figure>
       </>
     ),
   },

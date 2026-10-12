@@ -52,11 +52,27 @@ re-check the queue before you go idle.`}</Code>
   {
     title: 'Activate the editor',
     body: (
-      <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
-        On your localhost page, click the pinned icon and click <strong>Extension</strong> in the popup to
-        toggle it <strong>On</strong>. The editor toolbar appears — drag the grip to move it, collapse it to
-        browse the page normally, press <kbd style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-caption)', border: '1px solid var(--color-border)', padding: '0 4px' }}>ESC</kbd> to exit.
-      </p>
+      <>
+        <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
+          On your localhost page, click the pinned icon and click <strong>Extension</strong> in the popup to
+          toggle it <strong>On</strong>. The editor toolbar appears — drag the grip to move it, collapse it to
+          browse the page normally, press <kbd style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-caption)', border: '1px solid var(--color-border)', padding: '0 4px' }}>ESC</kbd> to exit.
+        </p>
+        <figure style={{ margin: 'var(--space-4) 0 0' }}>
+          <img
+            src={`${import.meta.env.BASE_URL}images/web-editor-example-switch-on.png`}
+            alt="The extension popup before and after: Extension toggled from Off to On, and the toolbar icon turning from grey to green"
+            width={958}
+            height={576}
+            style={{
+              display: 'block',
+              width: '100%',
+              height: 'auto',
+              borderRadius: 'var(--radius-sm, 4px)',
+            }}
+          />
+        </figure>
+      </>
     ),
   },
   {
