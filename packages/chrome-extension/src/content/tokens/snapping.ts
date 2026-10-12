@@ -230,7 +230,7 @@ export class SnappingEngine {
         height: '24px',
         borderRadius: OVERLAY.radiusSm,
         background: token.value,
-        border: '2px solid rgba(255, 255, 255, 0.3)',
+        border: `2px solid ${OVERLAY.swatchBorder}`,
         cursor: 'pointer',
       });
 

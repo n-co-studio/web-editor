@@ -164,6 +164,11 @@ export class TextEditor {
     if (this.shadow) {
       this.toolbar = this.buildToolbar(element);
       this.shadow.appendChild(this.toolbar);
+      // Place and show it immediately. It is built display:none, and its only
+      // other caller is the selectionchange handler — so without this the
+      // toolbar stayed invisible until the user happened to select something,
+      // which is the state this change exists to remove.
+      this.repositionToolbar(element);
     }
 
     // Bind handlers
@@ -521,16 +526,28 @@ export class TextEditor {
   private refreshToolbarState(element: HTMLElement): void {
     if (!this.toolbar) return;
 
+    // Now that the toolbar stays visible at a bare caret, "no selection" has
+    // to clear the pressed states rather than return early. Returning left the
+    // buttons lit from whatever was selected a moment ago, so an unstyled
+    // caret could sit under a toolbar still claiming bold is on.
+    const clearState = (): void => {
+      for (const [, btn] of this.toolbarButtons) {
+        btn.setAttribute('aria-pressed', 'false');
+        btn.style.background = 'none';
+      }
+    };
+
     const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) return;
+    if (!sel || sel.rangeCount === 0) { clearState(); return; }
     const range = sel.getRangeAt(0);
 
     if (range.collapsed || !element.contains(range.commonAncestorContainer)) {
+      clearState();
       return;
     }
 
     const clamped = clampRangeToRoot(range, element);
-    if (!clamped) return;
+    if (!clamped) { clearState(); return; }
 
     const state = getFormatState(clamped, element);
 
@@ -563,27 +580,21 @@ export class TextEditor {
   private repositionToolbar(element: HTMLElement): void {
     if (!this.toolbar) return;
 
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) {
-      this.toolbar.style.display = 'none';
-      return;
-    }
+    // The toolbar stays visible for as long as the text tool is open.
+    //
+    // It used to hide on every `selectionchange` that left the range
+    // collapsed, which is what happens each time the caret moves — so it
+    // flickered off and on while typing or arrowing through the text, and the
+    // formatting controls were unreachable without first making a selection.
+    // Availability should follow the tool being open, not the caret happening
+    // to span something.
+    //
+    // Position still follows the selection; only the visibility rule changed.
+    // The anchor falls back in order: the selected range, then the caret, then
+    // the element being edited — so there is always somewhere sensible to put
+    // it, which is what previously justified hiding.
+    const rect = this.toolbarAnchorRect(element);
 
-    const range = sel.getRangeAt(0);
-
-    // Hide when collapsed or outside the active element
-    if (range.collapsed || !element.contains(range.commonAncestorContainer)) {
-      this.toolbar.style.display = 'none';
-      return;
-    }
-
-    const rect = range.getBoundingClientRect();
-    if (!rect || rect.width === 0) {
-      this.toolbar.style.display = 'none';
-      return;
-    }
-
-    // Show toolbar
     this.toolbar.style.display = 'flex';
 
     // Measure toolbar dimensions (or use estimates before first paint)
@@ -608,6 +619,41 @@ export class TextEditor {
     this.toolbar.style.left = `${left}px`;
 
     this.refreshToolbarState(element);
+  }
+
+  /**
+   * Where to anchor the formatting toolbar.
+   *
+   * Preference order, each falling through only when it yields nothing usable:
+   *
+   * 1. The selected range — the requested behaviour, and the only anchor that
+   *    points at what the buttons will act on.
+   * 2. The caret. A collapsed range still reports a rect, zero-width but
+   *    correctly placed, so the toolbar tracks the cursor between selections
+   *    instead of jumping back to the top of the element.
+   * 3. The element being edited. Covers the degenerate cases — an empty
+   *    element, or a range the browser reports at 0,0 — where the first two
+   *    give nothing to anchor to.
+   *
+   * A selection outside the element is ignored rather than followed: during a
+   * blur or a click elsewhere the browser briefly reports a range in the new
+   * location, and chasing it would fling the toolbar across the page in the
+   * frame before editing ends.
+   */
+  private toolbarAnchorRect(element: HTMLElement): DOMRect {
+    const sel = window.getSelection();
+
+    if (sel && sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0);
+      if (element.contains(range.commonAncestorContainer)) {
+        const rect = range.getBoundingClientRect();
+        // A collapsed caret legitimately has zero width, so only a rect with
+        // no position at all is treated as unusable.
+        if (rect && (rect.width > 0 || rect.height > 0)) return rect;
+      }
+    }
+
+    return element.getBoundingClientRect();
   }
 }
 

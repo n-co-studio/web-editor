@@ -379,7 +379,7 @@ export class TypographyEditor {
       width: '20px',
       height: '20px',
       borderRadius: OVERLAY.radiusSm,
-      border: `1px solid ${OVERLAY.border}`,
+      border: `1px solid ${OVERLAY.swatchBorder}`,
       background: currentValue,
       flexShrink: '0',
     });

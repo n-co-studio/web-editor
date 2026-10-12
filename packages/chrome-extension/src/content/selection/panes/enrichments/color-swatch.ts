@@ -1,4 +1,5 @@
 import { createElement } from '../../../../shared/ui-utils';
+import { OVERLAY } from '../../../../shared/constants';
 
 /** CSS property names that should show a color swatch. */
 function isColorProperty(property: string): boolean {
@@ -30,7 +31,7 @@ export function createColorSwatch(
     width: '12px',
     height: '12px',
     borderRadius: '2px',
-    border: '1px solid rgba(255, 255, 255, 0.3)',
+    border: `1px solid ${OVERLAY.swatchBorder}`,
     background: value,
     flexShrink: '0',
     cursor: 'pointer',

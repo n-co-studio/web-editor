@@ -64,6 +64,11 @@ const OVERLAY_CSS = /* css */ `
     --fe-text-muted: #a1a1aa;
     --fe-text-inverse: #ffffff;
     --fe-border: rgba(255, 255, 255, 0.15);
+    /* Outline for a colour swatch. Distinct from --fe-border because a swatch
+       is filled with an arbitrary colour, so its edge must read against the
+       FILL as well as the panel: the general border is far too faint to
+       separate a white swatch from a light panel. */
+    --fe-swatch-border: rgba(255, 255, 255, 0.45);
     --fe-hover: rgba(255, 255, 255, 0.08);
     --fe-active: rgba(255, 255, 255, 0.12);
 
@@ -116,6 +121,9 @@ const OVERLAY_CSS = /* css */ `
     --fe-text-muted: #52525b;
     --fe-text-inverse: #000000;
     --fe-border: rgba(0, 0, 0, 0.14);
+    /* Dark in this theme: the case that drove it is a white swatch on the
+       near-white panel, which the 0.14 general border left invisible. */
+    --fe-swatch-border: rgba(0, 0, 0, 0.38);
     --fe-hover: rgba(0, 0, 0, 0.06);
     --fe-active: rgba(0, 0, 0, 0.10);
 

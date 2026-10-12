@@ -86,6 +86,10 @@ export const OVERLAY = {
   text: 'var(--fe-text)',
   textMuted: 'var(--fe-text-muted)',
   border: 'var(--fe-border)',
+  /** Outline for a colour swatch — must read against the swatch's own fill,
+   *  not just the panel. Use this anywhere a user-chosen colour is shown as a
+   *  filled chip; `border` is too faint for white-on-white. */
+  swatchBorder: 'var(--fe-swatch-border)',
   hover: 'var(--fe-hover)',
   active: 'var(--fe-active)',
 

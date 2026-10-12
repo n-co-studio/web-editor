@@ -226,7 +226,7 @@ export class ColorEditor {
       height: '24px',
       borderRadius: OVERLAY.radiusSm,
       background: currentValue,
-      border: `1px solid ${OVERLAY.border}`,
+      border: `1px solid ${OVERLAY.swatchBorder}`,
       flexShrink: '0',
     });
     previewRow.appendChild(colorChip);
