@@ -140,11 +140,11 @@ All processing is local — the extension and MCP server send your data nowhere 
 
 ## Known limitations
 
-- **Dev tooling** — built for your own dev server; it runs on other sites too, but without source mapping
+- **Dev tooling only** — do not install on production pages
 - **Chrome 116+** — uses MV3 service worker
 - **Vite projects with JSX/TSX** — the dev plugin is Vite-only; source mapping is not available for Webpack or plain CSS projects
 - **Visual properties only** — spacing, color, typography, layout. JavaScript behavior changes are out of scope.
-- **Automatic on localhost only** — the editor loads by itself on `localhost` and `127.0.0.1`. On any other page it loads when you click the toolbar icon, and edits stay in the browser: source mapping comes from the dev plugin at build time, so a production page has nothing to map back to.
+- **Localhost only** — the extension activates on `localhost` and `127.0.0.1` origins
 
 ---
 

@@ -70,13 +70,33 @@ const OVERLAY_CSS = /* css */ `
     --fe-primary: #06b6d4;
     --fe-primary-hover: #0891b2;
     --fe-primary-light: #cffafe;
+    /* Text on a primary fill. Black here because dark-theme primary is a bright
+       cyan: #000 on #06b6d4 = 8.65:1, where white would be only 2.43:1. */
+    --fe-on-primary: #000000;
     --fe-accent: #fb7185;
     --fe-accent-hover: #f43f5e;
+    /* Accent is a light rose and is not redefined per-theme, so one foreground
+       serves both: black is 7.80:1 on the base and 5.72:1 on hover, where white
+       would be 2.69:1 and 3.67:1. */
+    --fe-on-accent: #000000;
 
-    --fe-destructive: #ef4444;
+    /* Semantic colors here are the TEXT role — read against a dark panel.
+       #f87171 rather than #ef4444: the latter is 4.41:1 on --fe-bg-raised and
+       3.82:1 on the tinted warning chip, both under AA. #f87171 gives 6.00:1
+       and 5.20:1. Fills are separate tokens below, for the same reason primary
+       needed one — a colour legible as text on dark is too light to carry
+       white text as a background. */
+    --fe-destructive: #f87171;
     --fe-success: #22c55e;
     --fe-warning: #f59e0b;
     --fe-info: #3b82f6;
+
+    /* Fill role: a filled chip or button, always with white text. */
+    --fe-destructive-fill: #dc2626;
+    --fe-destructive-fill-hover: #b91c1c;
+    --fe-on-destructive: #ffffff;
+    --fe-info-fill: #1d4ed8;
+    --fe-on-info: #ffffff;
 
     --fe-space: 4px;
     --fe-radius-sm: 4px;
@@ -103,6 +123,11 @@ const OVERLAY_CSS = /* css */ `
     --fe-primary: #0e7490;
     --fe-primary-hover: #0c6479;
     --fe-primary-light: #cffafe;
+    /* Text on a primary fill, and the reason this token exists. The darkening
+       above was chosen for primary used AS text on white; used as a FILL it
+       needs the opposite foreground. Black on #0e7490 is 3.92:1 (3.11:1 on the
+       hover shade) and fails AA; white is 5.36:1 and 6.74:1. */
+    --fe-on-primary: #ffffff;
 
     /* Semantic colors adjusted for AA on light backgrounds */
     /* --fe-destructive: #dc2626 = 4.87:1 vs white ✓ */
@@ -113,6 +138,15 @@ const OVERLAY_CSS = /* css */ `
     --fe-warning: #b45309;
     /* --fe-info: #1d4ed8 = 6.77:1 vs white ✓ */
     --fe-info: #1d4ed8;
+
+    /* Fill role — same values as the light text role here, since a colour that
+       reads on white is already dark enough to carry white text. Declared
+       explicitly rather than inherited so the two roles stay independent. */
+    --fe-destructive-fill: #dc2626;
+    --fe-destructive-fill-hover: #b91c1c;
+    --fe-on-destructive: #ffffff;
+    --fe-info-fill: #1d4ed8;
+    --fe-on-info: #ffffff;
 
     --fe-shadow-md: 0 4px 6px rgba(0, 0, 0, 0.08);
     --fe-shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.12);

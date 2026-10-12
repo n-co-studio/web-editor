@@ -1,20 +1,34 @@
-# Release workflow — publishes @nco-studio/web-editor-mcp and @nco-studio/web-editor-plugin
-# to the npm registry via OIDC Trusted Publishing (no stored token required).
+# Release workflow — STAGES @nco-studio/web-editor-mcp and
+# @nco-studio/web-editor-plugin to npm via OIDC Trusted Publishing. No stored
+# token, and nothing becomes public when this workflow finishes.
 #
 # Triggered by: push of a tag matching v* (e.g. v0.2.0)
 #
-# OPERATOR SETUP REQUIRED (one-time, before first use):
-#   1. Go to npmjs.com -> your org (@nco-studio) -> Packages -> each package
-#      -> Settings -> Publish Access -> New Trusted Publisher
-#   2. Set:
-#        Repository: n-co-studio/web-editor
-#        Workflow:   .github/workflows/release.yml
-#        Environment: release
-#   Repeat for both packages (@nco-studio/web-editor-mcp, @nco-studio/web-editor-plugin).
-#   Until this is configured the publish job will fail with "401 Unauthorized".
-#   See RELEASING.md -> "OIDC Trusted Publishing setup" for the full walkthrough.
+# Pushing a tag does not release anything. Both packages land in npm's stage
+# queue, and a maintainer promotes them with a 2FA challenge — on npmjs.com
+# under Staged Packages, or `npm stage approve <stage-id>`. That is deliberate:
+# OIDC removes the human from the release path, and staging puts one back.
 #
-# This workflow is publish-only -- it does NOT replace the test/lint CI pipeline.
+# OPERATOR SETUP REQUIRED (one-time, before first use):
+#   1. npmjs.com -> @nco-studio -> each package -> Settings -> Publishing access
+#      -> add a trusted publisher
+#   2. Set:
+#        Repository:  n-co-studio/web-editor
+#        Workflow:    release.yml
+#        Environment: release
+#   3. Allowed actions: leave BOTH boxes unchecked.
+#        `npm stage publish` is always permitted and cannot be switched off.
+#        The boxes only ADD direct `npm publish` and `npm dist-tag` on top, and
+#        this workflow wants neither — unchecked is what makes it stage-only, so
+#        a direct publish from CI is refused by the registry.
+#   4. Create the `release` environment: repo Settings -> Environments -> New.
+#      The job declares `environment: release`; without it the job fails before
+#      reaching npm.
+#   Repeat 1-3 for both packages.
+#   A mismatch between these values and the workflow identity fails as a 404,
+#   not as a permissions error. See RELEASING.md for the full walkthrough.
+#
+# This workflow is release-only -- it does NOT replace the test/lint CI pipeline.
 
 name: Release
 
@@ -36,7 +50,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
 
       - name: Install dependencies
@@ -80,11 +94,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Node 24 ships npm 11.x. Trusted publishing needs npm >= 11.5.1 and
+      # `npm stage` needs >= 11.15.0, so the floor below is the stricter of the
+      # two. The Node 20 this job pinned before (npm 10.x) could never have
+      # authenticated over OIDC — it would have failed however the trusted
+      # publisher was configured, with a 401 that reads as a misconfiguration
+      # rather than a version problem.
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
           cache: 'npm'
+
+      # Assert it rather than trust it, so a future change to the Node image
+      # surfaces here as a clear message instead of a 401 at publish time.
+      - name: Verify npm supports trusted publishing and staging
+        run: |
+          need=11.15.0
+          have=$(npm --version)
+          if [ "$(printf '%s\n%s\n' "$need" "$have" | sort -V | head -1)" != "$need" ]; then
+            echo "ERROR: npm $have is too old for staged publishing (need >= $need)"
+            exit 1
+          fi
+          echo "npm $have OK (>= $need)"
 
       - name: Install dependencies
         run: npm ci
@@ -100,10 +132,51 @@ jobs:
           test -d packages/mcp-server/dist   || (echo "ERROR: mcp-server/dist missing" && exit 1)
           test -d packages/dev-plugin/dist    || (echo "ERROR: dev-plugin/dist missing"  && exit 1)
 
-      - name: Publish @nco-studio/web-editor-mcp
-        run: npm publish --provenance --access public
+      # Provenance attestation requires a PUBLIC repository. Asking for it on a
+      # private repo fails outright, so the flag is decided at run time: the
+      # release still goes out either way, and provenance switches itself on
+      # the moment the repository is made public — no edit needed.
+      - name: Decide provenance flag
+        id: prov
+        run: |
+          if [ "${{ github.event.repository.private }}" = "true" ]; then
+            echo "flag=" >> "$GITHUB_OUTPUT"
+            echo "Repository is private — staging WITHOUT provenance."
+            echo "Make the repository public to get signed provenance statements."
+          else
+            echo "flag=--provenance" >> "$GITHUB_OUTPUT"
+            echo "Repository is public — staging with provenance."
+          fi
+
+      # `npm stage publish`, not `npm publish`.
+      #
+      # The trusted publisher for these packages is configured stage-only: the
+      # "Allowed actions" boxes for `npm publish` and `npm dist-tag` are left
+      # unchecked, so the registry rejects a direct publish from this workflow.
+      # Staging is always permitted and needs no 2FA, which is what lets a
+      # non-interactive run do it at all.
+      #
+      # Nothing is public when this job finishes. Each package lands in the
+      # stage queue and a maintainer promotes it with a 2FA challenge, so every
+      # release keeps a human in the loop even though CI built it.
+      - name: Stage @nco-studio/web-editor-mcp
+        run: npm stage publish ${{ steps.prov.outputs.flag }} --access public
         working-directory: packages/mcp-server
 
-      - name: Publish @nco-studio/web-editor-plugin
-        run: npm publish --provenance --access public
+      - name: Stage @nco-studio/web-editor-plugin
+        run: npm stage publish ${{ steps.prov.outputs.flag }} --access public
         working-directory: packages/dev-plugin
+
+      - name: How to release what was just staged
+        run: |
+          echo "Both packages are staged. Nothing is public yet."
+          echo
+          echo "Approve on npmjs.com under the package's Staged Packages tab,"
+          echo "or from a trusted device:"
+          echo
+          echo "  npm stage list @nco-studio/web-editor-mcp"
+          echo "  npm stage approve <stage-id>"
+          echo "  npm stage list @nco-studio/web-editor-plugin"
+          echo "  npm stage approve <stage-id>"
+          echo
+          echo "Approval prompts for 2FA either way. 'npm stage reject <stage-id>' discards one."

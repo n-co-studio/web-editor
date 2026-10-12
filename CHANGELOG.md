@@ -15,6 +15,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - **Toolbar can no longer be stranded off-screen** — a position restored from a larger window, or a window resized after the toolbar was placed, could leave it entirely outside the viewport with no way to reach it short of a reload. It is now re-pinned inside the viewport on restore and on resize, including while collapsed.
 
+### Changed
+
+- **Privacy and security documentation now describes the agent boundary.** The extension and MCP server still send your data nowhere, but "no data leaves your machine" was never true of the *agent* the server hands edits to — most agents forward what they read to a model provider. `docs/privacy-policy.md` gains a "What your agent sees" section enumerating what an edit carries, and SECURITY.md, both READMEs, the store listing and the hosted guide say so plainly. No behaviour change.
+
 ## [0.2.0] - 2026-09-21
 
 First public release: Chrome Web Store extension 0.2.0 and both npm packages at 0.2.0.
@@ -34,7 +38,7 @@ First public release: Chrome Web Store extension 0.2.0 and both npm packages at 
 - **MCP server instructions** — the server describes its workflow to agents that have no project-specific guidance
 - Token discovery from `tailwind.config.ts` / `.mts` / `.cts`
 - Guidance for Chrome's Local Network Access prompt: the Review changes panel explains the permission when nothing has ever connected, and the quickstart, store reviewer notes and guide troubleshooting cover it
-- Two ways in, kept distinct in code: the editor loads **automatically** only on `localhost` / `127.0.0.1` (the manifest's `content_scripts.matches`), and on any other page it loads only when you click the toolbar icon, under `activeTab`, for that tab alone. Nothing loads into a site you are merely browsing, and no broad host permissions are requested.
+- Localhost-only activation is now enforced in code, not just declared: the popup refuses to inject into non-local pages and the content script refuses to activate on them (the public web-embed demo is exempt by design)
 
 ### Changed
 

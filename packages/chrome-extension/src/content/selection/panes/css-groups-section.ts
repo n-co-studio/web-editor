@@ -133,8 +133,8 @@ export class CssGroupsSection {
       gap: '6px',
     });
     const badge = createElement('span', {}, {
-      background: OVERLAY.info,
-      color: '#fff',
+      background: OVERLAY.infoFill,
+      color: OVERLAY.onInfo,
       padding: '1px 6px',
       borderRadius: '10px',
       fontSize: '10px',

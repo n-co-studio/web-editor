@@ -3,7 +3,7 @@
 ## What This Product Does NOT Do
 
 - Does not create or delete DOM elements/components — except via scoped insert and delete operations (see Boundary Expansions)
-- Does not map edits back to source on production builds (the dev-plugin is dev-only, so its build-time tags are absent). The editor itself still runs — on a page without those tags, edits are made and queued in the browser but cannot be written to files.
+- Does not work on production builds (dev-plugin is dev-only)
 - Does not access cross-origin iframe content
 - Does not modify closed Shadow DOM content
 - Does not modify source files directly — it delegates all code changes to Claude Code via structured diffs

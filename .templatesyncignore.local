@@ -7,3 +7,10 @@
 # it replaced this file's predecessor and then overwrote the README the
 # predecessor protected.
 README.md
+
+# This repo's own release pipeline. The template does not ship a release.yml
+# today, so nothing overwrites it — but it carries project-specific fixes (the
+# npm >= 11.5.1 floor that OIDC trusted publishing needs, and the run-time
+# provenance decision) that would be painful to lose silently if the template
+# ever adds a file at this path.
+.github/workflows/release.yml

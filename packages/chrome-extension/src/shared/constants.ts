@@ -93,14 +93,30 @@ export const OVERLAY = {
   primary: 'var(--fe-primary)',
   primaryHover: 'var(--fe-primary-hover)',
   primaryLight: 'var(--fe-primary-light)',
+  /** Foreground for text sitting ON a `primary` fill. Theme-dependent: the two
+   *  themes use primary at opposite ends of the lightness range, so a single
+   *  hard-coded value fails contrast in one of them. See shadow-host.ts. */
+  onPrimary: 'var(--fe-on-primary)',
   accent: 'var(--fe-accent)',
   accentHover: 'var(--fe-accent-hover)',
+  /** Foreground for text on an `accent` fill. See `onPrimary`. */
+  onAccent: 'var(--fe-on-accent)',
 
-  // Semantic
+  // Semantic — the TEXT role: these read against the panel background.
   destructive: 'var(--fe-destructive)',
   success: 'var(--fe-success)',
   warning: 'var(--fe-warning)',
   info: 'var(--fe-info)',
+
+  /** Semantic FILL role: use these for a filled button or chip, paired with the
+   *  matching `on*` foreground. Distinct from the text role above because a
+   *  colour chosen to be legible as text on the panel is too light to carry
+   *  white text as a background — the same split `onPrimary` exists for. */
+  destructiveFill: 'var(--fe-destructive-fill)',
+  destructiveFillHover: 'var(--fe-destructive-fill-hover)',
+  onDestructive: 'var(--fe-on-destructive)',
+  infoFill: 'var(--fe-info-fill)',
+  onInfo: 'var(--fe-on-info)',
 
   // Guide overlay (on-page — not themed, mode-coded to read over page content)
   guide: '#8b5cf6',

@@ -565,13 +565,21 @@ export class InsertPanel {
       header.textContent = CATEGORY_LABELS[category];
       this.catalogListEl.appendChild(header);
 
-      // Entry grid
+      // Entry grid.
+      //
+      // Layout presets get a single column. Their labels carry a ratio and an
+      // orientation — "1/2 + 1/4 + 1/4 (column)" — and in a half-width cell of
+      // a 240px panel the ellipsis lands on the suffix, which is the only part
+      // that differs between a preset and the one beside it. Both variants of
+      // a ratio then read identically, leaving the icon as the sole way to
+      // tell a row from a column. Every other category has short labels
+      // ("Container", "Section") that pair fine.
       const grid = createElement(
         "div",
         {},
         {
           display: "grid",
-          gridTemplateColumns: "1fr 1fr",
+          gridTemplateColumns: category === "layouts" ? "1fr" : "1fr 1fr",
           gap: "2px",
         },
       );
@@ -806,6 +814,13 @@ export class InsertPanel {
     );
     labelSpan.textContent = entry.label;
     btn.appendChild(labelSpan);
+
+    // The label is ellipsised, so a long one is unreadable on hover-less
+    // inspection and invisible to anyone relying on the accessible name being
+    // complete. Carry the full text in both title and aria-label so neither a
+    // narrow panel nor a future longer label can hide what a button inserts.
+    btn.title = entry.label;
+    btn.setAttribute("aria-label", entry.label);
 
     // Hover effects (only when not selected)
     btn.addEventListener("mouseenter", () => {

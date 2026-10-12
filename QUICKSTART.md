@@ -116,7 +116,7 @@ Install **Visual Web Editor for AI Agents** from the Chrome Web Store. To instal
 ### Elements do not show a hover highlight
 
 - Confirm the dev server is running and `http://localhost` (not `https`) is open
-- On `localhost` and `127.0.0.1` the editor loads automatically; on any other page you have to click the toolbar icon to load it
+- The extension activates on `localhost` and `127.0.0.1` origins only
 - Ensure the extension toggle is **On** (not just installed)
 
 ### "No edit option" after clicking an element
