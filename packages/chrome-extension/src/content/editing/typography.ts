@@ -296,12 +296,20 @@ export class TypographyEditor {
       value: String(isNaN(currentNum) ? 1.5 : currentNum / parseFloat(getComputedProperty(element, 'font-size'))),
     }, {
       flex: '1',
+      // Chrome gives range inputs a content-based automatic minimum width of
+      // roughly 129px, which flex:1 alone cannot shrink past. Combined with the
+      // 66px label and the readout, the row's minimum exceeded the 218px
+      // content box and the overflow was sheared off by the panel's
+      // overflow:hidden — taking the readout with it.
+      minWidth: '0',
       pointerEvents: 'auto',
       cursor: 'pointer',
     });
 
     const valueDisplay = createText('span', currentValue, 'mono');
     valueDisplay.style.width = '40px';
+    // Without this the readout is the flex item that loses the fight for space.
+    valueDisplay.style.flexShrink = '0';
     valueDisplay.style.textAlign = 'right';
     valueDisplay.style.fontSize = '10px';
 
@@ -410,6 +418,12 @@ export class TypographyEditor {
     labelEl.style.width = '66px';
     labelEl.style.flexShrink = '0';
     labelEl.style.fontSize = '10px';
+    // CSS property names contain hyphens, which are legal soft-break
+    // opportunities. At 10px mono "font-family" and "line-height" are just
+    // wider than this 66px box, so without nowrap they broke mid-word into
+    // "font-" / "family". Nowrap keeps them on one line; the label is a fixed
+    // width the panel already accounts for, so nothing else moves.
+    labelEl.style.whiteSpace = 'nowrap';
     row.appendChild(labelEl);
 
     return row;
@@ -450,7 +464,20 @@ export class TypographyEditor {
       select.appendChild(opt);
     }
 
+    // The select is deliberately shrinkable (flex:1 / minWidth:0) so it never
+    // widens the panel, which means a long value — a font stack runs to several
+    // hundred pixels — is clipped by the native control with no ellipsis and no
+    // way to read it. Mirroring the selection into `title` keeps it
+    // recoverable, and keeping it in sync on change stops the tooltip going
+    // stale against the visible value.
+    const syncTitle = (): void => {
+      const opt = select.selectedOptions[0];
+      select.title = opt ? opt.textContent ?? select.value : select.value;
+    };
+    syncTitle();
+
     select.addEventListener('change', () => {
+      syncTitle();
       const token = tokens.find((t) => t.value === select.value);
       onChange(select.value, token);
     });

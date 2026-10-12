@@ -398,7 +398,18 @@ export class PositionEditor {
       });
       btn.dataset.posValue = pos;
       btn.style.flex = '1';
-      btn.style.padding = '3px 0';
+      // flex:1 is `1 1 0%`, but a flex item's automatic minimum size is its
+      // min-content — here an unbreakable uppercase word. Five of them
+      // (STATIC…STICKY) plus gaps came to ~205px against a 198px content box,
+      // so the row overflowed and overflow:hidden cut STICKY off entirely.
+      // minWidth:0 lets them compress; the title carries the full word for any
+      // that end up ellipsised.
+      btn.style.minWidth = '0';
+      btn.style.overflow = 'hidden';
+      btn.style.textOverflow = 'ellipsis';
+      btn.style.whiteSpace = 'nowrap';
+      btn.title = pos;
+      btn.style.padding = '3px 2px';
       btn.style.fontSize = '9px';
       btn.style.fontFamily = OVERLAY.monoFamily;
       btn.style.textTransform = 'uppercase';

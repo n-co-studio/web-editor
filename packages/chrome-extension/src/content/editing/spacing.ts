@@ -280,7 +280,14 @@ export class SpacingEditor {
     // Property rows in a 2x2 grid: T R / B L
     const grid = createElement('div', {}, {
       display: 'grid',
-      gridTemplateColumns: '1fr 1fr',
+      // minmax(0, 1fr), not 1fr. A bare `1fr` is `minmax(auto, 1fr)`, so each
+      // track's minimum is its content's min-content width — and these cells
+      // hold a <select> whose widest option is a matched-rule label like
+      // "0px (*, ::before, ::after)". That inflated both tracks past the 198px
+      // body, and the panel's overflow:hidden sheared the right-hand column,
+      // taking the R and L side labels with it. A 0 minimum lets the tracks
+      // stay within the panel and the selects ellipsise instead.
+      gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
       gap: '3px',
     });
 

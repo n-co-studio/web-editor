@@ -240,7 +240,16 @@ export class ColorEditor {
     previewRow.appendChild(valueText);
     body.appendChild(previewRow);
 
-    // Token swatches
+    const reflectPick = (changes: PropertyChange[]): void => {
+      const last = changes[changes.length - 1];
+      if (last) {
+        colorChip.style.background = last.toValue;
+        valueText.textContent = last.toValue;
+      }
+      onCommit(changes);
+    };
+
+    // Token swatches, when the project has any.
     if (this.tokenStore.loaded) {
       const swatches = this.snapping.renderColorSwatches(
         (token) => {
@@ -261,31 +270,29 @@ export class ColorEditor {
       );
       body.appendChild(swatches);
     } else {
-      // No tokens loaded. Offer page-inferred colors ("On this page") above the
-      // freeform floor when the harvester found any (feature-011); otherwise
-      // fall straight through to freeform (feature-003). Either way freeform
-      // entry remains available beneath — the escape hatch is never suppressed.
-      const reflectPick = (changes: PropertyChange[]): void => {
-        const last = changes[changes.length - 1];
-        if (last) {
-          colorChip.style.background = last.toValue;
-          valueText.textContent = last.toValue;
-        }
-        onCommit(changes);
-      };
-
+      // Page-inferred colours ("On this page") sit above the freeform floor
+      // when the harvester found any (feature-011). Only offered when there are
+      // no tokens — with tokens, the swatches are the curated answer.
       const pageOptions = this.pageValueStore.getForProperty(property);
       if (pageOptions.length > 0) {
         body.appendChild(
           buildPageValueColorGroup(property, pageOptions, element, this.preview, reflectPick, this.tokenStore.hasDegradedDesignSystem()),
         );
       }
-
-      // Freeform floor — raw CSS, no toToken (feature-003).
-      body.appendChild(
-        buildColorInput(property, currentValue, element, this.preview, reflectPick),
-      );
     }
+
+    // Freeform floor — raw CSS, no toToken (feature-003). UNCONDITIONAL.
+    //
+    // This used to live inside the else above, under a comment claiming the
+    // escape hatch is never suppressed. It was: `tokenStore.loaded` is true
+    // when the project has tokens of ANY category, so a project with only
+    // spacing or type tokens rendered an empty colour-swatch grid and no
+    // picker at all — the panel had nothing clickable in it. Even with real
+    // colour tokens, a palette is a shortlist and picking a colour outside it
+    // has to stay possible.
+    body.appendChild(
+      buildColorInput(property, currentValue, element, this.preview, reflectPick),
+    );
 
     container.appendChild(body);
     this.container = container;
