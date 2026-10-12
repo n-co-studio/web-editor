@@ -149,11 +149,51 @@ The Web Store requires up to 5 screenshots at **1280×800** pixels (PNG or JPEG)
 | **Frame 2** — Change Request Queue | Queue side-panel open on the right showing 2–3 queued diffs with descriptions; toolbar icon showing orange badge; "Review" and "Send All" buttons visible. | Shows the batching / zero-setup workflow. |
 | **Frame 3** — Architecture / Zero-Setup | Split view: browser with overlay active on the left, terminal showing `npx @nco-studio/web-editor-mcp@^0` output on the right. | Shows the one-command setup and local-only architecture for reviewers and skeptical users. |
 
-### Promo tile
+### Small promo tile — 440×280
 
-- **Size:** 440×280 pixels (PNG)
-- **Content:** n'co studio wordmark / logo on a dark background (`rgba(0,0,0,0.9)`); tagline "Point → Adjust → Generate"; cyan accent (`#06b6d4`) for the arrow glyphs.
-- **Note:** Producing the actual image files is an operator step. This document specifies the content.
+**Required, not optional.** Chrome's dashboard docs list it among the assets
+you "must provide", with only the marquee tile excepted. Even where a
+submission goes through without one, Google states plainly: *"Extensions that
+don't have a small promotional image will be shown after extensions that do."*
+
+**Where it appears:** the Web Store homepage, category pages, and **search
+results**. It is the thumbnail next to every competing extension when someone
+browses or searches — not a listing-page decoration. It renders at roughly
+220×140, so it is read at about half the size it is authored at.
+
+**Hard constraints** (any of these is an outright rejection):
+
+- Exactly 440×280. 439×280 is refused — check the export, some editors round.
+- PNG (24-bit, **no alpha**) or JPEG. A transparent background is not accepted.
+- Keep text inside the centre 70%; the edges get cropped in some placements.
+
+**Content direction:**
+
+- A single mark or illustration filling 40%+ of the tile. At 220px wide it gets
+  about two seconds of attention, so it has to read at a glance rather than be
+  parsed.
+- No screenshot. Google is explicit: *"Don't just use a screenshot; your images
+  should communicate the brand and appear professional."*
+- Nothing that claims store status — no "Editor's Choice", no "#1".
+- Author at 2× (880×560) and export at 1×, so it stays sharp on high-DPI.
+
+**Branding must match the rest of the listing.** Google asks for consistency
+between the tile, the icon and the screenshots. Note that the three screenshots
+in `docs/store-assets/` are **light** — white page, light panels — so the dark
+`rgba(0,0,0,0.9)` background previously specified here would make the tile the
+odd one out. Either carry the light ground through to the tile, or accept that
+the tile is deliberately the dark "brand" moment and make the icon agree with
+it. Pick one and apply it to all three surfaces.
+
+Suggested content, unchanged in substance from the original spec: n'co studio
+wordmark, the tagline "Point → Adjust → Generate", cyan accent `#06b6d4` on the
+arrow glyphs.
+
+### Marquee promo tile — 1400×560
+
+Genuinely optional. Only used if the item is picked for the rotating carousel
+on the store homepage, and it cannot be picked without one. Worth producing
+only if being featured is a goal.
 
 ---
 

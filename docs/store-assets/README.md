@@ -34,5 +34,13 @@ trusting it — where the toolbar sits moves between captures.
 
 ## Still needed
 
-- **Promo tile, 440×280.** Not derivable from a screenshot; it is a designed
-  marketing tile. Optional for submission, but required to be featured.
+- **Small promo tile, 440×280.** Not derivable from a screenshot — Google
+  explicitly asks for brand artwork rather than a capture. Treat it as
+  **required**: the dashboard docs list it among the assets you must provide,
+  and items without one rank below items with one. It appears on the store
+  homepage, category pages and in search results, at roughly 220×140.
+  PNG 24-bit with no alpha, or JPEG. Exact dimensions or it is rejected.
+  Full spec in `docs/store-listing.md`.
+
+- **Marquee tile, 1400×560.** Genuinely optional — only for the homepage
+  carousel, which an item cannot be chosen for without it.
