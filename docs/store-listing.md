@@ -186,10 +186,22 @@ tile as the only dark surface in the listing.
 
 | Role | Value | Why |
 |------|-------|-----|
-| Ground | `#FFFFFF` | matches icon and all three screenshots |
-| Ink / wordmark | `#0F0F0F` | the guide's `--color-ink`; near-identical to the icon's `#212420` |
-| Accent | `#609D53` | **the store icon's green** — the mark repeated most often across the listing |
-| Secondary accent | `#06b6d4` | the editor's selection cyan, visible in every screenshot |
+Updated 2026-10-12 after the icon was redrawn: the icon now sits on a dark
+`#444444` ground rather than white, and the delivered tile resolves that by
+splitting — a `#444444` header band carrying the lockup, over a near-white
+body carrying the tagline. The header matches the icon, the body matches the
+screenshots, and neither surface has to overrule the other.
+
+| Role | Value | Why |
+|------|-------|-----|
+| Header band | `#444444` | matches the store icon's ground exactly |
+| Body | `#F7F7F7` | matches the three screenshots |
+| Lockup / accent | `#C5E3BF` | the icon's pale green `#D2F2CB`, as used on the band |
+| Tagline ink | `#474747` | dark grey on the near-white body |
+
+Superseded: the earlier spec called for a flat `#FFFFFF` ground with `#609D53`
+accent, both taken from the previous white-ground icon. Neither value survives
+the redraw.
 
 **On the accent.** Four different accents exist across the project: the icon's
 green `#609D53`, the editor UI's cyan `#06b6d4`, the nco.studio site's orange
