@@ -13,6 +13,7 @@ import { PreviewManager } from './editing/preview';
 import { DragHandleManager, getDimensionBlockReason } from './editing/handles';
 import { DimensionsEditor } from './editing/dimensions';
 import { SpacingEditor } from './editing/spacing';
+import { BorderRadiusEditor } from './editing/border-radius';
 import { PositionEditor } from './editing/position';
 import { KeyboardHandler } from './editing/keyboard';
 import { DiffBuilder } from './batching/diff-builder';
@@ -129,6 +130,7 @@ let typographyEditor: TypographyEditor | null = null;
 let colorEditor: ColorEditor | null = null;
 let dimensionsEditor: DimensionsEditor | null = null;
 let spacingEditor: SpacingEditor | null = null;
+let borderRadiusEditor: BorderRadiusEditor | null = null;
 let layoutEditor: LayoutEditor | null = null;
 let positionEditor: PositionEditor | null = null;
 let editHistory: EditHistory | null = null;
@@ -642,6 +644,7 @@ export async function activate(): Promise<void> {
   // spacing panel surfaces the same matched rules (pseudo-class rules included)
   // that diff attribution already credits.
   spacingEditor = new SpacingEditor(tokenStore, preview, pageValueStore, (el) => activeRulesFor(el).rules);
+  borderRadiusEditor = new BorderRadiusEditor(tokenStore, preview);
   layoutEditor = new LayoutEditor(tokenStore, preview, pageValueStore);
   positionEditor = new PositionEditor(shadow, preview);
 
@@ -781,6 +784,7 @@ export async function activate(): Promise<void> {
     colorEditor!.cleanup();
     dimensionsEditor!.cleanup();
     spacingEditor!.cleanup();
+    borderRadiusEditor!.cleanup();
     layoutEditor!.cleanup();
     positionEditor!.cleanup();
     reorderEditor!.cleanup();
@@ -843,6 +847,7 @@ export async function activate(): Promise<void> {
     colorEditor!.cleanup();
     dimensionsEditor!.cleanup();
     spacingEditor!.cleanup();
+    borderRadiusEditor!.cleanup();
     layoutEditor!.cleanup();
     positionEditor!.cleanup();
     reorderEditor!.cleanup();
@@ -927,6 +932,7 @@ export async function activate(): Promise<void> {
       colorEditor!.cleanup();
       dimensionsEditor!.cleanup();
       spacingEditor!.cleanup();
+      borderRadiusEditor!.cleanup();
       layoutEditor!.cleanup();
       positionEditor!.cleanup();
       reorderEditor!.cleanup();
@@ -984,6 +990,7 @@ export async function activate(): Promise<void> {
     colorEditor!.reposition(toolbar!.getButtonPosition('colors'));
     dimensionsEditor!.reposition(toolbar!.getButtonPosition('dimensions'));
     spacingEditor!.reposition(toolbar!.getButtonPosition('spacing'));
+    borderRadiusEditor!.reposition(toolbar!.getButtonPosition('border-radius'));
     layoutEditor!.reposition(toolbar!.getButtonPosition('layout'));
     positionEditor!.reposition(toolbar!.getButtonPosition('position'));
     if (notesEditor!.getPositionMode() === 'toolbar') {
@@ -1018,6 +1025,12 @@ export async function activate(): Promise<void> {
     else { toolbar!.setActiveMode('cursor'); }
   });
   spacingEditor.onClose(() => {
+    handles!.hideHandles();
+    const el = selection?.getSelectedElement();
+    if (el) { activateToolForElement(el, 'cursor'); }
+    else { toolbar!.setActiveMode('cursor'); }
+  });
+  borderRadiusEditor.onClose(() => {
     handles!.hideHandles();
     const el = selection?.getSelectedElement();
     if (el) { activateToolForElement(el, 'cursor'); }
@@ -1375,6 +1388,7 @@ export function deactivate(): void {
   colorEditor?.cleanup();
   dimensionsEditor?.cleanup();
   spacingEditor?.cleanup();
+  borderRadiusEditor?.cleanup();
   layoutEditor?.cleanup();
   positionEditor?.cleanup();
   reorderEditor?.cleanup();
@@ -1440,6 +1454,7 @@ export function deactivate(): void {
   colorEditor = null;
   dimensionsEditor = null;
   spacingEditor = null;
+  borderRadiusEditor = null;
   layoutEditor = null;
   positionEditor = null;
   editHistory = null;
@@ -1509,6 +1524,7 @@ function activateToolForElement(el: Element, mode: EditMode): void {
   colorEditor!.cleanup();
   dimensionsEditor!.cleanup();
   spacingEditor!.cleanup();
+  borderRadiusEditor!.cleanup();
   layoutEditor!.cleanup();
   positionEditor!.cleanup();
   reorderEditor!.cleanup();
@@ -1569,6 +1585,22 @@ function activateToolForElement(el: Element, mode: EditMode): void {
     });
     shadow!.appendChild(controls);
     toolbar!.setActiveMode('spacing');
+  } else if (mode === 'border-radius') {
+    // Corner drag handles stay — they were the only radius affordance before
+    // this panel existed, and dragging remains the faster gesture. The panel
+    // adds what dragging cannot: reading the current value, typing an exact
+    // one, setting all four at once, and snapping to a token.
+    handles!.showHandles(el, mode);
+    const pos = toolbar!.getButtonPosition('border-radius');
+    const controls = borderRadiusEditor!.render(el, pos, (changes) => {
+      const info = buildElementInfo(el);
+      const diff = diffBuilder!.build(info, changes, el);
+      commitEdit(el, changes, diff);
+      selection!.refreshHighlight();
+      handles!.refreshHandles();
+    });
+    shadow!.appendChild(controls);
+    toolbar!.setActiveMode('border-radius');
   } else if (mode === 'layout') {
     handles!.showHandles(el, 'dimensions');
     const pos = toolbar!.getButtonPosition('layout');
@@ -2757,6 +2789,7 @@ function enterMultiSelectMode(): void {
   colorEditor?.cleanup();
   dimensionsEditor?.cleanup();
   spacingEditor?.cleanup();
+  borderRadiusEditor?.cleanup();
   layoutEditor?.cleanup();
   positionEditor?.cleanup();
   reorderEditor?.cleanup();
