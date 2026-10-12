@@ -43,6 +43,16 @@ export class ReviewPanel {
     private readonly diffBuilder: DiffBuilder,
     private readonly notesStore: NotesStore,
     private readonly onHighlightElement?: (selector: string) => void,
+    /**
+     * Hover preview for a queue entry. Called with the entry's selector on
+     * mouseenter and `null` on mouseleave.
+     *
+     * Separate from `onHighlightElement`, which is the click action and holds
+     * its highlight on a timer. A hover highlight has to track the pointer
+     * exactly — appearing and disappearing with it — so the two cannot share
+     * a mechanism.
+     */
+    private readonly onHoverElement?: (selector: string | null) => void,
   ) {
     // Auto-refresh when queue or notes change
     queue.onChange(() => {
@@ -513,6 +523,19 @@ export class ReviewPanel {
     header.addEventListener('click', () => {
       this.onHighlightElement?.(selector);
     });
+
+    // Hovering anywhere on the entry highlights the element it changes.
+    //
+    // Bound to the whole group rather than the header alone: the entry is a
+    // card listing an element's changes, so the element it refers to is what
+    // the card as a whole is about, and requiring the pointer to find the
+    // selector text would make the connection hard to discover.
+    //
+    // mouseenter/mouseleave rather than mouseover/mouseout — the latter fire
+    // again for every child crossed, which would strobe the highlight as the
+    // pointer moved between the rows inside a card.
+    group.addEventListener('mouseenter', () => { this.onHoverElement?.(selector); });
+    group.addEventListener('mouseleave', () => { this.onHoverElement?.(null); });
     header.addEventListener('mouseenter', () => { header.style.textDecoration = 'underline'; });
     header.addEventListener('mouseleave', () => { header.style.textDecoration = 'none'; });
     headerRow.appendChild(header);

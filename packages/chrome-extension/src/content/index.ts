@@ -630,13 +630,29 @@ export async function activate(): Promise<void> {
   toolbar = new FloatingToolbar(shadow);
   handles = new DragHandleManager(shadow, snapping, preview, () => rulerOverlay?.getGuidePositions() ?? { x: [], y: [] });
   keyboard = new KeyboardHandler(shadow, handles, null as any, selection);
-  reviewPanel = new ReviewPanel(shadow!, queue!, wsClient!, diffBuilder!, notesStore!, (selector) => {
-    const el = document.querySelector(selector);
-    if (el) {
-      hover?.showProgrammaticHighlight(el);
-      setTimeout(() => hover?.clearProgrammaticHighlight(), 3000);
-    }
-  });
+  reviewPanel = new ReviewPanel(
+    shadow!, queue!, wsClient!, diffBuilder!, notesStore!,
+    // Click: hold the highlight briefly so it survives the pointer leaving.
+    (selector) => {
+      const el = document.querySelector(selector);
+      if (el) {
+        hover?.showProgrammaticHighlight(el);
+        setTimeout(() => hover?.clearProgrammaticHighlight(), 3000);
+      }
+    },
+    // Hover: track the pointer exactly, with no timer.
+    //
+    // Uses the same highlightElement/unhighlightElement pair the DevTools DOM
+    // tree hover uses, so a queue entry and a tree row highlight identically.
+    // A selector that no longer matches - the element was removed, or the page
+    // navigated - simply clears, rather than leaving a stale highlight behind.
+    (selector) => {
+      if (selector === null) { hover?.unhighlightElement(); return; }
+      const el = document.querySelector(selector);
+      if (el) hover?.highlightElement(el);
+      else hover?.unhighlightElement();
+    },
+  );
   typographyEditor = new TypographyEditor(tokenStore, preview, pageValueStore);
   colorEditor = new ColorEditor(tokenStore, snapping, preview, pageValueStore);
   dimensionsEditor = new DimensionsEditor(preview);
