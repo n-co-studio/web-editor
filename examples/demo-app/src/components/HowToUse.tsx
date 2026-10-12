@@ -60,30 +60,47 @@ re-check the queue before you go idle.`}</Code>
     ),
   },
   {
-    title: 'Select an element',
+    title: 'Select and edit elements',
     body: (
-      <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
-        Point and click anything on the page. Build-time tags map every element to its component in
-        code, so what you select is exactly what the agent will edit.
-      </p>
-    ),
-  },
-  {
-    title: 'Edit with your design system',
-    body: (
-      <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
-        Adjust spacing, size, type, color, and layout. The editor pulls the design-system tokens from
-        your code and restricts edits to token values, so every change stays on-system.
-      </p>
-    ),
-  },
-  {
-    title: 'Rearrange by dragging',
-    body: (
-      <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
-        Drag to reorder elements. The editor works with CSS grid and flexbox auto-layout, so the page
-        stays responsive and the generated code stays clean.
-      </p>
+      <>
+        <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
+          Point and click anything on the page. Build-time tags map every element to its component in
+          code, so what you select is exactly what the agent will edit. From there:
+        </p>
+        <ul
+          style={{
+            listStyle: 'disc',
+            paddingLeft: 'var(--space-5)',
+            margin: 'var(--space-3) 0 0',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 'var(--space-3)',
+            fontSize: 'var(--text-body-sm)',
+            color: 'var(--color-secondary)',
+          }}
+        >
+          <li>
+            <strong style={{ color: 'var(--color-ink)', fontWeight: 'var(--fw-regular)' }}>
+              Edit with your design system.
+            </strong>{' '}
+            Adjust spacing, size, type, colour and layout. The editor reads the design tokens from
+            your code and snaps edits to them, so changes stay on-system.
+          </li>
+          <li>
+            <strong style={{ color: 'var(--color-ink)', fontWeight: 'var(--fw-regular)' }}>
+              Rearrange by dragging.
+            </strong>{' '}
+            Reorder elements directly. The editor understands CSS grid and flexbox auto-layout, so
+            the page stays responsive and the generated code stays clean.
+          </li>
+          <li>
+            <strong style={{ color: 'var(--color-ink)', fontWeight: 'var(--fw-regular)' }}>
+              Change text, images and structure.
+            </strong>{' '}
+            Edit copy in place, swap images, insert or remove elements — not just styling.
+          </li>
+        </ul>
+      </>
     ),
   },
   {

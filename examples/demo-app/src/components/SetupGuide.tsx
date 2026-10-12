@@ -187,13 +187,41 @@ function ConnectYourAgent() {
     <>
       <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
         It’s a standard MCP server — the same config works with any MCP-compatible agent. Your agent
-        launches it, and it also serves the extension over WebSocket. Pick yours:
+        launches it, and it also serves the extension over WebSocket.
       </p>
 
+      {/* Pills on a tinted strip, not underlined text.
+          These were set as plain body text with a 1px underline on the active
+          one, which made a control the reader has to act on look like prose
+          they can skim past — and the whole step is wrong if the wrong agent
+          is selected, because the config below changes with it. A label, a
+          surface and a filled active state make it read as a choice. */}
+      <div
+        style={{
+          marginTop: 'var(--space-4)',
+          padding: 'var(--space-4)',
+          background: 'var(--color-surface)',
+          border: '1px solid var(--color-border)',
+          borderRadius: 'var(--radius-sm, 4px)',
+        }}
+      >
+        <div
+          id="agent-picker-label"
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: 'var(--text-caption)',
+            letterSpacing: '0.04em',
+            textTransform: 'uppercase',
+            color: 'var(--color-secondary)',
+            marginBottom: 'var(--space-3)',
+          }}
+        >
+          Choose your agent
+        </div>
       <div
         role="radiogroup"
-        aria-label="Your agent"
-        style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-5)' }}
+        aria-labelledby="agent-picker-label"
+        style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}
       >
         {PROVIDERS.map((p, i) => {
           const selected = p.name === provider.name;
@@ -214,18 +242,20 @@ function ConnectYourAgent() {
                 fontFamily: 'var(--font-sans)',
                 fontSize: 'var(--text-body-sm)',
                 fontWeight: 'var(--fw-book)',
-                color: selected ? 'var(--color-ink)' : 'var(--color-secondary)',
-                background: 'none',
-                border: 'none',
-                borderBottom: `1px solid ${selected ? 'var(--color-ink)' : 'transparent'}`,
-                padding: '0 0 2px',
+                color: selected ? 'var(--color-on-ink)' : 'var(--color-ink)',
+                background: selected ? 'var(--color-ink)' : 'var(--color-bg)',
+                border: `1px solid ${selected ? 'var(--color-ink)' : 'var(--color-border)'}`,
+                borderRadius: 'var(--radius-full, 999px)',
+                padding: 'var(--space-2) var(--space-4)',
                 cursor: 'pointer',
+                transition: 'background 0.12s, color 0.12s, border-color 0.12s',
               }}
             >
               {p.name}
             </button>
           );
         })}
+      </div>
       </div>
 
       <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
@@ -310,11 +340,26 @@ const STEPS: Step[] = [
     body: <ConnectYourAgent />,
   },
   {
-    title: 'Add the dev plugin (optional)',
+    title: 'Add the dev plugin (recommended)',
     body: (
       <>
         <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
-          Enables source-file mapping so edits point at the exact line. Install it in your project:
+          <strong style={{ color: 'var(--color-ink)', fontWeight: 'var(--fw-book)' }}>
+            This is the step that connects your edits to your code.
+          </strong>{' '}
+          The plugin tags every element at build time with the file and line it came from. Without
+          those tags the editor still works — you can select, adjust and queue — but your agent
+          receives a CSS selector and has to go looking for what it belongs to. It will guess, and
+          on a codebase with repeated components it will sometimes guess wrong.
+        </p>
+        <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
+          With the plugin, a change arrives naming the exact component and line, so the edit lands
+          where you meant it. Recommended rather than required: the editor runs without it, but
+          skipping it is the difference between an agent that knows what you clicked and one that
+          is inferring.
+        </p>
+        <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
+          It is a dev dependency and does nothing in a production build. Install it in your project:
         </p>
         <Code>{`npm install --save-dev @nco-studio/web-editor-plugin`}</Code>
         <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
