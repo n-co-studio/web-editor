@@ -40,7 +40,11 @@ trusting it — where the toolbar sits moves between captures.
   and items without one rank below items with one. It appears on the store
   homepage, category pages and in search results, at roughly 220×140.
   PNG 24-bit with no alpha, or JPEG. Exact dimensions or it is rejected.
-  Full spec in `docs/store-listing.md`.
+
+  **White ground**, to match the store icon and the three screenshots here.
+  Type in `#0F0F0F`; green `#609D53` (the icon's) on arrows and shapes only —
+  it is 3.3:1 on white, so nothing legible should depend on it. Full spec and
+  the reasoning in `docs/store-listing.md`.
 
 - **Marquee tile, 1400×560.** Genuinely optional — only for the homepage
   carousel, which an item cannot be chosen for without it.

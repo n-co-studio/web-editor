@@ -177,17 +177,38 @@ browses or searches — not a listing-page decoration. It renders at roughly
 - Nothing that claims store status — no "Editor's Choice", no "#1".
 - Author at 2× (880×560) and export at 1×, so it stays sharp on high-DPI.
 
-**Branding must match the rest of the listing.** Google asks for consistency
-between the tile, the icon and the screenshots. Note that the three screenshots
-in `docs/store-assets/` are **light** — white page, light panels — so the dark
-`rgba(0,0,0,0.9)` background previously specified here would make the tile the
-odd one out. Either carry the light ground through to the tile, or accept that
-the tile is deliberately the dark "brand" moment and make the icon agree with
-it. Pick one and apply it to all three surfaces.
+**Ground: white.** Decided 2026-10-12. Google asks for consistency between the
+tile, the icon and the screenshots, and white is what the other two already
+are — the store icon sits on `#FEFEFE` and all three screenshots in
+`docs/store-assets/` are a white page with light panels. An earlier version of
+this spec called for a dark `rgba(0,0,0,0.9)` ground, which would have left the
+tile as the only dark surface in the listing.
 
-Suggested content, unchanged in substance from the original spec: n'co studio
-wordmark, the tagline "Point → Adjust → Generate", cyan accent `#06b6d4` on the
-arrow glyphs.
+| Role | Value | Why |
+|------|-------|-----|
+| Ground | `#FFFFFF` | matches icon and all three screenshots |
+| Ink / wordmark | `#0F0F0F` | the guide's `--color-ink`; near-identical to the icon's `#212420` |
+| Accent | `#609D53` | **the store icon's green** — the mark repeated most often across the listing |
+| Secondary accent | `#06b6d4` | the editor's selection cyan, visible in every screenshot |
+
+**On the accent.** Four different accents exist across the project: the icon's
+green `#609D53`, the editor UI's cyan `#06b6d4`, the nco.studio site's orange
+`#ff5c38`, and no chromatic accent at all in the guide. For this tile the
+icon's green leads, because the icon is the one mark that appears beside the
+tile everywhere it is shown. Cyan is available as a secondary since a viewer
+sees it in the screenshots directly below. The site's orange deliberately does
+not appear here — it belongs to nco.studio, not to this product, and the
+listing is judged against the icon and screenshots rather than the homepage.
+
+**Content:** n'co studio wordmark, the tagline "Point → Adjust → Generate",
+accent on the arrow glyphs.
+
+**Contrast, measured against white.** Ink `#0F0F0F` is 19.2:1. Green `#609D53`
+is 3.3:1 and cyan `#06b6d4` is 2.4:1 — both below the 4.5:1 that normal text
+needs, and the cyan below the 3:1 that even large text needs. So: **all type in
+`#0F0F0F`**, and the accents only on arrows, rules and shape work where nothing
+has to be read. This is a listing thumbnail rendered at ~220px, so anything
+marginal at full size is illegible in place.
 
 ### Marquee promo tile — 1400×560
 
