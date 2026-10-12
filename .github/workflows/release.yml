@@ -36,7 +36,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
 
       - name: Install dependencies
@@ -80,11 +80,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Node 24 ships npm 11.x. Trusted publishing requires npm >= 11.5.1, so
+      # the Node 20 this job pinned before (npm 10.x) could never authenticate
+      # over OIDC — it would have failed however the trusted publisher was set
+      # up, with a 401 that looks like a misconfiguration rather than a version
+      # problem.
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
           cache: 'npm'
+
+      # Assert it rather than trust it, so a future change to the Node image
+      # surfaces here as a clear message instead of a 401 at publish time.
+      - name: Verify npm supports trusted publishing
+        run: |
+          need=11.5.1
+          have=$(npm --version)
+          if [ "$(printf '%s\n%s\n' "$need" "$have" | sort -V | head -1)" != "$need" ]; then
+            echo "ERROR: npm $have is too old for OIDC trusted publishing (need >= $need)"
+            exit 1
+          fi
+          echo "npm $have OK (>= $need)"
 
       - name: Install dependencies
         run: npm ci
@@ -100,10 +117,26 @@ jobs:
           test -d packages/mcp-server/dist   || (echo "ERROR: mcp-server/dist missing" && exit 1)
           test -d packages/dev-plugin/dist    || (echo "ERROR: dev-plugin/dist missing"  && exit 1)
 
+      # Provenance attestation requires a PUBLIC repository. Asking for it on a
+      # private repo fails the publish outright, so the flag is decided at run
+      # time: the release still goes out either way, and provenance switches
+      # itself on the moment the repository is made public — no edit needed.
+      - name: Decide provenance flag
+        id: prov
+        run: |
+          if [ "${{ github.event.repository.private }}" = "true" ]; then
+            echo "flag=" >> "$GITHUB_OUTPUT"
+            echo "Repository is private — publishing WITHOUT provenance."
+            echo "Make the repository public to get signed provenance statements."
+          else
+            echo "flag=--provenance" >> "$GITHUB_OUTPUT"
+            echo "Repository is public — publishing with provenance."
+          fi
+
       - name: Publish @nco-studio/web-editor-mcp
-        run: npm publish --provenance --access public
+        run: npm publish ${{ steps.prov.outputs.flag }} --access public
         working-directory: packages/mcp-server
 
       - name: Publish @nco-studio/web-editor-plugin
-        run: npm publish --provenance --access public
+        run: npm publish ${{ steps.prov.outputs.flag }} --access public
         working-directory: packages/dev-plugin
