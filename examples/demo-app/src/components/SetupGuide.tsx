@@ -435,17 +435,6 @@ and acknowledge_visual_change tools.`}</Code>
           <code style={{ fontFamily: 'var(--font-mono)' }}>nco-web-editor</code> is the <code style={{ fontFamily: 'var(--font-mono)' }}>mcpServers</code> key
           from step 2 — swap in whatever you named it. The server runs on your machine; your agent is the one that sees your edits, and most agents send what they read to a model provider.
         </p>
-        <p
-          style={{
-            marginTop: 'var(--space-4)',
-            paddingLeft: 'var(--space-4)',
-            borderLeft: '2px solid var(--color-success)',
-            fontSize: 'var(--text-body-sm)',
-            color: 'var(--color-ink)',
-          }}
-        >
-          That’s setup complete — the loop is running. Everything after this is just using it.
-        </p>
       </>
     ),
   },
