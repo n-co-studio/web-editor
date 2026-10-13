@@ -5,6 +5,7 @@
  */
 
 import type { ReactNode } from 'react';
+import CopyPromptButton from './CopyPromptButton';
 
 function Code({ children }: { children: string }) {
   return (
@@ -28,6 +29,34 @@ function Code({ children }: { children: string }) {
 
 type Step = { title: string; body: ReactNode };
 
+/**
+ * The watch loop handed to the agent in step 1.
+ *
+ * Written as a standing instruction rather than a task. The earlier version
+ * ended "re-check the queue before you go idle", which an agent can satisfy by
+ * checking once and stopping — and then the next batch sits in the queue
+ * unnoticed while the designer keeps editing, which looks like the tool is
+ * broken. This version says to return to watching and makes idle mean waiting
+ * for the next batch, not finishing.
+ *
+ * It also names the stop condition. Without one, "keep going" invites an agent
+ * to burn tokens spinning; being told that waiting is the correct state, and
+ * that only the user ends it, is what makes idling safe.
+ */
+const WATCH_PROMPT = `Watch editor-queue-status.yaml and wait for pending_count
+to go above zero.
+
+When a batch lands: read it with get_pending_visual_changes,
+apply each diff to the source file it names, then call
+acknowledge_visual_change on each one.
+
+Then check the queue again. If another batch has arrived,
+repeat immediately. If not, go back to watching and stay
+there — waiting is the correct state, not a reason to stop.
+
+Keep this loop running until I tell you otherwise. Do not end
+the task because the queue is empty.`;
+
 const STEPS: Step[] = [
   {
     title: 'Put your agent on watch',
@@ -37,12 +66,11 @@ const STEPS: Step[] = [
           Start an agent session in the project first — it launches the bridge, so nothing can reach
           your code until one is running. Then hand it the loop:
         </p>
-        <Code>{`Watch editor-queue-status.yaml for pending_count above
-zero. When a batch lands, read it with
-get_pending_visual_changes, apply each diff to the source file
-it names, then acknowledge_visual_change on each one — and
-re-check the queue before you go idle.`}</Code>
-        <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
+        <Code>{WATCH_PROMPT}</Code>
+        <div style={{ marginTop: 'var(--space-4)' }}>
+          <CopyPromptButton text={WATCH_PROMPT} />
+        </div>
+        <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)', marginTop: 'var(--space-4)' }}>
           Agents that read the server's own instructions already work this way; the prompt makes it
           explicit for those that don't.
         </p>
