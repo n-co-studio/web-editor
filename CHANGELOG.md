@@ -6,13 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-12
+
+Renames the product to **AI Agent Visual Editor**, and fixes the editing panels — several colour controls in the shipped 0.2.0 build did nothing at all when clicked.
+
 ### Added
 
+- **Border radius panel** — radius gets the same panel treatment as every other tool: an "All corners" row plus a 2×2 grid for per-corner control.
+- **"No colour" in the colour picker** — clearing a colour no longer depends on the project having design tokens; the option is present either way and commits `transparent`.
+- **Queue entries highlight what they change** — hovering a row in the Change Request Queue highlights the corresponding element on the page.
+- **Copy-prompt buttons in the hosted guide**, including a watch-loop prompt that returns the agent to watching until told otherwise.
 - **Light / Dark / System theme toggle** — the toolbar-icon popup now has a three-way theme control (Light / Dark / System). The preference persists via `chrome.storage.local` and applies live without reloading the overlay. System mode follows the OS `prefers-color-scheme` setting and is the default.
 - **Two-column toolbar** — the floating toolbar lays its sections out in two columns, 608px tall instead of 978px, so it fits an ordinary viewport with every section open instead of auto-collapsing to cope.
 
 ### Fixed
 
+- **Colour controls were dead across the whole product.** Panels build their subtree and attach it to the shadow root last, so the popover resolved its host while the swatch was still detached and was never inserted into any document. Opening it set `display` on an orphan: nothing appeared and nothing threw. A second fault sat behind it — shadow-DOM event retargeting made a `pointerdown` inside the popover look like an outside click, dismissing it before the selection could land. Both are covered by regression tests that reproduce the real topology.
+- **Non-colour values no longer reach the colour picker**, and the Typography colour control no longer offers a dropdown of things that aren't colours.
+- **Three panels clipped their contents** (Typography, Spacing, Position) — two distinct CSS causes: a bare `1fr` track resolving to `minmax(auto, 1fr)`, and range inputs asserting a content-based minimum width.
+- **Apply Changes failed contrast in light mode.** `--fe-primary` was darkened to sit on white as text, then reused as a button fill with hardcoded black text. Fill and text roles now carry opposite foregrounds via `--fe-on-primary`; the same mistake was found and fixed in two other places.
+- **The inline text toolbar no longer flickers** — it is pinned and positioned from the selection rather than hidden and re-shown as the cursor moves.
+- **White colour swatches share one outline** regardless of fill, so a white swatch is visible against a white panel.
 - **Toolbar can no longer be stranded off-screen** — a position restored from a larger window, or a window resized after the toolbar was placed, could leave it entirely outside the viewport with no way to reach it short of a reload. It is now re-pinned inside the viewport on restore and on resize, including while collapsed.
 
 ### Changed
