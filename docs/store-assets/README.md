@@ -3,35 +3,33 @@
 Screenshots for the store listing. Chrome requires each to be **exactly
 1280×800** or 640×400 — anything else is rejected at upload.
 
-| File | Shows |
-|---|---|
-| `01-select-and-edit.png` | An element selected, with the dimension overlay and the toolbar |
-| `02-inline-text.png` | Inline text editing, with the formatting bar |
-| `03-insert-elements.png` | The insert panel, choosing a layout to add |
-| `promo-tile-440x280.png` | Small promo tile — store homepage, category pages, search |
+| File | Shows | Caption |
+|---|---|---|
+| `01-spacing-on-the-page.png` | Spacing panel, padding/margin overlays live on the page | Design on the page. Your agent writes the code. |
+| `02-typography-by-eye.png` | Typography panel adjusting the headline | Fine-tune type by eye, right on the page. |
+| `03-insert-layouts.png` | Insert panel with layout presets | Add sections and layouts without writing CSS. |
+| `04-edits-land-on-tokens.png` | Change queue showing token-named values | Edits land on your tokens, not one-off values. |
+| `05-localhost-own-mcp-server.png` | Setup step 2 on localhost, MCP config | Runs on localhost. Talks only to your own MCP server. |
+| `promo-tile-440x280.png` | Small promo tile | — |
 
-Generated from 3456×1992 captures. Retina captures are ~1.733, the store wants
-1.600, so a crop is unavoidable — about 7.7% of the width.
+Five screenshots, the store maximum. Each carries a caption band rather than
+being a bare capture: at the size these render in a listing, an unlabelled
+screenshot of an editor UI reads as visual noise, and the caption is what
+makes the frame legible before anyone studies it.
 
-**Crop from the left, not the centre.** Where the toolbar sits varies between
-captures, and a centred crop removes ~134px from each side, which is enough to
-slice the toolbar off when it is close to the left edge. A left-anchored crop
-keeps it, because the surplus is always on the right where the canvas is empty.
+Supplied already at 1280×800 with no alpha, so no crop or flatten was needed —
+only EXIF and XMP stripped.
 
-To regenerate from a new capture:
+If a future capture is not already 1280×800, crop it from the left rather than
+the centre — where the toolbar sits moves between captures, and a centred crop
+takes ~134px off each side, enough to slice it off:
 
-    magick shot.png -crop 3187x1992+0+0 +repage -resize 1280x800 \
+    magick shot.png -crop 3187x1992+0+0 +repage -resize 1280x800 \\
       +profile exif +profile xmp out.png
 
-(`3187 = round(height × 1.6)` — recompute if the capture height differs.)
-
 Drop EXIF and XMP, but **not** with `-strip`: that also removes the ICC colour
-profile, which leaves one screenshot rendering differently from the others in
-the same listing. `+profile exif +profile xmp` removes the metadata and keeps
-the profile.
-
-Open the result and check the toolbar and any open panel both survived before
-trusting it — where the toolbar sits moves between captures.
+profile, leaving one screenshot rendering differently from the others in the
+same listing.
 
 ## Still needed
 
