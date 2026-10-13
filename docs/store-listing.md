@@ -258,24 +258,19 @@ only if being featured is a goal.
 
 ## Support
 
-- **Support URL:** https://nco.studio/web-editor/#troubleshooting
+- **Support URL:** https://github.com/n-co-studio/web-editor/issues
 - **Support email:** hello@nco.studio
 - **Homepage URL:** https://nco.studio/web-editor/
 
-> **Do not use the GitHub issues URL while the repository is private.** It was
-> listed here as `github.com/n-co-studio/web-editor/issues`, which returns
-> **404** to anyone not on the org — i.e. to every user who clicks it from the
-> store. A support link that dead-ends is worse than none: it reads as an
-> abandoned project.
+> The repository went public on 2026-10-12, so issues are the Support URL
+> again: answers become searchable instead of living in one inbox. The email
+> stays listed alongside it — not everyone has a GitHub account, and a support
+> report about this tool often carries page content or internal URLs that
+> someone will not post publicly.
 >
-> The guide's Troubleshooting tab ends with a "Still stuck?" block that mails
-> `hello@nco.studio` with a prefilled report template, so the support URL
-> lands somewhere that both answers the common cases and offers a way through
-> when it does not.
->
-> Switch the Support URL back to GitHub issues if and when the repository is
-> made public — at which point issues are the better channel, because answers
-> become searchable instead of living in one inbox.
+> The guide's Troubleshooting tab still ends with a "Still stuck?" block
+> mailing `hello@nco.studio`, which is the fallback when the public channel is
+> itself the problem.
 
 ## Category and Tags
 

@@ -10,14 +10,15 @@
 import type { ReactNode } from 'react';
 
 /**
- * Support address and a prefilled report template.
+ * Support routes: public issues first, email as the private fallback.
  *
- * mailto rather than an issue tracker, deliberately. The repository is
- * private, so the Support URL in the store listing currently 404s for anyone
- * who clicks it; email is the one channel that actually reaches someone today.
- * An issue tracker is worth setting up when there is enough volume for
- * deduplication and public answers to pay for themselves — not before.
+ * Issues lead because an answer there is searchable and helps the next person
+ * with the same problem, where an email helps exactly one. Email stays because
+ * not everyone has a GitHub account, and a report about this tool often
+ * carries page content or internal URLs that someone will not post publicly —
+ * the subject matter is, by definition, somebody's own codebase.
  */
+const ISSUES_URL = 'https://github.com/n-co-studio/web-editor/issues';
 const SUPPORT_EMAIL = 'hello@nco.studio';
 
 const SUPPORT_BODY = [
@@ -279,15 +280,23 @@ rm .nco-web-editor/pending-queue.json`}</Code>
           Still stuck?
         </h3>
         <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)', marginTop: 'var(--space-3)' }}>
-          If your problem is not listed above, email{' '}
+          If your problem is not listed above, open an issue on{' '}
+          <a
+            href={ISSUES_URL}
+            style={{ color: 'var(--color-ink)', textDecoration: 'underline' }}
+          >
+            GitHub
+          </a>{' '}
+          — answers there are searchable, so the next person with your problem finds it. If it
+          involves page content or internal URLs you would rather not post publicly, email{' '}
           <a
             href={SUPPORT_MAILTO}
             style={{ color: 'var(--color-ink)', textDecoration: 'underline' }}
           >
             {SUPPORT_EMAIL}
-          </a>
-          . The link opens a message with the details below already in it — filling them in saves a
-          round trip, because they are the first things anyone would ask.
+          </a>{' '}
+          instead; that link opens a message with the details below already in it. Either way,
+          including them saves a round trip — they are the first things anyone would ask.
         </p>
         <ul style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)', marginTop: 'var(--space-3)', paddingLeft: 'var(--space-5)', lineHeight: 1.7 }}>
           <li>What you expected, and what happened instead</li>
