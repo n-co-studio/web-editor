@@ -69,10 +69,16 @@ jobs:
         run: node scripts/publish-dry-run.mjs
 
       # Upload built artifacts for the publish job.
-      # upload-artifact@v4 preserves full workspace-relative paths, so the
-      # artifact contains entries under packages/mcp-server/dist/ and
-      # packages/dev-plugin/dist/. Omitting path on download restores them
-      # to the workspace root — no path: override needed.
+      #
+      # upload-artifact@v4 does NOT preserve full workspace-relative paths: it
+      # roots the artifact at the LEAST COMMON ANCESTOR of the given paths.
+      # Both paths below sit under packages/, so that becomes the artifact root
+      # and it contains mcp-server/dist/ and dev-plugin/dist/ — the `packages/`
+      # prefix is stripped. The download step has to put it back.
+      #
+      # This bit the first v0.2.1 run (38352070977): the comment here claimed
+      # the opposite, download omitted `path:`, and publish died at
+      # "ERROR: mcp-server/dist missing" without ever reaching npm.
       - uses: actions/upload-artifact@v4
         with:
           name: dist-artifacts
@@ -121,11 +127,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Restores to workspace root — preserves packages/mcp-server/dist/ structure.
+      # `path: packages` is load-bearing — see the upload step. The artifact is
+      # rooted at packages/, so it must be unpacked there to land back at
+      # packages/<pkg>/dist/. Without it the files arrive at the workspace root
+      # and the verification step below fails.
       - name: Restore built artifacts
         uses: actions/download-artifact@v4
         with:
           name: dist-artifacts
+          path: packages
 
       - name: Verify dist artifacts exist
         run: |
