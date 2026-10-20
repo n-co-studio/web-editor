@@ -87,8 +87,29 @@ BRIEF_DIR=".claude/.automation/briefs"
 SEQ_BRIEF="$BRIEF_DIR/brief-1.md"
 PAR_BRIEF="$BRIEF_DIR/brief-par.md"
 
-printf '### Task Group\n\nGroup: %s\nBrief: 1 of 3\n' "$GROUP" > "$ADV_SANDBOX/$SEQ_BRIEF"
-printf '### Task Group\n\nGroup: %s\nBrief: 1 of 3\nExecution: parallel\n' "par-group" > "$ADV_SANDBOX/$PAR_BRIEF"
+# CANONICAL brief format — this is what the templates emit and what
+# _parse_brief_taskgroup_metadata requires. These fixtures previously used the
+# bare `Group: x` / `Execution: parallel` form, which no real brief uses, and
+# that is exactly why two parser defects shipped undetected: _extract_group_name
+# returned `**` for canonical briefs (so the group worktree never activated),
+# and the Execution: pattern missed `- **Execution:** parallel` (so a parallel
+# group would have been handed a shared worktree, racing its briefs).
+# A legacy-format fixture is kept below so both formats stay covered.
+{
+  printf '## Task Brief: sequential fixture\n\n### Task Group\n'
+  printf -- '- **Group:** %s\n' "$GROUP"
+  printf -- '- **Brief:** 1 of 3\n'
+  printf -- '- **Execution:** sequential\n'
+} > "$ADV_SANDBOX/$SEQ_BRIEF"
+{
+  printf '## Task Brief: parallel fixture\n\n### Task Group\n'
+  printf -- '- **Group:** %s\n' "par-group"
+  printf -- '- **Brief:** 1 of 3\n'
+  printf -- '- **Execution:** parallel\n'
+} > "$ADV_SANDBOX/$PAR_BRIEF"
+# Legacy bare format, still supported for pre-existing briefs.
+LEG_BRIEF="$BRIEF_DIR/brief-legacy.md"
+printf '### Task Group\n\nGroup: %s\nBrief: 1 of 3\n' "legacy-group" > "$ADV_SANDBOX/$LEG_BRIEF"
 
 git -C "$ADV_SANDBOX" branch "$GROUP_BRANCH" main > /dev/null 2>&1 \
   || git -C "$ADV_SANDBOX" branch "$GROUP_BRANCH" master > /dev/null 2>&1 || true
@@ -102,6 +123,164 @@ git -C "$ADV_SANDBOX" rev-parse --verify "$GROUP_BRANCH" > /dev/null 2>&1 \
   || git -C "$ADV_SANDBOX" branch "$GROUP_BRANCH" main > /dev/null 2>&1
 
 WT="$ADV_SANDBOX/.worktrees/tg-$GROUP"
+
+# ============================================================
+printf "\n# --- Brief metadata parsers: canonical AND legacy formats ---\n"
+# ============================================================
+# These assertions exist because both parsers shipped broken against the
+# canonical format while the old fixtures (bare form) passed. Each case below
+# fails on the pre-fix code.
+_tap_eq "$(_extract_group_name "$SEQ_BRIEF")" "$GROUP" \
+  "parsers: _extract_group_name reads the canonical '- **Group:**' form"
+_tap_eq "$(_extract_group_name "$LEG_BRIEF")" "legacy-group" \
+  "parsers: _extract_group_name still reads the legacy bare 'Group:' form"
+_tap_eq "$(_extract_group_name "$BRIEF_DIR/does-not-exist.md")" "" \
+  "parsers: _extract_group_name returns empty for a missing file"
+
+# A canonical Group value must never come back as markdown punctuation.
+case "$(_extract_group_name "$SEQ_BRIEF")" in
+  *'*'*) _tap_fail "parsers: canonical group name is free of bold markers" "got markdown in the value" ;;
+  *)     _tap_pass "parsers: canonical group name is free of bold markers" ;;
+esac
+
+# Execution: detection must see BOTH formats, or a parallel group gets a shared
+# worktree and its briefs race each other (Decision 0032).
+if _brief_is_sequential_group "$SEQ_BRIEF"; then
+  _tap_pass "parsers: canonical '- **Execution:** sequential' reads as sequential"
+else
+  _tap_fail "parsers: canonical '- **Execution:** sequential' reads as sequential"
+fi
+if _brief_is_sequential_group "$PAR_BRIEF"; then
+  _tap_fail "parsers: canonical '- **Execution:** parallel' reads as PARALLEL" \
+    "parallel group would be given a shared group worktree"
+else
+  _tap_pass "parsers: canonical '- **Execution:** parallel' reads as PARALLEL"
+fi
+if _brief_is_sequential_group "$LEG_BRIEF"; then
+  _tap_pass "parsers: legacy brief with no Execution line defaults to sequential"
+else
+  _tap_fail "parsers: legacy brief with no Execution line defaults to sequential"
+fi
+
+# The template documents omitting Execution: for sequential groups, so the
+# canonical-minus-Execution-line shape is the most common real one.
+NOEX_BRIEF="$BRIEF_DIR/brief-noexec.md"
+{
+  printf '## Task Brief: canonical, Execution omitted\n\n### Task Group\n'
+  printf -- '- **Group:** noexec-group\n'
+  printf -- '- **Brief:** 1 of 2\n'
+} > "$ADV_SANDBOX/$NOEX_BRIEF"
+if _brief_is_sequential_group "$NOEX_BRIEF"; then
+  _tap_pass "parsers: canonical brief omitting Execution: defaults to sequential"
+else
+  _tap_fail "parsers: canonical brief omitting Execution: defaults to sequential"
+fi
+_tap_eq "$(_extract_group_name "$NOEX_BRIEF")" "noexec-group" \
+  "parsers: canonical group name read when Execution: is omitted"
+
+# Fail-safe direction: a legacy brief whose `Execution: parallel` sits OUTSIDE
+# any ### Task Group section must still read as parallel. Missing it would hand
+# a parallel group a shared worktree and race its briefs (Decision 0032); a
+# spurious parallel reading only costs the shared-worktree optimisation.
+OUTEX_BRIEF="$BRIEF_DIR/brief-outside-exec.md"
+printf 'Execution: parallel\n\n### Task Group\n\nGroup: outside-group\nBrief: 1 of 2\n' \
+  > "$ADV_SANDBOX/$OUTEX_BRIEF"
+if _brief_is_sequential_group "$OUTEX_BRIEF"; then
+  _tap_fail "parsers: legacy 'Execution: parallel' outside the section still reads PARALLEL" \
+    "false negative on parallel would race briefs on one worktree"
+else
+  _tap_pass "parsers: legacy 'Execution: parallel' outside the section still reads PARALLEL"
+fi
+
+# --- Cross-parser agreement: the runner and queue-manager must not disagree ---
+# Two independent parsers decide "is this group parallel?" and they govern
+# different halves of the same decision: runner.sh's _brief_is_sequential_group
+# picks the worktree strategy, and queue-manager's _parse_brief_taskgroup_metadata
+# sets the work order's group semantics at enqueue time. queue-manager accepted
+# ONLY the fully canonical '- **Execution:** parallel' while the runner also
+# accepted the bare and half-bold forms, so a legacy brief was classified
+# parallel by one and sequential by the other — silently, with no error on either
+# side. Known-issue R9 records that these parsers are deliberately duplicated;
+# this block is the compensating control, pinning them to the same answer.
+# shellcheck disable=SC1091
+source "$ADV_SANDBOX/.claude/.automation/lib/queue-manager.sh"
+
+_AGREE_DIR="$BRIEF_DIR/agree"
+mkdir -p "$ADV_SANDBOX/$_AGREE_DIR"
+
+# The two parsers are only required to agree where queue-manager recognises a
+# task group at all. queue-manager requires the canonical `- **Group:**` line and
+# degrades anything else to a standard session with a warning, so a bare-format
+# brief never becomes a task group entry and the runner's answer is never
+# consulted for it. Expecting agreement there would assert a contract the system
+# does not have; expecting detection to be FALSE is the real contract.
+#
+# _assert_parsers_agree <label> <expect-detected> <expect-parallel> <brief-body>
+_assert_parsers_agree() {
+  local _label="$1" _expect_detected="$2" _expect="$3" _body="$4"
+  local _slug _n
+  _slug=$(printf '%s' "$_label" | tr -cd 'a-z0-9')
+  _n="$_AGREE_DIR/$_slug.md"
+  printf '%s' "$_body" > "$ADV_SANDBOX/$_n"
+
+  local _runner_parallel=false
+  _brief_is_sequential_group "$_n" || _runner_parallel=true
+
+  _parse_brief_taskgroup_metadata "$ADV_SANDBOX/$_n" || true
+  local _qm_detected="$_BRIEF_TG_DETECTED" _qm_parallel="$_BRIEF_TG_IS_PARALLEL"
+
+  _tap_eq "$_qm_detected" "$_expect_detected" \
+    "agreement: $_label — queue-manager detects task group=$_expect_detected"
+
+  if [ "$_qm_detected" = "true" ]; then
+    if [ "$_runner_parallel" = "$_qm_parallel" ]; then
+      _tap_pass "agreement: $_label — both parsers say parallel=$_runner_parallel"
+    else
+      _tap_fail "agreement: $_label" \
+        "runner says parallel=$_runner_parallel, queue-manager says parallel=$_qm_parallel"
+    fi
+    _tap_eq "$_runner_parallel" "$_expect" "agreement: $_label — expected parallel=$_expect"
+  fi
+}
+
+_assert_parsers_agree "canonical parallel" "true" "true" \
+  '## Task Brief: x
+
+### Task Group
+- **Group:** agree-group
+- **Brief:** 1 of 2
+- **Execution:** parallel
+'
+_assert_parsers_agree "canonical sequential" "true" "false" \
+  '## Task Brief: x
+
+### Task Group
+- **Group:** agree-group
+- **Brief:** 1 of 2
+- **Execution:** sequential
+'
+# Half-bold Execution with a canonical Group: detected as a task group, and the
+# form queue-manager used to miss while the runner caught it. This is the case
+# the widened pattern fixes.
+_assert_parsers_agree "halfbold parallel" "true" "true" \
+  '## Task Brief: x
+
+### Task Group
+- **Execution**: parallel
+- **Group:** agree-group
+- **Brief:** 1 of 2
+'
+# Bare format: not a task group as far as queue-manager is concerned. This case
+# also pins the `|| true` on the Group extraction — without it, the unmatched
+# grep aborts any caller running under `set -euo pipefail` instead of warning.
+_assert_parsers_agree "bare format" "false" "n/a" \
+  '## Task Brief: x
+
+### Task Group
+Group: agree-group
+Brief: 1 of 2
+Execution: parallel
+'
 
 # ============================================================
 printf "\n# --- Brief 1: creates the group worktree ---\n"

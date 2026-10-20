@@ -4,6 +4,17 @@ docs/spec/compiled/
 # Session logs and known issues
 docs/ai/logs/
 
+# Per-session governance verdict records (criteria verdicts). Same class as
+# docs/ai/logs/ above: these are the TEMPLATE's own Critic/QA verdicts for
+# TEMPLATE sessions, named by session uuid. They are meaningless in a child,
+# they accumulate one file per session forever, and because they are tracked
+# they entered the machinery manifest — so every regeneration churned the
+# manifest and every sync delivered another template session's paperwork to
+# every child. Excluded here rather than per-child so the file drops out of the
+# manifest too, keeping sync and the withdrawn-file sweep reasoning about the
+# same set (see t-0051, and the README note below for the same pattern).
+docs/ai/governance/criteria-verdicts/
+
 # .gitignore — excluded from generic file copy; merged via section markers
 # in template-sync-engine.sh (BEGIN/END REPO-OS MANAGED block)
 .gitignore

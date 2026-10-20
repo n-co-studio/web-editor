@@ -74,11 +74,28 @@ _resolve_contract() {
   local group_name="$1"
   local path=""
 
-  path="$REPO_ROOT/.claude/local/task-groups/${group_name}.yaml"
-  [ -f "$path" ] && { printf '%s' "$path"; return; }
+  # Searches BOTH roots: this session's first, then the main repo's. A task group
+  # contract belongs to the GROUP, not to one brief, but inside a worktree session
+  # $REPO_ROOT is the worktree root — so each brief used to read only its own
+  # private copy, and `git worktree remove` destroyed the group's definition of
+  # done along with the worktree (2026-10-19, task-details-header). The main copy
+  # is the one that survives that; the session copy is the live one while a brief
+  # runs. Session-first so a stale main copy cannot shadow a fresher session copy
+  # when both exist. See the fuller note in cohesion-trigger.sh
+  # `_resolve_contract_path`, and known-issue R17 for the writer side.
+  local _dd_main_root
+  _dd_main_root="$(get_main_repo_root 2>/dev/null)" || _dd_main_root=""
+  [ -n "$_dd_main_root" ] || _dd_main_root="$REPO_ROOT"
 
-  path="$REPO_ROOT/docs/ai/task-groups/${group_name}.yaml"
-  [ -f "$path" ] && { printf '%s' "$path"; return; }
+  local _dd_root
+  for _dd_root in "$REPO_ROOT" "$_dd_main_root"; do
+    [ -n "$_dd_root" ] || continue
+    path="$_dd_root/.claude/local/task-groups/${group_name}.yaml"
+    [ -f "$path" ] && { printf '%s' "$path"; return; }
+
+    path="$_dd_root/docs/ai/task-groups/${group_name}.yaml"
+    [ -f "$path" ] && { printf '%s' "$path"; return; }
+  done
 }
 
 # --- Check if a path matches a glob-style boundary ---

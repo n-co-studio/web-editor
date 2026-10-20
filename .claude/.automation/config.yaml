@@ -21,7 +21,20 @@ runner:
   cooldown_between_sessions: 5
   max_consecutive_sessions: 0
   max_deferral_cycles: 3
-  session_max_ttl_seconds: 21600  # Per-session elapsed-time cap (6 hours). 0 = disabled.
+  # Per-session elapsed-time cap in seconds (21600 = 6 hours). 0 = disabled.
+  # Comment above the key for the reason given below: with it on the value line
+  # this field parsed as empty and warned on every read, so the TTL was stuck at
+  # the hardcoded fallback and could not be configured at all.
+  session_max_ttl_seconds: 21600
+  # After 3 consecutive failures trip the breaker, allow ONE probe entry once
+  # this many seconds have passed (1800 = 30 min). The failure count is not
+  # cleared, so a failed probe re-trips for another window. 0 = never expires;
+  # recovery is then `queue-cli.sh reset-breaker` only.
+  # The comment sits ABOVE the key, not after the value: _parse_config_field
+  # takes everything after `<field>: ` as the value, so a trailing comment is
+  # concatenated onto it and then rejected by the metacharacter sanitiser —
+  # the field reads as absent and every operator edit is silently ignored.
+  circuit_breaker_cooldown_seconds: 1800
 
 # Model routing — controls the --model flag passed to claude -p in runner.sh.
 # Agent frontmatter controls per-subagent model (cost layer 1: subagent routing).
@@ -38,9 +51,37 @@ model_routing_overrides:
   standard: sonnet
   taskgroup-merge: sonnet
   # Evaluation study session types (Decision t-0046 Amendment 1)
-  eval: sonnet        # Conductor — orchestrates arms×tasks×reps; sonnet for reasoning quality
-  eval-cell: sonnet   # Per-cell agent run — task execution in isolated worktree
-  judge: haiku        # Read-only scoring; haiku sufficient for rubric application
+  #
+  # Comments go ABOVE the key here too, and this block shows why it is not
+  # cosmetic. With the comment on the value line, the parser returns the value
+  # with the comment glued to it; a comment containing a shell metacharacter is
+  # then rejected outright and the field reads as absent, while one WITHOUT a
+  # metacharacter is passed through verbatim. Measured on 2026-10-20: the
+  # per-cell override resolved to `sonnet#Per-cellagentrun-taskexecution...`
+  # and was handed to `claude --model`, which fails every such launch.
+  #
+  # Conductor — orchestrates arms x tasks x reps. sonnet for reasoning quality.
+  eval: sonnet
+  # Per-cell agent run — task execution in an isolated worktree.
+  eval-cell: sonnet
+  #
+  # There is deliberately NO override line here for rubric scoring. t-0046
+  # Amendment 1 named one, keyed on `judge` — but `judge` is a PHASE of the
+  # eval session type and a permission profile, never a session type, so that
+  # key could never have matched in the first place (see that decision's
+  # 2026-10-20 Amendment 2). Its line
+  # carried the same inline-comment defect, so it has been parsing as absent and
+  # rubric scoring has in fact been running on model_routing.default (sonnet),
+  # not on the haiku the line appeared to set. Removing the line keeps today's
+  # effective behaviour exactly while taking away the trap; repairing the
+  # comment placement instead would have switched the scoring model mid-study,
+  # which is the class of change that confounded the v5/v6 A/B results.
+  # Commenting the key out would NOT have been neutral either: the parser
+  # strips everything up to the field name and colon, so a commented key still
+  # parses. Operator decision pending — if haiku is still wanted for scoring it
+  # has to be applied on an axis that resolves (t-0046 dispatches scoring work
+  # as `eval-cell`, which already has a line above), at a cell boundary, with
+  # the boundary recorded so the study's data says which cells used which model.
 
 retention:
   queue_days: 30

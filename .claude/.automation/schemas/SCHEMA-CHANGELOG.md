@@ -10,6 +10,44 @@ Breaking changes (field removal, type change, required field addition) increment
 
 ---
 
+## v1.5.0 — Runner Liveness: Session TTL and Circuit Breaker Cooldown
+
+**Date:** 2026-10-20
+**Decision:** 0017 (Operator Automation Layer)
+
+### Changes
+
+**runner-config.yaml** (+2 fields):
+- `circuit_breaker_cooldown_seconds` (integer, default: `1800`) — seconds after the breaker trips before ONE probe entry is allowed. The failure count is not cleared, so a failed probe re-trips for another window. `0` disables expiry; recovery is then `queue-cli.sh reset-breaker` only. A missing or non-numeric value falls back to the default; a breaker whose own state is unreadable stays tripped (fails closed).
+- `session_max_ttl_seconds` (integer, default: `21600`) — per-session elapsed-time cap in seconds; `0` disables it. Implemented 2026-04-04 but never recorded here, so this entry backfills it.
+
+**Comment placement is part of the contract for both.** `_parse_config_field` takes everything after `<field>: ` as the value, so a trailing comment is concatenated onto it and — if it contains `(`, `)`, `;`, `&`, `|`, `$` or a backtick — rejected by the metacharacter sanitiser, leaving the field to read as ABSENT and silently fall back to the hardcoded default. Both fields shipped with that defect in `config.yaml` and were repaired on 2026-10-20 by moving the comments above the keys. Keep comments on their own line when adding any field.
+
+**No reader changes required.** Both fields are optional with in-code defaults, so a `config.yaml` without them behaves as before. `queue-cli.sh` gains `reset-breaker` (no schema surface).
+
+---
+
+## v1.4.0 — Work Metadata: Project and Milestone
+
+**Date:** 2026-10-12
+**Decision:** 0017 (Operator Automation Layer)
+
+### Changes
+
+**work-order.yaml** (+2 fields):
+- `project` (string, default: `""`) — free-text project name shown in the Task details header. Optional; YAML without this field loads unchanged.
+- `milestone` (nested object, default: all empty/zero) — milestone info rendered as "Milestone 01/06" in the UI. Three sub-fields: `name` (string), `index` (integer, 1-based position), `total` (integer, total count).
+
+**queue-entry.yaml** (+2 fields):
+- `project` (string, default: `""`) — per-entry project override. Entry value wins over work order value; empty defers to work order.
+- `milestone` (nested object, same shape as work order) — per-entry milestone override. Entry wins over work order; all-zero/empty defers to work order.
+
+**Resolution rule:** Entry fields win → work order fields win → empty. `show --json` and `list --json` return resolved values. For task groups, project and milestone are set once on the work order; all child entries inherit via resolution.
+
+**queue-cli.sh** — `add` gains `--project`, `--milestone-name`, `--milestone-index`, `--milestone-total`. `edit <id> project|milestone.name|milestone.index|milestone.total <value>` works on entries; use `--work-order` flag to edit the parent work order instead.
+
+---
+
 ## v1.3.0 — Stale-Branch Escalation Type
 
 **Date:** 2026-03-28

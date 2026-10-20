@@ -36,6 +36,8 @@ _QE_ID="" _QE_STATUS="" _QE_PRIORITY="" _QE_SESSION_TYPE="" _QE_BRANCH="" _QE_BR
 _QE_PROMPT="" _QE_LAST_PROMPT="" _QE_AUTO_MODE="" _QE_SOLO_MODE="" _QE_PUSH_ON_COMPLETE="" _QE_RETRY_COUNT=""
 _QE_MAX_RETRIES="" _QE_ERROR_LOG="" _QE_WORK_ORDER_ID="" _QE_CREATED_AT=""
 _QE_UPDATED_AT="" _QE_COMPLETED_AT="" _QE_PERMISSION_PROFILE=""
+# (v1.4.0) project / milestone — optional; resolved against work order at read time
+_QE_PROJECT="" _QE_MILESTONE_NAME="" _QE_MILESTONE_INDEX="" _QE_MILESTONE_TOTAL=""
 
 # --- Strip surrounding double quotes and unescape a YAML scalar value ---
 # Handles both quoted ("value") and unquoted (value) formats for backward compat.
@@ -94,10 +96,11 @@ _load_queue_entry() {
   _QE_PROMPT="" _QE_LAST_PROMPT="" _QE_AUTO_MODE="" _QE_SOLO_MODE="" _QE_PUSH_ON_COMPLETE="" _QE_RETRY_COUNT=""
   _QE_MAX_RETRIES="" _QE_ERROR_LOG="" _QE_WORK_ORDER_ID="" _QE_CREATED_AT=""
   _QE_UPDATED_AT="" _QE_COMPLETED_AT=""
+  _QE_PROJECT="" _QE_MILESTONE_NAME="" _QE_MILESTONE_INDEX="" _QE_MILESTONE_TOTAL=""
   [ -f "$entry_file" ] || return 1
 
   _QE_PERMISSION_PROFILE=""
-  local _line _in_prompt=false _prompt_is_block=false
+  local _line _in_prompt=false _prompt_is_block=false _in_milestone=false
   while IFS= read -r _line || [ -n "$_line" ]; do
     # Handle multi-line prompt block scalar
     if [ "$_in_prompt" = true ]; then
@@ -118,6 +121,17 @@ ${_line#    }"
       esac
     fi
 
+    # Handle milestone nested block (v1.4.0)
+    if [ "$_in_milestone" = true ]; then
+      case "$_line" in
+        "    name: "*)  _QE_MILESTONE_NAME="${_line#    name: }"; continue ;;
+        "    index: "*) _QE_MILESTONE_INDEX="${_line#    index: }"; continue ;;
+        "    total: "*) _QE_MILESTONE_TOTAL="${_line#    total: }"; continue ;;
+        "    "*)        continue ;;  # other 4-space sub-fields → stay in block
+        *)              _in_milestone=false ;;  # 2-space sibling field → exit block, fall through
+      esac
+    fi
+
     case "$_line" in
       "  id: "*)           _QE_ID="${_line#  id: }" ;;
       "  status: "*)       _QE_STATUS="${_line#  status: }" ;;
@@ -135,6 +149,8 @@ ${_line#    }"
       "  max_retries: "*)  _QE_MAX_RETRIES="${_line#  max_retries: }" ;;
       "  error_log: "*)    _QE_ERROR_LOG="${_line#  error_log: }" ;;
       "  work_order_id: "*) _QE_WORK_ORDER_ID="${_line#  work_order_id: }" ;;
+      "  project: "*)      _QE_PROJECT="${_line#  project: }" ;;
+      "  milestone:")      _in_milestone=true ;;
       "  created_at: "*)   _QE_CREATED_AT="${_line#  created_at: }" ;;
       "  updated_at: "*)   _QE_UPDATED_AT="${_line#  updated_at: }" ;;
       "  completed_at: "*) _QE_COMPLETED_AT="${_line#  completed_at: }" ;;
@@ -165,6 +181,10 @@ ${_line#    }"
   _QE_MAX_RETRIES=$(_strip_quotes "$_QE_MAX_RETRIES")
   _QE_ERROR_LOG=$(_strip_quotes "$_QE_ERROR_LOG")
   _QE_WORK_ORDER_ID=$(_strip_quotes "$_QE_WORK_ORDER_ID")
+  _QE_PROJECT=$(_strip_quotes "$_QE_PROJECT")
+  _QE_MILESTONE_NAME=$(_strip_quotes "$_QE_MILESTONE_NAME")
+  _QE_MILESTONE_INDEX=$(_strip_quotes "$_QE_MILESTONE_INDEX")
+  _QE_MILESTONE_TOTAL=$(_strip_quotes "$_QE_MILESTONE_TOTAL")
   _QE_CREATED_AT=$(_strip_quotes "$_QE_CREATED_AT")
   _QE_UPDATED_AT=$(_strip_quotes "$_QE_UPDATED_AT")
   _QE_COMPLETED_AT=$(_strip_quotes "$_QE_COMPLETED_AT")
@@ -208,6 +228,11 @@ _write_queue_entry() {
     printf '  max_retries: "%s"\n' "$(_yaml_escape_scalar "$_QE_MAX_RETRIES")"
     printf '  error_log: "%s"\n' "$(_yaml_escape_scalar "$_QE_ERROR_LOG")"
     printf '  work_order_id: "%s"\n' "$(_yaml_escape_scalar "$_QE_WORK_ORDER_ID")"
+    printf '  project: "%s"\n' "$(_yaml_escape_scalar "${_QE_PROJECT:-}")"
+    printf '  milestone:\n'
+    printf '    name: "%s"\n' "$(_yaml_escape_scalar "${_QE_MILESTONE_NAME:-}")"
+    printf '    index: %s\n' "${_QE_MILESTONE_INDEX:-0}"
+    printf '    total: %s\n' "${_QE_MILESTONE_TOTAL:-0}"
     printf '  created_at: "%s"\n' "$(_yaml_escape_scalar "$_QE_CREATED_AT")"
     printf '  updated_at: "%s"\n' "$(_yaml_escape_scalar "$_QE_UPDATED_AT")"
     printf '  completed_at: "%s"\n' "$(_yaml_escape_scalar "$_QE_COMPLETED_AT")"
@@ -371,6 +396,25 @@ _transition() {
 #   $1 — block name (e.g., "runner")
 #   $2 — field name (e.g., "enabled")
 # Output: field value on stdout
+#
+# ADDING A CONFIG FIELD — two traps, both of which have bitten:
+#
+# 1. Put the comment on its OWN LINE above the key, never after the value.
+#    `s/.*${field}: *//` takes everything after the field name as the value, so
+#    a trailing comment becomes part of it. If that comment contains a shell
+#    metacharacter the sanitiser below then rejects the WHOLE value and the
+#    field reads as ABSENT — the caller's hardcoded default silently wins and a
+#    warning fires on every read. If it contains no metacharacter it is worse:
+#    the comment text is passed through as the value. Measured on 2026-10-20:
+#    `session_max_ttl_seconds` had been unconfigurable since it was added, and a
+#    model override resolved to `sonnet#Per-cellagentrun-task...`, which was
+#    being handed to `claude --model`.
+#
+# 2. The sed range is `/^${block}:/,/^[a-z]/` and the field pattern is an
+#    unanchored `/${field}:/`, so ANY line in the block containing `<field>:` —
+#    including a comment line — is matched, and `tr -d '[:space:]'` runs before
+#    `head -1`, which concatenates multiple matches rather than discarding them.
+#    Do not name a field inside a comment within its own block.
 _parse_config_field() {
   local block="$1"
   local field="$2"
@@ -483,7 +527,13 @@ _parse_brief_taskgroup_metadata() {
 
   # Extract Group: field
   # Extract and trim leading/trailing whitespace only (Group values are kebab-case per template)
-  _BRIEF_TG_GROUP_NAME=$(printf '%s\n' "$tg_section" | grep -m1 '^\- \*\*Group:\*\*' | sed 's/^- \*\*Group:\*\* *//;s/^[[:space:]]*//;s/[[:space:]]*$//')
+  # `|| true` is load-bearing. Callers source this library into scripts running
+  # under `set -euo pipefail` (runner.sh, queue-cli.sh), where grep finding no
+  # canonical Group line fails the pipeline and aborts the whole process at this
+  # assignment — so the warning branch immediately below was unreachable dead
+  # code, and enqueuing a brief with a ### Task Group section but no
+  # `- **Group:**` line killed the enqueue instead of degrading to standard.
+  _BRIEF_TG_GROUP_NAME=$(printf '%s\n' "$tg_section" | grep -m1 '^\- \*\*Group:\*\*' | sed 's/^- \*\*Group:\*\* *//;s/^[[:space:]]*//;s/[[:space:]]*$//' || true)
 
   if [ -z "$_BRIEF_TG_GROUP_NAME" ]; then
     echo "WARNING: Brief has ### Task Group section but no Group: field — treating as standard" >&2
@@ -502,8 +552,17 @@ _parse_brief_taskgroup_metadata() {
     fi
   fi
 
-  # Check for parallel execution
-  if printf '%s\n' "$tg_section" | grep -q '^\- \*\*Execution:\*\* *parallel'; then
+  # Check for parallel execution.
+  # The pattern must match runner.sh's _brief_is_sequential_group. This accepted
+  # only the fully canonical '- **Execution:** parallel' while the runner also
+  # accepted the bare and half-bold forms, so a legacy brief was classified
+  # parallel by the runner (per-brief worktrees) and sequential here (which sets
+  # the work order's group semantics) — a silent disagreement between the two
+  # halves of the same decision. Both sides now accept the same three forms.
+  # See known-issue R9: these parsers are deliberately duplicated, so a change
+  # to one is a change to all of them.
+  if printf '%s\n' "$tg_section" \
+     | grep -qE '^[[:space:]]*(-[[:space:]]*)?(\*\*)?Execution:?(\*\*)?:?[[:space:]]*parallel'; then
     _BRIEF_TG_IS_PARALLEL=true
   fi
 }
@@ -523,6 +582,11 @@ _parse_brief_taskgroup_metadata() {
 #   $6 — work_order_id (optional, explicit work order association)
 #   $7 — push_on_complete (optional, default from config)
 #   $8 — priority (optional, default 0; lower = higher priority)
+#   $9 — permission_profile (optional, default build)
+#   ${10} — project (optional, v1.4.0)
+#   ${11} — milestone_name (optional, v1.4.0)
+#   ${12} — milestone_index (optional, v1.4.0; integer)
+#   ${13} — milestone_total (optional, v1.4.0; integer)
 # Output: UUID on stdout
 queue_enqueue() {
   local brief_path="$1"
@@ -534,6 +598,10 @@ queue_enqueue() {
   local push_on_complete="${7:-}"
   local priority="${8:-0}"
   local permission_profile="${9:-build}"
+  local project="${10:-}"
+  local milestone_name="${11:-}"
+  local milestone_index="${12:-0}"
+  local milestone_total="${13:-0}"
 
   _ensure_queue_dirs
 
@@ -603,6 +671,10 @@ queue_enqueue() {
   _QE_MAX_RETRIES="$max_retries"
   _QE_ERROR_LOG=""
   _QE_WORK_ORDER_ID=""
+  _QE_PROJECT="$project"
+  _QE_MILESTONE_NAME="$milestone_name"
+  _QE_MILESTONE_INDEX="$milestone_index"
+  _QE_MILESTONE_TOTAL="$milestone_total"
   _QE_CREATED_AT="$timestamp"
   _QE_UPDATED_AT="$timestamp"
   _QE_COMPLETED_AT=""
@@ -622,6 +694,12 @@ queue_enqueue() {
       # Auto-resolve: find or create work order
       local wo_label
       wo_label=$(_derive_work_order_label "$session_type" "$branch" "$brief_path")
+
+      # Pre-set project/milestone so wo_create picks them up (v1.4.0)
+      _WO_PROJECT="$project"
+      _WO_MILESTONE_NAME="$milestone_name"
+      _WO_MILESTONE_INDEX="$milestone_index"
+      _WO_MILESTONE_TOTAL="$milestone_total"
 
       case "$session_type" in
         taskgroup|taskgroup-merge)
@@ -1196,9 +1274,10 @@ queue_edit() {
 
   # Editable fields whitelist
   case "$field" in
-    brief_path|session_type|branch|auto_mode|solo_mode|push_on_complete|max_retries|priority) ;;
+    brief_path|session_type|branch|auto_mode|solo_mode|push_on_complete|max_retries|priority|\
+    project|milestone.name|milestone.index|milestone.total) ;;
     *)
-      echo "ERROR: Field '$field' is not editable (allowed: brief_path, session_type, branch, auto_mode, solo_mode, push_on_complete, max_retries, priority)" >&2
+      echo "ERROR: Field '$field' is not editable (allowed: brief_path, session_type, branch, auto_mode, solo_mode, push_on_complete, max_retries, priority, project, milestone.name, milestone.index, milestone.total)" >&2
       return 1
       ;;
   esac
@@ -1242,6 +1321,18 @@ queue_edit() {
         ''|*[!0-9]*) echo "ERROR: priority must be a non-negative integer" >&2; return 1 ;;
       esac
       _QE_PRIORITY="$value" ;;
+    project)           _QE_PROJECT="$value" ;;
+    milestone.name)    _QE_MILESTONE_NAME="$value" ;;
+    milestone.index)
+      case "$value" in
+        ''|*[!0-9]*) echo "ERROR: milestone.index must be a non-negative integer" >&2; return 1 ;;
+      esac
+      _QE_MILESTONE_INDEX="$value" ;;
+    milestone.total)
+      case "$value" in
+        ''|*[!0-9]*) echo "ERROR: milestone.total must be a non-negative integer" >&2; return 1 ;;
+      esac
+      _QE_MILESTONE_TOTAL="$value" ;;
   esac
 
   _QE_UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)

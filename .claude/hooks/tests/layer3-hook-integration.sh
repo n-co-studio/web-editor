@@ -624,9 +624,11 @@ tap_section "L3.4b: state-writer.sh — every rejection path writes an escalatio
 # discarded review was indistinguishable from an agent that had not finished yet —
 # two real BLOCKED verdicts were lost this way during the t-0047 work.
 #
-# These tests assert the REPORTING is present. They deliberately do NOT relax the
-# parse contract: Decision t-0039 requires GATE_RESULT: to be the terminal non-empty
-# line of each section, and the rejections below must still be rejections.
+# These tests assert the REPORTING is present. The parse contract still holds:
+# Decision t-0039 requires GATE_RESULT: to be the terminal MEANINGFUL line of each
+# section, so trailing prose, headings or table rows must still be rejections. The
+# one deliberate relaxation is content-free punctuation — a bare horizontal rule —
+# which `_last_meaningful_line` skips; see combined_separator below.
 _ESC_DIR="$SB/.claude/.automation/escalations"
 
 # --- no_sentinel: trailing prose after GATE_RESULT → rejected AND escalated ---
@@ -646,7 +648,17 @@ else
   _tap_fail "no_sentinel writes a verdict-rejected escalation" "no escalation file in $_ESC_DIR"
 fi
 
-# --- combined_no_sentinel: separator between sections → both rejected AND escalated ---
+# --- combined_separator: a bare horizontal rule between sections is ACCEPTED ---
+# This case previously asserted rejection. It was changed deliberately: a bare
+# `---` between the two sections is punctuation, not verdict content, and
+# treating it as content discarded seven real reviews across critic (3),
+# qa-verifier (2) and security-privacy (2). On 2026-10-12 a critic emitted this
+# exact shape and BOTH verdicts were thrown away — including a correctly
+# terminated diff-review section — then it re-emitted the same shape on
+# re-dispatch, looping the brief until it was force-stopped. Decision t-0039's
+# contract is that GATE_RESULT: is TERMINAL, i.e. no verdict content after it;
+# `_last_meaningful_line` in state-writer.sh now skips blanks and bare rules
+# only. The combined_trailing_prose case below keeps the contract covered.
 reset_phase "standard"
 _advance "plan" 2>/dev/null; _advance "approval" 2>/dev/null
 _advance "build" 2>/dev/null; _advance "review" 2>/dev/null
@@ -654,12 +666,32 @@ rm -f "$STATE_DIR/cohesion-reviewed" "$STATE_DIR/diff-review-complete"
 rm -rf "$_ESC_DIR"
 _split_out=$'## Cohesion Brief\n\nFindings: none\n\nGATE_RESULT: APPROVED\n\n---\n\n## Diff-Review Brief\n\nFindings: none\n\nMODE: diff-review\nGATE_RESULT: APPROVED'
 run_hook_rc "state-writer.sh" "$(fixture_subagentstop "critic" "$_split_out")"
-assert_file_not_exists "$STATE_DIR/cohesion-reviewed" \
-  "combined_no_sentinel still rejects both verdicts (t-0039 contract intact)"
+assert_file_exists "$STATE_DIR/cohesion-reviewed" \
+  "combined_separator accepts the cohesion verdict despite a trailing ---"
+assert_file_exists "$STATE_DIR/diff-review-complete" \
+  "combined_separator accepts the diff-review verdict too"
 if ls "$_ESC_DIR"/verdict-rejected-critic-* >/dev/null 2>&1; then
-  _tap_pass "combined_no_sentinel writes a verdict-rejected escalation"
+  _tap_fail "combined_separator writes NO verdict-rejected escalation" "escalation written for a well-formed review"
 else
-  _tap_fail "combined_no_sentinel writes a verdict-rejected escalation" "no escalation file in $_ESC_DIR"
+  _tap_pass "combined_separator writes NO verdict-rejected escalation"
+fi
+
+# --- combined_trailing_prose: real content after the sentinel → still rejected ---
+# Replaces the coverage the separator case used to provide. Prose after
+# GATE_RESULT: means the agent kept talking, which is what t-0039 forbids.
+reset_phase "standard"
+_advance "plan" 2>/dev/null; _advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null; _advance "review" 2>/dev/null
+rm -f "$STATE_DIR/cohesion-reviewed" "$STATE_DIR/diff-review-complete"
+rm -rf "$_ESC_DIR"
+_prose_out=$'## Cohesion Brief\n\nFindings: none\n\nGATE_RESULT: APPROVED\n\nOne further thought on naming.\n\n## Diff-Review Brief\n\nFindings: none\n\nMODE: diff-review\nGATE_RESULT: APPROVED'
+run_hook_rc "state-writer.sh" "$(fixture_subagentstop "critic" "$_prose_out")"
+assert_file_not_exists "$STATE_DIR/cohesion-reviewed" \
+  "combined_trailing_prose still rejects both verdicts (t-0039 contract intact)"
+if ls "$_ESC_DIR"/verdict-rejected-critic-* >/dev/null 2>&1; then
+  _tap_pass "combined_trailing_prose writes a verdict-rejected escalation"
+else
+  _tap_fail "combined_trailing_prose writes a verdict-rejected escalation" "no escalation file in $_ESC_DIR"
 fi
 
 # --- phase mismatch escalation names the EXPECTED phase, not just dispatch/current ---

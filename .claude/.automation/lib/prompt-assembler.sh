@@ -198,11 +198,47 @@ assemble_prompt() {
     # Task group placeholders (empty for non-taskgroup types)
     local group_name="" brief_seq="" is_final=""
     if [ -n "$brief_content" ]; then
-      group_name=$(printf '%s' "$brief_content" | grep -oE 'Group:\s*\S+' | head -1 | sed 's/Group:[[:space:]]*//' || true)
-      brief_seq=$(printf '%s' "$brief_content" | grep -oE 'Brief:\s*[0-9]+' | head -1 | sed 's/Brief:[[:space:]]*//' || true)
-      # is_final: check if brief mentions "final" or if brief_seq matches total
+      # Canonical format first — "- **Group:** x" and "- **Brief:** N of M"
+      # inside the ### Task Group section — then the legacy bare form.
+      #
+      # The previous patterns were naive about the bold markers and corrupted
+      # THREE placeholders for every canonical brief, which is what real
+      # templates emit: `grep -oE 'Group:\s*\S+'` returned the literal "**"
+      # (\S+ consumed the markers), `Brief:\s*[0-9]+` matched nothing at all
+      # (the markers sit between the colon and the digit), and because
+      # brief_seq was empty, is_final evaluated "false" for EVERY brief —
+      # including the final one, which was then handed a prompt telling it not
+      # to merge or seal. Same defect class as _extract_group_name in
+      # cohesion-trigger.sh, fixed alongside it.
+      local _tg_sec _brief_line
+      _tg_sec=$(printf '%s\n' "$brief_content" | sed -n '/^### Task Group$/,/^###/p' || true)
+
+      group_name=$(printf '%s\n' "$_tg_sec" | grep -m1 '^- \*\*Group:\*\*' \
+        | sed 's/^- \*\*Group:\*\*[[:space:]]*//; s/[[:space:]]*$//' || true)
+      if [ -z "$group_name" ]; then
+        group_name=$(printf '%s\n' "$brief_content" \
+          | grep -oE '^[[:space:]]*Group:[[:space:]]*[^[:space:]]+' | head -1 \
+          | sed 's/^[[:space:]]*Group:[[:space:]]*//' || true)
+      fi
+
+      # Pull the Brief: line once, then read both numbers out of it, so
+      # "N of M" cannot be satisfied by an unrelated "of <number>" elsewhere.
+      _brief_line=$(printf '%s\n' "$_tg_sec" | grep -m1 'Brief:' || true)
+      if [ -z "$_brief_line" ]; then
+        _brief_line=$(printf '%s\n' "$brief_content" \
+          | grep -m1 -E '^[[:space:]]*(-[[:space:]]*)?(\*\*)?Brief:' || true)
+      fi
+      brief_seq=$(printf '%s' "$_brief_line" | grep -oE '[0-9]+' | head -1 || true)
       local total_briefs
-      total_briefs=$(printf '%s' "$brief_content" | grep -oE 'of [0-9]+' | head -1 | sed 's/of //' || true)
+      total_briefs=$(printf '%s' "$_brief_line" | grep -oE 'of[[:space:]]+[0-9]+' \
+        | head -1 | grep -oE '[0-9]+' || true)
+      # No whole-brief fallback for the total. Scanning the body for 'of <number>'
+      # would happily match prose like "3 of 5 tests" and could set is_final=true
+      # off an arbitrary number, telling a mid-group brief to merge and seal the
+      # group branch. An unknown total therefore stays unknown, and the is_final
+      # test below resolves it to "false" — the safe direction, since a wrong
+      # "false" only leaves the branch open for the next brief.
+
       if [ -n "$brief_seq" ] && [ -n "$total_briefs" ] && [ "$brief_seq" = "$total_briefs" ]; then
         is_final="true"
       else

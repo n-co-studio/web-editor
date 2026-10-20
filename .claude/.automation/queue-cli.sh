@@ -72,6 +72,21 @@ source "$LIB_DIR/cleanup.sh"
 # --- Global flags ---
 JSON_OUTPUT=false
 
+# Failure count at which the daemon's circuit breaker trips. This is a REPORTING
+# copy: the authority is `_circuit_breaker_tripped` in runner.sh, which the CLI
+# cannot source (runner.sh parses argv and runs a daemon loop at load). Named
+# rather than inlined so the duplication is visible. If the runner's threshold
+# ever becomes configurable, this must read the same field.
+#
+# Scope of the parity, stated precisely: what `status` mirrors is the THRESHOLD
+# and the fail-closed direction, NOT the cooldown. The CLI does not read
+# `last_failure_epoch`, so inside a window that has already elapsed `status`
+# reports tripped while the daemon is about to allow one probe entry. That is
+# deliberate — `status` answers "is the breaker set", not "will the next poll
+# run something" — but it means `circuit_breaker_tripped` must be read as
+# "count >= threshold", not as a prediction about the daemon's next action.
+_CB_TRIP_THRESHOLD=3
+
 # --- Usage ---
 _usage() {
   cat >&2 << 'EOF'
@@ -91,6 +106,7 @@ Subcommands:
   prune [--briefs-only] [--dry-run] [--fix]
   recover-entry <id>
   reopen-wo <work-order-id>
+  reset-breaker
   start-daemon
   halt
   force-halt
@@ -111,6 +127,29 @@ _json_kv() {
 _json_kv_raw() {
   local key="$1" val="$2"
   printf '"%s":%s' "$key" "$val"
+}
+
+# --- Project/milestone resolution helper (v1.4.0) ---
+# Reads already-loaded _QE_* vars, loads the parent work order if present,
+# and applies resolution: entry wins → work order wins → empty/zero.
+# Sets: _RESOLVED_PROJECT _RESOLVED_MILESTONE_NAME _RESOLVED_MILESTONE_INDEX _RESOLVED_MILESTONE_TOTAL
+_resolve_entry_metadata() {
+  _RESOLVED_PROJECT="${_QE_PROJECT:-}"
+  _RESOLVED_MILESTONE_NAME="${_QE_MILESTONE_NAME:-}"
+  _RESOLVED_MILESTONE_INDEX="${_QE_MILESTONE_INDEX:-0}"
+  _RESOLVED_MILESTONE_TOTAL="${_QE_MILESTONE_TOTAL:-0}"
+
+  if [ -n "${_QE_WORK_ORDER_ID:-}" ]; then
+    local _wo_file
+    _wo_file="$(_wo_dir)/${_QE_WORK_ORDER_ID}.yaml"
+    if [ -f "$_wo_file" ]; then
+      _load_work_order "$_wo_file" 2>/dev/null || true
+      [ -z "$_RESOLVED_PROJECT" ] && _RESOLVED_PROJECT="${_WO_PROJECT:-}"
+      [ -z "$_RESOLVED_MILESTONE_NAME" ] && _RESOLVED_MILESTONE_NAME="${_WO_MILESTONE_NAME:-}"
+      [ "${_RESOLVED_MILESTONE_INDEX:-0}" = "0" ] && _RESOLVED_MILESTONE_INDEX="${_WO_MILESTONE_INDEX:-0}"
+      [ "${_RESOLVED_MILESTONE_TOTAL:-0}" = "0" ] && _RESOLVED_MILESTONE_TOTAL="${_WO_MILESTONE_TOTAL:-0}"
+    fi
+  fi
 }
 
 # --- Parse global flags and extract subcommand ---
@@ -141,16 +180,31 @@ case "$SUBCOMMAND" in
   add)
     ADD_BRIEF="" ADD_BRANCH="" ADD_SESSION_TYPE="standard"
     ADD_AUTO_APPROVE=false ADD_SOLO=false ADD_PUSH=false ADD_PRIORITY="0"
+    ADD_PROJECT="" ADD_MILESTONE_NAME="" ADD_MILESTONE_INDEX="0" ADD_MILESTONE_TOTAL="0"
     SESSION_TYPE_EXPLICIT=false BRANCH_EXPLICIT=false
 
     while [ $# -gt 0 ]; do
       case "$1" in
-        --brief)         ADD_BRIEF="$2"; shift 2 ;;
-        --branch)        ADD_BRANCH="$2"; BRANCH_EXPLICIT=true; shift 2 ;;
-        --session-type)  ADD_SESSION_TYPE="$2"; SESSION_TYPE_EXPLICIT=true; shift 2 ;;
-        --auto-approve)  ADD_AUTO_APPROVE=true; shift ;;
-        --solo)          ADD_SOLO=true; shift ;;
-        --push)          ADD_PUSH=true; shift ;;
+        --brief)            ADD_BRIEF="$2"; shift 2 ;;
+        --branch)           ADD_BRANCH="$2"; BRANCH_EXPLICIT=true; shift 2 ;;
+        --session-type)     ADD_SESSION_TYPE="$2"; SESSION_TYPE_EXPLICIT=true; shift 2 ;;
+        --auto-approve)     ADD_AUTO_APPROVE=true; shift ;;
+        --solo)             ADD_SOLO=true; shift ;;
+        --push)             ADD_PUSH=true; shift ;;
+        --project)          ADD_PROJECT="$2"; shift 2 ;;
+        --milestone-name)   ADD_MILESTONE_NAME="$2"; shift 2 ;;
+        --milestone-index)
+          ADD_MILESTONE_INDEX="$2"
+          case "$ADD_MILESTONE_INDEX" in
+            ''|*[!0-9]*) echo "ERROR: --milestone-index requires a non-negative integer" >&2; exit 1 ;;
+          esac
+          shift 2 ;;
+        --milestone-total)
+          ADD_MILESTONE_TOTAL="$2"
+          case "$ADD_MILESTONE_TOTAL" in
+            ''|*[!0-9]*) echo "ERROR: --milestone-total requires a non-negative integer" >&2; exit 1 ;;
+          esac
+          shift 2 ;;
         --priority)
           ADD_PRIORITY="$2"
           # Validate numeric
@@ -251,7 +305,7 @@ case "$SUBCOMMAND" in
     fi
 
     _ensure_queue_dirs
-    ENTRY_ID=$(queue_enqueue "$ADD_BRIEF" "$ADD_SESSION_TYPE" "$ADD_AUTO_MODE" "$ADD_SOLO_STR" "$ADD_BRANCH" "" "$ADD_PUSH_STR" "$ADD_PRIORITY")
+    ENTRY_ID=$(queue_enqueue "$ADD_BRIEF" "$ADD_SESSION_TYPE" "$ADD_AUTO_MODE" "$ADD_SOLO_STR" "$ADD_BRANCH" "" "$ADD_PUSH_STR" "$ADD_PRIORITY" "build" "$ADD_PROJECT" "$ADD_MILESTONE_NAME" "$ADD_MILESTONE_INDEX" "$ADD_MILESTONE_TOTAL")
 
     if [ -z "$ENTRY_ID" ]; then
       release_queue_lock
@@ -336,8 +390,15 @@ case "$SUBCOMMAND" in
     fi
     ;;
 
-  # --- edit: modify entry field ---
+  # --- edit: modify entry field (or work order field with --work-order) ---
   edit)
+    EDIT_WORK_ORDER=false
+    # Strip optional --work-order flag before positional args
+    if [ "${1:-}" = "--work-order" ]; then
+      EDIT_WORK_ORDER=true
+      shift
+    fi
+
     if [ $# -lt 3 ]; then
       echo "ERROR: edit requires <id> <field> <value>" >&2
       exit 1
@@ -349,16 +410,31 @@ case "$SUBCOMMAND" in
       exit 1
     fi
 
-    queue_edit "$EDIT_ID" "$EDIT_FIELD" "$EDIT_VALUE"
+    if [ "$EDIT_WORK_ORDER" = true ]; then
+      wo_edit "$EDIT_ID" "$EDIT_FIELD" "$EDIT_VALUE"
+    else
+      queue_edit "$EDIT_ID" "$EDIT_FIELD" "$EDIT_VALUE"
+    fi
     release_queue_lock
 
     if [ "$JSON_OUTPUT" = true ]; then
-      printf '{%s,%s,%s}\n' \
-        "$(_json_kv "entry_id" "$EDIT_ID")" \
-        "$(_json_kv "field" "$EDIT_FIELD")" \
-        "$(_json_kv "value" "$EDIT_VALUE")"
+      if [ "$EDIT_WORK_ORDER" = true ]; then
+        printf '{%s,%s,%s}\n' \
+          "$(_json_kv "work_order_id" "$EDIT_ID")" \
+          "$(_json_kv "field" "$EDIT_FIELD")" \
+          "$(_json_kv "value" "$EDIT_VALUE")"
+      else
+        printf '{%s,%s,%s}\n' \
+          "$(_json_kv "entry_id" "$EDIT_ID")" \
+          "$(_json_kv "field" "$EDIT_FIELD")" \
+          "$(_json_kv "value" "$EDIT_VALUE")"
+      fi
     else
-      printf 'Updated %s: %s = %s\n' "$EDIT_ID" "$EDIT_FIELD" "$EDIT_VALUE"
+      if [ "$EDIT_WORK_ORDER" = true ]; then
+        printf 'Updated work order %s: %s = %s\n' "$EDIT_ID" "$EDIT_FIELD" "$EDIT_VALUE"
+      else
+        printf 'Updated %s: %s = %s\n' "$EDIT_ID" "$EDIT_FIELD" "$EDIT_VALUE"
+      fi
     fi
     ;;
 
@@ -411,9 +487,58 @@ case "$SUBCOMMAND" in
         fi
         printf '"%s":%s' "$JSON_KEY" "$S_VAL"
       done <<< "$RAW"
+      # Circuit breaker state, appended to both output forms. A tripped breaker
+      # is the one condition that stops the queue without any entry looking
+      # wrong, and the playbook points operators at `status` to find it — but
+      # until now it was only visible by reading `.circuit-breaker` by hand.
+      _ST_CB="$(_queue_dir)/.circuit-breaker"
+      _ST_CB_COUNT=""
+      if [ -f "$_ST_CB" ]; then
+        _ST_CB_COUNT=$(grep '^consecutive_failures:' "$_ST_CB" 2>/dev/null \
+          | sed 's/^[^:]*: *//' | tr -d '[:space:]' | head -1) || true
+      fi
+      # The count is NOT interpolated raw. An unreadable value printed with %s
+      # emits `"circuit_breaker_failures":abc` — invalid JSON, in precisely the
+      # state this change set added fail-closed handling for, and `--json` is
+      # the form Prompt Q parses. Unreadable becomes null, and the verdict
+      # travels as its own boolean so a consumer never has to re-derive the
+      # threshold from the count.
+      case "${_ST_CB_COUNT:-}" in
+        '')
+          # No file, or a file with no count line: no failure record to honour.
+          # Matches _circuit_breaker_tripped's `''` arm, which does not trip.
+          printf ',"circuit_breaker_failures":0,"circuit_breaker_state":"ok","circuit_breaker_tripped":false'
+          ;;
+        *[!0-9]*)
+          printf ',"circuit_breaker_failures":null,"circuit_breaker_state":"unreadable","circuit_breaker_tripped":true'
+          ;;
+        *)
+          if [ "$_ST_CB_COUNT" -ge "$_CB_TRIP_THRESHOLD" ]; then
+            printf ',"circuit_breaker_failures":%s,"circuit_breaker_state":"tripped","circuit_breaker_tripped":true' "$_ST_CB_COUNT"
+          else
+            printf ',"circuit_breaker_failures":%s,"circuit_breaker_state":"ok","circuit_breaker_tripped":false' "$_ST_CB_COUNT"
+          fi
+          ;;
+      esac
       printf '}\n'
     else
       queue_status "text"
+      _ST_CB="$(_queue_dir)/.circuit-breaker"
+      if [ -f "$_ST_CB" ]; then
+        _ST_CB_COUNT=$(grep '^consecutive_failures:' "$_ST_CB" 2>/dev/null \
+          | sed 's/^[^:]*: *//' | tr -d '[:space:]' | head -1) || true
+        _ST_CB_AT=$(grep '^last_failure_at:' "$_ST_CB" 2>/dev/null \
+          | sed 's/^[^:]*: *//' | tr -d '[:space:]' | head -1) || true
+        echo "circuit breaker: ${_ST_CB_COUNT:-unreadable} consecutive failure(s), last at ${_ST_CB_AT:-unknown}"
+        case "${_ST_CB_COUNT:-0}" in
+          ''|*[!0-9]*)
+            echo "  TRIPPED (state unreadable — fails closed). Clear with: queue-cli.sh reset-breaker" ;;
+          *)
+            if [ "$_ST_CB_COUNT" -ge "$_CB_TRIP_THRESHOLD" ]; then
+              echo "  TRIPPED — the daemon will not start entries. Diagnose with 'queue-cli.sh log --lines 20', then clear with 'queue-cli.sh reset-breaker'."
+            fi ;;
+        esac
+      fi
     fi
     ;;
 
@@ -437,12 +562,25 @@ case "$SUBCOMMAND" in
         else
           printf ','
         fi
-        printf '{%s,%s,%s,%s,%s}' \
+        # Load entry for resolved project/milestone
+        L_ENTRY_FILE=$(_find_entry_file "$L_ID")
+        if [ -n "$L_ENTRY_FILE" ]; then
+          _load_queue_entry "$L_ENTRY_FILE"
+          _resolve_entry_metadata
+        else
+          _RESOLVED_PROJECT="" _RESOLVED_MILESTONE_NAME=""
+          _RESOLVED_MILESTONE_INDEX=0 _RESOLVED_MILESTONE_TOTAL=0
+        fi
+        printf '{%s,%s,%s,%s,%s,%s,%s,%s,%s}' \
           "$(_json_kv "id" "$L_ID")" \
           "$(_json_kv "status" "$L_STATUS")" \
           "$(_json_kv "session_type" "$L_TYPE")" \
           "$(_json_kv "brief_path" "$L_BRIEF")" \
-          "$(_json_kv "updated_at" "$L_UPDATED")"
+          "$(_json_kv "updated_at" "$L_UPDATED")" \
+          "$(_json_kv "project" "$_RESOLVED_PROJECT")" \
+          "$(_json_kv "milestone_name" "$_RESOLVED_MILESTONE_NAME")" \
+          "$(_json_kv_raw "milestone_index" "${_RESOLVED_MILESTONE_INDEX:-0}")" \
+          "$(_json_kv_raw "milestone_total" "${_RESOLVED_MILESTONE_TOTAL:-0}")"
       done < <(queue_list "$LIST_FILTER")
       printf ']\n'
     else
@@ -465,9 +603,10 @@ case "$SUBCOMMAND" in
         exit 1
       fi
       _load_queue_entry "$ENTRY_FILE"
+      _resolve_entry_metadata
       # Truncate last_prompt for JSON output (first 500 chars)
       _SHOW_LP="${_QE_LAST_PROMPT:0:500}"
-      printf '{%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s}\n' \
+      printf '{%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s}\n' \
         "$(_json_kv "id" "$_QE_ID")" \
         "$(_json_kv "status" "$_QE_STATUS")" \
         "$(_json_kv "priority" "${_QE_PRIORITY:-0}")" \
@@ -482,6 +621,10 @@ case "$SUBCOMMAND" in
         "$(_json_kv "error_log" "$_QE_ERROR_LOG")" \
         "$(_json_kv "last_prompt" "$_SHOW_LP")" \
         "$(_json_kv "work_order_id" "$_QE_WORK_ORDER_ID")" \
+        "$(_json_kv "project" "$_RESOLVED_PROJECT")" \
+        "$(_json_kv "milestone_name" "$_RESOLVED_MILESTONE_NAME")" \
+        "$(_json_kv_raw "milestone_index" "${_RESOLVED_MILESTONE_INDEX:-0}")" \
+        "$(_json_kv_raw "milestone_total" "${_RESOLVED_MILESTONE_TOTAL:-0}")" \
         "$(_json_kv "created_at" "$_QE_CREATED_AT")" \
         "$(_json_kv "updated_at" "$_QE_UPDATED_AT")" \
         "$(_json_kv "completed_at" "$_QE_COMPLETED_AT")"
@@ -759,6 +902,46 @@ case "$SUBCOMMAND" in
     fi
     ;;
 
+  # --- reset-breaker: clear the circuit breaker's consecutive-failure counter ---
+  # Until this existed there was no sanctioned way out of a tripped breaker: the
+  # counter is only cleared by a successful session, and the breaker prevents any
+  # session from starting. Deleting the file by hand was the only recovery.
+  reset-breaker)
+    _RB_FILE="$(_queue_dir)/.circuit-breaker"
+    if [ ! -f "$_RB_FILE" ]; then
+      if [ "$JSON_OUTPUT" = true ]; then
+        printf '{%s,%s}\n' "$(_json_kv "action" "reset-breaker")" "$(_json_kv "result" "not-tripped")"
+      else
+        echo "Circuit breaker is not set — nothing to reset."
+      fi
+      exit 0
+    fi
+    # `|| true` on both reads, and it is load-bearing, not defensive noise.
+    # This arm runs under `set -euo pipefail`: on a breaker file that exists but
+    # has no `consecutive_failures:` line, grep exits 1, pipefail propagates it,
+    # and the assignment ends the script BEFORE the `rm -f` below — the command
+    # would print nothing and leave the breaker set, which is the exact
+    # hand-deletion-only state it was added to remove. The `${_RB_*:-unknown}`
+    # fallbacks exist precisely because a miss has to be survivable.
+    _RB_COUNT=$(grep '^consecutive_failures:' "$_RB_FILE" 2>/dev/null \
+      | sed 's/^[^:]*: *//' | tr -d '[:space:]' | head -1) || true
+    # `s/^[^:]*: *//`, not the `s/.*: *//` used elsewhere for numeric fields:
+    # the value here is an ISO timestamp, and the greedy form eats up to its
+    # LAST colon, printing "52Z" instead of "2026-10-20T17:57:52Z".
+    _RB_AT=$(grep '^last_failure_at:' "$_RB_FILE" 2>/dev/null \
+      | sed 's/^[^:]*: *//' | tr -d '[:space:]' | head -1) || true
+    rm -f "$_RB_FILE" 2>/dev/null || true
+    if [ "$JSON_OUTPUT" = true ]; then
+      printf '{%s,%s,%s}\n' \
+        "$(_json_kv "action" "reset-breaker")" \
+        "$(_json_kv "cleared_failures" "${_RB_COUNT:-unknown}")" \
+        "$(_json_kv "last_failure_at" "${_RB_AT:-unknown}")"
+    else
+      echo "Circuit breaker cleared (was ${_RB_COUNT:-unknown} consecutive failures, last at ${_RB_AT:-unknown})."
+      echo "The daemon will pick up the next eligible entry; if the underlying cause is unfixed it will trip again after ${_CB_TRIP_THRESHOLD} failures."
+    fi
+    ;;
+
   # --- reopen-wo: reopen an escalated or failed work order and reset blocked/failed siblings ---
   reopen-wo)
     if [ $# -lt 1 ]; then
@@ -801,7 +984,21 @@ case "$SUBCOMMAND" in
               _QE_COMPLETED_AT=""
               _QE_ERROR_LOG=""
               _QE_PROMPT=""
-              local _qdir
+              # Reset the retry budget too. A sibling reaches `failed` by
+              # exhausting max_retries, so reopening it without clearing the
+              # count returned an entry that was immediately out of retries:
+              # the first failure sent it straight back to failed/ and the
+              # operator had to run reopen-wo again per attempt. Reopening is an
+              # explicit operator decision to try again, so the budget is
+              # restored with it.
+              _QE_RETRY_COUNT="0"
+              # NOT `local`: this is the top-level `case` dispatch, not a
+              # function, and bash errors with "local: can only be used in a
+              # function" — which aborted this loop before any sibling was
+              # reset. reopen-wo's advertised second step therefore never ran,
+              # and a task group with a failed brief could not be resumed by the
+              # documented recovery command. A plain global matches the
+              # surrounding `_REOPEN_*` variables.
               _qdir=$(_queue_dir)
               _write_queue_entry "$_qdir/approved/${_eid}.yaml"
               rm -f "$_ef"

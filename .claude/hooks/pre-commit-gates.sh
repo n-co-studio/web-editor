@@ -92,14 +92,36 @@ DECISIONS_DIR="$REPO_ROOT/docs/ai/decisions"
 # $BASHPID), and stay out of the way in subshells, where a non-zero status is
 # the caller's to handle. errexit still terminates the subshell with its
 # original status, which is exactly what the `||` capture expects.
+# Whether $LINENO in the ERR trap can be trusted. Set true only where errtrace
+# is actually enabled (see the block below). Without -E the trap still fires at
+# this script's top level, but $LINENO then reports the ENCLOSING CONSTRUCT
+# rather than the failing command — so the old message asserted a line the trap
+# could not determine. The child repo n-co-studio/web-editor was sent to line
+# 803 for a write that failed at 591, and an isolated reproduction of the same
+# trap reported line 23 for a failure at line 18. Declared before _gate_abort
+# so the trap can never read it unset under `set -u`.
+_GATE_ERRTRACE=false
+
 _gate_abort() {
   local rc=$?
   local line="${1:-unknown}"
   if [ "${BASHPID:-$$}" != "$$" ]; then
     return "$rc"
   fi
-  echo "GATE-FINAL: pre-commit gate aborted unexpectedly at line ${line} (exit ${rc}) — failing closed rather than letting the commit through. NEXT: this is a gate defect; re-run with 'bash -x .claude/hooks/pre-commit-gates.sh' to locate it, and verify with 'bash .claude/tools/gate-conformance.sh'. (no override)" >&2
-  log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "gate_script_abort" "line:${line} rc:${rc}" 2>/dev/null || true
+  local where
+  if [ "$_GATE_ERRTRACE" = true ]; then
+    where="at line ${line}"
+  else
+    # Naming the construct line here would send the reader to the wrong place,
+    # which is worse than admitting the line is unknown.
+    where="at an undetermined line (errtrace unavailable on bash ${BASH_VERSINFO[0]:-3}.x, so the trap cannot identify the failing command)"
+  fi
+  echo "GATE-FINAL: pre-commit gate aborted unexpectedly ${where} (exit ${rc}) — failing closed rather than letting the commit through. NEXT: this is a gate defect; re-run with 'bash -x .claude/hooks/pre-commit-gates.sh' to locate it, and verify with 'bash .claude/tools/gate-conformance.sh'. (no override)" >&2
+  if [ "$_GATE_ERRTRACE" = true ]; then
+    log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "gate_script_abort" "line:${line} rc:${rc}" 2>/dev/null || true
+  else
+    log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "gate_script_abort" "line:unreliable rc:${rc}" 2>/dev/null || true
+  fi
   exit 2
 }
 trap '_gate_abort "$LINENO"' ERR
@@ -117,6 +139,8 @@ trap '_gate_abort "$LINENO"' ERR
 # recorded in Decision t-0049 rather than papered over.
 if [ -n "${BASHPID:-}" ]; then
   set -E
+  # Only now can the trap's $LINENO be trusted to name the failing command.
+  _GATE_ERRTRACE=true
 fi
 
 FAILED=0
@@ -561,7 +585,17 @@ if [ "$SKIP_STATE" = false ]; then
         else
         _A34_FAIL=false
         _A34_FAIL_DETAIL=""
-        for _A34_CMD in "${_A34_CMDS[@]}"; do
+        # `${arr[@]+"${arr[@]}"}`, not `"${arr[@]}"`. On bash 3.2 — which this
+        # repo targets and macOS ships — expanding an EMPTY array under `set -u`
+        # is an unbound-variable error, and that exits the hook with status 1.
+        # Only exit 2 blocks a tool call, so this fail-OPEN silently disabled the
+        # entire pre-commit gate chain for any repo whose package.json has a
+        # `name` but none of build/build:pack/test/verify: the condition above
+        # admits that case on _A34_PKG_NAME alone, with zero commands collected.
+        # It also masked the unguarded functional-verified write below, dying
+        # before execution ever reached it. Found 2026-10-15 by a conformance
+        # case that had to add a package.json to reach this code at all.
+        for _A34_CMD in ${_A34_CMDS[@]+"${_A34_CMDS[@]}"}; do
           _A34_OUT=""
           _A34_RC=0
           _A34_OUT=$(cd "$REPO_ROOT" && timeout "$_A34_TIMEOUT" npm run "$_A34_CMD" 2>&1) || _A34_RC=$?
@@ -588,9 +622,28 @@ if [ "$SKIP_STATE" = false ]; then
           else
             _A34_CURRENT_SID=$(cat "$REPO_ROOT/.claude/.session-id" 2>/dev/null || echo "")
           fi
+          # Guarded exactly like the high-risk-detected write below: this was the
+          # only one of the three $STATE_DIR writes with neither guard, and an
+          # absent state dir therefore turned a reportable "no session" condition
+          # into an unoverridable GATE-FINAL abort of the whole chain. Found in
+          # the child repo n-co-studio/web-editor on 2026-10-15, where it blocked
+          # a docs commit across three sessions.
+          #
+          # This does NOT paper over an uninitialized session: the phase-state
+          # check above independently fails closed on a missing phase-state FILE,
+          # and no gate anywhere tests $STATE_DIR as a directory
+          # (`grep -n '\-d "\$STATE_DIR"' .claude/hooks/*.sh` returns nothing),
+          # so creating the dir cannot make an uninitialized session look valid.
+          #
+          # `|| true` is the part that prevents the abort. The `2>/dev/null` does
+          # NOT suppress the open-failure message — redirections are applied left
+          # to right, so the shell reports it before stderr is redirected — and is
+          # kept only for consistency with the two sibling writes. mkdir -p is
+          # what actually keeps the normal path quiet.
+          mkdir -p "$STATE_DIR" 2>/dev/null || true
           printf 'timestamp: %s\nsession_id: %s\nresult: PASSED\n' \
             "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_A34_CURRENT_SID" \
-            > "$STATE_DIR/functional-verified"
+            > "$STATE_DIR/functional-verified" 2>/dev/null || true
           refresh_manifest_entry "functional-verified" 2>/dev/null || true
         else
           # Blocking in headless/auto; advisory otherwise
@@ -928,11 +981,38 @@ if [ "${SKIP_CONTRACT_CHECK:-0}" = "1" ]; then
 fi
 if [ "$SKIP_STATE" = false ] && [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
   # Three-tier resolution: REPO_OS_MODE env var > .claude/repo-mode file > default "child"
+  #
+  # TWO directories are searched: the MAIN repo's and this session's.
+  #
+  # A contract belongs to the GROUP, not to one brief, but inside a worktree
+  # session $REPO_ROOT is the worktree root. This gate is what made the
+  # 2026-10-19 task-details-header failure unrecoverable: the group's contract
+  # was destroyed along with its worktree, A6.1 then found no
+  # `status: in_progress` anywhere, and the session could not commit even a
+  # record of being blocked. A main-repo copy survives `git worktree remove`.
+  #
+  # Both are searched rather than main alone because the prompts still instruct
+  # agents to write the contract at a session-relative path, and the guards that
+  # would need a new exemption to allow a main-rooted write (write-guard.sh,
+  # bash-guard.sh) are immune paths that cannot be modified. Searching both is
+  # correct for either writer location; moving the writer is a separate redesign
+  # (see known-issues).
+  # CONTRACT_DIR is THIS SESSION's directory and is searched first; the main
+  # repo's is the fallback. Session-first because briefs write the session copy,
+  # so a main-first order would let a stale copy satisfy A6.1 and then feed A6.3's
+  # integration-point checks the wrong content.
+  _A61_MAIN_ROOT="$(get_main_repo_root 2>/dev/null)" || _A61_MAIN_ROOT=""
+  [ -n "$_A61_MAIN_ROOT" ] || _A61_MAIN_ROOT="$REPO_ROOT"
   if [ "$(get_mode)" = "template" ]; then
     CONTRACT_DIR="$REPO_ROOT/.claude/local/task-groups"
+    CONTRACT_DIR_ALT="$_A61_MAIN_ROOT/.claude/local/task-groups"
   else
     CONTRACT_DIR="$REPO_ROOT/docs/ai/task-groups"
+    CONTRACT_DIR_ALT="$_A61_MAIN_ROOT/docs/ai/task-groups"
   fi
+  # Collapse to one when the session IS the main repo, so the glob below does
+  # not list every contract twice.
+  [ "$CONTRACT_DIR_ALT" = "$CONTRACT_DIR" ] && CONTRACT_DIR_ALT=""
 
   # A6.1: Contract existence (blocking for task group sessions, Decision 0018)
   # Task group sessions must have a contract with status: in_progress before
@@ -943,18 +1023,18 @@ if [ "$SKIP_STATE" = false ] && [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
   A6_CONTRACT_PATH=""  # set when in_progress contract is found — used by A6.3
   if [ "$A6_SESSION_TYPE" = "taskgroup" ] || [ "$A6_SESSION_TYPE" = "taskgroup-merge" ]; then
     CONTRACT_FOUND=false
-    if [ -d "$CONTRACT_DIR" ]; then
-      for _a6_cf in "$CONTRACT_DIR"/*.yaml; do
-        [ -f "$_a6_cf" ] || continue
-        # Skip template files (prefixed with _)
-        case "$(basename "$_a6_cf")" in _*) continue ;; esac
-        if grep -q "status: in_progress" "$_a6_cf" 2>/dev/null; then
-          CONTRACT_FOUND=true
-          A6_CONTRACT_PATH="$_a6_cf"
-          break
-        fi
-      done
-    fi
+    # Both roots. An unmatched glob stays literal, so the -f test is what filters
+    # a missing directory — no -d guard needed per directory.
+    for _a6_cf in "$CONTRACT_DIR"/*.yaml ${CONTRACT_DIR_ALT:+"$CONTRACT_DIR_ALT"/*.yaml}; do
+      [ -f "$_a6_cf" ] || continue
+      # Skip template files (prefixed with _)
+      case "$(basename "$_a6_cf")" in _*) continue ;; esac
+      if grep -q "status: in_progress" "$_a6_cf" 2>/dev/null; then
+        CONTRACT_FOUND=true
+        A6_CONTRACT_PATH="$_a6_cf"
+        break
+      fi
+    done
     if [ "$CONTRACT_FOUND" = false ]; then
       echo "GATE-RECOVERABLE: A6 — task group session ($A6_SESSION_TYPE) but no contract with 'status: in_progress'. NEXT: Create the contract during contract-init phase. (override: SKIP_CONTRACT_CHECK=1)" >&2
       block "A6_contract_missing"
@@ -963,8 +1043,24 @@ if [ "$SKIP_STATE" = false ] && [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
   fi
 
   # A6.2: Contract staging (blocking for all sessions with modified contracts)
-  if [ -d "$CONTRACT_DIR" ]; then
-    UNSTAGED_CONTRACTS=$(git diff --name-only -- "$CONTRACT_DIR"/*.yaml 2>/dev/null || true)
+  #
+  # Deliberately uses the SESSION-rooted directory, not the main-rooted
+  # CONTRACT_DIR that A6.1 searches. A6.2 asks a question about THIS repository's
+  # index — "is a modified contract staged?" — and git can only answer it for
+  # paths inside the current work tree. Pointing this at the main root inside a
+  # worktree made `git diff` fatal with "outside repository", which
+  # `2>/dev/null || true` then swallowed: UNSTAGED_CONTRACTS came back empty, the
+  # gate passed, and A6_contract_unstaged could never fire. That is a fail-open,
+  # and it is also the directory briefs actually write, so it is the one that
+  # needs checking. In the main repo the two paths are identical and behaviour is
+  # unchanged.
+  if [ "$(get_mode)" = "template" ]; then
+    _A62_DIR="$REPO_ROOT/.claude/local/task-groups"
+  else
+    _A62_DIR="$REPO_ROOT/docs/ai/task-groups"
+  fi
+  if [ -d "$_A62_DIR" ]; then
+    UNSTAGED_CONTRACTS=$(git diff --name-only -- "$_A62_DIR"/*.yaml 2>/dev/null || true)
     if [ -n "$UNSTAGED_CONTRACTS" ]; then
       NOT_STAGED=""
       while IFS= read -r CF; do

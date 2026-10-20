@@ -11,3 +11,8 @@ work_order:
   updated_at: ""            # ISO 8601 timestamp
   completed_at: ""          # ISO 8601 timestamp (set on terminal state)
   failure_entry_id: ""      # queue entry ID that caused work order failure (set when status → failed)
+  project: ""               # (v1.4.0) free-text project name; shown in Task details header (optional)
+  milestone:                # (v1.4.0) milestone info; shown as "Milestone 01/06" (optional)
+    name: ""                # milestone label (e.g., "Alpha")
+    index: 0                # 1-based milestone position (e.g., 1)
+    total: 0                # total milestones in project (e.g., 6)

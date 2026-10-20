@@ -28,6 +28,7 @@
 .claude/.automation/lib/eval-conductor.sh
 .claude/.automation/lib/eval-state-writer.sh
 .claude/.automation/lib/file-lock.sh
+.claude/.automation/lib/group-worktree-sweep.sh
 .claude/.automation/lib/health-check.sh
 .claude/.automation/lib/install-hooks.sh
 .claude/.automation/lib/intake.sh
@@ -65,12 +66,16 @@
 .claude/.automation/templates/finish-loop-brief.md
 .claude/.automation/templates/taskgroup-brief.md
 .claude/.automation/templates/template-sync-with-cleanup.yml
+.claude/.automation/tests/run-automation-tests.sh
 .claude/.automation/tests/sandbox-setup.sh
 .claude/.automation/tests/sandbox-teardown.sh
 .claude/.automation/tests/test-branch-manager.sh
+.claude/.automation/tests/test-daemon-liveness.sh
 .claude/.automation/tests/test-escalation-suppression.sh
 .claude/.automation/tests/test-gate-bypass.sh
+.claude/.automation/tests/test-group-worktree-lifecycle.sh
 .claude/.automation/tests/test-phase-ordering.sh
+.claude/.automation/tests/test-prompt-assembler.sh
 .claude/.automation/tests/test-queue-manipulation.sh
 .claude/.automation/tests/test-runner.sh
 .claude/.automation/tests/test-state-corruption.sh
@@ -151,6 +156,7 @@
 .claude/hooks/tests/layer5-live-editor-numbering.sh
 .claude/hooks/tests/layer6-stop-sessionend-split.sh
 .claude/hooks/tests/layer7-criteria-verdicts.sh
+.claude/hooks/tests/layer8-group-worktree.sh
 .claude/hooks/tests/run-phase-tests.sh
 .claude/hooks/tests/test-fixtures.sh
 .claude/hooks/tests/test-helpers.sh
@@ -245,11 +251,11 @@ docs/ai/decisions/t-0050-expected-changes.md
 docs/ai/decisions/t-0051-template-sync-ownership.md
 docs/ai/decisions/t-0052-child-owned-files.md
 docs/ai/decisions/t-0053-signal-fidelity.md
+docs/ai/decisions/t-0054-task-group-worktree-lifetime.md
 docs/ai/decisions/t-manifest.txt
 docs/ai/eval/.gitkeep
 docs/ai/eval/_nomenclature.md
 docs/ai/governance/.gitkeep
-docs/ai/governance/criteria-verdicts/693a8736-de98-44fc-8152-7f30bb6ce464.yaml
 docs/ai/governance/spec-compiled.yaml
 docs/ai/hook-rules-summary.md
 docs/ai/knowledge-graph/README.md

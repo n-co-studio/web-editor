@@ -2,7 +2,11 @@
 # State writer — captures governance agent verdicts as state files.
 # Wired to SubagentStop (all agents) via .claude/settings.json.
 # Only processes governance agents: critic, qa-verifier, reviewer, security-privacy, pragmatist.
-# Extracts GATE_RESULT: sentinel from last non-empty line of agent output.
+# Extracts GATE_RESULT: sentinel from the last meaningful line of agent output
+# (trailing blank lines and bare horizontal rules are skipped — see
+# _last_meaningful_line). The report is read from .last_assistant_message, falling
+# back to the SubagentHandback tool call in the subagent's transcript on harness
+# builds that end subagents with a handback instead of a final message.
 # Writes state files via shell I/O — never the Write tool.
 # Never blocks (always exit 0) — enforcement happens at commit time.
 # Phase advancement: advances phase on APPROVED results for critic and qa-verifier.
@@ -61,11 +65,65 @@ case "$AGENT_TYPE" in
 esac
 
 # --- Extract last assistant message ---
-LAST_MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty')
+LAST_MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty' 2>/dev/null || true)
+
+# Fallback: handback-terminated subagents (2026-10-13).
+# Newer harness builds end a subagent with a SubagentHandback tool call carrying
+# the report in .input.message, instead of a final assistant text block. That
+# leaves .last_assistant_message empty, which silently discarded EVERY governance
+# verdict — the same failure class as known-issue R8, but total rather than
+# formatting-dependent: three consecutive Pragmatist APPROVED verdicts were lost
+# before the cause was found, and the session deadlocked (no pragmatist-signed →
+# no advance out of 'plan' → writes gated → this hook uneditable).
+# Recover the report from the last handback call in the subagent's own transcript.
+# agent_transcript_path is the SUBAGENT's transcript; transcript_path is the parent
+# session's and contains no handback tool_use entries, so the order matters —
+# reading the parent first yields an empty match and looks like an absent verdict.
+# Both candidates are tried in turn and the first that EXISTS wins, so a renamed
+# or not-yet-created subagent transcript falls through instead of dead-ending.
+# When the harness emits a normal final message this path never fires, so the fix
+# is additive, not a behaviour change.
+if [ -z "$LAST_MESSAGE" ]; then
+  for _tp_key in agent_transcript_path transcript_path; do
+    TRANSCRIPT=$(echo "$INPUT" | jq -r --arg k "$_tp_key" '.[$k] // empty' 2>/dev/null || true)
+    [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ] || continue
+
+    # Parsed line by line with `fromjson?`, NOT with `jq -rs`. Slurping parses the
+    # whole transcript as one stream, so a single malformed line — a torn trailing
+    # write while the subagent's transcript is still being flushed is the realistic
+    # case — makes jq exit non-zero and loses the verdict, which is the exact
+    # failure this fallback exists to prevent. `fromjson?` drops only the bad line.
+    # Each match is emitted as a compact JSON string, so one handback is one output
+    # line regardless of newlines in the report; tail -1 therefore takes the LAST
+    # handback whole, and the final jq decodes it back to text.
+    _handback=$(jq -R -c '
+      fromjson?
+      | (.message?.content? // [])
+      | .[]?
+      | select(type == "object")
+      | select(.type == "tool_use" and .name == "SubagentHandback")
+      | .input?.message? // empty
+    ' "$TRANSCRIPT" 2>/dev/null | tail -1 || true)
+
+    if [ -n "$_handback" ]; then
+      LAST_MESSAGE=$(printf '%s' "$_handback" | jq -r '.' 2>/dev/null || true)
+    fi
+
+    if [ -n "$LAST_MESSAGE" ]; then
+      log_hook_event "state-writer" "SubagentStop" "$AGENT_TYPE" "recover" "$START_MS" "handback_transcript" "src:$_tp_key"
+      break
+    fi
+  done
+fi
 
 if [ -z "$LAST_MESSAGE" ]; then
-  echo "WARNING: $AGENT_TYPE completed with empty output — state file not written" >&2
-  log_hook_event "state-writer" "SubagentStop" "$AGENT_TYPE" "skip" "$START_MS" "no_message"
+  # Log the payload's top-level keys so the next occurrence is self-diagnosing.
+  # An agent that produced nothing and a renamed payload field look identical from
+  # the outside; telling them apart previously meant reading a subagent transcript
+  # by hand, which is how the handback change stayed invisible for two days.
+  PAYLOAD_KEYS=$(echo "$INPUT" | jq -r 'keys | join(",")' 2>/dev/null || true)
+  echo "WARNING: $AGENT_TYPE completed with empty output — state file not written (payload keys: ${PAYLOAD_KEYS:-none})" >&2
+  log_hook_event "state-writer" "SubagentStop" "$AGENT_TYPE" "skip" "$START_MS" "no_message" "keys:${PAYLOAD_KEYS:-none}"
   exit 0
 fi
 
@@ -131,13 +189,40 @@ _write_verdict_rejection() {
   } > "$_vr_file" 2>/dev/null || true
 }
 
-# --- Extract last non-empty line ---
-LAST_LINE=$(echo "$LAST_MESSAGE" | awk 'NF{line=$0} END{print line}')
+# --- Last MEANINGFUL line of an agent message ---
+# Skips trailing blank lines (as the previous `NF{line=$0}` did) and, in
+# addition, trailing markdown horizontal rules: ---, ***, ___ and their spaced
+# variants (- - -). Nothing else is skipped, so any prose, heading or table row
+# after the sentinel still fails the check.
+#
+# Why this does not weaken Decision t-0039: the contract is that GATE_RESULT:
+# is TERMINAL — that no further verdict content follows it. A horizontal rule
+# carries no content; it is punctuation an agent naturally emits between two
+# sections. Treating it as content cost seven discarded reviews across critic
+# (3), qa-verifier (2) and security-privacy (2), and it is not self-correcting:
+# on 2026-10-12 the critic re-emitted the identical trailing `---` on
+# re-dispatch, so the brief looped until it was force-stopped. The strictness
+# was rejecting well-formed verdicts, including a diff-review section that was
+# correctly terminated, because the sibling section ended in punctuation.
+# Interval expressions are avoided for macOS awk (BWK) compatibility.
+_last_meaningful_line() {
+  awk '
+    { t = $0; gsub(/[ \t]/, "", t)
+      if (t == "") next
+      if ((t ~ /^-+$/ || t ~ /^\*+$/ || t ~ /^_+$/) && length(t) >= 3) next
+      last = $0 }
+    END { print last }
+  '
+}
+
+# --- Extract last meaningful line ---
+LAST_LINE=$(echo "$LAST_MESSAGE" | _last_meaningful_line)
 
 # --- Check for GATE_RESULT: sentinel ---
 # The terminal position of GATE_RESULT: is a deliberate contract (Decision t-0039;
 # documented to the agent at critic.md:158) — a rejection here means the agent
-# violated its own output contract, not that the parser is too strict. Do not relax.
+# violated its own output contract, not that the parser is too strict. Relax only
+# for content-free punctuation (see _last_meaningful_line); never for prose.
 if [[ "$LAST_LINE" != GATE_RESULT:* ]]; then
   {
     printf '=== VERDICT REJECTED: %s ===\n' "$AGENT_TYPE"
@@ -414,13 +499,15 @@ _capture_criteria_verdicts() {
 if [ "$CRITIC_COMBINED" = true ]; then
   COHESION_PART=$(echo "$LAST_MESSAGE" | awk '/^## Diff-Review Brief/{exit} {print}')
   DIFF_REVIEW_PART=$(echo "$LAST_MESSAGE" | awk '/^## Diff-Review Brief/{found=1} found{print}')
-  COHESION_LAST=$(echo "$COHESION_PART" | awk 'NF{line=$0} END{print line}')
-  DIFF_REVIEW_LAST=$(echo "$DIFF_REVIEW_PART" | awk 'NF{line=$0} END{print line}')
+  COHESION_LAST=$(echo "$COHESION_PART" | _last_meaningful_line)
+  DIFF_REVIEW_LAST=$(echo "$DIFF_REVIEW_PART" | _last_meaningful_line)
 
   if [[ "$COHESION_LAST" != GATE_RESULT:* ]] || [[ "$DIFF_REVIEW_LAST" != GATE_RESULT:* ]]; then
     # Per Decision t-0039 each section must terminate with its own GATE_RESULT:.
-    # A separator or trailing prose between the sections makes the cohesion half's
-    # last non-empty line something else, and BOTH verdicts are discarded.
+    # Trailing PROSE between the sections makes the cohesion half's last
+    # meaningful line something else, and BOTH verdicts are discarded. A bare
+    # horizontal rule no longer counts — see _last_meaningful_line. This is the
+    # exact failure that looped a brief to death on 2026-10-12.
     {
       printf '=== VERDICT REJECTED: %s (combined) ===\n' "$AGENT_TYPE"
       printf '  cohesion section ends with:    %s\n' "${COHESION_LAST:-(empty)}"

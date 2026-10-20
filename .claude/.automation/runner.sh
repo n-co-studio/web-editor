@@ -151,6 +151,10 @@ _HEARTBEAT_PID=""
 
 # --- Child process tracking (for FORCE-HALT) ---
 _CLAUDE_CHILD_PID=""
+# The in-session FORCE-HALT watcher's pid. Declared here with its peer rather
+# than only being assigned inside _start_force_halt_watcher: the whole file runs
+# under `set -u`, so any read before the first launch would abort the daemon.
+_FORCE_HALT_WATCHER_PID=""
 
 # --- Worktree tracking (for cleanup on crash/FORCE-HALT) ---
 _CURRENT_WORKTREE_DIR=""
@@ -333,8 +337,56 @@ _circuit_breaker_tripped() {
   local count
   count=$(grep '^consecutive_failures:' "$cb_file" 2>/dev/null \
     | sed 's/.*: *//' | tr -d '[:space:]' | head -1)
-  [ -n "$count" ] && [ "$count" -ge 3 ] && return 0
-  return 1
+  # A corrupt count fails CLOSED, matching the epoch policy below. Previously
+  # `[ xyz -ge 3 ]` exited 2, so an unreadable breaker file reported "not
+  # tripped" and the daemon kept pulling entries — the opposite direction from
+  # every other malformed-input path here, and the one that turns a hard stop
+  # into an unbounded retry loop. A file that exists but cannot be read is not
+  # evidence that nothing is wrong. `reset-breaker` is the way out.
+  case "$count" in
+    '') return 1 ;;                                  # no count line: not tripped
+    *[!0-9]*)
+      echo "Circuit breaker file has an unreadable consecutive_failures value ('$count') — treating the breaker as TRIPPED. Clear it with 'queue-cli.sh reset-breaker'." >&2
+      return 0
+      ;;
+  esac
+  [ "$count" -ge 3 ] || return 1
+
+  # Cooldown. Before this, a tripped breaker had NO way out: nothing read the
+  # timestamp, no command reset it, and the only reset path runs on a successful
+  # entry — which the breaker itself prevents. On 2026-10-20 that left the daemon
+  # wedged from 04:08 until the counter file was deleted by hand.
+  #
+  # Once the window has passed the breaker reports "not tripped" so ONE entry can
+  # be attempted. The counter is deliberately NOT cleared: if that probe fails,
+  # _circuit_breaker_increment bumps the count and writes a fresh timestamp, so
+  # the breaker re-trips for another full window. That gives one probe per
+  # window rather than the retry loop a counter reset would produce. Only a
+  # SUCCESS clears the file, via the existing _circuit_breaker_reset.
+  local cooldown
+  cooldown=$(_parse_config_field "runner" "circuit_breaker_cooldown_seconds" 2>/dev/null || echo "")
+  cooldown="${cooldown:-1800}"
+  case "$cooldown" in ''|*[!0-9]*) cooldown=1800 ;; esac
+  [ "$cooldown" -gt 0 ] || return 0   # 0 disables the cooldown — stay tripped
+
+  # The epoch field is written alongside the ISO timestamp precisely so this
+  # comparison needs no date parsing: `date -d` is GNU-only and `date -j` is
+  # BSD-only, and this repo targets bash 3.2 on macOS.
+  local failed_epoch
+  failed_epoch=$(grep '^last_failure_epoch:' "$cb_file" 2>/dev/null \
+    | sed 's/.*: *//' | tr -d '[:space:]' | head -1)
+  # Missing or unparseable: stay tripped. Fails closed, not open — a breaker
+  # written by an older runner has no epoch field and must not silently expire.
+  case "$failed_epoch" in ''|*[!0-9]*) return 0 ;; esac
+
+  local now_epoch elapsed
+  now_epoch=$(date +%s)
+  elapsed=$(( now_epoch - failed_epoch ))
+  if [ "$elapsed" -ge "$cooldown" ]; then
+    echo "Circuit breaker cooldown elapsed (${elapsed}s >= ${cooldown}s) — allowing ONE probe entry. The failure count stays at ${count}: if the probe fails the breaker re-trips for another ${cooldown}s. Diagnose with 'queue-cli.sh review', or clear it with 'queue-cli.sh reset-breaker'." >&2
+    return 1
+  fi
+  return 0
 }
 
 _circuit_breaker_increment() {
@@ -342,14 +394,27 @@ _circuit_breaker_increment() {
   cb_file=$(_cb_file)
   local count=0
   if [ -f "$cb_file" ]; then
+    # `|| true`: this function is called as a plain command from the daemon
+    # loop's failure arm, so errexit is live (unlike _circuit_breaker_tripped,
+    # which is always called from an `if`). A breaker file with no
+    # `consecutive_failures:` line makes grep exit 1, pipefail propagates it,
+    # and the daemon dies while recording a failure — the count guard below
+    # would never be reached.
     count=$(grep '^consecutive_failures:' "$cb_file" 2>/dev/null \
-      | sed 's/.*: *//' | tr -d '[:space:]' | head -1)
+      | sed 's/.*: *//' | tr -d '[:space:]' | head -1) || true
     count="${count:-0}"
   fi
+  case "$count" in ''|*[!0-9]*) count=0 ;; esac
   count=$((count + 1))
-  local ts
+  local ts epoch
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  printf 'consecutive_failures: %s\nlast_failure_at: %s\n' "$count" "$ts" \
+  # The epoch is written for _circuit_breaker_tripped's cooldown arithmetic;
+  # the ISO timestamp stays because it is what operators read. Parsing the ISO
+  # form back is not portable (`date -d` GNU-only, `date -j -f` BSD-only), so
+  # the value is recorded in both shapes rather than converted later.
+  epoch=$(date +%s)
+  printf 'consecutive_failures: %s\nlast_failure_at: %s\nlast_failure_epoch: %s\n' \
+    "$count" "$ts" "$epoch" \
     > "${cb_file}.tmp"
   mv "${cb_file}.tmp" "$cb_file"
 }
@@ -722,7 +787,37 @@ _brief_is_sequential_group() {
     return 1
   fi
   # Absence of an Execution: line means sequential (the documented default).
-  if grep -qE '^[[:space:]]*(-[[:space:]]*)?Execution:[[:space:]]*parallel' "$resolved" 2>/dev/null; then
+  #
+  # Both brief formats must match. The canonical one the templates emit is
+  # `- **Execution:** parallel`; older briefs use a bare `Execution: parallel`.
+  # The original pattern allowed the leading "- " but not the bold markers, so a
+  # CANONICAL parallel brief fell through as sequential and would have been
+  # handed a shared group worktree — precisely what Decision 0032 forbids, and a
+  # race between parallel briefs on one working tree. Same root cause as the
+  # `_extract_group_name` defect fixed alongside this.
+  # Scoped to the ### Task Group section first, for the same reason
+  # _extract_group_name is: a stray phrase elsewhere in the brief must not
+  # decide execution mode.
+  #
+  # But the fallback is deliberately file-wide, NOT scope-only, because the two
+  # error directions are not equally costly. Missing a `parallel` marker
+  # (false negative) hands a parallel group a SHARED worktree and races its
+  # briefs against one working tree — the exact harm Decision 0032 exists to
+  # prevent. Spuriously reading `parallel` (false positive) merely gives a
+  # sequential group per-session worktrees, i.e. the pre-t-0054 behaviour.
+  # So when the section carries no Execution line at all, fall back to scanning
+  # the whole brief: being permissive toward "parallel" is the fail-safe side.
+  local _tg_section
+  _tg_section=$(sed -n '/^### Task Group$/,/^###/p' "$resolved" 2>/dev/null || true)
+  local _exec_pat='^[[:space:]]*(-[[:space:]]*)?(\*\*)?Execution:?(\*\*)?:?[[:space:]]*'
+  if printf '%s\n' "$_tg_section" | grep -qE "${_exec_pat}parallel"; then
+    return 1
+  fi
+  if printf '%s\n' "$_tg_section" | grep -qE "${_exec_pat}sequential"; then
+    return 0
+  fi
+  # No Execution line in the section — scan the whole brief (legacy briefs).
+  if grep -qE "${_exec_pat}parallel" "$resolved" 2>/dev/null; then
     return 1
   fi
   return 0
@@ -919,6 +1014,57 @@ _RESULT_BASELINE=""
 _RESULT_SOLO_MODE=""
 _RESULT_BRANCH=""
 
+# --- _start_force_halt_watcher ---
+# Makes FORCE-HALT interrupt a RUNNING entry.
+#
+# The daemon loop checks the FORCE-HALT file only BETWEEN entries, so an
+# operator who force-halted during a long brief had to wait for that brief to
+# finish. On 2026-10-20 a running brief had to be stopped by signalling its
+# process by hand, which is not something an operator should need to do. This
+# watcher polls for the flag and ends the child at the next poll.
+#
+# It deliberately does NOT delete the flag. The loop handler still needs to see
+# it to clean up the worktree and the entry and to stop the daemon; deleting it
+# here would silently turn a force-halt into "kill this one brief and carry on".
+#
+# One helper, called from both launch sites, rather than two inline copies: the
+# two branches are already near-duplicates and this keeps the kill ladder in a
+# single place. The TTL watchdog stays inline and unchanged — unifying the
+# watchers into one supervisor is a follow-up, not something to attempt inside a
+# liveness repair, because the kill path is exactly what must stay stable.
+#
+# Arguments:
+#   $1 — child pid to end when the flag appears
+# Sets: _FORCE_HALT_WATCHER_PID ("" when no watcher could be started)
+_start_force_halt_watcher() {
+  local child_pid="$1"
+  _FORCE_HALT_WATCHER_PID=""
+  [ -n "$child_pid" ] || return 0
+  [ -n "${AUTOMATION_DIR:-}" ] || return 0
+
+  (
+    while kill -0 "$child_pid" 2>/dev/null; do
+      if [ -f "$AUTOMATION_DIR/FORCE-HALT" ]; then
+        echo "FORCE-HALT seen while an entry is running — sending SIGTERM to child pid $child_pid" >&2
+        kill -TERM "$child_pid" 2>/dev/null || true
+        _fhw_waited=0
+        while [ "$_fhw_waited" -lt 10 ] && kill -0 "$child_pid" 2>/dev/null; do
+          sleep 1
+          _fhw_waited=$(( _fhw_waited + 1 ))
+        done
+        if kill -0 "$child_pid" 2>/dev/null; then
+          echo "FORCE-HALT: child pid $child_pid survived SIGTERM for 10s — sending SIGKILL" >&2
+          kill -KILL "$child_pid" 2>/dev/null || true
+        fi
+        exit 0
+      fi
+      sleep 5
+    done
+  ) &
+  _FORCE_HALT_WATCHER_PID=$!
+}
+
+# --- _run_single_entry ---
 # Arguments:
 #   $1 — brief_id (for branch naming)
 #   $2 — prompt (assembled prompt text)
@@ -1156,7 +1302,17 @@ _run_single_entry() {
   local exit_code=0
   if [ -n "$stderr_file" ]; then
     # shellcheck disable=SC2086 — $model_flag intentionally unquoted (expands to nothing when empty)
-    (cd "$launch_dir" && claude -p \
+    # `exec` is load-bearing. Without it the subshell FORKS the child, so `$!`
+    # is the SUBSHELL's pid and every kill path signals a wrapper while the real
+    # process keeps running: FORCE-HALT and the TTL watchdog were both affected. Confirmed on a live run 2026-10-20 — the
+    # tracked pid was a `bash runner.sh` subshell whose child was the real
+    # process, and terminating the tracked pid left it running.
+    #
+    # `cd ... && exec` keeps the ordering: a failed cd still never runs the
+    # child. The here-string and the stderr tee are established by the subshell
+    # BEFORE exec replaces it, so both survive. `wait` now returns the child's
+    # own status, including 143 on SIGTERM, which detect_outcome already handles.
+    (cd "$launch_dir" && exec claude -p \
       --permission-mode bypassPermissions \
       --disallowedTools "$disallowed" \
       --max-turns 200 \
@@ -1174,6 +1330,8 @@ _run_single_entry() {
         fi ) &
       _ttl_watchdog_pid=$!
     fi
+    # FORCE-HALT must be able to interrupt THIS entry, not just the next one.
+    _start_force_halt_watcher "$_CLAUDE_CHILD_PID"
     wait "$_CLAUDE_CHILD_PID" || exit_code=$?
     # Re-wait if child is still alive (SIGTERM interrupted wait, not child)
     while [ "$exit_code" -ne 0 ] && kill -0 "$_CLAUDE_CHILD_PID" 2>/dev/null; do
@@ -1193,7 +1351,10 @@ _run_single_entry() {
     done
   else
     # shellcheck disable=SC2086 — $model_flag intentionally unquoted (expands to nothing when empty)
-    (cd "$launch_dir" && claude -p \
+    # `exec` for the same reason as the stderr branch above: the tracked pid must
+    # be the real process, not a subshell wrapper, or every kill path signals the
+    # wrapper and the child survives.
+    (cd "$launch_dir" && exec claude -p \
       --permission-mode bypassPermissions \
       --disallowedTools "$disallowed" \
       --max-turns 200 \
@@ -1210,6 +1371,8 @@ _run_single_entry() {
         fi ) &
       _ttl_watchdog_pid=$!
     fi
+    # FORCE-HALT must be able to interrupt THIS entry, not just the next one.
+    _start_force_halt_watcher "$_CLAUDE_CHILD_PID"
     wait "$_CLAUDE_CHILD_PID" || exit_code=$?
     # Re-wait if child is still alive (SIGTERM interrupted wait, not child)
     while [ "$exit_code" -ne 0 ] && kill -0 "$_CLAUDE_CHILD_PID" 2>/dev/null; do
@@ -1233,6 +1396,14 @@ _run_single_entry() {
     kill "$_ttl_watchdog_pid" 2>/dev/null || true
     wait "$_ttl_watchdog_pid" 2>/dev/null || true
     _ttl_watchdog_pid=""
+  fi
+  # Same for the FORCE-HALT watcher. Its own loop exits when the child dies, but
+  # reaping it here keeps the daemon from accumulating one zombie poller per
+  # entry over a long run.
+  if [ -n "${_FORCE_HALT_WATCHER_PID:-}" ]; then
+    kill "$_FORCE_HALT_WATCHER_PID" 2>/dev/null || true
+    wait "$_FORCE_HALT_WATCHER_PID" 2>/dev/null || true
+    _FORCE_HALT_WATCHER_PID=""
   fi
   _CLAUDE_CHILD_PID=""
 
@@ -1318,6 +1489,30 @@ _solo_merge_if_needed() {
   local group_name="${5:-}"
 
   local _outcome_type="${_RESULT_OUTCOME%%:*}"
+
+  # --- Non-final task group briefs must not merge (Decision 0013 §7) ---
+  # The seal was already gated on finality below, but the MERGE was not, so
+  # every completed solo task group brief merged to main as it finished rather
+  # than only the final one. `session-close-check.sh` gates its merge on
+  # is_final_brief; this is the runner side of that parity contract.
+  #
+  # The observed damage was not just an early merge: merging brief N made the
+  # group branch an ancestor of main, so branch_manager_setup's Case 1 then
+  # deleted and recreated the branch before brief N+1 — the shared group branch
+  # did not survive between briefs at all.
+  #
+  # Standalone work is unaffected. _is_final_taskgroup_entry returns 0 (final)
+  # when work_order_id is empty, and also for a `type: single` work order whose
+  # only entry is this one, so single-entry merges behave exactly as before.
+  if [ "$_outcome_type" = "completed" ] && [ "$_RESULT_SOLO_MODE" = "true" ] \
+     && [ -n "$entry_current_branch" ] && ! _is_final_taskgroup_entry "$brief_id" "$work_order_id"; then
+    echo "Task group brief is not final — skipping merge and seal; branch '$entry_current_branch' stays open for the next brief (Decision 0013 §7)" >&2
+    if [ -n "$group_name" ]; then
+      release_group_worktree_lock "$group_name" "$$" "${REPO_OS_SESSION_ID:-}" || true
+      _CURRENT_GROUP_NAME=""
+    fi
+    return
+  fi
 
   if [ "$_outcome_type" = "completed" ] && [ "$_RESULT_SOLO_MODE" = "true" ] && [ -n "$entry_current_branch" ]; then
     case "$entry_current_branch" in
@@ -1864,7 +2059,12 @@ while true; do
   # --- Circuit breaker check ---
   if _circuit_breaker_tripped; then
     _write_health "circuit-breaker"
-    echo "Circuit breaker tripped (3 consecutive failures). Sleeping 60s..." >&2
+    # Message stays general: the count can be 4+ after a failed probe, and the
+    # fail-closed arm trips with no readable count at all. Naming the cooldown
+    # here matters because this is the line an operator watches while waiting a
+    # window out — it was previously the only breaker message that never
+    # mentioned there was a way out.
+    echo "Circuit breaker tripped. Sleeping 60s... (see 'queue-cli.sh status' for the failure count; it self-expires for one probe entry after runner.circuit_breaker_cooldown_seconds, or clear it with 'queue-cli.sh reset-breaker')" >&2
     sleep 60
     continue
   fi
@@ -2409,7 +2609,24 @@ while true; do
       fi
       ;;
     failed|*)
-      _circuit_breaker_increment
+      # An operator force-halt is not a repo failure. Since the in-session
+      # watcher actually kills the child, a force-halted session now returns 143
+      # and lands here, where it previously could not reach outcome detection at
+      # all. Counting it would mean three operator force-halts trip the breaker
+      # and block the next start for a full cooldown window — a failure the
+      # operator did not earn. The flag is still present at this point because
+      # the watcher deliberately leaves it: the loop-top handler needs it to
+      # stop the daemon and to sweep the worktree. Note it does NOT re-handle
+      # the entry — `_CURRENT_ENTRY_ID` is cleared before this arm runs, and the
+      # entry has already been through `queue_fail` on the normal failure path.
+      # Two consequences, both pre-existing and recorded rather than fixed here:
+      # a force-halted entry gets no escalation artifact, and the halt consumes
+      # one of its retries.
+      if [ -f "$AUTOMATION_DIR/FORCE-HALT" ]; then
+        echo "Session terminated by FORCE-HALT — not counted against the circuit breaker." >&2
+      else
+        _circuit_breaker_increment
+      fi
       _SESSIONS_FAILED=$((_SESSIONS_FAILED + 1))
       _LAST_SESSION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
       _CONSECUTIVE_SESSION_COUNT=$((_CONSECUTIVE_SESSION_COUNT + 1))

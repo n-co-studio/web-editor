@@ -171,6 +171,48 @@ REPO_ROOT="$_REPO_OS_ROOT"
 # message) target; SESSION_LOG_ALT is the additional candidate in template mode.
 IS_TEMPLATE=false
 [ "$(get_mode)" = "template" ] && IS_TEMPLATE=true
+
+# --- Task group contract directory ---
+# Rooted at the MAIN repo, NOT $REPO_ROOT. A contract belongs to the GROUP, not
+# to one brief: inside a worktree session $REPO_ROOT is the worktree root, so
+# every brief read and wrote its own private copy of the group's contract, and
+# `git worktree remove` destroyed the group's definition of done along with the
+# worktree. That happened on 2026-10-19 to task-details-header and left every
+# later brief unable to commit anything, because A6.1 requires a contract.
+# Decision t-0055 clause 4 roots the per-entry control directory the same way.
+#
+# One function because this file had THREE copies of the same if/else; it is
+# deliberately file-local rather than a shared repo-wide wrapper, which would be
+# a pass-through layer over get_main_repo_root().
+_scc_contract_dir() {
+  # THIS SESSION's directory, searched first. The main repo's is the fallback in
+  # _scc_contract_dir_alt. Session-first because briefs write the session copy,
+  # so a stale main copy must not shadow a fresher one.
+  if [ "$IS_TEMPLATE" = true ]; then
+    printf '%s' "$REPO_ROOT/.claude/local/task-groups"
+  else
+    printf '%s' "$REPO_ROOT/docs/ai/task-groups"
+  fi
+}
+
+# This session's own contract directory, which is a DIFFERENT path from
+# _scc_contract_dir inside a worktree. Both are searched: a main-repo copy
+# survives `git worktree remove`, while the session-root copy is what briefs
+# write today, because the prompts use session-relative paths and the guards
+# that would need a new exemption are immune paths. Empty when it would merely
+# duplicate _scc_contract_dir, so callers' globs do not list everything twice.
+_scc_contract_dir_alt() {
+  local _alt _primary _root
+  _primary="$(_scc_contract_dir)"
+  _root="$(get_main_repo_root 2>/dev/null)" || _root=""
+  [ -n "$_root" ] || _root="$REPO_ROOT"
+  if [ "$IS_TEMPLATE" = true ]; then
+    _alt="$_root/.claude/local/task-groups"
+  else
+    _alt="$_root/docs/ai/task-groups"
+  fi
+  [ "$_alt" = "$_primary" ] || printf '%s' "$_alt"
+}
 # Decouple the session-log filename from the live session id. Prefer the
 # session_log_id persisted in phase-state at init_phase — this is stable across
 # turns and robust against any future identity drift, not just the 9b6ec01
@@ -289,14 +331,12 @@ _branch_in_active_contract() {
   local target_branch="$1"
   [ -z "$target_branch" ] && return 1
   local contract_dir
-  if [ "$IS_TEMPLATE" = true ]; then
-    contract_dir="$REPO_ROOT/.claude/local/task-groups"
-  else
-    contract_dir="$REPO_ROOT/docs/ai/task-groups"
-  fi
-  [ -d "$contract_dir" ] || return 1
+  contract_dir="$(_scc_contract_dir)"
+  local contract_dir_alt
+  contract_dir_alt="$(_scc_contract_dir_alt)"
+  [ -d "$contract_dir" ] || [ -n "$contract_dir_alt" ] || return 1
   local contract
-  for contract in "$contract_dir"/*.yaml; do
+  for contract in "$contract_dir"/*.yaml ${contract_dir_alt:+"$contract_dir_alt"/*.yaml}; do
     [ -f "$contract" ] || continue
     [ "$(basename "$contract")" = "_contract-template.yaml" ] && continue
     if awk -v target="$target_branch" '
@@ -409,14 +449,11 @@ seal_branch_if_applicable() {
 # false matches against session_decisions or governance sections.
 # Returns "true", "false", or "n/a".
 is_final_brief() {
-  local contract_dir
-  if [ "$IS_TEMPLATE" = true ]; then
-    contract_dir="$REPO_ROOT/.claude/local/task-groups"
-  else
-    contract_dir="$REPO_ROOT/docs/ai/task-groups"
-  fi
+  local contract_dir contract_dir_alt
+  contract_dir="$(_scc_contract_dir)"
+  contract_dir_alt="$(_scc_contract_dir_alt)"
 
-  [ -d "$contract_dir" ] || { echo "n/a"; return; }
+  [ -d "$contract_dir" ] || [ -n "$contract_dir_alt" ] || { echo "n/a"; return; }
 
   local stype
   stype=$(get_session_type)
@@ -444,7 +481,7 @@ is_final_brief() {
   current_branch=$(get_branch)
 
   local contract
-  for contract in "$contract_dir"/*.yaml; do
+  for contract in "$contract_dir"/*.yaml ${contract_dir_alt:+"$contract_dir_alt"/*.yaml}; do
     [ -f "$contract" ] || continue
     [ "$(basename "$contract")" = "_contract-template.yaml" ] && continue
 
@@ -1054,12 +1091,34 @@ if [ "$STOP_ATTEMPT" -ge 3 ]; then
       log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "valve_a4_secret" || true
     fi
   fi
+  # Release the session registry claim before unblocking.
+  #
+  # Why this is here and not left to SessionEnd: the registry entry is a claim
+  # on this BRANCH, and write-guard's overlap gate blocks every Edit and Write
+  # for any other session that shares it. SessionEnd only fires when the process
+  # terminates, so an interactive session whose valve has fired keeps its claim
+  # for as long as the process lives — and `sweep_stale_sessions` cannot reap it
+  # because `kill -0` still succeeds. On 2026-10-19 that blocked brief 4 of
+  # task-details-header from writing ANY file, including a record of being
+  # blocked, with no in-session recovery: the documented
+  # REPO_OS_SKIP_OVERLAP_CHECK override cannot reach a hook process from an
+  # agent session, and no sanctioned API clears a FOREIGN registry entry.
+  #
+  # The trade, stated plainly: register_session() is called only from
+  # init_phase(), so this is a ONE-WAY release. If this session carries on
+  # working it will no longer hold its branch claim, and a concurrent session on
+  # the same branch will not be warned. That is deliberate — the valve firing
+  # means three close attempts have already failed, so the claim is obstructive
+  # rather than protective, and a permanent deadlock for every later session is
+  # worse than a lost advisory for this one. This releases the claim only; the
+  # seal, merge and state cleanup still belong to SessionEnd (Decision 0047).
+  unregister_session || true
   log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "attempt_limit" "$STOP_ATTEMPT" || true
   _emit_kpi_summary 0 "$STOP_ATTEMPT" "" "$(infer_session_type)"
   # Decision 0047: destructive close work (cleanup, seal, merge) moved to SessionEnd.
   # The safety valve on Stop only unblocks — SessionEnd will handle cleanup when the
   # session truly terminates. Emit advisory so operator knows unresolved issues remain.
-  _output_allow "Safety valve fired after $STOP_ATTEMPT Stop attempts — blocking checks could not be satisfied. SessionEnd will seal and clean up when the session ends. Review session log and any uncommitted changes manually."
+  _output_allow "Safety valve fired after $STOP_ATTEMPT Stop attempts — blocking checks could not be satisfied. This session's registry claim on the branch has been released so it cannot block other sessions; it will NOT re-register. SessionEnd will seal and clean up when the session ends. Review session log and any uncommitted changes manually."
   exit 0
 fi
 
@@ -1451,13 +1510,10 @@ fi
 # In template mode, contracts live locally; in product mode, they're committed.
 # Skipped on retry: advisory check, not needed for resolution.
 if [ "$IS_RETRY" = false ] && [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
-  if [ "$IS_TEMPLATE" = true ]; then
-    CONTRACT_DIR="$REPO_ROOT/.claude/local/task-groups"
-  else
-    CONTRACT_DIR="$REPO_ROOT/docs/ai/task-groups"
-  fi
-  if [ -d "$CONTRACT_DIR" ]; then
-    for CONTRACT in "$CONTRACT_DIR"/*.yaml; do
+  CONTRACT_DIR="$(_scc_contract_dir)"
+  CONTRACT_DIR_ALT="$(_scc_contract_dir_alt)"
+  if [ -d "$CONTRACT_DIR" ] || [ -n "$CONTRACT_DIR_ALT" ]; then
+    for CONTRACT in "$CONTRACT_DIR"/*.yaml ${CONTRACT_DIR_ALT:+"$CONTRACT_DIR_ALT"/*.yaml}; do
       [ -f "$CONTRACT" ] || continue
       [ "$(basename "$CONTRACT")" = "_contract-template.yaml" ] && continue
 
@@ -1500,9 +1556,13 @@ fi
 # Non-blocking: prints a reminder, does not exit 2. Override: SKIP_CONTRACT_CHECK=1
 # Skipped on retry: advisory check, not needed for resolution.
 if [ "$IS_RETRY" = false ] && [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
-  # CONTRACT_DIR resolved above (governance evidence check — same IS_RETRY guard)
-  if [ -d "${CONTRACT_DIR:-}" ]; then
-    for CONTRACT in "${CONTRACT_DIR:-}"/*.yaml; do
+  # CONTRACT_DIR / CONTRACT_DIR_ALT resolved above (governance evidence check —
+  # same IS_RETRY guard). Both are searched: in a worktree with no session copy,
+  # which is exactly the scenario that destroyed task-details-header's contract,
+  # a session-only search silently skips this reminder and the operator is never
+  # told the group has a next brief.
+  if [ -d "${CONTRACT_DIR:-}" ] || [ -n "${CONTRACT_DIR_ALT:-}" ]; then
+    for CONTRACT in "${CONTRACT_DIR:-}"/*.yaml ${CONTRACT_DIR_ALT:+"$CONTRACT_DIR_ALT"/*.yaml}; do
       [ -f "$CONTRACT" ] || continue
       # Skip the template file
       [ "$(basename "$CONTRACT")" = "_contract-template.yaml" ] && continue

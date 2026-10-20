@@ -83,19 +83,49 @@ _resolve_contract_path() {
   local group_name="$1"
   local contract=""
 
-  # Template mode first
-  contract="$REPO_ROOT/.claude/local/task-groups/${group_name}.yaml"
-  if [ -f "$contract" ]; then
-    printf '%s' "$contract"
-    return
-  fi
+  # Rooted at the MAIN repo, not $REPO_ROOT. A contract belongs to the GROUP,
+  # not to one brief: inside a worktree session $REPO_ROOT is the worktree root,
+  # so each brief read and wrote its own private copy and `git worktree remove`
+  # destroyed the group's definition of done (2026-10-19, task-details-header).
+  # Same reasoning as Decision t-0055 clause 4 for the control directory.
+  # Search THIS SESSION's root first, then the MAIN repo root.
+  #
+  # A contract belongs to the GROUP, not to one brief, but the prompts instruct
+  # agents to write it at a session-relative path, and write-guard/bash-guard are
+  # immune paths that cannot be taught a new exemption — so the writer cannot be
+  # moved without a larger redesign (known-issue R17). Searching both roots is
+  # coherent with either location: the session copy is the LIVE one while a brief
+  # is running, and the main-repo copy is the one that survives
+  # `git worktree remove` — which destroyed task-details-header's contract on
+  # 2026-10-19 and left every later brief unable to commit, because A6.1 requires
+  # one.
+  #
+  # Session-first, not main-first: because briefs write the session copy, a
+  # main-first order would silently serve a STALE copy to the consumers that read
+  # contract CONTENT (A6.3's integration-point checks, the bridge's active-group
+  # lookup) whenever both exist. A fresh worktree has no session copy at all —
+  # `.claude/local/` is gitignored — so the main fallback still covers the case
+  # that caused the loss.
+  local _ct_main_root
+  _ct_main_root="$(get_main_repo_root 2>/dev/null)" || _ct_main_root=""
+  [ -n "$_ct_main_root" ] || _ct_main_root="$REPO_ROOT"
 
-  # Product mode
-  contract="$REPO_ROOT/docs/ai/task-groups/${group_name}.yaml"
-  if [ -f "$contract" ]; then
-    printf '%s' "$contract"
-    return
-  fi
+  local _ct_root
+  for _ct_root in "$REPO_ROOT" "$_ct_main_root"; do
+    [ -n "$_ct_root" ] || continue
+    # Template mode first
+    contract="$_ct_root/.claude/local/task-groups/${group_name}.yaml"
+    if [ -f "$contract" ]; then
+      printf '%s' "$contract"
+      return
+    fi
+    # Product mode
+    contract="$_ct_root/docs/ai/task-groups/${group_name}.yaml"
+    if [ -f "$contract" ]; then
+      printf '%s' "$contract"
+      return
+    fi
+  done
 }
 
 # --- Parse total brief count from contract ---
@@ -121,17 +151,50 @@ _parse_brief_count() {
 # Arguments:
 #   $1 — brief_text or brief_path
 # Output: group name on stdout (empty if not found)
+# Two formats, in priority order:
+#
+#   1. Canonical (what the templates emit and what
+#      _parse_brief_taskgroup_metadata in queue-manager.sh requires):
+#          ### Task Group
+#          - **Group:** my-group
+#   2. Legacy bare form, anchored at line start:
+#          Group: my-group
+#
+# The previous implementation was `grep -oE 'Group:\s*\S+'` with the "Group:"
+# prefix stripped. Against the canonical form that matched `Group:**` and
+# returned the literal `**`, because `\S+` consumed the closing bold markers.
+# `_sanitize_group_name("**")` then reduced to the empty string, so every
+# consumer silently treated a well-formed task group brief as having no group:
+# the Decision 0054 group worktree never activated, cohesion triggers logged
+# "no contract found for group '**'", and drift detection lost its group scope.
+# The t-0054 tests missed it because their fixtures used the bare form.
+#
+# The canonical match is scoped to the `### Task Group` section so a stray
+# "Group:" elsewhere in a brief cannot win, and the legacy pattern is anchored
+# so it can never again match the middle of a bold marker.
 _extract_group_name() {
   local text="$1"
-  local group=""
+  local group="" file=""
 
-  # Try reading from brief path if it's a file
   if [ -f "$REPO_ROOT/$text" ]; then
-    group=$(grep -oE 'Group:\s*\S+' "$REPO_ROOT/$text" 2>/dev/null \
-      | head -1 | sed 's/Group:[[:space:]]*//' || true)
+    file="$REPO_ROOT/$text"
   elif [ -f "$text" ]; then
-    group=$(grep -oE 'Group:\s*\S+' "$text" 2>/dev/null \
-      | head -1 | sed 's/Group:[[:space:]]*//' || true)
+    file="$text"
+  else
+    printf ''
+    return
+  fi
+
+  # Format 1 — canonical, scoped to the ### Task Group section.
+  group=$(sed -n '/^### Task Group$/,/^###/{ /^- \*\*Group:\*\*/p; }' "$file" 2>/dev/null \
+    | head -1 \
+    | sed 's/^- \*\*Group:\*\*[[:space:]]*//; s/[[:space:]]*$//' || true)
+
+  # Format 2 — legacy bare form, anchored at line start.
+  if [ -z "$group" ]; then
+    group=$(grep -oE '^[[:space:]]*Group:[[:space:]]*[^[:space:]]+' "$file" 2>/dev/null \
+      | head -1 \
+      | sed 's/^[[:space:]]*Group:[[:space:]]*//' || true)
   fi
 
   printf '%s' "$group"

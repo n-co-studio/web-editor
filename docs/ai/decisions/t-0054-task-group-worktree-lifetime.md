@@ -292,3 +292,62 @@ to the pre-amendment behaviour instead of aborting init.
 - `.claude/hooks/tests/layer8-group-worktree.sh` — § L8.2b
 - `.claude/agents/_agent-glossary.md` — `REPO_OS_SKIP_GROUP_LOCK` override row
 - `.claude/.automation/RUNNER-PARITY.md` — row 58 updated
+
+---
+
+## Amendment — 2026-10-12: The Group Worktree Never Activated In Production
+
+This decision shipped working code and a passing test suite, and still never
+took effect for a single real brief. Recorded here because the failure mode —
+not the feature — is the transferable lesson.
+
+`_resolve_group_worktree()` resolves the group name through
+`_extract_group_name()` in `lib/cohesion-trigger.sh`, which was:
+
+```
+grep -oE 'Group:\s*\S+' "$f" | head -1 | sed 's/Group:[[:space:]]*//'
+```
+
+Real briefs carry the canonical form that `_parse_brief_taskgroup_metadata`
+requires and the templates emit:
+
+```
+### Task Group
+- **Group:** my-group
+```
+
+Against that, `\S+` consumed the closing bold markers, so the regex matched
+`Group:**` and the helper returned the literal `**`. `_sanitize_group_name("**")`
+reduces to the empty string, `group_worktree_path` therefore failed, and
+`_resolve_group_worktree` returned "not applicable" **silently** — no warning,
+because the empty-group guard above it tests for an empty return and `**` is not
+empty. Every sequential task group fell back to a per-session worktree, exactly
+as before this decision existed.
+
+It was not only the worktree. The same helper feeds the cohesion trigger and
+drift detection, so the daemon logged `no contract found for group '**'` and
+drift detection lost its group scope too.
+
+**Why the tests passed.** The fixtures in
+`.claude/.automation/tests/test-group-worktree-lifecycle.sh` were written with a
+bare `Group: x` line — a form no real brief uses. The suite verified the
+mechanism against a format that does not occur in production. A second instance
+of the same mistake was found while fixing this: `_brief_is_sequential_group()`
+matched a bare `Execution: parallel` but not the canonical
+`- **Execution:** parallel`, so a PARALLEL group would have been classified
+sequential and handed a shared worktree — two briefs racing one working tree,
+precisely what Decision 0032 exists to prevent. That defect never fired only
+because no parallel group has run since.
+
+**Fixed.** `_extract_group_name` now parses the canonical form first, scoped to
+the `### Task Group` section so a stray `Group:` elsewhere cannot win, and falls
+back to an anchored bare form for legacy briefs. `_brief_is_sequential_group`
+accepts both forms. The fixtures were rewritten to the canonical format with a
+legacy fixture retained alongside, and explicit parser assertions added for
+canonical / legacy / absent. Against the pre-fix source those assertions produce
+13 failures, including the downstream worktree ones; after the fix the suite is
+54/54.
+
+**The rule worth keeping:** a fixture that invents its own input format tests the
+mechanism and not the integration. When a parser has a canonical producer, the
+fixture must come from that producer's format.

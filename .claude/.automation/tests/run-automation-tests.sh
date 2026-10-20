@@ -40,6 +40,8 @@ fi
 SUITES="
 test-branch-manager.sh
 test-group-worktree-lifecycle.sh
+test-prompt-assembler.sh
+test-daemon-liveness.sh
 "
 
 printf "${BOLD}Functional Automation Tests${RESET}\n"

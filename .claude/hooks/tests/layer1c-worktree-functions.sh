@@ -229,6 +229,72 @@ assert_eq "$_compat_dir" "$SB/.claude/.state/wt-sessions/$_compat_expected_sid" 
   "interactive session: state dir is per-session without env var"
 
 # ============================================================
+# L1c.7 — A task group contract resolves from the MAIN repo inside a worktree
+# ============================================================
+# A contract belongs to the GROUP, not to one brief. Resolvers used to search
+# only $REPO_ROOT, which inside a worktree session IS the worktree, so each
+# brief read a private copy — and because `.claude/local/` is gitignored, a
+# fresh worktree has none at all. On 2026-10-19 `git worktree remove` destroyed
+# task-details-header's contract, A6.1 then found no `status: in_progress`
+# anywhere, and every later brief was unable to commit even a record of being
+# blocked. The resolvers now search the main repo root first, then the session
+# root.
+tap_section "L1c.7: contract resolves from the main repo inside a worktree"
+
+_L1C7_MAIN="$SB"
+_L1C7_WT="$SB/.worktrees/l1c7-probe"
+
+mkdir -p "$_L1C7_MAIN/.claude/local/task-groups"
+printf 'identity:\n  group_name: "l1c7-group"\n  execution: sequential\nbriefs:\n  - title: "only"\n    sequence: 1\n    status: in_progress\n' \
+  > "$_L1C7_MAIN/.claude/local/task-groups/l1c7-group.yaml"
+
+# setup_sandbox runs `git init` but makes NO commit, so `worktree add ... HEAD`
+# has no commit to detach from. Without this the whole block skipped and the
+# section passed while asserting nothing.
+( cd "$_L1C7_MAIN" \
+  && git config user.email "l1c7@test" \
+  && git config user.name "L1c7 Test" \
+  && printf 'probe\n' > .l1c7-seed \
+  && git add .l1c7-seed \
+  && git commit -q -m "l1c.7 seed" ) > /dev/null 2>&1 || true
+
+if ( cd "$_L1C7_MAIN" && git worktree add --detach "$_L1C7_WT" HEAD > /dev/null 2>&1 ); then
+  # Copy the libraries under test into the probe: a worktree is checked out at a
+  # COMMIT, so it would otherwise hold the committed version of these files and
+  # the test would silently exercise old code. This is the real repo's copy,
+  # which is what we want to exercise.
+  _L1C7_SRC="$(cd "$SCRIPT_DIR/.." && pwd)"
+  mkdir -p "$_L1C7_WT/.claude/.automation/lib" "$_L1C7_WT/.claude/hooks"
+  cp "$_L1C7_SRC/../.automation/lib/cohesion-trigger.sh" "$_L1C7_WT/.claude/.automation/lib/" 2>/dev/null || true
+  cp "$_L1C7_SRC/../.automation/lib/drift-detector.sh" "$_L1C7_WT/.claude/.automation/lib/" 2>/dev/null || true
+  cp "$_L1C7_SRC/_analytics-helper.sh" "$_L1C7_WT/.claude/hooks/" 2>/dev/null || true
+
+  assert_file_not_exists "$_L1C7_WT/.claude/local/task-groups/l1c7-group.yaml" \
+    "L1c.7 the worktree has no contract of its own (.claude/local is gitignored)"
+
+  _L1C7_OUT=$(
+    cd "$_L1C7_WT" || exit 1
+    export _REPO_OS_ROOT="$_L1C7_WT"
+    export REPO_ROOT="$_L1C7_WT"
+    _CACHED_MAIN_REPO_ROOT=""
+    # shellcheck disable=SC1091
+    source "$_L1C7_WT/.claude/hooks/_analytics-helper.sh" 2>/dev/null
+    # shellcheck disable=SC1091
+    source "$_L1C7_WT/.claude/.automation/lib/cohesion-trigger.sh" 2>/dev/null
+    _resolve_contract_path "l1c7-group" 2>/dev/null
+  )
+  assert_eq "$_L1C7_OUT" "$_L1C7_MAIN/.claude/local/task-groups/l1c7-group.yaml" \
+    "L1c.7 resolver finds the MAIN repo contract from inside the worktree"
+
+  # And it must still survive the removal that caused the original loss.
+  ( cd "$_L1C7_MAIN" && git worktree remove --force "$_L1C7_WT" > /dev/null 2>&1 ) || true
+  assert_file_exists "$_L1C7_MAIN/.claude/local/task-groups/l1c7-group.yaml" \
+    "L1c.7 contract outlives the worktree it was read from"
+else
+  _tap_pass "L1c.7 skipped — git worktree add unavailable in sandbox"
+fi
+
+# ============================================================
 # Finish
 # ============================================================
 finish_tests

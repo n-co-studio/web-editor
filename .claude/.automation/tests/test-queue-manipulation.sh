@@ -292,4 +292,105 @@ _write_raw_entry() {
   fi
 )
 
+# --- reopen-wo resets a failed sibling back to approved ---
+# `reopen-wo` is the documented operator recovery for an escalated or failed
+# work order, and its second step is "reset blocked/failed siblings back to
+# approved". That step never ran: `local _qdir` sat in the CLI's top-level `case`
+# arm rather than in a function, bash errored with "local: can only be used in a
+# function", and the loop aborted before touching any sibling. It shipped broken
+# because nothing exercised it — a recovery path is only reached once something
+# has already gone wrong. Observed live on 2026-10-20: a six-brief task group
+# with one failed brief could not be resumed by its own documented command.
+#
+# Asserts the OUTCOME, not the keyword, so any future abort inside that loop is
+# caught too.
+(
+  setup_adversarial_sandbox
+  trap 'teardown_adversarial_sandbox' EXIT
+  _source_queue_libs
+  source "$ADV_SANDBOX/.claude/.automation/lib/work-order-manager.sh" 2>/dev/null || true
+
+  # Fixture written directly in the on-disk formats rather than driven through
+  # enqueue -> approve -> dequeue -> fail. That lifecycle route was tried first
+  # and could not land an entry in failed/ inside the sandbox; chasing it would
+  # have cost more scaffolding than the one-word fix it guards. These two files
+  # are precisely what `reopen-wo` reads: a work order listing one child, and
+  # that child sitting in failed/.
+  #
+  # Every assignment carries `|| true`: this suite runs under `set -e`, so an
+  # unguarded non-zero — a grep that matches nothing — kills this subshell
+  # SILENTLY and the case disappears from the output instead of failing. The
+  # first draft did exactly that and looked like it had passed.
+  _RW_ID="rw-child-1"
+  _RW_WO="rw-wo-1"
+  _RW_Q="$ADV_SANDBOX/.claude/.automation/queue"
+  mkdir -p "$_RW_Q/failed" "$_RW_Q/approved" "$_RW_Q/work-orders"
+
+  {
+    printf 'entry:\n'
+    printf '  id: "%s"\n' "$_RW_ID"
+    printf '  status: "failed"\n'
+    printf '  priority: "0"\n'
+    printf '  session_type: "taskgroup"\n'
+    printf '  branch: "feature/rw-probe"\n'
+    printf '  brief_path: ".claude/.automation/briefs/rw-probe.md"\n'
+    printf '  prompt: ""\n'
+    printf '  last_prompt: ""\n'
+    printf '  auto_mode: "false"\n'
+    printf '  solo_mode: "true"\n'
+    printf '  push_on_complete: "false"\n'
+    printf '  retry_count: "3"\n'
+    printf '  max_retries: "3"\n'
+    printf '  error_log: "failed:group-worktree-dirty"\n'
+    printf '  work_order_id: "%s"\n' "$_RW_WO"
+    printf '  created_at: "2026-10-20T00:00:00Z"\n'
+    printf '  updated_at: "2026-10-20T00:00:00Z"\n'
+  } > "$_RW_Q/failed/$_RW_ID.yaml"
+
+  {
+    printf 'work_order:\n'
+    printf '  id: %s\n' "$_RW_WO"
+    printf '  type: group\n'
+    printf '  label: feature/rw-probe\n'
+    printf '  entry_ids:\n'
+    printf '  - %s\n' "$_RW_ID"
+    printf '  status: failed\n'
+    printf '  created_at: 2026-10-20T00:00:00Z\n'
+    printf '  updated_at: 2026-10-20T00:00:00Z\n'
+    printf '  completed_at: \n'
+    printf '  failure_entry_id: %s\n' "$_RW_ID"
+  } > "$_RW_Q/work-orders/$_RW_WO.yaml"
+
+  # The CLI must be COPIED into the sandbox: it derives REPO_ROOT and
+  # AUTOMATION_DIR from its OWN path (`SCRIPT_DIR/../..`), not from cwd.
+  # sandbox-setup.sh copies lib/, hooks/, schemas and config but not the CLI, so
+  # a sandbox-relative invocation silently does nothing — and invoking the REAL
+  # repo's copy would have operated on the REAL queue, which is how an earlier
+  # draft of this case "failed" while touching the live repo's work orders.
+  cp "$_ADV_REAL_REPO/.claude/.automation/queue-cli.sh" "$ADV_SANDBOX/.claude/.automation/" 2>/dev/null || true
+  ( cd "$ADV_SANDBOX" && bash "$ADV_SANDBOX/.claude/.automation/queue-cli.sh" reopen-wo "$_RW_WO" ) > /dev/null 2>&1 || true
+
+  if [ -f "$_RW_Q/approved/$_RW_ID.yaml" ]; then
+    _tap_pass "[HIGH] reopen-wo resets a failed sibling to approved"
+  else
+    _RW_WHERE=$(ls "$_RW_Q"/*/"$_RW_ID".yaml 2>/dev/null | head -1) || _RW_WHERE=""
+    _tap_fail "[HIGH] reopen-wo resets a failed sibling to approved" \
+      "entry still at: ${_RW_WHERE:-(not found)}"
+  fi
+
+  # The retry budget must come back with the entry. A sibling reaches `failed`
+  # by exhausting max_retries, so reopening it with retry_count still at 3 hands
+  # back an entry that is already out of retries: its first failure sends it
+  # straight to failed/ again and the operator has to re-run reopen-wo per
+  # attempt. The fixture above is seeded at the exhausted value on purpose.
+  _RW_RETRY=$(grep '^  retry_count:' "$_RW_Q/approved/$_RW_ID.yaml" 2>/dev/null \
+    | sed 's/^[^:]*: *//' | tr -d '"[:space:]' | head -1) || _RW_RETRY=""
+  if [ "${_RW_RETRY:-unset}" = "0" ]; then
+    _tap_pass "[HIGH] reopen-wo restores the reopened sibling's retry budget"
+  else
+    _tap_fail "[HIGH] reopen-wo restores the reopened sibling's retry budget" \
+      "retry_count is '${_RW_RETRY:-unset}', expected 0"
+  fi
+)
+
 finish || true

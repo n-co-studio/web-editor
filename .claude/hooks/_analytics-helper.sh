@@ -394,13 +394,40 @@ _sid_claimed_by_live_foreign() {
 _CACHED_SESSION_ID=""
 get_session_id() {
   local repo_root="$1"
-  if [ -n "$_CACHED_SESSION_ID" ]; then
+  # Env var injection (Decision 0030): worktree and daemon sessions set
+  # REPO_OS_SESSION_ID, and it is AUTHORITATIVE — so it is checked BEFORE the
+  # cache, and overrides it when the two diverge.
+  #
+  # This order is load-bearing. The automation daemon is ONE long-lived process
+  # that sources this library once and re-exports REPO_OS_SESSION_ID per brief.
+  # With the cache consulted first, brief 1 of a run became the identity for
+  # every brief after it: state_manager_setup wrote plan-approved under the
+  # stale key, the runner's worktree mirror found nothing at the new key, and
+  # the brief deadlocked in the `plan` phase — writes gated, advance_phase
+  # refusing without plan-approved, and AskUserQuestion unavailable in headless
+  # mode. It exited having done nothing and the runner logged review:dirty-noop.
+  # Only the FIRST brief of a daemon run could ever complete, which is exactly
+  # why single-brief tests never caught it. Diagnosed 2026-10-12, hit again
+  # 2026-10-13 on brief 3 of a 6-brief group after ~45 minutes of work.
+  #
+  # The cache is NOT removed: it still serves interactive sessions, which never
+  # set this variable, and that path is what keeps identity stable across a
+  # context-window turnover (the 2026-06-18 sidecar fix, 3647acf). Both
+  # requirements are pinned by layer4 L4.11 and L4.15.
+  if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
+    if [ "$_CACHED_SESSION_ID" != "$REPO_OS_SESSION_ID" ]; then
+      _CACHED_SESSION_ID="$REPO_OS_SESSION_ID"
+      # Derived from the id, so it cannot be allowed to outlive it — a stale
+      # dir cache is this same bug wearing a different hat, and is what
+      # actually mis-routes plan-approved. Cleared ONLY on divergence: doing it
+      # unconditionally would defeat the cache on every hook call in a worktree
+      # session.
+      _CACHED_SESSION_STATE_DIR=""
+    fi
     echo "$_CACHED_SESSION_ID"
     return
   fi
-  # Env var injection (Decision 0030): worktree sessions set REPO_OS_SESSION_ID
-  if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
-    _CACHED_SESSION_ID="$REPO_OS_SESSION_ID"
+  if [ -n "$_CACHED_SESSION_ID" ]; then
     echo "$_CACHED_SESSION_ID"
     return
   fi

@@ -31,6 +31,8 @@ _ensure_wo_dirs() {
 # --- Module variables (mirrors work-order.yaml fields) ---
 _WO_ID="" _WO_TYPE="" _WO_LABEL="" _WO_ENTRY_IDS="" _WO_STATUS=""
 _WO_CREATED_AT="" _WO_UPDATED_AT="" _WO_COMPLETED_AT="" _WO_FAILURE_ENTRY_ID=""
+# (v1.4.0) project / milestone — optional
+_WO_PROJECT="" _WO_MILESTONE_NAME="" _WO_MILESTONE_INDEX="" _WO_MILESTONE_TOTAL=""
 
 # --- Bulk-read work order YAML into _WO_* variables (zero-fork) ---
 # Work order format: `work_order:` header followed by `  key: value` lines.
@@ -40,9 +42,10 @@ _load_work_order() {
   local wo_file="$1"
   _WO_ID="" _WO_TYPE="" _WO_LABEL="" _WO_ENTRY_IDS="" _WO_STATUS=""
   _WO_CREATED_AT="" _WO_UPDATED_AT="" _WO_COMPLETED_AT="" _WO_FAILURE_ENTRY_ID=""
+  _WO_PROJECT="" _WO_MILESTONE_NAME="" _WO_MILESTONE_INDEX="" _WO_MILESTONE_TOTAL=""
   [ -f "$wo_file" ] || return 1
 
-  local _line _in_list=false
+  local _line _in_list=false _in_milestone=false
   while IFS= read -r _line || [ -n "$_line" ]; do
     # Handle entry_ids list items
     if [ "$_in_list" = true ]; then
@@ -62,6 +65,17 @@ _load_work_order() {
       esac
     fi
 
+    # Handle milestone nested block (v1.4.0)
+    if [ "$_in_milestone" = true ]; then
+      case "$_line" in
+        "    name: "*)  _WO_MILESTONE_NAME="${_line#    name: }"; continue ;;
+        "    index: "*) _WO_MILESTONE_INDEX="${_line#    index: }"; continue ;;
+        "    total: "*) _WO_MILESTONE_TOTAL="${_line#    total: }"; continue ;;
+        "    "*)        continue ;;  # other 4-space sub-fields → stay in block
+        *)              _in_milestone=false ;;  # 2-space sibling field → exit block, fall through
+      esac
+    fi
+
     case "$_line" in
       "  id: "*)           _WO_ID="${_line#  id: }" ;;
       "  type: "*)         _WO_TYPE="${_line#  type: }" ;;
@@ -73,6 +87,8 @@ _load_work_order() {
       "  updated_at: "*)   _WO_UPDATED_AT="${_line#  updated_at: }" ;;
       "  completed_at: "*) _WO_COMPLETED_AT="${_line#  completed_at: }" ;;
       "  failure_entry_id: "*) _WO_FAILURE_ENTRY_ID="${_line#  failure_entry_id: }" ;;
+      "  project: "*)      _WO_PROJECT="${_line#  project: }" ;;
+      "  milestone:")      _in_milestone=true ;;
     esac
   done < "$wo_file"
 }
@@ -107,6 +123,11 @@ _write_work_order() {
     printf '  updated_at: %s\n' "$_WO_UPDATED_AT"
     printf '  completed_at: %s\n' "$_WO_COMPLETED_AT"
     printf '  failure_entry_id: %s\n' "$_WO_FAILURE_ENTRY_ID"
+    printf '  project: %s\n' "${_WO_PROJECT:-}"
+    printf '  milestone:\n'
+    printf '    name: %s\n' "${_WO_MILESTONE_NAME:-}"
+    printf '    index: %s\n' "${_WO_MILESTONE_INDEX:-0}"
+    printf '    total: %s\n' "${_WO_MILESTONE_TOTAL:-0}"
   } > "$tmp_file"
   mv "$tmp_file" "$wo_file"
 }
@@ -227,10 +248,56 @@ wo_create() {
   _WO_UPDATED_AT="$timestamp"
   _WO_COMPLETED_AT=""
   _WO_FAILURE_ENTRY_ID=""
+  # (v1.4.0) project/milestone — callers may pre-set these before calling wo_create;
+  # initialize to empty here so stale values from prior _load_work_order don't leak.
+  _WO_PROJECT="${_WO_PROJECT:-}"
+  _WO_MILESTONE_NAME="${_WO_MILESTONE_NAME:-}"
+  _WO_MILESTONE_INDEX="${_WO_MILESTONE_INDEX:-0}"
+  _WO_MILESTONE_TOTAL="${_WO_MILESTONE_TOTAL:-0}"
 
   _write_work_order "$(_wo_dir)/${wo_id}.yaml"
 
   printf '%s' "$wo_id"
+}
+
+# --- Edit a work order field ---
+# Arguments:
+#   $1 — wo_id (work order identifier)
+#   $2 — field (project | milestone.name | milestone.index | milestone.total)
+#   $3 — value
+# Returns: 0 on success, 1 on error
+wo_edit() {
+  local wo_id="$1"
+  local field="$2"
+  local value="$3"
+  local wo_file="$(_wo_dir)/${wo_id}.yaml"
+
+  _load_work_order "$wo_file" || {
+    echo "ERROR: Work order $wo_id not found" >&2
+    return 1
+  }
+
+  case "$field" in
+    project)           _WO_PROJECT="$value" ;;
+    milestone.name)    _WO_MILESTONE_NAME="$value" ;;
+    milestone.index)
+      case "$value" in
+        ''|*[!0-9]*) echo "ERROR: milestone.index must be a non-negative integer" >&2; return 1 ;;
+      esac
+      _WO_MILESTONE_INDEX="$value" ;;
+    milestone.total)
+      case "$value" in
+        ''|*[!0-9]*) echo "ERROR: milestone.total must be a non-negative integer" >&2; return 1 ;;
+      esac
+      _WO_MILESTONE_TOTAL="$value" ;;
+    *)
+      echo "ERROR: Field '$field' is not editable on work orders (allowed: project, milestone.name, milestone.index, milestone.total)" >&2
+      return 1
+      ;;
+  esac
+
+  _WO_UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  _write_work_order "$wo_file"
 }
 
 # --- Add a child entry to a work order ---

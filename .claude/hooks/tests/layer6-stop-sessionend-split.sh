@@ -184,6 +184,39 @@ assert_file_contains "$SB/.claude/local/closed-branches" "feature/test" \
 unset REPO_OS_SESSION_ID
 
 # ============================================================
+# L6.5d — the safety valve releases the session's registry claim
+# ============================================================
+# The registry entry is a claim on the BRANCH: write-guard's overlap gate blocks
+# every Edit and Write for any other session that shares it. SessionEnd only
+# fires when the process terminates, so before this fix an interactive session
+# whose valve had fired kept its claim for as long as the process lived — and
+# sweep_stale_sessions could not reap it, because `kill -0` still succeeds.
+#
+# On 2026-10-19 that blocked brief 4 of task-details-header from writing ANY
+# file, including a record of being blocked, with no in-session recovery: the
+# documented REPO_OS_SKIP_OVERLAP_CHECK override cannot reach a hook process
+# from an agent session, and no sanctioned API clears a FOREIGN registry entry.
+tap_section "L6.5d: safety valve releases the registry claim"
+
+switch_sandbox_branch "feature/test" >/dev/null 2>&1 || true
+_reinit_l6_session
+export REPO_OS_SESSION_ID="$(cat "$SB/.claude/.session-id")"
+_L65D_SID="$REPO_OS_SESSION_ID"
+_L65D_RECORD="$SB/.claude/.state/sessions/${_L65D_SID}.yaml"
+
+register_session "standard" > /dev/null 2>&1 || true
+assert_file_exists "$_L65D_RECORD" "L6.5d registry claim exists before the valve fires"
+
+# Three firings: the valve is unconditional from the third attempt.
+for _i in 1 2 3; do
+  run_hook_rc "session-close-check.sh" "$STOP_FIXTURE" >/dev/null 2>&1 || true
+done
+
+assert_file_not_exists "$_L65D_RECORD" \
+  "L6.5d valve released the claim so it cannot block the next session"
+unset REPO_OS_SESSION_ID
+
+# ============================================================
 tap_section "L6.5c: SessionEnd honours the foreign-state guard before destructive work"
 # Decision t-0047 moved merge/seal/cleanup into the SessionEnd dispatch, which sits
 # ABOVE the Stop path's foreign-state guard — so the destructive path ran without it.

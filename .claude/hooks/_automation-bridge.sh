@@ -51,17 +51,35 @@ _BRIDGE_IS_TEMPLATE=false
 # Scans contract directory for a YAML file with status: in_progress.
 # Output: absolute path on stdout (empty if not found)
 _bridge_find_active_contract() {
-  local contract_dir
+  # Rooted at the MAIN repo, not $_BRIDGE_REPO_ROOT. A contract belongs to the
+  # GROUP, not to one brief: inside a worktree session the bridge root is the
+  # worktree root, so each brief saw its own private copy and
+  # `git worktree remove` destroyed the group's definition of done
+  # (2026-10-19, task-details-header). Decision t-0055 clause 4 roots the
+  # per-entry control directory the same way, for the same reason.
+  local _br_main_root
+  _br_main_root="$(get_main_repo_root 2>/dev/null)" || _br_main_root="$_BRIDGE_REPO_ROOT"
+  [ -n "$_br_main_root" ] || _br_main_root="$_BRIDGE_REPO_ROOT"
+
+  # Session directory first, main repo second — the session copy is the live one
+  # while a brief runs, and this function reads contract CONTENT to find the
+  # active group, so a stale main copy must not shadow it.
+  local contract_dir contract_dir_alt
   if [ "$_BRIDGE_IS_TEMPLATE" = true ]; then
     contract_dir="$_BRIDGE_REPO_ROOT/.claude/local/task-groups"
+    contract_dir_alt="$_br_main_root/.claude/local/task-groups"
   else
     contract_dir="$_BRIDGE_REPO_ROOT/docs/ai/task-groups"
+    contract_dir_alt="$_br_main_root/docs/ai/task-groups"
   fi
+  # Empty when it would duplicate the main one, so the scan below does not list
+  # every contract twice.
+  [ "$contract_dir_alt" = "$contract_dir" ] && contract_dir_alt=""
 
-  [ -d "$contract_dir" ] || return 0
+  [ -d "$contract_dir" ] || [ -n "$contract_dir_alt" ] || return 0
 
   local cf
-  for cf in "$contract_dir"/*.yaml; do
+  for cf in "$contract_dir"/*.yaml ${contract_dir_alt:+"$contract_dir_alt"/*.yaml}; do
     [ -f "$cf" ] || continue
     # Skip template files
     case "$(basename "$cf")" in _*) continue ;; esac

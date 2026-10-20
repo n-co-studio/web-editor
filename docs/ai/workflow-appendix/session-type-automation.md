@@ -13,10 +13,11 @@ Decision 0017. Optional headless runner infrastructure in `.claude/.automation/`
 
 | Method | Effect |
 |--------|--------|
-| `config.yaml` → `runner.enabled: false` | Daemon sleeps 30s between checks. Queued entries preserved |
-| `config.yaml` → `runner.enabled: true` | Daemon processes queue normally |
-| Create `.claude/.automation/HALT` file | Daemon exits immediately. Use for emergency stop |
-| Remove `HALT` file | Daemon resumes on next start |
+| `config.yaml` → `runner.enabled: false` | Daemon sleeps 30s between checks. Queued entries preserved. **Caveat:** `config.local.yaml` is read FIRST and any non-empty value there wins, and the runner bootstraps that file with `enabled: true` — so flipping only `config.yaml` can leave the daemon reading `true`. Check both files, or use `queue-cli.sh halt`. See known-issues R24 |
+| `config.yaml` → `runner.enabled: true` | Daemon processes queue normally (same precedence caveat applies to the reported state) |
+| Create `.claude/.automation/HALT` file (`queue-cli.sh halt`) | Graceful stop. Checked only BETWEEN entries, so a running session finishes first — this cannot interrupt the brief in flight |
+| Create `.claude/.automation/FORCE-HALT` file (`queue-cli.sh force-halt`) | Immediate stop. Watched DURING the session: a per-entry watcher polls every 5s and signals the `claude` child (SIGTERM, then SIGKILL after 10s), then the daemon loop sweeps the worktree and exits. The kill is not counted against the circuit breaker |
+| Remove both files (`queue-cli.sh resume`) | Daemon resumes on next start. Clearing BOTH matters — a leftover `FORCE-HALT` ends the next start at the top of the loop |
 
 **Escalation:** When a headless session exits at an `operator`-tagged phase, the runner writes an escalation file (`.claude/.automation/escalations/`) and transitions the queue entry to `review` status. Nine escalation types: `gate-failure`, `governance-block`, `phase-tag-escalation`, `ambiguity`, `scope-exceeded`, `dependency-missing`, `security-risk`, `structural-change`, `scope-deviation`. The `scope-deviation` type includes `scope_classification` (briefed/unbriefed-in-scope/out-of-scope) and `risk_gain` context for operator review.
 
@@ -30,7 +31,13 @@ Decision 0017. Optional headless runner infrastructure in `.claude/.automation/`
 
 **Auto mode activation:** When the operator selects auto mode during plan approval for a task group session, the `plan-approval.sh` hook automatically queues remaining pending briefs from the task group contract, enables the runner (`config.yaml` → `runner.enabled: true`), and starts the daemon. Daemon output is logged to `.claude/.automation/logs/runner.log` (gitignored). Briefs are queued with `auto_mode: true` and `solo_mode: true` (final brief only). The current session continues interactively; subsequent briefs execute headlessly via the runner. Idempotent: briefs already in the queue (pending-review, approved, or running) are skipped. Brief content convention: `.claude/.automation/briefs/{group-name}/brief-{N}.md` — if pre-populated by the operator, the prompt assembler reads them; otherwise sessions receive governance context and contract metadata via the taskgroup-brief template. Activation requires the automation layer to be installed (config.yaml must exist). Standalone (non-task-group) auto mode sessions are unaffected.
 
-**Circuit breaker:** 3 consecutive global failures pause the daemon (60s sleep between checks). Reset on first success.
+**Circuit breaker:** 3 consecutive global failures pause the daemon (60s sleep between checks), and the count persists in `.claude/.automation/queue/.circuit-breaker` — restarting the daemon does not clear it. Three exits, in the order an operator should reach for them:
+
+- `queue-cli.sh reset-breaker` — the sanctioned reset. A successful session also clears the counter, but the breaker prevents any session from starting, so waiting for one is not a recovery path.
+- **Self-expiry.** Once `runner.circuit_breaker_cooldown_seconds` (default 1800) has passed since the last failure, the breaker reports open so ONE probe entry can run. The failure count is deliberately NOT cleared, so a failed probe re-trips for another full window — one attempt per window, not a retry loop. Set the field to `0` to disable expiry entirely.
+- Fixing the cause, then either of the above.
+
+The breaker **fails closed** on state it cannot read: a `.circuit-breaker` whose `consecutive_failures` or `last_failure_epoch` is missing or non-numeric stays tripped rather than expiring on a value it cannot trust. A file written before 2026-10-20 has no epoch field and therefore never self-expires — use `reset-breaker`. A file with no count line at all does not trip. While tripped the runner writes health status `circuit-breaker`, not `idle`. Recovery walkthrough: `.claude/.automation/docs/blocker-playbook.md` §8.
 
 **Work-order deferral:** When the runner dequeues an entry that belongs to an escalated or failed work order, the entry is moved back to `approved/` without incrementing its retry count. This prevents sequential briefs from executing while a dependency is unresolved or a prerequisite has failed. Escalated work orders have a sibling in `review`/`blocked` status; failed work orders have a sibling in `failed` status (the `failure_entry_id` field identifies which entry caused the failure). When the operator resolves the blocking sibling and reopens the work order (`wo_reopen` / `queue-cli.sh reopen-wo`), the deferred entries resume automatically on the next poll cycle — they are already in `approved/` and eligible for dequeue. The deferral is logged as an `entry-deferred` event in the review log.
 

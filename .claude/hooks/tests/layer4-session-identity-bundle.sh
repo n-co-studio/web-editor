@@ -785,6 +785,78 @@ _CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
 teardown_sandbox
 
 # ============================================================
+# L4.15 — Env-var precedence: a long-lived process must follow REPO_OS_SESSION_ID
+# ============================================================
+
+tap_section "L4.15: REPO_OS_SESSION_ID overrides a populated cache (daemon per-brief identity)"
+
+setup_sandbox
+SB="$(get_sandbox)"
+rm -f "$SB/.claude/.session-id" "$SB"/.claude/.session-id.* 2>/dev/null || true
+
+# The automation daemon is ONE process that sources this library once and
+# re-exports REPO_OS_SESSION_ID per brief. get_session_id consulted its cache
+# first, so brief 1 of a run became the identity for every brief after it:
+# state_manager_setup wrote plan-approved under the stale key, the runner's
+# worktree mirror found nothing at the new key, and the brief deadlocked in the
+# plan phase — writes gated, no advance possible without plan-approved, and no
+# AskUserQuestion available in headless mode. Diagnosed 2026-10-12; hit again
+# 2026-10-13, where it killed brief 3 of a 6-brief group after ~45 minutes.
+#
+# CALL SHAPE IS THE TEST. `get_session_id ... > /dev/null` — a direct call with
+# a redirect, NOT `$(get_session_id ...)` — because that is what
+# state-manager.sh:39 does, and it is the only shape that reproduces the bug: a
+# command substitution runs in a subshell, so the cache it populates dies with
+# it and every call starts cold. Written with `$(...)` first, this whole section
+# passed against the unfixed helper. The caches are deliberately NOT reset
+# between the two briefs below; they carry over, exactly as in the daemon loop.
+_CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
+
+export REPO_OS_SESSION_ID="daemon-brief-1"
+get_session_id "$SB" > /dev/null
+get_session_state_dir > /dev/null
+SID_B1="$_CACHED_SESSION_ID"; SD_B1="$_CACHED_SESSION_STATE_DIR"
+assert_eq "$SID_B1" "daemon-brief-1" "brief 1 resolves to its own injected id"
+
+export REPO_OS_SESSION_ID="daemon-brief-2"
+get_session_id "$SB" > /dev/null
+SID_B2="$_CACHED_SESSION_ID"
+assert_eq "$SID_B2" "daemon-brief-2" "brief 2 follows the NEW env id despite a populated cache"
+
+# The state dir is derived from the id, so a stale dir cache is the same defect
+# wearing a different hat — and it is the one that actually mis-routed
+# plan-approved into the previous brief's directory.
+get_session_state_dir > /dev/null
+SD_B2="$_CACHED_SESSION_STATE_DIR"
+assert_neq "$SD_B2" "$SD_B1" "state dir follows the new identity"
+case "$SD_B2" in
+  *daemon-brief-2*) _tap_pass "state dir is keyed on the current brief id" ;;
+  *) _tap_fail "state dir is keyed on the current brief id" "got $SD_B2" ;;
+esac
+
+# Idempotence: re-asserting the SAME id must not thrash the cache.
+get_session_id "$SB" > /dev/null
+assert_eq "$_CACHED_SESSION_ID" "daemon-brief-2" "repeat call with an unchanged env id is stable"
+
+unset REPO_OS_SESSION_ID
+_CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
+teardown_sandbox
+
+tap_section "L4.15b: the cache still serves when REPO_OS_SESSION_ID is absent"
+
+setup_sandbox
+SB="$(get_sandbox)"
+rm -f "$SB/.claude/.session-id" "$SB"/.claude/.session-id.* 2>/dev/null || true
+unset REPO_OS_SESSION_ID
+# Interactive sessions never set the env var, and must keep the cache-first
+# path — this is what L4.11's turnover stability rests on.
+_CACHED_SESSION_ID="cached-interactive-id"; _CACHED_SESSION_STATE_DIR=""
+SID_C=$(get_session_id "$SB")
+assert_eq "$SID_C" "cached-interactive-id" "no env var: the cache is still authoritative"
+_CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
+teardown_sandbox
+
+# ============================================================
 # Summary
 # ============================================================
 finish_tests

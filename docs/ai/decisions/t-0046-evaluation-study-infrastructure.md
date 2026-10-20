@@ -209,3 +209,52 @@ original decision (Brief 1) already covers `docs/ai/eval/*`.
 - `.claude/.automation/config.yaml`
 - `.claude/hooks/_phase-helper.sh`
 - `.claude/agents/_agent-glossary.md`
+
+---
+
+## Amendment 2 — Model routing: the per-type override lines did not resolve (2026-10-20)
+
+**Status:** Accepted
+**Supersedes:** the "Model routing" paragraph of Amendment 1
+
+Amendment 1 recorded the routing defaults as three config lines. Measured on 2026-10-20, none
+of the three behaved as written:
+
+| Line as written | What `_parse_config_field` actually returned |
+|---|---|
+| conductor override | empty — comment on the value line contained `;`, rejected by the metacharacter sanitiser |
+| per-cell override | `sonnet#Per-cellagentrun-taskexecutioninisolatedworktree` — comment contained no metacharacter, so it was passed through verbatim and would have been handed to `claude --model` |
+| scoring override | empty — same `;` rejection |
+
+The cause is general, not specific to this decision: `_parse_config_field` takes everything
+after the field name and colon as the value, so a trailing comment becomes part of it. Both
+surviving lines have had their comments moved above the key and now resolve correctly; the
+parser, the schema and `config.yaml` all carry the warning, and `test-daemon-liveness.sh`
+asserts it for the runner block.
+
+**The scoring override line was removed rather than repaired.** Two reasons:
+
+1. Repairing it would have switched the scoring model from sonnet (what the broken line has in
+   fact been producing) to haiku, mid-study. That is the class of silent change that confounded
+   every v5/v6 GV comparison, and it is not a change to make inside a liveness repair.
+2. It could never have resolved in any case: `_resolve_model_for_session` keys on `session_type`,
+   and this decision dispatches scoring work as `eval-cell` with `permission_profile: judge`.
+   There is no `judge` session type for the override map to match. The `judge` **permission
+   profile** and the `judge` **phase** are unaffected and remain as Amendment 1 specifies.
+
+So the effective routing today, and as recorded by this amendment, is: conductor sonnet,
+per-cell sonnet, scoring sonnet via `model_routing.default`.
+
+**Open operator decision.** If haiku is still wanted for rubric scoring, it has to be applied
+on the axis that actually resolves — a per-profile or per-phase override, or a distinct session
+type — not a `judge` key in `model_routing_overrides`. Do it at a cell boundary and record the
+boundary, so the study's own data says which cells scored on which model. Until then, any
+archived study that cites haiku scoring is citing the config as written, not as it ran.
+
+### References (Amendment 2)
+
+- `.claude/.automation/config.yaml`
+- `.claude/.automation/schemas/runner-config.yaml`
+- `.claude/.automation/lib/queue-manager.sh` (`_parse_config_field`)
+- `.claude/.automation/runner.sh` (`_resolve_model_for_session`)
+- `docs/ai/workflow-appendix/session-type-eval.md`

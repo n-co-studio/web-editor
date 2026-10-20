@@ -114,15 +114,20 @@ Referenced by escalation reports for operator recovery guidance.
 
 ## 8. Circuit Breaker Pause
 
-**Symptom:** Daemon stops processing entries. Health status shows `idle` but approved entries exist in queue.
+**Symptom:** Daemon stops processing entries while approved entries exist in the queue. Health status shows **`circuit-breaker`** — this is a first-class status the runner writes on every tripped cycle, so if you see `idle` instead, this is not your section (try §10 multiple daemons, or §6).
 
 **Root Cause:** Three consecutive global failures triggered the circuit breaker. Daemon sleeps 60s between checks during pause.
 
 **Resolution:**
-1. Check recent failures: `queue-cli.sh log --lines 20`
-2. Resolve the underlying failure cause
-3. The circuit breaker resets automatically on the first successful session
-4. To force immediate processing: restart the daemon with `queue-cli.sh halt && queue-cli.sh resume && queue-cli.sh start-daemon`
+1. Confirm it with `queue-cli.sh status` — the `circuit breaker:` line reports the failure count and prints `TRIPPED` when the breaker is set. `--json status` carries the same as `circuit_breaker_state` / `circuit_breaker_tripped`. Read it as "count >= 3", not as a prediction: past its cooldown the breaker still allows one probe entry.
+2. Check recent failures: `queue-cli.sh log --lines 20`
+3. Resolve the underlying failure cause
+4. Clear the breaker: `queue-cli.sh reset-breaker`. This is the sanctioned reset — a successful session clears the counter, but the breaker itself prevents any session from starting, so waiting for one is not a recovery path.
+5. If the cause is transient, the breaker also expires on its own: once `circuit_breaker_cooldown_seconds` (default 1800) has elapsed since the last failure, the daemon attempts **one** probe entry. The failure count is deliberately left at 3, so if that probe fails the breaker re-trips for another full window. That is one attempt per window, not a retry loop.
+6. **A breaker file written before 2026-10-20 never expires.** Self-expiry reads `last_failure_epoch`, which older runners did not write, and a missing or unparseable value stays tripped by design (it fails closed rather than expiring on a value it cannot read). That path is silent, so waiting out the window will not help — check for the field with `cat .claude/.automation/queue/.circuit-breaker`, and if it is absent use `reset-breaker`.
+7. Restarting the daemon does **not** clear the breaker — the counter lives in `.circuit-breaker` under the queue directory, not in daemon memory.
+
+> Before 2026-10-20 a tripped breaker had no exit at all: nothing read the timestamp, there was no reset command, and the only reset ran on a successful session the breaker was blocking. Recovery meant deleting `.circuit-breaker` by hand.
 
 **Prevention:** Fix the root cause of repeated failures. Common causes: invalid session type, broken brief content, infrastructure issues (git, npm).
 
@@ -132,7 +137,7 @@ Referenced by escalation reports for operator recovery guidance.
 
 **Symptom:** HALT file created and/or SIGTERM sent, but daemon continues running. Health file shows `running` with stale timestamp. `ps aux | grep runner.sh` confirms the process is alive.
 
-**Root Cause:** The daemon is executing a `claude -p` subprocess. Both HALT file checks and SIGTERM graceful shutdown only take effect between entries (in the main daemon loop). During active `claude -p` execution, the daemon is blocked waiting for the subprocess to exit.
+**Root Cause:** The daemon is executing a `claude -p` subprocess. `HALT` is checked only between entries (in the main daemon loop), so a graceful halt cannot interrupt a running session — that is by design. `FORCE-HALT` is now watched *during* the session: since 2026-10-20 each entry launches a watcher that polls for the flag every 5s and signals the `claude` child directly (SIGTERM, then SIGKILL after 10s). If force-halt appears not to work, suspect a stale flag or a watcher that was never started rather than the old between-entries-only limitation.
 
 **Resolution:**
 1. Find the `claude` child process: `pgrep -P <daemon-pid>`
@@ -140,7 +145,7 @@ Referenced by escalation reports for operator recovery guidance.
 3. The daemon will detect the subprocess exit, process the failure, and then honor the HALT file on the next loop iteration
 4. If the child PID cannot be found: the session may be stuck in a sleep — wait for poll_interval to expire
 
-**Prevention:** Use `queue-cli.sh force-halt` for immediate stop — creates a `FORCE-HALT` file that sends SIGTERM to the active `claude -p` subprocess, waits up to 10 seconds for exit, then sends SIGKILL if still alive. The daemon then exits cleanly. HALT remains available for graceful shutdown (finish current entry first). Use `queue-cli.sh resume` to clear both HALT and FORCE-HALT files before restarting.
+**Prevention:** Use `queue-cli.sh force-halt` for immediate stop — the in-session watcher sends SIGTERM to the active `claude -p` subprocess, waits up to 10 seconds, then sends SIGKILL. The watcher deliberately leaves the flag in place so the daemon loop still sees it, sweeps the worktree and stops. Two things to know about a force-halted entry: it gets **no escalation artifact** (the loop-top handler that writes one only runs between entries, and the entry has already been finalised by the normal failure path), and the halt **consumes one of its retries** — repeatedly force-halting the same entry can walk it to terminal `failed/`. The kill itself is not counted against the circuit breaker. HALT remains available for graceful shutdown (finish current entry first). Use `queue-cli.sh resume` to clear both flags before restarting. A leftover FORCE-HALT ends the next daemon start at the top of its loop, before any session launches; the handler then deletes the flag, so the start after that proceeds — which makes "it stopped once for no reason" the signature of a flag nobody cleared. `resume` is hygiene that removes the surprise, not protection against a persistent flag.
 
 ---
 

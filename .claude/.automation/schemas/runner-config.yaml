@@ -1,30 +1,67 @@
 # Runner Config Schema — operational configuration for automation runners.
 # config.yaml in the parent directory follows this schema.
+#
+# COMMENT PLACEMENT IS PART OF THE CONTRACT. Every comment in this file sits on
+# its own line, above the key it describes, and new fields must follow that.
+# _parse_config_field takes everything after `<field>: ` as the value, so a
+# trailing comment is concatenated onto it; if the comment contains `(`, `)`,
+# `;`, `&`, `|`, `$` or a backtick, the metacharacter sanitiser then rejects the
+# whole value and the field reads as ABSENT, silently falling back to whatever
+# default is hardcoded in the reader. Nothing parses this schema file itself —
+# but it is the file operators copy fields out of into config.local.yaml, where
+# it does parse. Three fields shipped with that defect (session_max_ttl_seconds,
+# circuit_breaker_cooldown_seconds, and the per-cell model override) and were
+# repaired on 2026-10-20; the trailing comments that taught the pattern were
+# moved at the same time.
 
 runner:
-  enabled: false            # master toggle — runners must not execute when false
-  default_auto_mode: false  # default auto_mode for new queue entries
-  default_solo_mode: false  # default solo_mode for new queue entries
-  default_push_on_complete: false  # default push_on_complete for new queue entries
-  max_retries: 3            # default max retries per queue entry
-  heartbeat_interval: 30    # seconds between runner heartbeat checks
-  stderr_tail_lines: 50     # lines of stderr to capture in blocker reports
-  cohesion_trigger: 0       # line-change threshold triggering cohesion review (0 = disabled)
-  poll_interval: 60                # Daemon idle poll interval in seconds (default: 60)
-  cooldown_between_sessions: 5     # Pause between sessions in seconds (default: 5)
-  max_consecutive_sessions: 0      # Max sessions before daemon exits; 0 = unlimited
-  max_deferral_cycles: 3           # Max work-order deferral cycles before entry transitions to blocked
-  session_max_ttl_seconds: 21600   # Per-session elapsed-time cap in seconds (6h default). 0 = disabled.
+  # Master toggle — runners must not execute when false.
+  enabled: false
+  # Default auto_mode for new queue entries.
+  default_auto_mode: false
+  # Default solo_mode for new queue entries.
+  default_solo_mode: false
+  # Default push_on_complete for new queue entries.
+  default_push_on_complete: false
+  # Default max retries per queue entry.
+  max_retries: 3
+  # Seconds between runner heartbeat checks.
+  heartbeat_interval: 30
+  # Lines of stderr to capture in blocker reports.
+  stderr_tail_lines: 50
+  # Line-change threshold triggering cohesion review. 0 disables it.
+  cohesion_trigger: 0
+  # Daemon idle poll interval in seconds. Default 60.
+  poll_interval: 60
+  # Pause between sessions in seconds. Default 5.
+  cooldown_between_sessions: 5
+  # Max sessions before the daemon exits. 0 = unlimited.
+  max_consecutive_sessions: 0
+  # Max work-order deferral cycles before the entry transitions to blocked.
+  max_deferral_cycles: 3
+  # Per-session elapsed-time cap in seconds. 21600 = 6h. 0 disables it.
+  session_max_ttl_seconds: 21600
+  # Cooldown after 3 consecutive failures trip the breaker. 1800 = 30m. One
+  # probe entry per window, and the failure count is NOT cleared, so a failed
+  # probe re-trips. 0 stays tripped until `queue-cli.sh reset-breaker`.
+  circuit_breaker_cooldown_seconds: 1800
 
 model_routing:
-  default: sonnet            # model for claude -p when no model_routing_overrides match (sonnet | haiku)
+  # Model for claude -p when no model_routing_overrides key matches.
+  # One of: sonnet, haiku.
+  default: sonnet
 
-model_routing_overrides:     # per-session-type model override map (keys: Decision 0014 session types)
-  # <session_type>: <model>  e.g., audit: haiku
-  # Must be top-level block — _parse_config_field requires column-0 keys
+# Per-session-type model override map. Keys are Decision 0014 session types.
+# Shape: <session_type>: <model>   e.g. a line reading `audit` then `: haiku`.
+# Must be a top-level block — _parse_config_field requires column-0 keys.
+model_routing_overrides:
 
 retention:
-  queue_days: 30            # days to retain completed queue entries
-  report_days: 90           # days to retain blocker reports
-  escalation_days: 90       # days to retain resolved escalations
-  review_log_days: 90       # days to retain review-log NDJSON files
+  # Days to retain completed queue entries.
+  queue_days: 30
+  # Days to retain blocker reports.
+  report_days: 90
+  # Days to retain resolved escalations.
+  escalation_days: 90
+  # Days to retain review-log NDJSON files.
+  review_log_days: 90

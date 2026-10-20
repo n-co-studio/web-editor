@@ -23,8 +23,8 @@ This ensures the stop hook identifies this session as ephemeral and skips blocki
 
 After phase initialization, automatically present the current queue state:
 
-1. Run `.claude/.automation/queue-cli.sh status --json` — parse and present a human-readable summary (daemon state, entry counts by status, active sessions)
-2. Run `.claude/.automation/queue-cli.sh review --json` — if items need attention, list them with a brief description of each
+1. Run `.claude/.automation/queue-cli.sh --json status` — parse and present a human-readable summary (daemon state, entry counts by status, active sessions, and `circuit_breaker_tripped` / `circuit_breaker_state`). The `--json` flag is LEADING: a trailing `status --json` is silently ignored and returns text.
+2. Run `.claude/.automation/queue-cli.sh --json review` — if items need attention, list them with a brief description of each
 
 Present both as a combined overview: "Here's the current queue state: ..."
 
@@ -48,12 +48,13 @@ Map the operator's natural language to queue-cli.sh subcommands:
 **Actions (require confirmation)**
 - "Approve that", "Approve entry X" → `approve <id>` (confirm first)
 - "Remove entry X", "Delete that" → `remove <id>` (confirm first)
-- "Edit entry X, set field to value" → `edit <id> --field <field> --value <value>` (confirm first)
+- "Edit entry X, set field to value" → `edit <id> <field> <value>` (confirm first). Positional — `--field`/`--value` are parsed as the values themselves and rejected by the field whitelist.
 
 **Daemon Control (require confirmation)**
 - "Halt the daemon", "Stop the runner" → `halt` (confirm first)
 - "Force halt", "Kill it now" → `force-halt` (confirm first)
 - "Resume the daemon", "Start it back up" → `resume` (confirm first)
+- "The daemon is wedged / stuck / stopped picking up entries", "Clear the circuit breaker" → read the breaker state from `--json status` (`circuit_breaker_tripped`, `circuit_breaker_state`) or the `circuit breaker:` line of plain `status`; if it is tripped, `reset-breaker` (confirm first). Use `status`, not the `.health` file: `.health` carries only a status token, not the failure count, and it is gitignored — so it is simply absent if the daemon has never run here. Note that a tripped breaker past its cooldown window will still allow one probe entry; `status` reports the threshold state, not that prediction. This is the sanctioned exit from a tripped breaker — restarting the daemon does NOT clear it, and the counter only resets on a successful session the breaker is preventing. The breaker also self-expires after `runner.circuit_breaker_cooldown_seconds` and allows one probe entry, so an operator who prefers to wait has that option; a breaker file written before 2026-10-20 has no epoch field and never expires. Diagnose the underlying failures with `log --lines 20` before clearing, or the breaker will simply trip again.
 
 **Work Orders**
 - "Reopen that work order", "Retry entry X" → `reopen-wo <id>` (confirm first)
@@ -68,7 +69,7 @@ Map the operator's natural language to queue-cli.sh subcommands:
 
 When the operator asks to review escalations:
 
-1. Run `review --json` to get the list of items needing attention
+1. Run `--json review` to get the list of items needing attention
 2. For each escalated entry:
    a. Run `show <id>` to get entry detail
    b. Read the escalation file (path from the entry detail, under `.claude/.automation/escalations/`)
@@ -86,8 +87,9 @@ These subcommands are destructive or state-changing and MUST be confirmed before
 - `edit` — modifies entry fields
 - `halt` — stops the daemon loop
 - `force-halt` — kills active session immediately
-- `resume` — clears halt state
-- `reopen-wo` — reopens a work order and resets blocked/failed siblings
+- `resume` — clears halt state (both HALT and FORCE-HALT)
+- `reset-breaker` — clears the circuit breaker's consecutive-failure counter
+- `reopen-wo` — reopens a work order, resets blocked/failed siblings and restores their retry budget
 - `prune` — removes stale artifacts
 
 Present the action clearly: "I'll run `queue-cli.sh approve <id>` — this will move entry X to approved status. Proceed?"

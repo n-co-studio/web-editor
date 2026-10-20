@@ -188,4 +188,4 @@ generation.
 | `docs/spec/_templates/_eval-report.md` | Report template |
 | `docs/ai/prompts/prompt-eval-study.md` | Orchestrator prompt (triggers `eval` session) |
 | `.claude/.automation/lib/permission-profiles.sh` | `judge` profile |
-| `.claude/.automation/config.yaml` | `model_routing_overrides` for eval/eval-cell/judge |
+| `.claude/.automation/config.yaml` | `model_routing_overrides` for eval and eval-cell. There is no scoring override — scoring runs as an `eval-cell` session, so it resolves through `eval-cell`; see t-0046 Amendment 2 |
