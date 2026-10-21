@@ -4,7 +4,18 @@
 review_log_entry:
   seq: 0                    # monotonic sequence number within daily file
   timestamp: ""             # ISO 8601 timestamp
-  event: ""                 # entry-started | entry-completed | entry-escalated | entry-failed | entry-deferred | work-order-opened | work-order-completed | work-order-escalated
+  # Event names actually emitted, reconciled against every `review_log_append`
+  # call site on 2026-10-21. The list had drifted SIX names behind, all already
+  # emitted and unlisted: entry-blocked, entry-recovered, transition-failed,
+  # work-order-failed, work-order-reopened, work-order-reconciled. A seventh,
+  # entry-reopened, arrived with the reopen-entry command. The first
+  # reconciliation pass missed transition-failed AND miscounted the rest, which
+  # is the hazard below in miniature — reconcile with a diff of
+  # `grep -rhoE 'review_log_append "[a-z-]+"'` against this line, not by eye.
+  # Nothing validates this enum mechanically, so it drifts
+  # silently and a reader has no way to tell a stale list from a complete one.
+  # Add the name here in the same commit as any new call site.
+  event: ""                 # entry-started | entry-completed | entry-escalated | entry-failed | entry-deferred | entry-blocked | entry-recovered | entry-reopened | transition-failed | work-order-opened | work-order-completed | work-order-escalated | work-order-failed | work-order-reopened | work-order-reconciled
   work_order_id: ""         # parent work order identifier
   entry_id: ""              # queue entry identifier (absent for work-order-level events)
   summary: ""               # human-readable event description

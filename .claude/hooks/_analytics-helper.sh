@@ -1039,12 +1039,43 @@ sweep_stale_sessions() {
       local now_epoch
       now_epoch=$(date +%s)
       if [ -n "$file_epoch" ] && [ $(( now_epoch - file_epoch )) -gt 86400 ]; then
-        rm -f "$stale_file" 2>/dev/null || true
+        # Age alone is NOT grounds for eviction while the process is alive.
+        # Reaching this point means the dead-pid arm above did not remove the
+        # entry — either because the pid is live, or because the entry carries
+        # no `pid:` line at all, which is why the liveness test is repeated here
+        # rather than assumed. (An earlier version of this comment claimed the
+        # pid must be live; an entry with an empty pid falsifies that, and
+        # overclaimed warrants are the exact failure this round was fixing.)
+        # Removing a live session's
+        # registry entry also costs it its state directory, because the
+        # orphaned-state-dir loop below keys on "no registry entry" — so this
+        # used to delete a long-running session's plan approval and every
+        # recorded verdict, after which write-guard refused all of its edits.
+        # Observed 2026-10-21 against a ~16h interactive session.
+        #
+        # Residual: `kill -0` cannot see pid REUSE, so a dead session whose pid
+        # was recycled keeps its entry. The decisive liveness test in this repo
+        # is the per-process sidecar, and the sidecar reap earlier in this
+        # function already handles that class. An entry that outlives its
+        # process is a smaller problem than a live session losing its state.
+        if [ -n "$file_pid" ] && kill -0 "$file_pid" 2>/dev/null; then
+          echo "WARNING: Session $_sw_sid is over 24h old but its process ($file_pid) is still alive — leaving its registry entry and state intact." >&2
+        else
+          rm -f "$stale_file" 2>/dev/null || true
+        fi
         continue
       fi
 
-      # TTL guard (C7): session exceeding max TTL → failed + escalation
-      if [ -n "$file_epoch" ] && [ $(( now_epoch - file_epoch )) -gt "$max_ttl" ]; then
+      # TTL guard (C7): session exceeding max TTL → escalation
+      #
+      # Written once per session, not once per sweep. Removing the registry
+      # entry used to provide that bound implicitly; now that a live session
+      # keeps its entry, the escalation needs its own marker or every session
+      # init, every close and every daemon start writes another one for the same
+      # long-lived session — with a timestamp-unique id, so they accumulate and
+      # retention only prunes RESOLVED escalations.
+      if [ -n "$file_epoch" ] && [ $(( now_epoch - file_epoch )) -gt "$max_ttl" ] \
+         && ! grep -q '^ttl_escalated_at: ' "$stale_file" 2>/dev/null; then
         local _ttl_sid
         _ttl_sid=$(basename "$stale_file" .yaml)
         local _ttl_age_h=$(( (now_epoch - file_epoch) / 3600 ))
@@ -1066,7 +1097,21 @@ sweep_stale_sessions() {
           printf '  resolved: false\n'
           printf '  resolution: ""\n'
         } > "$_esc_dir/${_esc_id}.yaml" 2>/dev/null || true
-        rm -f "$stale_file" 2>/dev/null || true
+        # The escalation is the whole point here — it tells the operator a
+        # session has outlived its TTL. Removing the registry entry is NOT, and
+        # must not happen while the process is live: it takes the session's
+        # state directory with it (see the 24h arm above for why) and so breaks
+        # the very session the escalation is reporting. A TTL overrun is a
+        # signal, not a licence to evict.
+        if [ -n "$file_pid" ] && kill -0 "$file_pid" 2>/dev/null; then
+          echo "WARNING: Session $_ttl_sid is over TTL but still alive ($file_pid) — escalation written, registry entry and state left intact." >&2
+          # Mark the entry so the next sweep does not escalate it again. Append
+          # rather than rewrite: this file belongs to a LIVE session and a
+          # rewrite would race its own writers.
+          printf 'ttl_escalated_at: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$stale_file" 2>/dev/null || true
+        else
+          rm -f "$stale_file" 2>/dev/null || true
+        fi
       fi
     fi
   done
@@ -1086,8 +1131,40 @@ sweep_stale_sessions() {
       fi
       # Check if a registry entry exists for this session
       if [ ! -f "$sessions_dir/${dir_sid}.yaml" ]; then
-        # No registry entry — orphaned state dir, remove
-        rm -rf "$state_subdir" 2>/dev/null || true
+        # A missing registry entry is NOT sufficient on its own. This loop is
+        # where state actually gets destroyed, and until 2026-10-21 it was the
+        # only ungated step in the function: any path that removed a live
+        # session's registry entry took its whole state directory — plan
+        # approval, every verdict — with it on the same pass. The two arms that
+        # did that are now liveness-gated, but gating them is not the same as
+        # guarding the deletion, so check liveness here too, at the point of no
+        # return. The per-process sidecar is this repo's decisive test and does
+        # not depend on a registry entry existing.
+        local _os_sidecar="$repo_root/.claude/.session-id"
+        local _os_live=false
+        # A worktree session and every daemon brief run with REPO_OS_SESSION_ID
+        # pinned, and `get_session_id` returns before writing a sidecar in that
+        # case (Decision 0030) — so those sessions never have one, and a
+        # sidecar-only test could never find them live. Check the env id first.
+        if [ -n "${REPO_OS_SESSION_ID:-}" ] && [ "$dir_sid" = "$REPO_OS_SESSION_ID" ]; then
+          _os_live=true
+        fi
+        local _os_sc
+        for _os_sc in "$_os_sidecar".*; do
+          [ -f "$_os_sc" ] || continue
+          if [ "$(cat "$_os_sc" 2>/dev/null)" = "$dir_sid" ]; then
+            local _os_pid="${_os_sc##*.}"
+            case "$_os_pid" in
+              ''|*[!0-9]*) ;;
+              *) if kill -0 "$_os_pid" 2>/dev/null; then _os_live=true; fi ;;
+            esac
+          fi
+        done
+        if [ "$_os_live" = true ]; then
+          echo "WARNING: State dir for $dir_sid has no registry entry but its process is still live — leaving it intact." >&2
+        else
+          rm -rf "$state_subdir" 2>/dev/null || true
+        fi
       fi
     done
   fi

@@ -106,6 +106,7 @@ Subcommands:
   prune [--briefs-only] [--dry-run] [--fix]
   recover-entry <id>
   reopen-wo <work-order-id>
+  reopen-entry <id>
   reset-breaker
   start-daemon
   halt
@@ -899,6 +900,53 @@ case "$SUBCOMMAND" in
       printf '{%s}\n' "$(_json_kv "action" "resumed")"
     else
       echo "HALT file removed — restart daemon with: queue-cli.sh start-daemon"
+    fi
+    ;;
+
+  # --- reopen-entry: return a reviewed entry to the approved queue ---
+  # The missing exit from review/. See queue_reopen_reviewed for why every
+  # review:* outcome was previously a one-way door.
+  reopen-entry)
+    if [ $# -lt 1 ]; then
+      echo "ERROR: reopen-entry requires <id>" >&2
+      exit 1
+    fi
+    _RE_ID="$1"
+    if ! acquire_queue_lock; then
+      echo "ERROR: Queue lock unavailable" >&2
+      exit 1
+    fi
+    if queue_reopen_reviewed "$_RE_ID"; then
+      release_queue_lock
+      # Pass the work order id, as every other entry-level event does
+      # (entry-blocked, entry-deferred, entry-recovered). _QE_WORK_ORDER_ID is
+      # populated by the call that just ran, and this is the one line recording
+      # the work-order-clearing half of the command.
+      review_log_append "entry-reopened" "${_QE_WORK_ORDER_ID:-}" "$_RE_ID" \
+        "Entry $_RE_ID returned from review to approved by operator — retry budget restored" 2>/dev/null || true
+      # Report whether the parent work order was actually reopened. Both output
+      # forms used to be identical whether it was cleared or deliberately left
+      # failed, so neither a human nor a script could tell a full recovery from
+      # a half one.
+      if [ "$JSON_OUTPUT" = true ]; then
+        printf '{%s,%s,%s,%s}\n' \
+          "$(_json_kv "action" "reopen-entry")" \
+          "$(_json_kv "id" "$_RE_ID")" \
+          "$(_json_kv "work_order_reopened" "${_RR_WO_REOPENED:-n/a}")" \
+          "$(_json_kv "work_order_blockers" "${_RR_WO_BLOCKERS:-}")"
+      else
+        echo "Entry $_RE_ID returned to approved (retry budget reset to 0)."
+        case "${_RR_WO_REOPENED:-n/a}" in
+          true)         echo "Parent work order $_QE_WORK_ORDER_ID reopened — the entry is eligible on the next poll." ;;
+          not-needed)   echo "Parent work order $_QE_WORK_ORDER_ID needed no reopen." ;;
+          false)        echo "NOT fully recovered: work order $_QE_WORK_ORDER_ID was left as-is${_RR_WO_BLOCKERS:+ ($_RR_WO_BLOCKERS)}. This entry will be DEFERRED and then blocked until you run: queue-cli.sh reopen-wo $_QE_WORK_ORDER_ID" ;;
+          *)            : ;;
+        esac
+        echo "If it got here by exhausting its turn budget, raise runner.session_max_turns or split the brief FIRST — otherwise it will run just as long and end up back here."
+      fi
+    else
+      release_queue_lock
+      exit 1
     fi
     ;;
 

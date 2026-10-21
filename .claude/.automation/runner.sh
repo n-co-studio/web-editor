@@ -583,16 +583,56 @@ _startup_crash_recovery() {
     fi
   fi
 
-  # 4. Orphaned session state
+  # 4. Orphaned session state — DIAGNOSTIC ONLY. Deliberately does not mutate.
+  #
+  # This step used to call `runner_external_cleanup` whenever
+  # `.claude/.session-id` existed. Two things were wrong with that:
+  #
+  #   - It had NO liveness predicate. The condition was the mere existence of a
+  #     file the glossary documents as persistent and immune, so it fired on
+  #     essentially every daemon start.
+  #   - `runner_external_cleanup` is a session CLOSE routine, not an orphan
+  #     sweep: it unregisters the session, deletes its state directory via
+  #     `cleanup_session_files`, and writes dirty-tree and unsealed-branch
+  #     escalations. Called with an empty entry id it resolves the session
+  #     itself through `get_session_id` — i.e. whichever session is CURRENT.
+  #
+  # So starting the daemon closed the live interactive session. On 2026-10-21
+  # that deleted this very session's `.claude/.state/wt-sessions/<id>/` and its
+  # registry entry, taking its plan approval and every recorded verdict with
+  # them; `write-guard.sh` then refused every edit with "No phase-state" and the
+  # session could not complete its own close. A daemon start must never be able
+  # to brick a concurrent human session.
+  #
+  # The legitimate intent — clean up state left behind by a session that
+  # actually died — is step 5's job. Adding a liveness predicate here would
+  # have produced a second, independently-maintained notion of "live" sitting
+  # six lines above an existing one, so the fix is a deletion.
+  #
+  # Being precise about what step 5 does guarantee, because an earlier version
+  # of this comment overclaimed it: `sweep_stale_sessions` reaps per-process
+  # sidecars on the decisive sidecar test, and removes a registry entry when the
+  # recorded pid is dead. Its 24h and TTL arms used to remove the entry
+  # "regardless of PID" — which took the state directory with it, since the
+  # orphaned-state-dir loop keys on a missing registry entry. That is what
+  # actually destroyed a live ~16h session's state on 2026-10-21, and both arms
+  # are now gated on pid liveness. The deletion site itself — the orphaned
+  # state-dir loop — is gated too, on the per-process sidecar and on
+  # REPO_OS_SESSION_ID, so a live session keeps its state even if something else
+  # has already removed its registry entry. That belt-and-braces matters because
+  # the call below passes no exclude_sid and cannot: the daemon does not register
+  # itself and has no way to name a concurrent interactive session.
+  #
+  # Known not covered by step 5, deliberately (see known-issues): repo-level
+  # operational files that `cleanup_session_files` removes, and the out-of-tree
+  # evidence manifest. A hard-killed session leaves those behind.
   local session_id_file="$REPO_ROOT/.claude/.session-id"
   if [ -f "$session_id_file" ]; then
-    echo "Startup recovery: orphaned session-id file — running external cleanup" >&2
-    runner_external_cleanup "$REPO_ROOT" "" "startup-recovery" 2>/dev/null || true
-    recovered=$((recovered + 1))
+    echo "Startup recovery: session-id file present — leaving it to the stale-session sweep (step 5). No state is touched here." >&2
   fi
 
   # 5. Sweep stale session registry entries (C7 orphan TTL patch)
-  # Runs after step 4 to catch orphaned sessions with exceeded TTL.
+  # Owns orphaned session state outright, since step 4 no longer mutates.
   sweep_stale_sessions || true
 
   if [ "$recovered" -gt 0 ]; then
@@ -1295,6 +1335,22 @@ _run_single_entry() {
   local _session_max_ttl
   _session_max_ttl=$(_parse_config_field "runner" "session_max_ttl_seconds" 2>/dev/null || echo "21600")
   _session_max_ttl="${_session_max_ttl:-21600}"
+
+  # Turn budget. Was hardcoded `--max-turns 200` at both launch sites, which is
+  # what two briefs hit on 2026-10-21 after ~40 minutes each, producing nothing.
+  # Tunable without editing code, and it is the documented way out of the
+  # `review:turn-budget-exhausted` outcome the detector now raises.
+  #
+  # Daemon-global on purpose: a per-entry budget would need a queue-entry field,
+  # serialisation, the editable-field allowlist and intake validation, and
+  # nothing reads one yet.
+  local _session_max_turns
+  _session_max_turns=$(_parse_config_field "runner" "session_max_turns" 2>/dev/null || echo "400")
+  _session_max_turns="${_session_max_turns:-400}"
+  # Guard the value: it is interpolated into the CLI invocation, and a
+  # non-numeric or absent reading must not produce `--max-turns ''`.
+  case "$_session_max_turns" in ''|*[!0-9]*) _session_max_turns=400 ;; esac
+  [ "$_session_max_turns" -gt 0 ] || _session_max_turns=400
   local _session_launch_epoch
   _session_launch_epoch=$(date +%s)
   local _ttl_watchdog_pid=""
@@ -1315,7 +1371,7 @@ _run_single_entry() {
     (cd "$launch_dir" && exec claude -p \
       --permission-mode bypassPermissions \
       --disallowedTools "$disallowed" \
-      --max-turns 200 \
+      --max-turns "$_session_max_turns" \
       $model_flag \
       <<< "$prompt" \
       2> >(tee "$stderr_file" >&2)) &
@@ -1357,7 +1413,7 @@ _run_single_entry() {
     (cd "$launch_dir" && exec claude -p \
       --permission-mode bypassPermissions \
       --disallowedTools "$disallowed" \
-      --max-turns 200 \
+      --max-turns "$_session_max_turns" \
       $model_flag \
       <<< "$prompt") &
     _CLAUDE_CHILD_PID=$!

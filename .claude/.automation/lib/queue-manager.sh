@@ -752,6 +752,157 @@ queue_approve() {
   _transition "$entry_id" "pending-review" "approved"
 }
 
+# --- Return a reviewed entry to the queue ---
+# Moves from review back to approved, and restores the retry budget.
+#
+# Until 2026-10-21 there was NO transition out of `review/` at all: queue_approve
+# handles pending-review only, queue-cli's recover-entry handles running only,
+# and reopen-wo resets blocked|failed siblings only. So every `review:*` outcome
+# — escalation, scope-deviation, dirty-noop, incomplete-deliverable,
+# finish-incomplete, merge-conflict and the new turn-budget-exhausted — put an
+# entry somewhere the CLI could not move it from. `status` is not in
+# queue_edit's allowlist, and `_repair_status_mismatches` would rewrite a
+# hand-edited status back to match the directory, so the only exit was re-adding
+# the brief as a new entry and losing the original's history. That is the shape
+# this repo keeps producing: a guard with no documented way out.
+#
+# The retry budget is restored for the same reason reopen-wo restores it (R21):
+# returning an entry to the queue is an explicit operator decision to try again,
+# and an entry handed back at its retry ceiling fails on its first stumble.
+# Arguments:
+#   $1 — entry_id
+queue_reopen_reviewed() {
+  local entry_id="$1"
+  local qdir
+  qdir=$(_queue_dir)
+  local src_file="$qdir/review/${entry_id}.yaml"
+  if [ ! -f "$src_file" ]; then
+    echo "ERROR: Entry $entry_id is not in review/" >&2
+    return 1
+  fi
+  _load_queue_entry "$src_file"
+  _QE_STATUS="approved"
+  _QE_UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  _QE_RETRY_COUNT="0"
+  _QE_COMPLETED_AT=""
+  _QE_ERROR_LOG=""
+  # Preserve the prompt before clearing it, the way queue_fail does. The
+  # `review/` entry still holds the prompt the exhausted session actually ran,
+  # and this function was destroying it — which sits badly next to the turn-budget
+  # branch's own rationale that discarding the reason work was dropped is the
+  # wrong half to keep. `queue-cli.sh show <id>` surfaces last_prompt.
+  _QE_LAST_PROMPT="${_QE_PROMPT:-$_QE_LAST_PROMPT}"
+  _QE_PROMPT=""
+  _write_queue_entry "$qdir/approved/${entry_id}.yaml"
+  rm -f "$src_file" 2>/dev/null || true
+
+  # Reopen the parent work order, and clear the deferral counter.
+  #
+  # Without this the command does not do what it says. EVERY entry gets a work
+  # order — `single` for a standalone entry, `group` for a task group — and when
+  # a child goes to `review` the work order becomes `escalated`. The runner's
+  # post-dequeue guard then sees an escalated work order, defers the entry, and
+  # after `max_deferral_cycles` (default 3) transitions it to `blocked/`. So the
+  # first version of this function returned the entry to `approved/` and the
+  # daemon walked it straight into `blocked/` — the advertised exit relocated
+  # the failure instead of clearing it, which is the very class of defect this
+  # change set exists to remove. `wo_check_completion`'s `open` branch
+  # deliberately does not write, so only `wo_reopen` can clear `escalated`.
+  #
+  # The defer counter is cleared for the same reason `reopen-wo` clears it: an
+  # entry re-entering with a part-spent counter gets fewer cycles than a fresh
+  # one, for no reason the operator can see.
+  # Scoped, NOT unconditional. `wo_reopen` writes only the work-order file —
+  # it has no sibling semantics — so for a `single` work order (one entry, the
+  # standalone shape) it is exactly right. For a `group` work order it is too
+  # broad in two ways: it flips the whole group to `open`, which un-gates
+  # siblings the deferral guard was correctly holding back, and it clears
+  # `failure_entry_id` while a sibling may still be sitting in `failed/`, losing
+  # the pointer to the brief that actually broke. So a group is reopened here
+  # only when no OTHER child is in a state the guard exists to respect;
+  # otherwise the work order is left alone and the operator is pointed at
+  # `reopen-wo`, which does reset siblings.
+  #
+  # Do not "fix" this by calling `wo_check_completion` afterwards: for a group
+  # with another child in review or blocked it recomputes `escalated` and writes
+  # it straight back, silently undoing the reopen.
+  # Output variable, read by the caller: did the parent work order actually get
+  # reopened? Without this the CLI printed the same success line and the same
+  # JSON whether the work order was cleared or deliberately left failed, so
+  # neither a human nor a script could tell the two apart — and the only signal
+  # was three stderr lines.
+  _RR_WO_REOPENED="n/a"
+  _RR_WO_BLOCKERS=""
+  if [ -n "${_QE_WORK_ORDER_ID:-}" ]; then
+    if ! type wo_reopen > /dev/null 2>&1; then
+      echo "WARNING: work-order-manager.sh not sourced — work order $_QE_WORK_ORDER_ID left as-is; entry $entry_id may be deferred on the next poll" >&2
+      _RR_WO_REOPENED="false"
+    else
+      local _rr_wo_file="$(_wo_dir)/${_QE_WORK_ORDER_ID}.yaml"
+      if [ -f "$_rr_wo_file" ]; then
+        local _rr_loaded=true
+        _load_work_order "$_rr_wo_file" 2>/dev/null || _rr_loaded=false
+        local _rr_blockers=""
+        # An unreadable work order is treated as a GROUP, not as a single. On a
+        # failed load every `_WO_*` is empty, so a `${_WO_TYPE:-single}` default
+        # would route an unreadable group straight down the unconditional
+        # reopen path — reinstating exactly the over-reach this scoping exists
+        # to prevent. The conservative direction is the one that declines.
+        if [ "$_rr_loaded" = false ]; then
+          _rr_blockers="(work order could not be read) "
+        elif [ "$_WO_TYPE" != "single" ] && [ -n "${_WO_ENTRY_IDS:-}" ]; then
+          local _rr_old_ifs="$IFS"
+          IFS=','
+          # shellcheck disable=SC2086 — intentional word splitting
+          set -- $_WO_ENTRY_IDS
+          IFS="$_rr_old_ifs"
+          local _rr_sib
+          for _rr_sib in "$@"; do
+            [ "$_rr_sib" = "$entry_id" ] && continue
+            local _rr_s
+            for _rr_s in review blocked failed; do
+              if [ -f "$qdir/$_rr_s/${_rr_sib}.yaml" ]; then
+                _rr_blockers="${_rr_blockers}${_rr_sib} ($_rr_s) "
+              fi
+            done
+          done
+        fi
+        if [ -n "$_rr_blockers" ]; then
+          echo "NOTE: work order $_QE_WORK_ORDER_ID has other children still unresolved: $_rr_blockers" >&2
+          echo "      Left as-is deliberately — reopening it here would un-gate those siblings and discard the group's failure pointer." >&2
+          echo "      Entry $entry_id is back in approved/ but will be deferred until the group is reopened: queue-cli.sh reopen-wo $_QE_WORK_ORDER_ID" >&2
+          _RR_WO_REOPENED="false"
+          _RR_WO_BLOCKERS="$_rr_blockers"
+        elif ! wo_is_escalated "$_QE_WORK_ORDER_ID" 2>/dev/null \
+             && ! wo_is_failed "$_QE_WORK_ORDER_ID" 2>/dev/null; then
+          # Not escalated and not failed, so there is nothing for the deferral
+          # guard to catch and nothing to reopen. `wo_reopen` refuses a work
+          # order in this state, and reporting that refusal as "may be deferred"
+          # would be a warning about a healthy one. (There is no `wo_is_open`
+          # predicate — the guard itself tests these same two, so testing them
+          # here keeps the two in step.)
+          _RR_WO_REOPENED="not-needed"
+        else
+          if wo_reopen "$_QE_WORK_ORDER_ID" > /dev/null 2>&1; then
+            _RR_WO_REOPENED="true"
+          else
+            echo "WARNING: could not reopen work order $_QE_WORK_ORDER_ID — entry $entry_id may be deferred on the next poll" >&2
+            _RR_WO_REOPENED="false"
+          fi
+        fi
+      fi
+    fi
+  fi
+  rm -f "$qdir/.defer-count-${entry_id}" 2>/dev/null || true
+
+  # `|| true` to match every sibling transition (_transition, queue_complete,
+  # queue_fail, queue_escalate, queue_block, queue_defer all guard it). Without
+  # it, a rebuild failure returns non-zero AFTER the entry has already moved and
+  # the work order has been reopened, so the caller reports failure and skips
+  # its log line on a reopen that actually succeeded.
+  _rebuild_queue_index || true
+}
+
 # --- Parse task group brief sequence number ---
 # Extracts N from "**Brief:** N of M" in the ### Task Group section of a brief file.
 # Returns the sequence number via stdout, or empty string if not found/parseable.

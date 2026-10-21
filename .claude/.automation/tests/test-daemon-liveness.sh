@@ -536,6 +536,464 @@ _tap_eq "${_EXEC_LAUNCHES:-0}" "2" "both launch sites use 'exec claude -p'"
 _ALL_LAUNCHES=$(printf '%s\n' "$_LAUNCH_CODE" | grep -cF 'claude -p' || true)
 _tap_eq "${_ALL_LAUNCHES:-0}" "2" "no non-exec 'claude -p' launch remains"
 
+printf "# --- Turn budget: exhaustion must never read as success ---\n"
+
+# A session that runs out of turns exits ZERO. On 2026-10-21 two briefs burned
+# ~40 minutes each, hit "Reached max turns (200)", committed nothing, and left a
+# clean tree — so one was recorded `completed:clean-noop` and its queue entry
+# left the queue as though the work were done. These cases pin the routing.
+(
+  set +e
+  # shellcheck disable=SC1091
+  . "$ADV_SANDBOX/.claude/.automation/lib/outcome-detector.sh" > /dev/null 2>&1
+  _TB_ERR="$ADV_SANDBOX/stderr-maxturns.txt"
+  printf 'some earlier output\nError: Reached max turns (200)\n' > "$_TB_ERR"
+  _TB_CLEAN="$ADV_SANDBOX/stderr-clean.txt"
+  printf 'ordinary session output\n' > "$_TB_CLEAN"
+  # exit 0 + the max-turns banner, from a tree with no commits.
+  printf '%s' "$(detect_outcome 0 "" "$ADV_SANDBOX" "" "$_TB_ERR" 2>/dev/null)" \
+    > "$ADV_SANDBOX/tb-noop.out"
+  # Same, but with stderr that does NOT carry the banner — must fall through to
+  # the pre-existing behaviour rather than being swept up by the new branch.
+  printf '%s' "$(detect_outcome 0 "" "$ADV_SANDBOX" "" "$_TB_CLEAN" 2>/dev/null)" \
+    > "$ADV_SANDBOX/tb-clean.out"
+  # No stderr file at all — the mktemp-failure path. Must not crash or fire.
+  printf '%s' "$(detect_outcome 0 "" "$ADV_SANDBOX" "" "" 2>/dev/null)" \
+    > "$ADV_SANDBOX/tb-nostderr.out"
+  # The banner without the `Error: ` prefix — a reworded CLI must still match.
+  _TB_BARE="$ADV_SANDBOX/stderr-bare.txt"
+  printf 'Reached max turns (400)\n' > "$_TB_BARE"
+  printf '%s' "$(detect_outcome 0 "" "$ADV_SANDBOX" "" "$_TB_BARE" 2>/dev/null)" \
+    > "$ADV_SANDBOX/tb-bare.out"
+  # The same phrase MID-LINE must not match. This is what the anchor buys: the
+  # previous unanchored form matched the phrase anywhere in the whole captured
+  # stderr, so a trace or a quoted log line would have misclassified a session.
+  _TB_MID="$ADV_SANDBOX/stderr-midline.txt"
+  printf 'INFO: the detector greps for Reached max turns in stderr\n' > "$_TB_MID"
+  printf '%s' "$(detect_outcome 0 "" "$ADV_SANDBOX" "" "$_TB_MID" 2>/dev/null)" \
+    > "$ADV_SANDBOX/tb-midline.out"
+) || true
+
+_TB_OUT=$(cat "$ADV_SANDBOX/tb-noop.out" 2>/dev/null || printf 'MISSING')
+_tap_eq "$_TB_OUT" "review:turn-budget-exhausted" "max-turns exhaustion routes to review, not completed"
+_TB_CLEAN_OUT=$(cat "$ADV_SANDBOX/tb-clean.out" 2>/dev/null || printf 'MISSING')
+case "$_TB_CLEAN_OUT" in
+  review:turn-budget-exhausted)
+    _tap_fail "stderr without the banner is unaffected" "got '$_TB_CLEAN_OUT' — the new branch is matching too broadly" ;;
+  '' |MISSING)
+    _tap_fail "stderr without the banner is unaffected" "detector produced nothing" ;;
+  *)
+    _tap_pass "stderr without the banner is unaffected ($_TB_CLEAN_OUT)" ;;
+esac
+_TB_BARE_OUT=$(cat "$ADV_SANDBOX/tb-bare.out" 2>/dev/null || printf 'MISSING')
+_tap_eq "$_TB_BARE_OUT" "review:turn-budget-exhausted" "banner without the 'Error: ' prefix still matches"
+_TB_MID_OUT=$(cat "$ADV_SANDBOX/tb-midline.out" 2>/dev/null || printf 'MISSING')
+case "$_TB_MID_OUT" in
+  review:turn-budget-exhausted)
+    _tap_fail "the phrase mid-line does NOT match (anchor holds)" "unanchored match — a log line or trace containing the phrase would misclassify the session" ;;
+  ''|MISSING)
+    _tap_fail "the phrase mid-line does NOT match (anchor holds)" "detector produced nothing" ;;
+  *)
+    _tap_pass "the phrase mid-line does NOT match (anchor holds) ($_TB_MID_OUT)" ;;
+esac
+_TB_NONE_OUT=$(cat "$ADV_SANDBOX/tb-nostderr.out" 2>/dev/null || printf 'MISSING')
+case "$_TB_NONE_OUT" in
+  review:turn-budget-exhausted|''|MISSING)
+    _tap_fail "absent stderr neither fires nor crashes the detector" "got '$_TB_NONE_OUT'" ;;
+  *)
+    _tap_pass "absent stderr neither fires nor crashes the detector ($_TB_NONE_OUT)" ;;
+esac
+
+# The banner check must sit ahead of the has_new_commits success branch: partial
+# commits followed by exhaustion is the case that most looks like success.
+_TB_ORDER=$(grep -v '^[[:space:]]*#' "$_ADV_REAL_REPO/.claude/.automation/lib/outcome-detector.sh" \
+  | grep -nE 'Reached max turns|has_new_commits" = true' | head -2)
+_TB_FIRST=$(printf '%s\n' "$_TB_ORDER" | head -1)
+case "$_TB_FIRST" in
+  *"Reached max turns"*) _tap_pass "the exhaustion check precedes the first has_new_commits branch" ;;
+  *) _tap_fail "the exhaustion check precedes the first has_new_commits branch" "first match was: $_TB_FIRST" ;;
+esac
+
+printf "# --- Turn budget: the limit is configurable ---\n"
+
+# Hardcoded `--max-turns 200` is what the two briefs hit. Comments are stripped
+# before these greps: the launch sites carry a comment quoting the old literal,
+# and a grep a comment can satisfy is a test that passes on prose.
+_MT_CODE=$(grep -v '^[[:space:]]*#' "$_REAL_RUNNER_SRC")
+_MT_HARDCODED=$(printf '%s\n' "$_MT_CODE" | grep -cE '\-\-max-turns[[:space:]]+[0-9]+' || true)
+_tap_eq "${_MT_HARDCODED:-0}" "0" "no launch site hardcodes a turn budget"
+_MT_WIRED=$(printf '%s\n' "$_MT_CODE" | grep -cF -- '--max-turns "$_session_max_turns"' || true)
+_tap_eq "${_MT_WIRED:-0}" "2" "both launch sites read the configured turn budget"
+
+(
+  set +e
+  CONFIG_FILE="$_ADV_REAL_REPO/.claude/.automation/config.yaml"
+  CONFIG_LOCAL_FILE=""
+  # shellcheck disable=SC1091
+  . "$ADV_SANDBOX/.claude/.automation/lib/queue-manager.sh" > /dev/null 2>&1
+  printf '%s' "$(_parse_config_field "runner" "session_max_turns" 2>/dev/null)" \
+    > "$ADV_SANDBOX/mt-config"
+  printf '%s' "$(_parse_config_field "runner" "session_max_turns" 2>&1 >/dev/null)" \
+    > "$ADV_SANDBOX/mt-config-err"
+) || true
+_MT_VAL=$(cat "$ADV_SANDBOX/mt-config" 2>/dev/null || printf '')
+case "$_MT_VAL" in
+  ''|*[!0-9]*) _tap_fail "session_max_turns parses to a bare number" "got '$_MT_VAL' — inline comment on the value line?" ;;
+  *) _tap_pass "session_max_turns parses to a bare number ($_MT_VAL)" ;;
+esac
+_MT_ERR=$(cat "$ADV_SANDBOX/mt-config-err" 2>/dev/null || printf '')
+if [ -z "$_MT_ERR" ]; then
+  _tap_pass "reading session_max_turns emits no sanitiser warning"
+else
+  _tap_fail "reading session_max_turns emits no sanitiser warning" "stderr: $_MT_ERR"
+fi
+
+printf "# --- Startup recovery must not close a live session ---\n"
+
+# Startup recovery step 4 used to call runner_external_cleanup whenever
+# .claude/.session-id existed — no liveness predicate at all, on a file the
+# glossary documents as persistent. runner_external_cleanup is a session CLOSE
+# routine: it unregisters, deletes the state directory, and writes escalations.
+# So starting the daemon closed whichever session was current. On 2026-10-21
+# that deleted a live interactive session's state and registry entry, and
+# write-guard then refused every edit with "No phase-state".
+#
+# The fix is the ABSENCE of that call, so this is a static assertion — with
+# comments stripped, because the replacement comment names the function it
+# removed and would otherwise satisfy the grep on prose alone.
+_SR_CODE=$(grep -v '^[[:space:]]*#' "$_REAL_RUNNER_SRC")
+# Pins the PROPERTY, not the old literal. An earlier version of this assertion
+# required the exact argument list `"$REPO_ROOT" "" "startup-recovery"`, so
+# reintroducing the bug with any other arguments or spacing would have passed.
+# What must hold is that `_startup_crash_recovery` contains no call at all.
+_SR_FN=$(printf '%s\n' "$_SR_CODE" | awk '/^_startup_crash_recovery\(\) \{/{inside=1} inside{print} inside && /^}$/{exit}')
+if [ -z "$_SR_FN" ]; then
+  _tap_fail "startup recovery no longer runs a session close" "could not extract _startup_crash_recovery — did runner.sh change shape?"
+else
+  _SR_CALLS=$(printf '%s\n' "$_SR_FN" | grep -cE '(^|[^_[:alnum:]])runner_external_cleanup[[:space:]]' || true)
+  _tap_eq "${_SR_CALLS:-0}" "0" "startup recovery no longer runs a session close"
+fi
+# The legitimate orphan cleanup must still be invoked — deleting step 4 is only
+# correct because step 5 owns it.
+_SR_SWEEP=$(printf '%s\n' "$_SR_CODE" | grep -cF 'sweep_stale_sessions' || true)
+case "${_SR_SWEEP:-0}" in
+  0) _tap_fail "the liveness-gated stale-session sweep is still invoked" "no call found" ;;
+  *) _tap_pass "the liveness-gated stale-session sweep is still invoked" ;;
+esac
+# And runner_external_cleanup must survive as the close-path routine it is.
+_SR_DEFINED=$(grep -cE '^runner_external_cleanup\(\)' "$_ADV_REAL_REPO/.claude/.automation/lib/state-manager.sh" || true)
+_tap_eq "${_SR_DEFINED:-0}" "1" "runner_external_cleanup still exists for the close path"
+
+printf "# --- The sweep must not evict a LIVE session ---\n"
+
+# This is the defect that actually destroyed a session's state on 2026-10-21.
+# The dead-pid arm was correct, but the 24h and TTL arms removed the registry
+# entry "regardless of PID" — and the orphaned-state-dir loop then removed the
+# state directory, because it keys on a missing registry entry. A ~16h-old LIVE
+# interactive session lost its plan approval and every verdict, after which
+# write-guard refused all of its edits.
+(
+  set +e
+  # shellcheck disable=SC1091
+  . "$ADV_SANDBOX/.claude/hooks/_analytics-helper.sh" > /dev/null 2>&1
+  _SW_SESS="$ADV_SANDBOX/.claude/.state/sessions"
+  _SW_WT="$ADV_SANDBOX/.claude/.state/wt-sessions"
+  mkdir -p "$_SW_SESS" "$_SW_WT/live-old" "$_SW_WT/dead-old"
+  # A live session, far older than any TTL: this process, which is definitionally
+  # alive. Using $$ rather than a made-up pid is the point — a fabricated pid
+  # could be dead and the case would pass for the wrong reason.
+  printf 'session_id: live-old\nsession_type: standard\nbranch: main\npid: %s\nstarted_at: 2020-01-01T00:00:00Z\n' "$$" \
+    > "$_SW_SESS/live-old.yaml"
+  printf 'marker\n' > "$_SW_WT/live-old/plan-approved"
+  # A genuinely dead session of the same age — pid 1 is init-owned and not ours,
+  # so pick an unused high pid and confirm it is dead before relying on it.
+  _SW_DEAD=99999
+  while kill -0 "$_SW_DEAD" 2>/dev/null; do _SW_DEAD=$(( _SW_DEAD - 1 )); done
+  printf 'session_id: dead-old\nsession_type: standard\nbranch: main\npid: %s\nstarted_at: 2020-01-01T00:00:00Z\n' "$_SW_DEAD" \
+    > "$_SW_SESS/dead-old.yaml"
+  printf 'marker\n' > "$_SW_WT/dead-old/plan-approved"
+  REPO_ROOT="$ADV_SANDBOX" _REPO_OS_ROOT="$ADV_SANDBOX" sweep_stale_sessions > /dev/null 2>&1
+  # Report presence as words so a failure prints readably.
+  { [ -f "$_SW_SESS/live-old.yaml" ] && printf 'kept' || printf 'evicted'; } > "$ADV_SANDBOX/sw-live-reg"
+  { [ -f "$_SW_WT/live-old/plan-approved" ] && printf 'kept' || printf 'evicted'; } > "$ADV_SANDBOX/sw-live-state"
+  { [ -f "$_SW_SESS/dead-old.yaml" ] && printf 'kept' || printf 'evicted'; } > "$ADV_SANDBOX/sw-dead-reg"
+) || true
+
+_tap_eq "$(cat "$ADV_SANDBOX/sw-live-reg" 2>/dev/null || printf MISSING)" "kept" \
+  "a live session's registry entry survives the sweep however old it is"
+_tap_eq "$(cat "$ADV_SANDBOX/sw-live-state" 2>/dev/null || printf MISSING)" "kept" \
+  "a live session's state directory survives the sweep"
+# The control: the sweep must still do its job. If this reports "kept" the fix
+# has disabled the sweep rather than scoped it, and the two cases above prove
+# nothing.
+_tap_eq "$(cat "$ADV_SANDBOX/sw-dead-reg" 2>/dev/null || printf MISSING)" "evicted" \
+  "a dead session's registry entry is still reaped (fix scopes, does not disable)"
+
+# The orphan-state-dir loop, pinned on its own. The case above reaches it only
+# via the registry arms, so it could not tell whether the loop itself is gated —
+# and that loop is where state is actually destroyed. A live session whose
+# registry entry is already missing (the state this defect produced) must keep
+# its state directory.
+(
+  set +e
+  # shellcheck disable=SC1091
+  . "$ADV_SANDBOX/.claude/hooks/_analytics-helper.sh" > /dev/null 2>&1
+  _OS_WT="$ADV_SANDBOX/.claude/.state/wt-sessions"
+  mkdir -p "$_OS_WT/live-unregistered" "$_OS_WT/dead-unregistered"
+  printf 'marker\n' > "$_OS_WT/live-unregistered/plan-approved"
+  printf 'marker\n' > "$_OS_WT/dead-unregistered/plan-approved"
+  # The decisive liveness signal is the per-process sidecar: a file named
+  # .session-id.<pid> whose contents are the session id.
+  printf 'live-unregistered\n' > "$ADV_SANDBOX/.claude/.session-id.$$"
+  _OS_DEAD=99998
+  while kill -0 "$_OS_DEAD" 2>/dev/null; do _OS_DEAD=$(( _OS_DEAD - 1 )); done
+  printf 'dead-unregistered\n' > "$ADV_SANDBOX/.claude/.session-id.$_OS_DEAD"
+  REPO_ROOT="$ADV_SANDBOX" _REPO_OS_ROOT="$ADV_SANDBOX" sweep_stale_sessions > /dev/null 2>&1
+  { [ -d "$_OS_WT/live-unregistered" ] && printf 'kept' || printf 'evicted'; } > "$ADV_SANDBOX/os-live"
+  { [ -d "$_OS_WT/dead-unregistered" ] && printf 'kept' || printf 'evicted'; } > "$ADV_SANDBOX/os-dead"
+) || true
+
+_tap_eq "$(cat "$ADV_SANDBOX/os-live" 2>/dev/null || printf MISSING)" "kept" \
+  "the orphan-state-dir loop spares a live session with no registry entry"
+_tap_eq "$(cat "$ADV_SANDBOX/os-dead" 2>/dev/null || printf MISSING)" "evicted" \
+  "the orphan-state-dir loop still reaps a dead session's state"
+
+printf "# --- review/ has an exit ---\n"
+
+# Before 2026-10-21 nothing could move an entry out of review/: approve handles
+# pending-review, recover-entry handles running, reopen-wo resets blocked|failed.
+# So every review:* outcome — including the new turn-budget one — was a one-way
+# door, and the first draft of that outcome's own comment named two commands
+# that cannot move the entry.
+_RE_Q="$ADV_SANDBOX/.claude/.automation/queue"
+mkdir -p "$_RE_Q/review" "$_RE_Q/approved"
+{
+  printf 'entry:\n'
+  printf '  id: "re-probe-1"\n'
+  printf '  status: "review"\n'
+  printf '  priority: "0"\n'
+  printf '  session_type: "standard"\n'
+  printf '  branch: ""\n'
+  printf '  brief_path: ".claude/.automation/briefs/re-probe.md"\n'
+  printf '  prompt: ""\n'
+  printf '  last_prompt: ""\n'
+  printf '  auto_mode: "false"\n'
+  printf '  solo_mode: "false"\n'
+  printf '  push_on_complete: "false"\n'
+  printf '  retry_count: "3"\n'
+  printf '  max_retries: "3"\n'
+  printf '  error_log: "review:turn-budget-exhausted"\n'
+  printf '  created_at: "2026-10-21T00:00:00Z"\n'
+  printf '  updated_at: "2026-10-21T00:00:00Z"\n'
+} > "$_RE_Q/review/re-probe-1.yaml"
+_RE_OUT=$(bash "$_CLI" reopen-entry re-probe-1 2>&1) || true
+if [ -f "$_RE_Q/approved/re-probe-1.yaml" ]; then
+  _tap_pass "reopen-entry moves a reviewed entry back to approved"
+else
+  _tap_fail "reopen-entry moves a reviewed entry back to approved" "output: $_RE_OUT"
+fi
+# Seeded at the exhausted value on purpose, so a no-op cannot pass this.
+_RE_RETRY=$(grep '^  retry_count:' "$_RE_Q/approved/re-probe-1.yaml" 2>/dev/null \
+  | sed 's/^[^:]*: *//' | tr -d '"[:space:]' | head -1) || _RE_RETRY=""
+_tap_eq "${_RE_RETRY:-unset}" "0" "reopen-entry restores the retry budget"
+# And it must refuse an entry that is not in review/, rather than inventing one.
+_RE_OUT2=$(bash "$_CLI" reopen-entry no-such-entry 2>&1) || true
+case "$_RE_OUT2" in
+  *"not in review"*) _tap_pass "reopen-entry refuses an entry that is not in review/" ;;
+  *) _tap_fail "reopen-entry refuses an entry that is not in review/" "output: $_RE_OUT2" ;;
+esac
+
+# THE case that matters, and the one the first fixture omitted. Every entry gets
+# a work order — `single` for a standalone entry — and a child in review makes
+# the work order `escalated`. The runner's post-dequeue guard then defers the
+# entry and, after max_deferral_cycles, transitions it to `blocked/`. So an
+# entry reopened without clearing its work order is walked straight into
+# `blocked/`, and the advertised exit merely relocates the failure. The first
+# version of this suite tested only the no-work-order path, which is exactly
+# why that defect reached review rather than being caught here.
+mkdir -p "$_RE_Q/work-orders"
+{
+  printf 'entry:\n'
+  printf '  id: "re-probe-2"\n'
+  printf '  status: "review"\n'
+  printf '  priority: "0"\n'
+  printf '  session_type: "standard"\n'
+  printf '  branch: ""\n'
+  printf '  brief_path: ".claude/.automation/briefs/re-probe.md"\n'
+  printf '  prompt: "the prompt the exhausted session ran"\n'
+  printf '  last_prompt: ""\n'
+  printf '  auto_mode: "false"\n'
+  printf '  solo_mode: "false"\n'
+  printf '  push_on_complete: "false"\n'
+  printf '  retry_count: "3"\n'
+  printf '  max_retries: "3"\n'
+  printf '  error_log: "review:turn-budget-exhausted"\n'
+  printf '  work_order_id: "re-wo-2"\n'
+  printf '  created_at: "2026-10-21T00:00:00Z"\n'
+  printf '  updated_at: "2026-10-21T00:00:00Z"\n'
+} > "$_RE_Q/review/re-probe-2.yaml"
+{
+  printf 'work_order:\n'
+  printf '  id: re-wo-2\n'
+  printf '  type: single\n'
+  printf '  label: re-probe-2\n'
+  printf '  entry_ids:\n'
+  printf '  - re-probe-2\n'
+  printf '  status: escalated\n'
+  printf '  created_at: 2026-10-21T00:00:00Z\n'
+  printf '  updated_at: 2026-10-21T00:00:00Z\n'
+  printf '  completed_at: \n'
+} > "$_RE_Q/work-orders/re-wo-2.yaml"
+# A part-spent deferral counter, as a previously-deferred entry would carry.
+printf '2\n' > "$_RE_Q/.defer-count-re-probe-2"
+_RE_OUT3=$(bash "$_CLI" reopen-entry re-probe-2 2>&1) || true
+_RE_WO_STATUS=$(grep '^  status:' "$_RE_Q/work-orders/re-wo-2.yaml" 2>/dev/null \
+  | sed 's/^[^:]*: *//' | tr -d '"[:space:]' | head -1) || _RE_WO_STATUS=""
+case "${_RE_WO_STATUS:-unset}" in
+  escalated|failed)
+    _tap_fail "reopen-entry clears the parent work order's escalation" \
+      "work order is still '$_RE_WO_STATUS' — the entry will be deferred into blocked/; output: $_RE_OUT3" ;;
+  unset|'')
+    _tap_fail "reopen-entry clears the parent work order's escalation" "could not read work order status" ;;
+  *)
+    _tap_pass "reopen-entry clears the parent work order's escalation ($_RE_WO_STATUS)" ;;
+esac
+if [ -f "$_RE_Q/.defer-count-re-probe-2" ]; then
+  _tap_fail "reopen-entry clears a part-spent deferral counter" "counter file still present"
+else
+  _tap_pass "reopen-entry clears a part-spent deferral counter"
+fi
+# The prompt that ran must survive as last_prompt rather than being destroyed.
+_RE_LAST=$(grep '^  last_prompt:' "$_RE_Q/approved/re-probe-2.yaml" 2>/dev/null \
+  | sed 's/^[^:]*: *//' | head -1) || _RE_LAST=""
+case "$_RE_LAST" in
+  *"the prompt the exhausted session ran"*) _tap_pass "reopen-entry preserves the prompt as last_prompt" ;;
+  *) _tap_fail "reopen-entry preserves the prompt as last_prompt" "last_prompt is '$_RE_LAST'" ;;
+esac
+
+# A GROUP work order with another child still failed. Reopening the group here
+# would un-gate siblings the deferral guard is deliberately holding AND erase
+# failure_entry_id while that sibling sits in failed/, so the command must
+# decline and say so. The first version called wo_reopen unconditionally and no
+# fixture used a group, which is why that over-reach reached review.
+_RG_ID="rg-child-1"
+_RG_SIB="rg-child-2"
+{
+  printf 'entry:\n'
+  printf '  id: "%s"\n' "$_RG_ID"
+  printf '  status: "review"\n'
+  printf '  priority: "0"\n'
+  printf '  session_type: "taskgroup"\n'
+  printf '  branch: "feature/rg-probe"\n'
+  printf '  brief_path: ".claude/.automation/briefs/rg-probe.md"\n'
+  printf '  prompt: ""\n'
+  printf '  last_prompt: ""\n'
+  printf '  auto_mode: "false"\n'
+  printf '  solo_mode: "false"\n'
+  printf '  push_on_complete: "false"\n'
+  printf '  retry_count: "1"\n'
+  printf '  max_retries: "3"\n'
+  printf '  error_log: "review:incomplete-deliverable"\n'
+  printf '  work_order_id: "rg-wo-1"\n'
+  printf '  created_at: "2026-10-21T00:00:00Z"\n'
+  printf '  updated_at: "2026-10-21T00:00:00Z"\n'
+} > "$_RE_Q/review/${_RG_ID}.yaml"
+mkdir -p "$_RE_Q/failed"
+{
+  printf 'entry:\n'
+  printf '  id: "%s"\n' "$_RG_SIB"
+  printf '  status: "failed"\n'
+  printf '  priority: "1"\n'
+  printf '  session_type: "taskgroup"\n'
+  printf '  branch: "feature/rg-probe"\n'
+  printf '  brief_path: ".claude/.automation/briefs/rg-probe-2.md"\n'
+  printf '  prompt: ""\n'
+  printf '  last_prompt: ""\n'
+  printf '  auto_mode: "false"\n'
+  printf '  solo_mode: "false"\n'
+  printf '  push_on_complete: "false"\n'
+  printf '  retry_count: "3"\n'
+  printf '  max_retries: "3"\n'
+  printf '  error_log: "failed:crash"\n'
+  printf '  work_order_id: "rg-wo-1"\n'
+  printf '  created_at: "2026-10-21T00:00:00Z"\n'
+  printf '  updated_at: "2026-10-21T00:00:00Z"\n'
+} > "$_RE_Q/failed/${_RG_SIB}.yaml"
+{
+  printf 'work_order:\n'
+  printf '  id: rg-wo-1\n'
+  printf '  type: group\n'
+  printf '  label: feature/rg-probe\n'
+  printf '  entry_ids:\n'
+  printf '  - %s\n' "$_RG_ID"
+  printf '  - %s\n' "$_RG_SIB"
+  printf '  status: failed\n'
+  printf '  created_at: 2026-10-21T00:00:00Z\n'
+  printf '  updated_at: 2026-10-21T00:00:00Z\n'
+  printf '  completed_at: \n'
+  printf '  failure_entry_id: %s\n' "$_RG_SIB"
+} > "$_RE_Q/work-orders/rg-wo-1.yaml"
+_RG_OUT=$(bash "$_CLI" reopen-entry "$_RG_ID" 2>&1) || true
+# The entry itself still moves — the operator asked for that and it is harmless.
+if [ -f "$_RE_Q/approved/${_RG_ID}.yaml" ]; then
+  _tap_pass "reopen-entry still moves a group entry out of review"
+else
+  _tap_fail "reopen-entry still moves a group entry out of review" "output: $_RG_OUT"
+fi
+# But the group work order must be left alone.
+_RG_WO_STATUS=$(grep '^  status:' "$_RE_Q/work-orders/rg-wo-1.yaml" 2>/dev/null \
+  | sed 's/^[^:]*: *//' | tr -d '"[:space:]' | head -1) || _RG_WO_STATUS=""
+_tap_eq "${_RG_WO_STATUS:-unset}" "failed" \
+  "a group work order with a failed sibling is NOT reopened"
+# And the pointer to the brief that actually broke must survive.
+_RG_FAIL_ID=$(grep '^  failure_entry_id:' "$_RE_Q/work-orders/rg-wo-1.yaml" 2>/dev/null \
+  | sed 's/^[^:]*: *//' | tr -d '"[:space:]' | head -1) || _RG_FAIL_ID=""
+_tap_eq "${_RG_FAIL_ID:-unset}" "$_RG_SIB" "the group's failure pointer is not erased"
+# And the operator must be told what to do instead.
+case "$_RG_OUT" in
+  *"reopen-wo rg-wo-1"*) _tap_pass "the operator is pointed at reopen-wo for the group" ;;
+  *) _tap_fail "the operator is pointed at reopen-wo for the group" "output: $_RG_OUT" ;;
+esac
+# The declined case must be distinguishable on STDOUT, not only on stderr — both
+# output forms used to be byte-identical whether the work order was cleared or
+# left failed, so neither a human nor a script could tell a full recovery from a
+# half one.
+case "$_RG_OUT" in
+  *"NOT fully recovered"*) _tap_pass "a declined group reopen says so on stdout" ;;
+  *) _tap_fail "a declined group reopen says so on stdout" "output: $_RG_OUT" ;;
+esac
+# And in JSON, which is what Prompt Q parses. Re-stage the fixture, since the
+# run above moved the entry.
+{
+  printf 'entry:\n'
+  printf '  id: "rg-child-3"\n'
+  printf '  status: "review"\n'
+  printf '  priority: "0"\n'
+  printf '  session_type: "taskgroup"\n'
+  printf '  branch: "feature/rg-probe"\n'
+  printf '  brief_path: ".claude/.automation/briefs/rg-probe.md"\n'
+  printf '  prompt: ""\n'
+  printf '  last_prompt: ""\n'
+  printf '  auto_mode: "false"\n'
+  printf '  solo_mode: "false"\n'
+  printf '  push_on_complete: "false"\n'
+  printf '  retry_count: "1"\n'
+  printf '  max_retries: "3"\n'
+  printf '  error_log: "review:incomplete-deliverable"\n'
+  printf '  work_order_id: "rg-wo-1"\n'
+  printf '  created_at: "2026-10-21T00:00:00Z"\n'
+  printf '  updated_at: "2026-10-21T00:00:00Z"\n'
+} > "$_RE_Q/review/rg-child-3.yaml"
+perl -i -pe 's/^  entry_ids:$/  entry_ids:\n  - rg-child-3/' "$_RE_Q/work-orders/rg-wo-1.yaml"
+_RG_JSON=$(bash "$_CLI" --json reopen-entry rg-child-3 2>/dev/null) || true
+if printf '%s' "$_RG_JSON" | jq -e . > /dev/null 2>&1; then
+  _tap_pass "reopen-entry --json emits valid JSON"
+else
+  _tap_fail "reopen-entry --json emits valid JSON" "output: $_RG_JSON"
+fi
+_RG_WOR=$(printf '%s' "$_RG_JSON" | jq -r '.work_order_reopened' 2>/dev/null || printf 'PARSE-FAIL')
+_tap_eq "$_RG_WOR" "false" "reopen-entry --json reports that the work order was not reopened"
+
 printf "\n# === Summary ===\n"
 printf "1..%d\n" "$_TAP_NUM"
 printf "# pass %d / fail %d\n" "$_TAP_PASS" "$_TAP_FAIL"

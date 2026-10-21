@@ -26,6 +26,12 @@ runner:
   # this field parsed as empty and warned on every read, so the TTL was stuck at
   # the hardcoded fallback and could not be configured at all.
   session_max_ttl_seconds: 21600
+  # Turn budget per headless session (--max-turns). Was hardcoded at 200, which
+  # two multi-part briefs exhausted after ~40 minutes each on 2026-10-21 having
+  # committed nothing. A session that runs out of turns is now routed to
+  # review:turn-budget-exhausted rather than reported as completed; raising this
+  # value, or splitting the brief, is the way to clear that. Must be > 0.
+  session_max_turns: 400
   # After 3 consecutive failures trip the breaker, allow ONE probe entry once
   # this many seconds have passed (1800 = 30 min). The failure count is not
   # cleared, so a failed probe re-trips for another window. 0 = never expires;

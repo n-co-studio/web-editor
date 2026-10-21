@@ -41,6 +41,10 @@ runner:
   max_deferral_cycles: 3
   # Per-session elapsed-time cap in seconds. 21600 = 6h. 0 disables it.
   session_max_ttl_seconds: 21600
+  # Turn budget per headless session, passed as --max-turns. Must be > 0; a
+  # missing or non-numeric value falls back to the in-code default. Exhausting
+  # it routes the session to review:turn-budget-exhausted, never to completed.
+  session_max_turns: 400
   # Cooldown after 3 consecutive failures trip the breaker. 1800 = 30m. One
   # probe entry per window, and the failure count is NOT cleared, so a failed
   # probe re-trips. 0 stays tripped until `queue-cli.sh reset-breaker`.

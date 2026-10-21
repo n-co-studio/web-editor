@@ -25,7 +25,7 @@ Phase-state writes use shell I/O, which bypasses write-guard (Decision 0014).
 - **No product code changes.** Prompt Q never writes application code, tests, specs, or documentation.
 - **No session log entries.** Queue triage is ephemeral — zero-change by design.
 - **Bash restricted to queue operations.** Only `queue-cli.sh` invocations and reading escalation/report files under `.claude/.automation/`.
-- **Destructive commands require confirmation.** `approve`, `remove`, `edit`, `halt`, `force-halt`, `resume`, `reset-breaker`, `reopen-wo`, `prune` — ask the operator before executing.
+- **Destructive commands require confirmation.** `approve`, `remove`, `edit`, `halt`, `force-halt`, `resume`, `reset-breaker`, `reopen-wo`, `reopen-entry`, `prune` — ask the operator before executing.
 - **No in-session execution.** If the operator wants to act on a brief (e.g., "run this one"), redirect: "Copy the brief and open a new Prompt B session."
 
 ## Governance

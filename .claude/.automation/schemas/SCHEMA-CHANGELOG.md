@@ -10,6 +10,51 @@ Breaking changes (field removal, type change, required field addition) increment
 
 ---
 
+## v1.6.0 — Turn Budget
+
+**Date:** 2026-10-21
+**Decision:** 0017 (Operator Automation Layer)
+
+### Changes
+
+**runner-config.yaml** (+1 field):
+- `session_max_turns` (integer, default: `400`) — turn budget passed to `claude -p` as
+  `--max-turns`. Must be greater than zero; a missing or non-numeric value falls back to the
+  in-code default. Was a hardcoded `200` at both launch sites until 2026-10-21, when two
+  multi-part briefs exhausted it after roughly 40 minutes each.
+
+**Outcome vocabulary** (+1 detail): `review:turn-budget-exhausted`. A session that runs out of
+turns exits ZERO, so one of those two briefs was classified `completed:clean-noop` and its
+queue entry left the queue as though the work were done. The detector now checks the stderr for
+the max-turns banner ahead of every success branch — including ahead of the new-commits branch,
+because partial commits followed by exhaustion is the case that most resembles success.
+
+**queue-entry transitions** (+1 command, no schema change): `queue-cli.sh reopen-entry <id>`
+moves an entry from `review/` back to `approved/`, resets `retry_count`, clears its
+`.defer-count-<id>` file, preserves the prompt that ran as `last_prompt`, and reopens its
+parent work order. Added here because no transition out of `review/` existed for ANY `review:*`
+outcome, which would have made the new detail a one-way door.
+
+The work-order half is load-bearing, not incidental: every entry has a work order, a child in
+`review` makes it `escalated`, and the runner's post-dequeue guard defers an entry whose work
+order is escalated — three cycles, then `blocked/`. A reopen that cleared only the entry
+therefore relocated the failure rather than clearing it. The reopen is **scoped**: a `single`
+work order is reopened outright, but a `group` one is left alone when another child is still in
+`review`/`blocked`/`failed`, because flipping the group to `open` would un-gate siblings the
+guard is deliberately holding and would erase the group's `failure_entry_id` while the failed
+sibling remains. In that case the command says so and points at `reopen-wo`.
+
+**review-log-entry.yaml** (event enum reconciled): added `entry-reopened` for the new command,
+and backfilled six names that were already being emitted and had never been listed —
+`entry-blocked`, `entry-recovered`, `transition-failed`, `work-order-failed`,
+`work-order-reopened`, `work-order-reconciled`. Nothing validates this enum mechanically, which
+is how it drifted; the file now says to reconcile it with a diff against the call sites rather
+than by eye, because the first pass at this missed `transition-failed` and miscounted the rest.
+
+**Comment placement** remains part of the contract — see v1.5.0. The new field follows it.
+
+---
+
 ## v1.5.0 — Runner Liveness: Session TTL and Circuit Breaker Cooldown
 
 **Date:** 2026-10-20

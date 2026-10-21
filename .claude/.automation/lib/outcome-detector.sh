@@ -7,14 +7,22 @@
 #   _phase-helper.sh — _load_phase_state, _PS_* cache variables
 #   blocker-reporter.sh — write_blocker_report (optional, for enriched reports)
 #
-# 6 outcome types (+ 1 edge case):
+# Outcomes, in the order the exit-0 path tests them. This list is the only
+# enumeration of them in the codebase, so keep it current — it had drifted four
+# details behind by 2026-10-21.
+#   review    — turn-budget-exhausted (exit 0 + "Reached max turns" in stderr;
+#               checked FIRST, ahead of every success branch)
+#   review    — scope-deviation (exit 0 + scope-deviation escalation)
+#   review    — escalation (exit 0 + escalation file or tag=operator)
+#   review    — incomplete-deliverable (exit 0 + commits + COMPLETENESS_GATE: NEEDS_WORK)
+#   review    — finish-incomplete (finish-loop sessions only)
 #   completed — success (exit 0 + new commits)
 #   completed — clean-noop (exit 0 + no commits + clean tree)
-#   completed — killed-after-complete (exit 143/SIGTERM + new commits — git is source of truth)
-#   review    — escalation (exit 0 + escalation file or tag=operator)
 #   review    — dirty-noop (exit 0 + dirty tree + no commits — edge case)
+#   completed — killed-after-complete (exit 143/SIGTERM + new commits — git is source of truth)
 #   failed    — crash (non-zero + dirty tree)
 #   failed    — clean-failure (non-zero + clean tree)
+# Every review:* detail is cleared with `queue-cli.sh reopen-entry <id>`.
 
 # Audit C6: guard against missing _phase-helper.sh dependency
 if ! declare -f _validate_phase_session > /dev/null 2>&1; then
@@ -116,6 +124,55 @@ detect_outcome() {
 
   # Classification (priority order)
   if [ "$exit_code" -eq 0 ]; then
+    # Turn-budget exhaustion. Checked FIRST, ahead of every success branch.
+    #
+    # A session that runs out of turns exits ZERO. On 2026-10-21 two briefs each
+    # burned ~40 minutes, hit `Error: Reached max turns (200)`, committed
+    # nothing, and left a clean tree — so one was recorded `completed:clean-noop`
+    # and its queue entry left the queue as though the work were done. Silently
+    # dropping approved work is the worst failure this detector can produce.
+    #
+    # Ahead of the has_new_commits branch, not merely ahead of clean-noop: a
+    # session that committed partial work and THEN ran out of turns has not
+    # completed its brief either, and its partial commits are exactly what makes
+    # that case look like success.
+    #
+    # The signal has to be the stderr text, because the exit code is 0 and
+    # carries nothing. `stderr_file` is empty only when mktemp failed at launch;
+    # that path is already degraded and the check simply cannot fire there.
+    #
+    # Way out of this outcome (it must not become another guard with no exit):
+    # raise `runner.session_max_turns` or split the brief, THEN
+    # `queue-cli.sh reopen-entry <id>`.
+    #
+    # That command had to be added for this: `queue_approve` handles
+    # pending-review only, `recover-entry` handles running only, and
+    # `reopen-wo` resets blocked|failed siblings only — so before 2026-10-21
+    # NO review:* outcome had a transition out of review/, and the first draft
+    # of this comment confidently named two commands that cannot move the
+    # entry. Review caught it. Documented in
+    # .claude/.automation/docs/blocker-playbook.md section 14.
+    if [ -n "$stderr_file" ] && [ -f "$stderr_file" ]; then
+      # Anchored to start-of-line, and the `Error: ` prefix is optional so a
+      # reworded banner still matches. Anchoring matters: the previous
+      # unanchored case-insensitive form matched the phrase ANYWHERE in the
+      # whole captured stderr for all time, so any future wrapper, `set -x`
+      # trace or hook message containing it would misclassify the session —
+      # and misclassification is sticky, since the entry then needs an operator.
+      # Observed banner, from a real run on 2026-10-21:
+      #   Error: Reached max turns (200)
+      if grep -qE '^(Error: )?Reached max turns' "$stderr_file" 2>/dev/null; then
+        # Persist the evidence before returning. Every other review:* detail
+        # leaves an artifact — an escalation YAML or an error_log — and this one
+        # left only a line in daemon.log, with `runner.sh` deleting the stderr
+        # temp file straight after. For an outcome whose entire purpose is "do
+        # not silently drop approved work", discarding the reason the work was
+        # dropped is the wrong half to keep.
+        _write_blocker_report "$exit_code" "$repo_root" "$entry_id" "$stderr_file" 2>/dev/null || true
+        echo "review:turn-budget-exhausted"
+        return
+      fi
+    fi
     # Escalation check (exit 0 but needs operator review)
     if [ "$has_escalation" = true ] || [ "$has_operator_tag" = true ]; then
       # Enrich detail when scope-deviation escalation is present

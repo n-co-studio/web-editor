@@ -69,7 +69,9 @@ Referenced by escalation reports for operator recovery guidance.
 
 **Symptom:** Headless session completes all code changes but the entry shows `completed` with no commits. Branch has uncommitted working tree changes. Review log shows `entry-completed` but `git log` shows no new commits on the branch.
 
-**Root Cause:** The headless session produced all expected code changes but never committed them. Possible causes: max-turns exhaustion before reaching the commit phase, permission issue during `git commit` (pre-commit hook failure), or phase enforcement blocking the commit.
+**Root Cause:** The headless session produced all expected code changes but never committed them. Possible causes: a permission issue during `git commit` (pre-commit hook failure), or phase enforcement blocking the commit.
+
+**Note:** turn-budget exhaustion used to present this way too, and no longer does — since 2026-10-21 it classifies as `review:turn-budget-exhausted` and the entry goes to `review/`, never to `completed`. If you are here because an entry shows `completed` with no commits, exhaustion is **not** the cause; see §14 for that one.
 
 **Resolution:**
 1. Check the branch for uncommitted changes: `git stash list && git status`
@@ -77,7 +79,7 @@ Referenced by escalation reports for operator recovery guidance.
 3. If the branch is clean but no commits: the session may have failed silently — check `queue-cli.sh log` and escalation files
 4. Re-queue if needed: `queue-cli.sh add --brief <path> --branch <branch> --auto-approve --solo`
 
-**Prevention:** Root cause requires investigation per case. Common mitigations: ensure `max-turns` is sufficient (default 200), verify pre-commit gates pass for headless sessions, check for `GATE-RECOVERABLE` messages in daemon logs (`logs/daemon.log`).
+**Prevention:** Root cause requires investigation per case. Common mitigations: ensure the turn budget is sufficient (`runner.session_max_turns`, default 400 — it was a hardcoded 200 until 2026-10-21), verify pre-commit gates pass for headless sessions, check for `GATE-RECOVERABLE` messages in daemon logs (`logs/daemon.log`).
 
 ---
 
@@ -199,3 +201,50 @@ Referenced by escalation reports for operator recovery guidance.
 **Resolution:** Check the blocker report (if generated) for execution context. Daemon logs (`logs/daemon.log`) may contain outcome details from the failed attempt.
 
 **Prevention:** `queue_fail()` now copies the assembled prompt to `last_prompt` in the entry YAML before clearing the active `prompt` field. This preserves the previous attempt's prompt for diagnostic review. Additionally, `write_blocker_report()` includes the first 500 characters of the prompt in the report's `prompt_context` field. Use `queue-cli.sh show <id>` to view the `last_prompt` field on retried or failed entries.
+
+---
+
+## 14. Session Ran Out of Turns (`review:turn-budget-exhausted`)
+
+**Symptom:** A queue entry lands in `review` with outcome detail `turn-budget-exhausted`. The
+session ran for a long time — tens of minutes — and the stderr tail contains
+`Error: Reached max turns (N)`. It may have committed nothing, or committed partial work.
+
+**Root Cause:** The headless session hit its `--max-turns` budget. The brief was larger than
+the budget allowed, or the budget is set too low for the brief shape.
+
+**Why this outcome exists:** a session that exhausts its turn budget exits **zero**. Before
+2026-10-21 that meant a session which had done nothing and left a clean tree was recorded
+`completed:clean-noop` — the entry left the queue as though the work were done, silently
+dropping approved work. Two briefs were lost that way on 2026-10-21. The detector now checks
+for the max-turns banner ahead of every success branch, including ahead of the new-commits
+branch: partial commits followed by exhaustion is the case that most resembles success.
+
+**Resolution — pick one, they are not alternatives so much as a diagnosis:**
+1. Read the brief. If it bundles several concerns, **split it** into single-concern briefs and
+   re-queue those. This is usually the right answer; a budget is a backstop, not a sizing
+   policy.
+2. If the brief is genuinely one concern and simply large, raise `runner.session_max_turns` in
+   `config.yaml` (or `config.local.yaml`, which wins) and re-queue.
+3. Return the entry to the queue with **`queue-cli.sh reopen-entry <id>`**. It resets the retry
+   budget, clears the deferral counter, keeps the prompt that ran as `last_prompt`, and reopens
+   the parent work order — without that last part the daemon would defer the entry three times
+   into `blocked/`. Do this *after* step 1 or 2, not instead of them.
+
+   For a **task group** entry it will decline to reopen the group if another brief is still in
+   `review`, `blocked` or `failed`, print which ones, and tell you to use `reopen-wo <id>`
+   instead. That is deliberate: reopening the group would un-gate siblings the deferral guard is
+   holding back, and erase the pointer to the brief that actually failed.
+
+`reopen-entry` exists because of this outcome: `approve` only handles `pending-review`,
+`recover-entry` only handles `running`, and `reopen-wo` only resets `blocked`/`failed`
+siblings — so before 2026-10-21 **no** `review:*` outcome had any CLI transition out of
+`review/`, and the only exit was re-adding the brief as a fresh entry and losing the
+original's history. It applies to every review outcome, not just this one.
+
+**Do not** simply reopen the same brief against the same budget: it will run for the same
+duration and land back here. Two such runs cost roughly 80 minutes on 2026-10-21.
+
+**Prevention:** size briefs to one concern. If a brief has three numbered parts, it is three
+briefs. `session_max_turns` is daemon-global, so raising it for one oversized brief raises it
+for every session.

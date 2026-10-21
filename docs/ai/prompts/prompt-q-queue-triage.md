@@ -58,6 +58,7 @@ Map the operator's natural language to queue-cli.sh subcommands:
 
 **Work Orders**
 - "Reopen that work order", "Retry entry X" → `reopen-wo <id>` (confirm first)
+- "Put that one back in the queue", "Retry the one in review" → `reopen-entry <id>` (confirm first). This is the ONLY way out of `review/` — `approve` handles `pending-review` only and `recover-entry` handles `running` only, so before 2026-10-21 a reviewed entry could not be moved at all. It resets the retry budget and reopens the entry's parent work order **when it is safe to do so**: for a task group whose other children are still in `review`, `blocked` or `failed` it deliberately declines, reports "NOT fully recovered", and tells you to use `reopen-wo <id>` instead. Check `work_order_reopened` in the `--json` form before assuming the entry will run. If the entry got there via `review:turn-budget-exhausted`, fix the cause first (raise `runner.session_max_turns` or split the brief) or it will run just as long and come straight back.
 
 **Cleanup (requires confirmation)**
 - "Clean up stale entries" → `prune` (confirm first)
@@ -74,7 +75,7 @@ When the operator asks to review escalations:
    a. Run `show <id>` to get entry detail
    b. Read the escalation file (path from the entry detail, under `.claude/.automation/escalations/`)
    c. Present a summary: entry ID, brief title, escalation type, severity, context
-   d. Suggest a resolution: approve, remove, reopen-wo, or manual intervention
+   d. Suggest a resolution: for an entry sitting in `review/`, `reopen-entry` once the cause is addressed; otherwise `approve` (pending-review only), `remove`, `reopen-wo` for a work order, or manual intervention
    e. Ask the operator what to do
    f. Execute the chosen action (with confirmation for destructive commands)
 3. After processing all escalations, summarize what was done
@@ -90,6 +91,7 @@ These subcommands are destructive or state-changing and MUST be confirmed before
 - `resume` — clears halt state (both HALT and FORCE-HALT)
 - `reset-breaker` — clears the circuit breaker's consecutive-failure counter
 - `reopen-wo` — reopens a work order, resets blocked/failed siblings and restores their retry budget
+- `reopen-entry` — returns one reviewed entry to approved, clears its deferral counter, resets its retry budget, and reopens its parent work order unless that is a task group with other children still unresolved (then it declines and says so)
 - `prune` — removes stale artifacts
 
 Present the action clearly: "I'll run `queue-cli.sh approve <id>` — this will move entry X to approved status. Proceed?"
