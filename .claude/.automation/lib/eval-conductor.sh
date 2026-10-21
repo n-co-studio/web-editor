@@ -405,7 +405,9 @@ eval_launch_cells() {
 
         # Enqueue runner entry for this cell via the same path as the working judge path.
         # queue_enqueue args: brief_path, session_type, auto_mode, solo_mode, branch,
-        #   work_order_id, push_on_complete, priority, permission_profile
+        #   work_order_id, push_on_complete, priority, permission_profile (arg 9).
+        #   args 10-14 (project/milestone/model) default to empty — no per-entry model
+        #   pin for cell entries; model routing falls through to _resolve_model_for_session.
         # solo=false: cells NEVER merge to main (Decision t-0046).
         local cell_entry_id=""
         local cell_status="failed"
@@ -839,7 +841,31 @@ eval_trigger_judge() {
   rubric_ref="$(_ec_yaml_field "$study_file" "rubric_ref")"
   local judge_model
   judge_model="$(_ec_yaml_field "$study_file" "model")"
-  judge_model="${judge_model:-claude-opus-4-6}"
+  # Default: haiku for rubric scoring (operator decision, Decision t-0046 Amendment 3).
+  judge_model="${judge_model:-claude-haiku-5-5}"
+  # Resolve alias to raw id — an alias in the study record would let a later
+  # alias-map change silently rewrite history (Amendment 3).
+  case "$judge_model" in
+    sonnet) judge_model="claude-sonnet-5-5" ;;
+    haiku)  judge_model="claude-haiku-5-5" ;;
+    opus)   judge_model="claude-opus-5-5" ;;
+  esac
+  # Pin the resolved raw id back into study.yaml if the field is absent or
+  # held an alias (i.e. not already a raw "claude-*" id).
+  # Use awk to rewrite: update existing "  model:" line or append if absent.
+  case "$(_ec_yaml_field "$study_file" "model")" in
+    claude-*) ;;  # already pinned — leave as-is
+    *)
+      local _pin_tmp="${study_file}.tmp"
+      awk -v m="$judge_model" '
+        BEGIN { done=0 }
+        /^model:/ || /^  model:/ { print "  model: " m; done=1; next }
+        { print }
+        END { if (!done) print "  model: " m }
+      ' "$study_file" > "$_pin_tmp" && mv "$_pin_tmp" "$study_file" 2>/dev/null || true
+      echo "INFO [eval-conductor]: Pinned resolved judge model to study.yaml: $judge_model"
+      ;;
+  esac
 
   local judge_brief_dir="$raw_root/judge-briefs"
   mkdir -p "$judge_brief_dir" 2>/dev/null || true
@@ -869,7 +895,8 @@ eval_trigger_judge() {
   echo "INFO [eval-conductor]: Judge brief written to $judge_brief"
 
   # Enqueue judge entry with the 'judge' permission profile (read-only: no Edit/Write/commit/push).
-  # queue_enqueue arg 9 = permission_profile (added in Decision t-0046 Amendment 1).
+  # queue_enqueue arg  9 = permission_profile (Decision t-0046 Amendment 1).
+  # queue_enqueue arg 14 = model pin (Decision t-0046 Amendment 3).
   # auto_mode=true so the runner picks it up without manual approval.
   if type queue_enqueue > /dev/null 2>&1; then
     local judge_entry_id
@@ -882,9 +909,14 @@ eval_trigger_judge() {
       "" \
       "false" \
       "10" \
-      "judge" 2>/dev/null)"
+      "judge" \
+      "" \
+      "" \
+      "0" \
+      "0" \
+      "$judge_model" 2>/dev/null)"
     if [ -n "$judge_entry_id" ]; then
-      echo "INFO [eval-conductor]: Judge entry enqueued: $judge_entry_id (permission_profile=judge)"
+      echo "INFO [eval-conductor]: Judge entry enqueued: $judge_entry_id (permission_profile=judge, model=$judge_model)"
     else
       echo "WARNING [eval-conductor]: queue_enqueue failed — judge must be dispatched manually"
       echo "INFO [eval-conductor]: Manual invocation: queue-cli.sh add --brief $judge_brief --session-type eval-cell --auto-approve"

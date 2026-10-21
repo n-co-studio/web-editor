@@ -35,7 +35,7 @@ _ensure_queue_dirs() {
 _QE_ID="" _QE_STATUS="" _QE_PRIORITY="" _QE_SESSION_TYPE="" _QE_BRANCH="" _QE_BRIEF_PATH=""
 _QE_PROMPT="" _QE_LAST_PROMPT="" _QE_AUTO_MODE="" _QE_SOLO_MODE="" _QE_PUSH_ON_COMPLETE="" _QE_RETRY_COUNT=""
 _QE_MAX_RETRIES="" _QE_ERROR_LOG="" _QE_WORK_ORDER_ID="" _QE_CREATED_AT=""
-_QE_UPDATED_AT="" _QE_COMPLETED_AT="" _QE_PERMISSION_PROFILE=""
+_QE_UPDATED_AT="" _QE_COMPLETED_AT="" _QE_PERMISSION_PROFILE="" _QE_MODEL=""
 # (v1.4.0) project / milestone — optional; resolved against work order at read time
 _QE_PROJECT="" _QE_MILESTONE_NAME="" _QE_MILESTONE_INDEX="" _QE_MILESTONE_TOTAL=""
 
@@ -100,6 +100,7 @@ _load_queue_entry() {
   [ -f "$entry_file" ] || return 1
 
   _QE_PERMISSION_PROFILE=""
+  _QE_MODEL=""
   local _line _in_prompt=false _prompt_is_block=false _in_milestone=false
   while IFS= read -r _line || [ -n "$_line" ]; do
     # Handle multi-line prompt block scalar
@@ -155,6 +156,7 @@ ${_line#    }"
       "  updated_at: "*)   _QE_UPDATED_AT="${_line#  updated_at: }" ;;
       "  completed_at: "*) _QE_COMPLETED_AT="${_line#  completed_at: }" ;;
       "  permission_profile: "*) _QE_PERMISSION_PROFILE="${_line#  permission_profile: }" ;;
+      "  model: "*)              _QE_MODEL="${_line#  model: }" ;;
     esac
   done < "$entry_file"
 
@@ -189,6 +191,7 @@ ${_line#    }"
   _QE_UPDATED_AT=$(_strip_quotes "$_QE_UPDATED_AT")
   _QE_COMPLETED_AT=$(_strip_quotes "$_QE_COMPLETED_AT")
   _QE_PERMISSION_PROFILE=$(_strip_quotes "$_QE_PERMISSION_PROFILE")
+  _QE_MODEL=$(_strip_quotes "$_QE_MODEL")
 }
 
 # --- Write queue entry YAML from _QE_* variables (atomic) ---
@@ -237,6 +240,7 @@ _write_queue_entry() {
     printf '  updated_at: "%s"\n' "$(_yaml_escape_scalar "$_QE_UPDATED_AT")"
     printf '  completed_at: "%s"\n' "$(_yaml_escape_scalar "$_QE_COMPLETED_AT")"
     printf '  permission_profile: "%s"\n' "$(_yaml_escape_scalar "${_QE_PERMISSION_PROFILE:-build}")"
+    printf '  model: "%s"\n' "$(_yaml_escape_scalar "${_QE_MODEL:-}")"
   } > "$tmp_file"
   mv "$tmp_file" "$entry_file"
 }
@@ -587,6 +591,8 @@ _parse_brief_taskgroup_metadata() {
 #   ${11} — milestone_name (optional, v1.4.0)
 #   ${12} — milestone_index (optional, v1.4.0; integer)
 #   ${13} — milestone_total (optional, v1.4.0; integer)
+#   ${14} — model (optional; per-entry model pin — bypasses _resolve_model_for_session
+#             in runner.sh; default empty; Decision t-0046 Amendment 3)
 # Output: UUID on stdout
 queue_enqueue() {
   local brief_path="$1"
@@ -602,6 +608,7 @@ queue_enqueue() {
   local milestone_name="${11:-}"
   local milestone_index="${12:-0}"
   local milestone_total="${13:-0}"
+  local model="${14:-}"
 
   _ensure_queue_dirs
 
@@ -679,6 +686,7 @@ queue_enqueue() {
   _QE_UPDATED_AT="$timestamp"
   _QE_COMPLETED_AT=""
   _QE_PERMISSION_PROFILE="${permission_profile:-build}"
+  _QE_MODEL="${model:-}"
 
   local qdir
   qdir=$(_queue_dir)

@@ -258,3 +258,61 @@ archived study that cites haiku scoring is citing the config as written, not as 
 - `.claude/.automation/lib/queue-manager.sh` (`_parse_config_field`)
 - `.claude/.automation/runner.sh` (`_resolve_model_for_session`)
 - `docs/ai/workflow-appendix/session-type-eval.md`
+
+---
+
+## Amendment 3 — Per-entry model pin + alias map refresh (2026-10-21)
+
+**Status:** Accepted
+**Supersedes:** the open operator decision in Amendment 2
+
+### What was added
+
+**(a) Alias map refresh.** `_resolve_model_for_session` in `runner.sh` now maps to the Claude 5
+family: `sonnet → claude-sonnet-5-5`, `haiku → claude-haiku-5-5`, `opus → claude-opus-5-5` (new).
+Any cost or latency comparison straddling this commit is not comparable: `audit` and `queue-triage`
+(haiku), and `standard`, `taskgroup-merge`, `eval`, `eval-cell` (sonnet) all moved from Claude 4 to
+Claude 5.
+
+**(b) Per-entry model field.** A new optional `model` field in the queue entry schema is threaded
+end-to-end:
+
+- `schemas/queue-entry.yaml` — new optional field, default empty.
+- `queue-manager.sh` — `_QE_MODEL` declared, reset, parsed from `  model: ` lines, written by
+  `_write_queue_entry`, exposed via `queue_enqueue` as trailing `${14}` arg (bash 3.2 brace form).
+  No existing caller breaks: the arg defaults to empty.
+- `runner.sh` — `ENTRY_MODEL` is extracted from `_QE_MODEL` after dequeue. When non-empty it is
+  passed as the new `$8` arg to `_run_single_entry` and used verbatim, skipping
+  `_resolve_model_for_session`. A per-entry model is a pin: re-mapping through the alias table
+  would let a later map change silently rewrite what a study used.
+
+**(c) Conductor passes judge model.** `eval_trigger_judge` in `eval-conductor.sh`:
+
+- Default changed from `claude-opus-4-6` to `claude-haiku-5-5` (operator decision: haiku for
+  rubric scoring).
+- Alias resolution applied inline: if the study's model field holds an alias (`sonnet`, `haiku`,
+  `opus`), it is resolved to its raw id before use and before writing back to `study.yaml`.
+- Resolved raw id pinned back to `study.yaml` if the field was absent or held an alias (not
+  already a `claude-*` id). Prevents a later alias-map change from silently reassigning the
+  model used in a historical study.
+- `judge_model` passed as arg 14 to `queue_enqueue` — it was previously a dead local.
+
+**(d) Amendment 2 open decision closed.** Amendment 2 identified haiku for rubric scoring as
+an open operator decision pending a correct delivery axis. That axis is now the per-entry `model`
+field (`queue-entry.model`): the conductor sets it at judge dispatch time, the runner uses it
+verbatim, and it is pre-registered in `study.yaml` before any cells run. The boundary is
+2026-10-20 (before any study ran — `docs/ai/eval/` held only `_nomenclature.md`). No cells
+need re-scoring; no archived result is affected.
+
+### Boundary
+
+**Before any study ran.** Verified 2026-10-20: `docs/ai/eval/` contained only `_nomenclature.md`.
+No study.yaml, no cells, no judge entries. No re-scoring required.
+
+### References (Amendment 3)
+
+- `.claude/.automation/runner.sh` (`_resolve_model_for_session`, `_run_single_entry`)
+- `.claude/.automation/lib/queue-manager.sh` (`_QE_MODEL`, `_write_queue_entry`, `queue_enqueue`)
+- `.claude/.automation/schemas/queue-entry.yaml` (`model` field)
+- `.claude/.automation/lib/eval-conductor.sh` (`eval_trigger_judge`)
+- `.claude/.automation/tests/test-eval-model-routing.sh` (new test suite)

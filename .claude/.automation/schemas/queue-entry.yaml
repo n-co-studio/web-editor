@@ -26,3 +26,7 @@ entry:
   created_at: ""            # ISO 8601 timestamp
   updated_at: ""            # ISO 8601 timestamp
   completed_at: ""          # ISO 8601 timestamp (set on terminal state)
+  permission_profile: build # build | judge | ... (Decision t-0046 Amendment 1)
+  model: ""                 # optional per-entry model pin (Decision t-0046 Amendment 3)
+                             # used verbatim by the runner — bypasses _resolve_model_for_session
+                             # so a later alias-map change cannot silently rewrite study history

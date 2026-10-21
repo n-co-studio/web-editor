@@ -1034,10 +1034,14 @@ _resolve_model_for_session() {
     model=$(_parse_config_field "model_routing" "default")
   fi
 
-  # Map config names to CLI model IDs
+  # Map config names to CLI model IDs (Claude 5 family — Decision t-0046 Amendment 3)
+  # Any cost or latency comparison straddling this change is not comparable:
+  # audit/queue-triage (haiku) and standard/taskgroup-merge/eval/eval-cell (sonnet)
+  # all moved from Claude 4 generation to Claude 5.
   case "$model" in
-    sonnet) printf '%s' "claude-sonnet-4-6" ;;
-    haiku)  printf '%s' "claude-haiku-4-5-20251001" ;;
+    sonnet) printf '%s' "claude-sonnet-5-5" ;;
+    haiku)  printf '%s' "claude-haiku-5-5" ;;
+    opus)   printf '%s' "claude-opus-5-5" ;;
     "")     printf '' ;;  # no model flag — use CLI default
     *)      printf '%s' "$model" ;;  # pass through unknown values as-is
   esac
@@ -1114,6 +1118,8 @@ _start_force_halt_watcher() {
 #   $6 — push_on_complete (optional, default: "false")
 #   $7 — brief_path (optional; required for sequential task group worktree
 #        reuse — Decision 0054 reads the Group: and Execution: fields from it)
+#   $8 — entry_model (optional; per-entry model pin — used verbatim, bypasses
+#        _resolve_model_for_session; Decision t-0046 Amendment 3)
 # Sets globals: _RESULT_OUTCOME, _RESULT_BASELINE, _RESULT_SOLO_MODE, _RESULT_BRANCH
 _run_single_entry() {
   local brief_id="$1"
@@ -1123,6 +1129,7 @@ _run_single_entry() {
   local permission_profile="${5:-build}"
   local push_on_complete="${6:-false}"
   local brief_path="${7:-}"
+  local entry_model="${8:-}"
 
   # Reset globals
   _RESULT_OUTCOME=""
@@ -1202,9 +1209,15 @@ _run_single_entry() {
   local stderr_file
   stderr_file=$(mktemp "${TMPDIR:-/tmp}/runner-stderr-XXXXXX" 2>/dev/null || echo "")
 
-  # Resolve model for this session type (model routing — Decision 0017)
+  # Resolve model: per-entry pin wins over session-type routing (Decision t-0046 Amendment 3).
+  # A per-entry model is used verbatim — re-mapping it through the alias table
+  # would let a later map change silently rewrite what a study used.
   local model_id
-  model_id=$(_resolve_model_for_session "$session_type")
+  if [ -n "${entry_model:-}" ]; then
+    model_id="$entry_model"
+  else
+    model_id=$(_resolve_model_for_session "$session_type")
+  fi
   local model_flag=""
   if [ -n "$model_id" ]; then
     model_flag="--model $model_id"
@@ -1860,7 +1873,7 @@ if [ "$DAEMON_MODE" = false ]; then
   # Single-shot mode builds a minimal prompt and has no brief path, so the
   # Decision 0054 group-worktree path does not engage here — the entry falls
   # back to a per-session worktree (Decision 0033).
-  _run_single_entry "$BRIEF_ID" "$PROMPT" "$SESSION_TYPE" "$EXISTING_BRANCH" "${_QE_PERMISSION_PROFILE:-build}" "false" "${_QE_BRIEF_PATH:-}"
+  _run_single_entry "$BRIEF_ID" "$PROMPT" "$SESSION_TYPE" "$EXISTING_BRANCH" "${_QE_PERMISSION_PROFILE:-build}" "false" "${_QE_BRIEF_PATH:-}" ""
 
   # Solo merge + branch seal (Phase 2: extracted from _run_single_entry)
   _solo_merge_if_needed "$_RESULT_BRANCH" "false" "$BRIEF_ID" "" "$_CURRENT_GROUP_NAME"
@@ -2291,6 +2304,7 @@ while true; do
   ENTRY_WORK_ORDER_ID="$_QE_WORK_ORDER_ID"
   ENTRY_PUSH="${_QE_PUSH_ON_COMPLETE:-false}"
   ENTRY_PERMISSION_PROFILE="${_QE_PERMISSION_PROFILE:-build}"
+  ENTRY_MODEL="${_QE_MODEL:-}"
 
   echo "Processing entry: $ENTRY_ID (type: $ENTRY_SESSION_TYPE)" >&2
 
@@ -2467,7 +2481,7 @@ while true; do
   # --- Execute (direct call — no subshell, outcome in globals) ---
   _CURRENT_ENTRY_ID="$ENTRY_ID"
   _write_health "running"
-  _run_single_entry "$ENTRY_ID" "$PROMPT" "$ENTRY_SESSION_TYPE" "$ENTRY_BRANCH" "$ENTRY_PERMISSION_PROFILE" "$ENTRY_PUSH" "$ENTRY_BRIEF_PATH"
+  _run_single_entry "$ENTRY_ID" "$PROMPT" "$ENTRY_SESSION_TYPE" "$ENTRY_BRANCH" "$ENTRY_PERMISSION_PROFILE" "$ENTRY_PUSH" "$ENTRY_BRIEF_PATH" "$ENTRY_MODEL"
 
   # --- Stop heartbeat ---
   _stop_heartbeat
