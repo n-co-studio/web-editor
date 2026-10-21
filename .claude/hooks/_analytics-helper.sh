@@ -364,6 +364,41 @@ _resolve_durable_pid() {
   echo "$p"
 }
 
+# --- Is a given session id live (by any signal)? ---
+# Returns 0 (true) if the session is provably alive; 1 (false) otherwise.
+# Checks two independent signals in priority order:
+#   1. REPO_OS_SESSION_ID env var — set by daemon and worktree sessions. These
+#      sessions are authoritative from an external process tree and never write
+#      a sidecar (Decision 0030), so the env var is the only signal available.
+#   2. Per-process sidecars (.session-id.<pid>) — written by interactive sessions.
+#      A sidecar with a live pid is the decisive signal for interactive sessions.
+# Called by sweep_stale_sessions from both its registry arm and the orphaned-
+# state-dir loop, so the two halves share a single liveness test (R29).
+_session_is_live() {
+  local sid="$1"
+  local repo_root="${2:-$_REPO_OS_ROOT}"
+  # Env check: daemon/worktree sessions set REPO_OS_SESSION_ID. This is only
+  # useful when the sweep itself runs inside that same process tree, but it is
+  # cost-free and prevents a daemon from evicting its own current session.
+  if [ -n "${REPO_OS_SESSION_ID:-}" ] && [ "$REPO_OS_SESSION_ID" = "$sid" ]; then
+    return 0
+  fi
+  # Sidecar check: an interactive session writes .session-id.<pid>.
+  local _sl_sc
+  for _sl_sc in "$repo_root"/.claude/.session-id.*; do
+    [ -f "$_sl_sc" ] || continue
+    local _sl_pid="${_sl_sc##*.}"
+    case "$_sl_pid" in
+      ''|*[!0-9]*) continue ;;
+    esac
+    kill -0 "$_sl_pid" 2>/dev/null || continue
+    local _sl_content
+    _sl_content=$(cat "$_sl_sc" 2>/dev/null)
+    [ "$_sl_content" = "$sid" ] && return 0
+  done
+  return 1
+}
+
 # --- Is a given session id already claimed by a DIFFERENT, LIVE process? ---
 # Scans the per-process sidecars .claude/.session-id.<pid>. Returns 0 (true) iff
 # some sidecar for a pid != our dpid, whose process is still alive, holds the id.
@@ -921,18 +956,15 @@ register_session() {
   local stype="${1:-}"
   local branch
   branch="$(get_branch)"
-  # Durable PID: prefer $PPID (the long-lived claude process that spawns the hook
-  # subprocess) over $$ (the short-lived hook process itself). Using $PPID means
-  # the registry entry reflects a PID that survives multiple hook invocations,
-  # making is_session_active / sweep_stale_sessions correct for interactive sessions.
-  # Fall back to $$ if $PPID is 0/1/unavailable (edge case in some environments).
-  # Liveness has an age-based backstop in sweep_stale_sessions, so an imperfect
-  # PID degrades gracefully.
+  # Durable PID: use _resolve_durable_pid() — the same function the sidecar
+  # writer uses — so the registry and the sidecar agree on what "the process"
+  # is. _resolve_durable_pid respects _REPO_OS_DURABLE_PID for test injection,
+  # prefers $PPID (the long-lived claude process that spawns each hook
+  # subprocess) over $$ (the short-lived subprocess itself), and falls back to
+  # $$ when $PPID is 0/1/unavailable. Using the shared helper is what keeps the
+  # two halves of sweep_stale_sessions from disagreeing about liveness (R29).
   local pid
-  pid="${PPID:-0}"
-  if [ "$pid" -le 1 ] 2>/dev/null || ! kill -0 "$pid" 2>/dev/null; then
-    pid="$$"
-  fi
+  pid="$(_resolve_durable_pid)"
   local started_at
   started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
@@ -1026,6 +1058,19 @@ sweep_stale_sessions() {
 
     # PID check: if process is dead, remove stale entry
     if [ -n "$file_pid" ] && ! kill -0 "$file_pid" 2>/dev/null; then
+      # Dead registry pid — but confirm the session is truly gone before
+      # evicting. The registry pid can be dead while the session is alive:
+      # register_session is called from a hook subprocess, and even using
+      # _resolve_durable_pid() the recorded pid can die if $PPID itself is a
+      # short-lived wrapper (tool-call context). The sidecar is the decisive
+      # signal for interactive sessions; REPO_OS_SESSION_ID covers daemon/
+      # worktree sessions that have no sidecar (Decision 0030). Using the same
+      # _session_is_live helper as the orphaned-state-dir loop below means the
+      # two halves cannot disagree — one shared notion of "live" (R29).
+      if _session_is_live "$_sw_sid" "$repo_root"; then
+        echo "WARNING: Session $_sw_sid has a dead registry pid ($file_pid) but its process is still live via sidecar or env — leaving its registry entry intact." >&2
+        continue
+      fi
       rm -f "$stale_file" 2>/dev/null || true
       continue
     fi
@@ -1140,27 +1185,7 @@ sweep_stale_sessions() {
         # guarding the deletion, so check liveness here too, at the point of no
         # return. The per-process sidecar is this repo's decisive test and does
         # not depend on a registry entry existing.
-        local _os_sidecar="$repo_root/.claude/.session-id"
-        local _os_live=false
-        # A worktree session and every daemon brief run with REPO_OS_SESSION_ID
-        # pinned, and `get_session_id` returns before writing a sidecar in that
-        # case (Decision 0030) — so those sessions never have one, and a
-        # sidecar-only test could never find them live. Check the env id first.
-        if [ -n "${REPO_OS_SESSION_ID:-}" ] && [ "$dir_sid" = "$REPO_OS_SESSION_ID" ]; then
-          _os_live=true
-        fi
-        local _os_sc
-        for _os_sc in "$_os_sidecar".*; do
-          [ -f "$_os_sc" ] || continue
-          if [ "$(cat "$_os_sc" 2>/dev/null)" = "$dir_sid" ]; then
-            local _os_pid="${_os_sc##*.}"
-            case "$_os_pid" in
-              ''|*[!0-9]*) ;;
-              *) if kill -0 "$_os_pid" 2>/dev/null; then _os_live=true; fi ;;
-            esac
-          fi
-        done
-        if [ "$_os_live" = true ]; then
+        if _session_is_live "$dir_sid" "$repo_root"; then
           echo "WARNING: State dir for $dir_sid has no registry entry but its process is still live — leaving it intact." >&2
         else
           rm -rf "$state_subdir" 2>/dev/null || true

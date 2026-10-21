@@ -53,12 +53,11 @@ QUESTIONS_TEXT=$(echo "$INPUT" | jq -r '[.tool_input.questions[]?.question // em
 QUESTION_PREVIEW=$(printf '%.64s' "$QUESTIONS_TEXT")
 log_hook_event "plan-approval" "PostToolUse" "AskUserQuestion" "allow" "$START_MS" "ask_user_question" "$QUESTION_PREVIEW"
 
-# Gate 1: Question must mention "plan", "brief", or "task" — non-approval questions exit after universal event
-if ! echo "$QUESTIONS_TEXT" | grep -iqE '\b(plan|brief|task)\b'; then
-  exit 0
-fi
-
-# Gate 2: Question or options must contain confirmation/approval language
+# Gate 2: Question or options contain confirmation/approval language.
+# Computed before Gate 1 so we can warn when Gate 2 passes but Gate 1 does not
+# (Decision t-0058). A question with approval language but no plan/brief/task
+# keyword is almost certainly a plan approval phrased differently; the operator
+# is entitled to know the approval was not recorded.
 OPTION_LABELS=$(echo "$INPUT" | jq -r '[.tool_input.questions[]?.options[]?.label // empty] | join(" ")' 2>/dev/null)
 IS_CONFIRMATION=false
 
@@ -66,6 +65,17 @@ if echo "$QUESTIONS_TEXT" | grep -iqE '\b(approv[a-z]*|confirm|proceed|accept|re
   IS_CONFIRMATION=true
 elif echo "$OPTION_LABELS" | grep -iqE '\b(yes|approv[a-z]*|confirm|proceed|accept)\b'; then
   IS_CONFIRMATION=true
+fi
+
+# Gate 1: Question must mention "plan", "brief", or "task" — non-approval questions exit after universal event.
+# If Gate 2 already passed (approval language present), warn before exiting: the
+# operator phrased a genuine plan approval without a plan/brief/task keyword.
+if ! echo "$QUESTIONS_TEXT" | grep -iqE '\b(plan|brief|task)\b'; then
+  if [ "$IS_CONFIRMATION" = true ]; then
+    echo "WARNING: plan-approval — question contains approval language but no plan/brief/task keyword. Approval NOT recorded. Add 'plan', 'brief', or 'task' to the question to register the approval." >&2
+    log_hook_event "plan-approval" "PostToolUse" "AskUserQuestion" "skip" "$START_MS" "not_approved" "gate1_miss_with_approval_language"
+  fi
+  exit 0
 fi
 
 if [ "$IS_CONFIRMATION" = false ]; then
@@ -102,6 +112,12 @@ if echo "$TOOL_OUTPUT" | grep -iqE '\b(yes|approv[a-z]*|confirm(ed)?|proceed|go 
 fi
 
 if [ "$APPROVED" = false ]; then
+  # Gates 1 and 2 passed — this looks like a plan approval question — but the
+  # selected answer contains no affirmative keyword. The operator is entitled to
+  # know. The previous plan-approved marker (if any) remains on disk and looks
+  # current; without this warning there is no trace except a not_approved line
+  # in the hook event log. The hook still exits 0: PostToolUse must never block.
+  echo "WARNING: plan-approval — plan question answered but approval NOT recorded. Answer '$TOOL_OUTPUT' contains no affirmative keyword (yes, approve, confirm, proceed, accept, auto, review). Re-approve with an affirmative option to register the plan." >&2
   log_hook_event "plan-approval" "PostToolUse" "AskUserQuestion" "skip" "$START_MS" "not_approved"
   exit 0
 fi
@@ -138,6 +154,12 @@ QUESTION_HASH=$(printf '%s' "$QUESTIONS_TEXT" | portable_hash | cut -c1-12)
   printf 'large-scope: %s\n' "$LARGE_SCOPE"
   printf 'mode: %s\n' "$DETECTED_MODE"
   printf 'session_id: %s\n' "$SID"
+  # Staleness hint: compare timestamp above against the phase-state mtime to
+  # detect an approval that predates a plan revision. A new plan generates a
+  # different question_hash; if the hash here no longer matches the current plan
+  # question, this marker covers a different plan. pre-commit-gates.sh checks
+  # the hash via session-resume.yaml.plan_hash when a resume marker exists.
+  printf 'stale_check: compare timestamp with phase-state mtime; question_hash identifies the plan text\n'
 } > "$STATE_DIR/plan-approved" 2>/dev/null || true
 refresh_manifest_entry "plan-approved" 2>/dev/null || true
 

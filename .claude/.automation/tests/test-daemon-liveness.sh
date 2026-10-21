@@ -758,6 +758,85 @@ _tap_eq "$(cat "$ADV_SANDBOX/os-live" 2>/dev/null || printf MISSING)" "kept" \
 _tap_eq "$(cat "$ADV_SANDBOX/os-dead" 2>/dev/null || printf MISSING)" "evicted" \
   "the orphan-state-dir loop still reaps a dead session's state"
 
+printf "# --- R29: dead registry pid + live sidecar must survive the sweep ---\n"
+
+# The registry arm (dead-pid check) must not evict a session whose recorded pid
+# has died but whose SIDECAR is still live. Before R29, the arm did a blind
+# remove on dead-pid without consulting _session_is_live, so a session that
+# registered from a short-lived tool subprocess (dead pid) was evicted even
+# while it was very much alive. The fix: call _session_is_live before removing,
+# so the registry arm and the orphaned-state-dir loop agree on liveness.
+#
+# This tests the case the earlier sweep block cannot exercise: the earlier block
+# plants a live pid IN THE REGISTRY ENTRY so the dead-pid arm never fires.
+# Here the registry pid is dead, but the sidecar confirms the session is live.
+(
+  set +e
+  # shellcheck disable=SC1091
+  . "$ADV_SANDBOX/.claude/hooks/_analytics-helper.sh" > /dev/null 2>&1
+  _DPS_SESS="$ADV_SANDBOX/.claude/.state/sessions"
+  _DPS_WT="$ADV_SANDBOX/.claude/.state/wt-sessions"
+  mkdir -p "$_DPS_SESS" "$_DPS_WT/dead-reg-live-sc"
+  # Build a registry entry with a dead pid — this is the R29 scenario.
+  _DPS_DEAD=99997
+  while kill -0 "$_DPS_DEAD" 2>/dev/null; do _DPS_DEAD=$(( _DPS_DEAD - 1 )); done
+  printf 'session_id: dead-reg-live-sc\nsession_type: standard\nbranch: main\npid: %s\nstarted_at: 2026-01-01T00:00:00Z\n' \
+    "$_DPS_DEAD" > "$_DPS_SESS/dead-reg-live-sc.yaml"
+  printf 'marker\n' > "$_DPS_WT/dead-reg-live-sc/plan-approved"
+  # Live sidecar for the same session id. $$ is alive by construction.
+  printf 'dead-reg-live-sc\n' > "$ADV_SANDBOX/.claude/.session-id.$$"
+  REPO_ROOT="$ADV_SANDBOX" _REPO_OS_ROOT="$ADV_SANDBOX" sweep_stale_sessions > /dev/null 2>&1
+  { [ -f "$_DPS_SESS/dead-reg-live-sc.yaml" ] && printf 'kept' || printf 'evicted'; } \
+    > "$ADV_SANDBOX/dps-reg"
+  { [ -d "$_DPS_WT/dead-reg-live-sc" ] && printf 'kept' || printf 'evicted'; } \
+    > "$ADV_SANDBOX/dps-state"
+  # Cleanup sidecar so it does not leak into other sweep tests.
+  rm -f "$ADV_SANDBOX/.claude/.session-id.$$"
+) || true
+
+_tap_eq "$(cat "$ADV_SANDBOX/dps-reg" 2>/dev/null || printf MISSING)" "kept" \
+  "dead registry pid + live sidecar: registry entry survives the sweep (R29)"
+_tap_eq "$(cat "$ADV_SANDBOX/dps-state" 2>/dev/null || printf MISSING)" "kept" \
+  "dead registry pid + live sidecar: state directory survives the sweep (R29)"
+
+printf "# --- R29: register_session records a durable pid ---\n"
+
+# register_session must record a pid that is still alive after the calling
+# subprocess exits. Using _resolve_durable_pid() (which prefers $PPID over $$)
+# is the mechanism; this test confirms the recorded pid survives the write.
+# A test that re-reads the file inside the same subprocess proves nothing, so
+# the write is done in a subshell, the pid is captured to a file, and
+# liveness is checked from the PARENT after the subshell has exited.
+(
+  set +e
+  # shellcheck disable=SC1091
+  . "$ADV_SANDBOX/.claude/hooks/_analytics-helper.sh" > /dev/null 2>&1
+  . "$ADV_SANDBOX/.claude/hooks/_phase-helper.sh" > /dev/null 2>&1
+  _DPS2_SESS="$ADV_SANDBOX/.claude/.state/sessions"
+  mkdir -p "$_DPS2_SESS"
+  # Set a deterministic session id for this sub-test.
+  _CACHED_SESSION_ID="reg-pid-durability"
+  export REPO_OS_SESSION_ID="reg-pid-durability"
+  REPO_ROOT="$ADV_SANDBOX" _REPO_OS_ROOT="$ADV_SANDBOX" register_session "standard" > /dev/null 2>&1
+  # Extract the recorded pid before this subshell exits.
+  _REG_PID=$(grep '^pid: ' "$_DPS2_SESS/reg-pid-durability.yaml" 2>/dev/null \
+    | sed 's/^pid: *//')
+  printf '%s\n' "$_REG_PID" > "$ADV_SANDBOX/reg-pid-value"
+) || true
+
+# Now check from the parent: is the recorded pid still alive?
+_REG_PID_VAL=$(cat "$ADV_SANDBOX/reg-pid-value" 2>/dev/null || printf '')
+case "$_REG_PID_VAL" in
+  ''|*[!0-9]*) _tap_fail "register_session recorded pid is a number" "got '$_REG_PID_VAL'" ;;
+  *)
+    if kill -0 "$_REG_PID_VAL" 2>/dev/null; then
+      _tap_pass "register_session records a pid that outlives the calling subprocess ($_REG_PID_VAL)"
+    else
+      _tap_fail "register_session records a pid that outlives the calling subprocess" \
+        "pid $_REG_PID_VAL is dead — the registry is already wrong at write time"
+    fi ;;
+esac
+
 printf "# --- review/ has an exit ---\n"
 
 # Before 2026-10-21 nothing could move an entry out of review/: approve handles

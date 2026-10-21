@@ -427,6 +427,56 @@ run_hook_rc "plan-approval.sh" \
 phase_after=$(get_phase)
 assert_eq "$phase_after" "governance" "plan-approval advances spec-fresh to governance after approval"
 
+# --- R28: Gates 1+2 pass but answer not affirmative → WARNING, no state written ---
+# Before R28 this path exited 0 silently. The operator got a not_approved hook
+# event log entry but zero stderr feedback — the previous plan-approved on disk
+# looked current and the only trace was in the event log.
+reset_phase "standard"
+_advance "plan" 2>/dev/null
+rm -f "$STATE_DIR/plan-approved"
+run_hook_rc "plan-approval.sh" \
+  "$(fixture_posttooluse_ask "Do you approve this plan?" "All four, reaping first (Recommended),Revise" "All four, reaping first (Recommended)")"
+assert_ok "$_LAST_RC" "plan-approval exits 0 even when answer is non-affirmative (PostToolUse never blocks)"
+assert_file_not_exists "$STATE_DIR/plan-approved" "plan-approval does not write state when answer has no affirmative keyword"
+assert_contains "$_LAST_OUTPUT" "WARNING" "plan-approval emits WARNING on non-affirmative answer to plan question"
+assert_contains "$_LAST_OUTPUT" "NOT recorded" "plan-approval WARNING names the failure"
+
+# --- R28: Gate 1 miss with Gate 2 present → WARNING (Decision t-0058) ---
+# A question about "units of work" (no plan/brief/task) with approval language
+# in the options previously exited 0 with no trace at all. Under t-0058, when
+# Gate 2 passes but Gate 1 does not, a WARNING is emitted so the operator knows
+# the approval was not captured.
+reset_phase "standard"
+_advance "plan" 2>/dev/null
+rm -f "$STATE_DIR/plan-approved"
+run_hook_rc "plan-approval.sh" \
+  "$(fixture_posttooluse_ask "Which units of work should we proceed with?" "Approve all,Adjust" "Approve all")"
+assert_ok "$_LAST_RC" "plan-approval exits 0 on Gate-1 miss (PostToolUse never blocks)"
+assert_file_not_exists "$STATE_DIR/plan-approved" "plan-approval does not write state on Gate-1 miss"
+assert_contains "$_LAST_OUTPUT" "WARNING" "plan-approval emits WARNING when Gate 2 passes but Gate 1 does not (Decision t-0058)"
+
+# --- R28: non-approval question (Gate 2 also misses) → no WARNING, silent exit ---
+# A bare non-plan, non-approval question must still exit silently — the warning
+# must not fire on every AskUserQuestion call, only when approval intent is present.
+reset_phase "standard"
+_advance "plan" 2>/dev/null
+rm -f "$STATE_DIR/plan-approved"
+run_hook_rc "plan-approval.sh" \
+  "$(fixture_posttooluse_ask "Which library should we use?" "React,Vue" "React")"
+assert_ok "$_LAST_RC" "plan-approval exits 0 on non-plan non-approval question"
+case "$_LAST_OUTPUT" in
+  *WARNING*) assert_fail "0" "no WARNING on non-plan non-approval question (got: '$_LAST_OUTPUT')" ;;
+  *) assert_ok "0" "no WARNING on non-plan non-approval question (silent as before)" ;;
+esac
+
+# --- R28: written plan-approved includes stale_check field ---
+reset_phase "standard"
+_advance "plan" 2>/dev/null
+rm -f "$STATE_DIR/plan-approved"
+run_hook_rc "plan-approval.sh" \
+  "$(fixture_posttooluse_ask "Do you approve this plan?" "Yes approve,No revise" "Yes approve")"
+assert_file_contains "$STATE_DIR/plan-approved" "stale_check:" "plan-approved includes stale_check hint"
+
 # ============================================================
 # L3.4 — state-writer.sh (SubagentStop)
 # ============================================================

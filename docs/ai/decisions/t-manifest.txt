@@ -62,3 +62,4 @@ t-0051-template-sync-ownership.md
 t-0052-child-owned-files.md
 t-0053-signal-fidelity.md
 t-0054-task-group-worktree-lifetime.md
+t-0058-plan-approval-silent-path.md

@@ -50,6 +50,14 @@ editor-queue-status.yaml
 .claude/.automation/briefs/
 .claude/.automation/logs/
 
+# Transient daemon control flags. These are runtime signals, not configuration:
+# HALT stops the daemon between entries, FORCE-HALT kills the running session.
+# They were not ignored, and on 2026-10-21 a `git add -A` committed HALT — which
+# would have shipped a "do not start" flag to every child repo on the next
+# template sync and left their daemons refusing to run for no visible reason.
+.claude/.automation/HALT
+.claude/.automation/FORCE-HALT
+
 # Eval study raw artifacts — gitignored to prevent accidental secret commits (Decision t-0046)
 # Committed study records live in docs/ai/eval/ (tracked).
 # Raw cell artifacts (diffs, transcripts, judge outputs, blinded submissions) stay here only.
