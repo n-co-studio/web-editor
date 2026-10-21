@@ -1537,6 +1537,35 @@ _run_single_entry() {
 #        worktree is removed after a successful seal — Decision 0054)
 # Reads: _RESULT_OUTCOME, _RESULT_SOLO_MODE
 # May modify: _RESULT_OUTCOME (on merge conflict → review:merge-conflict)
+# BEFORE CHANGING THIS FUNCTION OR THE OUTCOME HANDLING AROUND IT, read this.
+#
+# Several queued briefs written on 2026-10-12 name this function and the runner's
+# outcome handling in their scope. Between then and 2026-10-21 this region
+# changed substantially, and a brief written against the older shape can rewrite
+# it and silently drop one of the following. Nothing would fail; the behaviour
+# would just be gone. Each of these was a live defect that cost a session:
+#
+#   - `exec claude -p` at BOTH launch sites. Without `exec` the subshell forks,
+#     so the tracked `$!` is a wrapper and every kill path signals the wrapper
+#     while the real process runs on.
+#   - the FORCE-HALT watcher call at both launch sites, which is what lets a
+#     force-halt interrupt the entry it was raised against rather than the next.
+#   - `--max-turns "$_session_max_turns"`, the configurable turn budget. It was
+#     hardcoded at 200 and two briefs exhausted it, producing nothing.
+#   - the turn-budget outcome branch in `lib/outcome-detector.sh`, which must
+#     stay AHEAD of every exit-0 success branch. A session that runs out of turns
+#     exits zero, so without it an exhausted brief is recorded `completed` and
+#     its queue entry leaves the queue as though the work were done.
+#   - the circuit-breaker cooldown and its FORCE-HALT exemption.
+#   - the merge-finality gate here: this function merges only for a session the
+#     runner considers final. RUNNER-PARITY row 16 records that task-group
+#     finality is derived from the entry's `solo_mode` flag, so setting that flag
+#     on a non-final group brief makes the runner merge and SEAL the group branch
+#     early, stranding the remaining briefs. Checked on 2026-10-21: every
+#     task-group entry in the queue had it set, including non-final ones.
+#
+# RUNNER-PARITY.md is the fuller catalogue of this region; `known-issues.md`
+# R25-R30 carry the defect histories.
 _solo_merge_if_needed() {
   local entry_current_branch="$1"
   local push_on_complete="${2:-false}"
