@@ -9,10 +9,37 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/sandbox-setup.sh"
 
 # --- TAP infrastructure ---
+# Counters are set in the parent after reading the tally file (see bottom).
 _TAP_NUM=0; _TAP_PASS=0; _TAP_FAIL=0; _TAP_FAILURES=""
-_tap_pass() { _TAP_NUM=$((_TAP_NUM+1)); _TAP_PASS=$((_TAP_PASS+1)); printf "ok %d - %s\n" "$_TAP_NUM" "$1"; }
-_tap_fail() { _TAP_NUM=$((_TAP_NUM+1)); _TAP_FAIL=$((_TAP_FAIL+1)); printf "not ok %d - %s\n" "$_TAP_NUM" "$1"; [ -n "${2:-}" ] && printf "  # %s\n" "$2"; _TAP_FAILURES="${_TAP_FAILURES}  FAIL: $1\n"; }
-finish() { printf "\n1..%d\n# Tests: %d  Pass: %d  Fail: %d\n" $((_TAP_PASS+_TAP_FAIL)) $((_TAP_PASS+_TAP_FAIL)) "$_TAP_PASS" "$_TAP_FAIL"; [ "$_TAP_FAIL" -gt 0 ] && printf "# Failures:\n%b" "$_TAP_FAILURES"; return "$_TAP_FAIL"; }
+
+# Tally file: every case runs in its own ( ) subshell, so counter increments
+# in _tap_pass/_tap_fail never propagate back to the parent process. Each
+# function appends one line here instead; the parent reads it after all
+# subshells complete. Failing closed: a missing or unreadable tally fails
+# the run rather than reporting zero.
+_TALLY_DIR=$(mktemp -d "/tmp/repo-os-tally-XXXXXX")
+_TALLY_FILE="$_TALLY_DIR/tally.txt"
+: > "$_TALLY_FILE"
+trap 'rm -rf "$_TALLY_DIR"' EXIT
+
+_tap_pass() {
+  _TAP_NUM=$((_TAP_NUM+1)); _TAP_PASS=$((_TAP_PASS+1))
+  printf "ok %d - %s\n" "$_TAP_NUM" "$1"
+  printf "PASS\n" >> "$_TALLY_FILE"
+}
+_tap_fail() {
+  _TAP_NUM=$((_TAP_NUM+1)); _TAP_FAIL=$((_TAP_FAIL+1))
+  printf "not ok %d - %s\n" "$_TAP_NUM" "$1"
+  [ -n "${2:-}" ] && printf "  # %s\n" "$2"
+  _TAP_FAILURES="${_TAP_FAILURES}  FAIL: $1\n"
+  printf "FAIL %s\n" "$1" >> "$_TALLY_FILE"
+}
+finish() {
+  printf "\n1..%d\n# Tests: %d  Pass: %d  Fail: %d\n" \
+    $((_TAP_PASS+_TAP_FAIL)) $((_TAP_PASS+_TAP_FAIL)) "$_TAP_PASS" "$_TAP_FAIL"
+  [ "$_TAP_FAIL" -gt 0 ] && printf "# Failures:\n%b" "$_TAP_FAILURES"
+  return "$_TAP_FAIL"
+}
 
 printf "# === Queue Manipulation Attacks ===\n"
 
@@ -393,4 +420,24 @@ _write_raw_entry() {
   fi
 )
 
-finish || true
+# --- Accumulate tally from subshells ---
+# Every case ran in its own ( ) subshell; the parent counters are still zero.
+# Read the tally file to set the real counts. Fail closed: a missing or
+# unreadable tally means something went seriously wrong — fail the run.
+if [ ! -f "$_TALLY_FILE" ]; then
+  printf "# FATAL: tally file missing — treating suite as failed\n" >&2
+  exit 1
+fi
+_TAP_PASS=$(grep -c "^PASS$" "$_TALLY_FILE" 2>/dev/null) || _TAP_PASS=0
+_TAP_FAIL=$(grep -c "^FAIL " "$_TALLY_FILE" 2>/dev/null) || _TAP_FAIL=0
+_TAP_NUM=$((_TAP_PASS + _TAP_FAIL))
+while IFS= read -r _tline; do
+  case "$_tline" in
+    FAIL\ *)
+      _fname="${_tline#FAIL }"
+      _TAP_FAILURES="${_TAP_FAILURES}  FAIL: ${_fname}\n"
+      ;;
+  esac
+done < "$_TALLY_FILE"
+
+finish

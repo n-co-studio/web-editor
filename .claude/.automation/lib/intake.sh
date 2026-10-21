@@ -16,7 +16,7 @@
 #
 # For full lifecycle management (status, edit, remove, review), use queue-cli.sh.
 #
-# When entries are added, auto-enables the runner in config.yaml.
+# When entries are added, auto-enables the runner in config.local.yaml.
 # Prints entry ID and status to stdout.
 #
 # Exit codes:
