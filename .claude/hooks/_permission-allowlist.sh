@@ -127,6 +127,29 @@ _PERMISSION_ALLOW_BASH=(
   '\. "\$_BRIDGE_AUTOMATION_DIR'
   '\. .claude/.automation/'
 
+  # Execute repo-controlled verification scripts (Decision t-0060).
+  #
+  # Without these, a headless session cannot run the bash test suites at all:
+  # bare `bash ` is not in the deny list, it is simply absent here, so it falls
+  # through to the permission dialog — and headless is fail-closed. Every brief
+  # whose acceptance criteria say "all suites pass" was therefore unachievable.
+  #
+  # These grant strictly LESS than the `source .claude/hooks/` entries above,
+  # which run arbitrary repo script content in the *current* shell with no
+  # subprocess isolation.
+  #
+  # Anchoring: path segments use [A-Za-z0-9_-], which excludes '.', so '..'
+  # traversal cannot match. The trailing '$' means a same-line chain such as
+  # `bash <suite> && git push --force` does not match and falls through to the
+  # dialog. It does NOT cover newline-separated commands — grep matches per
+  # line (see "Newline-separated commands" in the anchoring notes below); that
+  # gap is pre-existing and shared by every prefix entry in this array.
+  'bash \.claude/hooks/tests/([A-Za-z0-9_-]+/)?[A-Za-z0-9_-]+\.sh([ ][A-Za-z0-9=._/-]+)*$'
+  'bash \.claude/\.automation/tests/([A-Za-z0-9_-]+/)?[A-Za-z0-9_-]+\.sh([ ][A-Za-z0-9=._/-]+)*$'
+  'bash \.claude/tools/([A-Za-z0-9_-]+/)?[A-Za-z0-9_-]+\.sh([ ][A-Za-z0-9=._/-]+)*$'
+  # Syntax check only — `-n` parses without executing.
+  'bash -n \.claude/[A-Za-z0-9_/-]+\.sh$'
+
   # File watching (read-only passive tools — editor-live session type)
   'fswatch '
   'fswatch$'

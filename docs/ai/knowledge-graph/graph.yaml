@@ -3,7 +3,7 @@
 # Seeded from governance metadata on 2026-03-31
 
 schema_version: 1
-last_updated: "2026-10-22T06:05:01Z"
+last_updated: "2026-10-22T07:23:21Z"
 
 nodes:
   # --- Decisions (from DIGEST.md) ---
@@ -310,8 +310,8 @@ nodes:
   - id: "hook-permission-allowlist"
     type: "hook"
     path: ".claude/hooks/_permission-allowlist.sh"
-    description: "Permission allowlist for tools and commands"
-    last_verified: "2026-08-07"
+    description: "Permission allowlist for tools and commands. _PERMISSION_DENY_BASH is checked BEFORE _PERMISSION_ALLOW_BASH in both callers (permission-request.sh, pretooluse-permission.sh); is_bash_allowed matches grep -qE \"^${pat}\" and appends no terminator, so patterns supply their own end anchor. 2026-10-22 (Decision t-0060) four end-anchored patterns permit EXECUTING repo-controlled verification scripts — bash under .claude/hooks/tests/, .claude/.automation/tests/, .claude/tools/ (one optional subdirectory level), plus bash -n on .claude/ paths. Previously bare `bash ` was absent from the allow list (never denied), so it fell through to the dialog and headless fail-closed made every \"all suites pass\" acceptance criterion unachievable. Path segments exclude '.', so the SCRIPT PATH cannot escape the directory; the $ anchor refuses same-line chains. Arguments are NOT path-bounded (arg class admits '.' and '/'), but metacharacters are excluded so an argument cannot start a new command. Known pre-existing gap shared by all prefix entries: grep matches per line, so multi-line commands are not covered. First test coverage of this file landed with t-0060"
+    last_verified: "2026-10-22"
     status: "active"
     layer: "template"
   - id: "hook-cleanup-helper"
@@ -1261,7 +1261,31 @@ nodes:
     last_verified: "2026-10-22"
     status: "active"
     layer: "template"
+  - id: "decision-0060"
+    type: "decision"
+    path: "docs/ai/decisions/t-0060-bash-verification-execution.md"
+    description: "Decision record: executing repo-controlled verification scripts headlessly. Four end-anchored _PERMISSION_ALLOW_BASH patterns permit bash under .claude/hooks/tests/, .claude/.automation/tests/ and .claude/tools/ (one optional subdirectory level), plus bash -n on .claude/ paths. Motivated by bare `bash ` being absent from the allow list while never denied: it fell through to the dialog, and headless fail-closed made every brief requiring \"all suites pass\" unachievable. For hooks/tests and .automation/tests this grants nothing new, because the pre-existing `source .claude/hooks/` and `source .claude/.automation/` entries are strict supersets (arbitrary repo script in the current shell, no subprocess boundary). For .claude/tools/ it IS new capability — there is no `source .claude/tools/` entry — justified instead by the already-allowed `node `/`python3 ` entries being unrestricted execution; it admits the writers kg-seed.sh and kg-merge-deltas.sh. Path segments exclude '.' so the SCRIPT PATH cannot escape; arguments are NOT path-bounded (the arg class admits '.' and '/'), though metacharacters are refused so an argument cannot start a new command. Executing a hook itself is refused. Depends on Write/Edit guards keeping those directories agent-unwritable. Known pre-existing gap stated rather than hidden: grep matches per line, so multi-line commands are uncovered and `bash <suite>` is a new qualifying first line; is_bash_denied also greps per line, so a deny-listed second line is still denied. Shipped the first test coverage of _permission-allowlist.sh in the repo (21 cases: 8 fail-first, 11 guard applied per-pattern, 2 ordering)"
+    last_verified: "2026-10-22"
+    status: "active"
+    layer: "template"
+  - id: "hook-layer3-hook-integration"
+    type: "hook"
+    path: ".claude/hooks/tests/layer3-hook-integration.sh"
+    description: "Layer 3 of the hook test suite: exercises every hook at the phase transitions where it fires, verifying allow/block/advance behaviour and inter-hook state chains. Requires jq (skips cleanly without it); bash 3.2 compatible. 298 cases as of 2026-10-22, including the Decision t-0059 directional dispatch-phase section and the Decision t-0060 section — the latter being the first test coverage of _permission-allowlist.sh anywhere in the repo"
+    last_verified: "2026-10-22"
+    status: "active"
+    layer: "template"
 edges:
+  # --- Decision t-0060 (headless verification-script execution) governance ---
+  - source: "decision-0060"
+    target: "hook-permission-allowlist"
+    relation: "governs"
+    context: "Four end-anchored patterns permit executing repo-controlled verification scripts (.claude/hooks/tests/, .claude/.automation/tests/, .claude/tools/, plus bash -n on .claude/ paths). Narrower than the pre-existing `source .claude/hooks/` and `source .claude/.automation/` entries, which run arbitrary repo script in the current shell — but .claude/tools/ has no such source entry and is genuine new capability, justified by the already-allowed node/python3 entries. No override env var: the capability is either in the allow list or it falls through to the dialog"
+    source_type: "agent-inferred"
+    last_verified: "2026-10-22"
+    status: "active"
+    confidence: 0.95
+
   # --- Decision t-0059 (directional dispatch-phase acceptance) governance ---
   - source: "decision-0059"
     target: "hook-state-writer"

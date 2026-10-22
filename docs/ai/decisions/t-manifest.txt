@@ -64,3 +64,4 @@ t-0053-signal-fidelity.md
 t-0054-task-group-worktree-lifetime.md
 t-0058-plan-approval-silent-path.md
 t-0059-directional-dispatch-phase.md
+t-0060-bash-verification-execution.md

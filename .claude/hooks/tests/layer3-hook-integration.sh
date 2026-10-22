@@ -2336,6 +2336,93 @@ rm -f "$SB/.claude/local/closed-branches"
 rm -f "$_TSD"/tg-*-brief-*.complete 2>/dev/null || true
 
 # ============================================================
+# Decision t-0060 — bash verification-script allowlist
+# ============================================================
+# First test coverage of _permission-allowlist.sh. The absence of any coverage
+# is why the missing `bash` entry survived unnoticed until it blocked every
+# brief whose acceptance criteria require running a suite.
+#
+# Each check sources the library in a subshell so the array and function
+# definitions cannot leak into the rest of this layer.
+tap_section "Decision t-0060 — bash verification-script allowlist"
+
+# Echoes 0 when the command is auto-approved, 1 when it falls through to the
+# permission dialog. Runs inside `if`, so errexit does not fire on a non-match.
+_t0060_allowed() {
+  if ( . "$SCRIPT_DIR/../_permission-allowlist.sh" >/dev/null 2>&1
+       is_bash_allowed "$1" ); then echo 0; else echo 1; fi
+}
+_t0060_denied() {
+  if ( . "$SCRIPT_DIR/../_permission-allowlist.sh" >/dev/null 2>&1
+       is_bash_denied "$1" >/dev/null 2>&1 ); then echo 0; else echo 1; fi
+}
+
+# --- Allowed: repo-controlled verification scripts ---
+assert_eq "$(_t0060_allowed "bash .claude/hooks/tests/layer3-hook-integration.sh")" "0" \
+  "t-0060: hook test suite is executable"
+assert_eq "$(_t0060_allowed "bash .claude/hooks/tests/drift-check/test-drift-check.sh")" "0" \
+  "t-0060: hook test suite one subdirectory deep is executable"
+assert_eq "$(_t0060_allowed "bash .claude/.automation/tests/test-phase-ordering.sh")" "0" \
+  "t-0060: automation test suite is executable"
+assert_eq "$(_t0060_allowed "bash .claude/.automation/tests/run-automation-tests.sh --verbose")" "0" \
+  "t-0060: suite with a flag argument is executable"
+assert_eq "$(_t0060_allowed "bash .claude/tools/gate-conformance.sh")" "0" \
+  "t-0060: tools script is executable"
+assert_eq "$(_t0060_allowed "bash -n .claude/hooks/state-writer.sh")" "0" \
+  "t-0060: syntax check of a hook is allowed"
+
+# --- Not allowed: these must fall through to the dialog ---
+# Path segments exclude '.', so '..' cannot match.
+assert_eq "$(_t0060_allowed "bash .claude/hooks/tests/../../../tmp/evil.sh")" "1" \
+  "t-0060: parent-directory traversal out of tests/ is refused"
+assert_eq "$(_t0060_allowed "bash .claude/tools/../../.ssh/id_rsa.sh")" "1" \
+  "t-0060: parent-directory traversal out of tools/ is refused"
+# The trailing '$' anchor stops a same-line chain riding along on the match.
+assert_eq "$(_t0060_allowed "bash .claude/hooks/tests/layer3-hook-integration.sh && git push --force origin main")" "1" \
+  "t-0060: same-line command chain is refused"
+assert_eq "$(_t0060_allowed "bash /tmp/evil.sh")" "1" \
+  "t-0060: out-of-tree script path is refused"
+assert_eq "$(_t0060_allowed "bash -n /tmp/evil.sh")" "1" \
+  "t-0060: syntax check of an out-of-tree path is refused"
+# Only the tests/ and tools/ directories are in scope — not hooks/ generally.
+assert_eq "$(_t0060_allowed "bash .claude/hooks/state-writer.sh")" "1" \
+  "t-0060: executing a hook itself is refused"
+assert_eq "$(_t0060_allowed "bash")" "1" \
+  "t-0060: bare interactive bash is refused"
+
+# --- Per-pattern parity ---
+# Each of the three directory patterns is checked for the same two properties,
+# so that dropping the '$' anchor or admitting '.' into a path segment in ONE
+# of them cannot pass unnoticed.
+assert_eq "$(_t0060_allowed "bash .claude/.automation/tests/../../../tmp/evil.sh")" "1" \
+  "t-0060: parity — traversal out of .automation/tests/ is refused"
+assert_eq "$(_t0060_allowed "bash .claude/.automation/tests/test-runner.sh && git push --force origin main")" "1" \
+  "t-0060: parity — same-line chain after an automation suite is refused"
+assert_eq "$(_t0060_allowed "bash .claude/tools/gate-conformance.sh && git push --force origin main")" "1" \
+  "t-0060: parity — same-line chain after a tools script is refused"
+assert_eq "$(_t0060_allowed "bash .claude/.automation/tests/sandbox/setup.sh")" "0" \
+  "t-0060: parity — automation suite one subdirectory deep is executable"
+
+# --- Recorded looseness: arguments are NOT path-bounded ---
+# The argument class permits '.' and '/', so a traversing path can be passed TO
+# a script even though the script path itself cannot traverse. This is asserted
+# so the looseness is pinned by a test rather than only described in prose; it
+# is relied upon by suites that take fixture paths. See Decision t-0060.
+assert_eq "$(_t0060_allowed "bash .claude/tools/gate-conformance.sh ../../../etc/passwd")" "0" \
+  "t-0060: a traversing path may be passed as an argument (recorded looseness)"
+# Metacharacters in arguments remain refused, so an argument cannot start a new command.
+assert_eq "$(_t0060_allowed "bash .claude/tools/gate-conformance.sh \$(id)")" "1" \
+  "t-0060: command substitution in an argument is refused"
+
+# --- Deny list is checked before the allow list in both callers ---
+# permission-request.sh:137 and pretooluse-permission.sh:136 both call
+# is_bash_denied first. 'dd ' is used as a harmless stand-in deny pattern.
+assert_eq "$(_t0060_denied "bash .claude/tools/gate-conformance.sh; dd /dev/zero")" "0" \
+  "t-0060: a chained deny-listed command is still denied"
+assert_eq "$(_t0060_allowed "bash .claude/tools/gate-conformance.sh; dd /dev/zero")" "1" \
+  "t-0060: that chain does not match the allow list either"
+
+# ============================================================
 # Summary
 # ============================================================
 finish_tests
