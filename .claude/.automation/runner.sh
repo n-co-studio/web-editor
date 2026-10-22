@@ -1000,9 +1000,23 @@ _resolve_group_worktree() {
     # Case 3: has unique commits but is behind main — rebase inside the
     # worktree. The tree is known clean (checked above), so a rebase is safe.
     echo "Group branch $_GWT_BRANCH is behind main — rebasing inside $wt_dir" >&2
-    if ! git -C "$wt_dir" rebase main 2>/dev/null; then
-      echo "WARNING: Rebase of $_GWT_BRANCH onto main failed — aborting rebase, continuing branch as-is" >&2
-      git -C "$wt_dir" rebase --abort 2>/dev/null || true
+    local rebase_rc=0
+    _bm_rebase_onto_main "$wt_dir" || rebase_rc=$?
+    if [ "$rebase_rc" -ne 0 ]; then
+      # A rebase that cannot be finished mechanically is NOT "continue as-is":
+      # the group would build on a stale base, and its final merge would hit the
+      # same conflict with the work already done. The abort has been verified
+      # (tree clean, no rebase in progress), so the worktree is launchable once
+      # an operator rebases the branch by hand — or reset-group-worktree clears it.
+      local conflict_files="${_BM_REBASE_CONFLICT_FILES:-none reported}"
+      local esc_id
+      esc_id=$(_write_group_worktree_escalation "esc-group-worktree-rebase-conflict" "$brief_id" \
+        "Task group branch cannot be rebased onto main without manual conflict resolution — brief not started" \
+        "group: $group, worktree: $wt_dir, branch: $_GWT_BRANCH, conflicting_files: $conflict_files, detail: $_BM_REBASE_DETAIL, recovery: run 'git -C $wt_dir rebase main', resolve the conflicts, 'git -C $wt_dir add' them and 'git -C $wt_dir rebase --continue', then 'queue-cli.sh reopen-wo <work-order>' (or discard a wedged worktree with 'queue-cli.sh reset-group-worktree $group')")
+      echo "ERROR: Group branch $_GWT_BRANCH cannot be rebased onto main — conflicting files: $conflict_files — escalation $esc_id" >&2
+      release_group_worktree_lock "$group" "$$" "${REPO_OS_SESSION_ID:-}" || true
+      _GWT_BLOCK_OUTCOME="failed:group-worktree-rebase-conflict"
+      return 2
     fi
   fi
 
@@ -1010,7 +1024,100 @@ _resolve_group_worktree() {
   _GWT_REUSE=true
   return 0
 }
-# ============================================================
+
+# --- Message for a branch with commits ahead of main that is not merged ---
+# Defect C: the original message ("not merged to main — retrying") was logged
+# unconditionally. For a NON-FINAL brief of a sequential task group the unmerged
+# branch is the designed state (Decision t-0013 §7: only the final brief merges),
+# so "retrying" was wrong. This is message-only: both cases fall through to the
+# same normal execution path in the caller.
+# Arguments: $1 entry_id, $2 branch, $3 commits_ahead, $4 brief path, $5 work_order_id
+# Output: the message on stdout (caller redirects to stderr)
+_unmerged_branch_message() {
+  local entry_id="$1" branch="$2" ahead="$3" brief_path="${4:-}" wo_id="${5:-}"
+  if [ -n "$wo_id" ] && _brief_is_sequential_group "$brief_path" \
+     && ! _is_final_taskgroup_entry "$entry_id" "$wo_id"; then
+    printf 'Entry %s: branch %s has %s commit(s) ahead of main and is intentionally unmerged — only the final brief of a sequential task group merges; running this brief on the group branch\n' \
+      "$entry_id" "$branch" "$ahead"
+  else
+    printf 'Entry %s: branch %s has %s commit(s) ahead but is not merged to main — retrying\n' \
+      "$entry_id" "$branch" "$ahead"
+  fi
+}
+
+# --- Handle an entry whose work order is escalated or failed ---
+# The entry is deferred back to approved/ (retry_count untouched). Once it has been
+# deferred max_deferral_cycles times, the work order cannot make progress, so the
+# entry AND every approved sibling of the same work order go to blocked/ with ONE
+# escalation naming the work order — instead of starving unrelated queue entries.
+#
+# Defect B: the inline version called queue_block on an entry queue_defer had just
+# moved to approved/; queue_block only accepts running/, so it failed under set -e,
+# killed the daemon and left the queue lock held. This function never exits, never
+# leaves the lock held, and always returns 0 — except when the queue lock cannot be
+# taken (returns 1, entry still in running/; the caller ignores it; the entry is not lost but
+# stays running until the idle-cycle stale-running warning / `queue-cli.sh recover-entry`).
+# Arguments: $1 entry_id, $2 work_order_id, $3 reason ("failed" | "escalated")
+_handle_wo_deferral() {
+  local entry_id="$1" wo_id="$2" reason="$3"
+  local attempts=0 defer_count max_deferrals
+  while ! acquire_queue_lock; do
+    attempts=$((attempts + 1))
+    if [ "$attempts" -ge 3 ]; then
+      echo "ERROR: Lock unavailable for work-order defer ($entry_id)" >&2
+      return 1
+    fi
+    sleep 1
+  done
+
+  defer_count=$(queue_defer "$entry_id" "work-order-${reason}") || defer_count=""
+  max_deferrals=$(_parse_config_field "runner" "max_deferral_cycles" 2>/dev/null || true)
+  max_deferrals="${max_deferrals:-3}"
+
+  if ! [ "$defer_count" -ge "$max_deferrals" ] 2>/dev/null; then
+    release_queue_lock || true
+    review_log_append "entry-deferred" "$wo_id" "$entry_id" \
+      "Entry $entry_id deferred — work order $wo_id $reason (sibling has failed or needs review) [cycle ${defer_count:-?}/$max_deferrals]" 2>/dev/null || true
+    return 0
+  fi
+
+  # Cap reached: the work order cannot progress. Block this entry and its
+  # approved siblings; one escalation covers them all.
+  local qdir blocked_ids="" sib failure_entry=""
+  qdir=$(_queue_dir)
+  _WO_ENTRY_IDS=""
+  _WO_FAILURE_ENTRY_ID=""
+  _load_work_order "$qdir/work-orders/${wo_id}.yaml" 2>/dev/null || true
+  failure_entry="${_WO_FAILURE_ENTRY_ID:-unknown}"
+  local block_reason="work order $wo_id $reason (failed entry: $failure_entry) — max_deferral_cycles exceeded ($defer_count/$max_deferrals)"
+  local old_ifs="$IFS" sibs="$entry_id"
+  [ -n "$_WO_ENTRY_IDS" ] && sibs="$entry_id,$_WO_ENTRY_IDS"
+  IFS=','
+  # shellcheck disable=SC2086 — intentional word splitting on comma-delimited list
+  set -- $sibs
+  IFS="$old_ifs"
+  for sib in "$@"; do
+    case ",$blocked_ids," in *",$sib,"*) continue ;; esac
+    [ -f "$qdir/approved/${sib}.yaml" ] || continue
+    if queue_block_deferred "$sib" "$block_reason" >/dev/null 2>&1; then
+      blocked_ids="${blocked_ids:+$blocked_ids,}$sib"
+      rm -f "$qdir/.defer-count-${sib}"
+      review_log_append "entry-blocked" "$wo_id" "$sib" \
+        "Entry $sib blocked — $block_reason" 2>/dev/null || true
+    fi
+  done
+  release_queue_lock || true
+
+  local esc_id
+  esc_id=$(_write_group_worktree_escalation "esc-wo-blocked-${wo_id}" "$entry_id" \
+    "Work order $wo_id cannot progress ($reason) — its remaining entries were blocked so they do not starve the queue" \
+    "work_order: $wo_id, status: $reason, failed_entry: $failure_entry, blocked_entries: ${blocked_ids:-none}, recovery: fix the cause, then run 'queue-cli.sh reopen-wo $wo_id' to restore the blocked entries") || esc_id=""
+  echo "Work order $wo_id is $reason — blocked entries: ${blocked_ids:-none} — escalation ${esc_id:-not written}; recovery: queue-cli.sh reopen-wo $wo_id" >&2
+  review_log_append "work-order-${reason}" "$wo_id" "" \
+    "Work order $wo_id $reason — remaining entries blocked (deferral cap). Recovery: queue-cli.sh reopen-wo $wo_id" 2>/dev/null || true
+  return 0
+}
+
 # ============================================================
 # Model routing — resolve CLI --model flag for claude -p
 # ============================================================
@@ -1182,7 +1289,31 @@ _run_single_entry() {
     # without touching the branch ref.
     _SETUP_BRANCH="$_GWT_BRANCH"
   else
-    branch_manager_setup "$brief_id" "$existing_branch"
+    # Capture the return code: a bare call lets `set -e` kill the daemon on any
+    # non-zero return. rc 3 = the branch is behind main and its rebase hit a
+    # conflict (already aborted and verified clean) — block BEFORE any worktree
+    # is created, with an escalation naming the files, instead of launching on a
+    # stale base.
+    local _bm_rc=0
+    branch_manager_setup "$brief_id" "$existing_branch" || _bm_rc=$?
+    if [ "$_bm_rc" -ne 0 ]; then
+      local _bm_outcome="failed:branch-setup" _bm_esc=""
+      if [ "$_bm_rc" -eq 3 ]; then
+        _bm_outcome="failed:branch-rebase-conflict"
+        _bm_esc=$(_write_group_worktree_escalation "esc-branch-rebase-conflict" "$brief_id" \
+          "Branch cannot be rebased onto main without manual conflict resolution — brief not started" \
+          "branch: $existing_branch, conflicting_files: ${_BM_REBASE_CONFLICT_FILES:-none reported}, detail: ${_BM_REBASE_DETAIL:-}, recovery: rebase the branch onto main by hand, resolve the conflicts, then requeue the brief")
+        echo "ERROR: Branch $existing_branch cannot be rebased onto main — conflicting files: ${_BM_REBASE_CONFLICT_FILES:-none reported} — escalation $_bm_esc" >&2
+      else
+        echo "ERROR: Branch setup failed for $existing_branch (rc $_bm_rc)" >&2
+      fi
+      _RESULT_OUTCOME="$_bm_outcome"
+      _RESULT_BRANCH="$existing_branch"
+      unset REPO_OS_AUTOMATION_ENTRY 2>/dev/null || true
+      runner_external_cleanup "$REPO_ROOT" "$brief_id" "init" "" 2>/dev/null || true
+      unset REPO_OS_SESSION_ID
+      return
+    fi
   fi
 
   # Record baseline SHA — when worktree-isolate active, HEAD is still main,
@@ -1205,9 +1336,20 @@ _run_single_entry() {
   local disallowed
   disallowed=$(get_disallowed_tools "$permission_profile")
 
-  # Capture stderr to temp file for blocker reports
-  local stderr_file
+  # Capture stderr AND stdout to temp files: blocker reports read stderr, and
+  # detect_outcome scans the tail of both for the turn-budget banner (which stream
+  # the CLI prints it on was never established). Both are needed or neither is:
+  # if either mktemp fails the session runs uncaptured — no banner detection, but
+  # no crash — which is the pre-existing degraded path.
+  local stderr_file stdout_file
   stderr_file=$(mktemp "${TMPDIR:-/tmp}/runner-stderr-XXXXXX" 2>/dev/null || echo "")
+  stdout_file=$(mktemp "${TMPDIR:-/tmp}/runner-stdout-XXXXXX" 2>/dev/null || echo "")
+  if [ -z "$stderr_file" ] || [ -z "$stdout_file" ]; then
+    [ -n "$stderr_file" ] && rm -f "$stderr_file" 2>/dev/null
+    [ -n "$stdout_file" ] && rm -f "$stdout_file" 2>/dev/null
+    stderr_file=""
+    stdout_file=""
+  fi
 
   # Resolve model: per-entry pin wins over session-type routing (Decision t-0046 Amendment 3).
   # A per-entry model is used verbatim — re-mapping it through the alias table
@@ -1328,6 +1470,7 @@ _run_single_entry() {
       unset REPO_OS_AUTOMATION_ENTRY
       unset CLAUDE_HEADLESS
       [ -n "$stderr_file" ] && rm -f "$stderr_file" 2>/dev/null || true
+      [ -n "$stdout_file" ] && rm -f "$stdout_file" 2>/dev/null || true
       # Clean up state initialized by state_manager_setup before early return
       runner_external_cleanup "$REPO_ROOT" "$brief_id" "close" "$_RESULT_BASELINE" 2>/dev/null || true
       unset REPO_OS_SESSION_ID
@@ -1378,16 +1521,27 @@ _run_single_entry() {
     # process, and terminating the tracked pid left it running.
     #
     # `cd ... && exec` keeps the ordering: a failed cd still never runs the
-    # child. The here-string and the stderr tee are established by the subshell
-    # BEFORE exec replaces it, so both survive. `wait` now returns the child's
-    # own status, including 143 on SIGTERM, which detect_outcome already handles.
+    # child. The here-string and the two file redirects are established by the
+    # subshell BEFORE exec replaces it, so all survive. `wait` now returns the
+    # child's own status, including 143 on SIGTERM, which detect_outcome already
+    # handles.
+    #
+    # Output goes straight to files, NOT through `2> >(tee ...)`. The tee that
+    # used to sit here was an intermediate process the subshell's exec orphaned
+    # and nothing waited on, so the banner — the LAST thing written — could still
+    # be in the pipe when detect_outcome read the file (known-issues R26, which
+    # materialised on 2026-10-21). With a direct redirect there is no process to
+    # outlive the child: when `wait` returns, the files are complete. The cost is
+    # that output reaches daemon.log after the session ends rather than live;
+    # it is replayed below, before detect_outcome runs. Do not "fix" a missed
+    # read with sleep/sync/retry — removing the intermediate process is the fix.
     (cd "$launch_dir" && exec claude -p \
       --permission-mode bypassPermissions \
       --disallowedTools "$disallowed" \
       --max-turns "$_session_max_turns" \
       $model_flag \
       <<< "$prompt" \
-      2> >(tee "$stderr_file" >&2)) &
+      >"$stdout_file" 2>"$stderr_file") &
     _CLAUDE_CHILD_PID=$!
     # Start TTL watchdog: kills child directly after TTL seconds
     if [ "$_session_max_ttl" -gt 0 ]; then
@@ -1476,6 +1630,16 @@ _run_single_entry() {
   fi
   _CLAUDE_CHILD_PID=""
 
+  # Replay the captured output so it still lands in daemon.log (stdout to stdout,
+  # stderr to stderr, as before). The child has exited, so both files are
+  # complete. This runs BEFORE detect_outcome, which may itself print to stderr.
+  if [ -n "$stdout_file" ] && [ -f "$stdout_file" ]; then
+    cat "$stdout_file"
+  fi
+  if [ -n "$stderr_file" ] && [ -f "$stderr_file" ]; then
+    cat "$stderr_file" >&2
+  fi
+
   # Clear automation context (keep REPO_OS_SESSION_ID alive for cleanup)
   unset REPO_OS_AUTOMATION_ENTRY
   unset CLAUDE_HEADLESS
@@ -1487,7 +1651,7 @@ _run_single_entry() {
     _RESULT_SOLO_MODE="${_QE_SOLO_MODE:-false}"
     _RESULT_BRANCH=$(git -C "$_CURRENT_WORKTREE_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
     # Outcome detection from worktree context
-    _RESULT_OUTCOME=$(detect_outcome "$exit_code" "$_RESULT_BASELINE" "$_CURRENT_WORKTREE_DIR" "$brief_id" "$stderr_file")
+    _RESULT_OUTCOME=$(detect_outcome "$exit_code" "$_RESULT_BASELINE" "$_CURRENT_WORKTREE_DIR" "$brief_id" "$stderr_file" "$stdout_file")
     if [ "$_CURRENT_WORKTREE_IS_GROUP" = true ]; then
       # Task group worktree (Decision 0054): keep it for the next brief. The
       # occupancy lock is deliberately NOT released here — it stays held across
@@ -1503,7 +1667,7 @@ _run_single_entry() {
     fi
   else
     # Legacy path or worktree not created
-    _RESULT_OUTCOME=$(detect_outcome "$exit_code" "$_RESULT_BASELINE" "$REPO_ROOT" "$brief_id" "$stderr_file")
+    _RESULT_OUTCOME=$(detect_outcome "$exit_code" "$_RESULT_BASELINE" "$REPO_ROOT" "$brief_id" "$stderr_file" "$stdout_file")
     _RESULT_SOLO_MODE="${_QE_SOLO_MODE:-false}"
     _RESULT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
   fi
@@ -1522,8 +1686,9 @@ _run_single_entry() {
     unset REPO_OS_SESSION_ID
   fi
 
-  # Clean up stderr temp file
+  # Clean up stderr/stdout temp files
   [ -n "$stderr_file" ] && rm -f "$stderr_file" 2>/dev/null || true
+  [ -n "$stdout_file" ] && rm -f "$stdout_file" 2>/dev/null || true
 
   # Output result summary to stderr (informational only — outcome is in globals)
   local outcome="${_RESULT_OUTCOME%%:*}"
@@ -1561,6 +1726,12 @@ _run_single_entry() {
 #   - `exec claude -p` at BOTH launch sites. Without `exec` the subshell forks,
 #     so the tracked `$!` is a wrapper and every kill path signals the wrapper
 #     while the real process runs on.
+#   - the DIRECT redirects (`>"$stdout_file" 2>"$stderr_file"`) at the capturing
+#     launch site, replayed with `cat` after the child is reaped. The earlier
+#     `2> >(tee ...)` left an orphaned tee that could still hold the banner when
+#     detect_outcome read the file, silently restoring the turn-budget defect
+#     (R26; it happened on 2026-10-21). Never reintroduce a process substitution
+#     on the launch path, and never paper over a missed read with sleep/sync.
 #   - the FORCE-HALT watcher call at both launch sites, which is what lets a
 #     force-halt interrupt the entry it was raised against rather than the next.
 #   - `--max-turns "$_session_max_turns"`, the configurable turn budget. It was
@@ -2328,7 +2499,9 @@ while true; do
         _merge_skip=true
       else
         # Commits ahead but NOT merged — unmerged work from prior attempt, retry
-        echo "Entry $ENTRY_ID: branch $ENTRY_BRANCH has $_commits_ahead commit(s) ahead but is not merged to main — retrying" >&2
+        # (message-only distinction: a non-final sequential group brief is expected
+        # to have an unmerged branch — see _unmerged_branch_message)
+        _unmerged_branch_message "$ENTRY_ID" "$ENTRY_BRANCH" "$_commits_ahead" "$ENTRY_BRIEF_PATH" "$ENTRY_WORK_ORDER_ID" >&2 || true
         # Fall through to normal retry execution
       fi
     else
@@ -2393,43 +2566,9 @@ while true; do
     fi
     if [ -n "$_wo_defer_reason" ]; then
       echo "Entry $ENTRY_ID: work order $ENTRY_WORK_ORDER_ID is $_wo_defer_reason — deferring" >&2
-      _wo_lock_attempts=0
-      while ! acquire_queue_lock; do
-        _wo_lock_attempts=$((_wo_lock_attempts + 1))
-        if [ "$_wo_lock_attempts" -ge 3 ]; then
-          echo "ERROR: Lock unavailable for work-order defer ($ENTRY_ID)" >&2
-          continue 2
-        fi
-        sleep 1
-      done
-      _defer_count=$(queue_defer "$ENTRY_ID" "work-order-${_wo_defer_reason}")
-      # Check deferral cap — transition to blocked if exceeded
-      _max_deferrals=$(_parse_config_field "runner" "max_deferral_cycles")
-      _max_deferrals="${_max_deferrals:-3}"
-      if [ "$_defer_count" -ge "$_max_deferrals" ] 2>/dev/null; then
-        queue_block "$ENTRY_ID" "max_deferral_cycles exceeded ($_defer_count/$_max_deferrals)"
-        release_queue_lock
-        review_log_append "entry-blocked" "$ENTRY_WORK_ORDER_ID" "$ENTRY_ID" \
-          "Entry $ENTRY_ID blocked — max deferral cycles exceeded ($_defer_count/$_max_deferrals)" 2>/dev/null || true
-        # Check if this triggers work order escalation
-        _wo_new_status=$(wo_check_completion "$ENTRY_WORK_ORDER_ID" 2>/dev/null) || {
-          echo "WARNING: wo_check_completion failed for work order $ENTRY_WORK_ORDER_ID after blocking entry $ENTRY_ID (deferral cap)" >&2
-        }
-        case "$_wo_new_status" in
-          escalated|failed)
-            review_log_append "work-order-${_wo_new_status}" "$ENTRY_WORK_ORDER_ID" "" \
-              "Work order $ENTRY_WORK_ORDER_ID ${_wo_new_status} — entry blocked (deferral cap). Recovery: queue-cli.sh reopen-wo $ENTRY_WORK_ORDER_ID" 2>/dev/null || true
-            ;;
-          "")
-            echo "WARNING: wo_check_completion returned empty status for work order $ENTRY_WORK_ORDER_ID (deferral cap, entry $ENTRY_ID)" >&2
-            ;;
-        esac
-      else
-        release_queue_lock
-        # Review log
-        review_log_append "entry-deferred" "$ENTRY_WORK_ORDER_ID" "$ENTRY_ID" \
-          "Entry $ENTRY_ID deferred — work order $ENTRY_WORK_ORDER_ID $_wo_defer_reason (sibling has failed or needs review) [cycle $_defer_count/$_max_deferrals]" 2>/dev/null || true
-      fi
+      # Never fatal: at the cap the entry and its siblings are blocked with an
+      # escalation (see _handle_wo_deferral) and the daemon moves on.
+      _handle_wo_deferral "$ENTRY_ID" "$ENTRY_WORK_ORDER_ID" "$_wo_defer_reason" || true
       sleep 2
       continue
     fi
@@ -2593,8 +2732,10 @@ while true; do
       # terminal failed/ without incrementing retry_count. Retriable failures use
       # queue_fail which respects max_retries.
       case "$OUTCOME_RAW" in
-        failed:empty-result)
-          if ! queue_fail_terminal "$ENTRY_ID" "infrastructure failure: empty outcome from session"; then
+        failed:empty-result|failed:group-worktree-rebase-conflict|failed:branch-rebase-conflict)
+          # A rebase conflict cannot be fixed by retrying: the group is blocked until
+          # the operator rebases by hand (or reset-group-worktree) and runs reopen-wo.
+          if ! queue_fail_terminal "$ENTRY_ID" "${OUTCOME_RAW#failed:}: terminal, operator action required (see escalation)"; then
             echo "ERROR: queue_fail_terminal failed for $ENTRY_ID" >&2
             _transition_ok=false
           fi
@@ -2723,6 +2864,11 @@ while true; do
       # one of its retries.
       if [ -f "$AUTOMATION_DIR/FORCE-HALT" ]; then
         echo "Session terminated by FORCE-HALT — not counted against the circuit breaker." >&2
+      elif [ "$OUTCOME_RAW" = "failed:group-worktree-rebase-conflict" ] || [ "$OUTCOME_RAW" = "failed:branch-rebase-conflict" ]; then
+        # No session ran; the conflict is a repo-content problem the operator must
+        # resolve. Counting it would let one conflicted group trip the breaker
+        # and stall every unrelated queue entry.
+        echo "Rebase conflict — not counted against the circuit breaker." >&2
       else
         _circuit_breaker_increment
       fi

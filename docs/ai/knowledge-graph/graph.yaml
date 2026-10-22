@@ -3,7 +3,7 @@
 # Seeded from governance metadata on 2026-03-31
 
 schema_version: 1
-last_updated: "2026-10-20T17:02:24Z"
+last_updated: "2026-10-22T06:05:01Z"
 
 nodes:
   # --- Decisions (from DIGEST.md) ---
@@ -280,8 +280,8 @@ nodes:
   - id: "hook-state-writer"
     type: "hook"
     path: ".claude/hooks/state-writer.sh"
-    description: "Captures governance state files at SubagentStop; calls refresh_manifest_entry after each write (2026-08-07); 2026-09-01 all three verdict-rejection paths (phase_mismatch, no_sentinel, combined_no_sentinel) write a verdict-rejected escalation via shared _write_verdict_rejection(), and phase-mismatch reporting names EXPECTED_PHASE. Parse contract per Decision t-0039 deliberately unchanged"
-    last_verified: "2026-09-01"
+    description: "Captures governance state files at SubagentStop; calls refresh_manifest_entry after each write (2026-08-07); 2026-09-01 all three verdict-rejection paths (phase_mismatch, no_sentinel, combined_no_sentinel) write a verdict-rejected escalation via shared _write_verdict_rejection(), and phase-mismatch reporting names EXPECTED_PHASE. 2026-10-22 (Decision t-0059) phase_mismatch is DIRECTIONAL: a verdict dispatched at or after its expected phase is accepted, writes a dispatch_phase_discrepancy line into the verdict file and logs phase_late_accepted; dispatched EARLIER it is still refused, as is a verdict with no terminal sentinel. Position is compared by index in get_phases_for_type, so an unresolvable phase fails closed. REPO_OS_STRICT_DISPATCH_PHASE=1 restores exact matching. Parse contract per Decision t-0039 deliberately unchanged"
+    last_verified: "2026-10-22"
     status: "active"
     layer: "template"
 
@@ -1247,7 +1247,46 @@ nodes:
     last_verified: "2026-10-20"
     status: "unverified"
     layer: "template"
+  - id: "file-branch-manager"
+    type: "file"
+    path: ".claude/.automation/lib/branch-manager.sh"
+    description: "Selects or creates the branch a session runs on (branch_manager_setup): creates from main, recreates a stale branch, takes an ahead branch as-is, rebases a diverged one. On a rebase conflict it aborts IN the target directory (git -C), VERIFIES the abort took, returns 3 for the caller to escalate, and selects no branch. 2026-10-22: after a verified abort it returns the MAIN worktree to main — gated on .git being a directory, so a linked worktree keeps its own branch because a task group's worktree exists to hold the group branch. Leaving the main tree on the conflicting branch is what wedged task-details-header for two days. That checkout is the git -C form Decision t-0036 Risks Accepted 3 calls undetectable; t-0036 Amendment 1 records it"
+    last_verified: "2026-10-22"
+    status: "active"
+    layer: "template"
+  - id: "decision-0059"
+    type: "decision"
+    path: "docs/ai/decisions/t-0059-directional-dispatch-phase.md"
+    description: "Decision record: directional dispatch-phase acceptance for governance verdicts. A verdict carrying a terminal GATE_RESULT dispatched at or AFTER its expected phase is accepted, records a dispatch_phase_discrepancy line and logs phase_late_accepted; dispatched EARLIER it is still refused, as is a verdict with no sentinel. Position compared by index in get_phases_for_type, so an unresolvable phase fails closed. Motivated by 20 APPROVED verdicts destroyed over 2026-10-20/22, which stalled 5 briefs and lost 3 sessions' work. Exit: REPO_OS_STRICT_DISPATCH_PHASE=1"
+    last_verified: "2026-10-22"
+    status: "active"
+    layer: "template"
 edges:
+  # --- Decision t-0059 (directional dispatch-phase acceptance) governance ---
+  - source: "decision-0059"
+    target: "hook-state-writer"
+    relation: "governs"
+    context: "Directional dispatch-phase acceptance: a verdict with a terminal GATE_RESULT dispatched at or after its expected phase is accepted and records a dispatch_phase_discrepancy line; earlier dispatches and sentinel-less verdicts are still refused. Exit: REPO_OS_STRICT_DISPATCH_PHASE=1"
+    source_type: "agent-inferred"
+    last_verified: "2026-10-22"
+    status: "active"
+    confidence: 0.95
+
+  # --- Decision t-0036 Amendment 1 (sanctioned main-tree restore) ---
+  # Recorded as an edge because the amendment's reasoning lives in prose on both
+  # sides: branch-manager performs the `git -C <dir> checkout main` that t-0036
+  # Risks Accepted 3 describes as undetectable, and t-0036 is where that
+  # instance is sanctioned. Without the edge, relevance scoring surfaces one
+  # without the other.
+  - source: "decision-0036"
+    target: "file-branch-manager"
+    relation: "governs"
+    context: "Amendment 1 sanctions branch_manager_setup's post-abort `git -C <dir> checkout main` — the undetectable form t-0036 Risks Accepted 3 describes — scoped to the main worktree only (.git as a directory), after a verified-clean abort, before any session launches"
+    source_type: "agent-inferred"
+    last_verified: "2026-10-22"
+    status: "active"
+    confidence: 0.9
+
   # --- Decision t-0047 (Stop/SessionEnd split) governance ---
   - source: "decision-0047"
     target: "hook-session-close-check"

@@ -46,7 +46,9 @@ Referenced by escalation reports for operator recovery guidance.
 2. If still looping (pre-cap): resolve the escalated sibling first. The deferred entry will automatically resume on the next poll cycle.
 3. To check work order status: `queue-cli.sh --json list --status blocked` and `queue-cli.sh --json list --status review`
 
-**Prevention:** `max_deferral_cycles` config (default: 3) caps deferral loops. Exceeded entries transition to `blocked` with an escalation file. `reopen-wo` CLI command resets the work order and clears defer counts.
+**Prevention:** `max_deferral_cycles` config (default: 3) caps deferral loops. Exceeded entries transition to `blocked` with an escalation file. `reopen-wo` CLI command resets the work order and clears defer counts. At the cap the entry AND its approved siblings are blocked together with one `esc-wo-blocked-<wo>` escalation, so unrelated entries are not starved behind them.
+
+**Rebase conflicts (`failed:group-worktree-rebase-conflict`, `failed:branch-rebase-conflict`):** the runner aborts the rebase, verifies the worktree, escalates naming the conflicting files and stops before launching a session. These are terminal and do not count against the circuit breaker. To resume a group: resolve by hand (`git -C .worktrees/tg-<group> rebase main`) or discard with `queue-cli.sh reset-group-worktree <group> [--yes]` (refuses unless the work order is failed/escalated; prints what it discards; never run by the daemon), then `queue-cli.sh reopen-wo <work-order-id>`.
 
 ---
 
@@ -207,8 +209,8 @@ Referenced by escalation reports for operator recovery guidance.
 ## 14. Session Ran Out of Turns (`review:turn-budget-exhausted`)
 
 **Symptom:** A queue entry lands in `review` with outcome detail `turn-budget-exhausted`. The
-session ran for a long time — tens of minutes — and the stderr tail contains
-`Error: Reached max turns (N)`. It may have committed nothing, or committed partial work.
+session ran for a long time — tens of minutes — and the stderr or stdout tail contains
+`Reached max turns (N)`. It may have committed nothing, or committed partial work.
 
 **Root Cause:** The headless session hit its `--max-turns` budget. The brief was larger than
 the budget allowed, or the budget is set too low for the brief shape.

@@ -8,7 +8,7 @@
 #   BM.2: Branch exists, is ancestor of main (stale) → deleted and recreated
 #   BM.3: Branch exists, ahead of main, main is ancestor → selected as-is
 #   BM.4: Branch exists, ahead AND behind main (diverged) → rebased onto main
-#   BM.5: Rebase conflict → rebase aborted, branch selected as-is
+#   BM.5: Rebase conflict → rebase aborted, branch left unchanged, rc 3 (caller escalates)
 #   BM.6: Standalone (no existing_branch) → new branch from main
 #   BM.7: Log messages emitted for Cases 1 and 3
 #
@@ -374,17 +374,28 @@ setup_branch_test
   git add conflict.txt
   git commit -q -m "main modifies conflict.txt" 2>/dev/null
 
-  # branch_manager_setup should attempt rebase, fail, abort, and leave branch as-is
-  branch_manager_setup "test-brief" "feature/conflict-branch" > "$_BM_OUT" 2>&1 || true
+  # branch_manager_setup attempts the rebase, fails, aborts it, VERIFIES the abort,
+  # and reports rc 3 — a branch left behind main is not launchable, so it is no
+  # longer "selected" (previously it was, and the session built on a stale base).
+  _bm5_rc=0
+  _SETUP_BRANCH=""
+  branch_manager_setup "test-brief" "feature/conflict-branch" > "$_BM_OUT" 2>&1 || _bm5_rc=$?
   output=$(cat "$_BM_OUT")
-  assert_setup_branch "feature/conflict-branch" "BM.5: branch selected despite rebase failure"
+  assert_eq "$_bm5_rc" "3" "BM.5: rebase conflict reported as rc 3, not silently accepted"
+  assert_eq "$_SETUP_BRANCH" "" "BM.5: no branch selected after a failed rebase"
 
-  # Branch should be at original SHA (rebase aborted)
-  current_sha=$(git rev-parse "$_SETUP_BRANCH")
+  # Branch ref unchanged (rebase aborted)
+  current_sha=$(git rev-parse "feature/conflict-branch")
   assert_eq "$current_sha" "$branch_sha" "BM.5: branch at original SHA after aborted rebase"
+
+  # Working tree restored: on main, clean, no rebase left in progress
+  assert_eq "$(git rev-parse --abbrev-ref HEAD)" "main" "BM.5: main worktree restored to main"
+  assert_eq "$(git status --porcelain --untracked-files=no)" "" "BM.5: tracked files clean after abort"
+  assert_eq "$(_bm_rebase_in_progress . && echo yes || echo no)" "no" "BM.5: no rebase in progress"
 
   assert_contains "$output" "WARNING" "BM.5: warning emitted on rebase failure"
   assert_contains "$output" "aborting rebase" "BM.5: log mentions aborting rebase"
+  assert_contains "$output" "conflict.txt" "BM.5: log names the conflicting file"
   [ "$_TAP_FAIL" -eq 0 ]
 ) || _BM_FAILED=$((_BM_FAILED + 1))
 

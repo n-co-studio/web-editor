@@ -310,6 +310,78 @@ if [ -n "$VALIDATE_PHASE" ]; then
       ;;
   esac
 fi
+# --- Directional acceptance (Decision t-0059) ---
+# A verdict dispatched at or AFTER its expected phase is accepted, with the
+# discrepancy recorded. A verdict dispatched BEFORE it is still rejected.
+#
+# Why: between 2026-10-20 and 22, twenty verdicts were discarded on this check
+# and every one was dispatched at or after its expected phase — `verify` or
+# `commit` for a critic expecting `review`. Each carried GATE_RESULT: APPROVED.
+# Discarding them meant the gate they fed could never be satisfied, and because
+# the phase model has no backward edge from `commit`, those sessions were stuck;
+# five of them lost their work when their worktrees were removed. One of them,
+# the HALT-race fix, was built, tested and approved before it was destroyed.
+#
+# Destroying a correct verdict — and a whole session's work with it — to protect
+# the provenance of a phase label is the wrong trade. The check was right to
+# exist and wrong to be fatal.
+#
+# The direction matters and is not symmetric. An EARLY dispatch is a real
+# integrity problem: a critic dispatched at `plan`, before the code exists,
+# would return APPROVED on an empty diff, and the commit gates check only that
+# `dispatch_phase:` is present and non-empty — never its value. Accepting that
+# would make A5 satisfiable without the built code ever being reviewed. So
+# earlier-than-expected stays a hard rejection, as does a verdict with no
+# terminal sentinel, which is unparseable rather than merely mis-sequenced.
+#
+# Way back: REPO_OS_STRICT_DISPATCH_PHASE=1 restores exact-match behaviour.
+_phase_index() {
+  # Position of $1 in the session type's ordered phase list, or empty.
+  local _pi_want="$1" _pi_seq _pi_n=0 _pi_p
+  _pi_seq=$(get_phases_for_type "$(get_session_type 2>/dev/null)" 2>/dev/null || echo "")
+  [ -n "$_pi_seq" ] || return 0
+  for _pi_p in $_pi_seq; do
+    if [ "$_pi_p" = "$_pi_want" ]; then printf '%s' "$_pi_n"; return 0; fi
+    _pi_n=$((_pi_n + 1))
+  done
+  return 0
+}
+
+_DISPATCH_LATE=false
+if [ "$PHASE_OK" = false ] && [ "${REPO_OS_STRICT_DISPATCH_PHASE:-0}" != "1" ]; then
+  # Only meaningful when both phases resolve to a position in this session
+  # type's sequence. An unresolvable phase falls through to rejection — fail
+  # closed, since an unknown position cannot be shown to be at-or-after.
+  # Index the phase the check ACTUALLY compared — VALIDATE_PHASE, which is
+  # `${DISPATCH_PHASE:-$CURRENT_PHASE}`. Using DISPATCH_PHASE alone would make
+  # this fall through to rejection whenever no dispatch was recorded, which is
+  # precisely the case where the fallback to current phase is doing the work.
+  _SW_DI=$(_phase_index "${VALIDATE_PHASE:-}")
+  # EXPECTED_PHASE may be an alternation (pragmatist). Take the EARLIEST
+  # acceptable position: being at or after the earliest permitted phase is what
+  # "not early" means for a multi-phase expectation.
+  _SW_EI=""
+  for _sw_e in $(printf '%s' "${EXPECTED_PHASE:-}" | tr '|' ' '); do
+    _sw_i=$(_phase_index "$_sw_e")
+    if [ -n "$_sw_i" ]; then
+      if [ -z "$_SW_EI" ] || [ "$_sw_i" -lt "$_SW_EI" ]; then _SW_EI="$_sw_i"; fi
+    fi
+  done
+  if [ -n "$_SW_DI" ] && [ -n "$_SW_EI" ] && [ "$_SW_DI" -ge "$_SW_EI" ]; then
+    PHASE_OK=true
+    _DISPATCH_LATE=true
+    echo "ADVISORY: verdict from $AGENT_TYPE was dispatched from '${DISPATCH_PHASE:-$VALIDATE_PHASE (no dispatch record; current phase used)}' but expected '${EXPECTED_PHASE}' — accepted because that is at or after the expected phase (Decision t-0059). The discrepancy is recorded in the verdict file. Dispatching review agents from their own phase remains correct; this is a safety net, not a licence." >&2
+    log_hook_event "state-writer" "SubagentStop" "$AGENT_TYPE" "allow" "$START_MS" "phase_late_accepted:agent=${AGENT_TYPE}:dispatch=${DISPATCH_PHASE:-none}:expected=${EXPECTED_PHASE:-unknown}"
+  fi
+elif [ "$PHASE_OK" = false ] && [ "${REPO_OS_STRICT_DISPATCH_PHASE:-0}" = "1" ]; then
+  # Argument order is (hook, env_var) — see _analytics-helper.sh. Reversing them
+  # writes a transposed line into overrides.log, corrupting the audit record of
+  # the one override t-0059 offers as its way out. A third argument is silently
+  # dropped, so the explanatory detail belongs in the advisory below, not here.
+  log_override "state-writer" "REPO_OS_STRICT_DISPATCH_PHASE" 2>/dev/null || true
+  echo "ADVISORY: REPO_OS_STRICT_DISPATCH_PHASE=1 — exact dispatch-phase match enforced, t-0059 directional acceptance disabled. This reinstates the behaviour that destroyed five sessions' work on 2026-10-20/22." >&2
+fi
+
 if [ "$PHASE_OK" = false ]; then
   # --- Loud rejection: emit full context to stderr ---
   # A discarded verdict must never look like success. The dispatching agent
@@ -523,8 +595,15 @@ if [ "$CRITIC_COMBINED" = true ]; then
     exit 0
   fi
 
-  printf 'timestamp: %s\nagent: %s\nsession_id: %s\ndispatch_phase: %s\n%s\n' \
-    "$TIMESTAMP" "$AGENT_TYPE" "$STATE_SID" "${DISPATCH_PHASE:-$CURRENT_PHASE}" "$COHESION_LAST" \
+  # See the single-mode write below for why the discrepancy is recorded here.
+  _DISPATCH_NOTE=""
+  if [ "${_DISPATCH_LATE:-false}" = true ]; then
+    _DISPATCH_NOTE="dispatch_phase_discrepancy: dispatched from ${DISPATCH_PHASE:-$VALIDATE_PHASE}, expected ${EXPECTED_PHASE:-unknown} — accepted as at-or-after (t-0059)
+"
+  fi
+
+  printf 'timestamp: %s\nagent: %s\nsession_id: %s\ndispatch_phase: %s\n%s%s\n' \
+    "$TIMESTAMP" "$AGENT_TYPE" "$STATE_SID" "${DISPATCH_PHASE:-$CURRENT_PHASE}" "$_DISPATCH_NOTE" "$COHESION_LAST" \
     > "$STATE_DIR/cohesion-reviewed" 2>/dev/null || true
 
   COMBINED_COMPLETENESS_LINE=$(echo "$COHESION_PART" | grep -E '^COMPLETENESS: ' | tail -1 || true)
@@ -538,8 +617,8 @@ if [ "$CRITIC_COMBINED" = true ]; then
 
   _capture_criteria_verdicts "$COHESION_PART"
 
-  printf 'timestamp: %s\nagent: %s\nsession_id: %s\ndispatch_phase: %s\n%s\n' \
-    "$TIMESTAMP" "$AGENT_TYPE" "$STATE_SID" "${DISPATCH_PHASE:-$CURRENT_PHASE}" "$DIFF_REVIEW_LAST" \
+  printf 'timestamp: %s\nagent: %s\nsession_id: %s\ndispatch_phase: %s\n%s%s\n' \
+    "$TIMESTAMP" "$AGENT_TYPE" "$STATE_SID" "${DISPATCH_PHASE:-$CURRENT_PHASE}" "$_DISPATCH_NOTE" "$DIFF_REVIEW_LAST" \
     > "$STATE_DIR/diff-review-complete" 2>/dev/null || true
 
   COHESION_GATE_VALUE=$(echo "$COHESION_LAST" | sed 's/^GATE_RESULT: *//' | awk '{print $1}')
@@ -554,8 +633,17 @@ if [ "$CRITIC_COMBINED" = true ]; then
   exit 0
 fi
 
-printf 'timestamp: %s\nagent: %s\nsession_id: %s\ndispatch_phase: %s\n%s\n' \
-  "$TIMESTAMP" "$AGENT_TYPE" "$STATE_SID" "${DISPATCH_PHASE:-$CURRENT_PHASE}" "$LAST_LINE" \
+# Discrepancy record (t-0059). Written into the verdict file itself, not only
+# to stderr, so a later reader of the evidence can see the verdict was accepted
+# out of sequence. Empty for the normal case, so the file shape is unchanged.
+_DISPATCH_NOTE=""
+if [ "${_DISPATCH_LATE:-false}" = true ]; then
+  _DISPATCH_NOTE="dispatch_phase_discrepancy: dispatched from ${DISPATCH_PHASE:-$VALIDATE_PHASE}, expected ${EXPECTED_PHASE:-unknown} — accepted as at-or-after (t-0059)
+"
+fi
+
+printf 'timestamp: %s\nagent: %s\nsession_id: %s\ndispatch_phase: %s\n%s%s\n' \
+  "$TIMESTAMP" "$AGENT_TYPE" "$STATE_SID" "${DISPATCH_PHASE:-$CURRENT_PHASE}" "$_DISPATCH_NOTE" "$LAST_LINE" \
   > "$STATE_DIR/$STATE_FILE" 2>/dev/null || true
 
 # --- Completeness capture (critic cohesion mode only) ---

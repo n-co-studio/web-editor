@@ -233,6 +233,7 @@ All overrides logged via `log_override()`.
 | `REPO_OS_RECOVER=1` | pre-commit-gates | All state checks | Emergency recovery — skip plan-approved, cohesion-reviewed, diff-review-complete, qa-verified, pragmatist-signed, kg-updated |
 | `REPO_OS_SKIP_PLAN_GATE=1` | pre-commit-gates / bash-guard | plan-approved | Bypass plan-approved check |
 | `REPO_OS_SKIP_PRAGMATIST_GATE=1` | pre-commit-gates | pragmatist-signed | Bypass pragmatist-signed check (Decision 0025) |
+| `REPO_OS_STRICT_DISPATCH_PHASE=1` | state-writer | all verdict files | Restore exact-match dispatch-phase validation, disabling the at-or-after acceptance of Decision t-0059. Use when a verdict's provenance must be exact; note it reinstates the behaviour that destroyed five sessions' work on 2026-10-20/22 |
 | `SKIP_FUNC_CHECK=1` | pre-commit-gates | A3.4 functional-verified | Bypass A3.4 functional verification (build/pack/test scripts). **Interactive mode only** — ignored in headless/auto (IS_NO_REVIEW_BACKSTOP=true); writes governance-block escalation and continues. Use `REPO_OS_RECOVER=1` to bypass in headless/auto (Decision t-0044 Amendment 1). |
 | `REPO_OS_SKIP_KG_GATE=1` | pre-commit-gates | KG Update Gate | Bypass KG Update Gate. **Interactive mode only** — ignored in headless/auto (IS_NO_REVIEW_BACKSTOP=true); gate still enforced. Use `REPO_OS_RECOVER=1` to bypass in headless/auto. Decision 0034 Amendment 7. |
 | `REPO_OS_FUNC_CHECK_TIMEOUT` | pre-commit-gates | A3.4 functional-verified | Per-command timeout in seconds for A3.4 script execution (default: 120). |

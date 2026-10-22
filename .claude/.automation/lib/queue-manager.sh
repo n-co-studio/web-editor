@@ -1355,6 +1355,42 @@ queue_block() {
   _rebuild_queue_index || true
 }
 
+# --- Block a DEFERRED entry (approved/ -> blocked/) ---
+# queue_block only accepts running/, but a deferred entry has already been moved
+# back to approved/ by queue_defer. This is the approved/ counterpart, used when
+# a work order cannot progress: the entry (and its approved siblings) leave the
+# dequeue pool so they stop starving unrelated entries. `queue-cli.sh reopen-wo`
+# moves blocked siblings back to approved/.
+# Arguments:
+#   $1 — entry_id
+#   $2 — reason (stored in error_log field)
+# Returns: 0 on success (or already blocked), 1 if not found in approved/
+queue_block_deferred() {
+  local entry_id="$1"
+  local reason="${2:-}"
+  local qdir
+  qdir=$(_queue_dir)
+  local src_file="$qdir/approved/${entry_id}.yaml"
+
+  if [ ! -f "$src_file" ]; then
+    if [ -f "$qdir/blocked/${entry_id}.yaml" ]; then
+      return 0
+    fi
+    echo "ERROR: Entry $entry_id not found in approved/" >&2
+    return 1
+  fi
+
+  _load_queue_entry "$src_file"
+  _QE_STATUS="blocked"
+  _QE_ERROR_LOG="$reason"
+  _QE_COMPLETED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  _QE_UPDATED_AT="$_QE_COMPLETED_AT"
+
+  _write_queue_entry "$qdir/blocked/${entry_id}.yaml"
+  rm -f "$src_file"
+  _rebuild_queue_index || true
+}
+
 # --- Defer a running entry (work-order pause) ---
 # Moves from running back to approved/ WITHOUT incrementing retry_count.
 # Used when a sibling entry in the same work order is in review/failed/blocked.

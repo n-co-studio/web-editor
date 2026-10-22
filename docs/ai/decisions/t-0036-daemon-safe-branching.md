@@ -48,3 +48,56 @@ When a branch switch is needed while the daemon is running, use one of these opt
 1. **PID file staleness:** If the daemon crashes without cleaning up `.daemon-pid`, the guard may block unnecessarily. Mitigated by: `kill -0` liveness check against the stored PID before blocking.
 2. **`pgrep` unavailability:** Some environments may not have `pgrep`. Mitigated by: PID file check runs first; `pgrep` is only the fallback. If both are unavailable, the guard is silent (no false blocks).
 3. **Worktree context detection gap:** Commands using `git -C <path> checkout` that target the main tree from an external path will not be detected by the git-dir check. Accepted: this is an adversarial-only edge case.
+
+---
+
+## Amendment 1 — a sanctioned main-tree restore after a failed rebase (2026-10-22)
+
+**Status:** Accepted
+
+`branch_manager_setup` now returns the checkout to `main` after it aborts a conflicting rebase,
+and does so with `git -C "$dir" checkout main`. That is the exact form this decision's **Risks
+Accepted §3** describes as undetectable by the git-dir check and dismisses as "an
+adversarial-only edge case". It is no longer adversarial-only: there is now one sanctioned
+instance, inside daemon-owned library code, and this amendment records it.
+
+**Why it is needed.** `rebase --abort` restores `HEAD` to the branch being rebased. Without the
+restore, a setup that conflicted — and therefore selected no branch and returned 3 for the
+caller to escalate — leaves the checkout sitting on the conflicting feature branch. That is the
+state that wedged the `task-details-header` group for two days: later briefs found an
+unexpected branch, the clean-tree guard refused to launch, and every brief in the group failed
+before starting. Leaving the tree on a stray branch is a worse violation of this decision's
+intent than the restore is of its letter.
+
+**Why it is safe, and narrowly scoped.**
+
+- It applies **only to the main worktree**, gated on `.git` being a directory rather than a
+  file. A linked worktree keeps its own branch, because a task group's worktree exists to hold
+  the group branch and the next brief expects to find it there.
+- With worktree isolation on (the default, Decision t-0033) the session runs in a linked
+  worktree, so `$dir` is that worktree and the restore does not fire at all. It is reachable
+  only when isolation is disabled — the mode in which the daemon is already the component that
+  moves the main tree's branch, which is what this decision governs.
+- It runs during setup, **before any session launches**, and only after the abort has been
+  verified clean: no rebase in progress, no tracked changes. Checking out over a dirty tree or
+  a half-finished rebase cannot occur.
+- A failed checkout is reported in the detail string the caller escalates with, not swallowed.
+
+**What this changes about §3, stated precisely.** "Legitimate code moves the main tree's branch
+here" was already true: `branch_manager_setup` contains four plain `git checkout main` calls in
+the non-isolated path (around lines 165, 188, 222 and 247). Those are *detectable* by the
+git-dir check, so §3's gap was never exercised by them. What is new is only that the restore
+uses the `-C` form, which the check cannot see — so this is the first sanctioned instance of the
+**undetectable** shape, not the first instance of the daemon moving the main tree.
+
+That makes the restore consistent with what this function already does rather than a new
+liberty, and it narrows what the amendment is actually accepting: one call site whose
+directory is explicit and whose safety is established locally. §3's "adversarial-only"
+justification for leaving the gap open is nonetheless weaker now, because a reader can no
+longer assume every `-C` checkout of the main tree is hostile. Anyone adding another must
+record it here. The gap itself cannot be closed in `bash-guard.sh`, which is an immune path.
+
+**References:** `.claude/.automation/lib/branch-manager.sh` (post-abort restore);
+`.claude/.automation/tests/test-branch-manager.sh` BM.5;
+`.claude/.automation/tests/test-daemon-recovery-paths.sh` A-1 (the group-worktree case that
+must keep its own branch); known-issues R16 (the group this prevents wedging again).

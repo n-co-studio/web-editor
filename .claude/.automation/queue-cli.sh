@@ -20,6 +20,7 @@
 #   prune [--briefs-only] [--dry-run] [--fix]
 #   recover-entry <id>
 #   reopen-wo <work-order-id>
+#   reset-group-worktree <group> [--yes]
 #   start-daemon
 #   halt
 #   force-halt
@@ -108,6 +109,7 @@ Subcommands:
   reopen-wo <work-order-id>
   reopen-entry <id>
   reset-breaker
+  reset-group-worktree <group> [--yes]
   start-daemon
   halt
   force-halt
@@ -987,6 +989,200 @@ case "$SUBCOMMAND" in
     else
       echo "Circuit breaker cleared (was ${_RB_COUNT:-unknown} consecutive failures, last at ${_RB_AT:-unknown})."
       echo "The daemon will pick up the next eligible entry; if the underlying cause is unfixed it will trip again after ${_CB_TRIP_THRESHOLD} failures."
+    fi
+    ;;
+
+  # --- reset-group-worktree: clear a wedged sequential task group worktree ---
+  # Operator-only (the runner never calls it). A group worktree can be left
+  # mid-rebase, detached or dirty; the runner then blocks every brief of the group
+  # rather than building on it. This discards the UNCOMMITTED state only —
+  # committed work and the branch are kept — and only for a group whose work order
+  # is failed/escalated. Same shape as reset-breaker: sanctioned, explicit, and
+  # idempotent, instead of hand-deleting git state.
+  reset-group-worktree)
+    _RG_GROUP="" _RG_YES=false
+    for _rg_arg in "$@"; do
+      case "$_rg_arg" in
+        --yes|-y) _RG_YES=true ;;
+        -*)
+          echo "ERROR: reset-group-worktree: unknown option $_rg_arg" >&2
+          exit 1
+          ;;
+        *)
+          if [ -n "$_RG_GROUP" ]; then
+            echo "ERROR: reset-group-worktree takes one <group>" >&2
+            exit 1
+          fi
+          _RG_GROUP="$_rg_arg"
+          ;;
+      esac
+    done
+    if [ -z "$_RG_GROUP" ]; then
+      echo "ERROR: reset-group-worktree requires <group> [--yes]" >&2
+      exit 1
+    fi
+    if ! _RG_WT=$(group_worktree_path "$_RG_GROUP"); then
+      echo "ERROR: '$_RG_GROUP' is not a usable group name" >&2
+      exit 1
+    fi
+    # Informational text goes to stdout, or stderr when --json owns stdout.
+    _rg_say() { if [ "$JSON_OUTPUT" = true ]; then echo "$*" >&2; else echo "$*"; fi; }
+
+    if [ ! -d "$_RG_WT" ]; then
+      _rg_say "No worktree for group '$_RG_GROUP' ($_RG_WT) — nothing to reset."
+      if [ "$JSON_OUTPUT" = true ]; then
+        printf '{%s,%s}\n' "$(_json_kv "action" "reset-group-worktree")" "$(_json_kv "result" "nothing-to-reset")"
+      fi
+      exit 0
+    fi
+    if ! is_registered_worktree "$_RG_WT"; then
+      # git -C on an unregistered directory would act on the PARENT repo.
+      echo "ERROR: $_RG_WT exists but is not a registered git worktree — refusing to run git there. Inspect and remove it by hand." >&2
+      exit 1
+    fi
+
+    # Which work orders belong to this group? Matched through each child entry's
+    # brief (### Task Group → canonical "- **Group:**" line via
+    # _parse_brief_taskgroup_metadata). A brief using only the legacy bare "Group:"
+    # form (which the runner's _extract_group_name also accepts) will not match here.
+    _RG_KEY=$(_sanitize_group_name "$_RG_GROUP")
+    _RG_ACTIVE="" _RG_BRANCH="" _RG_REFUSE=""
+    for _rg_wf in "$(_queue_dir)"/work-orders/*.yaml; do
+      [ -f "$_rg_wf" ] || continue
+      _load_work_order "$_rg_wf" || continue
+      [ "$_WO_STATUS" = "completed" ] && continue
+      _rg_wo_id="$_WO_ID"
+      _rg_wo_status="$_WO_STATUS"
+      _rg_hit=false
+      _old_ifs="$IFS"
+      IFS=','
+      # shellcheck disable=SC2086 — intentional word splitting
+      set -- $_WO_ENTRY_IDS
+      IFS="$_old_ifs"
+      for _eid in "$@"; do
+        _ef=$(_find_entry_file "$_eid") || true
+        [ -n "$_ef" ] || continue
+        _load_queue_entry "$_ef" || continue
+        _rg_bp="$_QE_BRIEF_PATH"
+        case "$_rg_bp" in
+          /*) ;;
+          *) _rg_bp="$REPO_ROOT/$_rg_bp" ;;
+        esac
+        [ -f "$_rg_bp" ] || continue
+        _parse_brief_taskgroup_metadata "$_rg_bp" 2>/dev/null || true
+        if [ "$_BRIEF_TG_DETECTED" = true ] \
+           && [ "$(_sanitize_group_name "$_BRIEF_TG_GROUP_NAME")" = "$_RG_KEY" ]; then
+          _rg_hit=true
+          if [ -z "$_RG_BRANCH" ] && [ -n "$_QE_BRANCH" ]; then
+            _RG_BRANCH=$(sanitize_branch_name "$_QE_BRANCH")
+          fi
+        fi
+      done
+      if [ "$_rg_hit" = true ]; then
+        _RG_ACTIVE="${_RG_ACTIVE:+$_RG_ACTIVE }$_rg_wo_id"
+        case "$_rg_wo_status" in
+          failed|escalated) ;;
+          *) _RG_REFUSE="${_RG_REFUSE:+$_RG_REFUSE; }work order $_rg_wo_id is $_rg_wo_status" ;;
+        esac
+      fi
+    done
+
+    if [ -z "$_RG_ACTIVE" ]; then
+      echo "ERROR: no failed or escalated work order found for group '$_RG_GROUP' — refusing to discard the worktree's state. (A group that is still progressing, or already completed, must not be reset.)" >&2
+      exit 1
+    fi
+    if [ -n "$_RG_REFUSE" ]; then
+      echo "ERROR: refusing to reset group '$_RG_GROUP': $_RG_REFUSE (reset is only for a failed or escalated work order)." >&2
+      exit 1
+    fi
+
+    # A live session in the worktree must never have it pulled out from under it.
+    _RG_LOCK=$(_group_worktree_lock_dir "$_RG_GROUP" 2>/dev/null) || _RG_LOCK=""
+    if [ -n "$_RG_LOCK" ] && [ -d "$_RG_LOCK" ]; then
+      _RG_LPID=$(cat "$_RG_LOCK/pid" 2>/dev/null || true)
+      if [ -n "$_RG_LPID" ] && [ "$_RG_LPID" != "$$" ] && kill -0 "$_RG_LPID" 2>/dev/null; then
+        echo "ERROR: group worktree '$_RG_GROUP' is occupied by a live session (pid $_RG_LPID) — stop it first." >&2
+        exit 1
+      fi
+    fi
+
+    # --- Preview: exactly what will be discarded ---
+    _RG_CUR=$(group_worktree_branch "$_RG_WT")
+    _RG_STATUS=$(git -C "$_RG_WT" status --porcelain 2>/dev/null || true)
+    _RG_REBASING=false
+    if _bm_rebase_in_progress "$_RG_WT"; then _RG_REBASING=true; fi
+    _RG_NEEDS=false
+    [ -n "$_RG_STATUS" ] && _RG_NEEDS=true
+    [ "$_RG_REBASING" = true ] && _RG_NEEDS=true
+    if [ -n "$_RG_BRANCH" ] && [ "$_RG_CUR" != "$_RG_BRANCH" ]; then _RG_NEEDS=true; fi
+
+    if [ "$_RG_NEEDS" = false ]; then
+      _rg_say "Group worktree '$_RG_GROUP' ($_RG_WT) is already clean on ${_RG_CUR:-?} — nothing to discard."
+    else
+      _rg_say "reset-group-worktree '$_RG_GROUP' will, in $_RG_WT:"
+      if [ "$_RG_REBASING" = true ]; then
+        _rg_say "  - abort the rebase that is in progress"
+      fi
+      if [ -n "$_RG_BRANCH" ] && [ "$_RG_CUR" != "$_RG_BRANCH" ]; then
+        _rg_say "  - check out $_RG_BRANCH (HEAD is on '${_RG_CUR:-detached}')"
+      fi
+      if [ -n "$_RG_STATUS" ]; then
+        _rg_say "  - DISCARD these uncommitted changes (git reset --hard + git clean -fd):"
+        while IFS= read -r _rg_line; do
+          [ -n "$_rg_line" ] && _rg_say "      $_rg_line"
+        done <<< "$_RG_STATUS"
+      fi
+      _rg_say "  Kept: all committed work and the branch itself; gitignored files (dependencies, caches)."
+    fi
+
+    if [ "$_RG_NEEDS" = true ] && [ "$_RG_YES" != true ]; then
+      if [ -t 0 ]; then
+        printf 'Type "yes" to proceed: '
+        read -r _rg_ans || _rg_ans=""
+        if [ "$_rg_ans" != "yes" ]; then
+          echo "Aborted — nothing was changed." >&2
+          exit 1
+        fi
+      else
+        echo "No terminal to confirm on — nothing was changed. Re-run with --yes to proceed." >&2
+        exit 1
+      fi
+    fi
+
+    if [ "$_RG_NEEDS" = true ]; then
+      if [ "$_RG_REBASING" = true ]; then
+        git -C "$_RG_WT" rebase --abort > /dev/null 2>&1 || true
+      fi
+      _RG_CUR=$(group_worktree_branch "$_RG_WT")
+      if [ -n "$_RG_BRANCH" ] && [ "$_RG_CUR" != "$_RG_BRANCH" ]; then
+        if ! git -C "$_RG_WT" checkout -f "$_RG_BRANCH" > /dev/null 2>&1; then
+          echo "ERROR: could not check out $_RG_BRANCH in $_RG_WT — resolve by hand." >&2
+          exit 1
+        fi
+      fi
+      git -C "$_RG_WT" reset --hard > /dev/null 2>&1 || true
+      git -C "$_RG_WT" clean -fd > /dev/null 2>&1 || true
+      if [ -n "$(git -C "$_RG_WT" status --porcelain 2>/dev/null || true)" ] || _bm_rebase_in_progress "$_RG_WT"; then
+        echo "ERROR: worktree $_RG_WT is still not clean after the reset — resolve by hand." >&2
+        exit 1
+      fi
+      review_log_append "group-worktree-reset" "" "" \
+        "Operator reset group worktree '$_RG_GROUP' ($_RG_WT)" 2>/dev/null || true
+      _rg_say "Group worktree '$_RG_GROUP' reset and clean on $(group_worktree_branch "$_RG_WT")."
+    fi
+
+    # Next steps. Only "behind main" needs a rebase; say so when it applies.
+    _RG_TIP="${_RG_BRANCH:-$(group_worktree_branch "$_RG_WT")}"
+    _rg_say "Next steps:"
+    if [ -n "$_RG_TIP" ] && ! git -C "$_RG_WT" merge-base --is-ancestor main "$_RG_TIP" 2>/dev/null; then
+      _rg_say "  1. Bring the branch up to date: git -C $_RG_WT rebase main  (resolve conflicts, 'git add', 'git rebase --continue')"
+      _rg_say "  2. Resume the group: queue-cli.sh reopen-wo ${_RG_ACTIVE%% *}"
+    else
+      _rg_say "  Resume the group: queue-cli.sh reopen-wo ${_RG_ACTIVE%% *}"
+    fi
+    if [ "$JSON_OUTPUT" = true ]; then
+      printf '{%s,%s,%s}\n' "$(_json_kv "action" "reset-group-worktree")" \
+        "$(_json_kv "group" "$_RG_GROUP")" "$(_json_kv "work_order" "${_RG_ACTIVE%% *}")"
     fi
     ;;
 

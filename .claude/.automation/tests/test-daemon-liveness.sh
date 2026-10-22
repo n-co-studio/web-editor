@@ -536,6 +536,69 @@ _tap_eq "${_EXEC_LAUNCHES:-0}" "2" "both launch sites use 'exec claude -p'"
 _ALL_LAUNCHES=$(printf '%s\n' "$_LAUNCH_CODE" | grep -cF 'claude -p' || true)
 _tap_eq "${_ALL_LAUNCHES:-0}" "2" "no non-exec 'claude -p' launch remains"
 
+printf "# --- Output capture: direct redirect, no orphaned tee ---\n"
+
+# The stderr capture used `2> >(tee "$stderr_file" >&2)`. The tee was orphaned by
+# the subshell's exec and nothing waited on it, so the banner — the LAST thing
+# written — could still be in the pipe when detect_outcome read the file. That
+# race materialised on 2026-10-21. A direct redirect has no intermediate process
+# to outlive the child, so the file is complete when `wait` returns.
+#
+# Static pin (comments stripped): no process substitution anywhere on the launch
+# path. This is the case that fails against the tee construct; a behavioural race
+# repro would be timing-dependent and so would not be a reliable red/green.
+_CAP_CODE=$(grep -v '^[[:space:]]*#' "$_REAL_RUNNER_SRC")
+_CAP_PSUB=$(printf '%s\n' "$_CAP_CODE" | grep -cE '>\(|<\(' || true)
+_tap_eq "${_CAP_PSUB:-0}" "0" "no process substitution remains in runner.sh"
+_CAP_ERR=$(printf '%s\n' "$_CAP_CODE" | grep -cF -- '2>"$stderr_file"' || true)
+_tap_eq "${_CAP_ERR:-0}" "1" "the capture launch redirects stderr straight to the file"
+_CAP_OUT=$(printf '%s\n' "$_CAP_CODE" | grep -cF -- '>"$stdout_file"' || true)
+_tap_eq "${_CAP_OUT:-0}" "1" "the capture launch redirects stdout straight to a file"
+_CAP_ECHO=$(printf '%s\n' "$_CAP_CODE" | grep -cE '^[[:space:]]*cat "\$stderr_file" >&2' || true)
+_tap_eq "${_CAP_ECHO:-0}" "1" "captured stderr is echoed back to daemon.log after the child exits"
+_CAP_ECHO_OUT=$(printf '%s\n' "$_CAP_CODE" | grep -cE '^[[:space:]]*cat "\$stdout_file"[[:space:]]*$' || true)
+_tap_eq "${_CAP_ECHO_OUT:-0}" "1" "captured stdout is echoed back to daemon.log after the child exits"
+# Every detect_outcome caller must hand over BOTH files: a caller that passes only
+# stderr silently loses the stdout half of the detection.
+_CAP_CALLERS=$(printf '%s\n' "$_CAP_CODE" | grep -cE 'detect_outcome .*"\$stderr_file" "\$stdout_file"\)' || true)
+_tap_eq "${_CAP_CALLERS:-0}" "2" "both detect_outcome callers pass stderr and stdout"
+# The echo must precede detect_outcome (the brief: before detect_outcome runs).
+_CAP_ORDER=$(printf '%s\n' "$_CAP_CODE" | grep -nE '^[[:space:]]*cat "\$stderr_file" >&2|_RESULT_OUTCOME=\$\(detect_outcome' | head -1)
+case "$_CAP_ORDER" in
+  *'cat "$stderr_file"'*) _tap_pass "the echo precedes the first detect_outcome call" ;;
+  *) _tap_fail "the echo precedes the first detect_outcome call" "first match was: $_CAP_ORDER" ;;
+esac
+
+# Behavioural: the launch construct on a replica (the real sites are inline in
+# _run_single_entry and cannot be extracted). The stub writes a large stderr
+# burst, then the banner as the LAST thing it does, then exits. Read immediately
+# after `wait` — no sleep, no retry, no sync. Run repeatedly: a race would show
+# up as an occasional missing line, which one lucky pass would hide.
+_CAP_STUB="$ADV_SANDBOX/cap-bin"
+mkdir -p "$_CAP_STUB"
+{
+  printf '#!/usr/bin/env bash\n'
+  printf 'i=0; while [ "$i" -lt 2000 ]; do echo "noise $i" >&2; i=$((i+1)); done\n'
+  printf 'echo "final stdout line"\n'
+  printf 'echo "Error: Reached max turns (400)" >&2\n'
+} > "$_CAP_STUB/claude"
+chmod +x "$_CAP_STUB/claude"
+_CAP_MISSING=0
+_CAP_RUN=0
+while [ "$_CAP_RUN" -lt 10 ]; do
+  _CAP_E="$ADV_SANDBOX/cap-err.$_CAP_RUN"
+  _CAP_O="$ADV_SANDBOX/cap-out.$_CAP_RUN"
+  (cd "$ADV_SANDBOX" && PATH="$_CAP_STUB:$PATH" exec claude -p \
+    <<< "prompt" \
+    >"$_CAP_O" 2>"$_CAP_E") &
+  _CAP_PID=$!
+  wait "$_CAP_PID" || true
+  [ "$(tail -n 1 "$_CAP_E")" = "Error: Reached max turns (400)" ] || _CAP_MISSING=$((_CAP_MISSING + 1))
+  [ "$(tail -n 1 "$_CAP_O")" = "final stdout line" ] || _CAP_MISSING=$((_CAP_MISSING + 1))
+  _CAP_RUN=$((_CAP_RUN + 1))
+done
+_tap_eq "$_CAP_MISSING" "0" "files hold the final line the instant wait returns (10 runs, no sleep)"
+
 printf "# --- Turn budget: exhaustion must never read as success ---\n"
 
 # A session that runs out of turns exits ZERO. On 2026-10-21 two briefs burned
@@ -565,13 +628,36 @@ printf "# --- Turn budget: exhaustion must never read as success ---\n"
   printf 'Reached max turns (400)\n' > "$_TB_BARE"
   printf '%s' "$(detect_outcome 0 "" "$ADV_SANDBOX" "" "$_TB_BARE" 2>/dev/null)" \
     > "$ADV_SANDBOX/tb-bare.out"
-  # The same phrase MID-LINE must not match. This is what the anchor buys: the
-  # previous unanchored form matched the phrase anywhere in the whole captured
-  # stderr, so a trace or a quoted log line would have misclassified a session.
+  # The banner with LEADING content on its line. Observed 2026-10-21: the banner
+  # was immediately followed by a hook WARNING with no newline, i.e. output was
+  # being concatenated with no line discipline, so the banner need not start a
+  # line. The old `^` anchor missed that.
   _TB_MID="$ADV_SANDBOX/stderr-midline.txt"
-  printf 'INFO: the detector greps for Reached max turns in stderr\n' > "$_TB_MID"
+  printf 'earlier output\nWARNING: partial line Error: Reached max turns (400)\n' > "$_TB_MID"
   printf '%s' "$(detect_outcome 0 "" "$ADV_SANDBOX" "" "$_TB_MID" 2>/dev/null)" \
     > "$ADV_SANDBOX/tb-midline.out"
+  # The banner present ONLY in stdout (cause 1: the CLI may print it there).
+  # stderr is clean; stdout is the sixth argument.
+  _TB_OUTONLY="$ADV_SANDBOX/stdout-maxturns.txt"
+  printf 'final answer text\nError: Reached max turns (400)\n' > "$_TB_OUTONLY"
+  printf '%s' "$(detect_outcome 0 "" "$ADV_SANDBOX" "" "$_TB_CLEAN" "$_TB_OUTONLY" 2>/dev/null)" \
+    > "$ADV_SANDBOX/tb-stdout.out"
+  # The phrase EARLY in a long capture with ordinary output after it. This is
+  # what the tail scope buys now that the line anchor is gone: a trace or a
+  # quoted log line far from the end must not misclassify the session.
+  _TB_EARLY="$ADV_SANDBOX/stderr-early.txt"
+  {
+    # Starts the line, so it even satisfies the old `^` anchor: only the tail
+    # scope separates this from a real exhaustion at the end of the capture.
+    printf 'Error: Reached max turns (400)\n'
+    _i=0
+    while [ "$_i" -lt 200 ]; do printf 'ordinary line %d\n' "$_i"; _i=$((_i + 1)); done
+  } > "$_TB_EARLY"
+  printf '%s' "$(detect_outcome 0 "" "$ADV_SANDBOX" "" "$_TB_EARLY" "$_TB_CLEAN" 2>/dev/null)" \
+    > "$ADV_SANDBOX/tb-early.out"
+  # Same, in stdout.
+  printf '%s' "$(detect_outcome 0 "" "$ADV_SANDBOX" "" "$_TB_CLEAN" "$_TB_EARLY" 2>/dev/null)" \
+    > "$ADV_SANDBOX/tb-early-stdout.out"
 ) || true
 
 _TB_OUT=$(cat "$ADV_SANDBOX/tb-noop.out" 2>/dev/null || printf 'MISSING')
@@ -588,14 +674,22 @@ esac
 _TB_BARE_OUT=$(cat "$ADV_SANDBOX/tb-bare.out" 2>/dev/null || printf 'MISSING')
 _tap_eq "$_TB_BARE_OUT" "review:turn-budget-exhausted" "banner without the 'Error: ' prefix still matches"
 _TB_MID_OUT=$(cat "$ADV_SANDBOX/tb-midline.out" 2>/dev/null || printf 'MISSING')
-case "$_TB_MID_OUT" in
-  review:turn-budget-exhausted)
-    _tap_fail "the phrase mid-line does NOT match (anchor holds)" "unanchored match — a log line or trace containing the phrase would misclassify the session" ;;
-  ''|MISSING)
-    _tap_fail "the phrase mid-line does NOT match (anchor holds)" "detector produced nothing" ;;
-  *)
-    _tap_pass "the phrase mid-line does NOT match (anchor holds) ($_TB_MID_OUT)" ;;
-esac
+_tap_eq "$_TB_MID_OUT" "review:turn-budget-exhausted" "banner with leading content on its line still matches"
+_TB_STDOUT_OUT=$(cat "$ADV_SANDBOX/tb-stdout.out" 2>/dev/null || printf 'MISSING')
+_tap_eq "$_TB_STDOUT_OUT" "review:turn-budget-exhausted" "banner present only in stdout still matches"
+for _TB_CASE in early:"phrase early in a long stderr capture does NOT match (tail scope holds)" \
+                early-stdout:"phrase early in a long stdout capture does NOT match (tail scope holds)"; do
+  _TB_KEY="${_TB_CASE%%:*}"; _TB_NAME="${_TB_CASE#*:}"
+  _TB_GOT=$(cat "$ADV_SANDBOX/tb-$_TB_KEY.out" 2>/dev/null || printf 'MISSING')
+  case "$_TB_GOT" in
+    review:turn-budget-exhausted)
+      _tap_fail "$_TB_NAME" "matched outside the tail — a log line or trace quoting the phrase would misclassify the session" ;;
+    ''|MISSING)
+      _tap_fail "$_TB_NAME" "detector produced nothing" ;;
+    *)
+      _tap_pass "$_TB_NAME ($_TB_GOT)" ;;
+  esac
+done
 _TB_NONE_OUT=$(cat "$ADV_SANDBOX/tb-nostderr.out" 2>/dev/null || printf 'MISSING')
 case "$_TB_NONE_OUT" in
   review:turn-budget-exhausted|''|MISSING)
@@ -607,10 +701,10 @@ esac
 # The banner check must sit ahead of the has_new_commits success branch: partial
 # commits followed by exhaustion is the case that most looks like success.
 _TB_ORDER=$(grep -v '^[[:space:]]*#' "$_ADV_REAL_REPO/.claude/.automation/lib/outcome-detector.sh" \
-  | grep -nE 'Reached max turns|has_new_commits" = true' | head -2)
+  | grep -nE '_find_turn_banner "\$stderr_file"|has_new_commits" = true' | head -2)
 _TB_FIRST=$(printf '%s\n' "$_TB_ORDER" | head -1)
 case "$_TB_FIRST" in
-  *"Reached max turns"*) _tap_pass "the exhaustion check precedes the first has_new_commits branch" ;;
+  *"_find_turn_banner"*) _tap_pass "the exhaustion check precedes the first has_new_commits branch" ;;
   *) _tap_fail "the exhaustion check precedes the first has_new_commits branch" "first match was: $_TB_FIRST" ;;
 esac
 

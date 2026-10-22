@@ -44,6 +44,7 @@ test-prompt-assembler.sh
 test-daemon-liveness.sh
 test-eval-model-routing.sh
 test-queue-manipulation.sh
+test-daemon-recovery-paths.sh
 "
 # Note: test-queue-manipulation.sh uses adversarial severity labels ([HIGH]/[MEDIUM]/[LOW])
 # in its test names, but its cases gate on exit code — not on the tags. This runner only

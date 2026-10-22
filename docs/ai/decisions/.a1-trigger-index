@@ -1,7 +1,7 @@
 # A1 trigger index — generated artifact. Do not hand-edit.
 # Regenerate: bash .claude/.automation/lib/rebuild-trigger-index.sh
 # format: 2
-# digest: d12c25f0945669211d70c956725abeb57d90b880bcd61ab764c124135879132b
+# digest: 5329b0a2c09451ad2fa0d03984634b41ebd69237a369b1698f72b35d1e7b1aa2
 0001AI\.mdprompt system, verification gate, session-based
 0001docs/ai/prompts/prompt-.*\.mdprompt system, verification gate, session-based
 0002docs/ai/decisions/.*\.mdmandatory, commit-blocking
@@ -127,6 +127,7 @@
 0053\.claude/tools/gate-conformance\.shcommit trailer, Decisions trailer, recover-signal, COMMIT_CMD, commit message, one-shot signal, proxy
 0054\.claude/(\.automation/(runner|lib/group-worktree-sweep|lib/cleanup)|hooks/(_cleanup-helper|session-close-check))\.shgroup worktree, tg-, group_worktree_path, acquire_group_worktree_lock, remove_group_worktree, sweep_stale_group_worktrees, clean-start, worktree lifetime, worktree reuse
 0058\.claude/hooks/plan-approval\.shplan-approval, Gate 1, Gate 2, not_approved, affirmative, silent, warning, stale marker
+0059\.claude/hooks/state-writer\.shdispatch_phase, phase_late_accepted, REPO_OS_STRICT_DISPATCH_PHASE, dispatch_phase_discrepancy, phase_mismatch
 0001AI\.mdprompt system, verification gate, session-based
 0001docs/ai/prompts/prompt-.*\.mdprompt system, verification gate, session-based
 0002docs/ai/decisions/.*\.mdmandatory, commit-blocking

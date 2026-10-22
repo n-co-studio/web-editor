@@ -10,7 +10,8 @@
 # Outcomes, in the order the exit-0 path tests them. This list is the only
 # enumeration of them in the codebase, so keep it current — it had drifted four
 # details behind by 2026-10-21.
-#   review    — turn-budget-exhausted (exit 0 + "Reached max turns" in stderr;
+#   review    — turn-budget-exhausted (exit 0 + "Reached max turns" in the last
+#               runner.stderr_tail_lines lines of captured stderr OR stdout;
 #               checked FIRST, ahead of every success branch)
 #   review    — scope-deviation (exit 0 + scope-deviation escalation)
 #   review    — escalation (exit 0 + escalation file or tag=operator)
@@ -23,6 +24,30 @@
 #   failed    — crash (non-zero + dirty tree)
 #   failed    — clean-failure (non-zero + clean tree)
 # Every review:* detail is cleared with `queue-cli.sh reopen-entry <id>`.
+
+# --- Find the turn-budget banner in the tail of the captured streams ---
+# Arguments: any number of capture-file paths (empty or missing ones are skipped,
+#   which is the mktemp-failure path: no detection, no crash).
+# Output: the first path whose last N lines contain the banner, else nothing.
+#   N is runner.stderr_tail_lines (default 50, also used when the config reader
+#   is not loaded or returns something non-numeric).
+_find_turn_banner() {
+  local _tail_n=""
+  if declare -f _parse_config_field > /dev/null 2>&1; then
+    _tail_n=$(_parse_config_field "runner" "stderr_tail_lines" 2>/dev/null || true)
+  fi
+  case "$_tail_n" in ''|*[!0-9]*) _tail_n=50 ;; esac
+  [ "$_tail_n" -gt 0 ] || _tail_n=50
+  local _f
+  for _f in "$@"; do
+    [ -n "$_f" ] && [ -f "$_f" ] || continue
+    if tail -n "$_tail_n" "$_f" 2>/dev/null | grep -qF 'Reached max turns'; then
+      printf '%s' "$_f"
+      return 0
+    fi
+  done
+  return 0
+}
 
 # Audit C6: guard against missing _phase-helper.sh dependency
 if ! declare -f _validate_phase_session > /dev/null 2>&1; then
@@ -37,6 +62,8 @@ fi
 #   $3 — repo_root (absolute path)
 #   $4 — entry_id (optional; queue entry ID for enriched blocker reports)
 #   $5 — stderr_file (optional; path to captured stderr for blocker reports)
+#   $6 — stdout_file (optional; path to captured stdout; scanned for the
+#        turn-budget banner alongside stderr)
 # Output: "outcome:detail" on stdout (e.g., "completed:success", "failed:crash")
 #   Caller parses with: OUTCOME="${result%%:*}" DETAIL="${result#*:}"
 detect_outcome() {
@@ -45,6 +72,7 @@ detect_outcome() {
   local repo_root="$3"
   local entry_id="${4:-}"
   local stderr_file="${5:-}"
+  local stdout_file="${6:-}"
 
   local has_new_commits=false
   local has_dirty_tree=false
@@ -137,9 +165,10 @@ detect_outcome() {
     # completed its brief either, and its partial commits are exactly what makes
     # that case look like success.
     #
-    # The signal has to be the stderr text, because the exit code is 0 and
-    # carries nothing. `stderr_file` is empty only when mktemp failed at launch;
-    # that path is already degraded and the check simply cannot fire there.
+    # The signal has to be the captured output text, because the exit code is 0
+    # and carries nothing. The capture files are empty only when mktemp failed at
+    # launch (runner.sh blanks both together); that path is already degraded and
+    # the check simply cannot fire there.
     #
     # Way out of this outcome (it must not become another guard with no exit):
     # raise `runner.session_max_turns` or split the brief, THEN
@@ -152,26 +181,32 @@ detect_outcome() {
     # of this comment confidently named two commands that cannot move the
     # entry. Review caught it. Documented in
     # .claude/.automation/docs/blocker-playbook.md section 14.
-    if [ -n "$stderr_file" ] && [ -f "$stderr_file" ]; then
-      # Anchored to start-of-line, and the `Error: ` prefix is optional so a
-      # reworded banner still matches. Anchoring matters: the previous
-      # unanchored case-insensitive form matched the phrase ANYWHERE in the
-      # whole captured stderr for all time, so any future wrapper, `set -x`
-      # trace or hook message containing it would misclassify the session —
-      # and misclassification is sticky, since the entry then needs an operator.
-      # Observed banner, from a real run on 2026-10-21:
-      #   Error: Reached max turns (200)
-      if grep -qE '^(Error: )?Reached max turns' "$stderr_file" 2>/dev/null; then
-        # Persist the evidence before returning. Every other review:* detail
-        # leaves an artifact — an escalation YAML or an error_log — and this one
-        # left only a line in daemon.log, with `runner.sh` deleting the stderr
-        # temp file straight after. For an outcome whose entire purpose is "do
-        # not silently drop approved work", discarding the reason the work was
-        # dropped is the wrong half to keep.
-        _write_blocker_report "$exit_code" "$repo_root" "$entry_id" "$stderr_file" 2>/dev/null || true
-        echo "review:turn-budget-exhausted"
-        return
-      fi
+    # Both captured streams are scanned, because which one carries the banner
+    # was never established (the CLI cannot be spawned from a governed session).
+    # The match is NOT anchored to start-of-line: on 2026-10-21 the banner was
+    # immediately followed by a hook WARNING with no newline, so output reaches
+    # these files without line discipline and the banner need not start a line.
+    # What keeps the match from misfiring is scope, not anchoring — only the last
+    # `runner.stderr_tail_lines` lines are searched. The older unanchored form
+    # matched the phrase ANYWHERE in the whole capture for all time, so any
+    # wrapper, `set -x` trace or hook message quoting it would misclassify the
+    # session, and misclassification is sticky (the entry then needs an
+    # operator). Exhaustion is always the END of a session; a stray mention
+    # earlier in a long one is not. Observed banner, 2026-10-21:
+    #   Error: Reached max turns (200)
+    local _banner_file
+    _banner_file=$(_find_turn_banner "$stderr_file" "$stdout_file")
+    if [ -n "$_banner_file" ]; then
+      # Persist the evidence before returning. Every other review:* detail
+      # leaves an artifact — an escalation YAML or an error_log — and this one
+      # left only a line in daemon.log, with `runner.sh` deleting the temp
+      # files straight after. For an outcome whose entire purpose is "do not
+      # silently drop approved work", discarding the reason the work was
+      # dropped is the wrong half to keep. The report tails the file the
+      # banner was actually found in.
+      _write_blocker_report "$exit_code" "$repo_root" "$entry_id" "$_banner_file" 2>/dev/null || true
+      echo "review:turn-budget-exhausted"
+      return
     fi
     # Escalation check (exit 0 but needs operator review)
     if [ "$has_escalation" = true ] || [ "$has_operator_tag" = true ]; then

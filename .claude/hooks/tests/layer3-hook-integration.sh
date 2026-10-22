@@ -496,6 +496,77 @@ assert_file_exists "$STATE_DIR/cohesion-reviewed" "state-writer writes cohesion-
 phase_after=$(get_phase)
 assert_eq "$phase_after" "verify" "state-writer advances review→verify on critic APPROVED"
 
+# --- t-0059: a critic dispatched LATE is accepted, with the discrepancy recorded ---
+# Between 2026-10-20 and 22, twenty verdicts were discarded on the dispatch-phase
+# check. Every one was at or after the expected phase — a critic dispatched from
+# `verify` or `commit` while expecting `review` — and every one carried
+# GATE_RESULT: APPROVED. Discarding them made the gate they fed unsatisfiable,
+# and with no backward edge from `commit` five sessions were stuck and lost
+# their work. Accepting at-or-after is the fix; see the EARLY case below for the
+# half that must still be refused.
+reset_phase "standard"
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "review" 2>/dev/null
+_advance "verify" 2>/dev/null
+rm -f "$STATE_DIR/cohesion-reviewed"
+# Pin the precondition. Without this the case passes trivially whenever the
+# advance to `verify` did not take: the phase stays at `review`, there is no
+# mismatch to forgive, and the verdict is accepted by the ordinary path — so the
+# assertion below would be green with or without the fix. Assert the phase is
+# actually ahead of `review` before invoking the hook.
+assert_eq "$(get_phase)" "verify" "t-0059: precondition — phase is ahead of review before dispatch"
+run_hook_rc "state-writer.sh" \
+  "$(fixture_subagentstop "critic" $'Review complete.\nGATE_RESULT: APPROVED')"
+assert_file_exists "$STATE_DIR/cohesion-reviewed" "t-0059: critic dispatched from verify is ACCEPTED (was discarded)"
+# Assert the phase NAME, not just the prefix. A prefix-only assertion passed
+# while the line read "dispatched from -e" — a mangled substitution that made
+# the record useless for the reader it exists for, and the test could not see it.
+assert_file_contains "$STATE_DIR/cohesion-reviewed" "dispatch_phase_discrepancy: dispatched from verify, expected review" "t-0059: the discrepancy names the actual phases"
+assert_file_contains "$STATE_DIR/cohesion-reviewed" "GATE_RESULT:" "t-0059: the discrepancy line does not displace GATE_RESULT"
+
+# --- t-0059: the COMBINED write path records the phases too ---
+# The case above exercises only the single-mode write. Combined mode is the
+# DEFAULT critic dispatch (t-0039) and writes two files through a separate
+# printf, so an `-e`-style regression reintroduced there alone would pass the
+# suite green — which is exactly how the first one survived.
+reset_phase "standard"
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "review" 2>/dev/null
+_advance "verify" 2>/dev/null
+rm -f "$STATE_DIR/cohesion-reviewed" "$STATE_DIR/diff-review-complete"
+run_hook_rc "state-writer.sh" \
+  "$(fixture_subagentstop "critic" $'## Cohesion Brief\nNo incoherence found.\nGATE_RESULT: APPROVED\n\n## Diff-Review Brief\nNo mechanical defects.\nGATE_RESULT: APPROVED')"
+assert_file_contains "$STATE_DIR/cohesion-reviewed" "dispatch_phase_discrepancy: dispatched from verify, expected review" "t-0059: combined mode records the phases in cohesion-reviewed"
+assert_file_contains "$STATE_DIR/diff-review-complete" "dispatch_phase_discrepancy: dispatched from verify, expected review" "t-0059: combined mode records the phases in diff-review-complete"
+
+# --- t-0059: a critic dispatched EARLY is still refused ---
+# This is the half that must not be relaxed. A critic dispatched at `plan`, before
+# the code exists, would review an empty diff and return APPROVED — and the commit
+# gates check only that `dispatch_phase:` is present, never its value. Accepting
+# that would make A5 satisfiable without the built code ever being reviewed.
+reset_phase "standard"
+_advance "plan" 2>/dev/null
+rm -f "$STATE_DIR/cohesion-reviewed"
+run_hook_rc "state-writer.sh" \
+  "$(fixture_subagentstop "critic" $'Looks fine.\nGATE_RESULT: APPROVED')"
+assert_file_not_exists "$STATE_DIR/cohesion-reviewed" "t-0059: critic dispatched from plan (EARLY) is still refused"
+
+# --- t-0059: the override restores exact-match behaviour ---
+reset_phase "standard"
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "review" 2>/dev/null
+_advance "verify" 2>/dev/null
+rm -f "$STATE_DIR/cohesion-reviewed"
+REPO_OS_STRICT_DISPATCH_PHASE=1 run_hook_rc "state-writer.sh" \
+  "$(fixture_subagentstop "critic" $'Review complete.\nGATE_RESULT: APPROVED')"
+assert_file_not_exists "$STATE_DIR/cohesion-reviewed" "t-0059: REPO_OS_STRICT_DISPATCH_PHASE=1 restores strict rejection"
+
 # --- critic BLOCKED → writes file but does NOT advance phase ---
 reset_phase "standard"
 _advance "plan" 2>/dev/null
