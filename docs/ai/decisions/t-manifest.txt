@@ -65,3 +65,4 @@ t-0054-task-group-worktree-lifetime.md
 t-0058-plan-approval-silent-path.md
 t-0059-directional-dispatch-phase.md
 t-0060-bash-verification-execution.md
+t-0061-adversarial-runner-fail-closed.md

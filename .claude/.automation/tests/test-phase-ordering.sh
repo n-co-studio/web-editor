@@ -15,14 +15,14 @@ source "$SCRIPT_DIR/sandbox-setup.sh"
 # numbered every case "ok 1", whatever actually happened. Tally through a file
 # instead, which the subshells share.
 _TAP_LOG="$(mktemp "${TMPDIR:-/tmp}/repo-os-tap-XXXXXX")"
-# No EXIT trap here deliberately. A guarded `trap ... EXIT` was tried and
-# broke all three suites: a case subshell inherits the trap, the BASHPID guard
-# evaluates false, the `&&` returns non-zero, that becomes the subshell's exit
-# status, and `set -e` killed the parent after the first case. The new
-# harness-integrity check in test-runner.sh caught it as 3 CRITICAL "suite
-# emitted no TAP cases". Accepted consequence: a suite that dies mid-run leaks
-# one repo-os-tap-* file in $TMPDIR. finish() removes it on every normal exit,
-# and nothing is ever written inside the repo.
+trap 'rm -f "$_TAP_LOG"' EXIT
+# Remove the tally on any exit, including an abort before finish() runs.
+# Unguarded on purpose. An earlier attempt guarded this on BASHPID and broke
+# every suite; the cause was NOT subshell trap inheritance (bash does not
+# inherit an EXIT trap into a ( ) subshell) but that BASHPID is a bash 4.0+
+# variable and these suites run under bash 3.2, so `set -u` made it a fatal
+# unbound-variable error before the first case. No guard is needed: the trap
+# does not fire in the case subshells, which set their own EXIT trap anyway.
 _tap_n() { wc -l < "$_TAP_LOG" | tr -d '[:space:]'; }
 _tap_pass() { printf 'P\t%s\n' "$1" >> "$_TAP_LOG"; printf "ok %s - %s\n" "$(_tap_n)" "$1"; return 0; }
 _tap_fail() {
@@ -63,6 +63,27 @@ printf "# === Phase Ordering Attacks ===\n"
     _tap_fail "[CRITICAL] Forward-jump plan→commit should be blocked" "advance_phase allows arbitrary forward skip"
   else
     _tap_pass "[CRITICAL] Forward-jump plan→commit blocked"
+  fi
+)
+
+# --- Test 1b: the non-adjacency rule alone, with no substance gate involved ---
+# The other forward-jump cases are all ALSO blocked by a substance gate (a
+# missing pragmatist-signed, cohesion-reviewed or qa-verified), so disabling
+# the ordering check leaves them green and they do not pin that layer.
+# init -> plan is the exception: `plan` requires no verdict file, so the only
+# thing that can refuse this jump is the non-skippable intermediate
+# `drift-check` (Decision 0038). If this case passes while the others also
+# pass, the ordering rule is genuinely live.
+(
+  setup_adversarial_sandbox
+  trap 'teardown_adversarial_sandbox' EXIT
+  init_phase "standard"
+  rc=0; advance_phase "plan" 2>/dev/null || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    _tap_pass "[HIGH] Non-adjacency rule alone refuses init->plan over drift-check"
+  else
+    _tap_fail "[HIGH] init->plan skipped the non-skippable drift-check phase" \
+      "no substance gate guards this jump, so the ordering rule is not enforcing"
   fi
 )
 

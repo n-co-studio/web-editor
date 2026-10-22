@@ -1,7 +1,17 @@
 #!/usr/bin/env bash
 # Adversarial test runner — executes all attack suites and produces summary.
 # Parses severity tags [CRITICAL], [HIGH], [MEDIUM], [LOW] from TAP output.
-# Exits non-zero if any CRITICAL or HIGH governance bypasses found.
+#
+# Gating (Decision t-0061): exits non-zero on CRITICAL, HIGH, MEDIUM, or any
+# failure whose severity cannot be determined. Only an explicitly [LOW]-tagged
+# failure is advisory.
+#
+# Why an untagged failure gates: untagged failures used to fall to MEDIUM, and
+# MEDIUM did not gate, so a failure the runner could not classify could not
+# fail the run — fail-open on exactly the case it understands least. Measured,
+# not theorised: the "SETUP: could not reach phase" failures that report an
+# adversarial case never running are untagged, so forcing them produced
+# 14 of them, printed "RESULT: 14 governance bypass(es) found", and exited 0.
 #
 # Usage: bash test-runner.sh
 
@@ -63,7 +73,10 @@ for suite in "${SUITES[@]}"; do
           *"[HIGH]"*)     s_high=$((s_high + 1)) ;;
           *"[MEDIUM]"*)   s_medium=$((s_medium + 1)) ;;
           *"[LOW]"*)      s_low=$((s_low + 1)) ;;
-          *)              s_medium=$((s_medium + 1)) ;; # default to medium
+          # Unclassifiable failure -> CRITICAL, not MEDIUM. Failing closed on
+          # unknown severity (Decision t-0061). An untagged failure is the one
+          # the runner understands least, so it must not be the one it ignores.
+          *)              s_critical=$((s_critical + 1)) ;;
         esac
         ;;
     esac
@@ -131,7 +144,12 @@ echo "RESULT: $TOTAL_FAIL governance bypass(es) found"
 echo "  CRITICAL: $TOTAL_CRITICAL  HIGH: $TOTAL_HIGH  MEDIUM: $TOTAL_MEDIUM  LOW: $TOTAL_LOW"
 
 # Exit non-zero if critical or high severity bypasses
-if [ "$TOTAL_CRITICAL" -gt 0 ] || [ "$TOTAL_HIGH" -gt 0 ]; then
+# Decision t-0061: MEDIUM gates too. Only an explicitly [LOW]-tagged failure
+# is advisory. MEDIUM tags real correctness checks in these suites (queue lock
+# starvation, transition without a lock, JSON injection into the queue index,
+# YAML duplicate-field override), so treating them as non-blocking was never a
+# considered policy — it was a side effect of the untagged default above.
+if [ "$TOTAL_CRITICAL" -gt 0 ] || [ "$TOTAL_HIGH" -gt 0 ] || [ "$TOTAL_MEDIUM" -gt 0 ]; then
   exit 1
 fi
 exit 0

@@ -9,10 +9,40 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/sandbox-setup.sh"
 
 # --- TAP infrastructure ---
-_TAP_NUM=0; _TAP_PASS=0; _TAP_FAIL=0; _TAP_FAILURES=""
-_tap_pass() { _TAP_NUM=$((_TAP_NUM+1)); _TAP_PASS=$((_TAP_PASS+1)); printf "ok %d - %s\n" "$_TAP_NUM" "$1"; }
-_tap_fail() { _TAP_NUM=$((_TAP_NUM+1)); _TAP_FAIL=$((_TAP_FAIL+1)); printf "not ok %d - %s\n" "$_TAP_NUM" "$1"; [ -n "${2:-}" ] && printf "  # %s\n" "$2"; _TAP_FAILURES="${_TAP_FAILURES}  FAIL: $1\n"; }
-finish() { printf "\n1..%d\n# Tests: %d  Pass: %d  Fail: %d\n" $((_TAP_PASS+_TAP_FAIL)) $((_TAP_PASS+_TAP_FAIL)) "$_TAP_PASS" "$_TAP_FAIL"; [ "$_TAP_FAIL" -gt 0 ] && printf "# Failures:\n%b" "$_TAP_FAILURES"; return "$_TAP_FAIL"; }
+# Every case runs in its own ( ) subshell, so counter VARIABLES cannot survive
+# it: each case incremented a fresh copy and the parent's totals stayed at zero.
+# This suite therefore reported "Tests: 0 Pass: 0 Fail: 0" and numbered every
+# case "ok 1", whatever happened. Tally through a file the subshells share.
+# Remove the tally on any exit, including an abort before finish() runs.
+# Unguarded on purpose. An earlier attempt guarded this on BASHPID and broke
+# every suite; the cause was NOT subshell trap inheritance (bash does not
+# inherit an EXIT trap into a ( ) subshell) but that BASHPID is a bash 4.0+
+# variable and these suites run under bash 3.2, so `set -u` made it a fatal
+# unbound-variable error before the first case. No guard is needed: the trap
+# does not fire in the case subshells, which set their own EXIT trap anyway.
+_TAP_LOG="$(mktemp "${TMPDIR:-/tmp}/repo-os-tap-XXXXXX")"
+trap 'rm -f "$_TAP_LOG"' EXIT
+_tap_n() { wc -l < "$_TAP_LOG" | tr -d '[:space:]'; }
+_tap_pass() { printf 'P\t%s\n' "$1" >> "$_TAP_LOG"; printf "ok %s - %s\n" "$(_tap_n)" "$1"; return 0; }
+_tap_fail() {
+  printf 'F\t%s\t%s\n' "$1" "${2:-}" >> "$_TAP_LOG"
+  printf "not ok %s - %s\n" "$(_tap_n)" "$1"
+  [ -n "${2:-}" ] && printf "  # %s\n" "$2"
+  return 0
+}
+finish() {
+  local total pass fail
+  total=$(_tap_n)
+  pass=$(grep -c '^P' "$_TAP_LOG" 2>/dev/null) || pass=0
+  fail=$(grep -c '^F' "$_TAP_LOG" 2>/dev/null) || fail=0
+  printf "\n1..%s\n# Tests: %s  Pass: %s  Fail: %s\n" "$total" "$total" "$pass" "$fail"
+  if [ "$fail" -gt 0 ]; then
+    printf "# Failures:\n"
+    grep '^F' "$_TAP_LOG" | cut -f2 | sed 's/^/  FAIL: /'
+  fi
+  rm -f "$_TAP_LOG"
+  return "$fail"
+}
 
 printf "# === Escalation Suppression Attacks ===\n"
 

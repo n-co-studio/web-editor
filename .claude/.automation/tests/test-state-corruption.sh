@@ -16,14 +16,14 @@ source "$SCRIPT_DIR/sandbox-setup.sh"
 # numbered every case "ok 1", whatever actually happened. Tally through a file
 # instead, which the subshells share.
 _TAP_LOG="$(mktemp "${TMPDIR:-/tmp}/repo-os-tap-XXXXXX")"
-# No EXIT trap here deliberately. A guarded `trap ... EXIT` was tried and
-# broke all three suites: a case subshell inherits the trap, the BASHPID guard
-# evaluates false, the `&&` returns non-zero, that becomes the subshell's exit
-# status, and `set -e` killed the parent after the first case. The new
-# harness-integrity check in test-runner.sh caught it as 3 CRITICAL "suite
-# emitted no TAP cases". Accepted consequence: a suite that dies mid-run leaks
-# one repo-os-tap-* file in $TMPDIR. finish() removes it on every normal exit,
-# and nothing is ever written inside the repo.
+trap 'rm -f "$_TAP_LOG"' EXIT
+# Remove the tally on any exit, including an abort before finish() runs.
+# Unguarded on purpose. An earlier attempt guarded this on BASHPID and broke
+# every suite; the cause was NOT subshell trap inheritance (bash does not
+# inherit an EXIT trap into a ( ) subshell) but that BASHPID is a bash 4.0+
+# variable and these suites run under bash 3.2, so `set -u` made it a fatal
+# unbound-variable error before the first case. No guard is needed: the trap
+# does not fire in the case subshells, which set their own EXIT trap anyway.
 _tap_n() { wc -l < "$_TAP_LOG" | tr -d '[:space:]'; }
 _tap_pass() { printf 'P\t%s\n' "$1" >> "$_TAP_LOG"; printf "ok %s - %s\n" "$(_tap_n)" "$1"; return 0; }
 _tap_fail() {
@@ -309,9 +309,26 @@ _stage_and_fixture() {
   echo "0000000000000000000000000000000000000000" > "$ADV_SANDBOX/.claude/.session-baseline-sha"
   # Session-close-check reads this for recent-commits calculation
   # This should not cause a crash or false positive
-  run_adv_hook "session-close-check.sh" "{}"
-  # We're testing resilience — any non-crash is acceptable
-  _tap_pass "[HIGH] Baseline SHA forgery handled without crash (rc=$ADV_LAST_RC)"
+  _bl_out=$(cd "$ADV_SANDBOX" && printf '{}' | bash "$ADV_SANDBOX/.claude/hooks/session-close-check.sh" 2>&1) || ADV_LAST_RC=$?
+  # "Resilience" was previously asserted by calling _tap_pass unconditionally,
+  # so this case could not fail. There IS a deterministic outcome to pin: the
+  # gate-exit contract (Decision t-0049) defines 0 and 2 as the only valid hook
+  # exits — 2 blocks, 0 allows. Anything else (1, 127, a signal) means the hook
+  # fell over on the forged value rather than handling it. A bash diagnostic in
+  # the output means the same thing even when the exit code looks benign.
+  case "${ADV_LAST_RC:-0}" in
+    0|2) _bl_rc_ok=true ;;
+    *)   _bl_rc_ok=false ;;
+  esac
+  if printf '%s' "$_bl_out" | grep -qE 'line [0-9]+:|command not found|unbound variable|syntax error'; then
+    _tap_fail "[HIGH] Baseline SHA forgery produced a shell error" \
+      "rc=$ADV_LAST_RC; hook emitted a bash diagnostic rather than handling the forged value"
+  elif [ "$_bl_rc_ok" = true ]; then
+    _tap_pass "[HIGH] Baseline SHA forgery handled within the gate-exit contract (rc=$ADV_LAST_RC)"
+  else
+    _tap_fail "[HIGH] Baseline SHA forgery produced an out-of-contract exit" \
+      "rc=$ADV_LAST_RC — Decision t-0049 allows only 0 or 2"
+  fi
 )
 
 # --- Test 13: Stale state file from previous session ---

@@ -1278,7 +1278,7 @@ nodes:
   - id: "file-test-phase-ordering"
     type: "file"
     path: ".claude/.automation/tests/test-phase-ordering.sh"
-    description: "Adversarial suite: phase-ordering attacks (forward jumps, direct state edits, session-type manipulation, double-init, concurrent writes). 13 cases. Repaired 2026-10-22 (R32): ran 0 of 13 because every case jumped init->plan while drift-check sits between and is not skippable (Decision 0038), aborting the suite under set -e. Now uses the shared _reach/_setup_at helper in sandbox-setup.sh; attacks still call bare advance_phase so nothing seeded for setup can make one pass for the wrong reason, and unreachable setup reports a visible failing case. Forgeries re-pointed from the retired flat state path to get_session_state_dir() (Decision 0030). TAP tally moved to a shared temp file because per-subshell counters never aggregated. The direct-phase-state-edit case was unfailable (_tap_pass in both branches) and is now a real assertion documenting the residual no-content-integrity risk. KNOWN WEAKNESS: the forward-jump cases are held by the independent substance gates, not by the non-adjacency ordering rule — disabling that rule alone leaves all 13 green, so they do not pin that layer"
+    description: "Adversarial suite: phase-ordering attacks (forward jumps, direct state edits, session-type manipulation, double-init, concurrent writes). 14 cases, including an isolator for the non-adjacency ordering rule: init->plan is the one forward jump no substance gate guards, and under mutation it is the ONLY phase-ordering case that goes red when that rule is disabled (Decision t-0061 work). Repaired 2026-10-22 (R32): ran 0 of 13 because every case jumped init->plan while drift-check sits between and is not skippable (Decision 0038), aborting the suite under set -e. Now uses the shared _reach/_setup_at helper in sandbox-setup.sh; attacks still call bare advance_phase so nothing seeded for setup can make one pass for the wrong reason, and unreachable setup reports a visible failing case. Forgeries re-pointed from the retired flat state path to get_session_state_dir() (Decision 0030). TAP tally moved to a shared temp file because per-subshell counters never aggregated. The direct-phase-state-edit case was unfailable (_tap_pass in both branches) and is now a real assertion documenting the residual no-content-integrity risk. KNOWN WEAKNESS: the forward-jump cases are held by the independent substance gates, not by the non-adjacency ordering rule — disabling that rule alone leaves all 13 green, so they do not pin that layer"
     last_verified: "2026-10-22"
     status: "active"
     layer: "template"
@@ -1292,7 +1292,7 @@ nodes:
   - id: "file-test-gate-bypass"
     type: "file"
     path: ".claude/.automation/tests/test-gate-bypass.sh"
-    description: "Adversarial suite: gate-bypass attacks (spoofed/misplaced GATE_RESULT, agent-type spoofing, emergency and stacked overrides, headless AskUserQuestion, phase advance without a verdict, stale cross-session state). 12 cases. Repaired 2026-10-22 (R32): 13 forgery sites re-pointed to get_session_state_dir(); SIX chained setup walks were failing silently (set -e does not fire in the left operand of an && list) so every attack ran from init rather than review/build and was rejected for the wrong reason; the phase-advance case called _tap_pass in all three branches and could not fail; and tests 6/7 wrote `VAR=1 printf ... | bash hook`, binding the override to printf so it never reached the hook. Those two now pin the real boundary: REPO_OS_RECOVER=1 skips state-dependent gates by design (pre-commit-gates.sh:26, audited via log_override at :187) while A4 secret scanning still blocks, confirmed by a 2x2 control probe over secret/clean x override/no-override plus stacked overrides. NOTE: the earlier KG claim of '11/11 passing' was not evidence of discrimination — at that point the attacks were landing in the wrong phase. Under mutation (pre-commit-gates forced to exit 0) only a subset of cases goes red; the suite is not uniformly discriminating"
+    description: "Adversarial suite: gate-bypass attacks (spoofed/misplaced GATE_RESULT, agent-type spoofing, emergency and stacked overrides, headless AskUserQuestion, phase advance without a verdict, stale cross-session state, EARLY dispatch-phase refusal). 13 cases. The early-dispatch case pins the security-relevant half of Decision t-0059: a critic verdict dispatched from build (before review) must be refused, since the commit gates check only that dispatch_phase is present, never its value. Repaired 2026-10-22 (R32): 13 forgery sites re-pointed to get_session_state_dir(); SIX chained setup walks were failing silently (set -e does not fire in the left operand of an && list) so every attack ran from init rather than review/build and was rejected for the wrong reason; the phase-advance case called _tap_pass in all three branches and could not fail; and tests 6/7 wrote `VAR=1 printf ... | bash hook`, binding the override to printf so it never reached the hook. Those two now pin the real boundary: REPO_OS_RECOVER=1 skips state-dependent gates by design (pre-commit-gates.sh:26, audited via log_override at :187) while A4 secret scanning still blocks, confirmed by a 2x2 control probe over secret/clean x override/no-override plus stacked overrides. NOTE: the earlier KG claim of '11/11 passing' was not evidence of discrimination — at that point the attacks were landing in the wrong phase. Under mutation (pre-commit-gates forced to exit 0) only a subset of cases goes red; the suite is not uniformly discriminating"
     last_verified: "2026-10-22"
     status: "active"
     layer: "template"
@@ -1303,7 +1303,24 @@ nodes:
     last_verified: "2026-10-22"
     status: "active"
     layer: "template"
+  - id: "decision-0061"
+    type: "decision"
+    path: "docs/ai/decisions/t-0061-adversarial-runner-fail-closed.md"
+    description: "Decision record: the adversarial runner fails closed on unknown severity. Exits non-zero on CRITICAL, HIGH, MEDIUM, or any failure whose severity cannot be determined; only an explicit [LOW] tag is advisory. Previously untagged failures fell to MEDIUM and MEDIUM did not gate, so a failure the runner could not classify could not fail the run. Measured: forcing the untagged SETUP failures produced 13 of them, printed 'RESULT: 13 governance bypass(es) found' and exited 0. Landed while all five suites were at 0 failures, so it turned nothing red. Mutation-verified both directions"
+    last_verified: "2026-10-22"
+    status: "active"
+    layer: "template"
 edges:
+  # --- Decision t-0061 (adversarial runner fails closed) governance ---
+  - source: "decision-0061"
+    target: "file-test-runner"
+    relation: "governs"
+    context: "Severity gating policy: CRITICAL, HIGH, MEDIUM and undeterminable severities all gate; only explicit [LOW] is advisory. Untagged failures count as CRITICAL rather than MEDIUM, and SETUP failures are tagged at source rather than relying on the default"
+    source_type: "agent-inferred"
+    last_verified: "2026-10-22"
+    status: "active"
+    confidence: 0.95
+
   # --- Decision t-0060 (headless verification-script execution) governance ---
   - source: "decision-0060"
     target: "hook-permission-allowlist"

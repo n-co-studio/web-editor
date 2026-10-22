@@ -183,7 +183,7 @@ _setup_at() {
   if [ $# -ge 2 ]; then stype="$1"; target="$2"; else target="$1"; fi
   init_phase "$stype" >/dev/null 2>&1 || true
   if ! _reach "$target"; then
-    _tap_fail "SETUP: could not reach phase '$target'" \
+    _tap_fail "[CRITICAL] SETUP: could not reach phase '$target'" \
       "precondition unmet at '${_REACH_FAILED_AT}' — case NOT exercised: $(printf '%s' "${_REACH_ERR}" | head -1 | cut -c1-140)"
     return 1
   fi
