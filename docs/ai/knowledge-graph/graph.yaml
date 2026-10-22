@@ -3,7 +3,7 @@
 # Seeded from governance metadata on 2026-03-31
 
 schema_version: 1
-last_updated: "2026-10-22T07:23:21Z"
+last_updated: "2026-10-22T16:28:54Z"
 
 nodes:
   # --- Decisions (from DIGEST.md) ---
@@ -1272,6 +1272,34 @@ nodes:
     type: "hook"
     path: ".claude/hooks/tests/layer3-hook-integration.sh"
     description: "Layer 3 of the hook test suite: exercises every hook at the phase transitions where it fires, verifying allow/block/advance behaviour and inter-hook state chains. Requires jq (skips cleanly without it); bash 3.2 compatible. 298 cases as of 2026-10-22, including the Decision t-0059 directional dispatch-phase section and the Decision t-0060 section — the latter being the first test coverage of _permission-allowlist.sh anywhere in the repo"
+    last_verified: "2026-10-22"
+    status: "active"
+    layer: "template"
+  - id: "file-test-phase-ordering"
+    type: "file"
+    path: ".claude/.automation/tests/test-phase-ordering.sh"
+    description: "Adversarial suite: phase-ordering attacks (forward jumps, direct state edits, session-type manipulation, double-init, concurrent writes). 13 cases. Repaired 2026-10-22 (R32): ran 0 of 13 because every case jumped init->plan while drift-check sits between and is not skippable (Decision 0038), aborting the suite under set -e. Now uses the shared _reach/_setup_at helper in sandbox-setup.sh; attacks still call bare advance_phase so nothing seeded for setup can make one pass for the wrong reason, and unreachable setup reports a visible failing case. Forgeries re-pointed from the retired flat state path to get_session_state_dir() (Decision 0030). TAP tally moved to a shared temp file because per-subshell counters never aggregated. The direct-phase-state-edit case was unfailable (_tap_pass in both branches) and is now a real assertion documenting the residual no-content-integrity risk. KNOWN WEAKNESS: the forward-jump cases are held by the independent substance gates, not by the non-adjacency ordering rule — disabling that rule alone leaves all 13 green, so they do not pin that layer"
+    last_verified: "2026-10-22"
+    status: "active"
+    layer: "template"
+  - id: "file-test-state-corruption"
+    type: "file"
+    path: ".claude/.automation/tests/test-state-corruption.sh"
+    description: "Adversarial suite: state-corruption attacks (verdict forgery, truncated/foreign phase-state, safety-valve abuse, config injection, stale cross-session state, concurrent writes). 14 cases. Repaired 2026-10-22 (R32): ran 8 of 14 — it died at exit 127 because _parse_config_field lives in queue-manager.sh, which sandbox-setup.sh does not source. 20 forgery sites re-pointed to get_session_state_dir(), EXCEPT .session-baseline-sha which session-close-check.sh reads from $REPO_ROOT/.claude/ and not the state dir. The two safety-valve cases failed because a freshly-init'd interactive session takes the interactive-pause exit preceding the valve; they now set REPO_OS_SESSION_ID to model the worktree/headless session the valve applies to, and the A4 escalation is confirmed written. Concurrency case now pins a post-fork phase rather than merely asserting the phase is non-empty, which had passed while no concurrency occurred"
+    last_verified: "2026-10-22"
+    status: "active"
+    layer: "template"
+  - id: "file-test-gate-bypass"
+    type: "file"
+    path: ".claude/.automation/tests/test-gate-bypass.sh"
+    description: "Adversarial suite: gate-bypass attacks (spoofed/misplaced GATE_RESULT, agent-type spoofing, emergency and stacked overrides, headless AskUserQuestion, phase advance without a verdict, stale cross-session state). 12 cases. Repaired 2026-10-22 (R32): 13 forgery sites re-pointed to get_session_state_dir(); SIX chained setup walks were failing silently (set -e does not fire in the left operand of an && list) so every attack ran from init rather than review/build and was rejected for the wrong reason; the phase-advance case called _tap_pass in all three branches and could not fail; and tests 6/7 wrote `VAR=1 printf ... | bash hook`, binding the override to printf so it never reached the hook. Those two now pin the real boundary: REPO_OS_RECOVER=1 skips state-dependent gates by design (pre-commit-gates.sh:26, audited via log_override at :187) while A4 secret scanning still blocks, confirmed by a 2x2 control probe over secret/clean x override/no-override plus stacked overrides. NOTE: the earlier KG claim of '11/11 passing' was not evidence of discrimination — at that point the attacks were landing in the wrong phase. Under mutation (pre-commit-gates forced to exit 0) only a subset of cases goes red; the suite is not uniformly discriminating"
+    last_verified: "2026-10-22"
+    status: "active"
+    layer: "template"
+  - id: "file-test-runner"
+    type: "file"
+    path: ".claude/.automation/tests/test-runner.sh"
+    description: "Aggregate runner for the adversarial suites; parses TAP output per suite, tallies by severity tag ([CRITICAL]/[HIGH]/[MEDIUM]/[LOW]) and exits 1 when any CRITICAL or HIGH failure is present. MEDIUM-only failures deliberately do not gate. 2026-10-22 (R32): now reads the suite_rc it was already capturing and never using — flags a suite that emitted no TAP cases, or exited non-zero with no 'not ok' to explain it. Without that, a suite dying under set -e contributed zero failures and passed silently, which is how 19 cases went unrun. Both branches mutation-tested, and the check then caught a real regression during its own session: an EXIT trap added to the three suites killed each after its first case, surfacing as 3 CRITICAL 'emitted no TAP cases'"
     last_verified: "2026-10-22"
     status: "active"
     layer: "template"

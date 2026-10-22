@@ -71,6 +71,28 @@ for suite in "${SUITES[@]}"; do
 
   s_total=$((s_pass + s_fail))
 
+  # --- Harness integrity (R32) -------------------------------------------
+  # `suite_rc` was captured above and never read. A suite that died under
+  # `set -e` therefore contributed zero failures and passed silently: this is
+  # how test-phase-ordering.sh ran 0 of 13 cases, and test-state-corruption.sh
+  # 8 of 14, for an unknown length of time. Counting only emitted TAP lines
+  # means "no output" is indistinguishable from "nothing wrong".
+  #
+  # A suite that reported every case AND exited non-zero is normal — that is
+  # just a failing suite, already counted above. The two states worth
+  # surfacing are a suite that produced no cases at all, and one that stopped
+  # early (non-zero exit with no `not ok` to explain it).
+  if [ "$s_total" -eq 0 ]; then
+    echo "HARNESS ERROR: $suite emitted no TAP cases (exit $suite_rc) — it did not run" >&2
+    s_fail=$((s_fail + 1))
+    s_critical=$((s_critical + 1))
+  elif [ "$suite_rc" -ne 0 ] && [ "$s_fail" -eq 0 ]; then
+    echo "HARNESS ERROR: $suite exited $suite_rc with no reported failure — truncated before its last case" >&2
+    s_fail=$((s_fail + 1))
+    s_critical=$((s_critical + 1))
+  fi
+  s_total=$((s_pass + s_fail))
+
   # Print suite output
   echo "$suite_output"
   echo ""

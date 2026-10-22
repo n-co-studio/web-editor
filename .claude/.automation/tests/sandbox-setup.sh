@@ -114,3 +114,78 @@ run_adv_hook() {
   ADV_LAST_RC=0
   (cd "$ADV_SANDBOX" && printf '%s' "$input" | bash "$ADV_SANDBOX/.claude/hooks/$hook" 2>&1) || ADV_LAST_RC=$?
 }
+
+# --- Reaching a phase legitimately (R32) ------------------------------------
+# Adversarial cases must START from a properly-governed state, or a block
+# cannot be attributed to the thing under test.
+#
+# What this replaces: cases wrote `init_phase X; advance_phase "plan" && ...`.
+# Two problems. `drift-check` sits between init and plan and is not skippable
+# (Decision 0038), so the walk fails; and because the failure happens in the
+# left operand of an `&&` list, `set -e` does NOT fire — so it failed SILENTLY
+# and the case ran its attack from `init` instead of the phase it meant. That
+# is why suites could report a wall of passes while testing almost nothing.
+# `advance_phase` also enforces substance gates (approval needs a
+# pragmatist-signed verdict, Decision 0025), so a correct walk still needs the
+# verdict files a governed session would have.
+#
+# _reach seeds ONLY what the SETUP transitions require, never what the attack
+# targets: seeding stops at the target phase, so an attacked transition's own
+# substance file is absent and cannot make the attack pass for the wrong
+# reason. Every attack must still call bare `advance_phase`.
+_adv_seed_verdict() {
+  # $1 file, $2 agent, $3 dispatch_phase
+  local sd sid
+  sd=$(get_session_state_dir) || return 1
+  sid=$(cat "$ADV_SANDBOX/.claude/.session-id") || return 1
+  printf 'timestamp: test\nagent: %s\nsession_id: %s\ndispatch_phase: %s\nGATE_RESULT: APPROVED\n' \
+    "$2" "$sid" "$3" > "$sd/$1"
+}
+
+_REACH_FAILED_AT=""
+_REACH_ERR=""
+_reach() {
+  local target="$1"
+  local sd sid phases p
+  _REACH_FAILED_AT=""; _REACH_ERR=""
+  sd=$(get_session_state_dir) || return 1
+  sid=$(cat "$ADV_SANDBOX/.claude/.session-id") || return 1
+  phases=$(get_phases_for_type "$(get_session_type)") || return 1
+  for p in $phases; do
+    [ "$p" = "init" ] && continue
+    case "$p" in
+      approval)
+        _adv_seed_verdict pragmatist-signed pragmatist plan || return 1
+        printf 'timestamp: test\nsession_id: %s\nmode: auto\nlarge-scope: true\n' "$sid" \
+          > "$sd/plan-approved"
+        ;;
+      verify)
+        # Critic combined mode writes both; A5 requires both (Decision 0039).
+        _adv_seed_verdict cohesion-reviewed critic review || return 1
+        _adv_seed_verdict diff-review-complete critic review || return 1
+        ;;
+      commit)
+        _adv_seed_verdict qa-verified qa-verifier verify || return 1
+        ;;
+    esac
+    _REACH_ERR=$(advance_phase "$p" 2>&1) || { _REACH_FAILED_AT="$p"; return 1; }
+    [ "$p" = "$target" ] && return 0
+  done
+  _REACH_FAILED_AT="(target '$target' not in sequence)"
+  return 1
+}
+
+# init + walk to $2 (default "plan") for session type $1 (default "standard").
+# Records a visible failing case when the phase cannot be reached: a case that
+# never ran must not look like a case that passed.
+_setup_at() {
+  local stype="standard" target
+  if [ $# -ge 2 ]; then stype="$1"; target="$2"; else target="$1"; fi
+  init_phase "$stype" >/dev/null 2>&1 || true
+  if ! _reach "$target"; then
+    _tap_fail "SETUP: could not reach phase '$target'" \
+      "precondition unmet at '${_REACH_FAILED_AT}' — case NOT exercised: $(printf '%s' "${_REACH_ERR}" | head -1 | cut -c1-140)"
+    return 1
+  fi
+  return 0
+}

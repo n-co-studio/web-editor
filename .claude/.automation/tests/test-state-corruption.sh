@@ -10,12 +10,43 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/sandbox-setup.sh"
 
 # --- TAP infrastructure ---
-_TAP_NUM=0; _TAP_PASS=0; _TAP_FAIL=0; _TAP_FAILURES=""
-_tap_pass() { _TAP_NUM=$((_TAP_NUM+1)); _TAP_PASS=$((_TAP_PASS+1)); printf "ok %d - %s\n" "$_TAP_NUM" "$1"; }
-_tap_fail() { _TAP_NUM=$((_TAP_NUM+1)); _TAP_FAIL=$((_TAP_FAIL+1)); printf "not ok %d - %s\n" "$_TAP_NUM" "$1"; [ -n "${2:-}" ] && printf "  # %s\n" "$2"; _TAP_FAILURES="${_TAP_FAILURES}  FAIL: $1\n"; }
+# Every case below runs in its own ( ) subshell, so counter VARIABLES cannot
+# survive it: each case incremented a fresh copy and the parent's totals stayed
+# at zero. The suite therefore always reported "Tests: 0 Pass: 0 Fail: 0" and
+# numbered every case "ok 1", whatever actually happened. Tally through a file
+# instead, which the subshells share.
+_TAP_LOG="$(mktemp "${TMPDIR:-/tmp}/repo-os-tap-XXXXXX")"
+# No EXIT trap here deliberately. A guarded `trap ... EXIT` was tried and
+# broke all three suites: a case subshell inherits the trap, the BASHPID guard
+# evaluates false, the `&&` returns non-zero, that becomes the subshell's exit
+# status, and `set -e` killed the parent after the first case. The new
+# harness-integrity check in test-runner.sh caught it as 3 CRITICAL "suite
+# emitted no TAP cases". Accepted consequence: a suite that dies mid-run leaks
+# one repo-os-tap-* file in $TMPDIR. finish() removes it on every normal exit,
+# and nothing is ever written inside the repo.
+_tap_n() { wc -l < "$_TAP_LOG" | tr -d '[:space:]'; }
+_tap_pass() { printf 'P\t%s\n' "$1" >> "$_TAP_LOG"; printf "ok %s - %s\n" "$(_tap_n)" "$1"; return 0; }
+_tap_fail() {
+  printf 'F\t%s\t%s\n' "$1" "${2:-}" >> "$_TAP_LOG"
+  printf "not ok %s - %s\n" "$(_tap_n)" "$1"
+  [ -n "${2:-}" ] && printf "  # %s\n" "$2"
+  return 0
+}
 assert_ok() { if [ "$1" -eq 0 ]; then _tap_pass "$2"; else _tap_fail "$2" "expected exit 0, got $1"; fi; }
 assert_fail() { if [ "$1" -ne 0 ]; then _tap_pass "$2"; else _tap_fail "$2" "expected non-zero exit, got 0"; fi; }
-finish() { printf "\n1..%d\n# Tests: %d  Pass: %d  Fail: %d\n" $((_TAP_PASS+_TAP_FAIL)) $((_TAP_PASS+_TAP_FAIL)) "$_TAP_PASS" "$_TAP_FAIL"; [ "$_TAP_FAIL" -gt 0 ] && printf "# Failures:\n%b" "$_TAP_FAILURES"; return "$_TAP_FAIL"; }
+finish() {
+  local total pass fail
+  total=$(_tap_n)
+  pass=$(grep -c '^P' "$_TAP_LOG" 2>/dev/null) || pass=0
+  fail=$(grep -c '^F' "$_TAP_LOG" 2>/dev/null) || fail=0
+  printf "\n1..%s\n# Tests: %s  Pass: %s  Fail: %s\n" "$total" "$total" "$pass" "$fail"
+  if [ "$fail" -gt 0 ]; then
+    printf "# Failures:\n"
+    grep '^F' "$_TAP_LOG" | cut -f2 | sed 's/^/  FAIL: /'
+  fi
+  rm -f "$_TAP_LOG"
+  return "$fail"
+}
 
 printf "# === State Corruption Attacks ===\n"
 
@@ -35,9 +66,9 @@ _stage_and_fixture() {
   sid=$(cat "$ADV_SANDBOX/.claude/.session-id")
   # Forge phase to commit
   printf 'session_type: standard\nsession_id: %s\nmode: auto\ncurrent_phase: commit\ncycle: 1\nphases_completed: init,plan,approval,build,review,verify\nsolo: false\ntag: agent\ntimestamp: 2026-03-20T00:00:00Z\n' "$sid" \
-    > "$ADV_SANDBOX/.claude/.state/phase-state"
+    > "$(get_session_state_dir)/phase-state"
   # Forge only plan-approved (not cohesion/qa)
-  printf 'mode: auto\nsession_id: %s\n' "$sid" > "$ADV_SANDBOX/.claude/.state/plan-approved"
+  printf 'mode: auto\nsession_id: %s\n' "$sid" > "$(get_session_state_dir)/plan-approved"
   fixture=$(_stage_and_fixture)
   run_adv_hook "pre-commit-gates.sh" "$fixture"
   if [ "$ADV_LAST_RC" -ne 0 ]; then
@@ -54,8 +85,8 @@ _stage_and_fixture() {
   init_phase "standard"
   sid=$(cat "$ADV_SANDBOX/.claude/.session-id")
   printf 'session_type: standard\nsession_id: %s\nmode: auto\ncurrent_phase: commit\ncycle: 1\nphases_completed: init,plan,approval,build,review,verify\nsolo: false\ntag: agent\ntimestamp: 2026-03-20T00:00:00Z\n' "$sid" \
-    > "$ADV_SANDBOX/.claude/.state/phase-state"
-  echo "GATE_RESULT: APPROVED" > "$ADV_SANDBOX/.claude/.state/cohesion-reviewed"
+    > "$(get_session_state_dir)/phase-state"
+  echo "GATE_RESULT: APPROVED" > "$(get_session_state_dir)/cohesion-reviewed"
   fixture=$(_stage_and_fixture)
   run_adv_hook "pre-commit-gates.sh" "$fixture"
   if [ "$ADV_LAST_RC" -ne 0 ]; then
@@ -72,8 +103,8 @@ _stage_and_fixture() {
   init_phase "standard"
   sid=$(cat "$ADV_SANDBOX/.claude/.session-id")
   printf 'session_type: standard\nsession_id: %s\nmode: auto\ncurrent_phase: commit\ncycle: 1\nphases_completed: init,plan,approval,build,review,verify\nsolo: false\ntag: agent\ntimestamp: 2026-03-20T00:00:00Z\n' "$sid" \
-    > "$ADV_SANDBOX/.claude/.state/phase-state"
-  echo "GATE_RESULT: APPROVED" > "$ADV_SANDBOX/.claude/.state/qa-verified"
+    > "$(get_session_state_dir)/phase-state"
+  echo "GATE_RESULT: APPROVED" > "$(get_session_state_dir)/qa-verified"
   fixture=$(_stage_and_fixture)
   run_adv_hook "pre-commit-gates.sh" "$fixture"
   if [ "$ADV_LAST_RC" -ne 0 ]; then
@@ -91,11 +122,11 @@ _stage_and_fixture() {
   sid=$(cat "$ADV_SANDBOX/.claude/.session-id")
   # Forge phase-state to commit
   printf 'session_type: standard\nsession_id: %s\nmode: auto\ncurrent_phase: commit\ncycle: 1\nphases_completed: init,plan,approval,build,review,verify\nsolo: false\ntag: agent\ntimestamp: 2026-03-20T00:00:00Z\n' "$sid" \
-    > "$ADV_SANDBOX/.claude/.state/phase-state"
+    > "$(get_session_state_dir)/phase-state"
   # Forge all three state files
-  printf 'mode: auto\nsession_id: %s\n' "$sid" > "$ADV_SANDBOX/.claude/.state/plan-approved"
-  printf 'timestamp: 2026-03-20T00:00:00Z\nagent: critic\nGATE_RESULT: APPROVED\n' > "$ADV_SANDBOX/.claude/.state/cohesion-reviewed"
-  printf 'timestamp: 2026-03-20T00:00:00Z\nagent: qa-verifier\nGATE_RESULT: APPROVED\n' > "$ADV_SANDBOX/.claude/.state/qa-verified"
+  printf 'mode: auto\nsession_id: %s\n' "$sid" > "$(get_session_state_dir)/plan-approved"
+  printf 'timestamp: 2026-03-20T00:00:00Z\nagent: critic\nGATE_RESULT: APPROVED\n' > "$(get_session_state_dir)/cohesion-reviewed"
+  printf 'timestamp: 2026-03-20T00:00:00Z\nagent: qa-verifier\nGATE_RESULT: APPROVED\n' > "$(get_session_state_dir)/qa-verified"
   fixture=$(_stage_and_fixture)
   run_adv_hook "pre-commit-gates.sh" "$fixture"
   if [ "$ADV_LAST_RC" -eq 0 ]; then
@@ -112,7 +143,7 @@ _stage_and_fixture() {
   init_phase "standard"
   # Forge phase-state with wrong session_id
   printf 'session_type: standard\nsession_id: WRONG-SID\nmode: auto\ncurrent_phase: commit\ncycle: 1\nphases_completed: init,plan,approval,build,review,verify\nsolo: false\ntag: agent\ntimestamp: 2026-03-20T00:00:00Z\n' \
-    > "$ADV_SANDBOX/.claude/.state/phase-state"
+    > "$(get_session_state_dir)/phase-state"
   _PS_VALIDATED=false; _CACHED_CURRENT_SID=""
   phase=$(get_phase)
   if [ -z "$phase" ]; then
@@ -130,7 +161,7 @@ _stage_and_fixture() {
   sid=$(cat "$ADV_SANDBOX/.claude/.session-id")
   # Write truncated phase-state
   printf 'session_type: standard\nsession_id: %s\n' "$sid" \
-    > "$ADV_SANDBOX/.claude/.state/phase-state"
+    > "$(get_session_state_dir)/phase-state"
   _PS_VALIDATED=false; _CACHED_CURRENT_SID=""
   phase=$(get_phase)
   if [ -z "$phase" ]; then
@@ -144,8 +175,21 @@ _stage_and_fixture() {
 (
   setup_adversarial_sandbox
   trap 'teardown_adversarial_sandbox' EXIT
+  # The safety valve sits AFTER the interactive-pause path in
+  # session-close-check.sh, and that path exits 0 for any session where
+  # REPO_OS_SESSION_ID is unset and is_session_closing() is false — which is
+  # exactly a freshly-init'd standard session. The hook's own comment says the
+  # pause is "placed before the 3-attempt counter so pauses never accumulate
+  # toward the safety valve". So this case could never reach the valve and its
+  # failure was a fixture defect, not a missing A4 escalation.
+  #
+  # Setting REPO_OS_SESSION_ID models a worktree/headless session, which the
+  # hook routes down the close path. It must be set BEFORE the state dir is
+  # resolved, because get_session_id prefers it over the .session-id file and
+  # the counter has to land in the dir the hook will actually read.
+  export REPO_OS_SESSION_ID="adv-valve-$$"
   init_phase "standard"
-  echo "2" > "$ADV_SANDBOX/.claude/.state/.stop-attempt-count"
+  echo "2" > "$(get_session_state_dir)/.stop-attempt-count"
   # Stage a file with a fake secret to test A4 preservation
   mkdir -p "$ADV_SANDBOX/src"
   echo 'token = "sk_live_test123secret"' > "$ADV_SANDBOX/src/config.ts"
@@ -164,8 +208,21 @@ _stage_and_fixture() {
 (
   setup_adversarial_sandbox
   trap 'teardown_adversarial_sandbox' EXIT
+  # The safety valve sits AFTER the interactive-pause path in
+  # session-close-check.sh, and that path exits 0 for any session where
+  # REPO_OS_SESSION_ID is unset and is_session_closing() is false — which is
+  # exactly a freshly-init'd standard session. The hook's own comment says the
+  # pause is "placed before the 3-attempt counter so pauses never accumulate
+  # toward the safety valve". So this case could never reach the valve and its
+  # failure was a fixture defect, not a missing A4 escalation.
+  #
+  # Setting REPO_OS_SESSION_ID models a worktree/headless session, which the
+  # hook routes down the close path. It must be set BEFORE the state dir is
+  # resolved, because get_session_id prefers it over the .session-id file and
+  # the counter has to land in the dir the hook will actually read.
+  export REPO_OS_SESSION_ID="adv-valve-$$"
   init_phase "standard"
-  echo "999" > "$ADV_SANDBOX/.claude/.state/.stop-attempt-count"
+  echo "999" > "$(get_session_state_dir)/.stop-attempt-count"
   # Stage a file with a fake secret
   mkdir -p "$ADV_SANDBOX/src"
   echo 'api_key = "ghp_ABC123secrettoken"' > "$ADV_SANDBOX/src/env.ts"
@@ -183,6 +240,17 @@ _stage_and_fixture() {
 (
   setup_adversarial_sandbox
   trap 'teardown_adversarial_sandbox' EXIT
+  # _parse_config_field lives in queue-manager.sh, which sandbox-setup.sh does
+  # not source. Without it this case died with exit 127 ("command not found")
+  # and took tests 9-14 with it — six cases that had never run. Sourced inside
+  # this subshell so it cannot leak into the others.
+  # shellcheck disable=SC1091
+  source "$ADV_SANDBOX/.claude/.automation/lib/queue-manager.sh" >/dev/null 2>&1 || true
+  if ! command -v _parse_config_field >/dev/null 2>&1; then
+    _tap_fail "[MEDIUM] Config.local.yaml metacharacter injection" \
+      "_parse_config_field unavailable — case NOT exercised"
+    exit 0
+  fi
   # Write config with shell metacharacters in value
   printf 'runner:\n  enabled: true;rm -rf /\n' \
     > "$ADV_SANDBOX/.claude/.automation/config.local.yaml"
@@ -204,7 +272,7 @@ _stage_and_fixture() {
   sid=$(cat "$ADV_SANDBOX/.claude/.session-id")
   # Add injection attempt to phase-state
   printf 'session_type: standard\nsession_id: %s\nmode: review\ncurrent_phase: build\ncycle: 1\nphases_completed: init,plan,approval\nsolo: false\ntag: agent\ntimestamp: 2026-03-20T00:00:00Z\ninjection: $(touch /tmp/pwned)\n' "$sid" \
-    > "$ADV_SANDBOX/.claude/.state/phase-state"
+    > "$(get_session_state_dir)/phase-state"
   _PS_VALIDATED=false; _CACHED_CURRENT_SID=""
   phase=$(get_phase)
   # Check that injection didn't execute
@@ -238,7 +306,7 @@ _stage_and_fixture() {
   trap 'teardown_adversarial_sandbox' EXIT
   init_phase "standard"
   # Forge baseline SHA to a non-existent commit
-  echo "0000000000000000000000000000000000000000" > "$ADV_SANDBOX/.claude/.state/.session-baseline-sha"
+  echo "0000000000000000000000000000000000000000" > "$ADV_SANDBOX/.claude/.session-baseline-sha"
   # Session-close-check reads this for recent-commits calculation
   # This should not cause a crash or false positive
   run_adv_hook "session-close-check.sh" "{}"
@@ -250,17 +318,28 @@ _stage_and_fixture() {
 (
   setup_adversarial_sandbox
   trap 'teardown_adversarial_sandbox' EXIT
-  # Create state files with old session ID
-  printf 'mode: auto\nsession_id: stale-old-session\n' > "$ADV_SANDBOX/.claude/.state/plan-approved"
-  printf 'timestamp: 2026-01-01T00:00:00Z\nagent: critic\nGATE_RESULT: APPROVED\n' > "$ADV_SANDBOX/.claude/.state/cohesion-reviewed"
-  printf 'timestamp: 2026-01-01T00:00:00Z\nagent: qa-verifier\nGATE_RESULT: APPROVED\n' > "$ADV_SANDBOX/.claude/.state/qa-verified"
-  # Start new session (new session-id)
+  # Seed APPROVED verdicts into the OLD session's own state dir. Under
+  # Decision 0030 each session has its own directory, so this is where a
+  # previous session's leftovers would actually sit. The dir must be created
+  # explicitly: it does not exist until init_phase, unlike the retired flat
+  # path this case used to write to (which sandbox-setup always mkdir'd, so
+  # the redirect silently succeeded).
+  _old_sd="$(get_session_state_dir)"
+  mkdir -p "$_old_sd"
+  printf 'mode: auto\nsession_id: stale-old-session\n' > "$_old_sd/plan-approved"
+  printf 'timestamp: 2026-01-01T00:00:00Z\nagent: critic\nGATE_RESULT: APPROVED\n' > "$_old_sd/cohesion-reviewed"
+  printf 'timestamp: 2026-01-01T00:00:00Z\nagent: qa-verifier\nGATE_RESULT: APPROVED\n' > "$_old_sd/qa-verified"
+  # Start a new session. A new session-id means a new per-session dir, so the
+  # property under test is that the old dir's verdicts do not carry over.
   echo "new-session-$(date +%s)" > "$ADV_SANDBOX/.claude/.session-id"
+  _PS_VALIDATED=false; _CACHED_CURRENT_SID=""
   init_phase "standard"
   sid=$(cat "$ADV_SANDBOX/.claude/.session-id")
-  # Forge phase-state to commit with new session ID
+  _new_sd="$(get_session_state_dir)"
+  mkdir -p "$_new_sd"
+  # Forge phase-state to commit with the NEW session ID
   printf 'session_type: standard\nsession_id: %s\nmode: auto\ncurrent_phase: commit\ncycle: 1\nphases_completed: init,plan,approval,build,review,verify\nsolo: false\ntag: agent\ntimestamp: 2026-03-20T00:00:00Z\n' "$sid" \
-    > "$ADV_SANDBOX/.claude/.state/phase-state"
+    > "$_new_sd/phase-state"
   _PS_VALIDATED=false; _CACHED_CURRENT_SID=""
   fixture=$(_stage_and_fixture)
   run_adv_hook "pre-commit-gates.sh" "$fixture"
@@ -276,7 +355,18 @@ _stage_and_fixture() {
   setup_adversarial_sandbox
   trap 'teardown_adversarial_sandbox' EXIT
   init_phase "standard"
-  advance_phase "plan"
+  sid=$(cat "$ADV_SANDBOX/.claude/.session-id")
+  _sd="$(get_session_state_dir)"
+  # drift-check sits between init and plan and is not skippable (Decision
+  # 0038). Jumping straight to plan failed and, under `set -e`, took the whole
+  # suite with it — this case never ran.
+  advance_phase "drift-check" >/dev/null 2>&1
+  advance_phase "plan" >/dev/null 2>&1
+  # Seed the substance files the forked advances need (pragmatist sign-off
+  # gates approval, Decision 0025). Without them all five forks fail
+  # immediately and nothing concurrent is actually exercised.
+  printf 'timestamp: test\nagent: pragmatist\nsession_id: %s\ndispatch_phase: plan\nGATE_RESULT: APPROVED\n' "$sid" > "$_sd/pragmatist-signed"
+  printf 'timestamp: test\nsession_id: %s\nmode: auto\n' "$sid" > "$_sd/plan-approved"
   # Simulate concurrent writes by forking
   for i in 1 2 3 4 5; do
     (
@@ -287,12 +377,22 @@ _stage_and_fixture() {
   wait
   _PS_VALIDATED=false; _CACHED_CURRENT_SID=""
   phase=$(get_phase)
-  # After concurrent writes, phase-state should be internally consistent
-  if [ -n "$phase" ]; then
-    _tap_pass "[MEDIUM] Concurrent phase-state writes produce readable state (phase=$phase)"
-  else
-    _tap_fail "[MEDIUM] Concurrent phase-state writes corrupted state"
-  fi
+  # After concurrent writes the state must be readable AND must reflect that
+  # the forked advances actually happened. Asserting only "non-empty" would
+  # also pass if all five forks failed and the phase never left plan, which is
+  # how this case passed while exercising no concurrency at all.
+  case "$phase" in
+    approval|build)
+      _tap_pass "[MEDIUM] Concurrent phase-state writes produce consistent state (phase=$phase)"
+      ;;
+    "")
+      _tap_fail "[MEDIUM] Concurrent phase-state writes corrupted state" "phase unreadable"
+      ;;
+    *)
+      _tap_fail "[MEDIUM] Concurrent phase-state writes left an unexpected phase" \
+        "phase=$phase — expected approval or build; forks may not have run"
+      ;;
+  esac
 )
 
 finish || true

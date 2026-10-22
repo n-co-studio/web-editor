@@ -9,13 +9,44 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/sandbox-setup.sh"
 
 # --- TAP infrastructure ---
-_TAP_NUM=0; _TAP_PASS=0; _TAP_FAIL=0; _TAP_FAILURES=""
-_tap_pass() { _TAP_NUM=$((_TAP_NUM+1)); _TAP_PASS=$((_TAP_PASS+1)); printf "ok %d - %s\n" "$_TAP_NUM" "$1"; }
-_tap_fail() { _TAP_NUM=$((_TAP_NUM+1)); _TAP_FAIL=$((_TAP_FAIL+1)); printf "not ok %d - %s\n" "$_TAP_NUM" "$1"; [ -n "${2:-}" ] && printf "  # %s\n" "$2"; _TAP_FAILURES="${_TAP_FAILURES}  FAIL: $1\n"; }
+# Every case below runs in its own ( ) subshell, so counter VARIABLES cannot
+# survive it: each case incremented a fresh copy and the parent's totals stayed
+# at zero. The suite therefore always reported "Tests: 0 Pass: 0 Fail: 0" and
+# numbered every case "ok 1", whatever actually happened. Tally through a file
+# instead, which the subshells share.
+_TAP_LOG="$(mktemp "${TMPDIR:-/tmp}/repo-os-tap-XXXXXX")"
+# No EXIT trap here deliberately. A guarded `trap ... EXIT` was tried and
+# broke all three suites: a case subshell inherits the trap, the BASHPID guard
+# evaluates false, the `&&` returns non-zero, that becomes the subshell's exit
+# status, and `set -e` killed the parent after the first case. The new
+# harness-integrity check in test-runner.sh caught it as 3 CRITICAL "suite
+# emitted no TAP cases". Accepted consequence: a suite that dies mid-run leaks
+# one repo-os-tap-* file in $TMPDIR. finish() removes it on every normal exit,
+# and nothing is ever written inside the repo.
+_tap_n() { wc -l < "$_TAP_LOG" | tr -d '[:space:]'; }
+_tap_pass() { printf 'P\t%s\n' "$1" >> "$_TAP_LOG"; printf "ok %s - %s\n" "$(_tap_n)" "$1"; return 0; }
+_tap_fail() {
+  printf 'F\t%s\t%s\n' "$1" "${2:-}" >> "$_TAP_LOG"
+  printf "not ok %s - %s\n" "$(_tap_n)" "$1"
+  [ -n "${2:-}" ] && printf "  # %s\n" "$2"
+  return 0
+}
 assert_ok() { if [ "$1" -eq 0 ]; then _tap_pass "$2"; else _tap_fail "$2" "expected exit 0, got $1"; fi; }
 assert_fail() { if [ "$1" -ne 0 ]; then _tap_pass "$2"; else _tap_fail "$2" "expected non-zero exit, got 0"; fi; }
 assert_eq() { if [ "$1" = "$2" ]; then _tap_pass "$3"; else _tap_fail "$3" "expected '$2', got '$1'"; fi; }
-finish() { printf "\n1..%d\n# Tests: %d  Pass: %d  Fail: %d\n" $((_TAP_PASS+_TAP_FAIL)) $((_TAP_PASS+_TAP_FAIL)) "$_TAP_PASS" "$_TAP_FAIL"; [ "$_TAP_FAIL" -gt 0 ] && printf "# Failures:\n%b" "$_TAP_FAILURES"; return "$_TAP_FAIL"; }
+finish() {
+  local total pass fail
+  total=$(_tap_n)
+  pass=$(grep -c '^P' "$_TAP_LOG" 2>/dev/null) || pass=0
+  fail=$(grep -c '^F' "$_TAP_LOG" 2>/dev/null) || fail=0
+  printf "\n1..%s\n# Tests: %s  Pass: %s  Fail: %s\n" "$total" "$total" "$pass" "$fail"
+  if [ "$fail" -gt 0 ]; then
+    printf "# Failures:\n"
+    grep '^F' "$_TAP_LOG" | cut -f2 | sed 's/^/  FAIL: /'
+  fi
+  rm -f "$_TAP_LOG"
+  return "$fail"
+}
 
 printf "# === Phase Ordering Attacks ===\n"
 
@@ -23,8 +54,7 @@ printf "# === Phase Ordering Attacks ===\n"
 (
   setup_adversarial_sandbox
   trap 'teardown_adversarial_sandbox' EXIT
-  init_phase "standard"
-  advance_phase "plan"
+  _setup_at "plan" || exit 0
   # Attempt to jump directly to commit, skipping build/review/verify
   rc=0; advance_phase "commit" 2>/dev/null || rc=$?
   # advance_phase allows any forward jump (new_idx > current_idx)
@@ -40,8 +70,7 @@ printf "# === Phase Ordering Attacks ===\n"
 (
   setup_adversarial_sandbox
   trap 'teardown_adversarial_sandbox' EXIT
-  init_phase "standard"
-  advance_phase "plan" && advance_phase "approval" && advance_phase "build" && advance_phase "review"
+  _setup_at "review" || exit 0
   rc=0; advance_phase "commit" 2>/dev/null || rc=$?
   if [ "$rc" -eq 0 ]; then
     _tap_fail "[HIGH] Forward-jump review→commit should be blocked" "skips verify phase entirely"
@@ -54,8 +83,7 @@ printf "# === Phase Ordering Attacks ===\n"
 (
   setup_adversarial_sandbox
   trap 'teardown_adversarial_sandbox' EXIT
-  init_phase "standard"
-  advance_phase "plan" && advance_phase "approval" && advance_phase "build"
+  _setup_at "build" || exit 0
   rc=0; advance_phase "plan" 2>/dev/null || rc=$?
   assert_fail "$rc" "[LOW] Backward jump build→plan blocked"
 )
@@ -72,17 +100,20 @@ printf "# === Phase Ordering Attacks ===\n"
   sid=$(cat "$ADV_SANDBOX/.claude/.session-id")
   # Forge phase-state directly (simulating shell I/O bypass of state-guard)
   printf 'session_type: standard\nsession_id: %s\nmode: auto\ncurrent_phase: commit\ncycle: 1\nphases_completed: init,plan,approval,build,review,verify\nsolo: false\ntag: agent\ntimestamp: 2026-03-20T00:00:00Z\n' "$sid" \
-    > "$ADV_SANDBOX/.claude/.state/phase-state"
+    > "$(get_session_state_dir)/phase-state"
   _PS_VALIDATED=false; _CACHED_CURRENT_SID=""
   phase=$(get_phase)
   # With correct session_id, phase-state is accepted (known residual — needs HMAC).
   # Defense: state-guard blocks agent tool writes to .state/ dir.
   # This is a PASS because the defense-in-depth layer (state-guard) is the primary control.
-  if [ "$phase" = "commit" ]; then
-    _tap_pass "[CRITICAL] Direct phase-state edit with correct session_id accepted (residual — state-guard is primary defense)"
-  else
-    _tap_pass "[CRITICAL] Direct phase-state edit rejected"
-  fi
+  # Documented residual risk: with the correct session_id there is no content
+  # integrity check, so a direct write to the per-session phase-state IS
+  # honoured. state-guard blocking agent writes to the state dir is the primary
+  # control. Asserted rather than accepted-either-way: this case previously
+  # called _tap_pass in both branches and so could never fail. If HMAC or any
+  # content check lands, this goes red on purpose — update the comment then.
+  assert_eq "$phase" "commit" \
+    "[CRITICAL] Direct phase-state edit with correct session_id is honoured (residual; state-guard is the primary defense)"
 )
 
 # --- Test 5: Session ID mismatch detection ---
@@ -91,8 +122,9 @@ printf "# === Phase Ordering Attacks ===\n"
   trap 'teardown_adversarial_sandbox' EXIT
   init_phase "standard"
   # Write a different session ID into phase-state
-  sed -i '' 's/^session_id: .*/session_id: FORGED-SID/' "$ADV_SANDBOX/.claude/.state/phase-state" 2>/dev/null || \
-    sed -i 's/^session_id: .*/session_id: FORGED-SID/' "$ADV_SANDBOX/.claude/.state/phase-state"
+  _adv_ps="$(get_session_state_dir)/phase-state"
+  sed -i '' 's/^session_id: .*/session_id: FORGED-SID/' "$_adv_ps" 2>/dev/null || \
+    sed -i 's/^session_id: .*/session_id: FORGED-SID/' "$_adv_ps"
   _PS_VALIDATED=false; _CACHED_CURRENT_SID=""
   phase=$(get_phase)
   assert_eq "$phase" "" "[MEDIUM] Session ID mismatch returns empty phase"
@@ -110,27 +142,26 @@ printf "# === Phase Ordering Attacks ===\n"
 (
   setup_adversarial_sandbox
   trap 'teardown_adversarial_sandbox' EXIT
-  init_phase "standard"
-  advance_phase "plan" && advance_phase "approval" && advance_phase "build"
-  # Second init overwrites — does it reset progress?
-  init_phase "standard"
+  _setup_at "build" || exit 0
+  # Second init on a session already in progress. The double-init guard now
+  # refuses this outright, so the attack is tested on two axes: the call must
+  # be rejected, AND progress must survive it. Previously this case let the
+  # re-init run unguarded under `set -e`, which aborted the suite before the
+  # assertion — tests 7 through 12 never ran at all.
+  rc=0; init_phase "standard" >/dev/null 2>&1 || rc=$?
   _PS_VALIDATED=false; _CACHED_CURRENT_SID=""
   phase=$(get_phase)
-  if [ "$phase" = "init" ]; then
-    _tap_fail "[MEDIUM] Double init resets to init phase" "progress lost — could be used to reset constraints"
-  else
-    _tap_pass "[MEDIUM] Double init preserves progress"
-  fi
+  assert_fail "$rc" "[MEDIUM] Double init refused by the double-init guard"
+  assert_eq "$phase" "build" "[MEDIUM] Double init does not reset phase progress"
 )
 
 # --- Test 8: Phase-state deletion then commit gate ---
 (
   setup_adversarial_sandbox
   trap 'teardown_adversarial_sandbox' EXIT
-  init_phase "standard"
-  advance_phase "plan"
+  _setup_at "plan" || exit 0
   # Delete phase-state
-  rm -f "$ADV_SANDBOX/.claude/.state/phase-state"
+  rm -f "$(get_session_state_dir)/phase-state"
   # Stage a file for commit
   mkdir -p "$ADV_SANDBOX/src"
   echo "test" > "$ADV_SANDBOX/src/test.ts"
@@ -149,8 +180,7 @@ printf "# === Phase Ordering Attacks ===\n"
 (
   setup_adversarial_sandbox
   trap 'teardown_adversarial_sandbox' EXIT
-  init_phase "standard"
-  advance_phase "plan"
+  _setup_at "plan" || exit 0
   # Skip approval phase, jump straight to build
   rc=0; advance_phase "build" 2>/dev/null || rc=$?
   if [ "$rc" -eq 0 ]; then
@@ -165,8 +195,7 @@ printf "# === Phase Ordering Attacks ===\n"
 (
   setup_adversarial_sandbox
   trap 'teardown_adversarial_sandbox' EXIT
-  init_phase "standard"
-  advance_phase "plan" && advance_phase "approval" && advance_phase "build"
+  _setup_at "build" || exit 0
   rc=0; advance_phase "build" 2>/dev/null || rc=$?
   assert_fail "$rc" "[LOW] Non-allowed loop build→build blocked"
 )
@@ -188,7 +217,7 @@ printf "# === Phase Ordering Attacks ===\n"
   sid=$(cat "$ADV_SANDBOX/.claude/.session-id")
   # Forge phase-state with all phases "completed" but current_phase at build
   printf 'session_type: standard\nsession_id: %s\nmode: auto\ncurrent_phase: build\ncycle: 1\nphases_completed: init,plan,approval,build,review,verify,user-review,commit\nsolo: false\ntag: agent\ntimestamp: 2026-03-20T00:00:00Z\n' "$sid" \
-    > "$ADV_SANDBOX/.claude/.state/phase-state"
+    > "$(get_session_state_dir)/phase-state"
   _PS_VALIDATED=false; _CACHED_CURRENT_SID=""
   # phases_completed claims everything done, but current_phase says build
   # Does assert_phase("commit") pass? (It checks current_phase index, not phases_completed)
