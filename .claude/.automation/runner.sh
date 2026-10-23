@@ -40,6 +40,8 @@ source "$LIB_DIR/state-manager.sh"
 source "$LIB_DIR/branch-manager.sh"
 # shellcheck source=lib/outcome-detector.sh
 source "$LIB_DIR/outcome-detector.sh"
+# shellcheck source=lib/work-preserver.sh
+source "$LIB_DIR/work-preserver.sh"
 # shellcheck source=lib/queue-manager.sh
 source "$LIB_DIR/queue-manager.sh"
 # shellcheck source=lib/prompt-assembler.sh
@@ -301,8 +303,7 @@ _runner_crash_cleanup() {
     _CURRENT_WORKTREE_DIR=""
     _CURRENT_WORKTREE_IS_GROUP=false
   elif [ -n "$_CURRENT_WORKTREE_DIR" ] && [ -d "$_CURRENT_WORKTREE_DIR" ]; then
-    git worktree remove --force "$_CURRENT_WORKTREE_DIR" 2>/dev/null || true
-    git worktree prune 2>/dev/null || true
+    remove_session_worktree "$_CURRENT_WORKTREE_DIR" "${_RESULT_BASELINE:-}" "${_CURRENT_ENTRY_ID:-}" "failed:runner-crash"
     _CURRENT_WORKTREE_DIR=""
   fi
   # Clean session state (3.1: runner_external_cleanup on crash)
@@ -1118,6 +1119,57 @@ _handle_wo_deferral() {
   return 0
 }
 
+# --- Honour HALT / FORCE-HALT at the launch boundary ---
+# The loop-top flag check runs well before an entry is dequeued: a circuit-breaker
+# sleep (60s) and a queue-lock acquisition sit between them, so a flag raised in
+# that window was never seen and a fresh session started (observed 2026-10-21).
+# Narrowing the window does not close it; the flag has to be re-read AFTER the
+# decision to run and BEFORE the run begins. This is that read.
+#
+# If either flag exists the entry — already moved to running/ by queue_dequeue —
+# goes back to approved/ via queue_defer in "nocount" mode: retry_count untouched
+# (it never ran), and no deferral cycle consumed (a halt is not the entry's
+# fault). The flag is left in place so the loop-top handler does its normal
+# teardown (HALT: stop; FORCE-HALT: worktree sweep, flag removal, exit).
+#
+# Residual window (known, deliberately not closed here): _run_single_entry still
+# creates the branch/worktree and registers the session before it execs claude,
+# and the dirty-tree cleanup runs before this check. A flag raised in that span
+# is not seen here; FORCE-HALT is still caught by the watcher's first poll, a
+# plain HALT lets that one session finish. Closing it means cleanup logic inside
+# the protected launch region.
+#
+# Never fatal. If the queue lock cannot be taken the entry stays in running/ —
+# still not started — and the message names the recovery command.
+# Arguments: $1 entry_id
+# Returns: 0 if a flag was present (caller must NOT launch), 1 if not (proceed)
+_return_entry_if_halted() {
+  local entry_id="$1" flag="" attempts=0
+  if [ -f "$AUTOMATION_DIR/FORCE-HALT" ]; then
+    flag="FORCE-HALT"
+  elif [ -f "$AUTOMATION_DIR/HALT" ]; then
+    flag="HALT"
+  else
+    return 1
+  fi
+
+  while ! acquire_queue_lock; do
+    attempts=$((attempts + 1))
+    if [ "$attempts" -ge 3 ]; then
+      echo "ERROR: $flag present but the queue lock is unavailable — entry $entry_id was NOT started and is still in running/ (recover with: queue-cli.sh recover-entry $entry_id)" >&2
+      return 0
+    fi
+    sleep 1
+  done
+  if queue_defer "$entry_id" "halt-requested" nocount > /dev/null; then
+    echo "$flag present — entry $entry_id returned to approved/ unstarted (retry_count and deferral count unchanged)" >&2
+  else
+    echo "ERROR: $flag present but entry $entry_id could not be returned to approved/ — it was NOT started and may be stranded in running/ (recover with: queue-cli.sh recover-entry $entry_id)" >&2
+  fi
+  release_queue_lock || true
+  return 0
+}
+
 # ============================================================
 # Model routing — resolve CLI --model flag for claude -p
 # ============================================================
@@ -1164,11 +1216,14 @@ _RESULT_OUTCOME=""
 _RESULT_BASELINE=""
 _RESULT_SOLO_MODE=""
 _RESULT_BRANCH=""
+# Path of the patch work-preserver wrote for this entry's uncommitted work, or "".
+_RESULT_PRESERVED_PATCH=""
 
 # --- _start_force_halt_watcher ---
 # Makes FORCE-HALT interrupt a RUNNING entry.
 #
-# The daemon loop checks the FORCE-HALT file only BETWEEN entries, so an
+# The daemon loop checks the FORCE-HALT file only BETWEEN entries (and once more
+# at the launch boundary — see _return_entry_if_halted), so an
 # operator who force-halted during a long brief had to wait for that brief to
 # finish. On 2026-10-20 a running brief had to be stopped by signalling its
 # process by hand, which is not something an operator should need to do. This
@@ -1243,6 +1298,7 @@ _run_single_entry() {
   _RESULT_BASELINE=""
   _RESULT_SOLO_MODE=""
   _RESULT_BRANCH=""
+  _RESULT_PRESERVED_PATCH=""
   _CURRENT_WORKTREE_IS_GROUP=false
   _CURRENT_GROUP_NAME=""
 
@@ -1652,7 +1708,12 @@ _run_single_entry() {
     _RESULT_BRANCH=$(git -C "$_CURRENT_WORKTREE_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
     # Outcome detection from worktree context
     _RESULT_OUTCOME=$(detect_outcome "$exit_code" "$_RESULT_BASELINE" "$_CURRENT_WORKTREE_DIR" "$brief_id" "$stderr_file" "$stdout_file")
+    _RESULT_PRESERVED_PATCH=""
     if [ "$_CURRENT_WORKTREE_IS_GROUP" = true ]; then
+      # Snapshot even though the tree is kept: the next brief may reset it, and
+      # the entry's error_log should still lead somewhere (Decision t-0062).
+      preserve_uncommitted_work "$_CURRENT_WORKTREE_DIR" "$_RESULT_BASELINE" "$brief_id" "$_RESULT_OUTCOME" || true
+      _RESULT_PRESERVED_PATCH="$_PRESERVED_PATCH_PATH"
       # Task group worktree (Decision 0054): keep it for the next brief. The
       # occupancy lock is deliberately NOT released here — it stays held across
       # _solo_merge_if_needed so no other session can claim the worktree in the
@@ -1660,9 +1721,10 @@ _run_single_entry() {
       # caller releases it after the merge/seal step.
       echo "Keeping task group worktree $_CURRENT_WORKTREE_DIR for the next brief (group: $_CURRENT_GROUP_NAME)" >&2
     else
-      # Remove worktree
-      git worktree remove --force "$_CURRENT_WORKTREE_DIR" 2>/dev/null || true
-      git worktree prune 2>/dev/null || true
+      # Capture uncommitted work, then remove the worktree (Decision t-0062).
+      # Never call this inside $(...): the patch path is returned via a global.
+      remove_session_worktree "$_CURRENT_WORKTREE_DIR" "$_RESULT_BASELINE" "$brief_id" "$_RESULT_OUTCOME"
+      _RESULT_PRESERVED_PATCH="$_PRESERVED_PATCH_PATH"
       _CURRENT_WORKTREE_DIR=""
     fi
   else
@@ -2229,6 +2291,7 @@ while true; do
       release_group_worktree_lock "$_CURRENT_GROUP_NAME" "$$" "${REPO_OS_SESSION_ID:-}" 2>/dev/null || true
       _CURRENT_GROUP_NAME=""
     fi
+    _fh_patch=""
     if [ "$_CURRENT_WORKTREE_IS_GROUP" = true ]; then
       if [ -n "$_CURRENT_WORKTREE_DIR" ]; then
         echo "FORCE-HALT: task group worktree '$_CURRENT_WORKTREE_DIR' left in place (Decision 0054)" >&2
@@ -2236,10 +2299,11 @@ while true; do
       _CURRENT_WORKTREE_DIR=""
       _CURRENT_WORKTREE_IS_GROUP=false
     elif [ -n "$_CURRENT_WORKTREE_DIR" ] && [ -d "$_CURRENT_WORKTREE_DIR" ]; then
-      git worktree remove --force "$_CURRENT_WORKTREE_DIR" 2>/dev/null || true
-      git worktree prune 2>/dev/null || true
+      remove_session_worktree "$_CURRENT_WORKTREE_DIR" "${_RESULT_BASELINE:-}" "${_CURRENT_ENTRY_ID:-}" "failed:force-halt"
+      _fh_patch="$_PRESERVED_PATCH_PATH"
       _CURRENT_WORKTREE_DIR=""
     fi
+    _fh_note=$(preserved_work_note "$_fh_patch" "$REPO_ROOT")
     # --- Transition running entry to failed/ ---
     if [ -n "$_CURRENT_ENTRY_ID" ]; then
       _fh_qdir=$(_queue_dir)
@@ -2248,7 +2312,7 @@ while true; do
         if acquire_queue_lock; then
           _load_queue_entry "$_fh_entry_file"
           _QE_STATUS="failed"
-          _QE_ERROR_LOG="force-halted"
+          _QE_ERROR_LOG="force-halted${_fh_note:+; ${_fh_note}}"
           _QE_COMPLETED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           _QE_UPDATED_AT="$_QE_COMPLETED_AT"
           _write_queue_entry "$_fh_qdir/failed/${_CURRENT_ENTRY_ID}.yaml"
@@ -2297,7 +2361,7 @@ while true; do
         printf '  phase_at_exit: "unknown"\n'
         printf '  tag_at_exit: "agent"\n'
         printf '  message: "FORCE-HALT — entry terminated by operator"\n'
-        printf '  context: "Daemon received FORCE-HALT file while entry was running"\n'
+        printf '  context: "Daemon received FORCE-HALT file while entry was running%s"\n' "$(printf '%s' "${_fh_note:+; ${_fh_note}}" | tr -d '"\\')"
         printf '  created_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         printf '  resolved: false\n'
         printf '  resolution: ""\n'
@@ -2610,6 +2674,15 @@ while true; do
   # --- Assemble prompt (lazy generation at dequeue time) ---
   PROMPT=$(assemble_prompt "$ENTRY_FILE")
 
+  # --- Re-check HALT / FORCE-HALT (last stop before the session starts) ---
+  # The loop-top check is stale by now. Deliberately placed as late as the loop
+  # allows, directly before the heartbeat and launch. Do not move it earlier
+  # and do not remove it: it is what makes "once the flag exists, no new entry
+  # starts" true. `continue` hands the flag to the loop-top handler.
+  if _return_entry_if_halted "$ENTRY_ID"; then
+    continue
+  fi
+
   # --- Start heartbeat ---
   _start_heartbeat "$ENTRY_ID"
 
@@ -2702,9 +2775,13 @@ while true; do
 
   # Transition call with return-code checks
   _transition_ok=true
+  # A preserved-work patch must be findable from the entry whatever the outcome:
+  # untracked-only work classifies as completed:clean-noop, so every transition
+  # below carries the note. Empty when nothing was preserved (error_log unchanged).
+  _pw_note=$(preserved_work_note "$_RESULT_PRESERVED_PATCH" "$REPO_ROOT")
   case "$OUTCOME" in
     completed)
-      if ! queue_complete "$ENTRY_ID"; then
+      if ! queue_complete "$ENTRY_ID" "${_pw_note:+${OUTCOME_RAW}; ${_pw_note}}"; then
         echo "ERROR: queue_complete failed for $ENTRY_ID" >&2
         _transition_ok=false
       fi
@@ -2714,13 +2791,13 @@ while true; do
         review:incomplete-deliverable)
           # Completeness veto: route to review/ and write escalation file with criteria detail
           _ri_score=$(grep '^COMPLETENESS: ' "$(get_session_state_dir)/cohesion-reviewed" 2>/dev/null | sed 's/^COMPLETENESS: *//' | head -1 || true)
-          if ! queue_incomplete "$ENTRY_ID" "${_ri_score:-COMPLETENESS_GATE: NEEDS_WORK}"; then
+          if ! queue_incomplete "$ENTRY_ID" "${_ri_score:-COMPLETENESS_GATE: NEEDS_WORK}" "${_pw_note:+${OUTCOME_RAW}; ${_pw_note}}"; then
             echo "ERROR: queue_incomplete failed for $ENTRY_ID" >&2
             _transition_ok=false
           fi
           ;;
         *)
-          if ! queue_escalate "$ENTRY_ID"; then
+          if ! queue_escalate "$ENTRY_ID" "${_pw_note:+${OUTCOME_RAW}; ${_pw_note}}"; then
             echo "ERROR: queue_escalate failed for $ENTRY_ID" >&2
             _transition_ok=false
           fi
@@ -2735,13 +2812,13 @@ while true; do
         failed:empty-result|failed:group-worktree-rebase-conflict|failed:branch-rebase-conflict)
           # A rebase conflict cannot be fixed by retrying: the group is blocked until
           # the operator rebases by hand (or reset-group-worktree) and runs reopen-wo.
-          if ! queue_fail_terminal "$ENTRY_ID" "${OUTCOME_RAW#failed:}: terminal, operator action required (see escalation)"; then
+          if ! queue_fail_terminal "$ENTRY_ID" "${OUTCOME_RAW#failed:}: terminal, operator action required (see escalation)${_pw_note:+; ${_pw_note}}"; then
             echo "ERROR: queue_fail_terminal failed for $ENTRY_ID" >&2
             _transition_ok=false
           fi
           ;;
         *)
-          if ! queue_fail "$ENTRY_ID" "$OUTCOME_RAW"; then
+          if ! queue_fail "$ENTRY_ID" "${OUTCOME_RAW}${_pw_note:+; ${_pw_note}}"; then
             echo "ERROR: queue_fail failed for $ENTRY_ID" >&2
             _transition_ok=false
           fi
@@ -2749,7 +2826,7 @@ while true; do
       esac
       ;;
     *)
-      if ! queue_fail "$ENTRY_ID" "$OUTCOME_RAW"; then
+      if ! queue_fail "$ENTRY_ID" "${OUTCOME_RAW}${_pw_note:+; ${_pw_note}}"; then
         echo "ERROR: queue_fail failed for $ENTRY_ID (wildcard outcome: $OUTCOME_RAW)" >&2
         _transition_ok=false
       fi

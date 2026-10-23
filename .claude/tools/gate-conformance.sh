@@ -45,6 +45,13 @@ VERBOSE=0
 
 REAL_HOOKS="$(cd "$(dirname "${BASH_SOURCE[0]}")/../hooks" && pwd)"
 
+# The cases run hooks in a sandbox. A live session's identity or mode flags in
+# the inherited environment (e.g. a daemon's REPO_OS_SESSION_ID / CLAUDE_HEADLESS)
+# would override the sandbox and turn every exit-0 case into a phase-state block
+# (R35). Cases that need one of these set it explicitly per invocation.
+unset REPO_OS_SESSION_ID CLAUDE_HEADLESS REPO_OS_RECOVER SKIP_FUNC_CHECK \
+  REPO_OS_SKIP_PLAN_GATE REPO_OS_SKIP_PRISTINE_GATE REPO_OS_SKIP_OVERLAP_CHECK
+
 PASS=0
 FAIL=0
 FAILED_CASES=""
@@ -268,6 +275,36 @@ stage() {
   ( cd "$SB" && git add -f "$rel" )
 }
 
+# --- Pristine evidence (Decision t-0063) -----------------------------------------
+# A staged change to the enforcement mechanism needs hash-bound evidence that it was
+# checked from outside itself. This is an INDEPENDENT implementation of the binding
+# (path + index blob, sorted, hashed) -- not a source of _mechanism-helper.sh --
+# so a defect in the helper cannot make this harness agree with it by construction.
+# Call AFTER staging the mechanism files; it stages the evidence file itself.
+mech_hash_indep() {
+  # Deletions count (diff-filter D) and renames are split into delete+add; each line
+  # is "path mode,blob", or "path deleted" when the path is no longer in the index.
+  ( cd "$SB" && git diff --cached --name-only --no-renames --diff-filter=ACMDT 2>/dev/null \
+      | grep -E '^\.claude/(hooks|tools|\.automation)/.*\.sh$|^\.claude/settings\.json$' \
+      | while IFS= read -r f; do
+          st=$(git ls-files -s -- "$f" | awk 'NR==1 {print $1 "," $2}')
+          printf '%s %s\n' "$f" "${st:-deleted}"
+        done \
+      | LC_ALL=C sort | git hash-object --stdin )
+}
+stage_pristine_evidence() {
+  local outcome="${1:-ran}" fail="${2:-0}" pass="${3:-3}" hash mb
+  hash=$(mech_hash_indep)
+  mb=$(cd "$SB" && git rev-parse HEAD)
+  stage "docs/ai/governance/pristine-evidence/conformance.yaml" \
+    "$(printf 'merge_base: %s\nchange_hash: %s\noutcome: %s\npass: %s\nfail: %s' "$mb" "$hash" "$outcome" "$pass" "$fail")"
+}
+marker_present() {   # any candidate state dir holds the marker
+  local d
+  for d in $(_state_dirs); do [ -f "$d/$1" ] && return 0; done
+  return 1
+}
+
 # --- Run a hook with a PreToolUse payload, return its exit code -------------
 # run_gate is called as `rc=$(run_gate ...)`, which runs it in a subshell — so
 # a plain global assignment to LAST_OUTPUT would not survive back to the
@@ -342,6 +379,7 @@ expect_exit 2 "$rc" "A1 blocks a triggered decision with no Decisions: trailer"
 # C8 — the same change WITH the trailer must pass.
 reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
 stage ".claude/hooks/probe-hook.sh" "# PreToolUse handler added here"
+stage_pristine_evidence
 rc=$(run_gate "pre-commit-gates.sh" "git commit -m chore-hookchange -m Decisions: 0004")
 expect_exit 0 "$rc" "A1 allows a triggered decision when the trailer names it"
 
@@ -352,6 +390,7 @@ expect_exit 0 "$rc" "A1 allows a triggered decision when the trailer names it"
 #       and a multi-line message naturally wants -F.
 reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
 stage ".claude/hooks/probe-hook.sh" "# PreToolUse handler added here"
+stage_pristine_evidence
 printf 'chore: hook change\n\nDecisions: 0004\n' > "$SB/.git/COMMIT_MSG_PROBE"
 rc=$(run_gate "pre-commit-gates.sh" "git commit -F $SB/.git/COMMIT_MSG_PROBE")
 expect_exit 0 "$rc" "A1 allows a triggered decision when the trailer is in a -F file"
@@ -387,6 +426,7 @@ expect_file present "$SB/.claude/.state/.recover-signal" \
 # C8e — and it IS consumed when the commit actually proceeds.
 reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
 stage ".claude/hooks/probe-hook.sh" "# PreToolUse handler added here"
+stage_pristine_evidence
 mkdir -p "$SB/.claude/.state"; : > "$SB/.claude/.state/.recover-signal"
 rc=$(run_gate "pre-commit-gates.sh" "git commit -m chore-hookchange -m Decisions: 0004")
 expect_exit 0 "$rc" "commit proceeds with the trailer present"
@@ -521,6 +561,203 @@ fi
 # leak into whatever case runs next and silently change its A3.4 applicability.
 rm -f "$SB/package.json"
 ( cd "$SB" && git rm -q --cached --ignore-unmatch package.json > /dev/null 2>&1 || true )
+
+# --- Mechanism changes must be verified from outside themselves (t-0063) ----
+# The commit gate used to exclude tests and everything under .claude/ from
+# high-risk classification, so a change to hooks, the runner, the queue libraries
+# or their tests was reviewed and verified by the mechanism it had just modified.
+# A staged change that intersects the mechanism now sets `mechanism-change-detected`
+# and needs fresh pristine evidence: a hash-bound record that verify-pristine.sh
+# ran the change's tests against the MERGE BASE in a throwaway checkout.
+#
+# Block vs advise: BLOCK when there is no fresh evidence, ADVISE (one line) when
+# there is. Exits: run the tool; REPO_OS_SKIP_PRISTINE_GATE=1 (interactive only --
+# ignored and escalated in headless); REPO_OS_RECOVER / .recover-signal (existing).
+printf '\n## mechanism-change gate (t-0063)\n'
+
+_mk_hook() { stage ".claude/hooks/probe-hook.sh" "# PreToolUse handler added here"; }
+_PCMD="git commit -m chore-hookchange -m Decisions: 0004"
+
+# M1 — no evidence: blocks, and says why.
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+_mk_hook
+rc=$(run_gate "pre-commit-gates.sh" "$_PCMD")
+expect_exit 2 "$rc" "a staged .claude/hooks change with no pristine evidence blocks"
+expect_output_has "verify-pristine.sh" "...and the block names the tool that clears it"
+if marker_present mechanism-change-detected; then PASS=$((PASS + 1)); printf 'ok   %-58s [present]\n' "mechanism-change-detected marker is written"
+else FAIL=$((FAIL + 1)); FAILED_CASES="${FAILED_CASES}    - mechanism-change-detected marker is written"$'\n'; printf 'FAIL %-58s [absent]\n' "mechanism-change-detected marker is written"; fi
+
+# M2 — fresh evidence: passes, advisory only.
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+_mk_hook; stage_pristine_evidence
+rc=$(run_gate "pre-commit-gates.sh" "$_PCMD")
+expect_exit 0 "$rc" "fresh pristine evidence lets the change through"
+expect_output_has "pristine" "...with a one-line advisory, not silence"
+
+# M3 — a run with failures is still evidence: the gate demands a run, not a green one.
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+_mk_hook; stage_pristine_evidence ran 2
+rc=$(run_gate "pre-commit-gates.sh" "$_PCMD")
+expect_exit 0 "$rc" "a pristine run that reported failures is still accepted"
+expect_output_has "fail=2" "...and the failures are shown to the committer"
+
+# M4 — stale: evidence for different content must not satisfy the gate.
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+_mk_hook; stage_pristine_evidence
+stage ".claude/hooks/probe-hook.sh" "# edited AFTER the pristine run"
+rc=$(run_gate "pre-commit-gates.sh" "$_PCMD")
+expect_exit 2 "$rc" "evidence is stale once the change moves after the run"
+
+# M5 — evidence whose merge_base is not an ancestor of HEAD is stale.
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+_mk_hook
+stage "docs/ai/governance/pristine-evidence/conformance.yaml" \
+  "$(printf 'merge_base: 0000000000000000000000000000000000000001\nchange_hash: %s\noutcome: ran\npass: 3\nfail: 0' "$(mech_hash_indep)")"
+rc=$(run_gate "pre-commit-gates.sh" "$_PCMD")
+expect_exit 2 "$rc" "evidence from a base that is not an ancestor of HEAD is stale"
+
+# M6 — evidence only in the working tree (never `git add`ed) does not count.
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+_mk_hook
+mkdir -p "$SB/docs/ai/governance/pristine-evidence"
+printf 'merge_base: %s\nchange_hash: %s\noutcome: ran\npass: 3\nfail: 0\n' "$(cd "$SB" && git rev-parse HEAD)" "$(mech_hash_indep)" \
+  > "$SB/docs/ai/governance/pristine-evidence/unstaged.yaml"
+rc=$(run_gate "pre-commit-gates.sh" "$_PCMD")
+expect_exit 2 "$rc" "evidence that is not in the index does not count"
+rm -f "$SB/docs/ai/governance/pristine-evidence/unstaged.yaml"
+
+# M7 — docs/spec does not intersect the mechanism: no marker, no gate.
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+stage "docs/spec/note.md" "a spec note"
+rc=$(run_gate "pre-commit-gates.sh" "git commit -m chore-spec")
+expect_exit 0 "$rc" "a docs/spec change is not a mechanism change"
+if marker_present mechanism-change-detected; then FAIL=$((FAIL + 1)); FAILED_CASES="${FAILED_CASES}    - docs/spec staged but marker written"$'\n'; printf 'FAIL %-58s [present]\n' "docs/spec change leaves no marker"
+else PASS=$((PASS + 1)); printf 'ok   %-58s [absent]\n' "docs/spec change leaves no marker"; fi
+
+# M8 — tool_error evidence: accepted loudly + escalated, never a deadlock.
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+rm -f "$SB"/.claude/.automation/escalations/*.yaml 2>/dev/null || true
+_mk_hook; stage_pristine_evidence tool_error
+rc=$(run_gate "pre-commit-gates.sh" "$_PCMD")
+expect_exit 0 "$rc" "tool_error evidence does not deadlock the commit"
+expect_output_has "tool_error" "...but says loudly that nothing was verified"
+if ls "$SB"/.claude/.automation/escalations/*pristine* >/dev/null 2>&1; then PASS=$((PASS + 1)); printf 'ok   %-58s [present]\n' "...and writes an escalation for the operator"
+else FAIL=$((FAIL + 1)); FAILED_CASES="${FAILED_CASES}    - tool_error evidence wrote no escalation"$'\n'; printf 'FAIL %-58s [absent]\n' "...and writes an escalation for the operator"; fi
+
+# M9 — operator exit: interactive override honoured and logged; headless override
+#      ignored and escalated.
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+_mk_hook
+export REPO_OS_SKIP_PRISTINE_GATE=1
+rc=$(run_gate "pre-commit-gates.sh" "$_PCMD")
+unset REPO_OS_SKIP_PRISTINE_GATE
+expect_exit 0 "$rc" "REPO_OS_SKIP_PRISTINE_GATE=1 is honoured interactively"
+
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+rm -f "$SB"/.claude/.automation/escalations/*.yaml 2>/dev/null || true
+_mk_hook
+export REPO_OS_SKIP_PRISTINE_GATE=1 CLAUDE_HEADLESS=1
+rc=$(run_gate "pre-commit-gates.sh" "$_PCMD")
+unset REPO_OS_SKIP_PRISTINE_GATE CLAUDE_HEADLESS
+expect_exit 2 "$rc" "REPO_OS_SKIP_PRISTINE_GATE=1 is NOT honoured in headless"
+if ls "$SB"/.claude/.automation/escalations/*pristine* >/dev/null 2>&1; then PASS=$((PASS + 1)); printf 'ok   %-58s [present]\n' "...and the ignored override is escalated"
+else FAIL=$((FAIL + 1)); FAILED_CASES="${FAILED_CASES}    - headless override ignored but not escalated"$'\n'; printf 'FAIL %-58s [absent]\n' "...and the ignored override is escalated"; fi
+
+# M10 — the existing recovery exit still works.
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+_mk_hook
+export REPO_OS_RECOVER=1
+rc=$(run_gate "pre-commit-gates.sh" "$_PCMD")
+unset REPO_OS_RECOVER
+expect_exit 0 "$rc" "REPO_OS_RECOVER=1 remains an exit"
+
+# M11 — a mechanism TEST file is a mechanism change, even though its path says "session".
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+stage ".claude/hooks/tests/test-session-probe.sh" "echo ok"
+rc=$(run_gate "pre-commit-gates.sh" "git commit -m chore-mechtest")
+expect_exit 2 "$rc" "a staged mechanism test with no pristine evidence blocks"
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+stage ".claude/hooks/tests/test-session-probe.sh" "echo ok"; stage_pristine_evidence
+rc=$(run_gate "pre-commit-gates.sh" "git commit -m chore-mechtest")
+expect_exit 0 "$rc" "...and with evidence passes: a test path is not a high-risk path"
+
+# M12 — evidence that executed NOTHING (pass 0 / fail 0) verified nothing: 'empty'.
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+_mk_hook; stage_pristine_evidence ran 0 0
+rc=$(run_gate "pre-commit-gates.sh" "$_PCMD")
+expect_exit 2 "$rc" "evidence from a run that executed no test is not accepted"
+expect_output_has "status: empty" "...and the block says the run was empty"
+
+# M13 — DELETING a mechanism file is a mechanism change (a deleted guard is the
+#       sharpest change there is). Needs a tracked mechanism file at HEAD.
+reset_worktree; clear_state
+stage ".claude/hooks/probe-del.sh" "# a guard that exists at HEAD"
+( cd "$SB" && git commit -q -m "fixture: tracked hook" )
+write_phase_state "commit"; write_full_evidence
+( cd "$SB" && git rm -q -- .claude/hooks/probe-del.sh )
+rc=$(run_gate "pre-commit-gates.sh" "$_PCMD")
+expect_exit 2 "$rc" "a staged DELETION of a mechanism file with no evidence blocks"
+if marker_present mechanism-change-detected; then PASS=$((PASS + 1)); printf 'ok   %-58s [present]\n' "...and a deletion sets the mechanism-change marker"
+else FAIL=$((FAIL + 1)); FAILED_CASES="${FAILED_CASES}    - deletion of a mechanism file wrote no marker"$'\n'; printf 'FAIL %-58s [absent]\n' "...and a deletion sets the mechanism-change marker"; fi
+
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+( cd "$SB" && git rm -q -- .claude/hooks/probe-del.sh )
+stage_pristine_evidence
+rc=$(run_gate "pre-commit-gates.sh" "$_PCMD")
+expect_exit 0 "$rc" "...and with evidence bound to the deletion it passes"
+
+# M14 — a mode flip is part of the bound state: evidence from before the flip is stale.
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+( cd "$SB" && git rm -q -- .claude/hooks/probe-del.sh )
+stage_pristine_evidence
+( cd "$SB" && git reset -q HEAD -- .claude/hooks/probe-del.sh && git checkout -q -- .claude/hooks/probe-del.sh \
+    && git update-index --chmod=+x .claude/hooks/probe-del.sh )
+rc=$(run_gate "pre-commit-gates.sh" "$_PCMD")
+expect_exit 2 "$rc" "evidence for a deletion does not cover a different change to the same path"
+
+# M15 — a TYPECHANGE (regular file -> symlink, git status T) is a mechanism change:
+#       a guard swapped for a link to a script outside the index is the same hole as
+#       a deletion. diff-filter ACMD alone would never list it.
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+( cd "$SB" && rm -f .claude/hooks/probe-del.sh && ln -s /usr/bin/true .claude/hooks/probe-del.sh \
+    && git add -- .claude/hooks/probe-del.sh )
+rc=$(run_gate "pre-commit-gates.sh" "$_PCMD")
+expect_exit 2 "$rc" "a staged TYPECHANGE (file -> symlink) of a mechanism file with no evidence blocks"
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+( cd "$SB" && rm -f .claude/hooks/probe-del.sh && ln -s /usr/bin/true .claude/hooks/probe-del.sh \
+    && git add -- .claude/hooks/probe-del.sh )
+stage_pristine_evidence
+rc=$(run_gate "pre-commit-gates.sh" "$_PCMD")
+expect_exit 0 "$rc" "...and with evidence bound to the typechange it passes"
+
+# Drop the fixture commit so later sections see the sandbox as it was.
+reset_worktree; ( cd "$SB" && git reset -q --hard HEAD~1 )
+
+# --- The docs/ai/ + .claude/ exclusion is narrowed to the KEYWORD scan (t-0063) ---
+# Before: one filtered list fed BOTH the path scan and the keyword scan, so
+# `.claude/hooks/session-*.sh` was invisible to high-risk classification. Now the
+# exclusion applies to the keyword scan only: governance prose that mentions
+# password / secret / token must still not trigger it, but a hook whose PATH says
+# session / auth / crypto is classified like any other source file.
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+stage "docs/ai/logs/sessions/session-auth-notes.md" "discusses a password, a secret and a token in prose"
+rc=$(run_gate "pre-commit-gates.sh" "git commit -m chore-prose")
+expect_exit 0 "$rc" "governance prose with session/auth/password/token is not high-risk"
+
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+_mk_hook
+stage ".claude/hooks/probe-hook.sh" "# the password and secret and token handling is documented here"
+stage_pristine_evidence
+rc=$(run_gate "pre-commit-gates.sh" "$_PCMD")
+expect_exit 0 "$rc" "keywords in a .claude/ file do not trigger the keyword scan"
+if marker_present high-risk-detected; then FAIL=$((FAIL + 1)); FAILED_CASES="${FAILED_CASES}    - keyword in .claude/ file set high-risk-detected"$'\n'; printf 'FAIL %-58s [present]\n' "keyword scan still ignores .claude/ content"
+else PASS=$((PASS + 1)); printf 'ok   %-58s [absent]\n' "keyword scan still ignores .claude/ content"; fi
+
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+stage ".claude/hooks/session-probe.sh" "echo hello"; stage_pristine_evidence
+rc=$(run_gate "pre-commit-gates.sh" "git commit -m chore-sessionhook")
+expect_exit 2 "$rc" "a .claude/hooks script whose path says 'session' is now high-risk by path"
+expect_output_has "High-risk" "...and the block is the high-risk sign-off gate"
 
 # --- Task group contracts must be resolvable from the MAIN repo ------------
 # A contract belongs to the GROUP, not to one brief. Inside a worktree session
@@ -708,6 +945,111 @@ for _sf in functional-verified high-risk-detected kg-updated; do
     printf 'FAIL %-58s [unguarded]\n' "$_sf write cannot abort the chain"
   fi
 done
+
+# --- The machinery manifest must match a fresh rebuild ----------------------
+# template-sync ships machinery-manifest.txt to every child and withdraws files
+# by diffing the child's old copy against the new one (Decision t-0051). A stale
+# manifest therefore means missed or spurious cleanups downstream, and nothing
+# failed when it went stale: it drifted by five files, then by fifteen, and was
+# only noticed twice and by accident. It has to stay tracked (children receive
+# it), so drift is made loud here instead — this harness runs in CI on every
+# feature/fix/release branch (.github/workflows/gate-conformance.yml).
+#
+# Two parts. The first checks the REAL repo. The second proves the check can go
+# red, in a scratch repo, because a check that has never failed is not evidence.
+printf '\n## machinery manifest\n'
+
+_MM_SCRIPT="$REAL_HOOKS/../.automation/lib/rebuild-machinery-manifest.sh"
+
+# This harness is itself synced to children, but the manifest is the TEMPLATE's
+# list of what it ships. In a child, `git ls-files` also holds the child's own
+# hooks, agents and product code, so the comparison can never come out equal and
+# nothing the child does would clear it. The real-repo check therefore runs only
+# in a template checkout (.claude/repo-mode, which is untracked and never synced).
+# CI has no repo-mode file, so gate-conformance.yml runs the same --check as its
+# own step — that workflow is excluded from sync, so it is template-only by
+# construction. The scratch-repo cases below need no such guard.
+if [ "$(cat "$REAL_HOOKS/../repo-mode" 2>/dev/null || true)" = "template" ]; then
+  _mm_rc=0
+  bash "$_MM_SCRIPT" --check > "$_OUT_FILE" 2>&1 || _mm_rc=$?
+  expect_exit 0 "$_mm_rc" "tracked machinery manifest matches a fresh rebuild"
+  # expect_exit shows the script's output only under -v, and CI does not pass -v;
+  # without this the failure would read "expected 0, got 1" with no remedy.
+  if [ "$_mm_rc" -ne 0 ]; then sed 's/^/       | /' "$_OUT_FILE"; fi
+else
+  printf 'skip %-58s [not a template checkout; CI step runs it]\n' \
+    "tracked machinery manifest matches a fresh rebuild"
+fi
+
+_MM="$SB/manifest-probe"
+_MM_REL=".claude/.automation/machinery-manifest.txt"
+_mm_ok=1
+mkdir -p "$_MM/.claude/.automation/lib" \
+  && cp "$_MM_SCRIPT" "$_MM/.claude/.automation/lib/" \
+  && git -C "$_MM" init -q \
+  && printf 'one\n' > "$_MM/one.txt" \
+  && git -C "$_MM" add -A \
+  && bash "$_MM/.claude/.automation/lib/rebuild-machinery-manifest.sh" > /dev/null 2>&1 \
+  && git -C "$_MM" add -A \
+  && bash "$_MM/.claude/.automation/lib/rebuild-machinery-manifest.sh" > /dev/null 2>&1 \
+  && git -C "$_MM" add -A && _mm_ok=0   # twice: the manifest lists itself, so it only settles once tracked
+if [ "$_mm_ok" -ne 0 ]; then
+  FAIL=$((FAIL + 1))
+  FAILED_CASES="${FAILED_CASES}    - manifest probe repo could not be built"$'\n'
+  printf 'FAIL %-58s [setup]\n' "manifest probe repo builds"
+else
+  _MM_RB="$_MM/.claude/.automation/lib/rebuild-machinery-manifest.sh"
+
+  _mm_rc=0; bash "$_MM_RB" --check > /dev/null 2>&1 || _mm_rc=$?
+  expect_exit 0 "$_mm_rc" "probe: fresh manifest passes --check"
+
+  # Drift: a synced file is added and the manifest is not regenerated.
+  printf 'two\n' > "$_MM/two.txt" && git -C "$_MM" add two.txt
+  _mm_rc=0; bash "$_MM_RB" --check > /dev/null 2>&1 || _mm_rc=$?
+  expect_exit 1 "$_mm_rc" "probe: added file, stale manifest -> --check fails"
+
+  # --check must not repair what it reports.
+  _mm_before=$(cksum < "$_MM/$_MM_REL")
+  bash "$_MM_RB" --check > /dev/null 2>&1 || true
+  [ "$(cksum < "$_MM/$_MM_REL")" = "$_mm_before" ] && _mm_rc=0 || _mm_rc=1
+  expect_exit 0 "$_mm_rc" "probe: --check leaves the manifest untouched"
+
+  # --help and unknown arguments must write nothing (they used to rebuild).
+  _mm_rc=0; bash "$_MM_RB" --help > /dev/null 2>&1 || _mm_rc=$?
+  expect_exit 0 "$_mm_rc" "probe: --help exits 0"
+  [ "$(cksum < "$_MM/$_MM_REL")" = "$_mm_before" ] && _mm_rc=0 || _mm_rc=1
+  expect_exit 0 "$_mm_rc" "probe: --help writes nothing"
+
+  _mm_rc=0; bash "$_MM_RB" --bogus > /dev/null 2>&1 || _mm_rc=$?
+  expect_exit 2 "$_mm_rc" "probe: unknown argument is a usage error"
+  [ "$(cksum < "$_MM/$_MM_REL")" = "$_mm_before" ] && _mm_rc=0 || _mm_rc=1
+  expect_exit 0 "$_mm_rc" "probe: unknown argument writes nothing"
+
+  # An explicit empty argument is an argument, not "no argument".
+  _mm_rc=0; bash "$_MM_RB" "" > /dev/null 2>&1 || _mm_rc=$?
+  expect_exit 2 "$_mm_rc" "probe: empty-string argument is a usage error"
+  [ "$(cksum < "$_MM/$_MM_REL")" = "$_mm_before" ] && _mm_rc=0 || _mm_rc=1
+  expect_exit 0 "$_mm_rc" "probe: empty-string argument writes nothing"
+
+  # The drift exit must be the STALE report, not an incidental crash that also
+  # happens to exit 1 — and it must name the remedy.
+  _mm_msg=$(bash "$_MM_RB" --check 2>&1 || true)
+  case "$_mm_msg" in
+    *STALE*rebuild-machinery-manifest.sh*) _mm_rc=0 ;;
+    *) _mm_rc=1 ;;
+  esac
+  expect_exit 0 "$_mm_rc" "probe: stale report names the regenerate command"
+
+  # Regenerating clears the drift.
+  bash "$_MM_RB" > /dev/null 2>&1 && git -C "$_MM" add -A
+  _mm_rc=0; bash "$_MM_RB" --check > /dev/null 2>&1 || _mm_rc=$?
+  expect_exit 0 "$_mm_rc" "probe: regenerate clears the drift"
+
+  # Drift the other way: a synced file is removed.
+  git -C "$_MM" rm -q -f two.txt
+  _mm_rc=0; bash "$_MM_RB" --check > /dev/null 2>&1 || _mm_rc=$?
+  expect_exit 1 "$_mm_rc" "probe: removed file, stale manifest -> --check fails"
+fi
 
 # ============================================================
 printf '\n# ------------------------------------------------------------\n'

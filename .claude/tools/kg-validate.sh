@@ -3,8 +3,8 @@
 # Decision 0034 — Knowledge Graph Data Layer (Amendment 4)
 #
 # Validates graph.yaml and/or product-graph.yaml against the enum constraints
-# defined in docs/ai/knowledge-graph/schema.yaml. Uses grep/sed only —
-# no external dependencies (no yq, no Python, no Node.js).
+# defined in docs/ai/knowledge-graph/schema.yaml. Uses awk (one pass per check)
+# — no external dependencies (no yq, no Python, no Node.js).
 #
 # Checks:
 #   - relation: values against 8-type taxonomy
@@ -93,65 +93,92 @@ _add_violation() {
 }
 
 # --------------------------------------------------------
-# _is_valid_enum VAL VALID_LIST
-# Returns 0 if VAL is in the space-delimited VALID_LIST, 1 otherwise.
-# Safe with set -e: always returns a defined value.
+# _record_violations FILE RECORDS
+# RECORDS is awk output: one "<line><TAB><message>" per violation.
 # --------------------------------------------------------
-_is_valid_enum() {
-  local val="$1" valid_list="$2"
-  local v
-  for v in $valid_list; do
-    if [ "$val" = "$v" ]; then
-      return 0
-    fi
-  done
-  return 1
+_record_violations() {
+  local graph_file="$1" records="$2" rec
+  while IFS= read -r rec; do
+    [ -n "$rec" ] || continue
+    _add_violation "$graph_file" "${rec%%$'\t'*}" "${rec#*$'\t'}"
+  done <<EOF
+$records
+EOF
 }
+
+# --------------------------------------------------------
+# Shared awk helpers (portable: POSIX/BSD awk, no gawk extensions).
+#
+# lastval(s, key) mirrors the former `sed -E 's/.*KEY: "([^"]+)".*/\1/'`:
+# the greedy leading .* binds to the LAST `KEY: "..."` on the line, and a line
+# with no such match is returned unchanged.
+# addm(list, field) appends a field to a ", "-joined list.
+# --------------------------------------------------------
+_KG_AWK_LIB='
+function lastval(s, key,    re, rest, hit, p) {
+  re = key ": \"[^\"]+\""
+  hit = ""
+  rest = s
+  while (match(rest, re)) {
+    hit = substr(rest, RSTART, RLENGTH)
+    rest = substr(rest, RSTART + 1)
+  }
+  if (hit == "") return s
+  p = index(hit, "\"")
+  return substr(hit, p + 1, length(hit) - p - 1)
+}
+function addm(list, field) {
+  return (list == "") ? field : list ", " field
+}
+function emit(n, msg) {
+  printf "%d\t%s\n", n, msg
+}
+'
 
 # ============================================================
 # Validate enum fields in a single graph file
 # ============================================================
 _validate_enums() {
-  local graph_file="$1"
-  local line_num=0
-  local line val
+  local graph_file="$1" nlines out
+  # `read` drops an unterminated final line; cap awk at the newline count to match.
+  nlines=$(wc -l < "$graph_file")
 
-  while IFS= read -r line; do
-    line_num=$((line_num + 1))
+  out=$(awk -v last="$nlines" \
+    -v rels="$VALID_RELATIONS" -v types="$VALID_NODE_TYPES" \
+    -v stats="$VALID_STATUSES" -v srcs="$VALID_SOURCE_TYPES" \
+    "$_KG_AWK_LIB"'
+function inlist(v, list,    n, a, i) {
+  n = split(list, a, " ")
+  for (i = 1; i <= n; i++) if ((a[i] "") == (v "")) return 1
+  return 0
+}
+NR > last { exit }
+{
+  line = $0
+  # relation: "value" — only match quoted values (avoids matching YAML comments)
+  if (line ~ /^ *relation: "[^"]+"/) {
+    val = lastval(line, "relation")
+    if (!inlist(val, rels)) emit(NR, "invalid relation: \"" val "\" (valid: " rels ")")
+  }
+  # node type: "value" — 4-space indent (node-level field, not edge)
+  if (line ~ /^    type: "[^"]+"/) {
+    val = lastval(line, "type")
+    if (!inlist(val, types)) emit(NR, "invalid node type: \"" val "\" (valid: " types ")")
+  }
+  # status: "value"
+  if (line ~ /^ *status: "[^"]+"/) {
+    val = lastval(line, "status")
+    if (!inlist(val, stats)) emit(NR, "invalid status: \"" val "\" (valid: " stats ")")
+  }
+  # source_type: "value"
+  if (line ~ /^ *source_type: "[^"]+"/) {
+    val = lastval(line, "source_type")
+    if (!inlist(val, srcs)) emit(NR, "invalid source_type: \"" val "\" (valid: " srcs ")")
+  }
+}
+' "$graph_file")
 
-    # relation: "value" — only match quoted values (avoids matching YAML comments)
-    if echo "$line" | grep -qE '^ *relation: "[^"]+"'; then
-      val=$(echo "$line" | sed -E 's/.*relation: "([^"]+)".*/\1/')
-      if ! _is_valid_enum "$val" "$VALID_RELATIONS"; then
-        _add_violation "$graph_file" "$line_num" "invalid relation: \"$val\" (valid: $VALID_RELATIONS)"
-      fi
-    fi
-
-    # node type: "value" — 4-space indent (node-level field, not edge)
-    if echo "$line" | grep -qE '^ {4}type: "[^"]+"'; then
-      val=$(echo "$line" | sed -E 's/.*type: "([^"]+)".*/\1/')
-      if ! _is_valid_enum "$val" "$VALID_NODE_TYPES"; then
-        _add_violation "$graph_file" "$line_num" "invalid node type: \"$val\" (valid: $VALID_NODE_TYPES)"
-      fi
-    fi
-
-    # status: "value"
-    if echo "$line" | grep -qE '^ *status: "[^"]+"'; then
-      val=$(echo "$line" | sed -E 's/.*status: "([^"]+)".*/\1/')
-      if ! _is_valid_enum "$val" "$VALID_STATUSES"; then
-        _add_violation "$graph_file" "$line_num" "invalid status: \"$val\" (valid: $VALID_STATUSES)"
-      fi
-    fi
-
-    # source_type: "value"
-    if echo "$line" | grep -qE '^ *source_type: "[^"]+"'; then
-      val=$(echo "$line" | sed -E 's/.*source_type: "([^"]+)".*/\1/')
-      if ! _is_valid_enum "$val" "$VALID_SOURCE_TYPES"; then
-        _add_violation "$graph_file" "$line_num" "invalid source_type: \"$val\" (valid: $VALID_SOURCE_TYPES)"
-      fi
-    fi
-
-  done < "$graph_file"
+  _record_violations "$graph_file" "$out"
 }
 
 # ============================================================
@@ -160,61 +187,49 @@ _validate_enums() {
 #   type, description, last_verified, status, layer
 # ============================================================
 _validate_node_fields() {
-  local graph_file="$1"
-  local in_node=false
-  local node_start_line=0
-  local node_id=""
-  local has_type=false has_desc=false has_lv=false has_status=false has_layer=false
-  local line_num=0
-  local line
+  local graph_file="$1" nlines out
+  nlines=$(wc -l < "$graph_file")
 
-  _flush_node() {
-    # Report missing required fields for the current node
-    if [ "$in_node" = true ] && [ -n "$node_id" ]; then
-      local missing=""
-      if [ "$has_type" = false ];   then missing="${missing:+$missing, }type"; fi
-      if [ "$has_desc" = false ];   then missing="${missing:+$missing, }description"; fi
-      if [ "$has_lv" = false ];     then missing="${missing:+$missing, }last_verified"; fi
-      if [ "$has_status" = false ]; then missing="${missing:+$missing, }status"; fi
-      if [ "$has_layer" = false ];  then missing="${missing:+$missing, }layer"; fi
-      if [ -n "$missing" ]; then
-        _add_violation "$graph_file" "$node_start_line" "node \"$node_id\" missing required fields: $missing"
-      fi
-    fi
+  out=$(awk -v last="$nlines" "$_KG_AWK_LIB"'
+function flush(    missing) {
+  if (in_node && node_id != "") {
+    missing = ""
+    if (!has_type)   missing = addm(missing, "type")
+    if (!has_desc)   missing = addm(missing, "description")
+    if (!has_lv)     missing = addm(missing, "last_verified")
+    if (!has_status) missing = addm(missing, "status")
+    if (!has_layer)  missing = addm(missing, "layer")
+    if (missing != "") emit(node_start_line, "node \"" node_id "\" missing required fields: " missing)
   }
+}
+NR > last { exit }
+# Node block start: "  - id:"
+/^  - id: / {
+  flush()
+  in_node = 1
+  node_start_line = NR
+  node_id = lastval($0, "id")
+  has_type = has_desc = has_lv = has_status = has_layer = 0
+  next
+}
+# Edge block start: "  - source:" — ends node section
+/^  - source: / {
+  flush()
+  in_node = 0
+  node_id = ""
+  next
+}
+in_node {
+  if (/^    type: /)          has_type = 1
+  if (/^    description: /)   has_desc = 1
+  if (/^    last_verified: /) has_lv = 1
+  if (/^    status: /)        has_status = 1
+  if (/^    layer: /)         has_layer = 1
+}
+END { flush() }
+' "$graph_file")
 
-  while IFS= read -r line; do
-    line_num=$((line_num + 1))
-
-    # Node block start: "  - id:"
-    if echo "$line" | grep -qE '^ {2}- id: '; then
-      _flush_node
-      in_node=true
-      node_start_line=$line_num
-      node_id=$(echo "$line" | sed -E 's/.*id: "([^"]+)".*/\1/')
-      has_type=false; has_desc=false; has_lv=false; has_status=false; has_layer=false
-      continue
-    fi
-
-    # Edge block start: "  - source:" — ends node section
-    if echo "$line" | grep -qE '^ {2}- source: '; then
-      _flush_node
-      in_node=false
-      node_id=""
-      continue
-    fi
-
-    if [ "$in_node" = true ]; then
-      if echo "$line" | grep -qE '^ {4}type: ';         then has_type=true; fi
-      if echo "$line" | grep -qE '^ {4}description: ';  then has_desc=true; fi
-      if echo "$line" | grep -qE '^ {4}last_verified: '; then has_lv=true; fi
-      if echo "$line" | grep -qE '^ {4}status: ';       then has_status=true; fi
-      if echo "$line" | grep -qE '^ {4}layer: ';        then has_layer=true; fi
-    fi
-  done < "$graph_file"
-
-  # Flush the last node
-  _flush_node
+  _record_violations "$graph_file" "$out"
 }
 
 # ============================================================
@@ -223,62 +238,51 @@ _validate_node_fields() {
 #   target, relation, context, source_type, last_verified, status
 # ============================================================
 _validate_edge_fields() {
-  local graph_file="$1"
-  local in_edge=false
-  local edge_start_line=0
-  local edge_src=""
-  local has_tgt=false has_rel=false has_ctx=false has_st=false has_lv=false has_status=false
-  local line_num=0
-  local line
+  local graph_file="$1" nlines out
+  nlines=$(wc -l < "$graph_file")
 
-  _flush_edge() {
-    if [ "$in_edge" = true ] && [ -n "$edge_src" ]; then
-      local missing=""
-      if [ "$has_tgt" = false ];    then missing="${missing:+$missing, }target"; fi
-      if [ "$has_rel" = false ];    then missing="${missing:+$missing, }relation"; fi
-      if [ "$has_ctx" = false ];    then missing="${missing:+$missing, }context"; fi
-      if [ "$has_st" = false ];     then missing="${missing:+$missing, }source_type"; fi
-      if [ "$has_lv" = false ];     then missing="${missing:+$missing, }last_verified"; fi
-      if [ "$has_status" = false ]; then missing="${missing:+$missing, }status"; fi
-      if [ -n "$missing" ]; then
-        _add_violation "$graph_file" "$edge_start_line" "edge from \"$edge_src\" missing required fields: $missing"
-      fi
-    fi
+  out=$(awk -v last="$nlines" "$_KG_AWK_LIB"'
+function flush(    missing) {
+  if (in_edge && edge_src != "") {
+    missing = ""
+    if (!has_tgt)    missing = addm(missing, "target")
+    if (!has_rel)    missing = addm(missing, "relation")
+    if (!has_ctx)    missing = addm(missing, "context")
+    if (!has_st)     missing = addm(missing, "source_type")
+    if (!has_lv)     missing = addm(missing, "last_verified")
+    if (!has_status) missing = addm(missing, "status")
+    if (missing != "") emit(edge_start_line, "edge from \"" edge_src "\" missing required fields: " missing)
   }
+}
+NR > last { exit }
+# Edge block start: "  - source:"
+/^  - source: / {
+  flush()
+  in_edge = 1
+  edge_start_line = NR
+  edge_src = lastval($0, "source")
+  has_tgt = has_rel = has_ctx = has_st = has_lv = has_status = 0
+  next
+}
+# Node block start: "  - id:" — ends edge section
+/^  - id: / {
+  flush()
+  in_edge = 0
+  edge_src = ""
+  next
+}
+in_edge {
+  if (/^    target: /)        has_tgt = 1
+  if (/^    relation: /)      has_rel = 1
+  if (/^    context: /)       has_ctx = 1
+  if (/^    source_type: /)   has_st = 1
+  if (/^    last_verified: /) has_lv = 1
+  if (/^    status: /)        has_status = 1
+}
+END { flush() }
+' "$graph_file")
 
-  while IFS= read -r line; do
-    line_num=$((line_num + 1))
-
-    # Edge block start: "  - source:"
-    if echo "$line" | grep -qE '^ {2}- source: '; then
-      _flush_edge
-      in_edge=true
-      edge_start_line=$line_num
-      edge_src=$(echo "$line" | sed -E 's/.*source: "([^"]+)".*/\1/')
-      has_tgt=false; has_rel=false; has_ctx=false; has_st=false; has_lv=false; has_status=false
-      continue
-    fi
-
-    # Node block start: "  - id:" — ends edge section
-    if echo "$line" | grep -qE '^ {2}- id: '; then
-      _flush_edge
-      in_edge=false
-      edge_src=""
-      continue
-    fi
-
-    if [ "$in_edge" = true ]; then
-      if echo "$line" | grep -qE '^ {4}target: ';       then has_tgt=true; fi
-      if echo "$line" | grep -qE '^ {4}relation: ';     then has_rel=true; fi
-      if echo "$line" | grep -qE '^ {4}context: ';      then has_ctx=true; fi
-      if echo "$line" | grep -qE '^ {4}source_type: ';  then has_st=true; fi
-      if echo "$line" | grep -qE '^ {4}last_verified: '; then has_lv=true; fi
-      if echo "$line" | grep -qE '^ {4}status: ';       then has_status=true; fi
-    fi
-  done < "$graph_file"
-
-  # Flush the last edge
-  _flush_edge
+  _record_violations "$graph_file" "$out"
 }
 
 # ============================================================

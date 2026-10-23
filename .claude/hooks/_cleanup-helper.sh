@@ -125,6 +125,7 @@ cleanup_session_files() {
     # deletion is benign because the gate re-checks on the next commit attempt.
     rm -f "$state_dir/scope-risk-gain"
     rm -f "$state_dir/high-risk-detected"
+    rm -f "$state_dir/mechanism-change-detected"
     rm -f "$state_dir/governance-checked"
     rm -f "$state_dir/governance-bash-fired"
     rm -f "$state_dir/overrides.log"

@@ -1097,8 +1097,10 @@ queue_dequeue() {
 # Moves from running to completed with completed_at timestamp.
 # Arguments:
 #   $1 — entry_id
+#   $2 — note (optional, stored in error_log; omitted → error_log is left as loaded)
 queue_complete() {
   local entry_id="$1"
+  local note="${2:-}"
   local qdir
   qdir=$(_queue_dir)
   local src_file="$qdir/running/${entry_id}.yaml"
@@ -1115,6 +1117,7 @@ queue_complete() {
 
   _load_queue_entry "$src_file"
   _QE_STATUS="completed"
+  [ -z "$note" ] || _QE_ERROR_LOG="$note"
   _QE_COMPLETED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   _QE_UPDATED_AT="$_QE_COMPLETED_AT"
 
@@ -1232,12 +1235,13 @@ queue_fail_terminal() {
 # Arguments:
 #   $1 — entry_id
 #   $2 — completeness_detail (optional; e.g., "3/5 criteria met")
+#   $3 — error_log note (optional; passed through to queue_escalate)
 queue_incomplete() {
   local entry_id="$1"
   local completeness_detail="${2:-}"
 
   # Delegate queue transition to queue_escalate (running → review/)
-  queue_escalate "$entry_id" || return $?
+  queue_escalate "$entry_id" "${3:-}" || return $?
 
   # Write escalation file so operator can see which criteria were incomplete
   local esc_dir="$AUTOMATION_DIR/escalations"
@@ -1263,8 +1267,11 @@ queue_incomplete() {
 # Moves from running to review/ for operator attention.
 # Arguments:
 #   $1 — entry_id
+#   $2 — reason (optional, stored in error_log so `queue-cli.sh show` surfaces it;
+#        omitted → error_log is left as loaded)
 queue_escalate() {
   local entry_id="$1"
+  local reason="${2:-}"
   local qdir
   qdir=$(_queue_dir)
   local src_file="$qdir/running/${entry_id}.yaml"
@@ -1281,6 +1288,7 @@ queue_escalate() {
 
   _load_queue_entry "$src_file"
   _QE_STATUS="review"
+  [ -z "$reason" ] || _QE_ERROR_LOG="$reason"
   _QE_COMPLETED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   _QE_UPDATED_AT="$_QE_COMPLETED_AT"
 
@@ -1393,16 +1401,22 @@ queue_block_deferred() {
 
 # --- Defer a running entry (work-order pause) ---
 # Moves from running back to approved/ WITHOUT incrementing retry_count.
-# Used when a sibling entry in the same work order is in review/failed/blocked.
+# Used when a sibling entry in the same work order is in review/failed/blocked,
+# and (in "nocount" mode) when HALT / FORCE-HALT appears after dequeue.
 # The entry resumes automatically when the work order is reopened.
 # Writes/increments a file-based defer count that survives daemon restarts.
 # Arguments:
 #   $1 — entry_id
 #   $2 — reason (optional, stored in error_log field)
+#   $3 — "nocount" (optional): return the entry WITHOUT consuming a deferral
+#        cycle. The counter feeds max_deferral_cycles, which blocks a work order
+#        that cannot progress; a HALT-return is not the entry's fault and must not
+#        move it toward that cap. Prints 0 in this mode (nothing reads it).
 # Output: new defer count on stdout
 queue_defer() {
   local entry_id="$1"
   local reason="${2:-}"
+  local count_mode="${3:-}"
   local qdir
   qdir=$(_queue_dir)
   local src_file="$qdir/running/${entry_id}.yaml"
@@ -1431,6 +1445,11 @@ queue_defer() {
   _write_queue_entry "$qdir/approved/${entry_id}.yaml"
   rm -f "$src_file"
   _rebuild_queue_index || true
+
+  if [ "$count_mode" = "nocount" ]; then
+    printf '0'
+    return 0
+  fi
 
   # Increment file-based defer count (survives daemon restarts)
   local defer_count_file="$qdir/.defer-count-${entry_id}"

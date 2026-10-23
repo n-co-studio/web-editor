@@ -75,11 +75,17 @@ Referenced by escalation reports for operator recovery guidance.
 
 **Note:** turn-budget exhaustion used to present this way too, and no longer does — since 2026-10-21 it classifies as `review:turn-budget-exhausted` and the entry goes to `review/`, never to `completed`. If you are here because an entry shows `completed` with no commits, exhaustion is **not** the cause; see §14 for that one.
 
+**The worktree is gone — look for the patch, not the tree.** The runner removes a session's worktree when the session ends. Since Decision t-0062 it first writes a patch of the working tree (tracked changes, deletions, binaries **and untracked non-ignored files**) whenever the session made no commits and left the tree dirty. This applies to the normal exit path, a FORCE-HALT and a runner crash. Before t-0062 the work was simply destroyed (2026-10-21: four files lost from a `review:dirty-noop` entry).
+
 **Resolution:**
-1. Check the branch for uncommitted changes: `git stash list && git status`
-2. If changes are present: review them manually, commit, and merge
-3. If the branch is clean but no commits: the session may have failed silently — check `queue-cli.sh log` and escalation files
-4. Re-queue if needed: `queue-cli.sh add --brief <path> --branch <branch> --auto-approve --solo`
+1. Find the patch. `queue-cli.sh show <entry-id>` — the `error_log` contains `uncommitted work preserved as a patch ... : .claude/.automation/reports/preserved-work-<entry-id>-<timestamp>.patch`. This holds for every outcome, including an entry that shows `completed` (a session that left only new files classifies as `completed:clean-noop`) and a force-halted one (finalised through the normal failure path). `queue-cli.sh review` prints `error_log` too. If `error_log` was cleared by `reopen-entry`, list `.claude/.automation/reports/preserved-work-<entry-id>-*.patch`; the file is named by entry id and survives the reopen.
+2. Read the header (`#` lines): entry, outcome, branch, base sha, capture time, and the `git status --short` at capture. It is a raw snapshot — **not reviewed and not gate-checked**.
+3. Inspect: `git apply --stat <patch>`. Check it applies: `git apply --check <patch>` from a checkout of the `base (HEAD)` sha in the header.
+4. Recover: `git checkout -b recover/<entry-id> <base sha> && git apply <patch>`, then review, test and commit through the normal gates. Applying the patch does not make it part of the entry; it is your work from that point.
+5. No patch and no commits: the tree was clean, or the session failed silently — check `queue-cli.sh log` and escalation files. If a commit exists on the session branch, the work is on the branch (a session that committed is never patched).
+6. Re-queue if needed: `queue-cli.sh add --brief <path> --branch <branch> --auto-approve --solo`
+
+**Limits:** a patch is only written when the session made **no** commits. If it committed and then left more files dirty, only the committed work survives. If `reports/` was unwritable, the runner warns on stderr (`work-preserver: ... NOT preserved`, visible in `logs/daemon.log`) and removes the tree anyway — the close is never blocked. Patches are reaped after `report_days` (default 90) like other reports. Task-group worktrees are kept (Decision 0054); the normal exit path snapshots them as well, while crash cleanup and the loop-top FORCE-HALT handler just leave them in place. Group worktrees removed by `remove_group_worktree` (after a seal or by the sweep) are outside this mechanism.
 
 **Prevention:** Root cause requires investigation per case. Common mitigations: ensure the turn budget is sufficient (`runner.session_max_turns`, default 400 — it was a hardcoded 200 until 2026-10-21), verify pre-commit gates pass for headless sessions, check for `GATE-RECOVERABLE` messages in daemon logs (`logs/daemon.log`).
 
@@ -141,7 +147,7 @@ Referenced by escalation reports for operator recovery guidance.
 
 **Symptom:** HALT file created and/or SIGTERM sent, but daemon continues running. Health file shows `running` with stale timestamp. `ps aux | grep runner.sh` confirms the process is alive.
 
-**Root Cause:** The daemon is executing a `claude -p` subprocess. `HALT` is checked only between entries (in the main daemon loop), so a graceful halt cannot interrupt a running session — that is by design. `FORCE-HALT` is now watched *during* the session: since 2026-10-20 each entry launches a watcher that polls for the flag every 5s and signals the `claude` child directly (SIGTERM, then SIGKILL after 10s). If force-halt appears not to work, suspect a stale flag or a watcher that was never started rather than the old between-entries-only limitation.
+**Root Cause:** The daemon is executing a `claude -p` subprocess. `HALT` is checked only in the main daemon loop — at the top, and again after an entry is dequeued and before it launches — never during a session, so a graceful halt cannot interrupt a running session — that is by design. `FORCE-HALT` is now watched *during* the session: since 2026-10-20 each entry launches a watcher that polls for the flag every 5s and signals the `claude` child directly (SIGTERM, then SIGKILL after 10s). If force-halt appears not to work, suspect a stale flag or a watcher that was never started rather than the old between-entries-only limitation.
 
 **Resolution:**
 1. Find the `claude` child process: `pgrep -P <daemon-pid>`

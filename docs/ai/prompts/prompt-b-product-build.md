@@ -107,6 +107,8 @@ Interpret the return code:
 
 Loops: `review→build` (cohesion findings), `verify→build` (QA failure).
 
+**Mechanism changes (Decision t-0063).** A change to the enforcement mechanism — hooks, `.claude/tools/`, `.claude/.automation/` scripts, their tests, `settings.json` — is verified by the machinery it modifies. In the review phase run `bash .claude/tools/verify-pristine.sh --classify`; on `mechanism-change: yes`, add the four self-referential questions in `.claude/agents/_cohesion-review.md` (§ mechanism-change addendum) to the Critic dispatch. Before commit, stage the change, then run `bash .claude/tools/verify-pristine.sh --suite=<each suite you changed or added> --out=docs/ai/governance/pristine-evidence/<name>.yaml` and `git add -f` the evidence file; `pre-commit-gates.sh` blocks a mechanism change without fresh evidence (`mechanism_change_no_pristine_evidence`). The evidence is bound to the staged files — re-run it after any further edit. New tests are expected to fail in a pristine run; report the counts, do not hide them. The operator exit `REPO_OS_SKIP_PRISTINE_GATE=1` is interactive-only; a headless session that cannot produce evidence escalates.
+
 ### Pragmatist Alignment (Decision 0038 § 7)
 
 When `bundle.implementation_design` (or contract `implementation_design:`) is present, Pragmatist Plan-Gating's alignment sub-mode is replaced by a deterministic Orchestrator-side check. Invoke:

@@ -167,7 +167,8 @@ _clean_reports() {
   [ -d "$reports_dir" ] || { echo "0"; return; }
 
   local f
-  for f in "$reports_dir"/*.yaml; do
+  # *.patch: work-preserver snapshots (Decision t-0062) live here too.
+  for f in "$reports_dir"/*.yaml "$reports_dir"/*.patch; do
     [ -f "$f" ] || continue
     local age
     age=$(_file_age_days "$f")
@@ -520,7 +521,7 @@ _dry_run_cleanup() {
   local reports_dir="${AUTOMATION_DIR:-$REPO_ROOT/.claude/.automation}/reports"
   if [ -d "$reports_dir" ]; then
     local f
-    for f in "$reports_dir"/*.yaml; do
+    for f in "$reports_dir"/*.yaml "$reports_dir"/*.patch; do
       [ -f "$f" ] || continue
       local age
       age=$(_file_age_days "$f")

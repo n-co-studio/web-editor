@@ -15,6 +15,17 @@ docs/ai/logs/
 # same set (see t-0051, and the README note below for the same pattern).
 docs/ai/governance/criteria-verdicts/
 
+# Pristine-verification evidence (Decision t-0063). Hash-bound to ONE commit of
+# the template's own enforcement mechanism, and one file is added per
+# mechanism-change commit. Tracked, so each new one entered the machinery
+# manifest: every mechanism change would have made the manifest stale the moment
+# it was committed, and shipped a record about a template commit to every child
+# where it can never match anything. A child's own evidence is written by its own
+# commits and never appeared in a manifest, so the sweep cannot touch it. The one
+# copy already shipped (t-0063-mechanism-change.yaml) is swept from a child only
+# if a manifest that child received listed it; otherwise it is an inert orphan.
+docs/ai/governance/pristine-evidence/
+
 # .gitignore — excluded from generic file copy; merged via section markers
 # in template-sync-engine.sh (BEGIN/END REPO-OS MANAGED block)
 .gitignore

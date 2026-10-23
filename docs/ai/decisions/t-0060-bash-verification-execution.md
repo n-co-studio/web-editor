@@ -130,6 +130,9 @@ does not: it prevents *same-line* chaining. The Pragmatist review caught the ove
 - Briefs with "all suites pass" criteria become achievable headlessly. This unblocks the
   queue generally rather than any single brief.
 - The permission surface grows by one command form, bounded to three directories.
+  (Amended 2026-10-22: plus exactly one script outside them,
+  `.claude/.automation/lib/rebuild-machinery-manifest.sh`, with at most `--check` or
+  `--help` — see Decision t-0051 Amendment 1. It is not a grant for `.automation/lib/`.)
 - Agents gain a real exit status for suite runs, instead of `source` side effects.
 
 ## Verification

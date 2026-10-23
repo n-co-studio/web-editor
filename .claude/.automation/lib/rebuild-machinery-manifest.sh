@@ -22,24 +22,59 @@
 # machinery, which has no ownership-marking naming convention to lean on.
 #
 # Usage:
-#   bash .claude/.automation/lib/rebuild-machinery-manifest.sh [--check]
+#   bash .claude/.automation/lib/rebuild-machinery-manifest.sh [--check | --help]
 #
+#   (no args) regenerate the manifest in place.
 #   --check   exit 1 if the manifest is out of date; write nothing.
-#             Used by the sync-engine conformance tests so a file added to or
-#             removed from the template without regenerating is caught.
+#             Run by gate-conformance.sh in a template checkout and by its own
+#             step in gate-conformance.yml (CI), which is what makes drift loud:
+#             a file added to or removed from the template without regenerating
+#             fails one of them.
+#   --help, -h  print this usage; write nothing.
+#
+# Any other argument is a usage error (exit 2, nothing written). The script
+# used to treat every argument other than --check as "rebuild", so --help and
+# typos silently rewrote the tracked manifest.
 #
 # Run in the TEMPLATE repo. Regenerate whenever a synced file is added or
 # removed. Decision t-0051.
 
 set -euo pipefail
 
+usage() {
+  cat <<'USAGE'
+Usage: bash .claude/.automation/lib/rebuild-machinery-manifest.sh [--check | --help]
+
+  (no args)  regenerate .claude/.automation/machinery-manifest.txt from the git index
+  --check    exit 1 if the tracked manifest differs from a fresh rebuild; writes nothing
+  --help, -h print this usage; writes nothing
+
+Any other argument is a usage error (exit 2) and writes nothing.
+USAGE
+}
+
+# Parsed before anything touches the filesystem, so no argument can reach the
+# write at the bottom of the file by accident.
+CHECK_ONLY=false
+if [ "$#" -gt 1 ]; then
+  echo "rebuild-machinery-manifest.sh: too many arguments" >&2
+  usage >&2; exit 2
+fi
+# Rebuild only when there is NO argument. Testing "${1:-}" for emptiness would
+# also treat an explicit empty string as "no argument" and rewrite the manifest.
+if [ "$#" -eq 1 ]; then
+  case "$1" in
+    --check)     CHECK_ONLY=true ;;
+    -h|--help)   usage; exit 0 ;;
+    *)           echo "rebuild-machinery-manifest.sh: unknown argument '$1'" >&2
+                 usage >&2; exit 2 ;;
+  esac
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 MANIFEST="$REPO_ROOT/.claude/.automation/machinery-manifest.txt"
 SYNCIGNORE="$REPO_ROOT/.templatesyncignore"
-
-CHECK_ONLY=false
-[ "${1:-}" = "--check" ] && CHECK_ONLY=true
 
 # Patterns are loaded ONCE into an array. Re-reading them per file via a
 # process substitution inside the generate loop crashes bash 3.2 (SIGBUS, exit
@@ -108,7 +143,7 @@ if [ "$CHECK_ONLY" = true ]; then
     echo "machinery manifest is current ($(printf '%s\n' "$NEW_CONTENT" | grep -vc '^#') entries)"
     exit 0
   fi
-  echo "machinery-manifest.txt is STALE — regenerate it. Difference:" >&2
+  echo "machinery-manifest.txt is STALE — regenerate: bash .claude/.automation/lib/rebuild-machinery-manifest.sh, then git add it. Difference:" >&2
   printf '%s\n' "$NEW_CONTENT" | diff "$MANIFEST" - | head -20 >&2
   exit 1
 fi

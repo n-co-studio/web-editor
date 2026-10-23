@@ -45,6 +45,7 @@
 .claude/.automation/lib/state-manager.sh
 .claude/.automation/lib/template-sync-engine.sh
 .claude/.automation/lib/work-order-manager.sh
+.claude/.automation/lib/work-preserver.sh
 .claude/.automation/local-decision-cache.yaml
 .claude/.automation/machinery-manifest.txt
 .claude/.automation/queue-cli.sh
@@ -71,7 +72,9 @@
 .claude/.automation/tests/sandbox-teardown.sh
 .claude/.automation/tests/test-branch-manager.sh
 .claude/.automation/tests/test-daemon-liveness.sh
+.claude/.automation/tests/test-daemon-recovery-paths.sh
 .claude/.automation/tests/test-escalation-suppression.sh
+.claude/.automation/tests/test-eval-model-routing.sh
 .claude/.automation/tests/test-gate-bypass.sh
 .claude/.automation/tests/test-group-worktree-lifecycle.sh
 .claude/.automation/tests/test-phase-ordering.sh
@@ -79,6 +82,8 @@
 .claude/.automation/tests/test-queue-manipulation.sh
 .claude/.automation/tests/test-runner.sh
 .claude/.automation/tests/test-state-corruption.sh
+.claude/.automation/tests/test-verify-pristine.sh
+.claude/.automation/tests/test-work-preserver.sh
 .claude/.state/.gitkeep
 .claude/agents/_advisory-board-lite.md
 .claude/agents/_advisory-board.md
@@ -121,6 +126,7 @@
 .claude/hooks/_cross-session-context.sh
 .claude/hooks/_headless-plan-approve.sh
 .claude/hooks/_headless-state-write.sh
+.claude/hooks/_mechanism-helper.sh
 .claude/hooks/_mode-guard-helper.sh
 .claude/hooks/_permission-allowlist.sh
 .claude/hooks/_phase-helper.sh
@@ -157,6 +163,7 @@
 .claude/hooks/tests/layer6-stop-sessionend-split.sh
 .claude/hooks/tests/layer7-criteria-verdicts.sh
 .claude/hooks/tests/layer8-group-worktree.sh
+.claude/hooks/tests/layer9-mechanism-change.sh
 .claude/hooks/tests/run-phase-tests.sh
 .claude/hooks/tests/test-fixtures.sh
 .claude/hooks/tests/test-helpers.sh
@@ -187,6 +194,7 @@
 .claude/tools/kg-validate.sh
 .claude/tools/spec-digest.sh
 .claude/tools/sync-conformance.sh
+.claude/tools/verify-pristine.sh
 .github/ISSUE_TEMPLATE/bug_report.yml
 .github/ISSUE_TEMPLATE/config.yml
 .github/ISSUE_TEMPLATE/feature_request.yml
@@ -252,6 +260,12 @@ docs/ai/decisions/t-0051-template-sync-ownership.md
 docs/ai/decisions/t-0052-child-owned-files.md
 docs/ai/decisions/t-0053-signal-fidelity.md
 docs/ai/decisions/t-0054-task-group-worktree-lifetime.md
+docs/ai/decisions/t-0058-plan-approval-silent-path.md
+docs/ai/decisions/t-0059-directional-dispatch-phase.md
+docs/ai/decisions/t-0060-bash-verification-execution.md
+docs/ai/decisions/t-0061-adversarial-runner-fail-closed.md
+docs/ai/decisions/t-0062-preserve-uncommitted-work.md
+docs/ai/decisions/t-0063-mechanism-change-verifies-itself.md
 docs/ai/decisions/t-manifest.txt
 docs/ai/eval/.gitkeep
 docs/ai/eval/_nomenclature.md

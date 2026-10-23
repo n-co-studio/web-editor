@@ -135,6 +135,71 @@ Like `gate-conformance.sh`, it is deliberately independent of
   one. `--check` fails on staleness and is the guard against forgetting.
 - First sync after this lands performs no sweep in any child, by design.
 
+## Amendment 1 (2026-10-22) — Manifest drift is detected, not remembered
+
+**Defect.** The Consequences above said the rebuilder "must be re-run whenever a
+synced file is added or removed" and that `--check` "is the guard against
+forgetting". Nothing ever ran `--check`, so it guarded nothing. By 2026-10-22 the
+tracked manifest was missing 15 files (t-0058..t-0061, `_mechanism-helper.sh`,
+`verify-pristine.sh`, `work-preserver.sh`, five test files) and had been noticed
+stale only incidentally, twice. Headless sessions made it worse: the rebuilder
+sits in `.automation/lib/`, which the headless allowlist did not cover, so an
+automation session could not regenerate it even when it knew it should (see
+t-0063's note that the manifest was left unregenerated for this reason). A
+manual step that the agents responsible cannot perform is a step that gets
+skipped. Separately, `--help` did not print help: every argument other than
+`--check` fell through to the rebuild and rewrote the tracked file.
+
+**Decision.**
+
+1. **The manifest stays tracked.** It is not purely derived from the *template's*
+   point of view: children receive it, and the withdrawn-file sweep works by
+   diffing the child's previous copy against the incoming one (§2). An untracked,
+   regenerate-on-demand manifest would not reach children and would leave the
+   sweep with nothing to diff. What *is* derived is its content, which is why it
+   can be checked mechanically against a fresh rebuild.
+2. **Drift fails `gate-conformance.sh` and CI.** The `## machinery manifest`
+   section runs `rebuild-machinery-manifest.sh --check` against the real repo
+   (case: "tracked machinery manifest matches a fresh rebuild"), and
+   `gate-conformance.yml` runs the same `--check` as its own step on every
+   feature/fix/hotfix/release/experiment push, every `main` push and every PR to
+   `main`. The real-repo case runs only when `.claude/repo-mode` says `template`:
+   the harness is itself synced to children, whose `git ls-files` includes their
+   own files, so the comparison could never come out equal there. `repo-mode` is
+   untracked, so CI relies on its own step, and that workflow is excluded from
+   sync. The same section proves the check can go red, in a scratch repo (which
+   needs no guard): add a tracked file → `--check` exits 1 with the STALE report;
+   remove one → exits 1; regenerate → exits 0.
+3. **Not refreshed from the A1 path.** A1 reads decision files and is a read-only
+   gate; making it rewrite and re-stage a tracked file inside a commit hook would
+   mutate the commit being judged and hide the change from the author. A1 already
+   treats its own generated index as warn-only for that reason. Detection was
+   preferred over a hidden write.
+4. **Argument handling is strict.** `--help`/`-h` print usage and exit 0; any
+   unknown argument — including an empty string — or more than one argument is a
+   usage error (exit 2); neither writes anything. Only a bare invocation rebuilds.
+5. **Headless can run it.** `_permission-allowlist.sh` admits exactly
+   `bash .claude/.automation/lib/rebuild-machinery-manifest.sh` with at most
+   `--check` or `--help`. It is deliberately not a grant for `.automation/lib/`.
+
+6. **A structural cause of drift is removed.** `docs/ai/governance/pristine-evidence/`
+   (Decision t-0063) is excluded from sync. One tracked evidence file is added per
+   mechanism-change commit, so with it in the manifest every such commit made the
+   manifest stale by construction. It is hash-bound to a template commit and
+   meaningless in a child — the same class as `criteria-verdicts/`, excluded the
+   same way. `t-0063-mechanism-change.yaml` was already tracked and shipped; the sweep
+   withdraws it from a child only if a manifest that child previously received
+   listed it (t-0063 records that the manifest was not regenerated for that
+   commit, so it may not have). If not, it stays as an inert orphan to remove by
+   hand — harmless, since nothing reads another repo's evidence.
+
+**Known limit.** Detection is at push/PR time (CI) or whenever the harness is run
+locally, not at commit time. A commit that adds a synced file without
+regenerating the manifest is caught after it is pushed, not before it is made.
+That lag was accepted over putting a write in the commit gate; if it proves too
+slow, the next step is a read-only check in `pre-commit-gates.sh` that fails when
+staged additions/deletions are not reflected in a staged manifest.
+
 ## Alternatives Considered
 
 **Delete anything absent from the template tree.** Simplest, and wrong: it

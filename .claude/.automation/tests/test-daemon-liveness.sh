@@ -78,12 +78,13 @@ _RUNNER_FNS="$ADV_SANDBOX/runner-liveness-fns.sh"
   _extract_runner_fn "_circuit_breaker_increment"
   _extract_runner_fn "_circuit_breaker_reset"
   _extract_runner_fn "_start_force_halt_watcher"
+  _extract_runner_fn "_return_entry_if_halted"
 } > "$_RUNNER_FNS"
 # shellcheck disable=SC1090
 source "$_RUNNER_FNS"
 
 for _fn in _cb_file _circuit_breaker_tripped _circuit_breaker_increment \
-           _circuit_breaker_reset _start_force_halt_watcher; do
+           _circuit_breaker_reset _start_force_halt_watcher _return_entry_if_halted; do
   if type "$_fn" > /dev/null 2>&1; then
     _tap_pass "extracted $_fn from runner.sh"
   else
@@ -1166,6 +1167,227 @@ else
 fi
 _RG_WOR=$(printf '%s' "$_RG_JSON" | jq -r '.work_order_reopened' 2>/dev/null || printf 'PARSE-FAIL')
 _tap_eq "$_RG_WOR" "false" "reopen-entry --json reports that the work order was not reopened"
+
+printf "# --- HALT / FORCE-HALT honoured at the launch boundary ---\n"
+
+# The daemon loop reads HALT once, at the top. A circuit-breaker sleep (60s) and
+# the queue lock + dequeue sit between that read and the launch, so a flag raised
+# in that window was never seen and a new ~40 minute session started (observed
+# 2026-10-21). The fix re-reads BOTH flags after dequeue and before launch.
+#
+# _hg_cycle replays that window against the REAL sandbox queue-manager and the
+# REAL extracted _return_entry_if_halted:
+#     loop-top check passed (no flag)  ->  dequeue  ->  FLAG APPEARS  ->  boundary
+# and launches a stub `claude` only if the boundary function says to proceed.
+# If the function is absent (pre-fix runner.sh) the stub launches, which is the
+# pre-fix behaviour — so the halt cases go red against the old code.
+#
+# Args: $1 flag to raise after dequeue ("" = none)  $2 entry id
+#       $3 retry_count for the fixture             $4 pre-seeded deferral count ("" = none)
+_hg_write_entry() {
+  {
+    printf 'entry:\n'
+    printf '  id: "%s"\n' "$2"
+    printf '  status: "approved"\n'
+    printf '  priority: "0"\n'
+    printf '  session_type: "standard"\n'
+    printf '  branch: "feature/hg-probe"\n'
+    printf '  brief_path: ".claude/.automation/briefs/hg-probe.md"\n'
+    printf '  prompt: ""\n'
+    printf '  last_prompt: ""\n'
+    printf '  auto_mode: "false"\n'
+    printf '  solo_mode: "false"\n'
+    printf '  push_on_complete: "false"\n'
+    printf '  retry_count: "%s"\n' "$3"
+    printf '  max_retries: "3"\n'
+    printf '  error_log: ""\n'
+    printf '  work_order_id: ""\n'
+    printf '  created_at: "2026-10-22T00:00:00Z"\n'
+    printf '  updated_at: "2026-10-22T00:00:00Z"\n'
+  } > "$1"
+}
+_hg_cycle() {
+  local flag="$1" id="$2" retry="$3" seed="$4"
+  local ad="$ADV_SANDBOX/hg-$id"
+  rm -rf "$ad"
+  mkdir -p "$ad/queue/approved"
+  _hg_write_entry "$ad/queue/approved/${id}.yaml" "$id" "$retry"
+  [ -z "$seed" ] || printf '%s' "$seed" > "$ad/queue/.defer-count-${id}"
+  (
+    AUTOMATION_DIR="$ad"
+    REPO_ROOT="$ADV_SANDBOX"
+    CONFIG_FILE="$_ADV_REAL_REPO/.claude/.automation/config.yaml"
+    CONFIG_LOCAL_FILE=""
+    # shellcheck disable=SC1091
+    . "$ADV_SANDBOX/.claude/.automation/lib/queue-manager.sh" > /dev/null 2>&1
+    # shellcheck disable=SC1091
+    . "$ADV_SANDBOX/.claude/.automation/lib/file-lock.sh" > /dev/null 2>&1
+    set +eu
+    _ensure_queue_dirs
+    claude() { printf 'launched\n' >> "$ad/launched"; }
+    # The loop-top check has already passed. Dequeue under the lock, as the loop does.
+    acquire_queue_lock || exit 90
+    queue_dequeue > /dev/null || exit 91
+    release_queue_lock || true
+    # The window: the flag appears after the decision to run.
+    case "$flag" in
+      "") ;;
+      BOTH) : > "$ad/HALT"; : > "$ad/FORCE-HALT" ;;
+      *) : > "$ad/$flag" ;;
+    esac
+    if type _return_entry_if_halted > /dev/null 2>&1 \
+       && _return_entry_if_halted "$id" 2> "$ad/halt.log"; then
+      :
+    else
+      claude -p "stub"
+    fi
+  )
+  printf '%s' "$?" > "$ad/cycle-rc"
+}
+_hg_where() {
+  local d
+  for d in approved running completed failed review blocked; do
+    if [ -f "$ADV_SANDBOX/hg-$1/queue/$d/$1.yaml" ]; then printf '%s' "$d"; return 0; fi
+  done
+  printf 'nowhere'
+}
+_hg_retry() {
+  sed -n 's/^  retry_count: *"\{0,1\}\([0-9]*\)"\{0,1\}$/\1/p' \
+    "$ADV_SANDBOX/hg-$1/queue/$(_hg_where "$1")/$1.yaml" 2>/dev/null | head -1
+}
+_hg_launched() { if [ -f "$ADV_SANDBOX/hg-$1/launched" ]; then printf 'yes'; else printf 'no'; fi; }
+
+for _HGF in HALT FORCE-HALT; do
+  _HGI="hg-$(printf '%s' "$_HGF" | tr 'A-Z-' 'a-z_')"
+  _hg_cycle "$_HGF" "$_HGI" 1 ""
+  _tap_eq "$(cat "$ADV_SANDBOX/hg-$_HGI/cycle-rc")" "0" "$_HGF case: the replayed window itself ran cleanly"
+  _tap_eq "$(_hg_launched "$_HGI")" "no" "$_HGF raised after dequeue: no session is launched"
+  _tap_eq "$(_hg_where "$_HGI")" "approved" "$_HGF raised after dequeue: the entry is back in approved/"
+  # Location is part of the value: retry_count "1" read from running/ means the
+  # entry never moved, which is not the same as being returned untouched.
+  _tap_eq "$(_hg_where "$_HGI"):$(_hg_retry "$_HGI")" "approved:1" "$_HGF raised after dequeue: returned with retry_count unchanged"
+  if [ -f "$ADV_SANDBOX/hg-$_HGI/$_HGF" ]; then
+    _tap_pass "$_HGF raised after dequeue: the flag is left for the loop-top handler"
+  else
+    _tap_fail "$_HGF raised after dequeue: the flag is left for the loop-top handler"
+  fi
+  _HG_LOG=$(cat "$ADV_SANDBOX/hg-$_HGI/halt.log" 2>/dev/null || printf '')
+  case "$_HG_LOG" in
+    *"$_HGI"*"unstarted"*|*"$_HGI"*"NOT started"*)
+      _tap_pass "$_HGF raised after dequeue: the log names the entry and says it was not started" ;;
+    *) _tap_fail "$_HGF raised after dequeue: the log names the entry and says it was not started" "log: '$_HG_LOG'" ;;
+  esac
+done
+
+# Both flags at once: still a clean return, and neither flag is consumed.
+_hg_cycle "BOTH" "hg-both" 0 ""
+_tap_eq "$(_hg_where hg-both)" "approved" "HALT + FORCE-HALT together: entry is returned, not stranded"
+if [ -f "$ADV_SANDBOX/hg-hg-both/HALT" ] && [ -f "$ADV_SANDBOX/hg-hg-both/FORCE-HALT" ]; then
+  _tap_pass "HALT + FORCE-HALT together: neither flag is consumed"
+else
+  _tap_fail "HALT + FORCE-HALT together: neither flag is consumed"
+fi
+
+# Guard scope: no flag means the boundary is a no-op and the entry runs.
+_hg_cycle "" "hg-clear" 1 ""
+_tap_eq "$(_hg_launched hg-clear)" "yes" "no flag: the entry launches as before"
+_tap_eq "$(_hg_where hg-clear)" "running" "no flag: the entry stays in running/ for the session"
+_tap_eq "$(_hg_retry hg-clear)" "1" "no flag: retry_count is untouched by the guard"
+
+# A halt-return must not consume a deferral cycle. The cap (max_deferral_cycles)
+# blocks an entry for being deferred too often; a halt is not the entry's fault,
+# and without this a few operator halts would starve a healthy entry.
+_hg_cycle "HALT" "hg-seeded" 0 "2"
+_HG_DC=$(cat "$ADV_SANDBOX/hg-hg-seeded/queue/.defer-count-hg-seeded" 2>/dev/null || printf 'missing')
+_tap_eq "$(_hg_where hg-seeded):$_HG_DC" "approved:2" "a halt-return leaves an existing deferral count unchanged"
+_hg_cycle "HALT" "hg-fresh" 0 ""
+if [ -f "$ADV_SANDBOX/hg-hg-fresh/queue/.defer-count-hg-fresh" ]; then
+  _tap_fail "a halt-return creates no deferral counter" "counter file exists"
+else
+  _tap_eq "$(_hg_where hg-fresh)" "approved" "a halt-return creates no deferral counter"
+fi
+
+# queue_defer itself: the nocount mode is opt-in, and the default still counts —
+# the work-order deferral guard depends on that to reach its cap.
+_hg_qd() { # $1 id, $2 optional mode
+  local ad="$ADV_SANDBOX/hg-qd-$1"
+  rm -rf "$ad"; mkdir -p "$ad/queue/approved"
+  _hg_write_entry "$ad/queue/approved/${1}.yaml" "$1" 0
+  (
+    AUTOMATION_DIR="$ad"; REPO_ROOT="$ADV_SANDBOX"
+    CONFIG_FILE="$_ADV_REAL_REPO/.claude/.automation/config.yaml"; CONFIG_LOCAL_FILE=""
+    # shellcheck disable=SC1091
+    . "$ADV_SANDBOX/.claude/.automation/lib/queue-manager.sh" > /dev/null 2>&1
+    set +eu
+    _ensure_queue_dirs
+    queue_dequeue > /dev/null
+    queue_defer "$1" "probe" ${2:+"$2"} > /dev/null 2>&1
+  )
+  cat "$ad/queue/.defer-count-$1" 2>/dev/null || printf 'none'
+}
+_tap_eq "$(_hg_qd qd-default)" "1" "queue_defer without a mode still consumes a deferral cycle"
+_tap_eq "$(_hg_qd qd-nocount nocount)" "none" "queue_defer ... nocount consumes no deferral cycle"
+
+# HALT is graceful: a session already running must finish. Nothing in the
+# FORCE-HALT watcher may react to HALT, and the boundary guard only runs before
+# launch. Contract pin — it passes before and after the fix, and must keep doing so.
+rm -f "$AUTOMATION_DIR/FORCE-HALT" "$AUTOMATION_DIR/HALT"
+_HG_MARK="$ADV_SANDBOX/hg-running-finished"
+rm -f "$_HG_MARK"
+# 7s outlives the watcher's first 5s poll, so the polling loop really runs
+# while HALT exists.
+( sleep 7; : > "$_HG_MARK" ) &
+_HG_CHILD=$!
+_start_force_halt_watcher "$_HG_CHILD"
+_HG_W="${_FORCE_HALT_WATCHER_PID:-}"
+: > "$AUTOMATION_DIR/HALT"
+wait "$_HG_CHILD" 2>/dev/null
+_HG_CHILD_RC=$?
+_tap_eq "$_HG_CHILD_RC" "0" "HALT during a running session: the session exits normally"
+if [ -f "$_HG_MARK" ]; then
+  _tap_pass "HALT during a running session: the session runs to completion"
+else
+  _tap_fail "HALT during a running session: the session runs to completion" "child was killed before finishing"
+fi
+[ -z "$_HG_W" ] || wait "$_HG_W" 2>/dev/null || true
+rm -f "$AUTOMATION_DIR/HALT"
+
+# Static pins on the real runner (comments stripped: the call site carries a
+# comment naming the function, which would satisfy a grep on prose alone).
+_HG_CODE=$(grep -v '^[[:space:]]*#' "$_REAL_RUNNER_SRC" | grep -n '' )
+_HG_L_DEQ=$(printf '%s\n' "$_HG_CODE" | grep -F 'ENTRY_FILE=$(queue_dequeue)' | head -1 | cut -d: -f1)
+_HG_L_GUARD=$(printf '%s\n' "$_HG_CODE" | grep -F 'if _return_entry_if_halted "$ENTRY_ID"' | head -1 | cut -d: -f1)
+_HG_L_RUN=$(printf '%s\n' "$_HG_CODE" | grep -F '_run_single_entry "$ENTRY_ID"' | head -1 | cut -d: -f1)
+if [ -n "$_HG_L_DEQ" ] && [ -n "$_HG_L_GUARD" ] && [ -n "$_HG_L_RUN" ] \
+   && [ "$_HG_L_DEQ" -lt "$_HG_L_GUARD" ] && [ "$_HG_L_GUARD" -lt "$_HG_L_RUN" ]; then
+  _tap_pass "the halt guard sits after dequeue and before _run_single_entry"
+else
+  _tap_fail "the halt guard sits after dequeue and before _run_single_entry" \
+    "dequeue=${_HG_L_DEQ:-none} guard=${_HG_L_GUARD:-none} launch=${_HG_L_RUN:-none}"
+fi
+# The guard must skip the launch, not merely log.
+_HG_NEXT=$(printf '%s\n' "$_HG_CODE" | grep -F -A2 'if _return_entry_if_halted "$ENTRY_ID"' | grep -c 'continue' || true)
+_tap_eq "${_HG_NEXT:-0}" "1" "a returned entry skips the launch (continue)"
+
+# The launch region's must-survive behaviours are untouched by this change.
+_HG_EXEC=$(printf '%s\n' "$_HG_CODE" | grep -cE 'exec claude -p' || true)
+_tap_eq "${_HG_EXEC:-0}" "2" "both launch sites still exec claude"
+_HG_WATCH=$(printf '%s\n' "$_HG_CODE" | grep -cF '_start_force_halt_watcher "' || true)
+_tap_eq "${_HG_WATCH:-0}" "2" "the FORCE-HALT watcher is still started at both launch sites"
+# The guard must precede everything that makes an entry look started: a
+# heartbeat file and the "entry-started" review-log line. Moving it below them
+# would leak both for an entry that never ran.
+_HG_L_HB=$(printf '%s\n' "$_HG_CODE" | awk -F: -v g="${_HG_L_GUARD:-0}" \
+  '$1 + 0 > g + 0 && index($0, "_start_heartbeat \"$ENTRY_ID\"") { print $1; exit }')
+_HG_L_LOG=$(printf '%s\n' "$_HG_CODE" | awk -F: -v g="${_HG_L_GUARD:-0}" \
+  '$1 + 0 > g + 0 && index($0, "review_log_append \"entry-started\"") { print $1; exit }')
+if [ -n "$_HG_L_HB" ] && [ -n "$_HG_L_LOG" ] && [ -n "$_HG_L_GUARD" ] \
+   && [ "$_HG_L_GUARD" -lt "$_HG_L_HB" ] && [ "$_HG_L_GUARD" -lt "$_HG_L_LOG" ]; then
+  _tap_pass "the halt guard precedes the heartbeat and the entry-started log line"
+else
+  _tap_fail "the halt guard precedes the heartbeat and the entry-started log line" \
+    "guard=${_HG_L_GUARD:-none} heartbeat=${_HG_L_HB:-none} started-log=${_HG_L_LOG:-none}"
+fi
 
 printf "\n# === Summary ===\n"
 printf "1..%d\n" "$_TAP_NUM"

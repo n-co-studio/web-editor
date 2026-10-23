@@ -44,6 +44,7 @@ source "$SCRIPT_DIR/_analytics-helper.sh"
 source "$SCRIPT_DIR/_phase-helper.sh"
 source "$SCRIPT_DIR/_secret-pattern.sh"
 source "$SCRIPT_DIR/_commit-message-helper.sh"
+source "$SCRIPT_DIR/_mechanism-helper.sh"
 START_MS=$(now_ms)
 
 # --- jq presence guard (fail-closed) ---
@@ -1367,6 +1368,73 @@ $_sp_parent
 fi
 
 # ============================================================
+# Mechanism-change detection (blocking) — Decision t-0063
+# A staged change to the enforcement mechanism (hooks, tools, automation,
+# settings.json, and their tests) is verified by the mechanism it modifies, so
+# a green run proves little. It must carry pristine evidence: a run of the
+# change's own tests against an unmodified merge-base checkout, from
+# .claude/tools/verify-pristine.sh, staged under
+# docs/ai/governance/pristine-evidence/ and bound to this exact change.
+# The gate demands a RUN, not a GREEN run: failures are shown, not blocked on.
+# Exit: REPO_OS_SKIP_PRISTINE_GATE=1 (interactive only; ignored headless/auto).
+# ============================================================
+if [ "$SKIP_STATE" = false ]; then
+  # Deletions and renames count: removing a verifier is the plainest way to weaken
+  # one. STAGED_FILES (ACM) cannot see them, so this block builds its own list
+  # (--no-renames turns a rename into delete + add, so the old path is visible).
+  # T (typechange, e.g. a script replaced by a symlink) is a mechanism change too.
+  _MECH_STAGED=$(git diff --cached --name-only --no-renames --diff-filter=ACMDT 2>/dev/null || true)
+  MECH_FILES=$(mech_filter "$_MECH_STAGED")
+  if [ -n "$MECH_FILES" ]; then
+    mkdir -p "$STATE_DIR" 2>/dev/null || true
+    printf 'timestamp: %s\nreason: staged files intersect the enforcement mechanism\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      > "$STATE_DIR/mechanism-change-detected" 2>/dev/null || true
+
+    _MECH_ESC_DIR="$REPO_ROOT/.claude/.automation/escalations"
+    _MECH_COUNT=$(printf '%s\n' "$MECH_FILES" | wc -l | tr -d ' ')
+    _MECH_FIRST=$(printf '%s\n' "$MECH_FILES" | head -1)
+    _MECH_SKIP=false
+    if [ "${REPO_OS_SKIP_PRISTINE_GATE:-0}" = "1" ]; then
+      if [ "$IS_NO_REVIEW_BACKSTOP" = false ]; then
+        log_override "pre-commit-gates" "REPO_OS_SKIP_PRISTINE_GATE"
+        _MECH_SKIP=true
+        echo "Advisory: REPO_OS_SKIP_PRISTINE_GATE=1 — $_MECH_COUNT mechanism file(s) committed WITHOUT pristine evidence (override logged)." >&2
+      else
+        log_override "pre-commit-gates" "REPO_OS_SKIP_PRISTINE_GATE_IGNORED_HEADLESS"
+        mkdir -p "$_MECH_ESC_DIR" 2>/dev/null || true
+        printf 'type: governance-block\ngate: pristine-evidence\nreason: REPO_OS_SKIP_PRISTINE_GATE_ignored_in_headless\nmessage: REPO_OS_SKIP_PRISTINE_GATE=1 was set but is not honored in headless/auto mode (Decision t-0063) -- pristine evidence is required\ntimestamp: %s\n' \
+          "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          > "$_MECH_ESC_DIR/pristine-skip-ignored-$(date -u +%Y%m%d-%H%M%S).yaml" 2>/dev/null || true
+      fi
+    fi
+
+    if [ "$_MECH_SKIP" = false ]; then
+      _MECH_STATUS=$(mech_evidence_status "$MECH_FILES")
+      case "$_MECH_STATUS" in
+        fresh*)
+          _MECH_FAIL=$(printf '%s' "$_MECH_STATUS" | sed -n 's/.*fail=\([0-9]*\).*/\1/p')
+          if printf '%s' "$_MECH_STATUS" | grep -q 'outcome=tool_error'; then
+            echo "WARNING: pristine verification hit a tool_error — NOTHING was verified against an unmodified checkout. The commit proceeds (the tool failing must not wedge the repo) but an escalation is written; fix the tool or have an operator review." >&2
+            mkdir -p "$_MECH_ESC_DIR" 2>/dev/null || true
+            printf 'type: governance-block\ngate: pristine-evidence\nreason: pristine_tool_error\nmessage: verify-pristine.sh reported tool_error for a mechanism change (%s files, first: %s) -- the change was committed without a successful pristine run\ntimestamp: %s\n' \
+              "$_MECH_COUNT" "$_MECH_FIRST" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              > "$_MECH_ESC_DIR/pristine-tool-error-$(date -u +%Y%m%d-%H%M%S).yaml" 2>/dev/null || true
+            warn "pristine_tool_error"
+          else
+            echo "Advisory: pristine evidence present for $_MECH_COUNT mechanism file(s) — fail=${_MECH_FAIL:-0} (${_MECH_STATUS#fresh }). Read the failures; a failing pristine run is data, not a pass." >&2
+          fi
+          ;;
+        *)
+          echo "GATE-RECOVERABLE: $_MECH_COUNT staged file(s) change the enforcement mechanism (first: $_MECH_FIRST) and carry no fresh pristine-verification evidence (status: $_MECH_STATUS; 'empty' means the run executed no test — name at least one existing suite with --suite; if the tool reports tool_error before a merge base, pass --base=<ref> for your default branch). NEXT: run 'bash .claude/tools/verify-pristine.sh --suite=<suite> --out=docs/ai/governance/pristine-evidence/<name>.yaml', then 'git add -f' that file. The evidence is bound to the staged mechanism files — re-run it after any further change. Operator exit (interactive only): REPO_OS_SKIP_PRISTINE_GATE=1." >&2
+          block "mechanism_change_no_pristine_evidence"
+          log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "mechanism_change_no_pristine_evidence" "$_MECH_FIRST"
+          ;;
+      esac
+    fi
+  fi
+fi
+
+# ============================================================
 # High-Risk Pattern Detection (blocking)
 # Requires reviewer-signed + security-signed state files
 # ============================================================
@@ -1376,13 +1444,32 @@ if [ "$SKIP_STATE" = false ] && [ -n "$STAGED_FILES" ]; then
   # --- Path-based risk patterns ---
   RISK_PATH_PATTERN='(auth|login|session|payment|billing|crypto|migration|schema)'
 
-  # Filter out test/fixture paths and governance docs before scanning
+  # Filter out test/fixture paths before scanning. The enforcement mechanism's own
+  # test files (.claude/hooks/tests/, .claude/.automation/tests/) are tests too:
+  # "tests/" does not match "(test|fixture)/", so they are named explicitly.
   NON_TEST_FILES=$(echo "$STAGED_FILES" | grep -vE '(test|fixture|__mocks__)/' || true)
-  # Exclude governance docs from risk scanning (false positives on descriptive text)
+  _HR_NON_MECH_TEST=""
+  while IFS= read -r _hr_f; do
+    [ -n "$_hr_f" ] || continue
+    if ! mech_is_test_path "$_hr_f"; then _HR_NON_MECH_TEST="${_HR_NON_MECH_TEST}${_hr_f}"$'\n'; fi
+  done <<HR_EOF
+$NON_TEST_FILES
+HR_EOF
+  NON_TEST_FILES=$(printf '%s' "$_HR_NON_MECH_TEST")
+
+  # PATH scan (Decision t-0063): governance prose is excluded, but .claude/ is NOT.
+  # A hook whose path says session/auth/crypto is classified like any source file;
+  # before this, one list excluded .claude/ for both scans and the enforcement
+  # mechanism was invisible to high-risk classification.
+  PATH_SCAN_FILES=$(echo "$NON_TEST_FILES" | grep -vE '^(docs/ai/|AI\.md$|CLAUDE\.md$|repo-os-explainer\.html$)' || true)
+  # KEYWORD scan: descriptive text in governance docs and .claude/ prose says
+  # "password"/"token" constantly (false positives), so it keeps the full exclusion.
   NON_TEST_FILES=$(echo "$NON_TEST_FILES" | grep -vE '^(docs/ai/|\.claude/|AI\.md$|CLAUDE\.md$|repo-os-explainer\.html$)' || true)
 
-  if [ -n "$NON_TEST_FILES" ]; then
-    RISK_PATH_MATCHES=$(echo "$NON_TEST_FILES" | grep -iE "$RISK_PATH_PATTERN" || true)
+  RISK_PATH_MATCHES=""
+  RISK_CONTENT_MATCHES=""
+  if [ -n "$PATH_SCAN_FILES" ]; then
+    RISK_PATH_MATCHES=$(echo "$PATH_SCAN_FILES" | grep -iE "$RISK_PATH_PATTERN" || true)
     if [ -n "$RISK_PATH_MATCHES" ]; then
       HIGH_RISK=true
     fi

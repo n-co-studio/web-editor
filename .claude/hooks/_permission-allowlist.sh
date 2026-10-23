@@ -109,6 +109,32 @@ _PERMISSION_ALLOW_BASH=(
   'git merge'
   'git push'
   'git clean'
+  # Replaying commits onto the current branch. Needed for branch recovery: the
+  # task-details-header recovery brief had to replay three stranded commits,
+  # escalated with headless_unknown_command because this entry was absent, and
+  # that blocked the other two briefs in its group.
+  #
+  # IMPORTANT, and not what an earlier draft of this comment claimed: a pick
+  # creates a commit WITHOUT passing the pre-commit gate chain.
+  # pre-commit-gates.sh dispatches on command text containing `git commit`, which
+  # `git cherry-pick` does not match, and git's own pre-commit hook does not fire
+  # for a pick either. So A1/A3/A4/A5 and the phase gate are all skipped.
+  #
+  # This is permitted on precedent, not on gate coverage: the already-allowed
+  # `git merge` has exactly the same gap. What still applies is the push gate
+  # chain and review of the branch before it lands.
+  #
+  # `--continue`, `--abort` and `--skip` are covered by the same prefix
+  # deliberately: a session that hits a conflict must be able to finish or
+  # unwind it rather than strand a half-applied pick.
+  #
+  # `-n` / `--no-commit` stages without committing, so it does not pass the
+  # commit gates at that moment — but the staged result still has to go through
+  # `git commit` to land, exactly as `git add` already does, and
+  # `git merge --no-commit` and `--squash` are already permitted here. Narrowing
+  # this one entry by regex would be inconsistent with every other prefix in
+  # this block and trivially sidestepped by reordering flags.
+  'git cherry-pick'
 
   # Git navigation (may mutate working tree / HEAD)
   'git checkout'
@@ -147,6 +173,13 @@ _PERMISSION_ALLOW_BASH=(
   'bash \.claude/hooks/tests/([A-Za-z0-9_-]+/)?[A-Za-z0-9_-]+\.sh([ ][A-Za-z0-9=._/-]+)*$'
   'bash \.claude/\.automation/tests/([A-Za-z0-9_-]+/)?[A-Za-z0-9_-]+\.sh([ ][A-Za-z0-9=._/-]+)*$'
   'bash \.claude/tools/([A-Za-z0-9_-]+/)?[A-Za-z0-9_-]+\.sh([ ][A-Za-z0-9=._/-]+)*$'
+  # The machinery-manifest rebuilder lives in .automation/lib/, which the
+  # entries above do not cover, so a headless session could not run it and the
+  # manifest could only be refreshed by hand — which is how it went stale. The
+  # pattern admits that one script bare, or with exactly --check or --help (the
+  # script also accepts -h; the pattern does not). It is not a general `.automation/lib/` grant, because those scripts take
+  # arbitrary arguments and some write.
+  'bash \.claude/\.automation/lib/rebuild-machinery-manifest\.sh( --check| --help)?$'
   # Syntax check only — `-n` parses without executing.
   'bash -n \.claude/[A-Za-z0-9_/-]+\.sh$'
 

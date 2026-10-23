@@ -17,7 +17,7 @@ Toggle the automation daemon runner on or off. Running this prompt flips the cur
        enabled: false
      ```
      If it exists, update the `enabled:` line within the `runner:` block (or insert it under `runner:` if the line is absent). Do not put a trailing comment on the `enabled:` line — `_parse_config_field` takes everything after the colon as the value, so a trailing comment is parsed as part of it and may be rejected.
-   - Create `.claude/.automation/HALT` file (content: ISO 8601 timestamp). This is a GRACEFUL stop: the daemon checks the flag only between entries, so a session already running finishes first. It does not interrupt the brief in flight — for that the operator runs `queue-cli.sh force-halt`, which is a separate deliberate act and not part of this toggle.
+   - Create `.claude/.automation/HALT` file (content: ISO 8601 timestamp). This is a GRACEFUL stop: the daemon checks the flag in its loop (at the top, and again after dequeue, before launch) and never during a session, so no new entry starts once the flag exists and a session already running finishes first. It does not interrupt the brief in flight — for that the operator runs `queue-cli.sh force-halt`, which is a separate deliberate act and not part of this toggle.
    - Report: "Daemon disabled. HALT file created — a session already running will finish first."
 
 3. **If effective `runner.enabled` is false** (currently off → turn on):

@@ -8,6 +8,11 @@
 
 set -euo pipefail
 
+# Hermetic against the invoking session: a suite run from inside a headless
+# Repo OS session inherits that session's identity and mode, which the hooks
+# under test read. The sandbox sets what each case needs; nothing may leak in.
+unset REPO_OS_SESSION_ID CLAUDE_HEADLESS
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/test-helpers.sh"
@@ -2384,11 +2389,32 @@ assert_eq "$(_t0060_allowed "bash /tmp/evil.sh")" "1" \
   "t-0060: out-of-tree script path is refused"
 assert_eq "$(_t0060_allowed "bash -n /tmp/evil.sh")" "1" \
   "t-0060: syntax check of an out-of-tree path is refused"
-# Only the tests/ and tools/ directories are in scope — not hooks/ generally.
+# Only the tests/ and tools/ directories — plus the single manifest rebuilder
+# (Decision t-0051 Amendment 1) — are in scope, not hooks/ generally.
 assert_eq "$(_t0060_allowed "bash .claude/hooks/state-writer.sh")" "1" \
   "t-0060: executing a hook itself is refused"
 assert_eq "$(_t0060_allowed "bash")" "1" \
   "t-0060: bare interactive bash is refused"
+
+# --- git cherry-pick: branch recovery needs to replay commits headlessly ---
+# Absent from the allow list, a recovery brief escalated with
+# headless_unknown_command and blocked the other two briefs in its task group.
+# A pick creates a commit WITHOUT passing the pre-commit gate chain:
+# pre-commit-gates.sh keys on `git commit` in the command text, which a pick does not
+# match. Permitted on the precedent of the already-allowed `git merge`, which has
+# the same gap — not on gate coverage. The conflict-resolution flags share the
+# prefix on purpose.
+assert_eq "$(_t0060_allowed "git cherry-pick 509e8fb")" "0" \
+  "allowlist: git cherry-pick <sha> is permitted"
+assert_eq "$(_t0060_allowed "git cherry-pick --continue")" "0" \
+  "allowlist: git cherry-pick --continue is permitted"
+assert_eq "$(_t0060_allowed "git cherry-pick --abort")" "0" \
+  "allowlist: git cherry-pick --abort is permitted"
+# Not relaxed alongside it — the recovery brief needs only cherry-pick.
+assert_eq "$(_t0060_allowed "git rebase main")" "1" \
+  "allowlist: git rebase is still refused"
+assert_eq "$(_t0060_allowed "git reset --hard HEAD~1")" "1" \
+  "allowlist: git reset --hard is still refused"
 
 # --- Per-pattern parity ---
 # Each of the three directory patterns is checked for the same two properties,
@@ -2421,6 +2447,25 @@ assert_eq "$(_t0060_denied "bash .claude/tools/gate-conformance.sh; dd /dev/zero
   "t-0060: a chained deny-listed command is still denied"
 assert_eq "$(_t0060_allowed "bash .claude/tools/gate-conformance.sh; dd /dev/zero")" "1" \
   "t-0060: that chain does not match the allow list either"
+
+# --- Machinery-manifest rebuilder (Decision t-0051 Amendment 1) ---
+# One script, at most one of its own flags. Deliberately NOT a general
+# .automation/lib/ grant, and NOT the open-ended argument class used above.
+_MM_RB="bash .claude/.automation/lib/rebuild-machinery-manifest.sh"
+assert_eq "$(_t0060_allowed "$_MM_RB")" "0" \
+  "t-0051: manifest rebuilder is executable headless"
+assert_eq "$(_t0060_allowed "$_MM_RB --check")" "0" \
+  "t-0051: manifest rebuilder --check is executable headless"
+assert_eq "$(_t0060_allowed "$_MM_RB --help")" "0" \
+  "t-0051: manifest rebuilder --help is executable headless"
+assert_eq "$(_t0060_allowed "$_MM_RB --bogus")" "1" \
+  "t-0051: manifest rebuilder with an unlisted flag is refused"
+assert_eq "$(_t0060_allowed "$_MM_RB && git push --force origin main")" "1" \
+  "t-0051: same-line chain after the rebuilder is refused"
+assert_eq "$(_t0060_allowed "bash .claude/.automation/lib/rebuild-trigger-index.sh")" "1" \
+  "t-0051: sibling .automation/lib script is not granted"
+assert_eq "$(_t0060_allowed "bash .claude/.automation/lib/../lib/rebuild-machinery-manifest.sh")" "1" \
+  "t-0051: traversal in the rebuilder path is refused"
 
 # ============================================================
 # Summary

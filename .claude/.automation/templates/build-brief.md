@@ -57,6 +57,7 @@ Follow all conventions from AI.md, the compiled spec, and applicable decisions.
 1. `advance_phase("review")`
 2. Dispatch Critic in cohesion mode (via Task tool with `reviewer` subagent): review the full `git diff` for internal consistency, naming, pattern adherence
 3. If critical cohesion findings exist, fix them (max 2 cycles — loop `review→build` if needed via `advance_phase("build")` then `advance_phase("review")`)
+   - If `bash .claude/tools/verify-pristine.sh --classify` prints `mechanism-change: yes`, the change touches the enforcement mechanism: add the four questions from `.claude/agents/_cohesion-review.md` (mechanism-change addendum) to the Critic dispatch, and before committing stage the change and produce pristine evidence with `bash .claude/tools/verify-pristine.sh --suite=<suite> --out=docs/ai/governance/pristine-evidence/<name>.yaml` (then `git add -f` it). The commit gate blocks without it (Decision t-0063).
 4. `advance_phase("verify")`
 5. Dispatch QA verification (via Task tool with `qa-verifier` subagent): verify gates A1–A6, B1–B3
 6. If QA failures exist, fix them (max 2 cycles — loop `verify→build` if needed via `advance_phase("build")` then `advance_phase("review")` then `advance_phase("verify")`)

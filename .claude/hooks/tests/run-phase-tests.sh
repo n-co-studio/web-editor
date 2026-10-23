@@ -131,6 +131,13 @@ l8_exit=0
 bash "$SCRIPT_DIR/layer8-group-worktree.sh" || l8_exit=$?
 
 printf "\n"
+printf '%s\n' "${BOLD}Layer 9: Mechanism-Change Classifier + Pristine Evidence${RESET}"
+printf '%s\n' "--------------------------------------------------------"
+
+l9_exit=0
+bash "$SCRIPT_DIR/layer9-mechanism-change.sh" || l9_exit=$?
+
+printf "\n"
 
 # --- Phase matrix visualization ---
 printf "${BOLD}Phase Matrix${RESET}\n"
@@ -318,6 +325,13 @@ if [ "$l8_exit" -eq 0 ]; then
   printf "Layer 8 (Group Worktree Lifetime): ${GREEN}PASS${RESET}\n"
 else
   printf "Layer 8 (Group Worktree Lifetime): ${RED}FAIL${RESET}\n"
+  overall=1
+fi
+
+if [ "$l9_exit" -eq 0 ]; then
+  printf "Layer 9 (Mechanism Change): ${GREEN}PASS${RESET}\n"
+else
+  printf "Layer 9 (Mechanism Change): ${RED}FAIL${RESET}\n"
   overall=1
 fi
 
