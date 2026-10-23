@@ -74,6 +74,15 @@ source "$LIB_DIR/file-lock.sh"
 source "$LIB_DIR/health-check.sh"
 # shellcheck source=lib/remediation-trigger.sh
 source "$LIB_DIR/remediation-trigger.sh"
+# shellcheck source=lib/overlap-report.sh
+# Sourced for the two stateless helpers only (overlap_report_main_changed /
+# _main_commit), which the close-time re-verification gate uses. The report
+# builders are not called from here and the `_OR_*` module state stays unused.
+source "$LIB_DIR/overlap-report.sh"
+# shellcheck source=lib/reverify-merge.sh
+# Sourced AFTER overlap-report.sh, queue-manager.sh and permission-profiles.sh:
+# it calls into all three at run time.
+source "$LIB_DIR/reverify-merge.sh"
 
 # --- Runner merge lock helpers (Decision 0030 — worktree merge serialization) ---
 _RUNNER_MERGE_LOCK_FD=7
@@ -131,6 +140,27 @@ _acquire_runner_merge_lock() {
   # Fail-closed: all 3 attempts exhausted
   echo "ERROR: Runner merge lock timeout (3 attempts × 10s) — fail-closed, merge blocked" >&2
   return 1
+}
+
+# --- Warn when the merge lock was held longer than the re-verify budget ---
+# Arguments: $1 — epoch at acquisition (0 = not measured); $2 — branch
+#
+# Deliberately measured on the HOLDER, not the waiter. The brief asks for a
+# warning when holding the lock blocks another merge for more than the timeout,
+# but a holder cannot see who is queued behind it, and the waiter side already
+# prints a line per retry in _acquire_runner_merge_lock. What the holder CAN
+# state, and what an operator greps for after a stalled close, is that this
+# merge held the lock past the budget everything else waits on.
+_warn_if_merge_lock_held_long() {
+  local started="${1:-0}" branch="${2:-}" budget held
+  case "$started" in ''|*[!0-9]*) return 0 ;; esac
+  [ "$started" -gt 0 ] || return 0
+  budget=$(_reverify_timeout)
+  held=$(( $(date +%s) - started ))
+  if [ "$held" -gt "$budget" ]; then
+    echo "WARNING: Runner merge lock held ${held}s for '$branch' — longer than reverify_timeout_seconds (${budget}s). Any other close waiting to merge was blocked for that long." >&2
+  fi
+  return 0
 }
 
 _release_runner_merge_lock() {
@@ -1218,6 +1248,12 @@ _RESULT_SOLO_MODE=""
 _RESULT_BRANCH=""
 # Path of the patch work-preserver wrote for this entry's uncommitted work, or "".
 _RESULT_PRESERVED_PATCH=""
+# Close-time re-verification result, recorded on the completed queue entry.
+# _RESULT_REVERIFIED:    "" not run (main changed nothing this branch touched)
+#                        | "true" rebased and re-verified | "false" did not pass
+# _RESULT_OVERLAP_FILES: newline list of the files both sides changed.
+_RESULT_REVERIFIED=""
+_RESULT_OVERLAP_FILES=""
 
 # --- _start_force_halt_watcher ---
 # Makes FORCE-HALT interrupt a RUNNING entry.
@@ -1299,6 +1335,13 @@ _run_single_entry() {
   _RESULT_SOLO_MODE=""
   _RESULT_BRANCH=""
   _RESULT_PRESERVED_PATCH=""
+  # Re-verification results (lib/reverify-merge.sh). These MUST be cleared per
+  # entry: the daemon-loop write-back fires whenever either is non-empty, so a
+  # value left over from a previous cycle would be stamped onto an entry whose
+  # merge never reached the gate (non-solo, non-feature branch, or _main_br
+  # other than main).
+  _RESULT_REVERIFIED=""
+  _RESULT_OVERLAP_FILES=""
   _CURRENT_WORKTREE_IS_GROUP=false
   _CURRENT_GROUP_NAME=""
 
@@ -1852,6 +1895,12 @@ _solo_merge_if_needed() {
         local _merge_conflict=false
         local _conflict_files=""
         local _pre_merge_sha=""
+        # Close-time re-verification (lib/reverify-merge.sh). _reverify_failed
+        # is a third outcome alongside ok/conflict: the branch must NOT be
+        # sealed, because it has to stay open for the fix and the retry.
+        local _reverify_failed=false
+        local _reverify_rc=0
+        local _reverify_lock_epoch=0
         if is_full_worktree_session; then
           # Worktree merge path (Decision 0030)
           local _main_repo="$REPO_ROOT"
@@ -1879,36 +1928,66 @@ _solo_merge_if_needed() {
             _release_runner_merge_lock
             return 0
           fi
+          _reverify_lock_epoch=$(date +%s)
           local _main_br
           _main_br=$(git -C "$_main_repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
           if [ "$_main_br" = "main" ]; then
-            _pre_merge_sha=$(git -C "$_main_repo" rev-parse HEAD 2>/dev/null || echo "")
-            if git -C "$_main_repo" merge --ff-only "$entry_current_branch" 2>/dev/null; then
-              _merge_ok=true
-            elif git -C "$_main_repo" merge --no-ff -m "Merge $entry_current_branch (auto)" "$entry_current_branch" 2>/dev/null; then
-              _merge_ok=true
-            else
-              _merge_conflict=true
-              _conflict_files=$(git -C "$_main_repo" diff --name-only --diff-filter=U 2>/dev/null || echo "unknown")
-              git -C "$_main_repo" merge --abort 2>/dev/null || true
+            # Rebase + re-verify, INSIDE the lock and before any merge. A no-op
+            # unless main changed a file this branch also changed.
+            _reverify_rc=0
+            _reverify_before_merge "$_main_repo" "$entry_current_branch" "$brief_id" || _reverify_rc=$?
+            case "$_reverify_rc" in
+              1) _merge_conflict=true
+                 _conflict_files="$_REVERIFY_CONFLICT_FILES" ;;
+              2) _reverify_failed=true ;;
+            esac
+            if [ "$_reverify_rc" -eq 0 ]; then
+              _pre_merge_sha=$(git -C "$_main_repo" rev-parse HEAD 2>/dev/null || echo "")
+              if git -C "$_main_repo" merge --ff-only "$entry_current_branch" 2>/dev/null; then
+                _merge_ok=true
+              elif git -C "$_main_repo" merge --no-ff -m "Merge $entry_current_branch (auto)" "$entry_current_branch" 2>/dev/null; then
+                _merge_ok=true
+              else
+                _merge_conflict=true
+                _conflict_files=$(git -C "$_main_repo" diff --name-only --diff-filter=U 2>/dev/null || echo "unknown")
+                git -C "$_main_repo" merge --abort 2>/dev/null || true
+              fi
             fi
           else
             echo "WARNING: Main repo on '$_main_br', not 'main' — skipping worktree merge" >&2
           fi
           _release_runner_merge_lock
+          _warn_if_merge_lock_held_long "$_reverify_lock_epoch" "$entry_current_branch"
         elif git checkout main 2>/dev/null; then
-          _pre_merge_sha=$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo "")
-          if git merge --ff-only "$entry_current_branch" 2>/dev/null; then
-            _merge_ok=true
-          else
-            # ff-only failed — try --no-ff merge
-            if git merge --no-ff -m "Merge $entry_current_branch (auto)" "$entry_current_branch" 2>/dev/null; then
+          # Legacy non-worktree path. It takes no merge lock — that is
+          # pre-existing (RUNNER-PARITY row 5) and not changed here — but it
+          # gets the same re-verification gate, so the two paths cannot
+          # disagree about whether a branch is safe to merge.
+          # No _warn_if_merge_lock_held_long call here, deliberately: that
+          # warning reports how long THIS holder blocked other merges, and on a
+          # path that holds no lock it would block nobody and the warning would
+          # be a lie. The gate still runs; only the hold measurement is absent.
+          _reverify_rc=0
+          _reverify_before_merge "$REPO_ROOT" "$entry_current_branch" "$brief_id" || _reverify_rc=$?
+          case "$_reverify_rc" in
+            1) _merge_conflict=true
+               _conflict_files="$_REVERIFY_CONFLICT_FILES" ;;
+            2) _reverify_failed=true ;;
+          esac
+          if [ "$_reverify_rc" -eq 0 ]; then
+            _pre_merge_sha=$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo "")
+            if git merge --ff-only "$entry_current_branch" 2>/dev/null; then
               _merge_ok=true
             else
-              # Merge conflict — capture conflict file list before aborting
-              _merge_conflict=true
-              _conflict_files=$(git diff --name-only --diff-filter=U 2>/dev/null || echo "unknown")
-              git merge --abort 2>/dev/null || true
+              # ff-only failed — try --no-ff merge
+              if git merge --no-ff -m "Merge $entry_current_branch (auto)" "$entry_current_branch" 2>/dev/null; then
+                _merge_ok=true
+              else
+                # Merge conflict — capture conflict file list before aborting
+                _merge_conflict=true
+                _conflict_files=$(git diff --name-only --diff-filter=U 2>/dev/null || echo "unknown")
+                git merge --abort 2>/dev/null || true
+              fi
             fi
           fi
         fi
@@ -2004,6 +2083,16 @@ _solo_merge_if_needed() {
           # Override outcome to review so daemon transitions entry correctly
           _RESULT_OUTCOME="review:merge-conflict"
           echo "Solo merge conflict: $entry_current_branch — escalation $_esc_id written, entry → review" >&2
+        elif [ "$_reverify_failed" = true ]; then
+          # Re-verification of the rebased branch did not pass. The branch is
+          # deliberately NOT sealed and NOT merged: it has to stay open for the
+          # fix and the retry, and main must not receive code that failed its
+          # own checks. _reverify_before_merge already wrote the esc-reverify
+          # escalation naming the failing checks, the overlapping files and the
+          # main commit that changed them.
+          _RESULT_OUTCOME="review:reverify-failed"
+          echo "Re-verification failed for $entry_current_branch — NOT merged, NOT sealed; escalation ${_REVERIFY_ESCALATION_ID:-unknown} written, entry → review" >&2
+          echo "  reason: ${_REVERIFY_FAIL_REASON:-unknown}" >&2
         else
           # Non-conflict failure (e.g., checkout failed) — seal branch (Leak Point 6)
           git merge --abort 2>/dev/null || true
@@ -2720,6 +2809,23 @@ while true; do
   # seals the branch.
   _GWT_ENTRY_GROUP="$_CURRENT_GROUP_NAME"
   _solo_merge_if_needed "$_RESULT_BRANCH" "$ENTRY_PUSH" "$ENTRY_ID" "$ENTRY_WORK_ORDER_ID" "$_GWT_ENTRY_GROUP"
+
+  # --- Record the re-verification result on the entry ---
+  # Written here, while the entry is still in running/, because the transition
+  # below moves the file and queue_complete() round-trips it through
+  # _load_queue_entry/_write_queue_entry — so a field set now survives into
+  # completed/, and one set afterwards would be written to a path that no
+  # longer exists. Both fields stay at their defaults ("" / []) when the gate
+  # did not run, which is how the entry says "no overlap" rather than "passed".
+  if [ -n "$_RESULT_REVERIFIED" ] || [ -n "$_RESULT_OVERLAP_FILES" ]; then
+    _running_entry="$(_queue_dir)/running/${ENTRY_ID}.yaml"
+    if [ -f "$_running_entry" ]; then
+      _load_queue_entry "$_running_entry"
+      _QE_REVERIFIED="$_RESULT_REVERIFIED"
+      _QE_OVERLAP_FILES=$(queue_yaml_flow_seq "$_RESULT_OVERLAP_FILES")
+      _write_queue_entry "$_running_entry"
+    fi
+  fi
 
   # --- Handle empty outcome (belt-and-suspenders guard on globals) ---
   if [ -z "$_RESULT_OUTCOME" ]; then

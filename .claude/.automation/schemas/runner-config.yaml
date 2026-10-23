@@ -49,6 +49,12 @@ runner:
   # probe entry per window, and the failure count is NOT cleared, so a failed
   # probe re-trips. 0 stays tripped until `queue-cli.sh reset-breaker`.
   circuit_breaker_cooldown_seconds: 1800
+  # Wall-clock cap for the close-time re-verification session, in seconds.
+  # 900 = 15m. Must be > 0; a missing or non-numeric value falls back to the
+  # in-code default. The merge lock is held for the whole rebase -> re-verify
+  # -> merge sequence, so this also bounds how long another close can wait on
+  # it. A timeout counts as a re-verification FAILURE, never as a pass.
+  reverify_timeout_seconds: 900
 
 model_routing:
   # Model for claude -p when no model_routing_overrides key matches.

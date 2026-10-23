@@ -97,6 +97,7 @@ _load_queue_entry() {
   _QE_MAX_RETRIES="" _QE_ERROR_LOG="" _QE_WORK_ORDER_ID="" _QE_CREATED_AT=""
   _QE_UPDATED_AT="" _QE_COMPLETED_AT=""
   _QE_PROJECT="" _QE_MILESTONE_NAME="" _QE_MILESTONE_INDEX="" _QE_MILESTONE_TOTAL=""
+  _QE_REVERIFIED="" _QE_OVERLAP_FILES=""
   [ -f "$entry_file" ] || return 1
 
   _QE_PERMISSION_PROFILE=""
@@ -157,6 +158,10 @@ ${_line#    }"
       "  completed_at: "*) _QE_COMPLETED_AT="${_line#  completed_at: }" ;;
       "  permission_profile: "*) _QE_PERMISSION_PROFILE="${_line#  permission_profile: }" ;;
       "  model: "*)              _QE_MODEL="${_line#  model: }" ;;
+      "  reverified: "*)         _QE_REVERIFIED="${_line#  reverified: }" ;;
+      # Carried as the literal YAML flow-sequence text, not as a parsed list —
+      # see the note on _QE_OVERLAP_FILES at _write_queue_entry.
+      "  overlap_files: "*)      _QE_OVERLAP_FILES="${_line#  overlap_files: }" ;;
     esac
   done < "$entry_file"
 
@@ -192,6 +197,10 @@ ${_line#    }"
   _QE_COMPLETED_AT=$(_strip_quotes "$_QE_COMPLETED_AT")
   _QE_PERMISSION_PROFILE=$(_strip_quotes "$_QE_PERMISSION_PROFILE")
   _QE_MODEL=$(_strip_quotes "$_QE_MODEL")
+  _QE_REVERIFIED=$(_strip_quotes "$_QE_REVERIFIED")
+  # _QE_OVERLAP_FILES is deliberately NOT unquoted: it is a flow sequence
+  # (`["a","b"]`), not a scalar, and _strip_quotes would leave it alone anyway
+  # since it neither starts nor ends with a double quote.
 }
 
 # --- Write queue entry YAML from _QE_* variables (atomic) ---
@@ -241,8 +250,37 @@ _write_queue_entry() {
     printf '  completed_at: "%s"\n' "$(_yaml_escape_scalar "$_QE_COMPLETED_AT")"
     printf '  permission_profile: "%s"\n' "$(_yaml_escape_scalar "${_QE_PERMISSION_PROFILE:-build}")"
     printf '  model: "%s"\n' "$(_yaml_escape_scalar "${_QE_MODEL:-}")"
+    printf '  reverified: "%s"\n' "$(_yaml_escape_scalar "${_QE_REVERIFIED:-}")"
+    # Emitted verbatim. _QE_OVERLAP_FILES holds the rendered flow sequence, not
+    # a list, because load/write only ever has to round-trip it — nothing reads
+    # the element values back, and storing the rendered form means there is no
+    # flow-sequence parser to keep in step with the renderer. Build it with
+    # queue_yaml_flow_seq; an unset value writes the empty sequence.
+    printf '  overlap_files: %s\n' "${_QE_OVERLAP_FILES:-[]}"
   } > "$tmp_file"
   mv "$tmp_file" "$entry_file"
+}
+
+# --- Render a newline list as a YAML flow sequence ---
+# Arguments: $1 — newline-separated values (blank lines skipped)
+# Output:    `[]`, or `["a","b"]` with each element escaped as a YAML scalar.
+# Lives here rather than in the caller so the escaping stays next to
+# _yaml_escape_scalar, which is what _write_queue_entry uses for every other
+# field.
+queue_yaml_flow_seq() {
+  local line out="" first=true
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    if [ "$first" = true ]; then
+      first=false
+    else
+      out="${out},"
+    fi
+    out="${out}\"$(_yaml_escape_scalar "$line")\""
+  done <<EOF
+${1:-}
+EOF
+  printf '[%s]' "$out"
 }
 
 # --- Rebuild queue-index.json from directory state (atomic) ---

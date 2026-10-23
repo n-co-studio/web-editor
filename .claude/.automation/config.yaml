@@ -41,6 +41,14 @@ runner:
   # concatenated onto it and then rejected by the metacharacter sanitiser —
   # the field reads as absent and every operator edit is silently ignored.
   circuit_breaker_cooldown_seconds: 1800
+  # Wall-clock cap in seconds for the re-verification session the runner starts
+  # at close when main changed files this branch also changed (900 = 15 min).
+  # The whole rebase -> re-verify -> merge sequence holds the merge lock, so
+  # this is also the worst case another close waits on that lock. A timeout is
+  # a FAILURE, not a pass: the branch is not merged, the outcome is
+  # review:reverify-failed and the escalation says it timed out. Must be > 0.
+  # Comment above the key, for the reason spelled out above.
+  reverify_timeout_seconds: 900
 
 # Model routing — controls the --model flag passed to claude -p in runner.sh.
 # Agent frontmatter controls per-subagent model (cost layer 1: subagent routing).

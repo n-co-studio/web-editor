@@ -33,6 +33,7 @@
 .claude/.automation/lib/install-hooks.sh
 .claude/.automation/lib/intake.sh
 .claude/.automation/lib/outcome-detector.sh
+.claude/.automation/lib/overlap-report.sh
 .claude/.automation/lib/permission-profiles.sh
 .claude/.automation/lib/prompt-assembler.sh
 .claude/.automation/lib/queue-manager.sh
@@ -41,6 +42,7 @@
 .claude/.automation/lib/rebuild-machinery-manifest.sh
 .claude/.automation/lib/rebuild-trigger-index.sh
 .claude/.automation/lib/remediation-trigger.sh
+.claude/.automation/lib/reverify-merge.sh
 .claude/.automation/lib/review-log.sh
 .claude/.automation/lib/state-manager.sh
 .claude/.automation/lib/template-sync-engine.sh
@@ -77,9 +79,11 @@
 .claude/.automation/tests/test-eval-model-routing.sh
 .claude/.automation/tests/test-gate-bypass.sh
 .claude/.automation/tests/test-group-worktree-lifecycle.sh
+.claude/.automation/tests/test-overlap-report.sh
 .claude/.automation/tests/test-phase-ordering.sh
 .claude/.automation/tests/test-prompt-assembler.sh
 .claude/.automation/tests/test-queue-manipulation.sh
+.claude/.automation/tests/test-reverify-merge.sh
 .claude/.automation/tests/test-runner.sh
 .claude/.automation/tests/test-state-corruption.sh
 .claude/.automation/tests/test-verify-pristine.sh

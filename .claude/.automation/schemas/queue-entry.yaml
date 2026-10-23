@@ -30,3 +30,11 @@ entry:
   model: ""                 # optional per-entry model pin (Decision t-0046 Amendment 3)
                              # used verbatim by the runner — bypasses _resolve_model_for_session
                              # so a later alias-map change cannot silently rewrite study history
+  reverified: ""            # "" | true | false — close-time re-verification outcome.
+                             # "" means it did not run: main changed nothing this branch
+                             # also changed, so the merge took the unchanged path.
+                             # false means it ran and did NOT pass (failed checks, a
+                             # rebase conflict, or the reverify_timeout_seconds cap) and
+                             # the branch was therefore not merged.
+  overlap_files: []         # files BOTH this branch and main changed since the
+                             # merge-base, as of close. Empty whenever reverified is "".

@@ -16,6 +16,7 @@
 #   list [--status <filter>]
 #   show <id>
 #   review
+#   overlap [--branch <name>]
 #   log [--lines N]
 #   prune [--briefs-only] [--dry-run] [--fix]
 #   recover-entry <id>
@@ -27,7 +28,7 @@
 #   resume
 #
 # Global flags:
-#   --json    Machine-readable JSON output (status, list, show, review)
+#   --json    Machine-readable JSON output (status, list, show, review, overlap)
 #
 # Exit codes:
 #   0  Success
@@ -69,6 +70,8 @@ source "$LIB_DIR/queue-validator.sh"
 source "$LIB_DIR/branch-manager.sh"
 # shellcheck source=lib/cleanup.sh
 source "$LIB_DIR/cleanup.sh"
+# shellcheck source=lib/overlap-report.sh
+source "$LIB_DIR/overlap-report.sh"
 
 # --- Global flags ---
 JSON_OUTPUT=false
@@ -103,6 +106,7 @@ Subcommands:
   list [--status <filter>]
   show <id>
   review
+  overlap [--branch <name>]
   log [--lines N]
   prune [--briefs-only] [--dry-run] [--fix]
   recover-entry <id>
@@ -663,6 +667,38 @@ case "$SUBCOMMAND" in
       else
         echo "$ITEMS"
       fi
+    fi
+    ;;
+
+  # --- overlap: shared files across open branches (read-only) ---
+  # Takes no lock and writes no state, so it is safe to poll. See
+  # lib/overlap-report.sh for the read-only contract.
+  overlap)
+    OVERLAP_BRANCH=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        # `$#` is checked before dereferencing `$2`: this script runs under
+        # `set -u`, so a bare `--branch` would abort with "unbound variable"
+        # instead of a usable message.
+        --branch)
+          if [ $# -lt 2 ]; then
+            echo "ERROR: --branch requires a value" >&2
+            exit 1
+          fi
+          OVERLAP_BRANCH="$2"; shift 2 ;;
+        *) echo "ERROR: Unknown overlap option: $1" >&2; exit 1 ;;
+      esac
+    done
+
+    if ! overlap_report_build "$REPO_ROOT"; then
+      echo "ERROR: Could not build overlap report (no main branch?)" >&2
+      exit 1
+    fi
+
+    if [ "$JSON_OUTPUT" = true ]; then
+      overlap_report_json "$OVERLAP_BRANCH"
+    else
+      overlap_report_text "$OVERLAP_BRANCH"
     fi
     ;;
 

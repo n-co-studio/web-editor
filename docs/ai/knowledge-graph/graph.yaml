@@ -3,7 +3,7 @@
 # Seeded from governance metadata on 2026-03-31
 
 schema_version: 1
-last_updated: "2026-10-22T21:42:33Z"
+last_updated: "2026-10-23T01:57:29Z"
 
 nodes:
   # --- Decisions (from DIGEST.md) ---
@@ -1343,6 +1343,13 @@ nodes:
     path: "docs/ai/decisions/t-0063-mechanism-change-verifies-itself.md"
     description: "Decision record: t-0063-mechanism-change-verifies-itself.md"
     last_verified: "2026-10-22"
+    status: "unverified"
+    layer: "template"
+  - id: "decision-0056"
+    type: "decision"
+    path: "docs/ai/decisions/t-0056-shared-files-reverify.md"
+    description: "Decision record: t-0056-shared-files-reverify.md"
+    last_verified: "2026-10-23"
     status: "unverified"
     layer: "template"
 edges:
