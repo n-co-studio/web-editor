@@ -64,6 +64,7 @@ t-0053-signal-fidelity.md
 t-0054-task-group-worktree-lifetime.md
 t-0055-operator-session-control.md
 t-0056-shared-files-reverify.md
+t-0057-close-pipeline-controls.md
 t-0058-plan-approval-silent-path.md
 t-0059-directional-dispatch-phase.md
 t-0060-bash-verification-execution.md

@@ -73,6 +73,7 @@
 .claude/.automation/tests/sandbox-setup.sh
 .claude/.automation/tests/sandbox-teardown.sh
 .claude/.automation/tests/test-branch-manager.sh
+.claude/.automation/tests/test-close-pipeline.sh
 .claude/.automation/tests/test-daemon-liveness.sh
 .claude/.automation/tests/test-daemon-recovery-paths.sh
 .claude/.automation/tests/test-escalation-suppression.sh
@@ -271,6 +272,7 @@ docs/ai/decisions/t-0053-signal-fidelity.md
 docs/ai/decisions/t-0054-task-group-worktree-lifetime.md
 docs/ai/decisions/t-0055-operator-session-control.md
 docs/ai/decisions/t-0056-shared-files-reverify.md
+docs/ai/decisions/t-0057-close-pipeline-controls.md
 docs/ai/decisions/t-0058-plan-approval-silent-path.md
 docs/ai/decisions/t-0059-directional-dispatch-phase.md
 docs/ai/decisions/t-0060-bash-verification-execution.md

@@ -10,6 +10,113 @@ Breaking changes (field removal, type change, required field addition) increment
 
 ---
 
+## v1.12.0 — Conflict Resolution
+
+**Date:** 2026-10-23
+**Decision:** t-0057 (Close Pipeline Controls), brief 3 of 3
+
+### Changes
+
+**queue-entry.yaml** (+1 field):
+- `conflict_resolution` (string, default `""`, one of `""` | `ours` | `theirs`) — the rebase strategy chosen by `resolve-conflict --ours|--theirs`, carried to the single `git rebase` in `lib/reverify-merge.sh`, which reads it once and clears it. Written by `queue_set_conflict_resolution` and by nothing else; absent from `queue_edit`'s allowlist, because it steers a merge.
+- `close_steps[].step` gains `resolve` — the row a `resolve-conflict` re-arm appends, carrying the mode and the operator note in its `detail`. It is the only step name an operator causes directly; every other one is a pipeline action.
+
+**review-log-entry.yaml** (no field change):
+- Two new event names registered: `entry-conflict-resolved` (the operator's choice) and `entry-conflict-resolve-reason` (the refusal that preceded it, written before `error_log` is cleared). Reconciling the enum by diff — as the file's own comment instructs — also surfaced twelve names emitted since the 2026-10-21 pass and never listed, all from t-0055's operator commands plus brief 1 of this decision. They are now listed. Nothing validates this enum mechanically, which is exactly why it drifts.
+
+**`--ours`/`--theirs` are stored, not applied — and that is the point of the field.** The obvious implementation resolves the conflict where the operator stands: merge `main` into the branch with `-X ours`, commit, done. It is wrong for a reason that is invisible until it bites. Resolving locally makes the branch contain main's tip, which empties `overlap_report.main_changed` — the *only* trigger for the t-0056 close-time re-verification. The next close would then skip re-verification and record a clean merge, so the brief's own requirement ("`--theirs`/`--ours` re-run all checks before the close") would be false in exactly the situation a conflict proves it matters: main has moved under a verified branch. Carrying the strategy to the one real rebase keeps rebase → re-verify → merge inside a single pipeline with a single gate.
+
+**The value is stored in the operator's vocabulary, and git's inversion is applied once.** `ours` means *the branch's side wins*. During `git rebase main` the branch is being replayed onto main, so git calls main "ours" and the branch "theirs" — the opposite of what the operator said. The translation (`ours` → `-Xtheirs`, `theirs` → `-Xours`) lives in `_reverify_take_conflict_strategy` at the rebase site and nowhere else. Storing git's spelling instead would have put the inversion in the operator's head at every read of the entry.
+
+**Read-and-clear, not read.** The strategy is cleared as it is taken, before the rebase runs. A strategy that survived its attempt would silently steer the *next* rebase too — including one the operator ordered months later for an unrelated reason. One choice resolves one conflict.
+
+**`""` on load for anything outside the closed set.** Normalised in `_load_queue_entry`, at the one place every reader passes through, for the same reason `pr.number` is validated there: the value is spliced into a `git rebase` argument list. An unrecognised value must become the empty string before it can reach git, not after.
+
+**`queue_close_rearm` is not `queue_reopen_reviewed`.** Reopening returns an entry to `approved/`, which re-runs the brief from its plan phase — right when the *session* failed, wrong here. The session's checks passed and were recorded; only the merge was refused, and re-running the brief would discard a verified result to fix a merge. The re-arm instead writes `completed/` + `close_state: ready`, which is not a convenience but what `_queue_close_preconditions` clauses (1) and (4) require. Three fields are cleared and all three are load-bearing: `status` (clause 1 refuses anything but `completed`), `close_state` (clause 4 admits `ready` and `held` only), and `reverified` (clause 2 reads a stored `false` as a *standing* refusal, so a `reverify_failed` conflict would stay refused forever; `""` means "did not run", and the next close runs the gate again). `error_log` is cleared last and only after its contents reach the review log.
+
+**The precondition is its own gate, not `_queue_close_preconditions`.** That gate asks "may this reach main", and two of its clauses describe the exact state a conflicted entry is in — clause (1) wants `completed` while the entry sits in `review/`, clause (2) treats `reverified: false` as permanent. Routing the recovery command through it would make the command unreachable from the only situation it exists for. What `queue_conflict_resolve_allowed` *does* keep is clause (5), finality — and not merely for symmetry: the re-arm reopens the parent work order (a conflicted entry's work order is `escalated`, and the runner's post-dequeue guard defers then blocks an escalated order's entries, which would walk the `--agent` fix brief straight into `blocked/`). With no unfinished sibling there is nothing for that guard to hold back, so finality is what makes the reopen safe.
+
+**An agent resolution is a fix brief, not a free session.** `--agent` generates a brief naming the conflicting files (from the escalation the merge path already wrote), both sides as short SHAs with the `git show`/`git diff` commands to read them, the operator's `--note`, and what happens on completion — then queues it through `follow-up-entry`, which is not reimplemented here. That command owns the linkage t-0055 clause 14 defines (the copy to `followup-<parent>-<n>.md`, `follow_up_of`, the deliberately empty `branch` the dequeue selector resolves, the inherited work order), and a second enqueue path would be free to drift from it. The generated brief carries **no `### Task Group` section** even when the parent is a task-group entry: `_parse_brief_sequence` then returns empty, the dequeue sequencing guard is skipped, and the fix brief is eligible as soon as its parent is `completed` — which is correct, since it has no position in the group's sequence to wait for.
+
+**The fix brief's completion *is* the close re-run.** It shares the parent's work order, so once the parent is re-armed to `completed` the fix brief becomes the group's unfinished entry — which also means the parent is no longer final and a `merge` on it is refused while the fix is outstanding. When the fix completes it is itself final, and its own close runs the whole pipeline on the shared branch: rebase, re-verification, merge. Nothing has to remember to re-merge the parent.
+
+**`--ours`/`--theirs` are refused on `close_path: pr`.** They are a local rebase strategy, and the pull request path updates the branch through `gh` where there is no local rebase to hand one to. Accepting the flag there would store a value nothing reads and report a resolution that never happens. `--agent` and `--manual` work on both paths, and the refusal names `set-close` as the third option.
+
+**The escalation is read, not resolved.** `resolve-conflict` takes the conflicting-file list from the newest unresolved `esc-merge-*` naming the entry (`esc-merge-lock-*` excluded: a different event sharing the prefix, and one that sorts *after* the dated ids in a glob) and leaves `resolved: false` in place. Nothing in this system marks an escalation resolved programmatically — `cleanup.sh` only deletes ones already marked — and inventing that here would have added an escalation-mutation mechanism as a side effect of a merge command.
+
+---
+
+## v1.11.0 — Pull Request Close Path
+
+**Date:** 2026-10-23
+**Decision:** t-0057 (Close Pipeline Controls), brief 2 of 3
+
+### Changes
+
+**queue-entry.yaml** (+1 nested field):
+- `pr` (map, default: `{number: 0, url: ""}`) — the pull request opened for this entry on `close_path: pr`. `number` is `0` and `url` is `""` until `open-pr` succeeds. Written by `queue_set_pr` and by nothing else — deliberately absent from `queue_edit`'s allowlist, because the number is GitHub's to assign, not the operator's to choose.
+
+**config.yaml** (+1 top-level block, 3 fields): `pr.merge_method` (`merge`), `pr.poll_seconds` (`120`), `pr.delete_branch` (`true`).
+
+**`close_state` rendering, corrected (no schema change):** v1.10.0 had `merge_hold: true` render as `held` over every stored state except `merged`, `pushed` and `pr_open`. It now also leaves `conflict` and `reverify_failed` alone. The exemption list in v1.10.0 was described as "a finished state", but the real criterion is *a state the merge gate refuses*, and those two are refusing states that are not finished. Because `_queue_close_preconditions` admits `held` on the solo path — an operator merging an entry they held is releasing it in the same breath — rendering `held` over `conflict` made placing a hold a way to **pass** the gate that `conflict` exists to fail. The hold is still visible either way: `merge_hold` is its own field and both `close-status` and `show --json` print it beside the state.
+
+**`pr` is nested, where `close_state` and the rest are flat.** Two fields describing one external entity, written together and read together, following the `milestone:` precedent rather than inventing `pr_number`/`pr_url`. The url is stored rather than rebuilt from the number so that reporting never has to know the repo slug — the entry stays readable on a machine with no remote configured.
+
+**The block is top-level in config.yaml, not nested under `runner:`.** `_parse_config_field`'s `sed` range pattern only resolves top-level keys. Within the block every comment sits above its key and never writes a field name followed by a colon: the field pattern is an unanchored `/<field>:/` over the block, so `merge_method:` in a comment would be matched as a second hit and concatenated onto the real value before `head -1` could discard it.
+
+**The pull request route fires on `push_on_complete` and finality, not on `close_path` alone.** `close_path` already resolves to `pr` for every `solo_mode: false` entry, so triggering on it would start pushing branches to origin on every existing install the moment this shipped. Opting a branch into reaching origin stays a per-entry decision. Finality is the second condition (Decision 0015 §3): a task group closes once, at its last brief, and opening a pull request per brief would put the group's partial work in front of a reviewer three times. A non-final brief takes the plain push it took before this route existed.
+
+**The branch is sealed as soon as the pull request opens, and sealed again when it merges.** Sealing retires a branch from *local* session use (Decision 0013), and on this path there is nothing left locally to wait for: checks, `update-branch` and the merge itself all happen on origin through `gh`. Deferring the seal to merge time would also have stranded the task group worktree, whose removal keys on the branch appearing in `closed-branches` — a pull request can sit open for days. So `record_closed_branch` runs at both sites: once in the runner's close arm when the pull request opens, and again in `pr_land` once the merge lands. It is idempotent, so the second is not a double-seal; `pr_land` is also where the local branch is deleted (`delete_merged_session_branch`) and, when `pr.delete_branch` is true, the remote one. The early seal is what frees the worktree; the late one is what cleans up now that the work is on `main`.
+
+**A degrade records `ready`, not `pushed`.** With no `gh`, no auth or no remote the entry stops at `ready` with the reason in the step `detail`, and is never failed (brief 2 step 5). `pushed` could not be reused: it means *the branch reached origin and nothing merged it*, which is false when there is no remote at all, and an entry reporting `pushed` would read as further along than it is. `ready` is the retryable state, and `pr open` is the retry.
+
+**The daemon's poll sweep reports; it does not transition.** It re-reads every `completed/` entry at `close_state: pr_open`, rate-limited to `pr.poll_seconds` with the timestamp stamped *before* the sweep so the interval does not drift by the `gh` round-trip time. It runs before the dequeue rather than in the idle branch, so a repo whose queue is never empty still notices a merge. It does not move an entry to `review/`: `queue_escalate` only acts on `running/`, and an entry whose session genuinely completed is not fixed by re-running it. The close state and the escalation are what the operator reads; the `pr` subcommands are where a conflict becomes a status transition.
+
+**No conflicting-file list is recorded on this path.** The solo path can name the conflicted files because it runs the merge locally. Here GitHub holds the only merge, and `mergeable: CONFLICTING` says that a conflict exists without saying where. The escalation says so rather than claiming a list it does not have.
+
+**`mergeable: UNKNOWN` is refused but never routed to conflict.** GitHub computes mergeability asynchronously (gh cli#9583), so `UNKNOWN` is a *transient* answer, not a negative one. Fail-closed (Decision t-0061) means a merge on an unverifiable precondition is refused — but routing to `review:merge-conflict` on it would escalate a pull request that is very likely fine. The refusal names the state and says to refresh.
+
+**Check status is read from the rollup rows, never from its aggregate.** The aggregate `statusCheckRollup` state can read `SUCCESS` while an individual row reads `FAILED` (gh cli#14253). `conclusion` is also the empty string — not null — on a run that has not finished, so an unfinished check is pending, not passing. Both are read per row.
+
+**`pr_land` takes no merge lock.** The lock exists to stop two local merges racing and to keep a re-verification verdict valid across rebase → verify → merge (row 63). Neither applies: GitHub performed the merge, and the local step is a `--ff-only` sync of `main` that has no verdict to invalidate and nothing to conflict with. `pr merge` therefore does not hand off to `runner.sh` the way `merge` does — there is no second merge gate that could disagree with the runner's.
+
+**`close_state: merged` describes the pull request, not the local sync.** `_pr_land` records `merged` even when its `push` step row reads `failed` — local `main` diverged, or the fetch failed. GitHub merged the pull request; that is settled, and a stale local `main` cannot un-settle it. Making the state conditional would leave an entry whose work is already on `origin/main` reporting something retryable, and `pr merge` would then refuse it (the gate admits `pr_open` only) with nothing left to retry. Two separate signals on purpose: the state says where the work got to, the step row says what the operator still has to reconcile.
+
+**Known gap: `merging` can strand on a double failure.** `merging` is transient in both directions — forward to `merged`, back to `pr_open` when `gh pr merge` fails. The one way to be stuck in it is for that restoring `queue_close_record` to fail as well (entry file gone or unwritable), because `merging` is not in `queue_pr_merge_allowed`'s admitted set, so the retry would be refused; the recovery is `set-close`. This is the price of every `queue_close_record` on the path carrying `|| true` — reporting must never decide whether a branch merges (parity row 67) — and the solo path has the identical window. Recorded rather than designed away.
+
+**The runner and CLI call sites are covered structurally, not behaviourally.** `runner.sh` parses argv and enters a daemon loop at load; `queue-cli.sh` dispatches on `"$1"`. Neither can be sourced, so `test-pr-manager.sh` PR.25 greps the shipped source for the call sites instead. That catches a green `pr-manager` that nothing ever calls — the failure the suite would otherwise miss entirely — but not a call site passing the wrong entry, and the daemon poll has no behavioural coverage at all. Recorded here as a known gap rather than left implied.
+
+---
+
+## v1.10.0 — Close State and Solo Controls
+
+**Date:** 2026-10-23
+**Decision:** t-0057 (Close Pipeline Controls), brief 1 of 3
+
+### Changes
+
+**queue-entry.yaml** (+4 fields):
+- `close_state` (string, default: `""`) — where the close pipeline has got to: `waiting`, `ready`, `held`, `rebasing`, `reverifying`, `merging`, `pushed`, `pr_open`, `merged`, `conflict`, `reverify_failed`, `handed_off`. **Derived state, not operator input** — absent from `queue_edit`'s allowlist, like `held_by`.
+- `close_path` (string, default: `""`) — `solo` or `pr`: how this entry's work reaches main. `""` means not yet decided.
+- `close_steps` (list, default: `[]`) — one row per step, `{"step","status","at","detail"}`, in the order they ran. `status` is `running | done | failed | skipped`. Appended by `queue_close_record`; absent from `queue_edit`'s allowlist.
+- `merge_hold` (boolean, default: `false`) — the operator has held this entry's merge. Set and cleared only by `hold-merge` / `hold-merge --release`.
+
+**The state is recorded, never inferred — except at exactly one site.** Every transition of the solo close path writes `close_state` as it happens, so a report shows where the pipeline actually is rather than a reader's guess about it. The one exception is an entry written before v1.10.0, which loads with the field empty: `queue_close_state` maps its `status` to a state (`completed` → `merged` on the solo path, `ready` otherwise; everything else → `waiting`) and nothing else in the codebase performs that mapping. Old entries therefore load and report sensibly without a migration, and there is a single place to change if the mapping is ever wrong.
+
+**`close_path` is resolved from `solo_mode` but pinned on first use.** A reader with no stored value resolves `solo_mode: true` → `solo`, `false` → `pr`. The first close transition writes the resolved value onto the entry, so a later `set-close` changes where the work goes *next* and cannot retroactively rewrite the route the work already took.
+
+**A hold is its own field, and `held` is only a rendering of it.** `held` is never written into `close_state`. The hold has to be placeable before an entry is `ready` — holding a non-final task-group brief holds the *next* brief's start — and `--release` must not have to restore a `close_state` it has no record of. So `merge_hold` is the single source of truth and `queue_close_state` renders `held` from it, never over a finished state (`merged`, `pushed`, `pr_open`): holding an entry that already merged must not relabel history. **Superseded in v1.11.0:** "a finished state" turned out to be the wrong criterion — the rendering must also leave `conflict` and `reverify_failed` alone, which are refusing rather than finished. See v1.11.0 above.
+
+**Merge is fail-closed (Decision t-0061).** `queue_close_merge_allowed` admits a merge only from `ready` or `held`, and only when the entry is `completed`, close-time re-verification did not fail (`reverified: false` refuses; `""` means it never ran, which is not a failure), no criteria verdict in the session's `criteria-verdicts/<session-id>.yaml` is `PARTIAL`, `INCONCLUSIVE` or `FAILED`, the entry is the final brief of its task group, and `close_path` is `solo`. It prints the reason it refused rather than guessing.
+
+**`close_steps` is stored verbatim, the way `overlap_files` is.** It is written as a single-line flow sequence that is simultaneously valid YAML and valid JSON — YAML 1.2 being a JSON superset — rendered once by `queue_close_step_json` and round-tripped as opaque text by `_load_queue_entry`/`_write_queue_entry`. Nothing parses it back. A step `detail` carrying newlines, tabs or quotes is folded and escaped at render time, so a conflicted-file list cannot break the entry file.
+
+**Three failure sites have no matching enum value, and all three record `ready`.** A merge-lock acquisition failure, a merge that fails without a conflict, and a branch type the solo path will not merge are each retryable, so they record `ready` with the distinction carried in the step row's `detail`. `conflict` would refuse the retry and `merging` would strand the entry; neither is true of these.
+
+**Task groups close once, at the last brief (Decision 0015 §3).** An earlier brief records `close_steps` for `commit` and `contract` and ends at `close_state: handed_off`. `merge`, `set-close` and the PR commands refuse any brief that is not final. The finality predicate moved to `queue_is_final_taskgroup_entry` in `queue-manager.sh` and the runner's `_is_final_taskgroup_entry` now delegates to it — a copy would have left the seal gate and the merge gate free to disagree about when a group branch may reach main.
+
+---
+
 ## v1.9.0 — Follow-ups
 
 **Date:** 2026-10-23

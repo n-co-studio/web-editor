@@ -43,6 +43,14 @@ _QE_PROJECT="" _QE_MILESTONE_NAME="" _QE_MILESTONE_INDEX="" _QE_MILESTONE_TOTAL=
 _QE_STOPPED_MODE="" _QE_RESUME=""
 # (v1.8.0) hold the line behind a stopped entry — t-0055 clauses 9-11
 _QE_HELD_BY="" _QE_INDEPENDENT="" _QE_FOLLOW_UP_OF=""
+# (t-0056) close-time re-verification
+_QE_REVERIFIED="" _QE_OVERLAP_FILES=""
+# (v1.10.0) close pipeline — t-0057
+_QE_CLOSE_PATH="" _QE_CLOSE_STATE="" _QE_CLOSE_STEPS="" _QE_MERGE_HOLD=""
+# (v1.11.0) pull request path — t-0057 brief 2
+_QE_PR_NUMBER="" _QE_PR_URL=""
+# (v1.12.0) conflict resolution — t-0057 brief 3
+_QE_CONFLICT_RESOLUTION=""
 
 # --- Strip surrounding double quotes and unescape a YAML scalar value ---
 # Handles both quoted ("value") and unquoted (value) formats for backward compat.
@@ -105,11 +113,13 @@ _load_queue_entry() {
   _QE_REVERIFIED="" _QE_OVERLAP_FILES=""
   _QE_STOPPED_MODE="" _QE_RESUME=""
   _QE_HELD_BY="" _QE_INDEPENDENT="" _QE_FOLLOW_UP_OF=""
+  _QE_CLOSE_PATH="" _QE_CLOSE_STATE="" _QE_CLOSE_STEPS="" _QE_MERGE_HOLD=""
+  _QE_PR_NUMBER="" _QE_PR_URL="" _QE_CONFLICT_RESOLUTION=""
   [ -f "$entry_file" ] || return 1
 
   _QE_PERMISSION_PROFILE=""
   _QE_MODEL=""
-  local _line _in_prompt=false _prompt_is_block=false _in_milestone=false
+  local _line _in_prompt=false _prompt_is_block=false _in_milestone=false _in_pr=false
   while IFS= read -r _line || [ -n "$_line" ]; do
     # Handle multi-line prompt block scalar
     if [ "$_in_prompt" = true ]; then
@@ -138,6 +148,16 @@ ${_line#    }"
         "    total: "*) _QE_MILESTONE_TOTAL="${_line#    total: }"; continue ;;
         "    "*)        continue ;;  # other 4-space sub-fields → stay in block
         *)              _in_milestone=false ;;  # 2-space sibling field → exit block, fall through
+      esac
+    fi
+
+    # Handle pr nested block (v1.11.0) — same shape as milestone above.
+    if [ "$_in_pr" = true ]; then
+      case "$_line" in
+        "    number: "*) _QE_PR_NUMBER="${_line#    number: }"; continue ;;
+        "    url: "*)    _QE_PR_URL="${_line#    url: }"; continue ;;
+        "    "*)         continue ;;  # other 4-space sub-fields → stay in block
+        *)               _in_pr=false ;;  # 2-space sibling field → exit block, fall through
       esac
     fi
 
@@ -174,6 +194,15 @@ ${_line#    }"
       # Carried as the literal YAML flow-sequence text, not as a parsed list —
       # see the note on _QE_OVERLAP_FILES at _write_queue_entry.
       "  overlap_files: "*)      _QE_OVERLAP_FILES="${_line#  overlap_files: }" ;;
+      "  close_path: "*)         _QE_CLOSE_PATH="${_line#  close_path: }" ;;
+      "  close_state: "*)        _QE_CLOSE_STATE="${_line#  close_state: }" ;;
+      # Same flow-sequence-as-text treatment as overlap_files. The stored form is
+      # simultaneously valid YAML and valid JSON, so close-status --json emits it
+      # with no parser at all.
+      "  close_steps: "*)        _QE_CLOSE_STEPS="${_line#  close_steps: }" ;;
+      "  merge_hold: "*)         _QE_MERGE_HOLD="${_line#  merge_hold: }" ;;
+      "  conflict_resolution: "*) _QE_CONFLICT_RESOLUTION="${_line#  conflict_resolution: }" ;;
+      "  pr:")                   _in_pr=true ;;
     esac
   done < "$entry_file"
 
@@ -215,9 +244,29 @@ ${_line#    }"
   _QE_PERMISSION_PROFILE=$(_strip_quotes "$_QE_PERMISSION_PROFILE")
   _QE_MODEL=$(_strip_quotes "$_QE_MODEL")
   _QE_REVERIFIED=$(_strip_quotes "$_QE_REVERIFIED")
-  # _QE_OVERLAP_FILES is deliberately NOT unquoted: it is a flow sequence
-  # (`["a","b"]`), not a scalar, and _strip_quotes would leave it alone anyway
-  # since it neither starts nor ends with a double quote.
+  _QE_CLOSE_PATH=$(_strip_quotes "$_QE_CLOSE_PATH")
+  _QE_CLOSE_STATE=$(_strip_quotes "$_QE_CLOSE_STATE")
+  _QE_MERGE_HOLD=$(_strip_quotes "$_QE_MERGE_HOLD")
+  _QE_PR_NUMBER=$(_strip_quotes "$_QE_PR_NUMBER")
+  _QE_PR_URL=$(_strip_quotes "$_QE_PR_URL")
+  _QE_CONFLICT_RESOLUTION=$(_strip_quotes "$_QE_CONFLICT_RESOLUTION")
+  # Normalised at the one place every reader passes through, for the same reason
+  # pr.number is below: the value is spliced into a `git rebase` argument list by
+  # reverify-merge.sh, so an unrecognised value must become the empty string here
+  # rather than reaching git. The set is closed — ours, theirs, or nothing.
+  case "$_QE_CONFLICT_RESOLUTION" in
+    ours|theirs) ;;
+    *) _QE_CONFLICT_RESOLUTION="" ;;
+  esac
+  # pr.number is written back unquoted, so a hand-edited non-numeric value would
+  # produce a malformed line on the next whole-file rewrite. Normalise it here,
+  # at the only place every reader passes through, rather than trusting writers.
+  case "$_QE_PR_NUMBER" in
+    ""|*[!0-9]*) _QE_PR_NUMBER="0" ;;
+  esac
+  # _QE_OVERLAP_FILES and _QE_CLOSE_STEPS are deliberately NOT unquoted: they are
+  # flow sequences (`["a","b"]`, `[{"step":...}]`), not scalars, and _strip_quotes
+  # would leave them alone anyway since neither starts nor ends with a double quote.
 }
 
 # --- Write queue entry YAML from _QE_* variables (atomic) ---
@@ -282,6 +331,24 @@ _write_queue_entry() {
     # flow-sequence parser to keep in step with the renderer. Build it with
     # queue_yaml_flow_seq; an unset value writes the empty sequence.
     printf '  overlap_files: %s\n' "${_QE_OVERLAP_FILES:-[]}"
+    printf '  close_path: "%s"\n' "$(_yaml_escape_scalar "${_QE_CLOSE_PATH:-}")"
+    printf '  close_state: "%s"\n' "$(_yaml_escape_scalar "${_QE_CLOSE_STATE:-}")"
+    # Emitted verbatim for the same reason as overlap_files above: nothing reads
+    # the rows back element-by-element, so there is no flow-sequence parser to
+    # keep in step with the renderer. Build it with queue_close_record.
+    printf '  close_steps: %s\n' "${_QE_CLOSE_STEPS:-[]}"
+    printf '  merge_hold: "%s"\n' "$(_yaml_escape_scalar "${_QE_MERGE_HOLD:-false}")"
+    # (v1.12.0) The operator's chosen rebase strategy, carried from
+    # `resolve-conflict --ours|--theirs` to the ONE rebase in reverify-merge.sh,
+    # which clears it after the attempt. Empty is the normal state: a stored
+    # value means a resolution is pending, not that one is configured.
+    printf '  conflict_resolution: "%s"\n' "$(_yaml_escape_scalar "${_QE_CONFLICT_RESOLUTION:-}")"
+    # (v1.11.0) Nested like milestone above. number is emitted unquoted as a
+    # number, so a stored non-numeric value would corrupt the line — queue_set_pr
+    # is the only writer and it refuses anything but digits.
+    printf '  pr:\n'
+    printf '    number: %s\n' "${_QE_PR_NUMBER:-0}"
+    printf '    url: "%s"\n' "$(_yaml_escape_scalar "${_QE_PR_URL:-}")"
   } > "$tmp_file"
   mv "$tmp_file" "$entry_file"
 }
@@ -765,6 +832,7 @@ queue_enqueue() {
   _QE_STOPPED_MODE="" _QE_RESUME="false"
   _QE_HELD_BY="" _QE_INDEPENDENT="false"
   _QE_REVERIFIED="" _QE_OVERLAP_FILES=""
+  _QE_CLOSE_PATH="" _QE_CLOSE_STATE="" _QE_CLOSE_STEPS="" _QE_MERGE_HOLD="false"
 
   local qdir
   qdir=$(_queue_dir)
@@ -1067,6 +1135,46 @@ _has_prior_taskgroup_entry() {
       sib_seq=$(_parse_brief_sequence "$_QE_BRIEF_PATH")
       # Unparseable sibling → skip (not a sequencing barrier). Graceful degradation:
       # a missing or malformed brief file does not block higher-sequence entries.
+      [ -n "$sib_seq" ] || continue
+      if [ "$sib_seq" -lt "$my_seq" ]; then
+        return 0
+      fi
+    done
+  done
+  return 1
+}
+
+# --- Check if an earlier brief of this task group is holding the merge ---
+# Returns 0 (true) if a sibling taskgroup entry in the same work order with a
+# lower sequence number has merge_hold set (Decision t-0057).
+#
+# `_has_prior_taskgroup_entry` above stops a later brief while an earlier one
+# is still approved or running. This predicate is what keeps it stopped once
+# the earlier brief has finished: holding brief N's merge holds brief N+1's
+# start, because in a sequential group they share one branch and brief N+1
+# would build on work the operator has deliberately parked.
+#
+# Scans completed/ first — a hold is normally placed on a brief that has
+# finished its checks — then the pre-run and off-ramp directories, because an
+# operator may hold a brief before it ever runs.
+_has_prior_taskgroup_merge_hold() {
+  local work_order_id="$1"
+  local my_seq="$2"
+  local skip_file="$3"
+  local qdir
+  qdir=$(_queue_dir)
+
+  local dir f sib_seq
+  for dir in "$qdir/completed" "$qdir/approved" "$qdir/running" "$qdir/pending-review" "$qdir/stopped" "$qdir/review"; do
+    for f in "$dir"/*.yaml; do
+      [ -f "$f" ] || continue
+      [ "$f" = "$skip_file" ] && continue
+      _load_queue_entry "$f"
+      [ "${_QE_WORK_ORDER_ID:-}" = "$work_order_id" ] || continue
+      [ "${_QE_SESSION_TYPE:-}" = "taskgroup" ] || continue
+      [ "${_QE_MERGE_HOLD:-false}" = "true" ] || continue
+      sib_seq=$(_parse_brief_sequence "${_QE_BRIEF_PATH:-}")
+      # Unparseable sibling → not a barrier, matching _has_prior_taskgroup_entry.
       [ -n "$sib_seq" ] || continue
       if [ "$sib_seq" -lt "$my_seq" ]; then
         return 0
@@ -1745,7 +1853,15 @@ queue_dequeue() {
         if _has_prior_taskgroup_entry "$_QE_WORK_ORDER_ID" "$my_seq" "$cand_file"; then
           continue  # Skip — prior brief still approved or running
         fi
+        # Holding an earlier brief's merge holds this one's start (t-0057).
+        if _has_prior_taskgroup_merge_hold "$_QE_WORK_ORDER_ID" "$my_seq" "$cand_file"; then
+          continue  # Skip — an earlier brief in this group is held
+        fi
       fi
+      # Both predicates above scan siblings with _load_queue_entry, which leaves
+      # _QE_* holding the last sibling read rather than this candidate. Reload
+      # before anything downstream reads a field off it.
+      _load_queue_entry "$cand_file"
     fi
 
     # This entry is eligible
@@ -2229,6 +2345,555 @@ queue_resume() {
   _write_queue_entry "$qdir/approved/${entry_id}.yaml"
   rm -f "$src_file"
   _rebuild_queue_index || true
+}
+
+# =============================================================================
+# Close pipeline — Decision t-0057
+# =============================================================================
+# One close-state machine for both paths. The pipeline RECORDS close_state;
+# no reader infers it. The single exception is an entry written before v1.10.0,
+# whose stored field is empty: queue_close_state derives a value from `status`
+# at that one site and nowhere else.
+#
+# All of these read the loaded _QE_* state or take an entry file path. None of
+# them take the queue lock — the caller holds it, as everywhere else in this
+# module. The ones that write say so in their header and reload the entry
+# themselves, so they clobber _QE_*.
+
+# --- Fold a step detail to one JSON-safe line ---
+# close_steps is stored as a single line that must stay valid JSON, so a detail
+# carrying newlines or tabs (a conflict file list, a git error) would break the
+# record. Folded to spaces here rather than at every call site.
+_close_step_text() {
+  local raw="$1"
+  raw=$(printf '%s' "$raw" | tr '\n\r\t' '   ')
+  _yaml_escape_scalar "$raw"
+}
+
+# --- Render one close_steps row ---
+# Arguments: $1 step name, $2 step status, $3 detail (optional)
+# Output: {"step":"rebase","status":"done","at":"...","detail":"..."}
+queue_close_step_json() {
+  printf '{"step":"%s","status":"%s","at":"%s","detail":"%s"}' \
+    "$(_close_step_text "${1:-}")" \
+    "$(_close_step_text "${2:-}")" \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    "$(_close_step_text "${3:-}")"
+}
+
+# --- Close path of the loaded entry ---
+# Resolves the stored value, or defaults from solo_mode when it is empty:
+# an entry that merges itself at close is on the solo path, one that does not
+# is on the pr path. Reads _QE_*; writes nothing.
+queue_close_path() {
+  if [ -n "${_QE_CLOSE_PATH:-}" ]; then
+    printf '%s' "$_QE_CLOSE_PATH"
+    return 0
+  fi
+  case "${_QE_SOLO_MODE:-false}" in
+    true) printf 'solo' ;;
+    *)    printf 'pr' ;;
+  esac
+}
+
+# --- Close state of the loaded entry ---
+# The ONE place a close state is ever derived rather than read. Reads _QE_*.
+#
+# merge_hold outranks the stored state because a hold is in force whatever the
+# pipeline last recorded, and `held` is its rendering (the hold itself lives in
+# merge_hold so that --release has nothing to restore). A hold does not rewrite
+# a state the pipeline has already finished with: calling an entry that is
+# merged `held` would be a lie, and there is nothing left to hold.
+#
+# It does not rewrite a state that REFUSES a merge either, and that half is
+# load-bearing rather than cosmetic. `_queue_close_preconditions` admits `held`
+# on the solo path — an operator merging an entry they held is releasing it in
+# the same breath (Decision t-0057 §5) — so rendering `held` over `conflict`
+# would have turned a hold into a way of PASSING the gate that `conflict` is
+# there to fail. The gate's own comment says `conflict` and `reverify_failed`
+# refuse "because the refusal is the point"; this case is what makes that true.
+# The hold stays visible regardless: `merge_hold` is its own field and both
+# `close-status` and `show --json` print it beside the state.
+queue_close_state() {
+  if [ "${_QE_MERGE_HOLD:-false}" = "true" ]; then
+    case "${_QE_CLOSE_STATE:-}" in
+      merged|pushed|pr_open) ;;
+      conflict|reverify_failed) ;;
+      *) printf 'held'; return 0 ;;
+    esac
+  fi
+  if [ -n "${_QE_CLOSE_STATE:-}" ]; then
+    printf '%s' "$_QE_CLOSE_STATE"
+    return 0
+  fi
+  # Pre-v1.10.0 entry — derive from status. Errs toward a state that does not
+  # permit a merge: every pre-terminal and every failed status reports
+  # `waiting`, so an old entry can never be merged on the strength of a state
+  # nobody recorded. The one state that does permit it is a completed entry
+  # that was never going to merge itself, which is exactly `ready`.
+  case "${_QE_STATUS:-}" in
+    completed)
+      case "${_QE_SOLO_MODE:-false}" in
+        true) printf 'merged' ;;
+        *)    printf 'ready' ;;
+      esac
+      ;;
+    *) printf 'waiting' ;;
+  esac
+}
+
+# --- Record a close-pipeline transition ---
+# Loads the entry, optionally sets close_state, optionally appends one step,
+# and writes it back. Clobbers _QE_*.
+#
+# Arguments:
+#   $1 — entry file path
+#   $2 — new close_state (empty = leave the state as it is)
+#   $3 — step name (empty = record no step, only the state)
+#   $4 — step status: running | done | failed | skipped
+#   $5 — detail (optional free text, folded to one line)
+# Returns 0 on success, 1 when the entry file is missing.
+queue_close_record() {
+  local entry_file="$1" new_state="${2:-}" step="${3:-}" step_status="${4:-}" detail="${5:-}"
+  _load_queue_entry "$entry_file" || return 1
+
+  [ -z "$new_state" ] || _QE_CLOSE_STATE="$new_state"
+  # Record the path alongside the first transition so an entry that reaches the
+  # pipeline carries the path it actually took, not one re-derived later from a
+  # solo_mode that `set-close` may since have diverged from.
+  [ -n "${_QE_CLOSE_PATH:-}" ] || _QE_CLOSE_PATH=$(queue_close_path)
+
+  if [ -n "$step" ]; then
+    local row cur
+    row=$(queue_close_step_json "$step" "$step_status" "$detail")
+    cur="${_QE_CLOSE_STEPS:-[]}"
+    # Append by string surgery on the stored sequence — there is no
+    # flow-sequence reader and deliberately no second representation. Anything
+    # that is not a well-formed non-empty sequence is replaced rather than
+    # appended to: a malformed record is already lost, and concatenating onto
+    # it would lose this step too.
+    case "$cur" in
+      "[]"|"") _QE_CLOSE_STEPS="[${row}]" ;;
+      \[*\])   _QE_CLOSE_STEPS="${cur%\]},${row}]" ;;
+      *)       _QE_CLOSE_STEPS="[${row}]" ;;
+    esac
+  fi
+
+  _QE_UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  _write_queue_entry "$entry_file"
+}
+
+# --- Set the close path (operator) ---
+# Arguments: $1 entry file path, $2 solo|pr. Clobbers _QE_*.
+# Returns 0 on success, 1 on a bad value or missing entry.
+queue_set_close_path() {
+  local entry_file="$1" path="${2:-}"
+  case "$path" in
+    solo|pr) ;;
+    *) echo "ERROR: close_path must be solo or pr (got '${path}')" >&2; return 1 ;;
+  esac
+  _load_queue_entry "$entry_file" || { echo "ERROR: entry file not found: $entry_file" >&2; return 1; }
+  _QE_CLOSE_PATH="$path"
+  _QE_UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  _write_queue_entry "$entry_file"
+}
+
+# --- Place or release a merge hold (operator) ---
+# Arguments: $1 entry file path, $2 true|false. Clobbers _QE_*.
+# Returns 0 on success, 1 on a bad value or missing entry.
+queue_set_merge_hold() {
+  local entry_file="$1" val="${2:-}"
+  case "$val" in
+    true|false) ;;
+    *) echo "ERROR: merge_hold must be true or false (got '${val}')" >&2; return 1 ;;
+  esac
+  _load_queue_entry "$entry_file" || { echo "ERROR: entry file not found: $entry_file" >&2; return 1; }
+  _QE_MERGE_HOLD="$val"
+  _QE_UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  _write_queue_entry "$entry_file"
+}
+
+# --- Is this entry the final brief of its task group? ---
+# Moved here from runner.sh's _is_final_taskgroup_entry (t-0057), which now
+# delegates to it. It had to be reachable from queue-cli.sh so an operator
+# `merge` on a non-final brief is REFUSED with a reason rather than silently
+# handed off by the runner; copying it would have left two finality gates free
+# to disagree about whether a group branch may reach main.
+#
+# Behaviour is unchanged from the runner version, including its fail-open
+# default: on any error this reports final, because the alternative is a group
+# branch that never seals.
+#
+# Requires _load_work_order and _find_entry_file (work-order-manager.sh).
+# Clobbers _QE_* and _WO_*.
+#
+# Arguments: $1 brief/entry id, $2 work_order_id (empty for standalone entries)
+# Returns: 0 = final (seal/merge OK), 1 = unfinished siblings remain
+queue_is_final_taskgroup_entry() {
+  local brief_id="$1"
+  local work_order_id="${2:-}"
+
+  # No work order → not a task group entry → final by definition
+  if [ -z "$work_order_id" ]; then
+    return 0
+  fi
+
+  type _load_work_order > /dev/null 2>&1 || return 0
+  type _find_entry_file > /dev/null 2>&1 || return 0
+
+  local wo_file="$(_queue_dir)/work-orders/${work_order_id}.yaml"
+  _load_work_order "$wo_file" 2>/dev/null || return 0
+
+  if [ -z "$_WO_ENTRY_IDS" ]; then
+    return 0
+  fi
+
+  local _eid _old_ifs="$IFS"
+  IFS=','
+  # shellcheck disable=SC2086 — intentional word splitting on comma-delimited list
+  set -- $_WO_ENTRY_IDS
+  IFS="$_old_ifs"
+  for _eid in "$@"; do
+    [ "$_eid" = "$brief_id" ] && continue
+    local entry_file
+    entry_file=$(_find_entry_file "$_eid") || true
+    if [ -z "$entry_file" ]; then
+      continue
+    fi
+    _load_queue_entry "$entry_file" 2>/dev/null || continue
+    case "$_QE_STATUS" in
+      pending-review|approved)
+        # Sibling still pending — more commits are coming to the shared branch
+        return 1
+        ;;
+      stopped)
+        # Sibling stopped by the operator (Decision t-0055 clause 6) — resumable,
+        # so more commits are still coming to the shared branch. Sealing now
+        # would close the branch under a live brief, and on a sequential group
+        # the seal also removes the group worktree the stopped entry must resume
+        # into. A stopped sibling is "not finished", exactly like an approved one.
+        return 1
+        ;;
+    esac
+  done
+
+  return 0
+}
+
+# --- The fail-closed preconditions for reaching main, on either close path ---
+# Prints the refusal reason on stdout and returns 1; prints nothing and returns
+# 0 when allowed. Loads the entry, so it clobbers _QE_*.
+#
+# One implementation, two gates. The solo merge and the pull-request merge
+# differ only in which close_state they start from and which close_path they
+# claim; clauses (1), (2), (3) and (5) are the same question — has this work
+# been verified, and is this the brief that closes its group — asked about the
+# same entry. t-0057 §6 makes "one set of rules about what may reach main" a
+# decision rather than a preference, and two copies of these four clauses would
+# be free to disagree the first time one of them was edited.
+#
+# Arguments:
+#   $1 — entry file path
+#   $2 — the close_path this gate is for: solo | pr
+#   $3 — space-separated close_states the merge may start from
+_queue_close_preconditions() {
+  local entry_file="$1" want_path="${2:-}" allowed_states="${3:-}"
+  if ! _load_queue_entry "$entry_file"; then
+    printf 'entry file not found: %s' "$entry_file"
+    return 1
+  fi
+
+  # (1) Verified means the session finished its checks and the queue recorded
+  # it. `completed` is the only status queue_complete writes, and it writes it
+  # only for a clean session outcome — every review:*, failure and in-flight
+  # status lands somewhere else. An entry that is not completed has not been
+  # verified, whatever its close_state says.
+  if [ "${_QE_STATUS:-}" != "completed" ]; then
+    printf 'entry is %s, not completed — its checks have not passed' "${_QE_STATUS:-unknown}"
+    return 1
+  fi
+
+  # (2) A close-time re-verification that RAN and did not pass (t-0056) is a
+  # standing refusal: the branch was held back from main once already, on
+  # evidence. "" means it never ran, which is not a failure.
+  if [ "${_QE_REVERIFIED:-}" = "false" ]; then
+    printf 'close-time re-verification did not pass — entry was not merged on purpose'
+    return 1
+  fi
+
+  # (3) A criterion the completeness gate could not confirm is an unverified
+  # check. Only consulted when the verdict file exists: an entry with no
+  # session record contributes no evidence either way, and (1) has already
+  # established that the session closed clean.
+  #
+  # The token list mirrors the existing verdict scan in queue-cli.sh's
+  # `verdicts` report verbatim, so the gate and the report never disagree about
+  # which verdicts count as unverified. `FAILED` is inert — the writer's
+  # vocabulary is VERIFIED|UNVERIFIED|INCONCLUSIVE and
+  # COMPLETE|INCOMPLETE|PARTIAL|N/A (state-writer.sh) — and is kept for that
+  # parity rather than trimmed here alone.
+  local _cm_sid _cm_vf _cm_bad
+  _cm_sid=$(_session_id_for_entry "${_QE_ID:-}") || _cm_sid=""
+  if [ -n "$_cm_sid" ] && type get_main_repo_root > /dev/null 2>&1; then
+    _cm_vf="$(get_main_repo_root)/docs/ai/governance/criteria-verdicts/${_cm_sid}.yaml"
+    if [ -f "$_cm_vf" ]; then
+      _cm_bad=$(grep -cE 'verdict: (PARTIAL|INCONCLUSIVE|FAILED)' "$_cm_vf" 2>/dev/null) || _cm_bad=0
+      case "$_cm_bad" in ''|*[!0-9]*) _cm_bad=0 ;; esac
+      if [ "$_cm_bad" -gt 0 ]; then
+        printf '%s criteria are unverified in %s' "$_cm_bad" "$_cm_vf"
+        return 1
+      fi
+    fi
+  fi
+
+  # (4) State gate. On the solo path `ready` is the entry awaiting a merge and
+  # `held` is the same entry with a hold on it, which `merge` releases by acting
+  # (the hold is the operator's own, and running `merge` is the operator
+  # overriding it). On the pr path the only starting state is `pr_open` — there
+  # is nothing to merge until a pull request exists. Every other state refuses:
+  # `merging` because a merge is already in flight, `conflict` and
+  # `reverify_failed` because the refusal is the point, and the remaining
+  # in-flight and terminal states because there is nothing to start.
+  #
+  # The refused-from message is built from allowed_states rather than written
+  # out, so the reason given can never name a different set from the one
+  # actually enforced.
+  #
+  # All four _cm_* values are captured BEFORE the finality check below, which
+  # calls _load_queue_entry on every sibling and so leaves _QE_* holding the
+  # last one it read. _cm_path and _cm_wo are read at the top of (5) for the
+  # same reason: anything inserted between here and there that loads an entry
+  # must capture what it needs off _QE_* first.
+  local _cm_state _cm_path _cm_wo _cm_id
+  _cm_id="${_QE_ID:-}"
+  _cm_state=$(queue_close_state)
+  case " $allowed_states " in
+    *" $_cm_state "*) ;;
+    *)
+      local _cm_phrase="" _cm_s
+      for _cm_s in $allowed_states; do
+        if [ -z "$_cm_phrase" ]; then _cm_phrase="$_cm_s"; else _cm_phrase="$_cm_phrase or $_cm_s"; fi
+      done
+      printf 'close_state is %s — merge is only available from %s' "$_cm_state" "${_cm_phrase:-no state}"
+      return 1
+      ;;
+  esac
+
+  # (5) Only the final brief of a task group closes the group (Decision 0015
+  # §3). Merging an earlier brief would make the group branch an ancestor of
+  # main mid-group, which branch_manager_setup then treats as merged and
+  # recreates — the remaining briefs lose the shared branch entirely.
+  _cm_path=$(queue_close_path)
+  _cm_wo="${_QE_WORK_ORDER_ID:-}"
+  if ! queue_is_final_taskgroup_entry "$_cm_id" "$_cm_wo"; then
+    printf 'entry is not the final brief of task group %s — the group closes once, at its last brief' "$_cm_wo"
+    return 1
+  fi
+
+  # (6) A gate only admits its own path. Refused rather than silently coerced:
+  # the two paths reach main by different routes, and guessing which one the
+  # operator meant is exactly what fail-closed rules out.
+  if [ "$_cm_path" != "$want_path" ]; then
+    case "$_cm_path" in
+      pr) printf 'close_path is pr — use the pull request flow, or switch it with `set-close %s solo` first' "${_cm_id:-<id>}" ;;
+      *)  printf 'close_path is %s — this entry merges directly; use `merge %s`' "$_cm_path" "${_cm_id:-<id>}" ;;
+    esac
+    return 1
+  fi
+
+  return 0
+}
+
+# --- May this entry be merged now, on the solo path? ---
+# The fail-closed precondition for every operator `merge`. Prints the refusal
+# reason on stdout and returns 1. Clobbers _QE_*.
+#
+# Arguments: $1 entry file path
+queue_close_merge_allowed() {
+  _queue_close_preconditions "$1" solo "ready held"
+}
+
+# --- May this entry's pull request be merged now? ---
+# The entry-side half of the fail-closed precondition for `pr merge`. Prints
+# the refusal reason on stdout and returns 1. Clobbers _QE_*.
+#
+# This answers only "is this entry allowed to reach main at all" — the
+# PR-side questions (have the checks passed, is the PR mergeable) are live
+# GitHub state and are asked by pr-manager.sh against `gh pr view`. Both halves
+# must pass; neither is sufficient alone.
+#
+# Arguments: $1 entry file path
+queue_pr_merge_allowed() {
+  _queue_close_preconditions "$1" pr "pr_open"
+}
+
+# --- Record the pull request opened for this entry ---
+# Arguments: $1 entry file path, $2 PR number (digits), $3 PR url.
+# Clobbers _QE_*. Returns 0 on success, 1 on a bad value or missing entry.
+#
+# Separate from queue_close_record because the two carry different kinds of
+# fact: close_state/close_steps are the pipeline's own account of itself, while
+# the PR number is GitHub's. A caller that opens a PR records both, in that
+# order, so an interrupted open leaves the number present and the state behind
+# rather than a pr_open state with no PR to point at.
+queue_set_pr() {
+  local entry_file="$1" number="${2:-}" url="${3:-}"
+  case "$number" in
+    ""|*[!0-9]*) echo "ERROR: pr.number must be digits (got '${number}')" >&2; return 1 ;;
+  esac
+  _load_queue_entry "$entry_file" || { echo "ERROR: entry file not found: $entry_file" >&2; return 1; }
+  _QE_PR_NUMBER="$number"
+  _QE_PR_URL="$url"
+  _QE_UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  _write_queue_entry "$entry_file"
+}
+
+# --- May this entry's conflict be resolved now? ---
+# The fail-closed precondition for every `resolve-conflict`. Prints the refusal
+# reason on stdout and returns 1; prints nothing and returns 0 when allowed.
+# Clobbers _QE_*.
+#
+# Deliberately NOT _queue_close_preconditions. That gate asks "may this reach
+# main", and two of its clauses are the exact state a conflicted entry is in:
+# clause (1) demands `completed` while a conflicted entry sits in `review/`, and
+# clause (2) treats `reverified: false` as a standing refusal. Routing through it
+# would make the recovery command unreachable from the only situation it exists
+# for. What the two gates DO share is clause (5): finality. That is enforced here
+# too, for a reason beyond consistency — the re-arm below reopens the parent work
+# order, and reopening a group's work order mid-group un-gates siblings the
+# deferral guard is correctly holding back (the same over-reach
+# queue_reopen_reviewed scopes around).
+#
+# Arguments: $1 entry file path
+queue_conflict_resolve_allowed() {
+  local entry_file="$1"
+  if ! _load_queue_entry "$entry_file"; then
+    printf 'entry file not found: %s' "$entry_file"
+    return 1
+  fi
+
+  # The close state is the evidence, not the queue directory. An entry reaches
+  # `review/` for a dozen reasons (scope-deviation, dirty-noop, turn budget) and
+  # only one of them is a conflict; `conflict` is recorded by the merge path
+  # itself, on both routes. Read through queue_close_state rather than off
+  # _QE_CLOSE_STATE so the one derivation site stays the one derivation site.
+  local _cr_state _cr_id _cr_wo
+  _cr_id="${_QE_ID:-}"
+  _cr_wo="${_QE_WORK_ORDER_ID:-}"
+  _cr_state=$(queue_close_state)
+  if [ "$_cr_state" != "conflict" ]; then
+    printf 'close_state is %s, not conflict — there is no conflict to resolve' "$_cr_state"
+    return 1
+  fi
+
+  if ! queue_is_final_taskgroup_entry "$_cr_id" "$_cr_wo"; then
+    printf 'entry is not the final brief of task group %s — resolve the conflict at the brief that closes the group' "$_cr_wo"
+    return 1
+  fi
+
+  return 0
+}
+
+# --- Record the operator's chosen rebase strategy ---
+# Arguments: $1 entry file path, $2 ours | theirs | "" (clear). Clobbers _QE_*.
+# Returns 0 on success, 1 on a bad value or missing entry.
+#
+# The value is the operator's INTENT, stored in their vocabulary: `ours` means
+# the branch's version wins. It is translated into git's inverted `-X` argument
+# at the single rebase site in reverify-merge.sh, and nowhere else.
+queue_set_conflict_resolution() {
+  local entry_file="$1" val="${2:-}"
+  case "$val" in
+    ours|theirs|"") ;;
+    *) echo "ERROR: conflict_resolution must be ours, theirs or empty (got '${val}')" >&2; return 1 ;;
+  esac
+  _load_queue_entry "$entry_file" || { echo "ERROR: entry file not found: $entry_file" >&2; return 1; }
+  _QE_CONFLICT_RESOLUTION="$val"
+  _QE_UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  _write_queue_entry "$entry_file"
+}
+
+# --- Re-arm a conflicted entry so the close can run again ---
+# Moves a conflicted entry back to `completed/` at close_state `ready`, which is
+# the one state the merge gates start from. Returns the new entry file path on
+# stdout. Clobbers _QE_* (and _WO_* via wo_reopen).
+#
+# This is NOT queue_reopen_reviewed. That function returns an entry to
+# `approved/`, which re-runs the whole brief from its plan phase — correct when
+# the SESSION failed, wrong here: the session's checks passed and were recorded,
+# and only the merge was refused. Re-running the brief would discard a verified
+# result to fix a merge. `completed/` + `ready` is also not a convenience: it is
+# what _queue_close_preconditions clauses (1) and (4) require, so anything else
+# leaves the operator holding a resolved conflict that `merge` still refuses.
+#
+# Three fields are cleared for three separate reasons, and all three are load-
+# bearing:
+#   - status review → completed  — clause (1) refuses anything else.
+#   - close_state   → ready      — clause (4) admits ready and held only.
+#   - reverified    → ""         — clause (2) reads `false` as a STANDING
+#     refusal, so a reverify_failed conflict would stay refused forever. "" is
+#     "did not run", which is honest: the next close runs the gate again.
+# error_log is cleared last and only after its contents have been written to the
+# review log, the same bargain queue_reopen_reviewed strikes — an operator who
+# retries blind lands back here with no trail.
+#
+# The parent work order is reopened because a conflicted entry's work order is
+# `escalated`, and the runner's post-dequeue guard defers an escalated work
+# order's entries and then blocks them. Without this the `--agent` fix brief
+# would be queued and walked straight into `blocked/`. Finality is already
+# established by queue_conflict_resolve_allowed, which is what makes the reopen
+# safe: with no unfinished sibling there is nothing for the guard to hold back.
+#
+# Arguments:
+#   $1 — entry file path (in review/ or completed/)
+#   $2 — mode: agent | ours | theirs | manual (recorded on the step row)
+#   $3 — operator note (optional)
+queue_close_rearm() {
+  local entry_file="$1" mode="${2:-}" note="${3:-}"
+  _load_queue_entry "$entry_file" || { echo "ERROR: entry file not found: $entry_file" >&2; return 1; }
+
+  local _ra_id="$_QE_ID" _ra_wo="${_QE_WORK_ORDER_ID:-}" _ra_err="${_QE_ERROR_LOG:-}"
+  local qdir
+  qdir=$(_queue_dir)
+  local dst_file="$qdir/completed/${_ra_id}.yaml"
+
+  if [ -n "$_ra_err" ]; then
+    review_log_append "entry-conflict-resolve-reason" "$_ra_wo" "$_ra_id" \
+      "Re-armed for close (${mode}) — prior refusal: ${_ra_err}" 2>/dev/null || true
+  fi
+
+  _QE_STATUS="completed"
+  _QE_CLOSE_STATE="ready"
+  _QE_REVERIFIED=""
+  _QE_ERROR_LOG=""
+  _QE_UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  # completed_at is NOT reset: the session completed when it completed, and the
+  # close re-arm is not a second completion.
+  [ -n "$_QE_COMPLETED_AT" ] || _QE_COMPLETED_AT="$_QE_UPDATED_AT"
+  mkdir -p "$qdir/completed" 2>/dev/null || true
+  _write_queue_entry "$dst_file"
+  if [ "$entry_file" != "$dst_file" ]; then
+    rm -f "$entry_file" 2>/dev/null || true
+  fi
+  _rebuild_queue_index || true
+
+  if [ -n "$_ra_wo" ] && type wo_reopen > /dev/null 2>&1; then
+    if wo_is_escalated "$_ra_wo" 2>/dev/null || wo_is_failed "$_ra_wo" 2>/dev/null; then
+      wo_reopen "$_ra_wo" > /dev/null 2>&1 \
+        || echo "WARNING: could not reopen work order $_ra_wo — the close may be deferred on the next poll" >&2
+    fi
+  fi
+  rm -f "$qdir/.defer-count-${_ra_id}" 2>/dev/null || true
+
+  # Recorded AFTER the move, against the new path, so the row lands on the file
+  # the operator will read. The detail carries the mode and the note because
+  # close_steps is the pipeline's own account of itself and "why is this entry
+  # ready again" is part of that account.
+  local _ra_detail="mode: $mode"
+  [ -z "$note" ] || _ra_detail="$_ra_detail; note: $note"
+  queue_close_record "$dst_file" "ready" "resolve" "done" "$_ra_detail" || true
+
+  printf '%s' "$dst_file"
 }
 
 # --- Edit a queue entry field ---

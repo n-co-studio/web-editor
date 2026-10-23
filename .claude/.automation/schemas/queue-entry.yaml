@@ -58,3 +58,67 @@ entry:
                              # the branch was therefore not merged.
   overlap_files: []         # files BOTH this branch and main changed since the
                              # merge-base, as of close. Empty whenever reverified is "".
+  close_path: ""            # (v1.10.0) "" | solo | pr — how this entry's work reaches main.
+                             # "" means not yet decided: readers resolve it from solo_mode
+                             # (true -> solo, false -> pr) via queue_close_path. Written on
+                             # first close transition, or earlier by `set-close`.
+  close_state: ""           # (v1.10.0) where the close pipeline has got to. One of:
+                             #   waiting         — checks not finished yet
+                             #   ready           — verified and awaiting an operator `merge`
+                             #   held            — a merge_hold is in force (DERIVED from
+                             #                     merge_hold, never stored here; see below)
+                             #   rebasing        — rebasing onto main before re-verification
+                             #   reverifying     — close-time re-verification running (t-0056)
+                             #   merging         — the merge itself is in flight
+                             #   pushed          — merged and pushed to origin
+                             #   pr_open         — a pull request is open (pr path, brief 2)
+                             #   merged          — merged to main, push not attempted/needed
+                             #   conflict        — rebase or merge conflict; escalated
+                             #   reverify_failed — re-verification did not pass; not merged
+                             #   handed_off      — non-final task-group brief: committed to the
+                             #                     group branch, close deferred to the final brief
+                             # Recorded by the pipeline, never inferred by a reader. An entry
+                             # written before v1.10.0 loads with this empty; queue_close_state
+                             # derives a value from `status` at that one site and nowhere else.
+                             # Not in queue_edit's allowlist — derived state, like held_by.
+  close_steps: []           # (v1.10.0) one row per close-pipeline step, in the order they ran:
+                             #   {"step":"<name>","status":"<state>","at":"<iso8601>","detail":"<text>"}
+                             # step is a lowercase word or hyphenated pair — rebase, reverify,
+                             # merge, push, commit, contract, push-branch, open-pr, checks,
+                             # merge-pr, resolve. status is running | done | failed | skipped.
+                             # `resolve` (v1.12.0) is the only one an operator causes directly:
+                             # it records a resolve-conflict re-arm, and its detail carries the
+                             # mode and the note, so the row answers "why is this ready again".
+                             # Stored as a single-line flow sequence that is simultaneously
+                             # valid YAML and valid JSON, round-tripped verbatim by
+                             # _load_queue_entry/_write_queue_entry exactly as overlap_files is.
+                             # Appended by queue_close_record; not in queue_edit's allowlist.
+  merge_hold: false         # (v1.10.0) true = the operator has held this entry's merge.
+                             # Set and cleared only by `hold-merge` / `hold-merge --release`.
+                             # A separate field rather than a close_state value because a hold
+                             # can be placed before the entry reaches `ready` (holding the next
+                             # task-group brief's start), and --release must not have to restore
+                             # a close_state it has no record of. One source of truth here, one
+                             # rendering (close_state: held) out of queue_close_state.
+  pr:                       # (v1.11.0) the pull request opened for this entry on close_path: pr.
+                             # Absent/zero until `open-pr` succeeds. Nested rather than flat
+                             # (pr_number/pr_url) to follow the `milestone:` precedent: two fields
+                             # describing one external entity, written together and read together.
+                             # Written by queue_set_pr and by nothing else — not in queue_edit's
+                             # allowlist, because the number is GitHub's to assign, not the
+                             # operator's to choose. The url is stored rather than rebuilt from
+                             # the number so that reporting never has to know the repo slug.
+    number: 0               # GitHub PR number; 0 = no PR recorded
+    url: ""                 # full https URL to the PR; "" = no PR recorded
+  conflict_resolution: ""   # (v1.12.0) "" | ours | theirs — the rebase strategy the operator
+                             # chose with `resolve-conflict --ours|--theirs`, carried to the one
+                             # `git rebase` in lib/reverify-merge.sh, which reads it ONCE and
+                             # clears it. Empty is the normal state: a value here means a
+                             # resolution is PENDING, not that a strategy is configured.
+                             # Stored in the OPERATOR's vocabulary — `ours` = the branch's side
+                             # wins. git inverts this during a rebase (the replayed branch is
+                             # "theirs"), and that inversion is applied at the rebase site only.
+                             # Normalised to "" on load for anything outside the closed set,
+                             # because the value is spliced into a git argument list.
+                             # Written by queue_set_conflict_resolution and by nothing else —
+                             # not in queue_edit's allowlist: it steers a merge.

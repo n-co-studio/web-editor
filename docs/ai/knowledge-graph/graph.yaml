@@ -3,7 +3,7 @@
 # Seeded from governance metadata on 2026-03-31
 
 schema_version: 1
-last_updated: "2026-10-23T05:21:00Z"
+last_updated: "2026-10-23T07:22:04Z"
 
 nodes:
   # --- Decisions (from DIGEST.md) ---
@@ -1408,7 +1408,39 @@ nodes:
     last_verified: "2026-10-23"
     status: "active"
     layer: "template"
+  - id: "decision-0057"
+    type: "decision"
+    path: "docs/ai/decisions/t-0057-close-pipeline-controls.md"
+    description: "The close is a pipeline with controls: a finished entry carries a recorded close_state and close_steps (one derivation site, for pre-v1.10.0 entries only), close_path resolves from solo_mode then pins on first transition, merge_hold is the one source of a hold and held is only its rendering (a view over a pending state — never over a finished state, and never over a refusing one, since the merge gate admits held), and the operator gets merge / hold-merge / set-close / close-status. queue-cli merge does not merge — it calls runner.sh --close-entry, so the solo close pipeline keeps exactly one implementation. The pr path adds a second pipeline over the same state field: lib/pr-manager.sh is the only gh surface, an entry opens a pull request at close (gated on push_on_complete AND task-group finality, not on close_path), the daemon re-reads every open one per loop, the branch is sealed at open and again at merge, and every unavailability degrades to ready without failing the entry. A conflict is the one close outcome that leaves the pipeline: it escalates to review and waits for `resolve-conflict <id> --agent|--ours|--theirs|--manual`. --agent writes a fix brief from the escalation and queues it as a follow-up (follow_up_of) on the same branch; --ours/--theirs STORE the operator's strategy in conflict_resolution rather than applying it, so the one `git rebase` in reverify-merge.sh consumes it (inverting to git's -X vocabulary, once, then clearing) and close-time re-verification still runs; --manual records the choice and re-arms nothing. Every mode that re-arms goes through queue_close_rearm, which moves the entry back to completed/ at close_state: ready, clears reverified and error_log, and appends a `resolve` close_step naming the mode and the note."
+    last_verified: "2026-10-23"
+    status: "unverified"
+    layer: "template"
 edges:
+  # --- Decision t-0057 (close pipeline + controls) governance ---
+  - source: "decision-0057"
+    target: "file-runner"
+    relation: "governs"
+    context: "The close arm records close_state through queue_close_record rather than inferring it, and routes to pr-manager's pr_open only when push_on_complete is true AND the entry is its task group's final brief; the daemon loop re-reads every pr_open entry once per pr.poll_seconds"
+    source_type: "agent-inferred"
+    last_verified: "2026-10-23"
+    status: "active"
+    confidence: 0.95
+  - source: "decision-0057"
+    target: "file-queue-cli"
+    relation: "governs"
+    context: "merge / hold-merge / set-close / close-status and the pr subcommands are operator reads and requests only — merge calls runner.sh --close-entry and the pr controls call pr-manager, so neither surface carries a second implementation of the close or a second gh call site. resolve-conflict keeps that shape: it checks the gate, writes the fix brief, delegates the enqueue to `queue-cli.sh follow-up-entry`, and the only git it runs is the rev-parse it needs for the SHAs — it rebases and merges nothing"
+    source_type: "agent-inferred"
+    last_verified: "2026-10-23"
+    status: "active"
+    confidence: 0.95
+  - source: "decision-0057"
+    target: "file-queue-cli"
+    relation: "constrains"
+    context: "`resolve-conflict --ours|--theirs` may not resolve the conflict where it is typed. Resolving locally would empty the overlap report's main_changed list, and _reverify_before_merge triggers only when that list is non-empty (Decision t-0056) — so a local fix would silently skip the re-verification the brief requires. The strategy is therefore stored in the operator's vocabulary and consumed once at the single rebase site in lib/reverify-merge.sh, which inverts it for git (during a rebase git's `ours` is main) and clears it so a second close cannot re-use a spent choice"
+    source_type: "agent-inferred"
+    last_verified: "2026-10-23"
+    status: "active"
+    confidence: 0.95
   # --- Decision t-0062 (preserve uncommitted work) governance ---
   - source: "decision-0062"
     target: "file-work-preserver"

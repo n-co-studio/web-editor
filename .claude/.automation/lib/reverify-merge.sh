@@ -32,7 +32,10 @@
 #   lib/permission-profiles.sh  get_disallowed_tools
 # `_resolve_model_for_session` lives in runner.sh and is optional: it is called
 # through a `type` guard, and without it the re-verify session simply runs on
-# the CLI's default model.
+# the CLI's default model. `_find_entry_file` (lib/work-order-manager.sh) and
+# `queue_set_conflict_resolution` (lib/queue-manager.sh) are optional in the same
+# way: without them the operator's stored rebase strategy is simply not applied
+# and the rebase runs with git's defaults, which is the pre-brief-3 behaviour.
 #
 # Bash 3.2 compatible: no associative arrays, no mapfile, no ${var^^}.
 
@@ -53,6 +56,44 @@ _REVERIFY_FAIL_SENTINEL="REVERIFY-RESULT: FAIL"
 _REVERIFY_CONFLICT_FILES=""
 _REVERIFY_FAIL_REASON=""
 _REVERIFY_ESCALATION_ID=""
+
+# --- Take the operator's rebase strategy, single-shot ---------------------
+# Reads `conflict_resolution` off the entry, clears it, and prints the `git
+# rebase` argument it maps to (or nothing). t-0057 brief 3.
+#
+# Read-and-clear in one step, deliberately: the strategy applies to the NEXT
+# rebase attempt and only that one. Leaving it stored would silently apply the
+# operator's one-off resolution to every future close of the entry, including
+# closes of conflicts they have not seen.
+#
+# THE INVERSION, and this is the only place it is applied. During
+# `git rebase main` the branch's commits are REPLAYED ONTO main, so from git's
+# point of view "ours" is main (the commits already in place) and "theirs" is
+# this branch (the commits being applied). The operator's `--ours` means "keep
+# my branch's version", which is git's `-X theirs`. Swapping these silently
+# discards the branch's work on every conflicting hunk, which is why the mapping
+# lives here next to the rebase rather than at the CLI where the words are read.
+#
+# Arguments: $1 entry/brief id
+_reverify_take_conflict_strategy() {
+  local brief_id="${1:-}"
+  [ -n "$brief_id" ] || return 0
+  type _find_entry_file > /dev/null 2>&1 || return 0
+  type queue_set_conflict_resolution > /dev/null 2>&1 || return 0
+
+  local file strategy
+  file=$(_find_entry_file "$brief_id" 2>/dev/null) || file=""
+  [ -n "$file" ] || return 0
+  _load_queue_entry "$file" 2>/dev/null || return 0
+  strategy="${_QE_CONFLICT_RESOLUTION:-}"
+  [ -n "$strategy" ] || return 0
+  queue_set_conflict_resolution "$file" "" > /dev/null 2>&1 || true
+
+  case "$strategy" in
+    ours)   printf -- '-Xtheirs' ;;
+    theirs) printf -- '-Xours' ;;
+  esac
+}
 
 # --- Wall-clock cap for the re-verification session, in seconds ----------
 # Sanitised the same way as runner.sh sanitises session_max_turns: the value
@@ -293,7 +334,7 @@ _reverify_release_worktree() {
 _reverify_before_merge() {
   local repo="$1" branch="$2" brief_id="${3:-}"
   local overlap="" main_commit="" pre_rebase_sha=""
-  local wt="" scratch="" owns_worktree=false conflicted=""
+  local wt="" scratch="" owns_worktree=false conflicted="" rebase_strategy=""
 
   _RESULT_REVERIFIED=""
   _RESULT_OVERLAP_FILES=""
@@ -367,7 +408,26 @@ _reverify_before_merge() {
   fi
 
   # --- Rebase ---
-  if ! git -C "$wt" rebase main > /dev/null 2>&1; then
+  # The close pipeline's `rebasing` and `reverifying` states are only
+  # distinguishable from in here: the caller sees one return code for the whole
+  # rebase-then-verify sequence. Recorded through runner.sh's fail-soft
+  # `_close_record`, behind a type guard because this lib is sourceable on its
+  # own (Decision t-0057).
+  # The operator's `resolve-conflict --ours|--theirs` is consumed HERE and
+  # nowhere else, so the rebase that resolves the conflict is the same rebase
+  # that gates the merge: re-verification still runs, against the resolved tree.
+  # Resolving at the CLI instead would merge main into the branch, which empties
+  # the overlap set — the only trigger for this whole gate — and the next close
+  # would skip re-verification entirely while reporting success.
+  rebase_strategy=$(_reverify_take_conflict_strategy "$brief_id") || rebase_strategy=""
+  if type _close_record > /dev/null 2>&1; then
+    _close_record "$brief_id" "rebasing" "rebase" "running" \
+      "$branch onto main${rebase_strategy:+ ($rebase_strategy)}"
+  fi
+  # Unquoted on purpose: empty must expand to NO argument, and "" would hand git
+  # an empty pathspec. The value is produced by the case above, never by input.
+  # shellcheck disable=SC2086
+  if ! git -C "$wt" rebase $rebase_strategy main > /dev/null 2>&1; then
     conflicted=$(git -C "$wt" diff --name-only --diff-filter=U 2>/dev/null || printf '')
     git -C "$wt" rebase --abort > /dev/null 2>&1 || true
     # Fall back to the overlap set rather than reporting "unknown": those are
@@ -376,11 +436,19 @@ _reverify_before_merge() {
     [ -n "$conflicted" ] || conflicted="$overlap"
     _REVERIFY_CONFLICT_FILES="$conflicted"
     _RESULT_REVERIFIED="false"
+    # The conflicting files belong in the step detail: the caller records the
+    # `conflict` state but only ever sees return code 1.
+    if type _close_record > /dev/null 2>&1; then
+      _close_record "$brief_id" "" "rebase" "failed" "$conflicted"
+    fi
     _reverify_release_worktree "$repo" "$wt" "$scratch" "$owns_worktree"
     return 1
   fi
 
   # --- Re-verify ---
+  if type _close_record > /dev/null 2>&1; then
+    _close_record "$brief_id" "reverifying" "rebase" "done" "rebased onto main cleanly"
+  fi
   if _run_reverify_session "$wt" "$branch" "$overlap"; then
     _RESULT_REVERIFIED="true"
     _reverify_release_worktree "$repo" "$wt" "$scratch" "$owns_worktree"

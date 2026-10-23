@@ -83,6 +83,12 @@ source "$LIB_DIR/overlap-report.sh"
 # Sourced AFTER overlap-report.sh, queue-manager.sh and permission-profiles.sh:
 # it calls into all three at run time.
 source "$LIB_DIR/reverify-merge.sh"
+# shellcheck source=lib/pr-manager.sh
+# Sourced AFTER queue-manager.sh (it calls queue_close_record, queue_set_pr and
+# queue_pr_merge_allowed) and AFTER _cleanup-helper.sh, whose record_closed_branch
+# and delete_merged_session_branch it reaches through `type` guards when a merged
+# pull request's branch is sealed.
+source "$LIB_DIR/pr-manager.sh"
 
 # --- Runner merge lock helpers (Decision 0030 — worktree merge serialization) ---
 _RUNNER_MERGE_LOCK_FD=7
@@ -230,11 +236,21 @@ BRIEF_ID=""
 EXISTING_BRANCH=""
 SESSION_TYPE="standard"
 DAEMON_MODE=false
+# (t-0057) Close-only mode: run the close pipeline for one already-completed
+# entry and exit. No session is launched. This is how `queue-cli.sh merge`
+# reaches the real merge path instead of re-implementing it.
+CLOSE_ENTRY_ID=""
+# Set true only inside that mode. Read by _close_merge_held.
+_CLOSE_ENTRY_MODE=false
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --brief-id)
       BRIEF_ID="$2"
+      shift 2
+      ;;
+    --close-entry)
+      CLOSE_ENTRY_ID="$2"
       shift 2
       ;;
     --branch)
@@ -253,20 +269,25 @@ while [ $# -gt 0 ]; do
       echo "ERROR: Unknown argument: $1" >&2
       echo "Usage: runner.sh --brief-id <id> [--branch <name>] [--session-type <type>]" >&2
       echo "       runner.sh --daemon" >&2
+      echo "       runner.sh --close-entry <id>" >&2
       exit 1
       ;;
   esac
 done
 
-# Validate mode: --daemon and --brief-id are mutually exclusive
+# Validate mode: the three modes are mutually exclusive
 if [ "$DAEMON_MODE" = true ] && [ -n "$BRIEF_ID" ]; then
   echo "ERROR: --daemon and --brief-id are mutually exclusive" >&2
   exit 1
 fi
+if [ -n "$CLOSE_ENTRY_ID" ] && { [ "$DAEMON_MODE" = true ] || [ -n "$BRIEF_ID" ]; }; then
+  echo "ERROR: --close-entry cannot be combined with --daemon or --brief-id" >&2
+  exit 1
+fi
 
 # Single-shot mode requires --brief-id
-if [ "$DAEMON_MODE" = false ] && [ -z "$BRIEF_ID" ]; then
-  echo "ERROR: --brief-id is required (or use --daemon for queue mode)" >&2
+if [ "$DAEMON_MODE" = false ] && [ -z "$CLOSE_ENTRY_ID" ] && [ -z "$BRIEF_ID" ]; then
+  echo "ERROR: --brief-id is required (or use --daemon for queue mode, --close-entry to close one entry)" >&2
   exit 1
 fi
 
@@ -904,56 +925,14 @@ _check_stale_locks() {
 #   $1 — brief_id (queue entry ID)
 #   $2 — work_order_id (empty for non-task-group entries)
 # Returns: 0 if this is the final entry (seal OK), 1 if siblings remain (don't seal)
+#
+# The body moved to queue_is_final_taskgroup_entry in lib/queue-manager.sh
+# (t-0057) so queue-cli.sh can refuse an operator `merge` on a non-final brief
+# using the SAME predicate the runner seals on. This wrapper is kept because
+# every call site here, the parity contract in RUNNER-PARITY.md and the blocker
+# playbook all name it. Behaviour is unchanged, fail-open default included.
 _is_final_taskgroup_entry() {
-  local brief_id="$1"
-  local work_order_id="${2:-}"
-
-  # No work order → not a task group entry → seal normally
-  if [ -z "$work_order_id" ]; then
-    return 0
-  fi
-
-  # Load work order — fail-open on error
-  local wo_file="$(_queue_dir)/work-orders/${work_order_id}.yaml"
-  _load_work_order "$wo_file" 2>/dev/null || return 0
-
-  # Check if any sibling entries remain in pending/approved status
-  if [ -z "$_WO_ENTRY_IDS" ]; then
-    return 0
-  fi
-
-  local _eid _old_ifs="$IFS"
-  IFS=','
-  # shellcheck disable=SC2086 — intentional word splitting on comma-delimited list
-  set -- $_WO_ENTRY_IDS
-  IFS="$_old_ifs"
-  for _eid in "$@"; do
-    # Skip self
-    [ "$_eid" = "$brief_id" ] && continue
-    local entry_file
-    entry_file=$(_find_entry_file "$_eid") || true
-    if [ -z "$entry_file" ]; then
-      continue
-    fi
-    _load_queue_entry "$entry_file" 2>/dev/null || continue
-    case "$_QE_STATUS" in
-      pending-review|approved)
-        # Sibling still pending — don't seal
-        return 1
-        ;;
-      stopped)
-        # Sibling stopped by the operator (Decision t-0055 clause 6) — resumable,
-        # so more commits are still coming to the shared branch. Sealing now
-        # would close the branch under a live brief, and on a sequential group
-        # the seal also removes the group worktree the stopped entry must resume
-        # into. A stopped sibling is "not finished", exactly like an approved one.
-        return 1
-        ;;
-    esac
-  done
-
-  # No pending/approved siblings remain — this is the final entry
-  return 0
+  queue_is_final_taskgroup_entry "$1" "${2:-}"
 }
 
 # ============================================================
@@ -2350,6 +2329,152 @@ _run_single_entry() {
 }
 
 # ============================================================
+# Close pipeline recorders (Decision t-0057)
+# ============================================================
+# The close pipeline's state is RECORDED as it happens, not reconstructed
+# afterwards by a reader. These two helpers are the only writers in runner.sh.
+
+# --- Resolve the queue entry file to record close steps into ---
+# During a session the entry still sits in running/; an operator-initiated
+# close (--close-entry) acts on one that has already moved to completed/.
+# Resolved per call rather than captured once, because _transition_entry moves
+# the file underneath us mid-pipeline.
+_close_entry_path() {
+  local eid="$1" f
+  [ -n "$eid" ] || return 1
+  f="$(_queue_dir)/running/${eid}.yaml"
+  if [ -f "$f" ]; then printf '%s' "$f"; return 0; fi
+  if type _find_entry_file > /dev/null 2>&1; then
+    f=$(_find_entry_file "$eid" 2>/dev/null) || f=""
+    if [ -n "$f" ] && [ -f "$f" ]; then printf '%s' "$f"; return 0; fi
+  fi
+  return 1
+}
+
+# --- Record one close-pipeline transition. Fail-soft, always rc 0 ---
+# close_state is a report ON the pipeline, not a participant IN it: a recorder
+# that cannot write must never change whether a branch merges. Every failure
+# mode here (entry file already archived, library not loaded, unwritable queue)
+# therefore returns success and leaves the merge path untouched.
+#
+# Beware: queue_close_record calls _load_queue_entry, which overwrites every
+# _QE_* global. _solo_merge_if_needed reads none of them, which is why the
+# calls below are safe where they are. A future caller that does read _QE_*
+# must reload after recording.
+_close_record() {
+  local eid="$1" state="${2:-}" step="${3:-}" step_status="${4:-}" detail="${5:-}"
+  local f
+  type queue_close_record > /dev/null 2>&1 || return 0
+  f=$(_close_entry_path "$eid") || return 0
+  queue_close_record "$f" "$state" "$step" "$step_status" "$detail" || true
+  return 0
+}
+
+# --- Which close path is this entry on? ---
+# Prints `solo` or `pr`, and prints `solo` for an entry that cannot be read.
+# That is the fail-safe direction: `solo` is the pre-t-0057 behaviour, so an
+# unreadable entry keeps doing exactly what it did before the PR route existed
+# rather than pushing a branch to origin on the strength of a failed read.
+#
+# Beware: _load_queue_entry overwrites every _QE_* global. Call sites in the
+# close pipeline read none of them, which is why this is safe where it is used.
+_close_entry_close_path() {
+  local eid="$1" f
+  type queue_close_path > /dev/null 2>&1 || { printf 'solo'; return 0; }
+  f=$(_close_entry_path "$eid") || { printf 'solo'; return 0; }
+  _load_queue_entry "$f" 2>/dev/null || { printf 'solo'; return 0; }
+  printf '%s' "$(queue_close_path)"
+}
+
+# --- Is this entry's merge held by the operator? ---
+# Returns 0 (held) only on a POSITIVE reading of merge_hold: true. An entry
+# that cannot be read is NOT treated as held, which is the fail-open direction
+# here on purpose — the opposite choice would silently strand every merge the
+# moment the queue file moved, and a missed hold is recoverable (the operator
+# sees the merge happened) where a silent universal hold is not.
+_close_merge_held() {
+  local eid="$1" f
+  # An explicit `--close-entry` outranks the hold: the hold stops the runner
+  # merging unattended, and the operator running `merge` on a held entry IS the
+  # attention it was waiting for. queue_close_merge_allowed admits `held` on the
+  # same reasoning, so refusing here would make that admission unreachable.
+  [ "${_CLOSE_ENTRY_MODE:-false}" = "true" ] && return 1
+  type _load_queue_entry > /dev/null 2>&1 || return 1
+  f=$(_close_entry_path "$eid") || return 1
+  _load_queue_entry "$f" 2>/dev/null || return 1
+  [ "${_QE_MERGE_HOLD:-false}" = "true" ]
+}
+
+# --- Record a passing re-verification, only if it actually ran ---
+# _reverify_before_merge returns 0 both when it re-verified the rebased branch
+# and when it never needed to (main changed nothing this branch changed). Only
+# the former sets _RESULT_REVERIFIED=true, so only the former gets a step row —
+# a `reverify: done` on a run that never happened is the exact false claim
+# close_steps exists to prevent.
+_close_record_reverify_pass() {
+  [ "${_RESULT_REVERIFIED:-}" = "true" ] || return 0
+  _close_record "$1" "" "reverify" "done" "re-verified after rebase onto main"
+}
+
+# --- Re-read every open pull request's checks (Decision t-0057 brief 2) ---
+# Called once per daemon loop iteration and self-rate-limited to pr.poll_seconds,
+# because the loop's own interval is the queue's, not GitHub's: every tick here
+# costs one gh round trip per open pull request.
+#
+# Scans completed/ only. An entry can only reach `pr_open` through the close
+# preconditions, whose first clause requires status `completed`, so no other
+# directory can hold one — and scanning review/ would re-read the entry whose
+# conflict already routed it there.
+#
+# This sweep REPORTS; it does not transition. pr_refresh records the close state
+# and writes the escalation, and a conflict found here leaves the entry where it
+# is rather than moving it to review/: queue_escalate only acts on running/, and
+# an entry whose session genuinely completed is not fixed by re-running it. The
+# close state and the escalation are what the operator reads.
+_PR_POLL_LAST=0
+
+_pr_poll_sweep() {
+  type pr_refresh > /dev/null 2>&1 || return 0
+  local interval now qdir f eid state
+  interval=$(_pr_poll_seconds)
+  now=$(date +%s)
+  [ $((now - _PR_POLL_LAST)) -ge "$interval" ] || return 0
+  # Stamped BEFORE the sweep, not after: stamping afterwards would make the
+  # interval "poll_seconds plus however long the gh calls took", which drifts
+  # further every cycle on a slow network.
+  _PR_POLL_LAST="$now"
+  # No gh, nothing to read. Silent: the daemon would otherwise log this line
+  # every poll_seconds forever on a repo that closes solo, and pr_open already
+  # recorded the same reason on the entry that cared.
+  pr_gh_available || return 0
+  qdir=$(_queue_dir)
+  for f in "$qdir/completed"/*.yaml; do
+    [ -f "$f" ] || continue
+    _load_queue_entry "$f" 2>/dev/null || continue
+    eid="${_QE_ID:-}"
+    [ "${_QE_PR_NUMBER:-0}" != "0" ] || continue
+    [ "$(queue_close_state)" = "pr_open" ] || continue
+    pr_refresh "$f" || true
+    case "${_PR_OUTCOME:-}" in
+      "") ;;
+      *) echo "Pull request #${_PR_NUMBER:-?} for entry $eid reported ${_PR_OUTCOME} — see escalation ${_PR_ESCALATION_ID:-unknown}" >&2 ;;
+    esac
+    # The STATE is reloaded rather than read off _QE_*: every
+    # queue_close_record inside pr_refresh rewrites those, so reading them here
+    # would be reading whichever write happened to be last. The _PR_* globals
+    # below are a different set — pr_refresh's own report, which is exactly
+    # what they are for, and which _load_queue_entry does not touch.
+    state=""
+    if _load_queue_entry "$f" 2>/dev/null; then
+      state=$(queue_close_state 2>/dev/null) || state=""
+    fi
+    if [ "$state" = "merged" ]; then
+      echo "Pull request #${_PR_NUMBER:-?} for entry $eid has merged — branch sealed, local main synced" >&2
+    fi
+  done
+}
+
+# ============================================================
 # Solo merge + branch seal (extracted from _run_single_entry)
 # ============================================================
 # Called from daemon loop and single-shot mode AFTER _run_single_entry returns.
@@ -2425,6 +2550,42 @@ _solo_merge_if_needed() {
   if [ "$_outcome_type" = "completed" ] && [ "$_RESULT_SOLO_MODE" = "true" ] \
      && [ -n "$entry_current_branch" ] && ! _is_final_taskgroup_entry "$brief_id" "$work_order_id"; then
     echo "Task group brief is not final — skipping merge and seal; branch '$entry_current_branch' stays open for the next brief (Decision 0013 §7)" >&2
+    # Close pipeline: this brief hands off rather than closing (t-0057). The two
+    # steps recorded are the two things it actually did, each with evidence
+    # rather than an assertion — the branch head it committed to, and the group
+    # contract file if one is on disk.
+    local _ho_sha _ho_contract=""
+    _ho_sha=$(git -C "$REPO_ROOT" rev-parse --short "$entry_current_branch" 2>/dev/null || echo "unknown")
+    _close_record "$brief_id" "" "commit" "done" "$entry_current_branch at $_ho_sha"
+    if [ -n "$group_name" ]; then
+      if [ -f "$REPO_ROOT/.claude/local/task-groups/${group_name}.yaml" ]; then
+        _ho_contract=".claude/local/task-groups/${group_name}.yaml"
+      elif [ -f "$REPO_ROOT/docs/ai/task-groups/${group_name}.yaml" ]; then
+        _ho_contract="docs/ai/task-groups/${group_name}.yaml"
+      fi
+    fi
+    if [ -n "$_ho_contract" ]; then
+      _close_record "$brief_id" "" "contract" "done" "$_ho_contract"
+    else
+      _close_record "$brief_id" "" "contract" "skipped" "no group contract found"
+    fi
+    _close_record "$brief_id" "handed_off" "" "" ""
+    if [ -n "$group_name" ]; then
+      release_group_worktree_lock "$group_name" "$$" "${REPO_OS_SESSION_ID:-}" || true
+      _CURRENT_GROUP_NAME=""
+    fi
+    return
+  fi
+
+  # --- Operator merge hold (t-0057) ---
+  # A held entry stops at the gate: verified, mergeable, not merged. The branch
+  # is deliberately left unsealed so `queue-cli.sh merge` can still close it
+  # after `hold-merge --release`. Checked before the solo merge rather than
+  # inside it so the hold applies to the PR path too once brief 2 lands.
+  if [ "$_outcome_type" = "completed" ] && [ -n "$entry_current_branch" ] \
+     && _close_merge_held "$brief_id"; then
+    echo "Merge held by operator — $entry_current_branch not merged, not sealed; release with 'queue-cli.sh hold-merge $brief_id --release'" >&2
+    _close_record "$brief_id" "ready" "merge" "skipped" "merge_hold set by operator"
     if [ -n "$group_name" ]; then
       release_group_worktree_lock "$group_name" "$$" "${REPO_OS_SESSION_ID:-}" || true
       _CURRENT_GROUP_NAME=""
@@ -2469,6 +2630,10 @@ _solo_merge_if_needed() {
               printf '  resolution: ""\n'
             } > "$_esc_dir/${_esc_id}.yaml" 2>/dev/null || true
             echo "ERROR: Runner merge blocked — lock acquisition failed. Escalation: $_esc_id" >&2
+            # Stays `ready`, not `conflict`: nothing was attempted against main,
+            # so this is retryable with `queue-cli.sh merge <id>` once the lock
+            # clears. Recording `conflict` here would refuse that retry.
+            _close_record "$brief_id" "ready" "merge" "failed" "merge lock unavailable — escalation $_esc_id"
             _release_runner_merge_lock
             return 0
           fi
@@ -2486,6 +2651,8 @@ _solo_merge_if_needed() {
               2) _reverify_failed=true ;;
             esac
             if [ "$_reverify_rc" -eq 0 ]; then
+              _close_record_reverify_pass "$brief_id"
+              _close_record "$brief_id" "merging" "merge" "running" "$entry_current_branch into main"
               _pre_merge_sha=$(git -C "$_main_repo" rev-parse HEAD 2>/dev/null || echo "")
               if git -C "$_main_repo" merge --ff-only "$entry_current_branch" 2>/dev/null; then
                 _merge_ok=true
@@ -2519,6 +2686,8 @@ _solo_merge_if_needed() {
             2) _reverify_failed=true ;;
           esac
           if [ "$_reverify_rc" -eq 0 ]; then
+            _close_record_reverify_pass "$brief_id"
+            _close_record "$brief_id" "merging" "merge" "running" "$entry_current_branch into main"
             _pre_merge_sha=$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo "")
             if git merge --ff-only "$entry_current_branch" 2>/dev/null; then
               _merge_ok=true
@@ -2548,6 +2717,7 @@ _solo_merge_if_needed() {
             echo "WARNING: Solo merge: 'Already up to date' — main HEAD unchanged by merge of '$entry_current_branch'. Possible prior ref-move by agent. Applying working-tree sync." >&2
           fi
           echo "Solo merge: $entry_current_branch → main (success)" >&2
+          _close_record "$brief_id" "merged" "merge" "done" "merged into main at ${_post_merge_sha:0:7}"
           # Post-merge working-tree sync (unconditional — Decision 0030).
           # Syncs the main repo index and working tree to HEAD. Critical when a
           # worktree agent moved the main ref (ref-move): the ref pointer advances
@@ -2590,13 +2760,22 @@ _solo_merge_if_needed() {
           local _is_template=false
           [ -f "$_repo_mode_file" ] && grep -q "template" "$_repo_mode_file" 2>/dev/null && _is_template=true
           if [ "$push_on_complete" = "true" ] && git remote get-url origin >/dev/null 2>&1; then
-            if ! git push -u origin main >/dev/null 2>&1; then
+            if git push -u origin main >/dev/null 2>&1; then
+              _close_record "$brief_id" "pushed" "push" "done" "origin main"
+            else
               echo "WARNING: push_on_complete failed — run 'git push origin main' manually" >&2
+              # State stays `merged`: main HAS the work, only origin does not.
+              _close_record "$brief_id" "" "push" "failed" "git push -u origin main failed"
             fi
           elif [ "$_is_template" = false ] && git remote get-url origin >/dev/null 2>&1; then
-            if ! git push origin main >/dev/null 2>&1; then
+            if git push origin main >/dev/null 2>&1; then
+              _close_record "$brief_id" "pushed" "push" "done" "origin main (advisory push)"
+            else
               echo "Advisory: push to origin failed — run 'git push origin main' manually" >&2
+              _close_record "$brief_id" "" "push" "failed" "advisory push to origin main failed"
             fi
+          else
+            _close_record "$brief_id" "" "push" "skipped" "no push configured for this repo"
           fi
         elif [ "$_merge_conflict" = true ]; then
           # Merge conflict — write scope-deviation escalation and transition to review
@@ -2626,6 +2805,9 @@ _solo_merge_if_needed() {
           } > "$_esc_dir/${_esc_id}.yaml" 2>/dev/null || true
           # Override outcome to review so daemon transitions entry correctly
           _RESULT_OUTCOME="review:merge-conflict"
+          # The conflicting files are the detail an operator acts on, so they go
+          # in the step row as well as the escalation.
+          _close_record "$brief_id" "conflict" "merge" "failed" "conflict_files: $_esc_context"
           echo "Solo merge conflict: $entry_current_branch — escalation $_esc_id written, entry → review" >&2
         elif [ "$_reverify_failed" = true ]; then
           # Re-verification of the rebased branch did not pass. The branch is
@@ -2635,6 +2817,7 @@ _solo_merge_if_needed() {
           # escalation naming the failing checks, the overlapping files and the
           # main commit that changed them.
           _RESULT_OUTCOME="review:reverify-failed"
+          _close_record "$brief_id" "reverify_failed" "reverify" "failed" "${_REVERIFY_FAIL_REASON:-unknown}"
           echo "Re-verification failed for $entry_current_branch — NOT merged, NOT sealed; escalation ${_REVERIFY_ESCALATION_ID:-unknown} written, entry → review" >&2
           echo "  reason: ${_REVERIFY_FAIL_REASON:-unknown}" >&2
         else
@@ -2645,6 +2828,11 @@ _solo_merge_if_needed() {
             record_closed_branch "$entry_current_branch"
           fi
           echo "WARNING: Solo merge of '$entry_current_branch' into main failed — branch sealed" >&2
+          # `ready`, not `conflict`: there were no unmerged paths, so the cause
+          # is something like a failed checkout or main not being on main. That
+          # is retryable, and `conflict` would refuse the retry. The step row
+          # carries the distinction a bare state cannot.
+          _close_record "$brief_id" "ready" "merge" "failed" "merge failed without conflict — branch sealed, retry with 'merge'"
         fi
         ;;
       *)
@@ -2652,22 +2840,85 @@ _solo_merge_if_needed() {
         if _is_final_taskgroup_entry "$brief_id" "$work_order_id"; then
           record_closed_branch "$entry_current_branch"
         fi
+        _close_record "$brief_id" "ready" "merge" "skipped" "branch '$entry_current_branch' is not a solo-mergeable type"
         ;;
     esac
   elif [ "$_outcome_type" = "completed" ] && [ "$push_on_complete" = "true" ] && [ -n "$entry_current_branch" ] && [ "$entry_current_branch" != "main" ]; then
-    # Non-solo completed entry with push_on_complete — push feature branch
-    if git remote get-url origin >/dev/null 2>&1; then
-      if ! git push -u origin "$entry_current_branch" >/dev/null 2>&1; then
-        echo "WARNING: push_on_complete failed for $entry_current_branch — push manually" >&2
+    # Non-solo completed entry with push_on_complete.
+    #
+    # On `close_path: pr` this is where the pull request is opened (t-0057 §10,
+    # brief 2). The trigger is push_on_complete and NOT close_path alone, even
+    # though close_path already defaults to `pr` for every non-solo entry: an
+    # entry that never asked to be pushed must not start reaching origin because
+    # the close pipeline grew a PR route. Opting in stays a per-entry decision.
+    #
+    # Gated on finality as well (Decision 0015 §3): a task group closes once, at
+    # its last brief. Opening a PR per brief would put the group's partial work
+    # in front of a reviewer three times. A non-final brief takes the plain push
+    # below, which is what it did before this route existed.
+    #
+    # Nothing in this arm reads _QE_* after the guard: _close_entry_close_path,
+    # _is_final_taskgroup_entry and pr_open each run _load_queue_entry and leave
+    # those globals holding whichever entry they looked at last. Everything the
+    # arm needs afterwards comes either from locals captured before the guard
+    # ($entry_current_branch, $brief_id) or from pr_open's own _PR_* report,
+    # which is a separate set _load_queue_entry does not touch.
+    local _pr_opened=false
+    if [ "$(_close_entry_close_path "$brief_id")" = "pr" ] \
+       && _is_final_taskgroup_entry "$brief_id" "$work_order_id"; then
+      local _pr_entry_file
+      if _pr_entry_file=$(_close_entry_path "$brief_id") \
+         && type pr_open > /dev/null 2>&1; then
+        # pr_open pushes the branch itself and records every close step it
+        # takes, including each documented degrade. It returns 0 for all of
+        # them — a missing `gh` is not a failed entry (brief 2 step 5) — so the
+        # outcome is read from the state it recorded, not from its exit code.
+        pr_open "$_pr_entry_file" || true
+        _pr_opened=true
+        # pr-manager never decides an entry's outcome — it reports one and the
+        # caller routes it. The only outcome it raises here is a conflict seen
+        # on a pull request it adopted, which must reach review exactly as a
+        # solo merge conflict does.
+        if [ -n "${_PR_OUTCOME:-}" ]; then
+          _RESULT_OUTCOME="$_PR_OUTCOME"
+          echo "Pull request for $entry_current_branch reported ${_PR_OUTCOME} — entry → review" >&2
+        fi
+        if [ -n "${_PR_NUMBER:-}" ] && [ "${_PR_NUMBER:-0}" != "0" ]; then
+          echo "Opened pull request #${_PR_NUMBER} for $entry_current_branch — ${_PR_URL:-no url}" >&2
+        else
+          echo "PR close path degraded for $entry_current_branch: ${_PR_REASON:-unknown} — entry stays at ready" >&2
+        fi
       fi
     fi
+    if [ "$_pr_opened" = false ]; then
+      if git remote get-url origin >/dev/null 2>&1; then
+        if ! git push -u origin "$entry_current_branch" >/dev/null 2>&1; then
+          echo "WARNING: push_on_complete failed for $entry_current_branch — push manually" >&2
+        fi
+      fi
+      # Manual-close entry: pushed, but nothing merged. It stops here awaiting
+      # an operator `merge` (t-0057).
+      _close_record "$brief_id" "ready" "push-branch" "done" "origin $entry_current_branch"
+    fi
     if _is_final_taskgroup_entry "$brief_id" "$work_order_id"; then
+      # Sealed even with a pull request still open: sealing retires the branch
+      # from LOCAL session use (Decision 0013), and everything left to do —
+      # checks, update-branch, the merge itself — happens on origin through gh.
+      # pr-manager's own seal after a merge lands is what deletes the local
+      # branch; record_closed_branch is idempotent, so running here first is
+      # not a double-seal.
       record_closed_branch "$entry_current_branch"
     fi
   elif [ -n "$entry_current_branch" ] && [ "$entry_current_branch" != "main" ]; then
     # Non-solo or failed outcome — still seal the branch
     if _is_final_taskgroup_entry "$brief_id" "$work_order_id"; then
       record_closed_branch "$entry_current_branch"
+    fi
+    # Only a COMPLETED entry is ready to close. A failed or review outcome has
+    # no close pipeline to be at the head of, and saying `ready` would offer the
+    # operator a merge of work that never passed its checks.
+    if [ "$_outcome_type" = "completed" ]; then
+      _close_record "$brief_id" "ready" "" "" ""
     fi
   fi
 
@@ -2698,6 +2949,114 @@ _solo_merge_if_needed() {
     _CURRENT_GROUP_NAME=""
   fi
 }
+
+# ============================================================
+# Close-only mode (Decision t-0057)
+# ============================================================
+# Runs the close pipeline for ONE already-completed entry and exits. No session
+# is launched, no outcome is detected, no queue status transition happens — this
+# is the operator saying "close that one now", and the only thing it adds to the
+# normal flow is the timing.
+#
+# It exists so `queue-cli.sh merge` reaches the real pipeline. queue-cli.sh
+# cannot source this file (argv parsing and a daemon loop run at load), and a
+# second copy of _solo_merge_if_needed would be a second merge gate free to
+# disagree with this one about when a branch is safe to merge.
+
+if [ -n "$CLOSE_ENTRY_ID" ]; then
+  _ce_file=$(_find_entry_file "$CLOSE_ENTRY_ID" 2>/dev/null) || _ce_file=""
+  if [ -z "$_ce_file" ] || [ ! -f "$_ce_file" ]; then
+    echo "ERROR: entry not found: $CLOSE_ENTRY_ID" >&2
+    exit 1
+  fi
+
+  # Fail-closed precondition. The same check queue-cli.sh ran before invoking
+  # us, repeated here because this mode is reachable directly and the queue can
+  # have moved on in between.
+  _ce_refusal=$(queue_close_merge_allowed "$_ce_file") || {
+    echo "REFUSED: $_ce_refusal" >&2
+    exit 1
+  }
+
+  _load_queue_entry "$_ce_file"
+  _ce_branch="$_QE_BRANCH"
+  _ce_push="${_QE_PUSH_ON_COMPLETE:-false}"
+  _ce_wo="${_QE_WORK_ORDER_ID:-}"
+
+  if [ -z "$_ce_branch" ]; then
+    echo "ERROR: entry $CLOSE_ENTRY_ID has no branch recorded — nothing to merge" >&2
+    exit 1
+  fi
+
+  # The operator is acting now, and queue_close_merge_allowed has already let
+  # `held` through on that basis (the hold stops the RUNNER merging unattended,
+  # not its owner merging deliberately). This flag is what tells the hold check
+  # inside _solo_merge_if_needed that it is looking at the deliberate case.
+  _CLOSE_ENTRY_MODE=true
+
+  # _solo_merge_if_needed is driven entirely by the _RESULT_* globals a session
+  # would have left behind. A manual-close entry is exactly a completed one
+  # whose solo merge was deferred, so that is what it is told.
+  _RESULT_OUTCOME="completed"
+  _RESULT_SOLO_MODE="true"
+  _RESULT_REVERIFIED=""
+  _RESULT_OVERLAP_FILES=""
+
+  # The group name is deliberately NOT passed. Its only effects in there are
+  # releasing a group worktree occupancy lock and removing the worktree — both
+  # keyed to the session that holds them, and this process holds neither. The
+  # worktree outliving an operator close is untidy; releasing another process's
+  # lock would be a correctness bug.
+  #
+  # The merge lock is acquired here only on the path where
+  # _solo_merge_if_needed does NOT acquire it itself (the legacy checkout path,
+  # RUNNER-PARITY row 5). Same predicate, so there is never a second
+  # acquisition — _acquire_runner_merge_lock is not reentrant and would
+  # fail-closed on one.
+  _ce_took_lock=false
+  if ! is_full_worktree_session; then
+    if ! _acquire_runner_merge_lock "$REPO_ROOT/.claude/.state/.merge-lock"; then
+      echo "REFUSED: runner merge lock unavailable — another merge is in flight" >&2
+      _release_runner_merge_lock
+      exit 1
+    fi
+    _ce_took_lock=true
+  fi
+
+  _solo_merge_if_needed "$_ce_branch" "$_ce_push" "$CLOSE_ENTRY_ID" "$_ce_wo" ""
+
+  if [ "$_ce_took_lock" = true ]; then
+    _release_runner_merge_lock
+  fi
+
+  # Same write-back the daemon does after its own merge: both fields stay at
+  # their defaults when the gate did not run, which is how the entry says "no
+  # overlap" rather than "passed".
+  _ce_file=$(_find_entry_file "$CLOSE_ENTRY_ID" 2>/dev/null) || _ce_file=""
+  if [ -n "$_ce_file" ] && [ -f "$_ce_file" ] \
+     && { [ -n "$_RESULT_REVERIFIED" ] || [ -n "$_RESULT_OVERLAP_FILES" ]; }; then
+    _load_queue_entry "$_ce_file"
+    _QE_REVERIFIED="$_RESULT_REVERIFIED"
+    _QE_OVERLAP_FILES=$(queue_yaml_flow_seq "$_RESULT_OVERLAP_FILES")
+    _write_queue_entry "$_ce_file"
+  fi
+
+  # Report the recorded state rather than inferring success from the absence of
+  # errors. The entry's queue status is left alone on purpose: a conflict here
+  # is a close-pipeline failure on an entry whose work is finished, and moving a
+  # completed entry back to review/ is a transition nobody asked for. The
+  # escalation _solo_merge_if_needed wrote is the operator's signal.
+  _ce_state="unknown"
+  if [ -n "$_ce_file" ] && [ -f "$_ce_file" ]; then
+    _load_queue_entry "$_ce_file"
+    _ce_state=$(queue_close_state)
+  fi
+  echo "Close pipeline finished for $CLOSE_ENTRY_ID — close_state: $_ce_state" >&2
+  case "$_ce_state" in
+    merged|pushed) exit 0 ;;
+    *) exit 1 ;;
+  esac
+fi
 
 # ============================================================
 # Single-shot mode (backward compatible with Brief 2)
@@ -3035,6 +3394,13 @@ while true; do
     sleep 60
     continue
   fi
+
+  # --- Re-read open pull requests (Decision t-0057 brief 2) ---
+  # Before the dequeue, not inside the idle branch: a repo whose queue is never
+  # empty would otherwise never notice that a pull request merged. Takes no
+  # queue lock — it only rewrites close fields on completed entries, which the
+  # dequeue below does not read.
+  _pr_poll_sweep || true
 
   # --- Dequeue oldest approved entry (locked) ---
   ENTRY_FILE=""

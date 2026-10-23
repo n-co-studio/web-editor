@@ -102,6 +102,33 @@ model_routing_overrides:
   # as `eval-cell`, which already has a line above), at a cell boundary, with
   # the boundary recorded so the study's data says which cells used which model.
 
+# Pull request close path (Decision t-0057 brief 2). Read by lib/pr-manager.sh.
+# A top-level block, not nested under runner:, because _parse_config_field's sed
+# range pattern only resolves top-level keys.
+#
+# Every comment in this block sits ABOVE its key and deliberately avoids writing
+# any field name followed by a colon: the field pattern is an unanchored
+# /<field>:/ over the whole block, so `merge_method:` inside a comment would be
+# matched as a second hit and concatenated onto the real value before head -1
+# could discard it. See the ADDING A CONFIG FIELD note in queue-manager.sh.
+pr:
+  # How `pr merge` lands the pull request, overridable per invocation with
+  # --method. One of merge, squash, rebase. Defaults to a merge commit because
+  # that is what the solo close path does (git merge --no-ff), and a task group
+  # whose briefs are squashed to one commit loses the per-brief history the
+  # group contract and session logs refer to.
+  merge_method: merge
+  # How often the daemon re-reads an open pull request's checks, in seconds.
+  # Raise it on a repo whose CI takes much longer than this; every tick costs
+  # one gh API round trip per open PR. Must be > 0.
+  poll_seconds: 120
+  # Delete the remote branch after the pull request merges. Defaults to true to
+  # match Decision 0013 sealing, which retires the local branch at the same
+  # point — leaving the remote alive would make the sealed ledger and origin
+  # disagree about which branches are still live. Set false on a repo whose
+  # deploy tooling reads merged branches.
+  delete_branch: true
+
 retention:
   queue_days: 30
   report_days: 90

@@ -29,6 +29,13 @@
 #   notes-entry <id>
 #   follow-up-entry <parent-id> --brief <path> [--auto-approve] [--priority N]
 #   follow-up-draft <parent-id>
+#   close-status <id>
+#   merge <id>
+#   hold-merge <id> [--release]
+#   set-close <id> solo|pr
+#   pr open|refresh|status|rerun|update-branch <id>
+#   pr merge <id> [--method merge|squash|rebase]
+#   resolve-conflict <id> (--agent | --ours | --theirs | --manual) [--note TEXT]
 #   start-daemon
 #   halt
 #   force-halt
@@ -48,9 +55,29 @@
 # parent, and has its branch resolved at dequeue. follow-up-draft only prints a
 # starting point for its brief — it queues nothing.
 #
+# close-status/merge/hold-merge/set-close are the close pipeline (Decision
+# t-0057). Every finished entry has a close_state; `merge` runs the real
+# pipeline via `runner.sh --close-entry` rather than re-implementing it, and
+# refuses rather than guesses when a precondition cannot be verified. On a task
+# group only the final brief closes the group (Decision 0015 §3) — the others
+# are refused, and holding an earlier brief holds the next one's start.
+#
+# `pr` is the same pipeline for an entry on `close_path: pr` (t-0057 brief 2),
+# where main is changed by GitHub rather than by a local merge. `pr status` is
+# free — it prints what the last refresh recorded. The other five each spend gh
+# round trips. `pr merge` is refused unless the checks pass and the pull request
+# is mergeable, read LIVE at the moment of the merge and not from the entry.
+#
+# `resolve-conflict` is the one exit from close_state `conflict`, on EITHER path
+# (t-0057 brief 3). It picks how the conflict is resolved and re-arms the entry
+# so the close can run again; it never merges anything itself. `--agent` queues a
+# fix brief as a follow-up of the entry, on the same branch, so the fix is a
+# session with a brief and a contract rather than a free hand on main.
+#
 # Global flags:
 #   --json    Machine-readable JSON output (status, list, show, review, overlap,
-#             note-entry, notes-entry, follow-up-entry, follow-up-draft)
+#             note-entry, notes-entry, follow-up-entry, follow-up-draft,
+#             close-status, merge, hold-merge, set-close, pr)
 #
 # Exit codes:
 #   0  Success
@@ -96,6 +123,13 @@ source "$LIB_DIR/cleanup.sh"
 source "$LIB_DIR/overlap-report.sh"
 # shellcheck source=lib/work-preserver.sh
 source "$LIB_DIR/work-preserver.sh"
+# shellcheck source=lib/pr-manager.sh
+# Sourced AFTER queue-manager.sh and _cleanup-helper.sh, both of which it calls
+# into at run time. Unlike `merge`, the `pr` subcommands do NOT hand off to
+# runner.sh: nothing they do touches main except the --ff-only sync after a pull
+# request has already merged, so there is no second merge gate to disagree with
+# the runner's — GitHub holds the only one.
+source "$LIB_DIR/pr-manager.sh"
 
 # --- Global flags ---
 JSON_OUTPUT=false
@@ -146,6 +180,19 @@ Subcommands:
   follow-up-entry <parent-id> --brief <path> [--auto-approve] [--priority N]
                                               queue work extending <parent-id> (alias: follow-up)
   follow-up-draft <parent-id>                 print a draft brief from what the parent left undone
+  close-status <id>                           close_path, close_state and every recorded close step
+  merge <id>                                  run the close pipeline now (rebase, re-verify, merge, push)
+  hold-merge <id> [--release]                 hold this entry's merge, or let it run
+  set-close <id> solo|pr                      choose how this entry's work reaches main
+  pr status <id>                              the recorded pull request and close state (no gh call)
+  pr open <id>                                push the branch and open its pull request
+  pr refresh <id>                             re-read its checks, conflicts and merged state
+  pr rerun <id>                               re-run the failed jobs of its latest failed run
+  pr update-branch <id>                       bring the pull request up to date with main
+  pr merge <id> [--method merge|squash|rebase]
+                                              merge it, if its checks pass and it is mergeable
+  resolve-conflict <id> (--agent|--ours|--theirs|--manual) [--note TEXT]
+                                              pick how a close conflict is resolved, then re-arm it
   start-daemon
   halt
   force-halt
@@ -787,7 +834,11 @@ EOF
       _resolve_entry_metadata
       # Truncate last_prompt for JSON output (first 500 chars)
       _SHOW_LP="${_QE_LAST_PROMPT:0:500}"
-      printf '{%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"follow_ups":[%s],%s,%s}\n' \
+      # Close pipeline (t-0057). Both resolvers read _QE_* only, so they are
+      # safe here after the load; close_steps is already JSON, emitted verbatim.
+      _SHOW_CLOSE_PATH=$(queue_close_path)
+      _SHOW_CLOSE_STATE=$(queue_close_state)
+      printf '{%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"follow_ups":[%s],%s,%s,%s,%s,%s,"close_steps":%s}\n' \
         "$(_json_kv "id" "$_QE_ID")" \
         "$(_json_kv "status" "$_QE_STATUS")" \
         "$(_json_kv "priority" "${_QE_PRIORITY:-0}")" \
@@ -814,7 +865,11 @@ EOF
         "$(_json_kv "follow_up_of" "${_QE_FOLLOW_UP_OF:-}")" \
         "$_SHOW_FU_JSON" \
         "$_SHOW_SESSION_JSON" \
-        "$_SHOW_HOLD_JSON"
+        "$_SHOW_HOLD_JSON" \
+        "$(_json_kv "close_path" "$_SHOW_CLOSE_PATH")" \
+        "$(_json_kv "close_state" "$_SHOW_CLOSE_STATE")" \
+        "$(_json_kv_raw "merge_hold" "${_QE_MERGE_HOLD:-false}")" \
+        "${_QE_CLOSE_STEPS:-[]}"
     else
       queue_show "$SHOW_ID"
     fi
@@ -1803,6 +1858,836 @@ EOF
     else
       printf 'Resumed: %s (approved/) — no resume handle found, so the next run starts a fresh session. Released %s held entries\n' \
         "$RESUME_ID" "$RESUME_FREED_COUNT"
+    fi
+    ;;
+
+  # --- close-status: where an entry's close pipeline has got to ---
+  # Read-only. Prints close_path, close_state and the recorded steps.
+  close-status)
+    if [ $# -lt 1 ]; then
+      echo "ERROR: close-status requires <id>" >&2
+      exit 1
+    fi
+    CS_ID="$1"
+    CS_FILE=$(_find_entry_file "$CS_ID") || CS_FILE=""
+    if [ -z "$CS_FILE" ]; then
+      echo "ERROR: Entry $CS_ID not found" >&2
+      exit 1
+    fi
+    _load_queue_entry "$CS_FILE"
+    CS_PATH=$(queue_close_path)
+    CS_STATE=$(queue_close_state)
+    CS_HOLD="${_QE_MERGE_HOLD:-false}"
+    # close_steps is stored as text that is already valid JSON, so --json emits
+    # it verbatim. There is no reader and deliberately no second representation.
+    CS_STEPS="${_QE_CLOSE_STEPS:-[]}"
+    CS_STATUS="${_QE_STATUS:-unknown}"
+
+    if [ "$JSON_OUTPUT" = true ]; then
+      printf '{%s,%s,%s,%s,%s,"close_steps":%s}\n' \
+        "$(_json_kv "entry_id" "$CS_ID")" \
+        "$(_json_kv "status" "$CS_STATUS")" \
+        "$(_json_kv "close_path" "$CS_PATH")" \
+        "$(_json_kv "close_state" "$CS_STATE")" \
+        "$(_json_kv_raw "merge_hold" "$CS_HOLD")" \
+        "$CS_STEPS"
+    else
+      printf 'Entry:       %s (%s)\n' "$CS_ID" "$CS_STATUS"
+      printf 'Close path:  %s\n' "$CS_PATH"
+      printf 'Close state: %s\n' "$CS_STATE"
+      if [ "$CS_HOLD" = "true" ]; then
+        printf 'Merge hold:  held by operator — release with: queue-cli.sh hold-merge %s --release\n' "$CS_ID"
+      fi
+      if [ "$CS_STEPS" = "[]" ] || [ -z "$CS_STEPS" ]; then
+        printf 'Steps:       (none recorded)\n'
+      else
+        printf 'Steps:\n'
+        # Split the stored sequence on its row boundary with parameter
+        # expansion, the same zero-fork style the entry parser uses. The rows
+        # are written by one function (queue_close_step_json) in one fixed key
+        # order, which is why four known keys can be lifted out positionally
+        # without a JSON reader.
+        CS_REST="${CS_STEPS#\[}"
+        CS_REST="${CS_REST%\]}"
+        while [ -n "$CS_REST" ]; do
+          case "$CS_REST" in
+            *'},{'*)
+              CS_ROW="${CS_REST%%\},\{*}}"
+              CS_REST="{${CS_REST#*\},\{}"
+              ;;
+            *)
+              CS_ROW="$CS_REST"
+              CS_REST=""
+              ;;
+          esac
+          CS_F="${CS_ROW#*\"step\":\"}";   CS_STEP="${CS_F%%\"*}"
+          CS_F="${CS_ROW#*\"status\":\"}"; CS_ST="${CS_F%%\"*}"
+          CS_F="${CS_ROW#*\"at\":\"}";     CS_AT="${CS_F%%\"*}"
+          CS_F="${CS_ROW#*\"detail\":\"}"; CS_DETAIL="${CS_F%%\"*}"
+          printf '  %-14s %-8s %s%s\n' "$CS_STEP" "$CS_ST" "$CS_AT" "${CS_DETAIL:+  — $CS_DETAIL}"
+        done
+      fi
+    fi
+    ;;
+
+  # --- hold-merge: hold an entry's merge, or release it ---
+  # merge_hold is the operator's input; `close_state: held` is its rendering.
+  # A hold may be placed BEFORE the entry reaches `ready` — on a task group,
+  # holding brief N also holds brief N+1's start (the dequeue selector reads it).
+  hold-merge)
+    if [ $# -lt 1 ]; then
+      echo "ERROR: hold-merge requires <id>" >&2
+      exit 1
+    fi
+    HM_ID="$1"
+    shift
+
+    HM_RELEASE=false
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --release)
+          HM_RELEASE=true
+          shift
+          ;;
+        *)
+          echo "ERROR: Unknown hold-merge option: $1" >&2
+          exit 1
+          ;;
+      esac
+    done
+
+    HM_FILE=$(_find_entry_file "$HM_ID") || HM_FILE=""
+    if [ -z "$HM_FILE" ]; then
+      echo "ERROR: Entry $HM_ID not found" >&2
+      exit 1
+    fi
+    _load_queue_entry "$HM_FILE"
+    HM_WO="${_QE_WORK_ORDER_ID:-}"
+    HM_WAS="${_QE_MERGE_HOLD:-false}"
+
+    if [ "$HM_RELEASE" = true ]; then
+      HM_WANT=false
+      HM_ACTION="released"
+    else
+      HM_WANT=true
+      HM_ACTION="held"
+    fi
+
+    # Refuse rather than report a no-op as a change: an operator who thinks they
+    # just placed a hold on an entry that was already held behaves differently
+    # from one who knows it was already there.
+    if [ "$HM_WAS" = "$HM_WANT" ]; then
+      if [ "$HM_WANT" = true ]; then
+        echo "ERROR: Entry $HM_ID is already held. Release it with: queue-cli.sh hold-merge $HM_ID --release" >&2
+      else
+        echo "ERROR: Entry $HM_ID is not held — nothing to release" >&2
+      fi
+      exit 1
+    fi
+
+    if ! acquire_queue_lock; then
+      echo "ERROR: Queue lock unavailable" >&2
+      exit 1
+    fi
+    if ! queue_set_merge_hold "$HM_FILE" "$HM_WANT"; then
+      release_queue_lock
+      echo "ERROR: Could not set merge_hold on entry $HM_ID" >&2
+      exit 1
+    fi
+    release_queue_lock
+
+    _load_queue_entry "$HM_FILE"
+    HM_STATE=$(queue_close_state)
+
+    review_log_append "entry-merge-${HM_ACTION}" "$HM_WO" "$HM_ID" \
+      "Operator $HM_ACTION the merge of entry $HM_ID — close_state is now $HM_STATE" 2>/dev/null || true
+
+    if [ "$JSON_OUTPUT" = true ]; then
+      printf '{%s,%s,%s,%s}\n' \
+        "$(_json_kv "entry_id" "$HM_ID")" \
+        "$(_json_kv "action" "$HM_ACTION")" \
+        "$(_json_kv_raw "merge_hold" "$HM_WANT")" \
+        "$(_json_kv "close_state" "$HM_STATE")"
+    elif [ "$HM_WANT" = true ]; then
+      printf 'Merge held: %s (close_state: %s). Nothing merges until you run: queue-cli.sh hold-merge %s --release\n' \
+        "$HM_ID" "$HM_STATE" "$HM_ID"
+    else
+      printf 'Merge released: %s (close_state: %s). Merge it now with: queue-cli.sh merge %s\n' \
+        "$HM_ID" "$HM_STATE" "$HM_ID"
+    fi
+    ;;
+
+  # --- set-close: choose how an entry's work reaches main ---
+  set-close)
+    if [ $# -lt 2 ]; then
+      echo "ERROR: set-close requires <id> and solo|pr" >&2
+      exit 1
+    fi
+    SC_ID="$1"
+    SC_WANT="$2"
+    case "$SC_WANT" in
+      solo|pr) ;;
+      *)
+        echo "ERROR: set-close takes solo or pr (got '$SC_WANT')" >&2
+        exit 1
+        ;;
+    esac
+
+    SC_FILE=$(_find_entry_file "$SC_ID") || SC_FILE=""
+    if [ -z "$SC_FILE" ]; then
+      echo "ERROR: Entry $SC_ID not found" >&2
+      exit 1
+    fi
+    _load_queue_entry "$SC_FILE"
+    SC_WAS=$(queue_close_path)
+    SC_STATE=$(queue_close_state)
+    SC_WO="${_QE_WORK_ORDER_ID:-}"
+    SC_ID_SAFE="${_QE_ID:-$SC_ID}"
+
+    # Only the final brief of a task group closes the group (Decision 0015 §3),
+    # so switching an earlier brief's path would set up a close that must not
+    # happen. Refused with the same predicate the runner seals on.
+    if ! queue_is_final_taskgroup_entry "$SC_ID_SAFE" "$SC_WO"; then
+      echo "ERROR: Entry $SC_ID is not the final brief of task group $SC_WO — the group's close path is set on its last brief" >&2
+      exit 1
+    fi
+
+    # A pipeline that has already finished has nothing left to route. Switching
+    # the path afterwards would describe a route the work did not take.
+    case "$SC_STATE" in
+      merged|pushed|pr_open|merging|rebasing|reverifying)
+        echo "ERROR: Entry $SC_ID is $SC_STATE — its close path is settled and cannot be switched now" >&2
+        exit 1
+        ;;
+    esac
+
+    if [ "$SC_WAS" = "$SC_WANT" ]; then
+      echo "ERROR: Entry $SC_ID is already on the $SC_WANT close path" >&2
+      exit 1
+    fi
+
+    if ! acquire_queue_lock; then
+      echo "ERROR: Queue lock unavailable" >&2
+      exit 1
+    fi
+    if ! queue_set_close_path "$SC_FILE" "$SC_WANT"; then
+      release_queue_lock
+      echo "ERROR: Could not set close_path on entry $SC_ID" >&2
+      exit 1
+    fi
+    release_queue_lock
+
+    review_log_append "entry-close-path-set" "$SC_WO" "$SC_ID" \
+      "Operator switched entry $SC_ID from the $SC_WAS close path to $SC_WANT" 2>/dev/null || true
+
+    if [ "$JSON_OUTPUT" = true ]; then
+      printf '{%s,%s,%s,%s,%s}\n' \
+        "$(_json_kv "entry_id" "$SC_ID")" \
+        "$(_json_kv "action" "set-close")" \
+        "$(_json_kv "close_path" "$SC_WANT")" \
+        "$(_json_kv "previous_close_path" "$SC_WAS")" \
+        "$(_json_kv "close_state" "$SC_STATE")"
+    elif [ "$SC_WANT" = "solo" ]; then
+      printf 'Close path: %s is now solo (was %s). Merge it with: queue-cli.sh merge %s\n' \
+        "$SC_ID" "$SC_WAS" "$SC_ID"
+    else
+      printf 'Close path: %s is now pr (was %s). The pull request flow takes it from here.\n' \
+        "$SC_ID" "$SC_WAS"
+    fi
+    ;;
+
+  # --- merge: run the close pipeline for one entry, now ---
+  # This does NOT implement the merge. It hands off to `runner.sh --close-entry`,
+  # which runs the one real solo close pipeline (_solo_merge_if_needed) under the
+  # merge lock. A second copy here would be a second merge gate, free to
+  # disagree with the runner's about when a branch is safe to merge.
+  merge)
+    if [ $# -lt 1 ]; then
+      echo "ERROR: merge requires <id>" >&2
+      exit 1
+    fi
+    MG_ID="$1"
+    shift
+    if [ $# -gt 0 ]; then
+      echo "ERROR: Unknown merge option: $1" >&2
+      exit 1
+    fi
+
+    MG_FILE=$(_find_entry_file "$MG_ID") || MG_FILE=""
+    if [ -z "$MG_FILE" ]; then
+      echo "ERROR: Entry $MG_ID not found" >&2
+      exit 1
+    fi
+    _load_queue_entry "$MG_FILE"
+    MG_WO="${_QE_WORK_ORDER_ID:-}"
+    MG_BRANCH="${_QE_BRANCH:-}"
+
+    # Fail-closed precondition (Decision t-0061): an unverifiable entry is a
+    # refusal, not a pass. The runner repeats this check before acting, because
+    # it is reachable directly and the queue can move in between.
+    MG_REFUSAL=$(queue_close_merge_allowed "$MG_FILE") || {
+      if [ "$JSON_OUTPUT" = true ]; then
+        printf '{%s,%s,%s}\n' \
+          "$(_json_kv "entry_id" "$MG_ID")" \
+          "$(_json_kv "action" "refused")" \
+          "$(_json_kv "reason" "$MG_REFUSAL")"
+      else
+        printf 'REFUSED: %s\n' "$MG_REFUSAL" >&2
+      fi
+      exit 1
+    }
+
+    review_log_append "entry-merge-requested" "$MG_WO" "$MG_ID" \
+      "Operator ran the close pipeline for entry $MG_ID (branch $MG_BRANCH)" 2>/dev/null || true
+
+    # Output goes to stderr so --json stays parseable; the runner reports its
+    # progress there too.
+    MG_RC=0
+    "$AUTOMATION_DIR/runner.sh" --close-entry "$MG_ID" >&2 || MG_RC=$?
+
+    # Report the RECORDED state, not the exit code. The pipeline writes where it
+    # got to at every transition, so re-reading the entry is the honest answer
+    # even when the runner died halfway.
+    MG_FILE=$(_find_entry_file "$MG_ID") || MG_FILE=""
+    MG_STATE="unknown"
+    MG_STEPS="[]"
+    if [ -n "$MG_FILE" ]; then
+      _load_queue_entry "$MG_FILE"
+      MG_STATE=$(queue_close_state)
+      MG_STEPS="${_QE_CLOSE_STEPS:-[]}"
+    fi
+
+    if [ "$JSON_OUTPUT" = true ]; then
+      printf '{%s,%s,%s,%s,"close_steps":%s}\n' \
+        "$(_json_kv "entry_id" "$MG_ID")" \
+        "$(_json_kv "action" "merge")" \
+        "$(_json_kv "close_state" "$MG_STATE")" \
+        "$(_json_kv_raw "runner_exit" "$MG_RC")" \
+        "$MG_STEPS"
+    else
+      case "$MG_STATE" in
+        merged|pushed)
+          printf 'Merged: %s → main (close_state: %s)\n' "$MG_BRANCH" "$MG_STATE"
+          ;;
+        *)
+          printf 'Close pipeline stopped at close_state: %s. See: queue-cli.sh close-status %s\n' \
+            "$MG_STATE" "$MG_ID"
+          ;;
+      esac
+    fi
+    [ "$MG_RC" -eq 0 ] || exit 1
+    ;;
+
+  # --- pr: the operator controls for an entry on the pull request close path ---
+  # Decision t-0057 brief 2 step 4. Six subcommands, every one of them a thin
+  # shell over lib/pr-manager.sh: argv parsing, the entry lookup, and rendering
+  # the result live here; which gh calls to make and when to refuse live there,
+  # so the daemon's poll and these commands cannot come to different conclusions
+  # about the same pull request.
+  #
+  # Every subcommand reports the state pr-manager RECORDED rather than inferring
+  # one from an exit code, for the reason `merge` above gives: the record is the
+  # honest answer even when the call died halfway.
+  pr)
+    if [ $# -lt 1 ]; then
+      echo "ERROR: pr requires a subcommand: open|refresh|status|rerun|update-branch|merge" >&2
+      exit 1
+    fi
+    PR_SUB="$1"
+    shift
+    case "$PR_SUB" in
+      open|refresh|status|rerun|update-branch|merge) ;;
+      *)
+        echo "ERROR: Unknown pr subcommand '$PR_SUB' (open|refresh|status|rerun|update-branch|merge)" >&2
+        exit 1
+        ;;
+    esac
+    if [ $# -lt 1 ]; then
+      echo "ERROR: pr $PR_SUB requires <id>" >&2
+      exit 1
+    fi
+    PR_ID="$1"
+    shift
+
+    PR_METHOD=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --method)
+          if [ "$PR_SUB" != "merge" ]; then
+            echo "ERROR: --method applies to 'pr merge' only" >&2
+            exit 1
+          fi
+          if [ $# -lt 2 ]; then
+            echo "ERROR: --method requires a value (merge|squash|rebase)" >&2
+            exit 1
+          fi
+          PR_METHOD="$2"
+          shift 2
+          ;;
+        *)
+          echo "ERROR: Unknown pr $PR_SUB option: $1" >&2
+          exit 1
+          ;;
+      esac
+    done
+
+    PR_FILE=$(_find_entry_file "$PR_ID") || PR_FILE=""
+    if [ -z "$PR_FILE" ]; then
+      echo "ERROR: Entry $PR_ID not found" >&2
+      exit 1
+    fi
+    _load_queue_entry "$PR_FILE"
+    PR_WO="${_QE_WORK_ORDER_ID:-}"
+    PR_BRANCH="${_QE_BRANCH:-}"
+    PR_PATH_WAS=$(queue_close_path)
+
+    # Refuse on a solo entry rather than opening a pull request for work that is
+    # routed to a direct merge. Named here and not inside pr-manager because it
+    # is an operator-input error with an operator-input remedy, and the daemon's
+    # poll reaches pr-manager without ever being able to make this mistake.
+    if [ "$PR_PATH_WAS" != "pr" ]; then
+      echo "ERROR: Entry $PR_ID is on the $PR_PATH_WAS close path. Switch it with: queue-cli.sh set-close $PR_ID pr" >&2
+      exit 1
+    fi
+
+    # `status` is read-only and takes no gh round trip at all — it prints what
+    # the last refresh recorded. Kept separate from `refresh` so an operator can
+    # look without spending an API call, and so a repo with no gh still has a
+    # way to read where a pull request got to.
+    if [ "$PR_SUB" = "status" ]; then
+      PR_NUM="${_QE_PR_NUMBER:-0}"
+      PR_URL="${_QE_PR_URL:-}"
+      PR_STATE=$(queue_close_state)
+      PR_STEPS="${_QE_CLOSE_STEPS:-[]}"
+      if [ "$JSON_OUTPUT" = true ]; then
+        printf '{%s,%s,%s,%s,%s,"close_steps":%s}\n' \
+          "$(_json_kv "entry_id" "$PR_ID")" \
+          "$(_json_kv "action" "pr-status")" \
+          "$(_json_kv_raw "pr_number" "$PR_NUM")" \
+          "$(_json_kv "pr_url" "$PR_URL")" \
+          "$(_json_kv "close_state" "$PR_STATE")" \
+          "$PR_STEPS"
+      elif [ "$PR_NUM" = "0" ]; then
+        printf 'No pull request recorded for %s (close_state: %s). Open one with: queue-cli.sh pr open %s\n' \
+          "$PR_ID" "$PR_STATE" "$PR_ID"
+      else
+        printf 'Pull request #%s  %s\n' "$PR_NUM" "$PR_URL"
+        printf 'Close state:     %s\n' "$PR_STATE"
+        printf 'Re-read it with: queue-cli.sh pr refresh %s\n' "$PR_ID"
+      fi
+      exit 0
+    fi
+
+    review_log_append "entry-pr-${PR_SUB}" "$PR_WO" "$PR_ID" \
+      "Operator ran 'pr $PR_SUB' for entry $PR_ID (branch $PR_BRANCH)" 2>/dev/null || true
+
+    PR_RC=0
+    case "$PR_SUB" in
+      open)          pr_open "$PR_FILE" || PR_RC=$? ;;
+      refresh)       pr_refresh "$PR_FILE" || PR_RC=$? ;;
+      rerun)         pr_rerun "$PR_FILE" || PR_RC=$? ;;
+      update-branch) pr_update_branch "$PR_FILE" || PR_RC=$? ;;
+      merge)         pr_merge "$PR_FILE" "$PR_METHOD" || PR_RC=$? ;;
+    esac
+
+    # A conflict found by any of these is the same event the runner routes on
+    # the solo path: the entry goes to review. pr-manager wrote the escalation
+    # and recorded close_state: conflict; the status transition is the CLI's to
+    # make, and queue_escalate is a no-op on an entry that is not in running/.
+    PR_ESCALATED=false
+    if [ "${_PR_OUTCOME:-}" = "review:merge-conflict" ]; then
+      if queue_escalate "$PR_ID" "review:merge-conflict" 2>/dev/null; then
+        PR_ESCALATED=true
+      fi
+    fi
+
+    # Re-read: pr-manager may have moved the entry's close state several times,
+    # and _find_entry_file is repeated because an escalation moves the file.
+    PR_FILE=$(_find_entry_file "$PR_ID") || PR_FILE=""
+    PR_STATE="unknown"
+    PR_STEPS="[]"
+    PR_NUM="0"
+    PR_URL=""
+    if [ -n "$PR_FILE" ]; then
+      _load_queue_entry "$PR_FILE"
+      PR_STATE=$(queue_close_state)
+      PR_STEPS="${_QE_CLOSE_STEPS:-[]}"
+      PR_NUM="${_QE_PR_NUMBER:-0}"
+      PR_URL="${_QE_PR_URL:-}"
+    fi
+
+    if [ "$JSON_OUTPUT" = true ]; then
+      printf '{%s,%s,%s,%s,%s,%s,%s,%s,"close_steps":%s}\n' \
+        "$(_json_kv "entry_id" "$PR_ID")" \
+        "$(_json_kv "action" "pr-$PR_SUB")" \
+        "$(_json_kv_raw "pr_number" "$PR_NUM")" \
+        "$(_json_kv "pr_url" "$PR_URL")" \
+        "$(_json_kv "close_state" "$PR_STATE")" \
+        "$(_json_kv "reason" "${_PR_REASON:-}")" \
+        "$(_json_kv "outcome" "${_PR_OUTCOME:-}")" \
+        "$(_json_kv_raw "escalated" "$PR_ESCALATED")" \
+        "$PR_STEPS"
+    else
+      if [ "$PR_RC" -ne 0 ] && [ -n "${_PR_REASON:-}" ]; then
+        printf 'REFUSED: %s\n' "$_PR_REASON" >&2
+      elif [ -n "${_PR_REASON:-}" ]; then
+        printf 'NOTE: %s\n' "$_PR_REASON" >&2
+      fi
+      case "$PR_STATE" in
+        merged)
+          printf 'Pull request #%s merged. Local main synced and the branch sealed.\n' "$PR_NUM"
+          ;;
+        conflict)
+          printf 'Conflict on pull request #%s. Escalation written; resolve it on the branch, then: queue-cli.sh pr update-branch %s\n' \
+            "$PR_NUM" "$PR_ID"
+          ;;
+        pr_open)
+          printf 'Pull request #%s  %s  (close_state: %s)\n' "$PR_NUM" "$PR_URL" "$PR_STATE"
+          ;;
+        *)
+          printf 'Close pipeline is at close_state: %s. See: queue-cli.sh close-status %s\n' \
+            "$PR_STATE" "$PR_ID"
+          ;;
+      esac
+    fi
+    [ "$PR_RC" -eq 0 ] || exit 1
+    ;;
+
+  # --- resolve-conflict: the one exit from close_state `conflict` ---
+  # t-0057 brief 3. Both close paths arrive here: the solo path records
+  # `conflict` from the runner's rebase, the pull request path from
+  # pr-manager's mergeable check, and neither of them can decide what the
+  # resolution should BE. This command picks, then re-arms the entry so the
+  # pipeline runs again from its own beginning. It never merges anything.
+  #
+  # Four modes, one shape: choose, re-arm, report. The difference is only in
+  # what "choose" writes.
+  #   --agent  queues a fix brief as a follow-up of the entry, on the same
+  #            branch. The fix is a session with a brief, a contract and the
+  #            gates — not a free hand on the branch — which is the whole
+  #            reason this is not "the agent resolves it inline".
+  #   --ours   keep the branch's side; --theirs keep main's side. Stored, not
+  #            applied: see below.
+  #   --manual the operator resolves it in their editor and re-runs the close
+  #            with `merge` or `pr merge`.
+  #
+  # --ours/--theirs are STORED on the entry rather than applied here, and that
+  # is the load-bearing choice of this command. Resolving locally means merging
+  # main into the branch, which empties overlap_report.main_changed — the one
+  # trigger for the t-0056 close-time re-verification. The next close would then
+  # skip re-verification and report success, making "all checks re-run before
+  # the close" false precisely when a conflict proves main has moved. Carrying
+  # the strategy to the single `git rebase` in reverify-merge.sh instead keeps
+  # rebase → re-verify → merge inside one pipeline.
+  resolve-conflict)
+    if [ $# -lt 1 ]; then
+      echo "ERROR: resolve-conflict requires <id>" >&2
+      exit 1
+    fi
+    RC_ID="$1"
+    shift
+
+    RC_MODE="" RC_NOTE=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --agent|--ours|--theirs|--manual)
+          _RC_M="${1#--}"
+          if [ -n "$RC_MODE" ] && [ "$RC_MODE" != "$_RC_M" ]; then
+            echo "ERROR: resolve-conflict takes ONE of --agent, --ours, --theirs, --manual (got --$RC_MODE and --$_RC_M)" >&2
+            exit 1
+          fi
+          RC_MODE="$_RC_M"
+          shift
+          ;;
+        --note)
+          if [ $# -lt 2 ]; then echo "ERROR: --note requires a value" >&2; exit 1; fi
+          RC_NOTE="$2"
+          shift 2
+          ;;
+        *)
+          echo "ERROR: Unknown resolve-conflict option: $1" >&2
+          exit 1
+          ;;
+      esac
+    done
+
+    # No default mode. Guessing one would pick a resolution strategy on the
+    # operator's behalf, which is the single thing this command exists not to do.
+    if [ -z "$RC_MODE" ]; then
+      echo "ERROR: resolve-conflict requires one of --agent, --ours, --theirs, --manual" >&2
+      echo "  --agent   queue a fix brief as a follow-up, on the same branch" >&2
+      echo "  --ours    keep the branch's side on the next rebase" >&2
+      echo "  --theirs  keep main's side on the next rebase" >&2
+      echo "  --manual  resolve it yourself, then re-run the close" >&2
+      exit 1
+    fi
+
+    RC_FILE=$(_find_entry_file "$RC_ID") || RC_FILE=""
+    if [ -z "$RC_FILE" ]; then
+      echo "ERROR: Entry $RC_ID not found" >&2
+      exit 1
+    fi
+    _load_queue_entry "$RC_FILE"
+    RC_WO="${_QE_WORK_ORDER_ID:-}"
+    RC_BRANCH="${_QE_BRANCH:-}"
+    RC_PATH=$(queue_close_path)
+
+    # Fail-closed precondition (t-0061). Not _queue_close_preconditions — see
+    # the comment on queue_conflict_resolve_allowed for why that gate refuses
+    # the exact state this command exists to recover from.
+    RC_REFUSAL=$(queue_conflict_resolve_allowed "$RC_FILE") || {
+      if [ "$JSON_OUTPUT" = true ]; then
+        printf '{%s,%s,%s,%s}\n' \
+          "$(_json_kv "entry_id" "$RC_ID")" \
+          "$(_json_kv "action" "refused")" \
+          "$(_json_kv "mode" "$RC_MODE")" \
+          "$(_json_kv "reason" "$RC_REFUSAL")"
+      else
+        printf 'REFUSED: %s\n' "$RC_REFUSAL" >&2
+      fi
+      exit 1
+    }
+
+    # --ours/--theirs reach git through reverify-merge.sh's rebase, which only
+    # the solo path runs — on the pull request path the branch is updated by
+    # `pr update-branch` through gh, where there is no local rebase to hand a
+    # strategy to. Accepting the flag there would store a value nothing reads
+    # and report a resolution that never happens.
+    case "$RC_MODE" in
+      ours|theirs)
+        if [ "$RC_PATH" = "pr" ]; then
+          RC_REFUSAL="--$RC_MODE is a local rebase strategy and entry $RC_ID is on the pr close path; use --agent or --manual, or switch paths with: queue-cli.sh set-close $RC_ID solo"
+          if [ "$JSON_OUTPUT" = true ]; then
+            printf '{%s,%s,%s,%s}\n' \
+              "$(_json_kv "entry_id" "$RC_ID")" \
+              "$(_json_kv "action" "refused")" \
+              "$(_json_kv "mode" "$RC_MODE")" \
+              "$(_json_kv "reason" "$RC_REFUSAL")"
+          else
+            printf 'REFUSED: %s\n' "$RC_REFUSAL" >&2
+          fi
+          exit 1
+        fi
+        ;;
+    esac
+
+    # The conflicting files come from the escalation the merge path wrote, not
+    # from re-running the merge to find out. Newest unresolved esc-merge-* for
+    # this entry wins: the glob sorts lexicographically and the ids carry a
+    # timestamp. esc-merge-lock-* is excluded because it is a different event
+    # (the merge lock, runner.sh) that shares the prefix and sorts after the
+    # dated ones. The pull request path writes no file list, so this is often
+    # empty — the fix brief says so rather than inventing one.
+    RC_ESC="" RC_FILES=""
+    for _RC_E in "$REPO_ROOT/.claude/.automation/escalations"/esc-merge-*.yaml; do
+      [ -f "$_RC_E" ] || continue
+      case "${_RC_E##*/}" in esc-merge-lock-*) continue ;; esac
+      grep -Fq "queue_entry_id: \"$RC_ID\"" "$_RC_E" 2>/dev/null || continue
+      grep -Fqx '  resolved: false' "$_RC_E" 2>/dev/null || continue
+      RC_ESC="$_RC_E"
+    done
+    if [ -n "$RC_ESC" ]; then
+      _RC_CTX=$(grep -F '  context:' "$RC_ESC" 2>/dev/null | head -1) || _RC_CTX=""
+      _RC_CTX="${_RC_CTX#*context:}"; _RC_CTX="${_RC_CTX# }"
+      _RC_CTX="${_RC_CTX#\"}"; _RC_CTX="${_RC_CTX%\"}"
+      case "$_RC_CTX" in
+        conflict_files:*) RC_FILES="${_RC_CTX#conflict_files: }" ;;
+      esac
+    fi
+
+    # Both sides, named as the two refs the fix session will diff. Short SHAs
+    # are recorded because the brief outlives the tips: by the time the fix runs
+    # main may have moved again, and "the main I conflicted with" has to stay
+    # nameable.
+    RC_MAIN_SHA=$(git -C "$REPO_ROOT" rev-parse --short main 2>/dev/null) || RC_MAIN_SHA=""
+    RC_BRANCH_SHA=""
+    if [ -n "$RC_BRANCH" ]; then
+      RC_BRANCH_SHA=$(git -C "$REPO_ROOT" rev-parse --short "$RC_BRANCH" 2>/dev/null) || RC_BRANCH_SHA=""
+    fi
+
+    RC_FOLLOW_UP=""
+    if [ "$RC_MODE" = "agent" ]; then
+      # Written into briefs/ under a dot-prefixed name so follow-up-entry can
+      # resolve it (it refuses a brief outside the repo) while staying out of
+      # the briefs/*.md glob that lists real briefs. follow-up-entry copies it
+      # to followup-<id>-<n>.md, so this file is scaffolding and is removed.
+      RC_DRAFT="$REPO_ROOT/.claude/.automation/briefs/.conflict-fix-${RC_ID}.md"
+      if ! mkdir -p "$REPO_ROOT/.claude/.automation/briefs"; then
+        echo "ERROR: Could not create the briefs directory" >&2
+        exit 1
+      fi
+      {
+        printf '# Follow-up: resolve the close conflict on %s\n\n' "${RC_BRANCH:-the branch}"
+        printf 'Generated by `queue-cli.sh resolve-conflict %s --agent`. The close\n' "$RC_ID"
+        printf 'pipeline for entry `%s` stopped at `close_state: conflict`; this\n' "$RC_ID"
+        printf 'session is how it gets past it.\n\n'
+
+        printf '## Parent task\n\n'
+        printf -- '- Entry: `%s`\n' "$RC_ID"
+        printf -- '- Branch: `%s`\n' "${RC_BRANCH:-unresolved}"
+        printf -- '- Close path: `%s`\n' "$RC_PATH"
+        [ -z "$RC_WO" ] || printf -- '- Work order: `%s`\n' "$RC_WO"
+        [ -z "$RC_ESC" ] || printf -- '- Escalation: `%s`\n' "${RC_ESC##*/}"
+        printf '\n'
+
+        printf '## Goal\n\n'
+        printf 'Resolve the merge conflict between `%s` and `main` on the branch, so\n' "${RC_BRANCH:-the branch}"
+        printf 'that a rebase onto main applies cleanly and the close pipeline can\n'
+        printf 'complete. Resolve the conflict only — this is not an opportunity to\n'
+        printf 'change behaviour.\n\n'
+
+        printf '## The two sides\n\n'
+        printf -- '- Branch `%s` at `%s` — the work this group produced.\n' \
+          "${RC_BRANCH:-unresolved}" "${RC_BRANCH_SHA:-unknown}"
+        printf -- '- `main` at `%s` — what landed while the group was running.\n' \
+          "${RC_MAIN_SHA:-unknown}"
+        printf '\n'
+        printf 'Read either side without checking anything out:\n\n'
+        printf '```bash\n'
+        printf 'git show %s:<file>   # main'"'"'s version\n' "${RC_MAIN_SHA:-main}"
+        printf 'git show %s:<file>   # the branch'"'"'s version\n' "${RC_BRANCH_SHA:-HEAD}"
+        printf 'git diff %s...%s -- <file>\n' "${RC_MAIN_SHA:-main}" "${RC_BRANCH_SHA:-HEAD}"
+        printf '```\n\n'
+
+        printf '## Conflicting files\n\n'
+        if [ -n "$RC_FILES" ]; then
+          _RC_OLD_IFS="$IFS"
+          IFS=','
+          # shellcheck disable=SC2086 — intentional split on the comma-delimited list
+          set -- $RC_FILES
+          IFS="$_RC_OLD_IFS"
+          for _RC_F in "$@"; do
+            _RC_F="${_RC_F# }"; _RC_F="${_RC_F% }"
+            [ -z "$_RC_F" ] || printf -- '- [ ] `%s`\n' "$_RC_F"
+          done
+          printf '\n'
+        else
+          printf '_The merge path recorded no file list for this conflict (the pull\n'
+          printf 'request path does not produce one). Find them first:_\n\n'
+          printf '```bash\n'
+          printf 'git merge-tree --write-tree %s %s\n' "${RC_MAIN_SHA:-main}" "${RC_BRANCH_SHA:-HEAD}"
+          printf '```\n\n'
+        fi
+
+        if [ -n "$RC_NOTE" ]; then
+          printf '## Operator note\n\n'
+          printf '%s\n\n' "$RC_NOTE"
+        fi
+
+        printf '## Verify first\n\n'
+        printf -- '- [ ] Every file above resolves to one version that keeps BOTH\n'
+        printf '      intents — the branch'"'"'s change and main'"'"'s change — or the\n'
+        printf '      session says plainly which one it dropped and why.\n'
+        printf -- '- [ ] `git rebase main` on the branch applies with no conflict.\n'
+        printf -- '- [ ] The checks that cover the resolved files pass on the result.\n\n'
+
+        printf '## What happens when this completes\n\n'
+        printf 'This entry is a follow-up of `%s`, so it runs on the same branch and\n' "$RC_ID"
+        printf 'shares its work order. Its own close runs the whole close pipeline\n'
+        printf 'again — rebase, close-time re-verification (t-0056), merge — which is\n'
+        printf 'why the conflict does not need to be resolved against main by hand\n'
+        printf 'here. Leave the merge to the pipeline.\n\n'
+
+        printf '### Task Contract\n\n'
+        printf '```yaml\n'
+        printf 'goal: "Resolve the close conflict between %s and main."\n' "${RC_BRANCH:-the branch}"
+        printf 'artifact: ""\n'
+        printf 'constraints: ["Resolve the conflict only — no behaviour change", "Leave the merge to the close pipeline"]\n'
+        printf 'lifecycle: task-scoped\n'
+        printf 'scope_files: []\n'
+        printf '```\n'
+      } > "$RC_DRAFT" || {
+        echo "ERROR: Could not write the conflict fix brief: $RC_DRAFT" >&2
+        exit 1
+      }
+
+      # Delegated to `follow-up-entry` rather than reimplemented. That command
+      # owns the linkage t-0055 clause 14 defines — the copy to
+      # followup-<parent>-<n>.md, follow_up_of, the empty branch the dequeue
+      # selector resolves, the inherited work order — and a second enqueue path
+      # would be free to drift from it. Called without --json so the output
+      # shape it is parsed from does not depend on OUR --json.
+      RC_FU_RC=0
+      RC_FU_OUT=$("$AUTOMATION_DIR/queue-cli.sh" follow-up-entry "$RC_ID" \
+        --brief "$RC_DRAFT" --auto-approve 2>&1) || RC_FU_RC=$?
+      rm -f "$RC_DRAFT" 2>/dev/null || true
+      if [ "$RC_FU_RC" -ne 0 ]; then
+        printf '%s\n' "$RC_FU_OUT" >&2
+        echo "ERROR: Could not queue the fix brief for $RC_ID — nothing was re-armed" >&2
+        exit 1
+      fi
+      RC_FOLLOW_UP=$(printf '%s\n' "$RC_FU_OUT" | grep '^entry_id:' | head -1) || RC_FOLLOW_UP=""
+      RC_FOLLOW_UP="${RC_FOLLOW_UP#entry_id:}"
+      RC_FOLLOW_UP="${RC_FOLLOW_UP## }"
+    fi
+
+    # Stored for the rebase in reverify-merge.sh, which reads it once and
+    # clears it. --agent and --manual store nothing: the resolution arrives as
+    # commits on the branch, and a leftover strategy would silently steer a
+    # later rebase.
+    case "$RC_MODE" in
+      ours|theirs)
+        if ! queue_set_conflict_resolution "$RC_FILE" "$RC_MODE"; then
+          echo "ERROR: Could not record the conflict resolution on $RC_ID" >&2
+          exit 1
+        fi
+        ;;
+    esac
+
+    # Re-armed LAST, and only last. Everything above can refuse; once the entry
+    # is back at close_state `ready` the conflict is no longer visible as one,
+    # so a failure after this point would leave an entry that looks mergeable
+    # with nothing arranged to make it so.
+    RC_NEW_FILE=$(queue_close_rearm "$RC_FILE" "$RC_MODE" "$RC_NOTE") || {
+      echo "ERROR: Could not re-arm entry $RC_ID for the close" >&2
+      exit 1
+    }
+
+    review_log_append "entry-conflict-resolved" "$RC_WO" "$RC_ID" \
+      "Operator chose --$RC_MODE for the $RC_PATH close conflict on branch ${RC_BRANCH:-unresolved}${RC_FOLLOW_UP:+ — fix brief $RC_FOLLOW_UP}${RC_FILES:+ (files: $RC_FILES)}${RC_NOTE:+ — note: $RC_NOTE}" 2>/dev/null || true
+
+    RC_STATE="unknown"
+    RC_STEPS="[]"
+    if [ -n "$RC_NEW_FILE" ] && [ -f "$RC_NEW_FILE" ]; then
+      _load_queue_entry "$RC_NEW_FILE"
+      RC_STATE=$(queue_close_state)
+      RC_STEPS="${_QE_CLOSE_STEPS:-[]}"
+    fi
+
+    if [ "$JSON_OUTPUT" = true ]; then
+      printf '{%s,%s,%s,%s,%s,%s,%s,%s,"close_steps":%s}\n' \
+        "$(_json_kv "entry_id" "$RC_ID")" \
+        "$(_json_kv "action" "resolve-conflict")" \
+        "$(_json_kv "mode" "$RC_MODE")" \
+        "$(_json_kv "close_path" "$RC_PATH")" \
+        "$(_json_kv "close_state" "$RC_STATE")" \
+        "$(_json_kv "follow_up_entry_id" "$RC_FOLLOW_UP")" \
+        "$(_json_kv "conflict_files" "$RC_FILES")" \
+        "$(_json_kv "escalation" "${RC_ESC##*/}")" \
+        "$RC_STEPS"
+    else
+      printf 'entry_id:        %s\n' "$RC_ID"
+      printf 'mode:            --%s\n' "$RC_MODE"
+      printf 'close_path:      %s\n' "$RC_PATH"
+      printf 'close_state:     %s (re-armed)\n' "$RC_STATE"
+      [ -z "$RC_FILES" ] || printf 'conflict_files:  %s\n' "$RC_FILES"
+      case "$RC_MODE" in
+        agent)
+          printf 'fix brief:       %s (follow-up of %s, same branch, auto-approved)\n' \
+            "${RC_FOLLOW_UP:-unknown}" "$RC_ID"
+          printf 'next:            the daemon runs it once %s is out of the way; its close re-runs the pipeline\n' "$RC_ID"
+          ;;
+        ours|theirs)
+          printf 'strategy:        --%s, applied at the next rebase and then cleared\n' "$RC_MODE"
+          printf 'next:            queue-cli.sh %s %s\n' \
+            "$([ "$RC_PATH" = "pr" ] && printf 'pr merge' || printf 'merge')" "$RC_ID"
+          ;;
+        manual)
+          printf 'next:            resolve it on %s, commit, then: queue-cli.sh %s %s\n' \
+            "${RC_BRANCH:-the branch}" \
+            "$([ "$RC_PATH" = "pr" ] && printf 'pr merge' || printf 'merge')" "$RC_ID"
+          ;;
+      esac
     fi
     ;;
 
