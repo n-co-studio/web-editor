@@ -10,6 +10,86 @@ Breaking changes (field removal, type change, required field addition) increment
 
 ---
 
+## v1.9.0 — Follow-ups
+
+**Date:** 2026-10-23
+**Decision:** t-0055 (Operator Session Control), clause 14
+
+### Changes
+
+**queue-entry.yaml** (+0 fields — two semantic changes):
+- `follow_up_of` is now **populated**. v1.8.0 declared and round-tripped it against this brief; `follow-up-entry <parent-id> --brief <path>` writes it. It is set once, at creation, and is deliberately absent from `queue_edit`'s allowlist: re-parenting an entry would invalidate the `followup-<parent-id>-<n>.md` brief filename that records the same link on disk, leaving two sources of truth that could disagree.
+- `branch` on a follow-up is created **empty on purpose** and resolved at dequeue. See below.
+
+**Linkage is one forward pointer, and the reverse direction is a scan.** `show --json` on a parent reports `follow_ups: [{id, status}]`; that array is computed by scanning the queue for entries whose `follow_up_of` matches, not read from a field. t-0055 clause 14 rejects a stored back-pointer list because it would have to be kept in sync by whoever creates the child, and because the set of follow-ups is a query over the queue rather than a fact the parent owns. On a follow-up, `show --json` and `list --json` report the flat `follow_up_of`.
+
+**Where a follow-up runs is decided at dequeue, not at creation.** The parent's branch may be live, merged or sealed by the time the follow-up reaches the front of the queue, and only one of those answers is right:
+
+| Parent's branch at dequeue | Resolved branch |
+|---|---|
+| Exists and is not an ancestor of `main` | the parent's branch — the follow-up continues it |
+| Merged into `main`, or deleted/sealed | `follow-up/<parent-slug>-<n>`, cut from current `main` |
+
+The resolved value is written back to the entry before it transitions to `running`, so `show` reports the branch the session actually used and the runner consumes `branch` unchanged — there is no follow-up-specific branch logic in the runner.
+
+**A follow-up never overtakes its parent.** `queue_dequeue` skips any entry whose `follow_up_of` names a parent that is not `completed` and still exists. That covers every row of the table above with one predicate: queued, running, stopped, review and blocked parents all hold the follow-up, and a parent that has been pruned away releases it rather than stranding it forever. The existing hold machinery is complementary, not redundant: `_hold_release_ok` condition (d) is what stops a follow-up being *released* from a stopped parent's hold, while this guard is what stops one being dequeued ahead of a parent that was never stopped at all.
+
+**`discard-entry` escalates follow-ups it was not holding.** v1.8.0 wrote one `parent-discarded` escalation per entry in `queue_hold_holding`. That list only ever contains `approved` entries, so a follow-up still sitting in `pending-review` when its parent was discarded got nothing. The held list and the direct-follow-up list are now unioned and deduped before the escalations are written. No new escalation type: `parent-discarded` already says exactly this.
+
+**`follow-up-draft <parent-id> [--json]`** prints a draft brief and queues nothing. It gathers what the parent left undone from four sources, because no one of them is populated for every parent: unchecked `- [ ]` lines in the parent brief's verification section; `PARTIAL` and `INCONCLUSIVE` criteria in the parent session's `docs/ai/governance/criteria-verdicts/<session-id>.yaml`; the entry's `error_log`; and any escalation naming the entry. The parent's goal is carried over as context. The operator edits the draft and passes it to `follow-up-entry` — nothing reaches the queue without that step.
+
+**Prompt assembly** gains a `## Parent task` section for any entry with `follow_up_of`, appended beside the `## Operator notes` section and built the same fail-open way.
+
+---
+
+## v1.8.0 — Hold the Line Behind a Stopped Entry
+
+**Date:** 2026-10-22
+**Decision:** t-0055 (Operator Session Control), clauses 9–11
+
+### Changes
+
+**queue-entry.yaml** (+3 fields):
+- `held_by` (string, default: `""`) — the id of the stopping/stopped/discarded entry that is holding this one back. **Derived state, not operator input:** it is recomputed from scratch by `queue_hold_evaluate` on every dequeue tick and is deliberately absent from `queue_edit`'s editable-field whitelist. A non-empty value makes the entry invisible to the dequeue selector.
+- `independent` (boolean, default: `false`) — operator opt-out. An independent entry is never held and never even evaluated, for work known to be unrelated to anything that might stop. Set with `add --independent` or `edit <id> independent true`.
+- `follow_up_of` (string, default: `""`) — the id of the entry this one follows up on. **Written by the v1.8.0 writer but populated by a later brief's `follow-up-entry`.** Round-tripped from the start on purpose: `_write_queue_entry` rewrites whole files, so a v1.8.0 process that loaded and rewrote an entry created by a later version would otherwise silently drop the pointer. The release predicate already reads it, so an entry that follows up on the stopped one is never auto-released.
+
+**escalation.yaml** (+1 type, 10 → 11):
+- `parent-discarded` — written for every entry still held by an entry the operator discards. The hold is released by the same command, but the work the entry was queued behind never landed, so its scope needs re-checking before it runs. Severity `blocking`.
+
+**Release is a proof obligation, not a default.** While an entry is stopping or stopped, every entry *after* it in dequeue order (greater priority value, or equal priority and a later `created_at`) is held. It is released only when all four of these hold: its brief's `scope_files` are disjoint from the stopped entry's `scope_files` ∪ the files its branch has changed since `main` ∪ its worktree's uncommitted paths; its branch is neither the stopped entry's branch nor descended from it; it is not in the stopped entry's work order; and it is not a follow-up of it. **An entry whose brief declares no `scope_files` can never satisfy the first condition** — unknown scope is treated as overlapping scope.
+
+**Re-evaluated every tick, not computed at stop time.** The stopped branch's changed-file set grows while it is stopped, so an entry released on one tick can legitimately be held on the next. `queue_dequeue` therefore calls `queue_hold_evaluate` before it sorts, fail-soft: a hold-evaluation error must not stall the queue.
+
+**`released` is derived, never stored.** `show --json` reports `hold: { holding: [...], released: [...] }`, where `released` is computed on read as "approved, after the holder, `held_by` empty". There is no second file to fall out of step with `held_by`.
+
+**`show --json`** also gains a `session` block — `{ state, stopped_mode, brief_seq, started_at, elapsed_s, claude_session_id }` with `state` ∈ `running | stopping | stopped | not-running | closed` — and the flat `held_by` and `independent` members. `stopping` is the gap the control directory makes visible: a `running` entry whose control dir already holds a `STOP`, `FORCE` or `DISCARD` flag but whose child has not exited yet.
+
+**`discard-entry <id> [--reason TEXT]`** moves a non-running entry to `failed/` with `error_log` set to the reason (default `discarded-by-operator`), writes a `DISCARD` flag to the control directory, releases every hold pointing at it and escalates each released entry as `parent-discarded`. Per Decision t-0054 it removes a single task's worktree (through `remove_session_worktree`, so uncommitted work is preserved as a patch first) but leaves a *group's* worktree in place and escalates the parent work order instead. It refuses a `running` entry and tells the operator to `stop-entry --force` first, rather than racing a live session.
+
+---
+
+## v1.7.0 — Operator Stop and Resume
+
+**Date:** 2026-10-13
+**Decision:** t-0055 (Operator Session Control)
+
+**Numbering note (2026-10-22):** this entry was authored as v1.5.0 on the `task-details-header` branch while main independently shipped v1.5.0 (runner liveness) and v1.6.0 (turn budget). When the branch was replayed onto main it was renumbered v1.7.0 so the history stays linear; the `(v1.7.0)` tags in `queue-entry.yaml` and the note in `runner-config.yaml` follow it.
+
+### Changes
+
+**queue-entry.yaml** (+1 status, +2 fields):
+- `status` enum gains `stopped` — an entry whose agent was stopped by the operator. Terminal for the daemon (it is not dequeued) but not for the work: the worktree and the Claude session survive, and `resume-entry` moves the entry back to `approved`. Total status count: 7 → 8, with a matching `queue/stopped/` directory.
+- `stopped_mode` (string, default: `""`) — `graceful` (the agent ended itself at its next tool call) or `forced` (the runner signalled the child). Read when composing the resume message so a force-stopped session warns about the working tree.
+- `resume` (boolean, default: `false`) — set by `resume-entry`, consumed and cleared by the runner at dequeue. Tells the runner to continue the recorded Claude session (`claude -p --resume <uuid>`) instead of minting a new one. Needed because the entry is back in `approved/` by the time the runner reads it, so its stopped history is no longer inferable from the directory.
+
+**runner-config.yaml** (+1 field):
+- `runner.stop_grace_seconds` (integer, default: `120`) — how long a graceful stop waits for the agent to reach a tool call before the runner escalates to a forced stop. Guards against an agent that is mid-thought, or looping without tool calls, never seeing the flag. Its comment sits ABOVE the key (see v1.5.0 on comment placement); the originally authored trailing comment contained `(` and would have made the field read as absent.
+
+**Resume handle:** the `claude_session_id` needed to resume outlives the session record (`runner_external_cleanup` unregisters it at close), so the runner persists it to `.claude/.state/control/<entry-id>/resume.yaml`. This extends the t-0055 control-directory convention: an UPPERCASE bare filename is a flag whose existence is the signal; a lowercase filename is durable data.
+
+---
+
 ## v1.6.0 — Turn Budget
 
 **Date:** 2026-10-21

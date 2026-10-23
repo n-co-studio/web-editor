@@ -49,6 +49,11 @@ runner:
   # review:reverify-failed and the escalation says it timed out. Must be > 0.
   # Comment above the key, for the reason spelled out above.
   reverify_timeout_seconds: 900
+  # Graceful-stop grace period in seconds (120 = 2 minutes) before the runner
+  # escalates a STOP to a forced stop. 0 = never escalate. Comment above the key
+  # for the same reason as the fields above: a trailing comment is read as part
+  # of the value and the field then parses as absent.
+  stop_grace_seconds: 120
 
 # Model routing — controls the --model flag passed to claude -p in runner.sh.
 # Agent frontmatter controls per-subagent model (cost layer 1: subagent routing).

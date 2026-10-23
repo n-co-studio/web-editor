@@ -56,11 +56,9 @@ _bridge_find_active_contract() {
   # worktree root, so each brief saw its own private copy and
   # `git worktree remove` destroyed the group's definition of done
   # (2026-10-19, task-details-header). Recorded as R16 in
-  # docs/ai/logs/known-issues.md, which is the authority for this rooting.
-  # (Earlier revisions cited "Decision t-0055 clause 4" for the per-entry
-  # control directory. No t-0055 exists — it would have come out of the
-  # task-details-header group, which is the very group this defect blocked.
-  # Cite it here once that group lands it, not before.)
+  # docs/ai/logs/known-issues.md, which records the defect; Decision t-0055
+  # clause 4 states the rule (shared per-group and per-entry state resolves
+  # through get_main_repo_root(), never the session's own root).
   local _br_main_root
   _br_main_root="$(get_main_repo_root 2>/dev/null)" || _br_main_root="$_BRIDGE_REPO_ROOT"
   [ -n "$_br_main_root" ] || _br_main_root="$_BRIDGE_REPO_ROOT"

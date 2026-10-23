@@ -77,8 +77,11 @@
 .claude/.automation/tests/test-daemon-recovery-paths.sh
 .claude/.automation/tests/test-escalation-suppression.sh
 .claude/.automation/tests/test-eval-model-routing.sh
+.claude/.automation/tests/test-followups.sh
 .claude/.automation/tests/test-gate-bypass.sh
 .claude/.automation/tests/test-group-worktree-lifecycle.sh
+.claude/.automation/tests/test-operator-control.sh
+.claude/.automation/tests/test-operator-notes.sh
 .claude/.automation/tests/test-overlap-report.sh
 .claude/.automation/tests/test-phase-ordering.sh
 .claude/.automation/tests/test-prompt-assembler.sh
@@ -141,6 +144,8 @@
 .claude/hooks/editor-watch.sh
 .claude/hooks/hvst-failure-tracker.sh
 .claude/hooks/next-live-editor-branch.sh
+.claude/hooks/operator-control.sh
+.claude/hooks/operator-notes.sh
 .claude/hooks/permission-request.sh
 .claude/hooks/plan-approval.sh
 .claude/hooks/pre-commit-gates.sh
@@ -264,6 +269,8 @@ docs/ai/decisions/t-0051-template-sync-ownership.md
 docs/ai/decisions/t-0052-child-owned-files.md
 docs/ai/decisions/t-0053-signal-fidelity.md
 docs/ai/decisions/t-0054-task-group-worktree-lifetime.md
+docs/ai/decisions/t-0055-operator-session-control.md
+docs/ai/decisions/t-0056-shared-files-reverify.md
 docs/ai/decisions/t-0058-plan-approval-silent-path.md
 docs/ai/decisions/t-0059-directional-dispatch-phase.md
 docs/ai/decisions/t-0060-bash-verification-execution.md

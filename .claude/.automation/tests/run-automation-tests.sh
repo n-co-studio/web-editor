@@ -49,6 +49,9 @@ test-work-preserver.sh
 test-verify-pristine.sh
 test-overlap-report.sh
 test-reverify-merge.sh
+test-operator-control.sh
+test-operator-notes.sh
+test-followups.sh
 "
 # Note: test-queue-manipulation.sh uses adversarial severity labels ([HIGH]/[MEDIUM]/[LOW])
 # in its test names, but its cases gate on exit code — not on the tags. This runner only

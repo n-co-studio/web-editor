@@ -7,7 +7,7 @@
 #   queue-cli.sh <subcommand> [options]
 #
 # Subcommands:
-#   add --brief <path> [--branch NAME] [--session-type TYPE] [--auto-approve] [--solo] [--push] [--priority N]
+#   add --brief <path> [--branch NAME] [--session-type TYPE] [--auto-approve] [--solo] [--push] [--priority N] [--independent]
 #   approve <id>
 #   remove <id>
 #   edit <id> <field> <value>
@@ -22,13 +22,35 @@
 #   recover-entry <id>
 #   reopen-wo <work-order-id>
 #   reset-group-worktree <group> [--yes]
+#   stop-entry <id> [--force] [--reason TEXT]
+#   resume-entry <id>
+#   discard-entry <id> [--reason TEXT]
+#   note-entry <id> (--text TEXT | --file PATH)
+#   notes-entry <id>
+#   follow-up-entry <parent-id> --brief <path> [--auto-approve] [--priority N]
+#   follow-up-draft <parent-id>
 #   start-daemon
 #   halt
 #   force-halt
 #   resume
 #
+# Scope note: halt/force-halt/resume act on the DAEMON (every entry).
+# stop-entry/resume-entry/discard-entry act on ONE entry and leave the daemon
+# running. While an entry is stopping or stopped the queue holds every entry
+# queued after it (t-0055 clause 10); resume-entry and discard-entry both
+# resolve those holds.
+#
+# note-entry/notes-entry address ONE entry and never interrupt it: a note is
+# context for the agent, not a control flag (t-0055 clause 13).
+#
+# follow-up-entry queues work that EXTENDS an entry rather than replacing it
+# (t-0055 clause 14). The new entry carries `follow_up_of`, never overtakes its
+# parent, and has its branch resolved at dequeue. follow-up-draft only prints a
+# starting point for its brief — it queues nothing.
+#
 # Global flags:
-#   --json    Machine-readable JSON output (status, list, show, review, overlap)
+#   --json    Machine-readable JSON output (status, list, show, review, overlap,
+#             note-entry, notes-entry, follow-up-entry, follow-up-draft)
 #
 # Exit codes:
 #   0  Success
@@ -72,6 +94,8 @@ source "$LIB_DIR/branch-manager.sh"
 source "$LIB_DIR/cleanup.sh"
 # shellcheck source=lib/overlap-report.sh
 source "$LIB_DIR/overlap-report.sh"
+# shellcheck source=lib/work-preserver.sh
+source "$LIB_DIR/work-preserver.sh"
 
 # --- Global flags ---
 JSON_OUTPUT=false
@@ -97,7 +121,7 @@ _usage() {
 Usage: queue-cli.sh [--json] <subcommand> [args]
 
 Subcommands:
-  add --brief <path> [--branch NAME] [--session-type TYPE] [--auto-approve] [--solo] [--push] [--priority N]
+  add --brief <path> [--branch NAME] [--session-type TYPE] [--auto-approve] [--solo] [--push] [--priority N] [--independent]
   approve <id>
   remove <id>
   edit <id> <field> <value>
@@ -111,9 +135,17 @@ Subcommands:
   prune [--briefs-only] [--dry-run] [--fix]
   recover-entry <id>
   reopen-wo <work-order-id>
-  reopen-entry <id>
+  reopen-entry <id>                           return one entry from review/ or failed/ to approved
   reset-breaker
   reset-group-worktree <group> [--yes]
+  stop-entry <id> [--force] [--reason TEXT]   stop one entry's session (stop again to force)
+  resume-entry <id>                           re-queue a stopped entry, same Claude session
+  discard-entry <id> [--reason TEXT]          abandon one entry; escalates whatever it held
+  note-entry <id> (--text TEXT | --file PATH) send the agent a note (alias: note; max 2000 chars)
+  notes-entry <id>                            list this entry's notes, pending and delivered
+  follow-up-entry <parent-id> --brief <path> [--auto-approve] [--priority N]
+                                              queue work extending <parent-id> (alias: follow-up)
+  follow-up-draft <parent-id>                 print a draft brief from what the parent left undone
   start-daemon
   halt
   force-halt
@@ -157,6 +189,110 @@ _resolve_entry_metadata() {
       [ "${_RESOLVED_MILESTONE_TOTAL:-0}" = "0" ] && _RESOLVED_MILESTONE_TOTAL="${_WO_MILESTONE_TOTAL:-0}"
     fi
   fi
+  # The last line above is an AND-list, so its status is the function's: an
+  # entry that already carries a milestone_total returns 1 from here, and
+  # `show --json` calls this as a plain command under `set -e` — the script
+  # then died with no output and no message. Reachable from the moment an
+  # entry has BOTH a work order and its own milestone, which is what a
+  # follow-up inheriting its parent's metadata now routinely is.
+  return 0
+}
+
+# --- session block for `show --json` (t-0055 clause 11) ---
+# Emits the "session" member: what the operator needs to decide whether to stop,
+# force or resume. Derived entirely from the entry's status, its control flags
+# and its session record — nothing here is separately maintained state.
+# Clobbers _QE_*: call it BEFORE the caller loads the fields it prints.
+# Arguments: $1 — entry_id
+_entry_session_json() {
+  local eid="$1"
+  local efile state="not-running" stopped_mode="" brief_seq="" started_at="" elapsed=0 csid=""
+
+  efile=$(_find_entry_file "$eid") || efile=""
+  if [ -n "$efile" ]; then
+    _load_queue_entry "$efile"
+    stopped_mode="${_QE_STOPPED_MODE:-}"
+    if [ -n "${_QE_BRIEF_PATH:-}" ]; then
+      brief_seq=$(_parse_brief_sequence "$_QE_BRIEF_PATH" 2>/dev/null) || brief_seq=""
+    fi
+    case "$_QE_STATUS" in
+      running)           state="running" ;;
+      stopped)           state="stopped" ;;
+      completed|failed)  state="closed" ;;
+      *)                 state="not-running" ;;
+    esac
+  fi
+
+  # A pending stop flag on a still-running entry is the "stopping" window: the
+  # flag is written but the child has not exited yet.
+  if [ "$state" = "running" ] && _hold_entry_is_stopping "$eid"; then
+    state="stopping"
+  fi
+
+  local cdir
+  cdir=$(get_control_dir "$eid" 2>/dev/null) || cdir=""
+  if [ -n "$cdir" ] && [ -f "$cdir/resume.yaml" ]; then
+    csid=$(grep -E '^claude_session_id:' "$cdir/resume.yaml" 2>/dev/null | head -1 \
+      | sed 's/^claude_session_id: *//; s/^"//; s/"$//') || csid=""
+  fi
+
+  local sid
+  sid=$(_session_id_for_entry "$eid") || sid=""
+  if [ -n "$sid" ]; then
+    started_at=$(session_record_get "$sid" "started_at" 2>/dev/null) || started_at=""
+    if [ -z "$csid" ]; then
+      csid=$(session_record_get "$sid" "claude_session_id" 2>/dev/null) || csid=""
+    fi
+  fi
+
+  if [ -n "$started_at" ]; then
+    local s_epoch now_epoch
+    s_epoch=$(_iso_to_epoch "$started_at" 2>/dev/null) || s_epoch=""
+    if [ -n "$s_epoch" ]; then
+      now_epoch=$(date -u +%s)
+      elapsed=$(( now_epoch - s_epoch ))
+      [ "$elapsed" -ge 0 ] || elapsed=0
+    fi
+  fi
+
+  printf '"session":{%s,%s,%s,%s,%s,%s}' \
+    "$(_json_kv "state" "$state")" \
+    "$(_json_kv "stopped_mode" "$stopped_mode")" \
+    "$(_json_kv "brief_seq" "$brief_seq")" \
+    "$(_json_kv "started_at" "$started_at")" \
+    "$(_json_kv_raw "elapsed_s" "$elapsed")" \
+    "$(_json_kv "claude_session_id" "$csid")"
+}
+
+# --- hold block for `show --json` (t-0055 clause 10) ---
+# Emits the "hold" member: which entries this one is holding back, and which
+# ones queued after it the release predicate let through. Both are derived from
+# held_by at read time, so they can never disagree with it.
+# Clobbers _QE_*: call it BEFORE the caller loads the fields it prints.
+# Arguments: $1 — entry_id
+_entry_hold_json() {
+  local eid="$1"
+  printf '"hold":{"holding":%s,"released":%s}' \
+    "$(_json_id_array "$(queue_hold_holding "$eid")")" \
+    "$(_json_id_array "$(queue_hold_released "$eid")")"
+}
+
+# --- Render a newline-separated id list as a JSON string array ---
+# Fed by a here-doc rather than `done < <(...)`: _entry_hold_json is itself
+# invoked inside a command substitution, and process substitution nested in
+# command substitution is the construct that misbehaves on the Bash 3.2 floor
+# this repo targets.
+_json_id_array() {
+  local _line _first=true
+  printf '['
+  while IFS= read -r _line; do
+    [ -n "$_line" ] || continue
+    if [ "$_first" = true ]; then _first=false; else printf ','; fi
+    printf '"%s"' "$(_json_escape "$_line")"
+  done <<EOF
+${1:-}
+EOF
+  printf ']'
 }
 
 # --- Parse global flags and extract subcommand ---
@@ -186,7 +322,7 @@ case "$SUBCOMMAND" in
   # --- add: create a queue entry ---
   add)
     ADD_BRIEF="" ADD_BRANCH="" ADD_SESSION_TYPE="standard"
-    ADD_AUTO_APPROVE=false ADD_SOLO=false ADD_PUSH=false ADD_PRIORITY="0"
+    ADD_AUTO_APPROVE=false ADD_SOLO=false ADD_PUSH=false ADD_PRIORITY="0" ADD_INDEPENDENT=false
     ADD_PROJECT="" ADD_MILESTONE_NAME="" ADD_MILESTONE_INDEX="0" ADD_MILESTONE_TOTAL="0"
     SESSION_TYPE_EXPLICIT=false BRANCH_EXPLICIT=false
 
@@ -198,6 +334,7 @@ case "$SUBCOMMAND" in
         --auto-approve)     ADD_AUTO_APPROVE=true; shift ;;
         --solo)             ADD_SOLO=true; shift ;;
         --push)             ADD_PUSH=true; shift ;;
+        --independent)      ADD_INDEPENDENT=true; shift ;;
         --project)          ADD_PROJECT="$2"; shift 2 ;;
         --milestone-name)   ADD_MILESTONE_NAME="$2"; shift 2 ;;
         --milestone-index)
@@ -329,6 +466,20 @@ case "$SUBCOMMAND" in
       release_queue_lock
       echo "ERROR: Queue entry validation failed — entry removed" >&2
       exit 1
+    fi
+
+    # Hold opt-out (t-0055 clause 10). Applied after validation rather than as a
+    # 14th positional argument to queue_enqueue: it is operator policy on an
+    # already-well-formed entry, not part of its identity.
+    # Guarded like the two steps above it rather than left bare: this block runs
+    # with the queue lock held under `set -e`, so an unguarded failure would exit
+    # the script with the lock still on disk.
+    if [ "$ADD_INDEPENDENT" = true ]; then
+      if ! queue_edit "$ENTRY_ID" independent true; then
+        release_queue_lock
+        echo "ERROR: Entry $ENTRY_ID was created but --independent could not be applied" >&2
+        exit 1
+      fi
     fi
 
     ADD_STATUS="pending-review"
@@ -577,13 +728,20 @@ case "$SUBCOMMAND" in
         else
           _RESOLVED_PROJECT="" _RESOLVED_MILESTONE_NAME=""
           _RESOLVED_MILESTONE_INDEX=0 _RESOLVED_MILESTONE_TOTAL=0
+          # _QE_* still holds the PREVIOUS row's entry; without this the
+          # unreadable row would report its neighbour's parent.
+          _QE_FOLLOW_UP_OF=""
         fi
-        printf '{%s,%s,%s,%s,%s,%s,%s,%s,%s}' \
+        # follow_up_of is flat on the list row, not the follow_ups array: a
+        # list is a view of many entries, and the reverse direction costs a
+        # whole-queue scan per row. `show` is where the links are walked.
+        printf '{%s,%s,%s,%s,%s,%s,%s,%s,%s,%s}' \
           "$(_json_kv "id" "$L_ID")" \
           "$(_json_kv "status" "$L_STATUS")" \
           "$(_json_kv "session_type" "$L_TYPE")" \
           "$(_json_kv "brief_path" "$L_BRIEF")" \
           "$(_json_kv "updated_at" "$L_UPDATED")" \
+          "$(_json_kv "follow_up_of" "${_QE_FOLLOW_UP_OF:-}")" \
           "$(_json_kv "project" "$_RESOLVED_PROJECT")" \
           "$(_json_kv "milestone_name" "$_RESOLVED_MILESTONE_NAME")" \
           "$(_json_kv_raw "milestone_index" "${_RESOLVED_MILESTONE_INDEX:-0}")" \
@@ -609,11 +767,27 @@ case "$SUBCOMMAND" in
         echo "ERROR: Entry $SHOW_ID not found" >&2
         exit 1
       fi
+      # All three derived blocks scan the queue and so clobber _QE_*. Build
+      # them first, then load the entry's own fields for the flat members.
+      _SHOW_SESSION_JSON=$(_entry_session_json "$SHOW_ID")
+      _SHOW_HOLD_JSON=$(_entry_hold_json "$SHOW_ID")
+
+      # Both directions of the follow-up link (t-0055 clause 14). The forward
+      # one is the stored field below; this is the reverse, which is a scan
+      # rather than a field precisely so it cannot disagree with it.
+      _SHOW_FU_JSON=""
+      while IFS="$_QH_TAB" read -r _SHOW_FU_ID _SHOW_FU_STATUS; do
+        [ -n "$_SHOW_FU_ID" ] || continue
+        _SHOW_FU_JSON="${_SHOW_FU_JSON:+$_SHOW_FU_JSON,}{$(_json_kv "id" "$_SHOW_FU_ID"),$(_json_kv "status" "$_SHOW_FU_STATUS")}"
+      done <<EOF
+$(queue_followups_of "$SHOW_ID")
+EOF
+
       _load_queue_entry "$ENTRY_FILE"
       _resolve_entry_metadata
       # Truncate last_prompt for JSON output (first 500 chars)
       _SHOW_LP="${_QE_LAST_PROMPT:0:500}"
-      printf '{%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s}\n' \
+      printf '{%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"follow_ups":[%s],%s,%s}\n' \
         "$(_json_kv "id" "$_QE_ID")" \
         "$(_json_kv "status" "$_QE_STATUS")" \
         "$(_json_kv "priority" "${_QE_PRIORITY:-0}")" \
@@ -634,7 +808,13 @@ case "$SUBCOMMAND" in
         "$(_json_kv_raw "milestone_total" "${_RESOLVED_MILESTONE_TOTAL:-0}")" \
         "$(_json_kv "created_at" "$_QE_CREATED_AT")" \
         "$(_json_kv "updated_at" "$_QE_UPDATED_AT")" \
-        "$(_json_kv "completed_at" "$_QE_COMPLETED_AT")"
+        "$(_json_kv "completed_at" "$_QE_COMPLETED_AT")" \
+        "$(_json_kv "held_by" "${_QE_HELD_BY:-}")" \
+        "$(_json_kv "independent" "${_QE_INDEPENDENT:-false}")" \
+        "$(_json_kv "follow_up_of" "${_QE_FOLLOW_UP_OF:-}")" \
+        "$_SHOW_FU_JSON" \
+        "$_SHOW_SESSION_JSON" \
+        "$_SHOW_HOLD_JSON"
     else
       queue_show "$SHOW_ID"
     fi
@@ -961,7 +1141,7 @@ case "$SUBCOMMAND" in
       # populated by the call that just ran, and this is the one line recording
       # the work-order-clearing half of the command.
       review_log_append "entry-reopened" "${_QE_WORK_ORDER_ID:-}" "$_RE_ID" \
-        "Entry $_RE_ID returned from review to approved by operator — retry budget restored" 2>/dev/null || true
+        "Entry $_RE_ID returned from ${_REOPEN_SRC_DIR:-review}/ to approved by operator — retry budget restored" 2>/dev/null || true
       # Report whether the parent work order was actually reopened. Both output
       # forms used to be identical whether it was cleared or deliberately left
       # failed, so neither a human nor a script could tell a full recovery from
@@ -973,7 +1153,7 @@ case "$SUBCOMMAND" in
           "$(_json_kv "work_order_reopened" "${_RR_WO_REOPENED:-n/a}")" \
           "$(_json_kv "work_order_blockers" "${_RR_WO_BLOCKERS:-}")"
       else
-        echo "Entry $_RE_ID returned to approved (retry budget reset to 0)."
+        echo "Entry $_RE_ID returned to approved from ${_REOPEN_SRC_DIR:-review}/ (retry budget reset to 0)."
         case "${_RR_WO_REOPENED:-n/a}" in
           true)         echo "Parent work order $_QE_WORK_ORDER_ID reopened — the entry is eligible on the next poll." ;;
           not-needed)   echo "Parent work order $_QE_WORK_ORDER_ID needed no reopen." ;;
@@ -1417,6 +1597,1069 @@ case "$SUBCOMMAND" in
         "$(_json_kv "escalation_id" "$_RECOVER_ESC_ID")"
     else
       printf 'Recovered: %s (moved to failed/, escalation written)\n' "$RECOVER_ID"
+    fi
+    ;;
+
+  # --- stop-entry: end one entry's session without halting the daemon ---
+  # Writes the control flag the session's PreToolUse hook reads (STOP) or the one
+  # the runner's stop watcher acts on (FORCE). Deliberately does NOT move the
+  # entry: the runner owns the running/ → stopped/ transition, because only it
+  # knows when the child has actually exited (Decision t-0055 clauses 6-7).
+  stop-entry)
+    if [ $# -lt 1 ]; then
+      echo "ERROR: stop-entry requires <id>" >&2
+      exit 1
+    fi
+    STOP_ID="$1"
+    shift
+
+    STOP_FORCE=false
+    STOP_REASON=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --force)
+          STOP_FORCE=true
+          shift
+          ;;
+        --reason)
+          if [ $# -lt 2 ]; then
+            echo "ERROR: --reason requires a value" >&2
+            exit 1
+          fi
+          STOP_REASON="$2"
+          shift 2
+          ;;
+        *)
+          echo "ERROR: Unknown stop-entry option: $1" >&2
+          exit 1
+          ;;
+      esac
+    done
+
+    STOP_ENTRY_FILE=$(_find_entry_file "$STOP_ID")
+    if [ -z "$STOP_ENTRY_FILE" ]; then
+      echo "ERROR: Entry $STOP_ID not found" >&2
+      exit 1
+    fi
+    _load_queue_entry "$STOP_ENTRY_FILE"
+    case "$STOP_ENTRY_FILE" in
+      */running/*)
+        ;; # expected — proceed
+      *)
+        echo "ERROR: Entry $STOP_ID is not running (current status: $_QE_STATUS). Only a running entry has a session to stop." >&2
+        exit 1
+        ;;
+    esac
+
+    STOP_CONTROL_DIR=$(ensure_control_dir "$STOP_ID") || STOP_CONTROL_DIR=""
+    if [ -z "$STOP_CONTROL_DIR" ]; then
+      echo "ERROR: Could not create the control directory for entry $STOP_ID" >&2
+      exit 1
+    fi
+
+    # Escalation: --force, or a second stop while an earlier one is still
+    # pending. "Stop again to force" is the whole interaction — the operator
+    # does not have to know which flag they are writing.
+    STOP_MODE="graceful"
+    if [ "$STOP_FORCE" = true ]; then
+      STOP_MODE="forced"
+    elif [ -f "$STOP_CONTROL_DIR/FORCE" ] || [ -f "$STOP_CONTROL_DIR/STOP" ]; then
+      STOP_MODE="forced"
+    fi
+    if [ "$STOP_MODE" = "forced" ]; then
+      STOP_FLAG="FORCE"
+    else
+      STOP_FLAG="STOP"
+    fi
+
+    # Flag content is advisory — the operator's reason, surfaced in the session's
+    # stopReason. Existence is the signal, so an empty flag is still a stop.
+    if [ -n "$STOP_REASON" ]; then
+      printf '%s\n' "$STOP_REASON" > "$STOP_CONTROL_DIR/$STOP_FLAG"
+    else
+      : > "$STOP_CONTROL_DIR/$STOP_FLAG"
+    fi
+
+    # Session record → control_state: stopping, which is what the UI reads to
+    # show "stopping" on an entry whose child has not exited yet. Records are
+    # keyed by session id, so the session running this entry is found by scanning
+    # the registry for its entry_id. Fail-soft: a missing record changes nothing
+    # about the stop — the flag is the mechanism, control_state is the display.
+    STOP_SESSION_ID=""
+    STOP_SESSIONS_DIR="$(get_main_repo_root)/.claude/.state/sessions"
+    if [ -d "$STOP_SESSIONS_DIR" ]; then
+      for _STOP_REC in "$STOP_SESSIONS_DIR"/*.yaml; do
+        [ -f "$_STOP_REC" ] || continue
+        if grep -Fqx "entry_id: $STOP_ID" "$_STOP_REC" 2>/dev/null; then
+          STOP_SESSION_ID=$(basename "$_STOP_REC" .yaml)
+          break
+        fi
+      done
+    fi
+    if [ -n "$STOP_SESSION_ID" ]; then
+      session_record_set "$STOP_SESSION_ID" "control_state=stopping" 2>/dev/null || \
+        echo "WARNING: Could not set control_state on session record $STOP_SESSION_ID" >&2
+    else
+      echo "WARNING: No session record names entry $STOP_ID — the flag is set, but control_state could not be updated" >&2
+    fi
+
+    review_log_append "entry-stop-requested" "${_QE_WORK_ORDER_ID:-}" "$STOP_ID" \
+      "Operator requested a $STOP_MODE stop of entry $STOP_ID${STOP_REASON:+ ($STOP_REASON)}. Resume with: queue-cli.sh resume-entry $STOP_ID" 2>/dev/null || true
+
+    if [ "$JSON_OUTPUT" = true ]; then
+      printf '{%s,%s,%s,%s,%s}\n' \
+        "$(_json_kv "entry_id" "$STOP_ID")" \
+        "$(_json_kv "action" "stop")" \
+        "$(_json_kv "mode" "$STOP_MODE")" \
+        "$(_json_kv "flag" "$STOP_FLAG")" \
+        "$(_json_kv "control_state" "stopping")"
+    elif [ "$STOP_MODE" = "forced" ]; then
+      printf 'Force-stopping %s: SIGTERM now, SIGKILL after 10s. The worktree and Claude session are kept — resume with: queue-cli.sh resume-entry %s\n' \
+        "$STOP_ID" "$STOP_ID"
+    else
+      printf 'Stopping %s at its next tool call. The worktree and Claude session are kept — resume with: queue-cli.sh resume-entry %s (stop again to force)\n' \
+        "$STOP_ID" "$STOP_ID"
+    fi
+    ;;
+
+  # --- resume-entry: put a stopped entry back in the queue, same session ---
+  resume-entry)
+    if [ $# -lt 1 ]; then
+      echo "ERROR: resume-entry requires <id>" >&2
+      exit 1
+    fi
+    RESUME_ID="$1"
+
+    RESUME_ENTRY_FILE=$(_find_entry_file "$RESUME_ID")
+    if [ -z "$RESUME_ENTRY_FILE" ]; then
+      echo "ERROR: Entry $RESUME_ID not found" >&2
+      exit 1
+    fi
+    _load_queue_entry "$RESUME_ENTRY_FILE"
+    case "$RESUME_ENTRY_FILE" in
+      */stopped/*)
+        ;; # expected — proceed
+      *)
+        echo "ERROR: Entry $RESUME_ID is not stopped (current status: $_QE_STATUS). Only a stopped entry can be resumed." >&2
+        exit 1
+        ;;
+    esac
+    RESUME_STOPPED_MODE="${_QE_STOPPED_MODE:-graceful}"
+    RESUME_WO_ID="${_QE_WORK_ORDER_ID:-}"
+
+    # Clear the flags BEFORE the entry becomes dequeuable. A flag left in place
+    # would be read by the resumed session's first tool call and stop it again
+    # (and by the runner's exit path, which would send it straight back to
+    # stopped/). The runner clears them too when it honours a stop, so this is
+    # the belt to that braces — a stop the runner never got to observe (daemon
+    # crash, force-halt) leaves a flag behind that only this path removes.
+    RESUME_CONTROL_DIR=$(get_control_dir "$RESUME_ID" 2>/dev/null) || RESUME_CONTROL_DIR=""
+    if [ -n "$RESUME_CONTROL_DIR" ]; then
+      rm -f "$RESUME_CONTROL_DIR/STOP" "$RESUME_CONTROL_DIR/FORCE" 2>/dev/null || true
+    fi
+
+    if ! acquire_queue_lock; then
+      echo "ERROR: Queue lock unavailable" >&2
+      exit 1
+    fi
+    if ! queue_resume "$RESUME_ID"; then
+      release_queue_lock
+      echo "ERROR: Could not resume entry $RESUME_ID" >&2
+      exit 1
+    fi
+    # Resuming resolves the hold (t-0055 clause 9): the entries queued behind
+    # this one were only waiting on its outcome. Any that are still genuinely
+    # related are re-held by the next dequeue tick if it stops again.
+    RESUME_FREED=$(queue_release_holds "$RESUME_ID") || RESUME_FREED=""
+    release_queue_lock
+
+    RESUME_FREED_COUNT=0
+    if [ -n "$RESUME_FREED" ]; then
+      RESUME_FREED_COUNT=$(printf '%s\n' "$RESUME_FREED" | grep -c .)
+    fi
+
+    # The resume handle (control/<id>/resume.yaml) is what makes the relaunch
+    # continue the recorded transcript. Without it the entry still runs, but from
+    # a fresh session — say so now rather than let the operator discover it from
+    # a runner warning.
+    RESUME_CLAUDE_SESSION=""
+    if [ -n "$RESUME_CONTROL_DIR" ] && [ -f "$RESUME_CONTROL_DIR/resume.yaml" ]; then
+      RESUME_CLAUDE_SESSION=$(grep -E '^claude_session_id:' "$RESUME_CONTROL_DIR/resume.yaml" 2>/dev/null | head -1 | sed 's/^claude_session_id: *//; s/^"//; s/"$//') || RESUME_CLAUDE_SESSION=""
+    fi
+
+    review_log_append "entry-resumed" "$RESUME_WO_ID" "$RESUME_ID" \
+      "Entry $RESUME_ID resumed by operator after a $RESUME_STOPPED_MODE stop — back in approved/ with resume: true${RESUME_CLAUDE_SESSION:+, continuing claude session $RESUME_CLAUDE_SESSION}; released $RESUME_FREED_COUNT held entries" 2>/dev/null || true
+
+    if [ "$JSON_OUTPUT" = true ]; then
+      printf '{%s,%s,%s,%s,%s}\n' \
+        "$(_json_kv "entry_id" "$RESUME_ID")" \
+        "$(_json_kv "action" "resumed")" \
+        "$(_json_kv "stopped_mode" "$RESUME_STOPPED_MODE")" \
+        "$(_json_kv "claude_session_id" "$RESUME_CLAUDE_SESSION")" \
+        "$(_json_kv_raw "released_count" "$RESUME_FREED_COUNT")"
+    elif [ -n "$RESUME_CLAUDE_SESSION" ]; then
+      printf 'Resumed: %s (approved/, continuing claude session %s) — released %s held entries\n' \
+        "$RESUME_ID" "$RESUME_CLAUDE_SESSION" "$RESUME_FREED_COUNT"
+    else
+      printf 'Resumed: %s (approved/) — no resume handle found, so the next run starts a fresh session. Released %s held entries\n' \
+        "$RESUME_ID" "$RESUME_FREED_COUNT"
+    fi
+    ;;
+
+  # --- discard-entry: abandon one entry and resolve what it was holding ---
+  # t-0055 clause 9. Deliberately NOT a stop: a running entry is refused rather
+  # than killed from here, so "abandon this work" and "end this session" stay
+  # separate operator decisions and the kill path keeps one implementation.
+  discard-entry)
+    if [ $# -lt 1 ]; then
+      echo "ERROR: discard-entry requires <id>" >&2
+      exit 1
+    fi
+    DISCARD_ID="$1"
+    shift
+
+    DISCARD_REASON="discarded-by-operator"
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --reason)
+          if [ $# -lt 2 ]; then
+            echo "ERROR: --reason requires a value" >&2
+            exit 1
+          fi
+          DISCARD_REASON="$2"
+          shift 2
+          ;;
+        *)
+          echo "ERROR: Unknown discard-entry option: $1" >&2
+          exit 1
+          ;;
+      esac
+    done
+
+    DISCARD_ENTRY_FILE=$(_find_entry_file "$DISCARD_ID")
+    if [ -z "$DISCARD_ENTRY_FILE" ]; then
+      echo "ERROR: Entry $DISCARD_ID not found" >&2
+      exit 1
+    fi
+    _load_queue_entry "$DISCARD_ENTRY_FILE"
+    if [ "$_QE_STATUS" = "running" ]; then
+      echo "ERROR: Entry $DISCARD_ID is still running. Stop it first:" >&2
+      echo "  queue-cli.sh stop-entry $DISCARD_ID --force && queue-cli.sh discard-entry $DISCARD_ID" >&2
+      exit 1
+    fi
+    DISCARD_WO_ID="${_QE_WORK_ORDER_ID:-}"
+    DISCARD_SESSION_TYPE="${_QE_SESSION_TYPE:-}"
+    DISCARD_BRANCH="${_QE_BRANCH:-}"
+
+    # The DISCARD flag is the durable record in the control directory, beside
+    # the STOP/FORCE flags and resume.yaml this entry may already have.
+    DISCARD_CONTROL_DIR=$(ensure_control_dir "$DISCARD_ID") || DISCARD_CONTROL_DIR=""
+    if [ -n "$DISCARD_CONTROL_DIR" ]; then
+      printf '%s\n' "$DISCARD_REASON" > "$DISCARD_CONTROL_DIR/DISCARD"
+    else
+      echo "WARNING: Could not create the control directory for entry $DISCARD_ID — the discard proceeds without a flag" >&2
+    fi
+
+    if ! acquire_queue_lock; then
+      echo "ERROR: Queue lock unavailable" >&2
+      exit 1
+    fi
+    # Capture what this entry is holding BEFORE the hold is released, so the
+    # escalations name the entries that were actually waiting on it. Read under
+    # the lock: a concurrent dequeue tick re-evaluates held_by, so a read taken
+    # before the lock could escalate a list the release then disagrees with.
+    DISCARD_HELD=$(queue_hold_holding "$DISCARD_ID") || DISCARD_HELD=""
+    # A follow-up of a discarded parent needs the same escalation, and the
+    # hold list alone does not reach it: `held_by` is only ever set while the
+    # parent is STOPPED, so a follow-up of a completed or failed parent is
+    # unheld — and it is exactly the follow-up of a completed parent that the
+    # operator is most likely to have queued. Union, deduped against the hold
+    # list, so an entry that is both is escalated once.
+    DISCARD_FU=$(queue_followups_of "$DISCARD_ID") || DISCARD_FU=""
+    while IFS="$_QH_TAB" read -r _DISC_FU_ID _DISC_FU_STATUS; do
+      [ -n "$_DISC_FU_ID" ] || continue
+      # A follow-up that already ran is not waiting on anything.
+      case "$_DISC_FU_STATUS" in completed|failed) continue ;; esac
+      case "
+$DISCARD_HELD
+" in *"
+$_DISC_FU_ID
+"*) continue ;; esac
+      DISCARD_HELD="${DISCARD_HELD:+$DISCARD_HELD
+}$_DISC_FU_ID"
+    done <<EOF
+$DISCARD_FU
+EOF
+    if ! queue_discard "$DISCARD_ID" "$DISCARD_REASON"; then
+      release_queue_lock
+      echo "ERROR: Could not discard entry $DISCARD_ID" >&2
+      exit 1
+    fi
+    DISCARD_FREED=$(queue_release_holds "$DISCARD_ID") || DISCARD_FREED=""
+    release_queue_lock
+
+    # Worktree (Decision t-0054): a single task owns its worktree, so discarding
+    # it ends the worktree too. A group's worktree is shared by every brief in
+    # the group and outlives any one of them — it is left in place and the work
+    # order is escalated instead, which is the signal an operator acts on.
+    DISCARD_WT=$(_hold_entry_worktree "$DISCARD_ID") || DISCARD_WT=""
+    DISCARD_WT_ACTION="none"
+    case "$DISCARD_SESSION_TYPE" in
+      taskgroup|taskgroup-merge)
+        DISCARD_WT_ACTION="kept-group-worktree"
+        ;;
+      *)
+        if [ -n "$DISCARD_WT" ] && [ -d "$DISCARD_WT" ]; then
+          # remove_session_worktree preserves uncommitted work as a patch first
+          # and uses bare `git worktree ...`, so it runs from the main repo.
+          ( cd "$REPO_ROOT" && remove_session_worktree "$DISCARD_WT" "" "$DISCARD_ID" "discarded-by-operator" ) || true
+          DISCARD_WT_ACTION="removed"
+        fi
+        ;;
+    esac
+
+    # Escalate the parent work order for a group discard. Inlined rather than
+    # given a public wrapper in work-order-manager.sh: this is the only caller.
+    DISCARD_WO_ACTION="none"
+    if [ "$DISCARD_WT_ACTION" = "kept-group-worktree" ] && [ -n "$DISCARD_WO_ID" ]; then
+      _DISCARD_WO_FILE="$(_wo_dir)/${DISCARD_WO_ID}.yaml"
+      if [ -f "$_DISCARD_WO_FILE" ] && _load_work_order "$_DISCARD_WO_FILE"; then
+        if [ "$_WO_STATUS" = "escalated" ]; then
+          DISCARD_WO_ACTION="already-escalated"
+        elif _transition_work_order "escalated"; then
+          _WO_FAILURE_ENTRY_ID="$DISCARD_ID"
+          _write_work_order "$_DISCARD_WO_FILE"
+          DISCARD_WO_ACTION="escalated"
+        else
+          echo "WARNING: Could not escalate work order $DISCARD_WO_ID (status: $_WO_STATUS)" >&2
+        fi
+      fi
+    fi
+
+    # Every entry that was waiting on this one is now waiting on nothing: the
+    # outcome it would have been rebased onto never happened. That is an
+    # operator decision, not an automatic one, so each gets an escalation.
+    # "Waiting on" is both senses — held behind it (clause 10) and following
+    # up on it (clause 14) — unioned above.
+    DISCARD_ESC_DIR="$REPO_ROOT/.claude/.automation/escalations"
+    DISCARD_ESC_COUNT=0
+    if [ -n "$DISCARD_HELD" ]; then
+      mkdir -p "$DISCARD_ESC_DIR" 2>/dev/null || true
+      while IFS= read -r _DISC_HELD_ID; do
+        [ -n "$_DISC_HELD_ID" ] || continue
+        _DISC_ESC_ID="esc-parent-discarded-${_DISC_HELD_ID}-$(date +%Y%m%d-%H%M%S)"
+        {
+          printf 'escalation:\n'
+          printf '  id: "%s"\n' "$_DISC_ESC_ID"
+          printf '  queue_entry_id: "%s"\n' "$_DISC_HELD_ID"
+          printf '  type: "parent-discarded"\n'
+          printf '  severity: "blocking"\n'
+          printf '  phase_at_exit: "queued"\n'
+          printf '  tag_at_exit: "operator"\n'
+          printf '  message: "Entry %s was waiting on %s, which the operator discarded"\n' \
+            "$_DISC_HELD_ID" "$DISCARD_ID"
+          printf '  context: "discarded_entry: %s | discarded_branch: %s | reason: %s | the hold was released, but the work this entry was waiting on never landed — re-check its scope before approving it"\n' \
+            "$DISCARD_ID" "${DISCARD_BRANCH:-unknown}" "$DISCARD_REASON"
+          printf '  created_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          printf '  resolved: false\n'
+          printf '  resolution: ""\n'
+        } > "$DISCARD_ESC_DIR/${_DISC_ESC_ID}.yaml" 2>/dev/null || true
+        DISCARD_ESC_COUNT=$(( DISCARD_ESC_COUNT + 1 ))
+      done <<EOF
+$DISCARD_HELD
+EOF
+    fi
+
+    DISCARD_FREED_COUNT=0
+    if [ -n "$DISCARD_FREED" ]; then
+      DISCARD_FREED_COUNT=$(printf '%s\n' "$DISCARD_FREED" | grep -c .)
+    fi
+
+    review_log_append "entry-discarded" "$DISCARD_WO_ID" "$DISCARD_ID" \
+      "Entry $DISCARD_ID discarded by operator ($DISCARD_REASON) — failed/, worktree: $DISCARD_WT_ACTION, work order: $DISCARD_WO_ACTION, released $DISCARD_FREED_COUNT held entries with $DISCARD_ESC_COUNT parent-discarded escalations" 2>/dev/null || true
+
+    if [ "$JSON_OUTPUT" = true ]; then
+      printf '{%s,%s,%s,%s,%s,%s,%s}\n' \
+        "$(_json_kv "entry_id" "$DISCARD_ID")" \
+        "$(_json_kv "action" "discarded")" \
+        "$(_json_kv "status" "failed")" \
+        "$(_json_kv "error_log" "$DISCARD_REASON")" \
+        "$(_json_kv "worktree" "$DISCARD_WT_ACTION")" \
+        "$(_json_kv "work_order" "$DISCARD_WO_ACTION")" \
+        "$(_json_kv_raw "escalated_held" "$DISCARD_ESC_COUNT")"
+    else
+      printf 'Discarded: %s → failed/ (%s)\n' "$DISCARD_ID" "$DISCARD_REASON"
+      printf '  worktree:   %s%s\n' "$DISCARD_WT_ACTION" "${DISCARD_WT:+ ($DISCARD_WT)}"
+      printf '  work order: %s%s\n' "$DISCARD_WO_ACTION" "${DISCARD_WO_ID:+ ($DISCARD_WO_ID)}"
+      printf '  held:       released %s, escalated %s as parent-discarded\n' \
+        "$DISCARD_FREED_COUNT" "$DISCARD_ESC_COUNT"
+    fi
+    ;;
+
+  # --- note-entry: send the operator's note to one entry's agent ---
+  # `note` is the short alias; `note-entry` is the canonical name, because
+  # t-0055 clause 12 requires every per-entry command to end in -entry.
+  note-entry|note)
+    if [ $# -lt 1 ]; then
+      echo "ERROR: note-entry requires <id>" >&2
+      exit 1
+    fi
+    NOTE_ID="$1"
+    shift
+
+    NOTE_TEXT=""
+    NOTE_SOURCE=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --text)
+          if [ $# -lt 2 ]; then
+            echo "ERROR: --text requires a value" >&2
+            exit 1
+          fi
+          NOTE_TEXT="$2"
+          NOTE_SOURCE="text"
+          shift 2
+          ;;
+        --file)
+          if [ $# -lt 2 ]; then
+            echo "ERROR: --file requires a path" >&2
+            exit 1
+          fi
+          if [ ! -f "$2" ]; then
+            echo "ERROR: Note file not found: $2" >&2
+            exit 1
+          fi
+          NOTE_TEXT="$(cat "$2")"
+          NOTE_SOURCE="file"
+          shift 2
+          ;;
+        *)
+          echo "ERROR: Unknown note-entry option: $1" >&2
+          exit 1
+          ;;
+      esac
+    done
+
+    if [ -z "$NOTE_SOURCE" ]; then
+      echo "ERROR: note-entry requires --text \"<note>\" or --file <path>" >&2
+      exit 1
+    fi
+    if [ -z "$NOTE_TEXT" ]; then
+      echo "ERROR: The note is empty. A note the agent cannot read is not worth queueing." >&2
+      exit 1
+    fi
+    # 2,000 characters, plain text. A note competes with the brief for the
+    # agent's attention and is injected into a tool result — anything longer
+    # belongs in the brief, not in a note.
+    if [ "${#NOTE_TEXT}" -gt 2000 ]; then
+      echo "ERROR: Note is ${#NOTE_TEXT} characters; the limit is 2000. Shorten it, or put the detail in the brief." >&2
+      exit 1
+    fi
+
+    NOTE_TARGET_VIA="entry"
+    NOTE_ENTRY_FILE=$(_find_entry_file "$NOTE_ID")
+    if [ -z "$NOTE_ENTRY_FILE" ]; then
+      # A work order id is accepted too. With no brief of a group running, the
+      # operator's note is for whichever brief runs next, and they should not
+      # have to look up an id for work the group has not reached yet. Entry ids
+      # are stored in declaration order, which for a sequential group is brief
+      # order, so the first non-terminal one IS the next brief.
+      NOTE_WO_FILE="$(_wo_dir)/${NOTE_ID}.yaml"
+      if [ -f "$NOTE_WO_FILE" ] && _load_work_order "$NOTE_WO_FILE"; then
+        NOTE_WO_ID="$NOTE_ID"
+        NOTE_REST="$_WO_ENTRY_IDS"
+        while [ -n "$NOTE_REST" ]; do
+          NOTE_CAND="${NOTE_REST%%,*}"
+          case "$NOTE_REST" in
+            *,*) NOTE_REST="${NOTE_REST#*,}" ;;
+            *)   NOTE_REST="" ;;
+          esac
+          [ -n "$NOTE_CAND" ] || continue
+          NOTE_CAND_FILE=$(_find_entry_file "$NOTE_CAND") || NOTE_CAND_FILE=""
+          [ -n "$NOTE_CAND_FILE" ] || continue
+          _load_queue_entry "$NOTE_CAND_FILE"
+          case "$_QE_STATUS" in
+            completed|failed) continue ;;
+          esac
+          NOTE_ENTRY_FILE="$NOTE_CAND_FILE"
+          NOTE_ID="$NOTE_CAND"
+          NOTE_TARGET_VIA="work-order"
+          break
+        done
+        if [ -z "$NOTE_ENTRY_FILE" ]; then
+          echo "ERROR: Work order $NOTE_WO_ID has no entry left to notify — every entry is completed or failed" >&2
+          exit 1
+        fi
+        echo "Work order $NOTE_WO_ID → next entry $NOTE_ID ($_QE_STATUS)" >&2
+      fi
+    fi
+    if [ -z "$NOTE_ENTRY_FILE" ]; then
+      echo "ERROR: Entry $NOTE_ID not found" >&2
+      exit 1
+    fi
+    if [ "$NOTE_TARGET_VIA" = "entry" ]; then
+      _load_queue_entry "$NOTE_ENTRY_FILE"
+    fi
+    # A closed entry has no agent left to read the note and will never run
+    # again, so queueing one would be a note that is pending forever.
+    case "$_QE_STATUS" in
+      completed|failed)
+        echo "ERROR: Entry $NOTE_ID is $_QE_STATUS — it is closed and has no session to notify. Reopen it first: queue-cli.sh reopen-entry $NOTE_ID" >&2
+        exit 1
+        ;;
+    esac
+
+    NOTE_CONTROL_DIR=$(ensure_control_dir "$NOTE_ID") || NOTE_CONTROL_DIR=""
+    if [ -z "$NOTE_CONTROL_DIR" ]; then
+      echo "ERROR: Could not create the control directory for entry $NOTE_ID" >&2
+      exit 1
+    fi
+    if ! mkdir -p "$NOTE_CONTROL_DIR/notes"; then
+      echo "ERROR: Could not create the notes directory for entry $NOTE_ID" >&2
+      exit 1
+    fi
+
+    # <epoch>-<n>.md (t-0055 clause 4). The epoch orders delivery; <n>
+    # disambiguates two notes sent in the same second.
+    NOTE_EPOCH=$(date -u +%s)
+    NOTE_SEQ=1
+    while [ -e "$NOTE_CONTROL_DIR/notes/${NOTE_EPOCH}-${NOTE_SEQ}.md" ] \
+       || [ -e "$NOTE_CONTROL_DIR/notes/delivered/${NOTE_EPOCH}-${NOTE_SEQ}.md" ]; do
+      NOTE_SEQ=$(( NOTE_SEQ + 1 ))
+    done
+    NOTE_FILE="$NOTE_CONTROL_DIR/notes/${NOTE_EPOCH}-${NOTE_SEQ}.md"
+    printf '%s\n' "$NOTE_TEXT" > "$NOTE_FILE"
+
+    NOTE_SENT_AT=$(epoch_to_iso "$NOTE_EPOCH")
+
+    # How this note will reach the agent, stated at send time so the operator
+    # is not left guessing. Running entries depend on operator-notes.sh being
+    # registered in settings.json; the other two routes are runner-side.
+    case "$_QE_STATUS" in
+      running)  NOTE_ROUTE="at the session's next tool step" ;;
+      stopped)  NOTE_ROUTE="in the resume message (queue-cli.sh resume-entry $NOTE_ID)" ;;
+      *)        NOTE_ROUTE="in the entry's prompt when it starts" ;;
+    esac
+
+    # When a work order id was resolved to an entry, the mapping goes in the log
+    # too — otherwise the only record of which brief the operator actually
+    # addressed is the stderr line, which nothing keeps.
+    NOTE_LOG_VIA=""
+    if [ "$NOTE_TARGET_VIA" = "work-order" ]; then
+      NOTE_LOG_VIA=" (resolved from work order $NOTE_WO_ID)"
+    fi
+    review_log_append "entry-note-sent" "${_QE_WORK_ORDER_ID:-}" "$NOTE_ID" \
+      "Operator sent a note to entry ${NOTE_ID}${NOTE_LOG_VIA} (${#NOTE_TEXT} chars, status $_QE_STATUS) — delivery $NOTE_ROUTE" 2>/dev/null || true
+
+    if [ "$JSON_OUTPUT" = true ]; then
+      printf '{%s,%s,%s,%s,%s,%s,%s}\n' \
+        "$(_json_kv "entry_id" "$NOTE_ID")" \
+        "$(_json_kv "action" "note")" \
+        "$(_json_kv "note_id" "${NOTE_EPOCH}-${NOTE_SEQ}")" \
+        "$(_json_kv "state" "pending")" \
+        "$(_json_kv "sent_at" "$NOTE_SENT_AT")" \
+        "$(_json_kv "entry_status" "$_QE_STATUS")" \
+        "$(_json_kv "resolved_via" "$NOTE_TARGET_VIA")"
+    else
+      printf 'Note queued for %s (%s): delivery %s\n' "$NOTE_ID" "${NOTE_EPOCH}-${NOTE_SEQ}" "$NOTE_ROUTE"
+    fi
+    ;;
+
+  # --- notes-entry: what the operator sent, and what has landed ---
+  notes-entry|notes)
+    if [ $# -lt 1 ]; then
+      echo "ERROR: notes-entry requires <id>" >&2
+      exit 1
+    fi
+    NOTES_ID="$1"
+    shift
+    if [ $# -gt 0 ]; then
+      echo "ERROR: Unknown notes-entry option: $1" >&2
+      exit 1
+    fi
+
+    # No entry lookup: a discarded or pruned entry still has a control
+    # directory, and its note history is exactly what an operator wants to read
+    # when working out what the agent was told.
+    NOTES_DIR="$(get_control_dir "$NOTES_ID")/notes"
+
+    NOTES_JSON=""
+    NOTES_TEXT=""
+    NOTES_PENDING=0
+    NOTES_DELIVERED=0
+    for _NOTE_STATE in pending delivered; do
+      if [ "$_NOTE_STATE" = "pending" ]; then
+        _NOTE_SRC="$NOTES_DIR"
+      else
+        _NOTE_SRC="$NOTES_DIR/delivered"
+      fi
+      # Quoted directory, bare `*.md`: a glob held in a variable would be
+      # word-split on a space in the path before the shell ever expanded it.
+      for _NOTE_PATH in "$_NOTE_SRC"/*.md; do
+        [ -f "$_NOTE_PATH" ] || continue
+        _NOTE_BASE="${_NOTE_PATH##*/}"
+        _NOTE_KEY="${_NOTE_BASE%.md}"
+        _NOTE_SENT=$(epoch_to_iso "${_NOTE_KEY%%-*}")
+        _NOTE_DELIVERED=""
+        if [ "$_NOTE_STATE" = "delivered" ] && [ -f "${_NOTE_PATH}.at" ]; then
+          _NOTE_DELIVERED=$(cat "${_NOTE_PATH}.at" 2>/dev/null) || _NOTE_DELIVERED=""
+        fi
+        _NOTE_BODY=$(cat "$_NOTE_PATH" 2>/dev/null) || _NOTE_BODY=""
+        if [ "$_NOTE_STATE" = "pending" ]; then
+          NOTES_PENDING=$(( NOTES_PENDING + 1 ))
+        else
+          NOTES_DELIVERED=$(( NOTES_DELIVERED + 1 ))
+        fi
+        NOTES_JSON="${NOTES_JSON:+$NOTES_JSON,}{$(_json_kv "note_id" "$_NOTE_KEY"),$(_json_kv "state" "$_NOTE_STATE"),$(_json_kv "sent_at" "$_NOTE_SENT"),$(_json_kv "delivered_at" "$_NOTE_DELIVERED"),$(_json_kv "text" "$_NOTE_BODY")}"
+        NOTES_TEXT="${NOTES_TEXT}$(printf '  %-10s %-24s %-24s %s' \
+          "$_NOTE_STATE" "$_NOTE_SENT" "${_NOTE_DELIVERED:--}" "$_NOTE_BODY")
+"
+      done
+    done
+
+    if [ "$JSON_OUTPUT" = true ]; then
+      printf '{%s,%s,%s,"notes":[%s]}\n' \
+        "$(_json_kv "entry_id" "$NOTES_ID")" \
+        "$(_json_kv_raw "pending" "$NOTES_PENDING")" \
+        "$(_json_kv_raw "delivered" "$NOTES_DELIVERED")" \
+        "$NOTES_JSON"
+    elif [ "$NOTES_PENDING" -eq 0 ] && [ "$NOTES_DELIVERED" -eq 0 ]; then
+      printf 'No notes for %s\n' "$NOTES_ID"
+    else
+      printf 'Notes for %s — %s pending, %s delivered\n' "$NOTES_ID" "$NOTES_PENDING" "$NOTES_DELIVERED"
+      printf '  %-10s %-24s %-24s %s\n' "STATE" "SENT" "DELIVERED" "TEXT"
+      printf '%s' "$NOTES_TEXT"
+    fi
+    ;;
+
+  # --- follow-up-entry: queue work that extends an entry already in the queue ---
+  # `follow-up` is the short alias; `follow-up-entry` is canonical, because
+  # t-0055 clause 12 requires every per-entry command to end in -entry.
+  #
+  # Deliberately NOT a flag on `add`. A follow-up resolves its parent in any
+  # status, names its brief after the parent, inherits the parent's work
+  # metadata and leaves `branch` empty for the dequeue selector — four
+  # behaviours `add` does not have and should not grow a mode switch for.
+  follow-up-entry|follow-up)
+    if [ $# -lt 1 ]; then
+      echo "ERROR: follow-up-entry requires <parent-id>" >&2
+      exit 1
+    fi
+    FU_PARENT_ID="$1"
+    shift
+
+    FU_BRIEF="" FU_AUTO_APPROVE=false FU_PRIORITY="" FU_SESSION_TYPE="" FU_PROJECT=""
+    FU_MILESTONE_NAME="" FU_MILESTONE_INDEX="" FU_MILESTONE_TOTAL=""
+    FU_PRIORITY_EXPLICIT=false
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --brief)
+          if [ $# -lt 2 ]; then echo "ERROR: --brief requires a path" >&2; exit 1; fi
+          FU_BRIEF="$2"; shift 2 ;;
+        --auto-approve)   FU_AUTO_APPROVE=true; shift ;;
+        --session-type)
+          if [ $# -lt 2 ]; then echo "ERROR: --session-type requires a value" >&2; exit 1; fi
+          FU_SESSION_TYPE="$2"; shift 2 ;;
+        --project)
+          if [ $# -lt 2 ]; then echo "ERROR: --project requires a value" >&2; exit 1; fi
+          FU_PROJECT="$2"; shift 2 ;;
+        --milestone-name)
+          if [ $# -lt 2 ]; then echo "ERROR: --milestone-name requires a value" >&2; exit 1; fi
+          FU_MILESTONE_NAME="$2"; shift 2 ;;
+        --milestone-index)
+          if [ $# -lt 2 ]; then echo "ERROR: --milestone-index requires a value" >&2; exit 1; fi
+          case "$2" in ''|*[!0-9]*) echo "ERROR: --milestone-index requires a non-negative integer" >&2; exit 1 ;; esac
+          FU_MILESTONE_INDEX="$2"; shift 2 ;;
+        --milestone-total)
+          if [ $# -lt 2 ]; then echo "ERROR: --milestone-total requires a value" >&2; exit 1; fi
+          case "$2" in ''|*[!0-9]*) echo "ERROR: --milestone-total requires a non-negative integer" >&2; exit 1 ;; esac
+          FU_MILESTONE_TOTAL="$2"; shift 2 ;;
+        --priority)
+          if [ $# -lt 2 ]; then echo "ERROR: --priority requires a value" >&2; exit 1; fi
+          case "$2" in ''|*[!0-9]*) echo "ERROR: --priority requires a non-negative integer" >&2; exit 1 ;; esac
+          FU_PRIORITY="$2"; FU_PRIORITY_EXPLICIT=true; shift 2 ;;
+        *)
+          echo "ERROR: Unknown follow-up-entry option: $1" >&2
+          exit 1
+          ;;
+      esac
+    done
+
+    if [ -z "$FU_BRIEF" ]; then
+      echo "ERROR: follow-up-entry requires --brief <path>" >&2
+      echo "  Start one from the parent's leftovers: queue-cli.sh follow-up-draft $FU_PARENT_ID > draft.md" >&2
+      exit 1
+    fi
+
+    # The parent may be in any status — that is the point of the command. A
+    # completed parent is the common case (its gaps are what the follow-up is
+    # for); a running one is queued behind it by the dequeue guard.
+    FU_PARENT_FILE=$(_find_entry_file "$FU_PARENT_ID") || FU_PARENT_FILE=""
+    if [ -z "$FU_PARENT_FILE" ]; then
+      echo "ERROR: Parent entry $FU_PARENT_ID not found" >&2
+      exit 1
+    fi
+    _load_queue_entry "$FU_PARENT_FILE"
+    FU_PARENT_STATUS="$_QE_STATUS"
+    FU_PARENT_BRIEF="${_QE_BRIEF_PATH:-}"
+    FU_PARENT_WO="${_QE_WORK_ORDER_ID:-}"
+    FU_PARENT_TYPE="${_QE_SESSION_TYPE:-}"
+    FU_PARENT_SOLO="${_QE_SOLO_MODE:-false}"
+    FU_PARENT_PUSH="${_QE_PUSH_ON_COMPLETE:-false}"
+    FU_PARENT_PROFILE="${_QE_PERMISSION_PROFILE:-build}"
+    FU_PARENT_PRIORITY="${_QE_PRIORITY:-0}"
+    FU_PARENT_PROJECT="${_QE_PROJECT:-}"
+    FU_PARENT_MS_NAME="${_QE_MILESTONE_NAME:-}"
+    FU_PARENT_MS_INDEX="${_QE_MILESTONE_INDEX:-0}"
+    FU_PARENT_MS_TOTAL="${_QE_MILESTONE_TOTAL:-0}"
+
+    # A follow-up of a follow-up points at the entry it actually extends, not
+    # at the head of the chain. Flattening would misreport the hold graph: the
+    # dequeue guard asks "is MY parent done", and that is the middle entry.
+    if [ -n "${_QE_FOLLOW_UP_OF:-}" ]; then
+      echo "Note: $FU_PARENT_ID is itself a follow-up of ${_QE_FOLLOW_UP_OF}; the new entry follows $FU_PARENT_ID, not the chain head" >&2
+    fi
+
+    # Inherit unless overridden.
+    [ -n "$FU_SESSION_TYPE" ]    || FU_SESSION_TYPE="$FU_PARENT_TYPE"
+    [ -n "$FU_PROJECT" ]         || FU_PROJECT="$FU_PARENT_PROJECT"
+    [ -n "$FU_MILESTONE_NAME" ]  || FU_MILESTONE_NAME="$FU_PARENT_MS_NAME"
+    [ -n "$FU_MILESTONE_INDEX" ] || FU_MILESTONE_INDEX="$FU_PARENT_MS_INDEX"
+    [ -n "$FU_MILESTONE_TOTAL" ] || FU_MILESTONE_TOTAL="$FU_PARENT_MS_TOTAL"
+    [ "$FU_PRIORITY_EXPLICIT" = true ] || FU_PRIORITY="$FU_PARENT_PRIORITY"
+
+    # Resolve and validate the source brief exactly as `add` does.
+    if [ ! -f "$FU_BRIEF" ] && [ -f "$REPO_ROOT/$FU_BRIEF" ]; then
+      FU_BRIEF="$REPO_ROOT/$FU_BRIEF"
+    fi
+    if [ ! -f "$FU_BRIEF" ]; then
+      echo "ERROR: Brief file not found: $FU_BRIEF" >&2
+      exit 1
+    fi
+    if [ ! -s "$FU_BRIEF" ]; then
+      echo "ERROR: Brief file is empty. Cannot queue an empty brief." >&2
+      exit 1
+    fi
+    _FU_BRIEF_REAL=$(cd "$(dirname "$FU_BRIEF")" && pwd)/$(basename "$FU_BRIEF")
+    case "$_FU_BRIEF_REAL" in
+      "$REPO_ROOT"/*) ;;
+      *)
+        echo "ERROR: Brief path must be inside the repo. Copy the file to .claude/.automation/briefs/ first." >&2
+        echo "  Resolved path: $_FU_BRIEF_REAL" >&2
+        exit 1
+        ;;
+    esac
+
+    # The brief is COPIED to briefs/followup-<parent-id>-<n>.md rather than
+    # referenced where it lies. The name is the human-readable half of the
+    # linkage — `ls briefs/` answers "what follows what" without parsing YAML —
+    # and the dequeue selector reads <n> back out of it to name the branch.
+    # Copying also means an operator editing their draft afterwards cannot
+    # change what a queued entry will run.
+    FU_BRIEFS_DIR="$REPO_ROOT/.claude/.automation/briefs"
+    if ! mkdir -p "$FU_BRIEFS_DIR"; then
+      echo "ERROR: Could not create the briefs directory: $FU_BRIEFS_DIR" >&2
+      exit 1
+    fi
+    # <n> counts existing follow-up briefs for this parent, not live entries:
+    # a pruned sibling must not free its number, or two briefs would collide.
+    FU_N=1
+    while [ -e "$FU_BRIEFS_DIR/followup-${FU_PARENT_ID}-${FU_N}.md" ]; do
+      FU_N=$(( FU_N + 1 ))
+    done
+    FU_BRIEF_DEST="$FU_BRIEFS_DIR/followup-${FU_PARENT_ID}-${FU_N}.md"
+    if ! cp "$FU_BRIEF" "$FU_BRIEF_DEST"; then
+      echo "ERROR: Could not write the follow-up brief: $FU_BRIEF_DEST" >&2
+      exit 1
+    fi
+
+    VALID_PHASES=$(get_phases_for_type "$FU_SESSION_TYPE" 2>/dev/null || true)
+    if [ -z "$VALID_PHASES" ]; then
+      rm -f "$FU_BRIEF_DEST" 2>/dev/null || true
+      echo "ERROR: Invalid session type: $FU_SESSION_TYPE" >&2
+      exit 1
+    fi
+
+    if ! acquire_queue_lock; then
+      rm -f "$FU_BRIEF_DEST" 2>/dev/null || true
+      echo "ERROR: Queue lock unavailable" >&2
+      exit 1
+    fi
+
+    _ensure_queue_dirs
+    # Argument 5 (branch) is empty ON PURPOSE. Whether this entry continues the
+    # parent's branch or starts a new one off main depends on whether that
+    # branch is still unmerged, which is only knowable when the follow-up
+    # reaches the front of the queue — so the dequeue selector resolves it
+    # there and writes the answer back (_followup_resolve_branch).
+    FU_ENTRY_ID=$(queue_enqueue "$FU_BRIEF_DEST" "$FU_SESSION_TYPE" "false" \
+      "$FU_PARENT_SOLO" "" "$FU_PARENT_WO" "$FU_PARENT_PUSH" "$FU_PRIORITY" \
+      "$FU_PARENT_PROFILE" "$FU_PROJECT" "$FU_MILESTONE_NAME" \
+      "$FU_MILESTONE_INDEX" "$FU_MILESTONE_TOTAL" "" "$FU_PARENT_ID")
+
+    if [ -z "$FU_ENTRY_ID" ]; then
+      release_queue_lock
+      rm -f "$FU_BRIEF_DEST" 2>/dev/null || true
+      echo "ERROR: Failed to create the follow-up entry" >&2
+      exit 1
+    fi
+
+    _FU_ENTRY_FILE="$(_queue_dir)/pending-review/${FU_ENTRY_ID}.yaml"
+    if ! validate_queue_entry "$_FU_ENTRY_FILE"; then
+      rm -f "$_FU_ENTRY_FILE" 2>/dev/null || true
+      _rebuild_queue_index
+      release_queue_lock
+      rm -f "$FU_BRIEF_DEST" 2>/dev/null || true
+      echo "ERROR: Queue entry validation failed — entry removed" >&2
+      exit 1
+    fi
+
+    FU_STATUS="pending-review"
+    if [ "$FU_AUTO_APPROVE" = true ]; then
+      queue_approve "$FU_ENTRY_ID"
+      FU_STATUS="approved"
+    fi
+
+    release_queue_lock
+
+    # What the operator will see happen, said at creation time rather than
+    # left to be discovered at dequeue. This is a FORECAST of the branch, not
+    # the stored value: the entry's `branch` is still empty and the selector
+    # re-asks the same question when the entry actually runs.
+    FU_BRANCH_FORECAST=$(_followup_resolve_branch "$FU_PARENT_ID" "$FU_N") || FU_BRANCH_FORECAST=""
+
+    review_log_append "entry-follow-up-created" "$FU_PARENT_WO" "$FU_ENTRY_ID" \
+      "Follow-up $FU_ENTRY_ID created for parent $FU_PARENT_ID ($FU_PARENT_STATUS) — brief followup-${FU_PARENT_ID}-${FU_N}.md, branch resolved at dequeue (forecast: ${FU_BRANCH_FORECAST:-unknown})" 2>/dev/null || true
+
+    if [ "$JSON_OUTPUT" = true ]; then
+      printf '{%s,%s,%s,%s,%s,%s,%s}\n' \
+        "$(_json_kv "entry_id" "$FU_ENTRY_ID")" \
+        "$(_json_kv "follow_up_of" "$FU_PARENT_ID")" \
+        "$(_json_kv "parent_status" "$FU_PARENT_STATUS")" \
+        "$(_json_kv "status" "$FU_STATUS")" \
+        "$(_json_kv "session_type" "$FU_SESSION_TYPE")" \
+        "$(_json_kv "brief_path" "$FU_BRIEF_DEST")" \
+        "$(_json_kv "branch_forecast" "$FU_BRANCH_FORECAST")"
+    else
+      printf 'entry_id:        %s\n' "$FU_ENTRY_ID"
+      printf 'follow_up_of:    %s (%s)\n' "$FU_PARENT_ID" "$FU_PARENT_STATUS"
+      printf 'status:          %s\n' "$FU_STATUS"
+      printf 'session_type:    %s\n' "$FU_SESSION_TYPE"
+      printf 'brief_path:      %s\n' "$FU_BRIEF_DEST"
+      printf 'branch:          resolved at dequeue (forecast: %s)\n' "${FU_BRANCH_FORECAST:-unknown}"
+      # The dequeue guard releases on `completed` and on `missing` only. A parent
+      # that reached `failed` — the discard destination too — therefore never
+      # releases on its own, and saying "held until it completes" of an entry that
+      # has stopped moving would be a lie the operator only discovers by waiting.
+      case "$FU_PARENT_STATUS" in
+        completed|missing) ;;
+        failed) printf 'order:           held indefinitely — %s is in failed/ and will not complete; discard this follow-up or re-queue the parent\n' "$FU_PARENT_ID" ;;
+        *) printf 'order:           held until %s completes\n' "$FU_PARENT_ID" ;;
+      esac
+    fi
+    ;;
+
+  # --- follow-up-draft: what the parent left undone, as a brief skeleton ---
+  # Queues nothing. It prints a draft to stdout for the operator to edit and
+  # hand back to `follow-up-entry --brief`, because the four sources below are
+  # evidence of a gap, not agreement that the gap is worth another session.
+  follow-up-draft)
+    if [ $# -lt 1 ]; then
+      echo "ERROR: follow-up-draft requires <parent-id>" >&2
+      exit 1
+    fi
+    FUD_PARENT_ID="$1"
+    shift
+    if [ $# -gt 0 ]; then
+      echo "ERROR: Unknown follow-up-draft option: $1" >&2
+      exit 1
+    fi
+
+    FUD_FILE=$(_find_entry_file "$FUD_PARENT_ID") || FUD_FILE=""
+    if [ -z "$FUD_FILE" ]; then
+      echo "ERROR: Entry $FUD_PARENT_ID not found" >&2
+      exit 1
+    fi
+    _load_queue_entry "$FUD_FILE"
+    FUD_STATUS="$_QE_STATUS"
+    FUD_BRIEF="${_QE_BRIEF_PATH:-}"
+    FUD_BRANCH="${_QE_BRANCH:-}"
+    FUD_ERROR_LOG="${_QE_ERROR_LOG:-}"
+    FUD_WO="${_QE_WORK_ORDER_ID:-}"
+
+    # --- source 1: the parent brief's own goal, as context ---
+    # First non-empty line under a `## Goal` / `### Goal` heading. A brief that
+    # does not use the template heading contributes nothing rather than
+    # guessing at some other paragraph.
+    FUD_GOAL=""
+    FUD_TITLE=""
+    if [ -n "$FUD_BRIEF" ] && [ -f "$FUD_BRIEF" ]; then
+      FUD_IN_GOAL=false
+      while IFS= read -r _FUD_LINE; do
+        case "$_FUD_LINE" in
+          "# "*)
+            [ -n "$FUD_TITLE" ] || FUD_TITLE="${_FUD_LINE#\# }"
+            FUD_IN_GOAL=false
+            ;;
+          "## Goal"*|"### Goal"*) FUD_IN_GOAL=true ;;
+          "#"*) FUD_IN_GOAL=false ;;
+          "")  ;;
+          *)
+            if [ "$FUD_IN_GOAL" = true ] && [ -z "$FUD_GOAL" ]; then
+              FUD_GOAL="$_FUD_LINE"
+              FUD_IN_GOAL=false
+            fi
+            ;;
+        esac
+      done < "$FUD_BRIEF"
+    fi
+    [ -n "$FUD_TITLE" ] || FUD_TITLE="Follow-up to $FUD_PARENT_ID"
+
+    # --- source 2: unticked checklist items in the parent brief ---
+    # `- [ ]` is the brief template's verification shape. An unticked box is
+    # the strongest single signal of unfinished work, and unlike the verdict
+    # file it exists even for an entry that never reached the review phase.
+    FUD_UNMET=""
+    FUD_UNMET_N=0
+    if [ -n "$FUD_BRIEF" ] && [ -f "$FUD_BRIEF" ]; then
+      while IFS= read -r _FUD_LINE; do
+        case "$_FUD_LINE" in
+          *"- [ ]"*)
+            FUD_UNMET="${FUD_UNMET}- [ ] ${_FUD_LINE#*- \[ \] }
+"
+            FUD_UNMET_N=$(( FUD_UNMET_N + 1 ))
+            ;;
+        esac
+      done < "$FUD_BRIEF"
+    fi
+
+    # --- source 3: criteria the verdict file did not record as met ---
+    # docs/ai/governance/criteria-verdicts/<session-id>.yaml, written by the
+    # completeness gate. PARTIAL and INCONCLUSIVE are the interesting verdicts:
+    # a criterion nobody could confirm is exactly what a follow-up is for. The
+    # file is keyed by session id, so an entry that never got a session record
+    # contributes nothing — which is correct, not a failure.
+    FUD_SID=$(_session_id_for_entry "$FUD_PARENT_ID") || FUD_SID=""
+    FUD_VERDICT_FILE=""
+    FUD_CRITERIA=""
+    FUD_CRITERIA_N=0
+    if [ -n "$FUD_SID" ]; then
+      _FUD_VF="$REPO_ROOT/docs/ai/governance/criteria-verdicts/${FUD_SID}.yaml"
+      if [ -f "$_FUD_VF" ]; then
+        FUD_VERDICT_FILE="$_FUD_VF"
+        # One pass, remembering the last `criterion:` seen. The verdict lines
+        # come AFTER their criterion text in the record's shape, so a criterion
+        # is emitted when a non-clean verdict names it — not when it is read.
+        _FUD_CRIT=""
+        while IFS= read -r _FUD_LINE; do
+          case "$_FUD_LINE" in
+            *"criterion:"*)
+              _FUD_CRIT="${_FUD_LINE#*criterion:}"
+              _FUD_CRIT="${_FUD_CRIT# }"
+              _FUD_CRIT="${_FUD_CRIT#\"}"; _FUD_CRIT="${_FUD_CRIT%\"}"
+              _FUD_CRIT="${_FUD_CRIT#\\\"}"; _FUD_CRIT="${_FUD_CRIT%\\\"}"
+              ;;
+            *"verdict: PARTIAL"*|*"verdict: INCONCLUSIVE"*|*"verdict: FAILED"*)
+              if [ -n "$_FUD_CRIT" ]; then
+                _FUD_V="${_FUD_LINE#*verdict: }"
+                FUD_CRITERIA="${FUD_CRITERIA}- [ ] ${_FUD_CRIT} (${_FUD_V} in ${FUD_SID})
+"
+                FUD_CRITERIA_N=$(( FUD_CRITERIA_N + 1 ))
+                _FUD_CRIT=""
+              fi
+              ;;
+          esac
+        done < "$_FUD_VF"
+      fi
+    fi
+
+    # --- source 4: escalations naming this entry ---
+    # An unresolved escalation is a gap the parent reported and could not close
+    # itself — brief 5's inert hook route is exactly this case.
+    FUD_ESCALATIONS=""
+    FUD_ESC_N=0
+    for _FUD_ESC in "$REPO_ROOT/.claude/.automation/escalations"/*.yaml; do
+      [ -f "$_FUD_ESC" ] || continue
+      grep -Fq "queue_entry_id: \"$FUD_PARENT_ID\"" "$_FUD_ESC" 2>/dev/null || continue
+      grep -Fqx '  resolved: false' "$_FUD_ESC" 2>/dev/null || continue
+      _FUD_ESC_TYPE=$(grep -F '  type:' "$_FUD_ESC" 2>/dev/null) || _FUD_ESC_TYPE=""
+      _FUD_ESC_TYPE="${_FUD_ESC_TYPE#*type:}"; _FUD_ESC_TYPE="${_FUD_ESC_TYPE# }"
+      _FUD_ESC_TYPE="${_FUD_ESC_TYPE#\"}"; _FUD_ESC_TYPE="${_FUD_ESC_TYPE%\"}"
+      FUD_ESCALATIONS="${FUD_ESCALATIONS}- [ ] Resolve escalation ${_FUD_ESC##*/} (${_FUD_ESC_TYPE:-unknown}, unresolved)
+"
+      FUD_ESC_N=$(( FUD_ESC_N + 1 ))
+    done
+
+    FUD_TOTAL=$(( FUD_UNMET_N + FUD_CRITERIA_N + FUD_ESC_N ))
+
+    if [ "$JSON_OUTPUT" = true ]; then
+      printf '{%s,%s,%s,%s,%s,%s,%s,%s,%s}\n' \
+        "$(_json_kv "parent_id" "$FUD_PARENT_ID")" \
+        "$(_json_kv "parent_status" "$FUD_STATUS")" \
+        "$(_json_kv "parent_brief" "$FUD_BRIEF")" \
+        "$(_json_kv "parent_goal" "$FUD_GOAL")" \
+        "$(_json_kv "verdict_file" "$FUD_VERDICT_FILE")" \
+        "$(_json_kv_raw "unmet_checklist" "$FUD_UNMET_N")" \
+        "$(_json_kv_raw "open_criteria" "$FUD_CRITERIA_N")" \
+        "$(_json_kv_raw "open_escalations" "$FUD_ESC_N")" \
+        "$(_json_kv "draft" "$(printf '%s%s%s' "$FUD_UNMET" "$FUD_CRITERIA" "$FUD_ESCALATIONS")")"
+    else
+      printf '# Follow-up: %s\n\n' "$FUD_TITLE"
+      printf 'Drafted from entry `%s` (%s). Nothing is queued: edit this, then\n' \
+        "$FUD_PARENT_ID" "$FUD_STATUS"
+      printf '`queue-cli.sh follow-up-entry %s --brief <this file>`.\n\n' "$FUD_PARENT_ID"
+
+      printf '## Parent task\n\n'
+      printf -- '- Entry: `%s` (%s)\n' "$FUD_PARENT_ID" "$FUD_STATUS"
+      printf -- '- Branch: `%s`\n' "${FUD_BRANCH:-unresolved}"
+      printf -- '- Brief: `%s`\n' "${FUD_BRIEF:-none}"
+      [ -n "$FUD_WO" ] && printf -- '- Work order: `%s`\n' "$FUD_WO"
+      [ -n "$FUD_SID" ] && printf -- '- Session: `%s`\n' "$FUD_SID"
+      [ -n "$FUD_ERROR_LOG" ] && printf -- '- Recorded failure: %s\n' "$FUD_ERROR_LOG"
+      printf '\n'
+      if [ -n "$FUD_GOAL" ]; then
+        printf 'Its goal was: %s\n\n' "$FUD_GOAL"
+      fi
+
+      printf '## Goal\n\n'
+      if [ "$FUD_TOTAL" -eq 0 ]; then
+        printf '_Nothing was detected as left undone — no unticked checklist item, no\n'
+        printf 'open criterion and no unresolved escalation names this entry. Say here\n'
+        printf 'what this follow-up is for, or do not queue it._\n\n'
+      else
+        printf '_Replace this with one sentence. The %s item(s) below are evidence of a\n' "$FUD_TOTAL"
+        printf 'gap, not a goal — delete the ones that do not deserve a session._\n\n'
+      fi
+
+      printf '## Verify first\n\n'
+      if [ "$FUD_UNMET_N" -gt 0 ]; then
+        printf '**Unticked in the parent brief (%s):**\n\n' "$FUD_UNMET_N"
+        printf '%s\n' "$FUD_UNMET"
+      fi
+      if [ "$FUD_CRITERIA_N" -gt 0 ]; then
+        printf '**Not confirmed met by the completeness gate (%s):**\n\n' "$FUD_CRITERIA_N"
+        printf '%s\n' "$FUD_CRITERIA"
+      fi
+      if [ "$FUD_ESC_N" -gt 0 ]; then
+        printf '**Unresolved escalations (%s):**\n\n' "$FUD_ESC_N"
+        printf '%s\n' "$FUD_ESCALATIONS"
+      fi
+      if [ "$FUD_TOTAL" -eq 0 ]; then
+        printf -- '- [ ] _Add the checks this follow-up must pass._\n\n'
+      fi
+
+      printf '## Scope\n\n'
+      printf '_List the files this follow-up may touch. The parent'"'"'s scope is a\n'
+      printf 'starting point, not an inheritance — a follow-up that needs the same\n'
+      printf 'breadth as its parent is probably a new task._\n\n'
+
+      printf '### Task Contract\n\n'
+      printf '```yaml\n'
+      printf 'artifact: ""\n'
+      printf 'constraints: []\n'
+      printf 'lifecycle: task-scoped\n'
+      printf 'scope_files: []\n'
+      printf '```\n'
     fi
     ;;
 

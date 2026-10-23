@@ -93,6 +93,17 @@ If the operator has already provided this context in their opening message, do n
    - Includes an integration test section (see `docs/ai/prompts/prompt-b-product-build.md` § Integration Test Requirement)
 4. If the operator declines, proceed normally but add a risk note: "This is an incremental fix on top of prior fixes. Higher risk of cascading regressions."
 
+**Follow-up detection (Decision t-0055 clause 14):** A follow-up is not a fix-on-fix. Fix-on-fix means the earlier work was *wrong*; a follow-up means it was *right and incomplete* — an extension, or a gap the earlier brief itself recorded. Signals include: "now add...", "the same brief left X undone", "finish what entry `<id>` started", naming an unticked verification item, or naming an unresolved escalation. When detected:
+
+1. Ask for the parent **entry id**. A follow-up without one is just a new task — the linkage is the whole point, and it cannot be added later (`follow_up_of` is not operator-editable).
+2. Run `.claude/.automation/queue-cli.sh follow-up-draft <parent-id>` and read the result. It reports what the parent actually left undone: unticked checklist items, criteria the completeness gate did not confirm, unresolved escalations, and the parent's goal. Ground the brief in that output rather than in the operator's recollection of it — the operator is describing what they remember, the draft is what the record says.
+3. Write the brief normally. A follow-up brief is an ordinary brief: its own Goal, Scope, Verification and `### Task Contract`. Do **not** inherit the parent's scope wholesale — a follow-up needing the same breadth as its parent is a new task, not an extension.
+4. Tell the operator to queue it with `follow-up-entry`, not `add`:
+   `queue-cli.sh follow-up-entry <parent-id> --brief <path>`
+   This is what writes the linkage, names the brief `followup-<parent-id>-<n>.md`, inherits the parent's project/milestone/work order, and lets the dequeue selector decide the branch and the ordering. `add` produces an unlinked entry that can overtake its parent.
+
+If the draft reports nothing left undone, say so plainly before writing anything: the record shows the parent finished what it claimed. The task may still be worth doing, but it is new work rather than a follow-up, and should be queued with `add`.
+
 **User Review consideration:** If the task involves user-facing output (UI, documentation, onboarding flows, error messages), ask whether User Review tiers should be included in the brief. Explain briefly: "This task touches user-facing output. Want to include User Review (persona simulation) in the brief? I can suggest tiers and scenarios." The operator may decline.
 
 #### Step 2 — Dispatch Specialists

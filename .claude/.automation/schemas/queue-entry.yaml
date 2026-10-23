@@ -1,12 +1,17 @@
 # Queue Entry Schema — defines a single automation task in the queue.
 # State machine: pending-review → approved → running → completed/failed/review/blocked
+#                running → stopped → approved (operator stop/resume, t-0055)
 
 entry:
   id: ""                    # unique entry identifier (UUID or timestamp-based)
-  status: pending-review    # pending-review | approved | running | completed | failed | review | blocked
+  status: pending-review    # pending-review | approved | running | completed | failed | review | blocked | stopped
   priority: 0               # lower = higher priority; 0 = default
   session_type: ""          # Decision 0014 enum (18 types, not extended)
-  branch: ""                # target branch name
+  branch: ""                # target branch name. A follow-up entry (see follow_up_of) is created
+                            # with this EMPTY on purpose: whether it continues its parent's branch
+                            # or starts a new one depends on whether that branch is still unmerged,
+                            # which is only knowable when the follow-up actually reaches the front
+                            # of the queue. The dequeue selector resolves and persists it there.
   brief_path: ""            # path to task brief (if applicable)
   prompt: ""                # assembled prompt for claude -p (written at dequeue, not creation)
   last_prompt: ""           # preserved prompt from previous attempt (diagnostic — written on retry/failure)
@@ -18,6 +23,21 @@ entry:
   work_order_id: ""         # (v1.1.0) parent work order ID (optional)
   push_on_complete: false   # true = push branch to origin after session completes (opt-in)
   scope_classification: ""  # briefed | unbriefed-in-scope | out-of-scope (schema contract — populated by runner/queue-manager implementations at commit time when scope deviates)
+  stopped_mode: ""          # (v1.7.0) graceful | forced — how an operator stop ended the session (set on stop, kept for the resume message)
+  resume: false             # (v1.7.0) true = resume the recorded Claude session instead of launching a fresh one (set by resume-entry, cleared at dequeue)
+  held_by: ""               # (v1.8.0) id of the stopped entry holding this one back. Set and cleared
+                             # by the dequeue tick, never by the operator — the hold is derived state.
+                             # A non-empty value makes the entry invisible to the dequeue selector.
+  independent: false        # (v1.8.0) true = exempt from holds entirely. Operator opt-out for work
+                             # known to be unrelated to anything that might stop.
+  follow_up_of: ""          # (v1.8.0 field; populated from v1.9.0) id of the entry this one
+                             # follows up on (t-0055 clause 14). Written by `follow-up-entry` and
+                             # never edited afterwards — re-parenting an entry would invalidate the
+                             # generated brief filename, so it is not in queue_edit's allowlist.
+                             # The link is a single forward pointer: the parent carries no list of
+                             # children, and `follow_ups` in `show --json` is a scan, not a field.
+                             # Read by the hold release predicate (a follow-up is never released
+                             # from its parent's hold) and by the dequeue follow-up guard.
   project: ""               # (v1.4.0) free-text project name; overrides work order value (optional, standalone entries)
   milestone:                # (v1.4.0) milestone override; entry wins over work order (optional)
     name: ""                # milestone label

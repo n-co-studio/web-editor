@@ -943,6 +943,22 @@ except:
   fi
 }
 
+# --- Portable epoch seconds to ISO 8601 (UTC) ---
+# BSD/macOS date takes -r, GNU date takes -d @<epoch>; neither accepts the
+# other's form. Echoes the input unchanged when both fail, so a caller
+# formatting a timestamp for display always gets something printable.
+# Used by the operator-notes delivery paths (Decision t-0055 clause 13), where
+# a note's send time is carried by the <epoch> prefix of its filename.
+epoch_to_iso() {
+  local epoch="$1"
+  case "$epoch" in
+    ''|*[!0-9]*) printf '%s' "$epoch"; return 0 ;;
+  esac
+  date -u -r "$epoch" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+    || date -u -d "@$epoch" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+    || printf '%s' "$epoch"
+}
+
 # --- Register session in the session registry ---
 # Writes a YAML file to .claude/.state/sessions/{session-id}.yaml.
 # Called at session init (from init_phase in _phase-helper.sh).
@@ -971,12 +987,29 @@ register_session() {
   local sessions_dir="$repo_root/.claude/.state/sessions"
   mkdir -p "$sessions_dir" 2>/dev/null || true
 
+  # Preserve operator-control fields already on the record (Decision t-0055).
+  # runner.sh writes them before launching `claude -p`; this function then runs
+  # inside the launched session's init_phase. The write below replaces the whole
+  # file, so without this the control fields would be dropped the moment the
+  # session it describes started. Only bites when the runner and the session
+  # resolve _REPO_OS_ROOT to the same path (no worktree isolation) — under
+  # worktree isolation the runner's record is the main repo's and is untouched
+  # here — but the cost of being unconditional is one grep.
+  local preserved_control=""
+  if [ -f "$sessions_dir/${sid}.yaml" ]; then
+    preserved_control=$(grep -E '^(entry_id|work_order_id|claude_session_id|child_pid|worktree|control_state):' \
+      "$sessions_dir/${sid}.yaml" 2>/dev/null || true)
+  fi
+
   # Write session file (add worktree_path for full worktree sessions — Decision 0030)
   {
     printf 'session_id: %s\nsession_type: %s\nbranch: %s\npid: %s\nstarted_at: %s\n' \
       "$sid" "$stype" "$branch" "$pid" "$started_at"
     if is_full_worktree_session; then
       printf 'worktree_path: %s\n' "$PWD"
+    fi
+    if [ -n "$preserved_control" ]; then
+      printf '%s\n' "$preserved_control"
     fi
   } > "$sessions_dir/${sid}.yaml" 2>/dev/null || true
 
@@ -996,6 +1029,192 @@ register_session() {
     other_type=$(grep '^session_type: ' "$overlap_file" 2>/dev/null | sed 's/^session_type: *//')
     echo "Warning: Session $other_sid (type: $other_type) is also active on branch '$branch'. Concurrent edits may cause conflicts." >&2
   done
+}
+
+# --- Operator session control record (Decision t-0055) ---
+# The control half of the session registry: the fields runner.sh writes so the
+# operator (and Massimo's Task details header) can see which entry a session is
+# running, which claude session id it can be resumed with, which process is
+# running it, and whether it is running, stopping or stopped.
+#
+# Resolved against the MAIN repo root, not _REPO_OS_ROOT. The runner writes the
+# record from the main repo while the session it describes runs in a worktree,
+# where _REPO_OS_ROOT is the worktree root (Decision 0028 two-root divergence).
+# Routing both parties through get_main_repo_root() means one record per session
+# id, readable from either side — the same treatment as handoff bundles, the
+# daemon queue, and the control directory below.
+#
+# Arguments:
+#   $1 — session id (required)
+# Output: absolute path to the record on stdout
+session_record_path() {
+  local sid="${1:-}"
+  [ -n "$sid" ] || return 1
+  # Sanitize: strip path components to prevent directory traversal
+  sid="${sid//\//_}"
+  sid="${sid//\.\./_}"
+  printf '%s/.claude/.state/sessions/%s.yaml\n' "$(get_main_repo_root)" "$sid"
+}
+
+# --- Merge-write fields into a session record ---
+# Replaces the named fields and preserves every other line, so the base fields
+# written by register_session() and any field this version does not know about
+# survive. Creates the record when absent.
+#
+# Arguments:
+#   $1    — session id
+#   $2... — one or more `name=value` pairs. Names must be [a-zA-Z0-9_].
+#           Newlines in a value are collapsed to spaces (a record is line-based).
+# Returns: 0 on success, 1 on bad arguments or write failure.
+session_record_set() {
+  local sid="${1:-}"
+  shift 2>/dev/null || true
+  [ -n "$sid" ] || return 1
+  [ "$#" -gt 0 ] || return 1
+
+  local record
+  record="$(session_record_path "$sid")" || return 1
+  [ -n "$record" ] || return 1
+  mkdir -p "$(dirname "$record")" 2>/dev/null || return 1
+
+  # Space-padded list of the field names being replaced, so the copy loop below
+  # can test membership with a substring match (no associative arrays — bash 3.2).
+  local names=" "
+  local kv name
+  for kv in "$@"; do
+    # A pair with no `=` is not a clear — `${kv#*=}` would return the name as
+    # the value and write `child_pid: child_pid`. Skip it rather than guess.
+    case "$kv" in
+      *=*) ;;
+      *) continue ;;
+    esac
+    name="${kv%%=*}"
+    case "$name" in
+      ''|*[!a-zA-Z0-9_]*) continue ;;
+    esac
+    names="${names}${name} "
+  done
+  [ "$names" != " " ] || return 1
+
+  local tmp="${record}.tmp.$$"
+  : > "$tmp" 2>/dev/null || return 1
+
+  local line key
+  if [ -f "$record" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      key="${line%%:*}"
+      # Not a plain `name: value` line (blank, comment, nested) — keep verbatim.
+      # Also keeps $key free of glob metacharacters before the match below.
+      case "$key" in
+        ''|*[!a-zA-Z0-9_]*)
+          printf '%s\n' "$line" >> "$tmp"
+          continue
+          ;;
+      esac
+      case "$names" in
+        *" $key "*) continue ;;
+      esac
+      printf '%s\n' "$line" >> "$tmp"
+    done < "$record"
+  fi
+
+  local value
+  for kv in "$@"; do
+    case "$kv" in
+      *=*) ;;
+      *) continue ;;
+    esac
+    name="${kv%%=*}"
+    case "$name" in
+      ''|*[!a-zA-Z0-9_]*) continue ;;
+    esac
+    value="${kv#*=}"
+    value="${value//$'\n'/ }"
+    value="${value//$'\r'/ }"
+    if [ -n "$value" ]; then
+      printf '%s: %s\n' "$name" "$value" >> "$tmp"
+    else
+      # No trailing space on a cleared field — `child_pid:` reads as empty to a
+      # YAML parser and to the repo's line-oriented readers alike.
+      printf '%s:\n' "$name" >> "$tmp"
+    fi
+  done
+
+  if ! mv -f "$tmp" "$record" 2>/dev/null; then
+    rm -f "$tmp" 2>/dev/null || true
+    return 1
+  fi
+}
+
+# --- Read one field from a session record ---
+# A missing record and a missing field are both "empty", not errors: records
+# written before a field existed must still load.
+#
+# Arguments:
+#   $1 — session id
+#   $2 — field name
+# Output: the value on stdout (empty when absent)
+# Returns: 0 unless the arguments are unusable
+session_record_get() {
+  local sid="${1:-}"
+  local field="${2:-}"
+  [ -n "$sid" ] && [ -n "$field" ] || return 1
+  case "$field" in
+    *[!a-zA-Z0-9_]*) return 1 ;;
+  esac
+
+  local record
+  record="$(session_record_path "$sid")" || return 1
+  [ -f "$record" ] || return 0
+
+  local line
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      "$field":*)
+        line="${line#*:}"
+        line="${line# }"
+        printf '%s\n' "$line"
+        return 0
+        ;;
+    esac
+  done < "$record"
+  return 0
+}
+
+# --- Per-entry control directory (Decision t-0055) ---
+# `.claude/.state/control/<entry-id>/` — where the operator's control flags for
+# one queue entry live (`STOP`, `FORCE`, and a `notes/` subdirectory). Flags are
+# files rather than signals so that one set while nothing is watching is still
+# honoured when something starts, matching the existing daemon-wide HALT and
+# FORCE-HALT flags.
+#
+# Resolved against the MAIN repo root for the same reason as the session record
+# above: the operator writes a flag from the main repo and the session that must
+# observe it is running inside a worktree.
+#
+# Arguments:
+#   $1 — entry id (required)
+# Output: absolute path on stdout. Does NOT create the directory.
+get_control_dir() {
+  local entry_id="${1:-}"
+  [ -n "$entry_id" ] || return 1
+  # Sanitize: strip path components to prevent directory traversal
+  entry_id="${entry_id//\//_}"
+  entry_id="${entry_id//\.\./_}"
+  printf '%s/.claude/.state/control/%s\n' "$(get_main_repo_root)" "$entry_id"
+}
+
+# --- Create the control directory for an entry ---
+# Arguments:
+#   $1 — entry id
+# Output: the directory path on stdout
+# Returns: 0 on success, 1 on bad argument or mkdir failure
+ensure_control_dir() {
+  local dir
+  dir="$(get_control_dir "${1:-}")" || return 1
+  [ -n "$dir" ] || return 1
+  mkdir -p "$dir" 2>/dev/null || return 1
+  printf '%s\n' "$dir"
 }
 
 # --- Sweep stale session registry entries ---

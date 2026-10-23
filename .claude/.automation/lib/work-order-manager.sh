@@ -189,7 +189,7 @@ _find_entry_file() {
   local qdir
   qdir=$(_queue_dir)
   local status
-  for status in pending-review approved running completed failed review blocked; do
+  for status in pending-review approved running completed failed review blocked stopped; do
     local f="$qdir/$status/${entry_id}.yaml"
     if [ -f "$f" ]; then
       printf '%s' "$f"
@@ -432,6 +432,13 @@ wo_check_completion() {
         fi
         ;;
       review|blocked) has_escalation=true; all_completed=false ;;
+      # Operator stop (Decision t-0055 clause 6). Neither completed nor failed
+      # nor escalated: the entry is paused and resumable, so the work order stays
+      # `open` for as long as the operator leaves it stopped. Listed explicitly
+      # rather than left to the catch-all because "stays open indefinitely" reads
+      # like a stuck work order unless it says it is deliberate. Brief 4's
+      # discard path is what makes a stopped entry terminal.
+      stopped) all_completed=false ;;
       *) all_completed=false ;;
     esac
   done

@@ -2,7 +2,7 @@
 # Type taxonomy covers all runner failure modes and scope deviations
 # requiring human intervention.
 #
-# 10 escalation types:
+# 11 escalation types:
 #   gate-failure          — governance gate blocked commit/push
 #   governance-block      — hook enforcement prevented action
 #   phase-tag-escalation  — phase tag was 'operator' at exit
@@ -13,11 +13,14 @@
 #   structural-change     — spec-level or architectural change not in brief
 #   scope-deviation       — change outside brief scope (classified by scope_classification)
 #   stale-branch          — branch left unsealed after crash or orphan detection
+#   parent-discarded      — the entry was held behind an entry the operator discarded (t-0055 clause 9).
+#                           The hold is released, but the work it was queued behind never landed, so
+#                           its scope needs re-checking before it runs.
 
 escalation:
   id: ""                    # unique escalation identifier
   queue_entry_id: ""        # references the originating queue entry
-  type: ""                  # gate-failure | governance-block | phase-tag-escalation | ambiguity | scope-exceeded | dependency-missing | security-risk | structural-change | scope-deviation | stale-branch
+  type: ""                  # gate-failure | governance-block | phase-tag-escalation | ambiguity | scope-exceeded | dependency-missing | security-risk | structural-change | scope-deviation | stale-branch | parent-discarded
   severity: ""              # blocking | advisory
   phase_at_exit: ""         # phase when escalation occurred
   tag_at_exit: ""           # phase automation tag (agent/operator/both) at escalation

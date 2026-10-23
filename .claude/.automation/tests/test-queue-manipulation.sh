@@ -420,6 +420,148 @@ _write_raw_entry() {
   fi
 )
 
+# --- reopen-entry rescues an entry from failed/, not just review/ ---
+# `recover-entry` rescues a stale `running` entry by writing it to `failed/` and
+# leaving the parent work order `open`. That pair had NO exit: `reopen-entry`
+# demanded review/, and `reopen-wo` refuses a work order that is not escalated
+# or failed. The capability existed — reopen-wo already resets blocked|failed
+# siblings — it was just unreachable for one entry whose work order was healthy.
+# Hit live on 2026-10-23 after the daemon died with its parent process, leaving
+# close-pipeline-controls-1 unrecoverable through the sanctioned surface.
+#
+# Fixture is written in the on-disk formats for the same reason the reopen-wo
+# case above does it: driving enqueue -> approve -> dequeue -> fail inside the
+# sandbox costs more scaffolding than the guard it protects. Every assignment
+# carries `|| true` because this suite runs under `set -e`.
+_re_fixture() {
+  # $1 = entry id, $2 = directory (review|failed), $3 = work-order status
+  _RE_Q="$ADV_SANDBOX/.claude/.automation/queue"
+  mkdir -p "$_RE_Q/review" "$_RE_Q/failed" "$_RE_Q/approved" "$_RE_Q/work-orders"
+  {
+    printf 'entry:\n'
+    printf '  id: "%s"\n' "$1"
+    printf '  status: "%s"\n' "$2"
+    printf '  priority: "0"\n'
+    printf '  session_type: "taskgroup"\n'
+    printf '  branch: "feature/re-probe"\n'
+    printf '  brief_path: ".claude/.automation/briefs/re-probe.md"\n'
+    printf '  prompt: ""\n'
+    printf '  last_prompt: "the prompt the dead session ran"\n'
+    printf '  auto_mode: "false"\n'
+    printf '  solo_mode: "true"\n'
+    printf '  push_on_complete: "false"\n'
+    printf '  retry_count: "3"\n'
+    printf '  max_retries: "3"\n'
+    printf '  error_log: "failed:stale-running-recovered"\n'
+    printf '  work_order_id: "re-wo-1"\n'
+    printf '  created_at: "2026-10-23T00:00:00Z"\n'
+    printf '  updated_at: "2026-10-23T00:00:00Z"\n'
+  } > "$_RE_Q/$2/$1.yaml"
+  {
+    printf 'work_order:\n'
+    printf '  id: re-wo-1\n'
+    printf '  type: group\n'
+    printf '  label: feature/re-probe\n'
+    printf '  entry_ids:\n'
+    printf '  - %s\n' "$1"
+    printf '  status: %s\n' "$3"
+    printf '  created_at: 2026-10-23T00:00:00Z\n'
+    printf '  updated_at: 2026-10-23T00:00:00Z\n'
+    printf '  completed_at: \n'
+  } > "$_RE_Q/work-orders/re-wo-1.yaml"
+  cp "$_ADV_REAL_REPO/.claude/.automation/queue-cli.sh" "$ADV_SANDBOX/.claude/.automation/" 2>/dev/null || true
+}
+
+# The case this fix exists for: failed/ entry, healthy (open) work order.
+(
+  setup_adversarial_sandbox
+  trap 'teardown_adversarial_sandbox' EXIT
+  _source_queue_libs
+  source "$ADV_SANDBOX/.claude/.automation/lib/work-order-manager.sh" 2>/dev/null || true
+  _re_fixture "re-failed-1" "failed" "open"
+  ( cd "$ADV_SANDBOX" && bash "$ADV_SANDBOX/.claude/.automation/queue-cli.sh" reopen-entry "re-failed-1" ) > /dev/null 2>&1 || true
+
+  if [ -f "$_RE_Q/approved/re-failed-1.yaml" ]; then
+    _tap_pass "[HIGH] reopen-entry rescues a failed/ entry under an open work order"
+  else
+    _RE_WHERE=$(ls "$_RE_Q"/*/"re-failed-1".yaml 2>/dev/null | head -1) || _RE_WHERE=""
+    _tap_fail "[HIGH] reopen-entry rescues a failed/ entry under an open work order" \
+      "entry still at: ${_RE_WHERE:-(not found)}"
+  fi
+
+  # It must MOVE, not copy: an entry present in two directories is the state
+  # `_repair_status_mismatches` exists to fight.
+  if [ ! -f "$_RE_Q/failed/re-failed-1.yaml" ]; then
+    _tap_pass "[MEDIUM] reopen-entry removes the entry from failed/"
+  else
+    _tap_fail "[MEDIUM] reopen-entry removes the entry from failed/" "still present in failed/"
+  fi
+
+  # The retry budget must come back, else the entry fails on its first stumble.
+  _RE_RC=$(grep '^  retry_count:' "$_RE_Q/approved/re-failed-1.yaml" 2>/dev/null | head -1) || _RE_RC=""
+  case "$_RE_RC" in
+    *'"0"'*) _tap_pass "[MEDIUM] reopen-entry from failed/ restores the retry budget" ;;
+    *)       _tap_fail "[MEDIUM] reopen-entry from failed/ restores the retry budget" "got: ${_RE_RC:-(absent)}" ;;
+  esac
+
+  # The failure reason must survive the reopen. error_log is cleared on the way
+  # back to approved/, so without this the operator retries blind and, if the
+  # cause still stands, lands back in failed/ with no trail. QA deleted the
+  # logging call and nothing went red, which is why this assertion exists.
+  _RE_LOG="$_RE_Q/review-log-$(date -u +%Y-%m-%d).jsonl"
+  if grep -q 'entry-reopen-reason' "$_RE_LOG" 2>/dev/null \
+     && grep -q 'failed:stale-running-recovered' "$_RE_LOG" 2>/dev/null; then
+    _tap_pass "[MEDIUM] reopen-entry records the prior failure reason before clearing it"
+  else
+    _tap_fail "[MEDIUM] reopen-entry records the prior failure reason before clearing it" \
+      "no entry-reopen-reason carrying the prior error_log in ${_RE_LOG##*/}"
+  fi
+
+  # last_prompt must survive: in failed/ the prompt field is already empty and
+  # the text the dead session ran lives only in last_prompt.
+  if grep -q 'the prompt the dead session ran' "$_RE_Q/approved/re-failed-1.yaml" 2>/dev/null; then
+    _tap_pass "[MEDIUM] reopen-entry from failed/ preserves last_prompt"
+  else
+    _tap_fail "[MEDIUM] reopen-entry from failed/ preserves last_prompt" "last_prompt lost"
+  fi
+)
+
+# review/ must keep working — this fix widens the lookup, it does not move it.
+(
+  setup_adversarial_sandbox
+  trap 'teardown_adversarial_sandbox' EXIT
+  _source_queue_libs
+  source "$ADV_SANDBOX/.claude/.automation/lib/work-order-manager.sh" 2>/dev/null || true
+  _re_fixture "re-review-1" "review" "escalated"
+  ( cd "$ADV_SANDBOX" && bash "$ADV_SANDBOX/.claude/.automation/queue-cli.sh" reopen-entry "re-review-1" ) > /dev/null 2>&1 || true
+
+  if [ -f "$_RE_Q/approved/re-review-1.yaml" ]; then
+    _tap_pass "[HIGH] reopen-entry still rescues a review/ entry"
+  else
+    _RE_WHERE=$(ls "$_RE_Q"/*/"re-review-1".yaml 2>/dev/null | head -1) || _RE_WHERE=""
+    _tap_fail "[HIGH] reopen-entry still rescues a review/ entry" "entry still at: ${_RE_WHERE:-(not found)}"
+  fi
+)
+
+# An entry that is in neither directory must still be refused, and the message
+# must name both so the operator is not sent looking in one place.
+(
+  setup_adversarial_sandbox
+  trap 'teardown_adversarial_sandbox' EXIT
+  _source_queue_libs
+  _re_fixture "re-absent-1" "failed" "open"
+  rm -f "$_RE_Q/failed/re-absent-1.yaml" 2>/dev/null || true
+  _RE_OUT=$( cd "$ADV_SANDBOX" && bash "$ADV_SANDBOX/.claude/.automation/queue-cli.sh" reopen-entry "re-absent-1" 2>&1 ) || true
+
+  case "$_RE_OUT" in
+    *"is not in review/ or failed/"*)
+      _tap_pass "[LOW] reopen-entry refuses an absent entry and names both directories" ;;
+    *)
+      _tap_fail "[LOW] reopen-entry refuses an absent entry and names both directories" \
+        "got: $(printf '%s' "$_RE_OUT" | head -1)" ;;
+  esac
+)
+
 # --- Accumulate tally from subshells ---
 # Every case ran in its own ( ) subshell; the parent counters are still zero.
 # Read the tally file to set the real counts. Fail closed: a missing or

@@ -4,6 +4,7 @@
 # Decision 0017 — Operator Automation Layer.
 #
 # State machine: pending-review → approved → running → completed/failed/review/blocked
+#                running → stopped → approved (operator stop/resume, t-0055)
 # All transitions use atomic write-to-tmp-then-mv pattern.
 # queue-index.json is rebuilt from directory state on every transition.
 #
@@ -26,7 +27,7 @@ _ensure_queue_dirs() {
   local qdir
   qdir=$(_queue_dir)
   local status
-  for status in pending-review approved running completed failed review blocked; do
+  for status in pending-review approved running completed failed review blocked stopped; do
     mkdir -p "$qdir/$status" 2>/dev/null || true
   done
 }
@@ -38,6 +39,10 @@ _QE_MAX_RETRIES="" _QE_ERROR_LOG="" _QE_WORK_ORDER_ID="" _QE_CREATED_AT=""
 _QE_UPDATED_AT="" _QE_COMPLETED_AT="" _QE_PERMISSION_PROFILE="" _QE_MODEL=""
 # (v1.4.0) project / milestone — optional; resolved against work order at read time
 _QE_PROJECT="" _QE_MILESTONE_NAME="" _QE_MILESTONE_INDEX="" _QE_MILESTONE_TOTAL=""
+# (v1.7.0) operator stop/resume — t-0055
+_QE_STOPPED_MODE="" _QE_RESUME=""
+# (v1.8.0) hold the line behind a stopped entry — t-0055 clauses 9-11
+_QE_HELD_BY="" _QE_INDEPENDENT="" _QE_FOLLOW_UP_OF=""
 
 # --- Strip surrounding double quotes and unescape a YAML scalar value ---
 # Handles both quoted ("value") and unquoted (value) formats for backward compat.
@@ -98,6 +103,8 @@ _load_queue_entry() {
   _QE_UPDATED_AT="" _QE_COMPLETED_AT=""
   _QE_PROJECT="" _QE_MILESTONE_NAME="" _QE_MILESTONE_INDEX="" _QE_MILESTONE_TOTAL=""
   _QE_REVERIFIED="" _QE_OVERLAP_FILES=""
+  _QE_STOPPED_MODE="" _QE_RESUME=""
+  _QE_HELD_BY="" _QE_INDEPENDENT="" _QE_FOLLOW_UP_OF=""
   [ -f "$entry_file" ] || return 1
 
   _QE_PERMISSION_PROFILE=""
@@ -151,6 +158,11 @@ ${_line#    }"
       "  max_retries: "*)  _QE_MAX_RETRIES="${_line#  max_retries: }" ;;
       "  error_log: "*)    _QE_ERROR_LOG="${_line#  error_log: }" ;;
       "  work_order_id: "*) _QE_WORK_ORDER_ID="${_line#  work_order_id: }" ;;
+      "  stopped_mode: "*) _QE_STOPPED_MODE="${_line#  stopped_mode: }" ;;
+      "  resume: "*)       _QE_RESUME="${_line#  resume: }" ;;
+      "  held_by: "*)      _QE_HELD_BY="${_line#  held_by: }" ;;
+      "  independent: "*)  _QE_INDEPENDENT="${_line#  independent: }" ;;
+      "  follow_up_of: "*) _QE_FOLLOW_UP_OF="${_line#  follow_up_of: }" ;;
       "  project: "*)      _QE_PROJECT="${_line#  project: }" ;;
       "  milestone:")      _in_milestone=true ;;
       "  created_at: "*)   _QE_CREATED_AT="${_line#  created_at: }" ;;
@@ -188,6 +200,11 @@ ${_line#    }"
   _QE_MAX_RETRIES=$(_strip_quotes "$_QE_MAX_RETRIES")
   _QE_ERROR_LOG=$(_strip_quotes "$_QE_ERROR_LOG")
   _QE_WORK_ORDER_ID=$(_strip_quotes "$_QE_WORK_ORDER_ID")
+  _QE_STOPPED_MODE=$(_strip_quotes "$_QE_STOPPED_MODE")
+  _QE_RESUME=$(_strip_quotes "$_QE_RESUME")
+  _QE_HELD_BY=$(_strip_quotes "$_QE_HELD_BY")
+  _QE_INDEPENDENT=$(_strip_quotes "$_QE_INDEPENDENT")
+  _QE_FOLLOW_UP_OF=$(_strip_quotes "$_QE_FOLLOW_UP_OF")
   _QE_PROJECT=$(_strip_quotes "$_QE_PROJECT")
   _QE_MILESTONE_NAME=$(_strip_quotes "$_QE_MILESTONE_NAME")
   _QE_MILESTONE_INDEX=$(_strip_quotes "$_QE_MILESTONE_INDEX")
@@ -240,6 +257,14 @@ _write_queue_entry() {
     printf '  max_retries: "%s"\n' "$(_yaml_escape_scalar "$_QE_MAX_RETRIES")"
     printf '  error_log: "%s"\n' "$(_yaml_escape_scalar "$_QE_ERROR_LOG")"
     printf '  work_order_id: "%s"\n' "$(_yaml_escape_scalar "$_QE_WORK_ORDER_ID")"
+    printf '  stopped_mode: "%s"\n' "$(_yaml_escape_scalar "${_QE_STOPPED_MODE:-}")"
+    printf '  resume: "%s"\n' "$(_yaml_escape_scalar "${_QE_RESUME:-false}")"
+    printf '  held_by: "%s"\n' "$(_yaml_escape_scalar "${_QE_HELD_BY:-}")"
+    printf '  independent: "%s"\n' "$(_yaml_escape_scalar "${_QE_INDEPENDENT:-false}")"
+    # Written from v1.8.0 but populated by a later brief's follow-up-entry.
+    # Round-tripped from the start so a v1.8.0 rewrite of an entry created later
+    # cannot silently drop the pointer — _write_queue_entry rewrites whole files.
+    printf '  follow_up_of: "%s"\n' "$(_yaml_escape_scalar "${_QE_FOLLOW_UP_OF:-}")"
     printf '  project: "%s"\n' "$(_yaml_escape_scalar "${_QE_PROJECT:-}")"
     printf '  milestone:\n'
     printf '    name: "%s"\n' "$(_yaml_escape_scalar "${_QE_MILESTONE_NAME:-}")"
@@ -293,7 +318,7 @@ _rebuild_queue_index() {
   local timestamp
   timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-  local statuses="pending-review approved running completed failed review blocked"
+  local statuses="pending-review approved running completed failed review blocked stopped"
   local counts_json=""
   local entries_json=""
   local first_count=true
@@ -631,6 +656,11 @@ _parse_brief_taskgroup_metadata() {
 #   ${13} — milestone_total (optional, v1.4.0; integer)
 #   ${14} — model (optional; per-entry model pin — bypasses _resolve_model_for_session
 #             in runner.sh; default empty; Decision t-0046 Amendment 3)
+#   ${15} — follow_up_of (optional, v1.9.0; id of the entry this one follows up on,
+#             t-0055 clause 14). Positional rather than a post-create queue_edit
+#             like `independent`, because the link is part of the entry's identity:
+#             the generated brief filename encodes it, and the dequeue selector
+#             reads it to decide both ordering and branch.
 # Output: UUID on stdout
 queue_enqueue() {
   local brief_path="$1"
@@ -647,6 +677,7 @@ queue_enqueue() {
   local milestone_index="${12:-0}"
   local milestone_total="${13:-0}"
   local model="${14:-}"
+  local follow_up_of="${15:-}"
 
   _ensure_queue_dirs
 
@@ -725,6 +756,15 @@ queue_enqueue() {
   _QE_COMPLETED_AT=""
   _QE_PERMISSION_PROFILE="${permission_profile:-build}"
   _QE_MODEL="${model:-}"
+  _QE_FOLLOW_UP_OF="$follow_up_of"
+  # The dedup scan above ran _load_queue_entry over other entries, so every
+  # module variable this function does not assign still holds that last entry's
+  # value. Every field above is assigned; these are the ones that were not, and
+  # they are exactly the fields a scanned entry is likely to have set. Reset
+  # them explicitly rather than relying on the caller having a fresh process.
+  _QE_STOPPED_MODE="" _QE_RESUME="false"
+  _QE_HELD_BY="" _QE_INDEPENDENT="false"
+  _QE_REVERIFIED="" _QE_OVERLAP_FILES=""
 
   local qdir
   qdir=$(_queue_dir)
@@ -817,16 +857,44 @@ queue_approve() {
 # and an entry handed back at its retry ceiling fails on its first stumble.
 # Arguments:
 #   $1 — entry_id
+#
+# Lookup order is review/ then failed/. The name is historical: it was
+# review-only until a crashed daemon showed the same guard-with-no-way-out in
+# the other terminal directory. `recover-entry` rescues a stale `running` entry
+# by writing it to `failed/` and leaving the parent work order `open` — and that
+# pair had no exit at all, because `reopen-entry` demanded review/ while
+# `reopen-wo` refused a work order that was not escalated or failed. The
+# capability already existed (reopen-wo resets blocked|failed siblings); it was
+# simply unreachable for a single entry whose work order was healthy. Hit live
+# on 2026-10-23 when the daemon died with its parent process.
+#
+# "Terminal" in `queue_fail_terminal` means the DAEMON will not retry, not that
+# the operator cannot: operator reopen is the intended exit. An infrastructure
+# failure whose cause still stands will fail again, which is why the reason is
+# written to the review log below before `error_log` is cleared.
 queue_reopen_reviewed() {
   local entry_id="$1"
   local qdir
   qdir=$(_queue_dir)
   local src_file="$qdir/review/${entry_id}.yaml"
+  local src_dir="review"
   if [ ! -f "$src_file" ]; then
-    echo "ERROR: Entry $entry_id is not in review/" >&2
+    src_file="$qdir/failed/${entry_id}.yaml"
+    src_dir="failed"
+  fi
+  if [ ! -f "$src_file" ]; then
+    echo "ERROR: Entry $entry_id is not in review/ or failed/" >&2
     return 1
   fi
   _load_queue_entry "$src_file"
+  # Preserve why it stopped. error_log is cleared below, and for a failed entry
+  # that is the only record of the cause — losing it means the operator retries
+  # blind and, if the cause stands, lands back here with no trail.
+  if [ -n "${_QE_ERROR_LOG:-}" ]; then
+    review_log_append "entry-reopen-reason" "${_QE_WORK_ORDER_ID:-}" "$entry_id" \
+      "Reopened from ${src_dir}/ — prior failure: ${_QE_ERROR_LOG}" 2>/dev/null || true
+  fi
+  _REOPEN_SRC_DIR="$src_dir"
   _QE_STATUS="approved"
   _QE_UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   _QE_RETRY_COUNT="0"
@@ -1067,6 +1135,536 @@ _dq_cleanup() {
   _se_cleanup "$@"
 }
 
+# ============================================================
+# Hold the line behind a stopped entry — Decision t-0055 clauses 9-11
+# ============================================================
+#
+# While an entry is stopping or stopped, everything queued after it is held:
+# its branch is unmerged and possibly dirty, and anything that could depend on
+# it must not start. A held entry carries `held_by: <stopped-entry-id>` and is
+# invisible to the dequeue selector.
+#
+# The hold is DERIVED, never operator-managed. `queue_hold_evaluate` recomputes
+# every held_by from scratch on each dequeue tick, so there is no hold to forget
+# to release and no second source of truth to drift. Re-evaluating every tick is
+# required rather than merely tidy: the stopped branch's changed-file set grows
+# while it is stopped, so an entry released on one tick can be held on the next.
+#
+# Release is a proof obligation, not a default. An entry is let through only
+# when all four conditions in `_hold_release_ok` hold, and an entry whose brief
+# declares no scope_files can never satisfy the first — unknown scope is treated
+# as overlapping scope.
+
+# Base ref every branch-change set is diffed against. A constant, mirroring
+# overlap-report.sh's `_OR_MAIN`: this repo's governance fixes main as the
+# integration branch, so there is no main branch to detect.
+_QH_MAIN_REF="main"
+_QH_NL='
+'
+_QH_TAB=$'\t'
+
+# Snapshot of the stopped entry currently being evaluated. Module-scoped rather
+# than passed as arguments because `_hold_release_ok` reads them alongside the
+# candidate's `_QE_*` vars, and `_load_queue_entry` would clobber any attempt to
+# keep both entries in `_QE_*` at once.
+_QH_S_ID="" _QH_S_BRANCH="" _QH_S_WO="" _QH_S_PRI="" _QH_S_CREATED="" _QH_S_FILES=""
+
+# --- scope_files from a brief's ### Task Contract block ---
+# Same list shape pre-commit-gates.sh reads out of .claude/local/task-contract.yaml:
+# `scope_files:` at column 0, then `  - "path"` items until a non-item line.
+# Output: one path per line; empty when the brief has no contract or no list.
+_parse_brief_scope_files() {
+  local brief_path="$1"
+  [ -n "$brief_path" ] && [ -f "$brief_path" ] || return 0
+  local line val in_scope=false
+  while IFS= read -r line; do
+    case "$line" in
+      "scope_files:"*) in_scope=true ;;
+      "  - "*)
+        if [ "$in_scope" = true ]; then
+          val="${line#  - }"
+          val="${val#\"}"; val="${val%\"}"
+          if [ -n "$val" ]; then
+            printf '%s\n' "$val"
+          fi
+        fi
+        ;;
+      *) in_scope=false ;;
+    esac
+  done < "$brief_path"
+}
+
+# --- Files a branch has changed, plus anything uncommitted in its worktree ---
+# `git diff --name-only main...<branch>` is the committed set; the worktree's
+# porcelain status adds the work a stopped session had not committed yet.
+# Fail-soft everywhere: an unresolvable ref, a missing worktree or any git error
+# contributes nothing. That is safe in this direction — a smaller changed set
+# can only make a release LOOK permissible, and the no-scope_files rule plus the
+# branch and work-order conditions still have to pass independently.
+# Arguments: $1 — branch name; $2 — worktree directory (optional)
+_branch_changed_files() {
+  local branch="$1" worktree="${2:-}"
+  [ -n "$branch" ] || return 0
+  git -C "${REPO_ROOT:-.}" diff --name-only "${_QH_MAIN_REF}...${branch}" 2>/dev/null || true
+  [ -n "$worktree" ] && [ -d "$worktree" ] || return 0
+  local st path
+  while IFS= read -r st; do
+    [ -n "$st" ] || continue
+    # Porcelain v1: two status columns, a space, then the path. Renames read
+    # "orig -> new"; the new name is the one that can collide with other work.
+    path="${st#???}"
+    case "$path" in
+      *" -> "*) path="${path##* -> }" ;;
+    esac
+    path="${path#\"}"; path="${path%\"}"
+    if [ -n "$path" ]; then
+      printf '%s\n' "$path"
+    fi
+  done <<EOF
+$(git -C "$worktree" status --porcelain 2>/dev/null || true)
+EOF
+}
+
+# --- Do two newline-separated path lists share an entry? ---
+# Exact whole-line match via sentinel newlines — zero-fork, and no partial-path
+# false positives (`lib/queue.sh` must not match `lib/queue.sh.bak`).
+_file_sets_overlap() {
+  local a="$1" b="$2" line
+  [ -n "$a" ] && [ -n "$b" ] || return 1
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    case "${_QH_NL}${b}${_QH_NL}" in
+      *"${_QH_NL}${line}${_QH_NL}"*) return 0 ;;
+    esac
+  done <<EOF
+$a
+EOF
+  return 1
+}
+
+# --- Is candidate ($1 priority, $2 created_at) after stopper ($3, $4)? ---
+# "After" means later in dequeue order, which sorts priority ASC then
+# created_at ASC. So: a numerically greater priority (= lower priority), or the
+# same priority and a later created_at.
+_entry_is_after() {
+  local c_pri="${1:-0}" c_created="$2" s_pri="${3:-0}" s_created="$4"
+  case "$c_pri" in ''|*[!0-9]*) c_pri=0 ;; esac
+  case "$s_pri" in ''|*[!0-9]*) s_pri=0 ;; esac
+  if [ "$c_pri" -gt "$s_pri" ]; then return 0; fi
+  if [ "$c_pri" -lt "$s_pri" ]; then return 1; fi
+  # ISO 8601 timestamps compare correctly as strings.
+  expr "$c_created" \> "$s_created" > /dev/null 2>&1
+}
+
+# --- Was branch $1 created from branch $2? ---
+# Approximated as "$2 is an ancestor of $1". The approximation errs toward
+# holding: a branch cut from main while the stopped branch is still at main also
+# answers yes. Holding an unrelated entry costs a tick; releasing a dependent
+# one costs a broken build.
+_branch_descends_from() {
+  local child="$1" parent="$2"
+  [ -n "$child" ] && [ -n "$parent" ] || return 1
+  [ "$child" != "$parent" ] || return 1
+  local g="${REPO_ROOT:-.}"
+  git -C "$g" rev-parse --verify --quiet "$child" > /dev/null 2>&1 || return 1
+  git -C "$g" rev-parse --verify --quiet "$parent" > /dev/null 2>&1 || return 1
+  git -C "$g" merge-base --is-ancestor "$parent" "$child" > /dev/null 2>&1
+}
+
+# --- May the loaded candidate be released from the stopped entry's hold? ---
+# Reads the candidate from `_QE_*` and the stopped entry from `_QH_S_*`.
+# Returns 0 to release, 1 to keep held. Every condition must pass.
+_hold_release_ok() {
+  # (d) not a follow-up of the stopped entry (t-0055 clause 14)
+  if [ -n "${_QE_FOLLOW_UP_OF:-}" ] && [ "$_QE_FOLLOW_UP_OF" = "$_QH_S_ID" ]; then
+    return 1
+  fi
+  # (c) not a sibling in the stopped entry's work order
+  if [ -n "${_QE_WORK_ORDER_ID:-}" ] && [ "$_QE_WORK_ORDER_ID" = "$_QH_S_WO" ]; then
+    return 1
+  fi
+  # (b) not the stopped entry's own branch, and not cut from it
+  if [ -n "${_QE_BRANCH:-}" ] && [ "$_QE_BRANCH" = "$_QH_S_BRANCH" ]; then
+    return 1
+  fi
+  if _branch_descends_from "${_QE_BRANCH:-}" "$_QH_S_BRANCH"; then
+    return 1
+  fi
+  # (a) scope must be KNOWN and disjoint. An entry whose brief declares no
+  # scope_files is never auto-released: there is nothing to prove it with.
+  local c_files
+  c_files=$(_parse_brief_scope_files "${_QE_BRIEF_PATH:-}")
+  [ -n "$c_files" ] || return 1
+  if _file_sets_overlap "$c_files" "$_QH_S_FILES"; then
+    return 1
+  fi
+  return 0
+}
+
+# --- Session id of the record naming entry $1 (empty when none) ---
+# Session records are keyed by session id, so the only route from an entry to
+# its record is a scan. Used for the live worktree path and for `show --json`.
+_session_id_for_entry() {
+  local eid="$1" dir rec
+  [ -n "$eid" ] || return 0
+  type get_main_repo_root > /dev/null 2>&1 || return 0
+  dir="$(get_main_repo_root)/.claude/.state/sessions"
+  [ -d "$dir" ] || return 0
+  for rec in "$dir"/*.yaml; do
+    [ -f "$rec" ] || continue
+    if grep -Fqx "entry_id: $eid" "$rec" 2>/dev/null; then
+      basename "$rec" .yaml
+      return 0
+    fi
+  done
+}
+
+# --- Is entry $1 stopping, stopped-by-flag or discarded? ---
+# Flag existence is the signal (t-0055 clause 4), so this answers for a running
+# entry whose child has not exited yet — the `stopping` half of clause 10.
+_hold_entry_is_stopping() {
+  local eid="$1" cdir
+  type get_control_dir > /dev/null 2>&1 || return 1
+  cdir=$(get_control_dir "$eid" 2>/dev/null) || return 1
+  [ -n "$cdir" ] || return 1
+  [ -f "$cdir/STOP" ] || [ -f "$cdir/FORCE" ] || [ -f "$cdir/DISCARD" ]
+}
+
+# --- Directory entry $1 was last launched in (empty when unknown) ---
+# resume.yaml is written when the runner honours a stop and outlives the session
+# record; the record is the source while the entry is still running.
+_hold_entry_worktree() {
+  local eid="$1" cdir wt="" sid
+  if type get_control_dir > /dev/null 2>&1; then
+    cdir=$(get_control_dir "$eid" 2>/dev/null) || cdir=""
+    if [ -n "$cdir" ] && [ -f "$cdir/resume.yaml" ]; then
+      wt=$(grep -E '^worktree:' "$cdir/resume.yaml" 2>/dev/null | head -1) || wt=""
+      wt="${wt#worktree:}"
+      wt="${wt# }"
+      wt="${wt#\"}"; wt="${wt%\"}"
+    fi
+  fi
+  if [ -z "$wt" ] && type session_record_get > /dev/null 2>&1; then
+    sid=$(_session_id_for_entry "$eid")
+    if [ -n "$sid" ]; then
+      wt=$(session_record_get "$sid" "worktree" 2>/dev/null || true)
+    fi
+  fi
+  printf '%s' "$wt"
+}
+
+# --- Recompute every held_by from current queue state (the dequeue tick) ---
+# Two passes so the result cannot depend on directory iteration order: pass 1
+# builds the id→holder map across all stoppers, pass 2 reconciles each approved
+# entry against it. An entry held by more than one stopper records the first;
+# the hold lifts only when no stopper claims it, so which one is recorded does
+# not change behaviour, only the explanation shown to the operator.
+queue_hold_evaluate() {
+  local qdir
+  qdir=$(_queue_dir)
+
+  local stoppers="" f eid
+  for f in "$qdir/stopped"/*.yaml; do
+    [ -f "$f" ] || continue
+    stoppers="${stoppers}${f}${_QH_NL}"
+  done
+  for f in "$qdir/running"/*.yaml; do
+    [ -f "$f" ] || continue
+    eid=$(basename "$f" .yaml)
+    if _hold_entry_is_stopping "$eid"; then
+      stoppers="${stoppers}${f}${_QH_NL}"
+    fi
+  done
+
+  # Pass 1 — map of candidate_id<TAB>holder_id, one per line.
+  local map="" sf cand changed
+  while IFS= read -r sf; do
+    [ -n "$sf" ] || continue
+    _load_queue_entry "$sf" || continue
+    _QH_S_ID="$_QE_ID"
+    _QH_S_BRANCH="$_QE_BRANCH"
+    _QH_S_WO="$_QE_WORK_ORDER_ID"
+    _QH_S_PRI="${_QE_PRIORITY:-0}"
+    _QH_S_CREATED="$_QE_CREATED_AT"
+    _QH_S_FILES=$(_parse_brief_scope_files "$_QE_BRIEF_PATH")
+    changed=$(_branch_changed_files "$_QE_BRANCH" "$(_hold_entry_worktree "$_QH_S_ID")")
+    if [ -n "$changed" ]; then
+      _QH_S_FILES="${_QH_S_FILES:+${_QH_S_FILES}${_QH_NL}}${changed}"
+    fi
+
+    for cand in "$qdir/approved"/*.yaml; do
+      [ -f "$cand" ] || continue
+      _load_queue_entry "$cand" || continue
+      [ "$_QE_ID" != "$_QH_S_ID" ] || continue
+      # Already claimed by an earlier stopper — no need to re-prove it.
+      case "$map" in *"${_QH_NL}${_QE_ID}${_QH_TAB}"*) continue ;; esac
+      # Opt-out (t-0055 clause 10 amendment): never held, never evaluated.
+      [ "${_QE_INDEPENDENT:-false}" != "true" ] || continue
+      _entry_is_after "${_QE_PRIORITY:-0}" "$_QE_CREATED_AT" "$_QH_S_PRI" "$_QH_S_CREATED" || continue
+      if _hold_release_ok; then
+        continue
+      fi
+      map="${map}${_QH_NL}${_QE_ID}${_QH_TAB}${_QH_S_ID}"
+    done
+  done <<EOF
+$stoppers
+EOF
+
+  # Pass 2 — reconcile. Writes only where held_by actually changes, so a tick
+  # with no stoppers is also the path that clears stale holds.
+  local desired writes=0
+  for cand in "$qdir/approved"/*.yaml; do
+    [ -f "$cand" ] || continue
+    _load_queue_entry "$cand" || continue
+    desired=""
+    case "$map" in
+      *"${_QH_NL}${_QE_ID}${_QH_TAB}"*)
+        desired="${map#*"${_QH_NL}${_QE_ID}${_QH_TAB}"}"
+        desired="${desired%%"${_QH_NL}"*}"
+        ;;
+    esac
+    if [ "${_QE_HELD_BY:-}" != "$desired" ]; then
+      _QE_HELD_BY="$desired"
+      _QE_UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+      _write_queue_entry "$cand"
+      writes=$(( writes + 1 ))
+    fi
+  done
+
+  if [ "$writes" -gt 0 ]; then
+    _rebuild_queue_index || true
+  fi
+  return 0
+}
+
+# --- Entry ids currently held by $1, one per line ---
+queue_hold_holding() {
+  local holder="$1" qdir f
+  [ -n "$holder" ] || return 0
+  qdir=$(_queue_dir)
+  for f in "$qdir/approved"/*.yaml; do
+    [ -f "$f" ] || continue
+    _load_queue_entry "$f" || continue
+    [ "${_QE_HELD_BY:-}" = "$holder" ] || continue
+    printf '%s\n' "$_QE_ID"
+  done
+}
+
+# --- Entry ids the hold evaluation let through $1, one per line ---
+# Derived on read rather than stored: an approved entry queued after $1 whose
+# held_by is empty has either proved itself unrelated or opted out, and in both
+# cases it is back in running order. Deriving it means `released` can never
+# disagree with `held_by`, and there is no second lock-shaped file to keep.
+queue_hold_released() {
+  local holder="$1" qdir f hfile
+  [ -n "$holder" ] || return 0
+  qdir=$(_queue_dir)
+  type _find_entry_file > /dev/null 2>&1 || return 0
+  hfile=$(_find_entry_file "$holder") || hfile=""
+  [ -n "$hfile" ] || return 0
+  _load_queue_entry "$hfile" || return 0
+  local s_id="$_QE_ID" s_pri="${_QE_PRIORITY:-0}" s_created="$_QE_CREATED_AT"
+  for f in "$qdir/approved"/*.yaml; do
+    [ -f "$f" ] || continue
+    _load_queue_entry "$f" || continue
+    [ "$_QE_ID" != "$s_id" ] || continue
+    [ -z "${_QE_HELD_BY:-}" ] || continue
+    _entry_is_after "${_QE_PRIORITY:-0}" "$_QE_CREATED_AT" "$s_pri" "$s_created" || continue
+    printf '%s\n' "$_QE_ID"
+  done
+}
+
+# --- Clear every held_by pointing at $1 (t-0055 clause 9) ---
+# Used by resume-entry and discard-entry. Outputs the released ids, one per
+# line, so the caller can log and report what the resolution freed.
+queue_release_holds() {
+  local holder="$1" qdir f writes=0
+  [ -n "$holder" ] || return 0
+  qdir=$(_queue_dir)
+  for f in "$qdir/approved"/*.yaml; do
+    [ -f "$f" ] || continue
+    _load_queue_entry "$f" || continue
+    [ "${_QE_HELD_BY:-}" = "$holder" ] || continue
+    _QE_HELD_BY=""
+    _QE_UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    _write_queue_entry "$f"
+    printf '%s\n' "$_QE_ID"
+    writes=$(( writes + 1 ))
+  done
+  if [ "$writes" -gt 0 ]; then
+    _rebuild_queue_index || true
+  fi
+  return 0
+}
+
+# --- Discard an entry (t-0055 clause 9) ---
+# Moves a non-running entry to failed/ with `error_log: discarded-by-operator`.
+# Deliberately narrow: the branch, the worktree and the transcript are left
+# alone — discard marks the work abandoned and leaves the evidence in place.
+# The worktree decision and the fate of the entries this one held belong to the
+# caller (queue-cli.sh discard-entry), which is where t-0054's single-task vs
+# group distinction and the escalation writer live.
+# Arguments:
+#   $1 — entry_id
+#   $2 — reason (optional; defaults to the discarded-by-operator marker)
+queue_discard() {
+  local entry_id="$1"
+  local reason="${2:-discarded-by-operator}"
+  local qdir
+  qdir=$(_queue_dir)
+
+  if ! type _find_entry_file > /dev/null 2>&1; then
+    echo "ERROR: queue_discard requires work-order-manager.sh to be sourced (_find_entry_file)" >&2
+    return 1
+  fi
+
+  local src_file
+  src_file=$(_find_entry_file "$entry_id")
+  if [ -z "$src_file" ]; then
+    echo "ERROR: Entry $entry_id not found" >&2
+    return 1
+  fi
+
+  case "$src_file" in
+    */failed/*)
+      echo "WARNING: Entry $entry_id already in failed/ — idempotent no-op" >&2
+      return 0
+      ;;
+  esac
+
+  _load_queue_entry "$src_file"
+  if [ "$_QE_STATUS" = "running" ]; then
+    echo "ERROR: Entry $entry_id is still running — stop it before discarding" >&2
+    return 1
+  fi
+
+  _QE_STATUS="failed"
+  _QE_ERROR_LOG="$reason"
+  _QE_HELD_BY=""
+  _QE_COMPLETED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  _QE_UPDATED_AT="$_QE_COMPLETED_AT"
+  # Preserve the last prompt for diagnostic review, as queue_fail_terminal does.
+  if [ -n "$_QE_PROMPT" ]; then
+    _QE_LAST_PROMPT="$_QE_PROMPT"
+  fi
+
+  _write_queue_entry "$qdir/failed/${entry_id}.yaml"
+  rm -f "$src_file"
+  _rebuild_queue_index || true
+}
+
+# ============================================================
+# Follow-ups (t-0055 clause 14)
+# ============================================================
+#
+# A follow-up is an ordinary queue entry carrying `follow_up_of: <parent-id>`.
+# The link is a single forward pointer on the child; the parent owns no list.
+# Two things are derived from the pointer rather than stored: the reverse
+# direction (queue_followups_of, a scan) and the branch the follow-up runs on
+# (_followup_resolve_branch, evaluated at dequeue). Both are derived for the
+# same reason — the answer changes after the entry is created, so storing it
+# would mean storing something that can go stale.
+
+# --- Entries that follow up on $1, one `id<TAB>status` line each ---
+# A scan, not a back-pointer. Clause 14 rejects a parent-side list because it
+# would have to be kept in sync by whoever creates the child; this cannot
+# disagree with `follow_up_of` because it reads nothing else.
+# Clobbers _QE_*.
+queue_followups_of() {
+  local pid="$1" qdir st f
+  [ -n "$pid" ] || return 0
+  qdir=$(_queue_dir)
+  for st in pending-review approved running completed failed review blocked stopped; do
+    for f in "$qdir/$st"/*.yaml; do
+      [ -f "$f" ] || continue
+      _load_queue_entry "$f" || continue
+      [ "${_QE_FOLLOW_UP_OF:-}" = "$pid" ] || continue
+      printf '%s%s%s\n' "$_QE_ID" "$_QH_TAB" "$_QE_STATUS"
+    done
+  done
+}
+
+# --- Status of entry $1, read from the directory it sits in ---
+# `missing` when no entry file exists anywhere; `unknown` when _find_entry_file
+# is not sourced. The directory IS the status (_transition moves the file and
+# rewrites the field together), so this needs no parse and clobbers nothing —
+# which matters, because queue_dequeue calls it with a candidate loaded.
+_followup_parent_state() {
+  local pid="$1" pfile
+  if [ -z "$pid" ]; then printf 'missing'; return 0; fi
+  if ! type _find_entry_file > /dev/null 2>&1; then printf 'unknown'; return 0; fi
+  pfile=$(_find_entry_file "$pid") || pfile=""
+  if [ -z "$pfile" ]; then printf 'missing'; return 0; fi
+  pfile="${pfile%/*}"
+  printf '%s' "${pfile##*/}"
+}
+
+# --- Branch-name component from a branch name, brief path or id ---
+# Keeps [a-z0-9], folds everything else to `-`, collapses runs and trims, so
+# the result is safe in a git ref however odd the input was.
+_followup_slug() {
+  local raw="$1" out="" i=0 len ch
+  raw="${raw##*/}"      # branch leaf, or brief basename
+  raw="${raw%.md}"
+  raw=$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')
+  len=${#raw}
+  while [ "$i" -lt "$len" ]; do
+    ch="${raw:$i:1}"
+    case "$ch" in
+      [a-z0-9]) out="${out}${ch}" ;;
+      *)        out="${out}-" ;;
+    esac
+    i=$(( i + 1 ))
+  done
+  while case "$out" in *--*) true ;; *) false ;; esac; do
+    out="${out%%--*}-${out#*--}"
+  done
+  while case "$out" in -*) true ;; *) false ;; esac; do out="${out#-}"; done
+  while case "$out" in *-) true ;; *) false ;; esac; do out="${out%-}"; done
+  [ -n "$out" ] || out="entry"
+  printf '%s' "$out"
+}
+
+# --- Branch a follow-up of $1 should run on (its $2'th follow-up) ---
+# The whole branch/order table in the brief collapses to one question: is the
+# parent's branch still a live line of work? If it exists and is not already
+# an ancestor of main, the follow-up continues it — that covers a parent that
+# is queued, running, stopped, or completed-but-unmerged, all of which still
+# have commits only reachable from that branch. Otherwise the branch is merged
+# or sealed and there is nothing to continue, so the follow-up gets its own
+# branch cut from current main.
+#
+# Errs toward continuing the parent's branch: if main cannot be resolved,
+# `--is-ancestor` fails and we cannot prove the work landed. Continuing a
+# branch that turns out to be merged costs an empty rebase; starting a new
+# branch from main when the parent's work has NOT landed costs the follow-up
+# its entire premise.
+#
+# Clobbers _QE_*.
+_followup_resolve_branch() {
+  local pid="$1" n="${2:-1}"
+  local pfile="" pbranch="" slug g="${REPO_ROOT:-.}"
+
+  if type _find_entry_file > /dev/null 2>&1; then
+    pfile=$(_find_entry_file "$pid") || pfile=""
+  fi
+  if [ -n "$pfile" ] && _load_queue_entry "$pfile"; then
+    pbranch="${_QE_BRANCH:-}"
+    slug=$(_followup_slug "${pbranch:-${_QE_BRIEF_PATH:-$pid}}")
+  else
+    slug=$(_followup_slug "$pid")
+  fi
+
+  if [ -n "$pbranch" ] \
+     && git -C "$g" rev-parse --verify --quiet "$pbranch" > /dev/null 2>&1 \
+     && ! git -C "$g" merge-base --is-ancestor "$pbranch" "$_QH_MAIN_REF" > /dev/null 2>&1; then
+    printf '%s' "$pbranch"
+    return 0
+  fi
+
+  printf 'follow-up/%s-%s' "$slug" "$n"
+}
+
 # --- Dequeue the highest-priority approved entry ---
 # Picks the entry with the lowest priority value from approved/ (priority ASC),
 # breaking ties by earliest created_at (created_at ASC).
@@ -1080,6 +1678,12 @@ _dq_cleanup() {
 queue_dequeue() {
   local qdir
   qdir=$(_queue_dir)
+
+  # Re-evaluate holds on every tick (t-0055 clause 11). The stopped branch's
+  # changed-file set grows while it is stopped, so an entry released on one
+  # tick can legitimately be held on the next. Fail-soft: a hold-evaluation
+  # error must not stall the queue.
+  queue_hold_evaluate || true
 
   # Collect approved entries into a temp file for sort-based dequeue.
   # Format per line: <zero-padded-priority>_<created_at><TAB><file_path>
@@ -1103,9 +1707,34 @@ queue_dequeue() {
 
   # Iterate sorted candidates (ASC), skip any blocked by task group sequencing.
   local _dq_key cand_file my_seq entry_id
+  local _dq_fu_of _dq_fu_state _dq_fu_n _dq_fu_branch
   while IFS=$'\t' read -r _dq_key cand_file; do
     [ -f "$cand_file" ] || continue
     _load_queue_entry "$cand_file"
+
+    # Held behind a stopping/stopped/discarded entry (t-0055 clause 10).
+    # held_by is derived state, written by queue_hold_evaluate above.
+    if [ -n "${_QE_HELD_BY:-}" ]; then
+      continue
+    fi
+
+    # A follow-up never overtakes its parent (t-0055 clause 14). This is a
+    # separate obligation from the hold above, which only fires when something
+    # was actually STOPPED: a parent that is merely queued or running stops
+    # nothing, yet running its follow-up first would build on work that does
+    # not exist. `completed` is the only state that releases a follow-up;
+    # `missing` releases it too, so a pruned parent cannot strand it forever.
+    # Every other state — including `failed` and `unknown` — holds, on the
+    # same reasoning as _hold_release_ok: a wasted tick is cheaper than a
+    # session built on a premise that never landed.
+    _dq_fu_of="${_QE_FOLLOW_UP_OF:-}"
+    if [ -n "$_dq_fu_of" ]; then
+      _dq_fu_state=$(_followup_parent_state "$_dq_fu_of")
+      case "$_dq_fu_state" in
+        completed|missing) ;;
+        *) continue ;;
+      esac
+    fi
 
     # Task group sequencing check (Decision 0017)
     # Brief 1 is always eligible (no predecessor). Brief N>1 waits for all
@@ -1121,6 +1750,30 @@ queue_dequeue() {
 
     # This entry is eligible
     entry_id=$(basename "$cand_file" .yaml)
+
+    # Resolve a follow-up's branch now, at the last moment before it runs, and
+    # persist it. `follow-up-entry` deliberately leaves `branch` empty because
+    # the parent's branch may be live when the follow-up is queued and merged
+    # by the time it is dequeued. Writing the answer back means `show` reports
+    # the branch the session actually used, and the runner reads `branch` the
+    # same way for every entry — no follow-up special case downstream.
+    #
+    # `<n>` comes from the brief filename `followup-<parent-id>-<n>.md` that
+    # follow-up-entry wrote, so the branch name and the brief agree. Recounting
+    # here would drift if a sibling follow-up were pruned in between.
+    if [ -n "$_dq_fu_of" ] && [ -z "${_QE_BRANCH:-}" ]; then
+      _dq_fu_n="${_QE_BRIEF_PATH##*/}"
+      _dq_fu_n="${_dq_fu_n%.md}"
+      _dq_fu_n="${_dq_fu_n##*-}"
+      case "$_dq_fu_n" in ''|*[!0-9]*) _dq_fu_n=1 ;; esac
+      _dq_fu_branch=$(_followup_resolve_branch "$_dq_fu_of" "$_dq_fu_n")
+      if [ -n "$_dq_fu_branch" ] && _load_queue_entry "$cand_file"; then
+        _QE_BRANCH="$_dq_fu_branch"
+        _QE_UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        _write_queue_entry "$cand_file"
+      fi
+    fi
+
     _transition "$entry_id" "approved" "running"
     printf '%s' "$qdir/running/${entry_id}.yaml"
     rm -f "$_dq_sort_file"
@@ -1346,7 +1999,7 @@ _repair_status_mismatches() {
   local repaired=0
 
   local status
-  for status in pending-review approved running completed failed review blocked; do
+  for status in pending-review approved running completed failed review blocked stopped; do
     local dir="$qdir/$status"
     [ -d "$dir" ] || continue
     local f
@@ -1504,6 +2157,80 @@ queue_defer() {
   printf '%s' "$current_count"
 }
 
+# --- Stop a running entry (operator stop, t-0055) ---
+# Moves from running to stopped/ WITHOUT incrementing retry_count — an operator
+# stop is not a failure. The worktree, the group lock and the Claude session all
+# survive; `queue_resume` puts the entry back in approved/.
+# Arguments:
+#   $1 — entry_id
+#   $2 — stopped_mode: graceful | forced
+queue_stop() {
+  local entry_id="$1"
+  local mode="${2:-graceful}"
+  local qdir
+  qdir=$(_queue_dir)
+  local src_file="$qdir/running/${entry_id}.yaml"
+
+  if [ ! -f "$src_file" ]; then
+    # Idempotency guard: if already in stopped/, treat as success
+    if [ -f "$qdir/stopped/${entry_id}.yaml" ]; then
+      echo "WARNING: Entry $entry_id already in stopped/ — idempotent no-op" >&2
+      return 0
+    fi
+    echo "ERROR: Entry $entry_id not found in running/" >&2
+    return 1
+  fi
+
+  _load_queue_entry "$src_file"
+  _QE_STATUS="stopped"
+  _QE_STOPPED_MODE="$mode"
+  _QE_RESUME="false"
+  _QE_UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  # No completed_at — a stopped entry is paused, not finished.
+  _QE_PROMPT=""  # Clear assembled prompt — the resume message replaces it
+
+  _write_queue_entry "$qdir/stopped/${entry_id}.yaml"
+  rm -f "$src_file"
+  _rebuild_queue_index || true
+}
+
+# --- Resume a stopped entry (operator resume, t-0055) ---
+# Moves from stopped/ back to approved/ with resume: true so the runner
+# continues the recorded Claude session instead of launching a fresh one.
+# Priority is left untouched — the entry's created_at predates anything queued
+# since, so at equal priority it already sorts to the front of approved/.
+# Arguments:
+#   $1 — entry_id
+queue_resume() {
+  local entry_id="$1"
+  local qdir
+  qdir=$(_queue_dir)
+  local src_file="$qdir/stopped/${entry_id}.yaml"
+
+  if [ ! -f "$src_file" ]; then
+    # Idempotency guard: if already in approved/, treat as success
+    if [ -f "$qdir/approved/${entry_id}.yaml" ]; then
+      echo "WARNING: Entry $entry_id already in approved/ — idempotent no-op" >&2
+      return 0
+    fi
+    echo "ERROR: Entry $entry_id not found in stopped/" >&2
+    return 1
+  fi
+
+  _load_queue_entry "$src_file"
+  _QE_STATUS="approved"
+  _QE_RESUME="true"
+  _QE_UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  _QE_COMPLETED_AT=""
+  _QE_PROMPT=""  # Cleared at stop; the runner assembles the resume message
+  # stopped_mode is deliberately preserved — the runner reads it to decide
+  # whether the resume message warns about a force-stopped working tree.
+
+  _write_queue_entry "$qdir/approved/${entry_id}.yaml"
+  rm -f "$src_file"
+  _rebuild_queue_index || true
+}
+
 # --- Edit a queue entry field ---
 # Updates a single field on a non-running entry.
 # Requires: _find_entry_file (from work-order-manager.sh)
@@ -1527,9 +2254,9 @@ queue_edit() {
   # Editable fields whitelist
   case "$field" in
     brief_path|session_type|branch|auto_mode|solo_mode|push_on_complete|max_retries|priority|\
-    project|milestone.name|milestone.index|milestone.total) ;;
+    independent|project|milestone.name|milestone.index|milestone.total) ;;
     *)
-      echo "ERROR: Field '$field' is not editable (allowed: brief_path, session_type, branch, auto_mode, solo_mode, push_on_complete, max_retries, priority, project, milestone.name, milestone.index, milestone.total)" >&2
+      echo "ERROR: Field '$field' is not editable (allowed: brief_path, session_type, branch, auto_mode, solo_mode, push_on_complete, max_retries, priority, independent, project, milestone.name, milestone.index, milestone.total)" >&2
       return 1
       ;;
   esac
@@ -1573,6 +2300,14 @@ queue_edit() {
         ''|*[!0-9]*) echo "ERROR: priority must be a non-negative integer" >&2; return 1 ;;
       esac
       _QE_PRIORITY="$value" ;;
+    independent)
+      # Hold opt-out (t-0055 clause 10) — boolean only. held_by is deliberately
+      # NOT editable: it is derived state owned by the dequeue tick.
+      case "$value" in
+        true|false) ;;
+        *) echo "ERROR: independent must be true or false" >&2; return 1 ;;
+      esac
+      _QE_INDEPENDENT="$value" ;;
     project)           _QE_PROJECT="$value" ;;
     milestone.name)    _QE_MILESTONE_NAME="$value" ;;
     milestone.index)

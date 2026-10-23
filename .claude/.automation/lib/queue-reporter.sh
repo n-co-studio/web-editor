@@ -32,7 +32,7 @@ queue_status() {
 
   # If no index file, scan directories directly
   if [ ! -f "$index_file" ]; then
-    local statuses="pending-review approved running completed failed review blocked"
+    local statuses="pending-review approved running completed failed review blocked stopped"
     local status
     # shellcheck disable=SC2086 — intentional word splitting
     for status in $statuses; do
@@ -123,7 +123,7 @@ queue_status() {
 # The 5th column reflects the sort field for each status:
 #   approved/pending-review/running → priority ASC, then created_at ASC (matches dequeue order)
 #   completed                       → completed_at (DESC — newest first)
-#   failed/blocked/review           → updated_at (DESC — most recently changed first)
+#   failed/blocked/review/stopped   → updated_at (DESC — most recently changed first)
 # Arguments:
 #   $1 — status filter (optional)
 queue_list() {
@@ -132,7 +132,7 @@ queue_list() {
   qdir=$(_queue_dir)
 
   # Scan directory state directly for reliability
-  local statuses="pending-review approved running completed failed review blocked"
+  local statuses="pending-review approved running completed failed review blocked stopped"
   local status
   # shellcheck disable=SC2086 — intentional word splitting
   for status in $statuses; do

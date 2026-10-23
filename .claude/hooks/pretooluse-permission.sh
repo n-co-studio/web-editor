@@ -33,6 +33,28 @@ INPUT=$(cat)
 export _REPO_OS_STDIN_SID
 _REPO_OS_STDIN_SID="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)"
 
+# --- Operator stop check (Decision t-0055 clause 6) ---
+# Precedes every permission decision: an entry the operator has stopped should
+# not have its next tool call adjudicated, it should not happen.
+#
+# Delegated to operator-control.sh rather than inlined, because that file is
+# what a PreToolUse "*" registration calls directly and the two paths must not
+# drift. `.claude/settings.json` is an immune path, so applying that
+# registration is an operator action; until it is applied, this delegation
+# covers the Bash and Agent tools — phase advances, git, and agent dispatch,
+# which is where a governed session spends its tool calls. Reads and edits are
+# not covered, and `stop_grace_seconds` is the backstop for a session that
+# makes neither kind of call (see runner.sh `_start_stop_watcher`).
+#
+# Gated on CLAUDE_HEADLESS so interactive sessions pay no extra process.
+if [ "${CLAUDE_HEADLESS:-0}" = "1" ]; then
+  _OC_OUT="$(bash "$SCRIPT_DIR/operator-control.sh" < /dev/null)" || true
+  if [ -n "$_OC_OUT" ]; then
+    printf '%s\n' "$_OC_OUT"
+    exit 0
+  fi
+fi
+
 # --- jq presence guard ---
 if [ "$_REPO_OS_HAS_JQ" = false ]; then
   if [ "${CLAUDE_HEADLESS:-0}" = "1" ]; then

@@ -15,6 +15,7 @@ This is a headless automation session (runner-invoked via `claude -p`).
 - Destructive git operations (`git reset --hard`, `git push --force`) are mechanically blocked
 - Plan-approved state has been pre-written by the runner (no operator approval prompt needed)
 - All commits MUST include an `Automation: runner` trailer
+- The operator may send notes mid-session; they arrive as "Operator note" context. Follow them within the brief's scope; if one conflicts with the brief or a gate, escalate rather than guess
 
 ## Security Constraints
 

@@ -62,6 +62,7 @@ t-0051-template-sync-ownership.md
 t-0052-child-owned-files.md
 t-0053-signal-fidelity.md
 t-0054-task-group-worktree-lifetime.md
+t-0055-operator-session-control.md
 t-0056-shared-files-reverify.md
 t-0058-plan-approval-silent-path.md
 t-0059-directional-dispatch-phase.md

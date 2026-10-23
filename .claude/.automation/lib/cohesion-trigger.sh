@@ -87,10 +87,9 @@ _resolve_contract_path() {
   # not to one brief: inside a worktree session $REPO_ROOT is the worktree root,
   # so each brief read and wrote its own private copy and `git worktree remove`
   # destroyed the group's definition of done (2026-10-19, task-details-header).
-  # Recorded as R16 in docs/ai/logs/known-issues.md — the authority for this
-  # rooting. (Earlier revisions cited a "Decision t-0055 clause 4" that does not
-  # exist; it would have come from the task-details-header group, which this
-  # defect blocked.)
+  # Recorded as R16 in docs/ai/logs/known-issues.md, which records the defect;
+  # Decision t-0055 clause 4 states the rule (shared per-group and per-entry
+  # state resolves through get_main_repo_root(), never the session's own root).
   # Search THIS SESSION's root first, then the MAIN repo root.
   #
   # A contract belongs to the GROUP, not to one brief, but the prompts instruct

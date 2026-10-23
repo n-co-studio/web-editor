@@ -38,6 +38,18 @@ export REPO_ROOT
 AUTOMATION_DIR="$ADV_SANDBOX/.claude/.automation"
 export AUTOMATION_DIR
 
+# Pin the main repo root to the sandbox. group_worktree_path() and
+# is_registered_worktree() resolve through get_main_repo_root(), which derives
+# the root from `git rev-parse --git-common-dir`. Run from inside a git worktree
+# — which is exactly how a task group brief runs — that returns the REAL
+# repository, so this suite resolved group paths under the real
+# `.worktrees/` and six cases failed with the real path in the diff. It passed
+# only because it had always been run from the main checkout. Pinning makes the
+# suite independent of where it is invoked from.
+cd "$ADV_SANDBOX" || exit 1
+_CACHED_MAIN_REPO_ROOT="$ADV_SANDBOX"
+_CACHED_SESSION_STATE_DIR=""
+
 # --- Source the pieces _resolve_group_worktree depends on ---
 # shellcheck disable=SC1091
 source "$ADV_SANDBOX/.claude/hooks/_cleanup-helper.sh"

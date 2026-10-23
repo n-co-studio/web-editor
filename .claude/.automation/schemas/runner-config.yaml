@@ -55,6 +55,9 @@ runner:
   # -> merge sequence, so this also bounds how long another close can wait on
   # it. A timeout counts as a re-verification FAILURE, never as a pass.
   reverify_timeout_seconds: 900
+  # Seconds a graceful operator stop waits before the runner escalates it to a
+  # forced stop. 0 = never escalate. Added in schema v1.7.0 (Decision t-0055).
+  stop_grace_seconds: 120
 
 model_routing:
   # Model for claude -p when no model_routing_overrides key matches.

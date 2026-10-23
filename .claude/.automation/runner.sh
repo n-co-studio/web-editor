@@ -200,6 +200,22 @@ _CURRENT_WORKTREE_DIR=""
 _CURRENT_WORKTREE_IS_GROUP=false
 _CURRENT_GROUP_NAME=""
 
+# --- Operator stop/resume tracking (Decision t-0055) ---
+# _STOP_WATCHER_PID — pid of the background poller that honours FORCE and
+#                     escalates a stalled graceful stop ("" when none runs).
+# _RESUME_ENTRY     — true when the dequeued entry carries `resume: true`, so
+#                     the child continues the recorded Claude session instead of
+#                     starting a fresh one. Set by the daemon loop before
+#                     _run_single_entry, which reads it. Single-shot mode never
+#                     sets it, hence the default here.
+# _RESUME_WORKTREE_EXEMPT — true when the group worktree's clean-start check is
+#                     waived because this entry is resuming into the very
+#                     worktree its own stop left dirty. An input to
+#                     _resolve_group_worktree, not one of its _GWT_* outputs.
+_STOP_WATCHER_PID=""
+_RESUME_ENTRY=false
+_RESUME_WORKTREE_EXEMPT=false
+
 # --- Daemon lifecycle state ---
 _SHUTDOWN_REQUESTED=false
 _DAEMON_START_EPOCH=""
@@ -266,6 +282,154 @@ fi
 if [ ! -f "$CONFIG_LOCAL_FILE" ]; then
   printf 'runner:\n  enabled: true\n' > "$CONFIG_LOCAL_FILE"
 fi
+
+# ============================================================
+# Operator notes — the two runner-side delivery routes
+# ============================================================
+
+# Drains an entry's pending operator notes and prints them as a markdown
+# section (Decision t-0055 clause 13). Prints nothing when there is nothing
+# pending, so callers can append the result unconditionally.
+#
+# This is the route for a note that was written while the entry was NOT
+# running: the queued case (the section is appended to the assembled prompt)
+# and the stopped case (appended to the resume message). The third route —
+# a note written to a session already running — is operator-notes.sh.
+#
+# Delivered notes are MOVED to notes/delivered/ with a .at sidecar carrying
+# delivery time, matching what operator-notes.sh does, so `notes-entry`
+# reports one history whichever route delivered a note. No cap here: unlike
+# the hook, this runs once per session start, and a brief's whole backlog of
+# operator context belongs in its opening prompt.
+#
+# Fails open and silent at every step. A note that cannot be read must not
+# stop the entry from running.
+_drain_operator_notes() {
+  local entry_id="$1"
+  local notes_dir body="" count=0
+  notes_dir="$(get_control_dir "$entry_id" 2>/dev/null)/notes" || return 0
+  [ -d "$notes_dir" ] || return 0
+
+  local note_file base epoch sent now text
+  for note_file in "$notes_dir"/*.md; do
+    [ -f "$note_file" ] || continue
+    text="$(cat "$note_file" 2>/dev/null)" || continue
+    [ -n "$text" ] || continue
+
+    base="${note_file##*/}"
+    epoch="${base%%-*}"
+    sent="$(epoch_to_iso "$epoch" 2>/dev/null)" || sent=""
+    [ -n "$sent" ] || sent="$base"
+
+    mkdir -p "$notes_dir/delivered" 2>/dev/null || continue
+    mv "$note_file" "$notes_dir/delivered/$base" 2>/dev/null || continue
+    now="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)" || now=""
+    printf '%s\n' "$now" > "$notes_dir/delivered/$base.at" 2>/dev/null || true
+
+    body="${body}- (${sent}) ${text}
+"
+    count=$((count + 1))
+  done
+
+  [ "$count" -gt 0 ] || return 0
+  printf '## Operator notes
+
+The operator sent %s note(s) for this entry. Treat them as operator direction
+for this brief. Follow them within the brief'"'"'s scope; if one conflicts with the
+brief or a gate, escalate rather than guess. Governance gates still apply.
+Record each note and what you did about it in the session log.
+
+%s' "$count" "$body"
+}
+
+# ============================================================
+# Parent task section — context a follow-up inherits (t-0055 clause 14)
+# ============================================================
+
+# --- `## Parent task` markdown for entry $1, whose parent is $2 ---
+# Emits nothing (success, empty output) when the entry is not a follow-up or
+# the parent can no longer be read. Fails open at every step for the same
+# reason _drain_operator_notes does: missing context must not stop the entry.
+#
+# This is the context half of the linkage. The ordering half is the dequeue
+# guard and the branch half is _followup_resolve_branch — all three read the
+# same `follow_up_of` pointer, none of them stores a second copy of it.
+#
+# Clobbers _QE_*, so callers must have captured what they need first.
+_build_parent_task_section() {
+  local entry_id="$1" parent_id="$2"
+  [ -n "$parent_id" ] || return 0
+
+  local pfile="" ptitle="" pgoal="" pstatus="" pbranch="" pbrief="" perror="" prange=""
+  pfile=$(_find_entry_file "$parent_id" 2>/dev/null) || pfile=""
+  if [ -n "$pfile" ] && _load_queue_entry "$pfile" 2>/dev/null; then
+    pstatus="${_QE_STATUS:-}"
+    pbranch="${_QE_BRANCH:-}"
+    pbrief="${_QE_BRIEF_PATH:-}"
+    perror="${_QE_ERROR_LOG:-}"
+  fi
+
+  # Title and goal come from the parent's brief, not from the entry: an entry
+  # has no prose. Same two headings `follow-up-draft` reads, so the draft the
+  # operator edited and the prompt the agent receives describe one parent.
+  if [ -n "$pbrief" ] && [ -f "$pbrief" ]; then
+    local line in_goal=false
+    while IFS= read -r line; do
+      case "$line" in
+        "# "*)
+          [ -n "$ptitle" ] || ptitle="${line#\# }"
+          in_goal=false
+          ;;
+        "## Goal"*|"### Goal"*) in_goal=true ;;
+        "#"*) in_goal=false ;;
+        "") ;;
+        *)
+          if [ "$in_goal" = true ] && [ -z "$pgoal" ]; then
+            pgoal="$line"
+            in_goal=false
+          fi
+          ;;
+      esac
+    done < "$pbrief"
+  fi
+
+  # The commit range is what the parent actually left on the branch. It only
+  # resolves while the branch still exists and is not yet in main: once the
+  # branch is merged and sealed the commits are in main's history and
+  # `main..<branch>` is empty, which is correct rather than broken — a
+  # follow-up of merged work starts from main and has no range to read.
+  if [ -n "$pbranch" ] \
+     && git -C "$REPO_ROOT" rev-parse --verify --quiet "$pbranch" > /dev/null 2>&1; then
+    local n
+    n=$(git -C "$REPO_ROOT" rev-list --count "main..$pbranch" 2>/dev/null) || n=""
+    case "$n" in
+      ''|0|*[!0-9]*) prange="" ;;
+      *) prange="main..$pbranch ($n commit(s))" ;;
+    esac
+  fi
+
+  printf '## Parent task
+
+This entry is a FOLLOW-UP. It extends `%s` rather than replacing it; that
+entry'"'"'s work has already landed (or has been abandoned) and is not yours to
+redo. Read this section as background, and your own brief as the task.
+
+- Parent entry: `%s` (%s)
+- Parent branch: `%s`
+' "$parent_id" "$parent_id" "${pstatus:-unknown}" "${pbranch:-unresolved}"
+
+  [ -n "$ptitle" ] && printf -- '- Parent title: %s\n' "$ptitle"
+  [ -n "$pbrief" ] && printf -- '- Parent brief: `%s`\n' "$pbrief"
+  [ -n "$prange" ] && printf -- '- Commits it left: `%s`\n' "$prange"
+  [ -n "$perror" ] && printf -- '- Recorded outcome: %s\n' "$perror"
+  [ -n "$pgoal" ] && printf -- '- Its goal was: %s\n' "$pgoal"
+
+  printf '
+If your brief conflicts with what the parent actually did, escalate rather
+than silently reversing it — the parent'"'"'s result is a governed outcome, not a
+draft. Entry: `%s`.
+' "$entry_id"
+}
 
 # ============================================================
 # Heartbeat — background timestamp writer for running entries
@@ -347,7 +511,7 @@ _runner_crash_cleanup() {
 }
 
 # Clean up on exit (guard each function to prevent cascade under set -euo pipefail)
-trap '_stop_heartbeat || true; _runner_crash_cleanup || true' EXIT
+trap '_stop_heartbeat || true; _stop_stop_watcher || true; _runner_crash_cleanup || true' EXIT
 
 # ============================================================
 # Circuit breaker — 3 consecutive global failures pauses daemon
@@ -777,6 +941,14 @@ _is_final_taskgroup_entry() {
         # Sibling still pending — don't seal
         return 1
         ;;
+      stopped)
+        # Sibling stopped by the operator (Decision t-0055 clause 6) — resumable,
+        # so more commits are still coming to the shared branch. Sealing now
+        # would close the branch under a live brief, and on a sequential group
+        # the seal also removes the group worktree the stopped entry must resume
+        # into. A stopped sibling is "not finished", exactly like an approved one.
+        return 1
+        ;;
     esac
   done
 
@@ -992,8 +1164,19 @@ _resolve_group_worktree() {
   # Each brief must still begin from a clean committed state. Gitignored files
   # are exempt by construction (git status --porcelain omits them) — preserving
   # them is the entire point of reusing the worktree.
+  #
+  # One exemption (Decision t-0055 clause 7): an entry resuming from an operator
+  # stop re-enters the worktree its own session was stopped in, and a force stop
+  # kills the child mid-edit, so that worktree is dirty by construction. Refusing
+  # it would make "still resumable" false for every forced stop. The exemption is
+  # narrow — same entry, same worktree, only on the resume path — so t-0055's
+  # "a dirty tree blocks the next brief" still holds for every *other* brief.
   local clean_rc=0 clean_reason=""
   clean_reason=$(check_group_worktree_clean "$wt_dir" "$_GWT_BRANCH") || clean_rc=$?
+  if [ "$clean_rc" -ne 0 ] && [ "${_RESUME_WORKTREE_EXEMPT:-false}" = true ]; then
+    echo "Group worktree '$wt_dir' is not clean ($clean_reason) — allowed because entry $brief_id is resuming into the worktree its own stop left dirty (Decision t-0055)" >&2
+    clean_rc=0
+  fi
   if [ "$clean_rc" -ne 0 ]; then
     local esc_id
     esc_id=$(_write_group_worktree_escalation "esc-dirty-tree" "$brief_id" \
@@ -1306,6 +1489,193 @@ _start_force_halt_watcher() {
   _FORCE_HALT_WATCHER_PID=$!
 }
 
+# Generate a lowercase RFC 4122 UUID on stdout, or return 1 if neither source
+# is available. `claude --session-id` rejects anything that is not a valid
+# UUID, so a malformed value must fail loudly rather than be passed through.
+# Decision t-0055.
+_generate_uuid() {
+  local u=""
+  if command -v uuidgen >/dev/null 2>&1; then
+    u=$(uuidgen 2>/dev/null | tr 'A-Z' 'a-z')
+  fi
+  if [ -z "$u" ] && [ -r /dev/urandom ]; then
+    # 16 random bytes as hex, reformatted 8-4-4-4-12 with the version (4) and
+    # variant (8) nibbles pinned so the result is a well-formed v4 UUID.
+    local hex
+    hex=$(od -An -tx1 -N16 /dev/urandom 2>/dev/null | tr -d ' \n')
+    if [ "${#hex}" -eq 32 ]; then
+      u="${hex:0:8}-${hex:8:4}-4${hex:13:3}-8${hex:17:3}-${hex:20:12}"
+    fi
+  fi
+  case "$u" in
+    [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-*) ;;
+    *) return 1 ;;
+  esac
+  printf '%s\n' "$u"
+}
+
+# --- _standalone_resume_reuse_applicable ---
+# True when a RESUMED standalone entry should re-enter its kept worktree instead
+# of creating one (Decision t-0055 clause 8).
+#
+# Why this exists: a resumed entry reuses its recorded REPO_OS_SESSION_ID, and a
+# standalone worktree path is `.worktrees/<session-id>` — the very worktree the
+# entry was stopped in, still registered with its branch checked out. `git
+# worktree add` refuses that path, so before this the entry returned
+# failed:worktree-creation and burned a retry, and the retry failed identically.
+# RUNNER-PARITY rows 64-65 asserted standalone resume worked when only the group
+# path could actually do it.
+#
+# A predicate rather than an inline condition so it can be tested directly
+# against real git worktrees — see tests/test-operator-control.sh. Deliberately
+# NOT unified with the group reuse arm: that refactor is a separate change.
+#
+# Arguments:
+#   $1 — candidate worktree directory
+#   $2 — branch the entry is set up on ($_SETUP_BRANCH)
+# Returns 0 when the directory should be reused as-is, 1 otherwise.
+_standalone_resume_reuse_applicable() {
+  local wt_dir="${1:-}"
+  local want_branch="${2:-}"
+
+  # Gate on resume: a FRESH standalone launch must keep the old create path.
+  # Its `.worktrees/<new session id>` cannot already exist, so this is belt and
+  # braces, but it keeps the blast radius of this arm at exactly "resumes".
+  [ "${_RESUME_ENTRY:-false}" = true ] || return 1
+  [ -n "$wt_dir" ] && [ -n "$want_branch" ] || return 1
+  [ -d "$wt_dir" ] || return 1
+  is_registered_worktree "$wt_dir" || return 1
+
+  # Branch equality is what stops a stale directory being adopted for the wrong
+  # branch — reusing one would run the brief against someone else's checkout.
+  local have_branch
+  have_branch=$(git -C "$wt_dir" rev-parse --abbrev-ref HEAD 2>/dev/null) || return 1
+  [ "$have_branch" = "$want_branch" ] || return 1
+  return 0
+}
+
+# --- Operator stop watcher (Decision t-0055 clauses 6-7) ---
+# A background poller started alongside the TTL watchdog and torn down with it.
+#
+# The PreToolUse hook (operator-control.sh) is the graceful path: it ends the
+# run at the next tool call, which is clean because no tool is mid-flight. This
+# watcher covers the two cases the hook cannot:
+#   - FORCE: the operator wants the process gone now, not at the next tool call.
+#   - A graceful STOP that no tool call ever reaches — the session is waiting on
+#     a long model turn, or on one of the tools the delegated hook path does not
+#     cover. After stop_grace_seconds the watcher writes FORCE itself, so the
+#     escalation goes through exactly the same code path as an explicit force.
+#
+# The kill sequence mirrors FORCE-HALT: SIGTERM, up to 10s, then SIGKILL.
+#
+# Arguments:
+#   $1 — entry_id
+#   $2 — child pid to watch
+#   $3 — stop_grace_seconds (0 disables the graceful-stop escalation)
+#   $4 — session root (optional; see below)
+# Sets: _STOP_WATCHER_PID ("" when no watcher could be started)
+_start_stop_watcher() {
+  local entry_id="$1"
+  local child_pid="$2"
+  local grace="${3:-120}"
+  # $4 — session root (the launch dir: the worktree when one is used, else
+  # REPO_ROOT). Used ONLY to locate the child's phase-state so the grace
+  # escalation can hold during the close phase. Absent means no phase awareness,
+  # which degrades to the pre-2026-10-19 behaviour (escalate regardless).
+  local session_root="${4:-}"
+
+  _STOP_WATCHER_PID=""
+  [ -n "$entry_id" ] && [ -n "$child_pid" ] || return 0
+
+  local control_dir
+  control_dir=$(get_control_dir "$entry_id" 2>/dev/null) || control_dir=""
+  # No control directory means no operator control for this entry — the session
+  # runs unwatched rather than being wedged by a missing directory.
+  [ -n "$control_dir" ] || return 0
+
+  # Phase-state path for the close-phase hold below. Resolved once, outside the
+  # loop: the file appears when the child initialises and its path never moves.
+  local phase_file=""
+  if [ -n "$session_root" ] && [ -n "${REPO_OS_SESSION_ID:-}" ]; then
+    phase_file="$session_root/.claude/.state/wt-sessions/${REPO_OS_SESSION_ID}/phase-state"
+  fi
+
+  (
+    _sw_stop_seen=""
+    _sw_close_logged=""
+    while kill -0 "$child_pid" 2>/dev/null; do
+      if [ -f "$control_dir/FORCE" ]; then
+        echo "Operator force-stop for entry $entry_id — sending SIGTERM to child pid $child_pid" >&2
+        kill -TERM "$child_pid" 2>/dev/null || true
+        _sw_waited=0
+        while [ "$_sw_waited" -lt 10 ] && kill -0 "$child_pid" 2>/dev/null; do
+          sleep 1
+          _sw_waited=$(( _sw_waited + 1 ))
+        done
+        if kill -0 "$child_pid" 2>/dev/null; then
+          echo "Child pid $child_pid survived SIGTERM for 10s — sending SIGKILL" >&2
+          kill -KILL "$child_pid" 2>/dev/null || true
+        fi
+        exit 0
+      fi
+      if [ -f "$control_dir/STOP" ]; then
+        if [ "$grace" -gt 0 ]; then
+          _sw_now=$(date +%s)
+          if [ -z "$_sw_stop_seen" ]; then
+            # First sighting, not the write time — the two differ by at most one
+            # poll interval, which is well inside a grace period measured in
+            # minutes.
+            _sw_stop_seen="$_sw_now"
+          elif [ $(( _sw_now - _sw_stop_seen )) -ge "$grace" ]; then
+            # Close-phase hold. operator-control.sh deliberately ignores STOP
+            # during `close` — stopping there leaves the work uncommitted and
+            # the branch unsealed, and t-0055 clause 6 says the flag stays set
+            # for the runner to honour once the child exits. Escalating here
+            # would SIGTERM then SIGKILL mid-close and produce exactly the
+            # outcome that guard exists to prevent, for any close longer than
+            # the grace period. So: hold instead, and let the child finish.
+            #
+            # The hold is bounded by the child exiting (this loop's condition)
+            # and by the existing TTL watchdog — deliberately NOT by a new
+            # "close grace" setting, which would be configuration for no gain.
+            #
+            # Fails TOWARD escalation: an unreadable, missing or non-close
+            # phase-state escalates as before, so a corrupt file cannot hold a
+            # runaway session open forever.
+            if [ -n "$phase_file" ] && [ -f "$phase_file" ] \
+               && grep -q '^current_phase: close$' "$phase_file" 2>/dev/null; then
+              if [ -z "$_sw_close_logged" ]; then
+                echo "Graceful stop for entry $entry_id reached its ${grace}s grace, but the session is in the close phase — holding escalation until it finishes (Decision t-0055 clause 6)" >&2
+                _sw_close_logged=1
+              fi
+            else
+              echo "Graceful stop for entry $entry_id saw no tool call within ${grace}s — escalating to force" >&2
+              printf 'escalated from a graceful stop after %ss without a tool call\n' "$grace" \
+                > "$control_dir/FORCE" 2>/dev/null || true
+              continue
+            fi
+          fi
+        fi
+      else
+        # STOP withdrawn before the grace period elapsed — restart the clock.
+        _sw_stop_seen=""
+      fi
+      sleep 5
+    done
+  ) &
+  _STOP_WATCHER_PID=$!
+}
+
+# --- Tear down the stop watcher ---
+# Safe to call when no watcher is running.
+_stop_stop_watcher() {
+  if [ -n "${_STOP_WATCHER_PID:-}" ]; then
+    kill "$_STOP_WATCHER_PID" 2>/dev/null || true
+    wait "$_STOP_WATCHER_PID" 2>/dev/null || true
+    _STOP_WATCHER_PID=""
+  fi
+}
+
 # --- _run_single_entry ---
 # Arguments:
 #   $1 — brief_id (for branch naming)
@@ -1345,10 +1715,60 @@ _run_single_entry() {
   _CURRENT_WORKTREE_IS_GROUP=false
   _CURRENT_GROUP_NAME=""
 
+  # --- Resume handle (Decision t-0055 clause 8) ---
+  # Read BEFORE the session id is minted, because a resume reuses the stopped
+  # session's REPO_OS_SESSION_ID rather than minting a new one. That is what
+  # makes the resumed session's commits carry the same Session: trailer as the
+  # work it is continuing. (The phase chain does not survive: the stop runs the
+  # normal close cleanup, which removes phase-state — see the resume message
+  # assembled in the daemon loop.)
+  # The handle is a file, not the session record: runner_external_cleanup calls
+  # unregister_session() at close, so the record is gone by the time a resume
+  # reads it.
+  local _resume_session_id=""
+  local _resume_claude_session=""
+  local _resume_worktree=""
+  _RESUME_WORKTREE_EXEMPT=false
+  if [ "${_RESUME_ENTRY:-false}" = true ]; then
+    local _resume_file="" _resume_dir=""
+    _resume_dir=$(get_control_dir "$brief_id" 2>/dev/null) || _resume_dir=""
+    if [ -n "$_resume_dir" ]; then
+      _resume_file="$_resume_dir/resume.yaml"
+    fi
+    if [ -n "$_resume_file" ] && [ -f "$_resume_file" ]; then
+      local _rl
+      while IFS= read -r _rl || [ -n "$_rl" ]; do
+        case "$_rl" in
+          "repo_os_session_id: "*)  _resume_session_id="${_rl#repo_os_session_id: }" ;;
+          "claude_session_id: "*)   _resume_claude_session="${_rl#claude_session_id: }" ;;
+          "worktree: "*)            _resume_worktree="${_rl#worktree: }" ;;
+        esac
+      done < "$_resume_file"
+      _resume_session_id=$(_strip_quotes "$_resume_session_id")
+      _resume_claude_session=$(_strip_quotes "$_resume_claude_session")
+      _resume_worktree=$(_strip_quotes "$_resume_worktree")
+    fi
+    if [ -z "$_resume_claude_session" ]; then
+      # No handle, or no session id in it: the entry is still runnable, it just
+      # cannot continue the old transcript. Falling back to a fresh session is
+      # the only alternative to failing an entry the operator asked to resume.
+      echo "WARNING: entry $brief_id is marked for resume but no resumable Claude session id was found at ${_resume_file:-<no control dir>} — starting a fresh session" >&2
+      _RESUME_ENTRY=false
+    else
+      # A resumed entry re-enters the worktree it was stopped in, which a force
+      # stop may well have left dirty. Exempt that one worktree from the
+      # clean-start check (Decision 0054) — see _resolve_group_worktree.
+      _RESUME_WORKTREE_EXEMPT=true
+    fi
+  fi
+
   # Generate per-session ID for state directory isolation (prevents daemon
   # sessions from overwriting interactive session phase-state). Exported so
   # hooks in the claude -p child process route state to wt-sessions/{id}/.
-  if [ -n "${EPOCHREALTIME:-}" ]; then
+  if [ "${_RESUME_ENTRY:-false}" = true ] && [ -n "$_resume_session_id" ]; then
+    export REPO_OS_SESSION_ID="$_resume_session_id"
+    echo "Resuming entry $brief_id in session $REPO_OS_SESSION_ID (claude session $_resume_claude_session)" >&2
+  elif [ -n "${EPOCHREALTIME:-}" ]; then
     local _frac="${EPOCHREALTIME#*.}"
     export REPO_OS_SESSION_ID="daemon-$(date +%Y%m%d-%H%M%S)-${_frac:0:4}"
   else
@@ -1508,6 +1928,10 @@ _run_single_entry() {
     if [ "$_GWT_REUSE" = true ]; then
       _wt_added=true
       echo "Reusing task group worktree $worktree_dir (group: $_GWT_GROUP, branch: $_SETUP_BRANCH)" >&2
+    elif [ "$_wt_is_group" != true ] \
+         && _standalone_resume_reuse_applicable "$worktree_dir" "$_SETUP_BRANCH"; then
+      _wt_added=true
+      echo "Reusing standalone worktree $worktree_dir for resumed entry $brief_id (branch: $_SETUP_BRANCH)" >&2
     elif git worktree add "$worktree_dir" "$_SETUP_BRANCH" 2>/dev/null; then
       _wt_added=true
       if [ "$_wt_is_group" = true ]; then
@@ -1610,9 +2034,60 @@ _run_single_entry() {
   _session_launch_epoch=$(date +%s)
   local _ttl_watchdog_pid=""
 
+  # Graceful-stop grace period (stop_grace_seconds: 0 = never escalate,
+  # default 120). Backstop for a graceful stop the PreToolUse hook never gets
+  # to answer — see _start_stop_watcher.
+  local _stop_grace
+  _stop_grace=$(_parse_config_field "runner" "stop_grace_seconds" 2>/dev/null || echo "120")
+  _stop_grace="${_stop_grace:-120}"
+  case "$_stop_grace" in
+    ''|*[!0-9]*) _stop_grace=120 ;;
+  esac
+
+  # --- Operator session control record (Decision t-0055) ---
+  # Written BEFORE launch so an operator (and Massimo's Task details header) can
+  # resolve a running entry to its work order, its resumable claude session id,
+  # the process running it and the worktree it is running in. control_state is
+  # updated again once the child exits. The record and the per-entry control
+  # directory both resolve against the MAIN repo root inside the helper, so the
+  # launched worktree session reads and writes the same files the runner does.
+  local _claude_session_id=""
+  local _session_id_flag=""
+  if [ "${_RESUME_ENTRY:-false}" = true ]; then
+    # Resume continues the recorded session with --resume instead of minting a
+    # new one with --session-id. Claude keys transcripts by working directory,
+    # so a resume only reaches the real history if it launches from the same
+    # directory the stopped session ran in — assert that rather than resume
+    # into an empty transcript (Decision t-0055 clause 8).
+    if [ -n "$_resume_worktree" ] && [ "$_resume_worktree" != "$launch_dir" ]; then
+      echo "WARNING: entry $brief_id was stopped in '$_resume_worktree' but would resume from '$launch_dir' — transcripts are keyed by directory, so a fresh session is started instead" >&2
+      _RESUME_ENTRY=false
+    else
+      _claude_session_id="$_resume_claude_session"
+      _session_id_flag="--resume $_claude_session_id"
+    fi
+  fi
+  if [ "${_RESUME_ENTRY:-false}" != true ]; then
+    if _claude_session_id=$(_generate_uuid); then
+      _session_id_flag="--session-id $_claude_session_id"
+    else
+      echo "WARNING: could not generate a UUID for --session-id — entry $brief_id will not be resumable by session id" >&2
+      _claude_session_id=""
+    fi
+  fi
+  ensure_control_dir "$brief_id" >/dev/null 2>&1 || \
+    echo "WARNING: failed to create the control directory for entry $brief_id" >&2
+  session_record_set "${REPO_OS_SESSION_ID:-}" \
+    "entry_id=$brief_id" \
+    "work_order_id=${_QE_WORK_ORDER_ID:-}" \
+    "claude_session_id=$_claude_session_id" \
+    "worktree=$launch_dir" \
+    "control_state=running" 2>/dev/null || \
+    echo "WARNING: failed to write the operator control record for entry $brief_id" >&2
+
   local exit_code=0
   if [ -n "$stderr_file" ]; then
-    # shellcheck disable=SC2086 — $model_flag intentionally unquoted (expands to nothing when empty)
+    # shellcheck disable=SC2086 — $model_flag and $_session_id_flag intentionally unquoted (each expands to nothing when empty)
     # `exec` is load-bearing. Without it the subshell FORKS the child, so `$!`
     # is the SUBSHELL's pid and every kill path signals a wrapper while the real
     # process keeps running: FORCE-HALT and the TTL watchdog were both affected. Confirmed on a live run 2026-10-20 — the
@@ -1639,9 +2114,11 @@ _run_single_entry() {
       --disallowedTools "$disallowed" \
       --max-turns "$_session_max_turns" \
       $model_flag \
+      $_session_id_flag \
       <<< "$prompt" \
       >"$stdout_file" 2>"$stderr_file") &
     _CLAUDE_CHILD_PID=$!
+    session_record_set "${REPO_OS_SESSION_ID:-}" "child_pid=$_CLAUDE_CHILD_PID" 2>/dev/null || true
     # Start TTL watchdog: kills child directly after TTL seconds
     if [ "$_session_max_ttl" -gt 0 ]; then
       local _child_pid_capture="$_CLAUDE_CHILD_PID"
@@ -1654,6 +2131,8 @@ _run_single_entry() {
     fi
     # FORCE-HALT must be able to interrupt THIS entry, not just the next one.
     _start_force_halt_watcher "$_CLAUDE_CHILD_PID"
+    # Start the operator stop watcher (Decision t-0055 clauses 6-7)
+    _start_stop_watcher "$brief_id" "$_CLAUDE_CHILD_PID" "$_stop_grace" "$launch_dir"
     wait "$_CLAUDE_CHILD_PID" || exit_code=$?
     # Re-wait if child is still alive (SIGTERM interrupted wait, not child)
     while [ "$exit_code" -ne 0 ] && kill -0 "$_CLAUDE_CHILD_PID" 2>/dev/null; do
@@ -1672,7 +2151,7 @@ _run_single_entry() {
       wait "$_CLAUDE_CHILD_PID" || exit_code=$?
     done
   else
-    # shellcheck disable=SC2086 — $model_flag intentionally unquoted (expands to nothing when empty)
+    # shellcheck disable=SC2086 — $model_flag and $_session_id_flag intentionally unquoted (each expands to nothing when empty)
     # `exec` for the same reason as the stderr branch above: the tracked pid must
     # be the real process, not a subshell wrapper, or every kill path signals the
     # wrapper and the child survives.
@@ -1681,8 +2160,10 @@ _run_single_entry() {
       --disallowedTools "$disallowed" \
       --max-turns "$_session_max_turns" \
       $model_flag \
+      $_session_id_flag \
       <<< "$prompt") &
     _CLAUDE_CHILD_PID=$!
+    session_record_set "${REPO_OS_SESSION_ID:-}" "child_pid=$_CLAUDE_CHILD_PID" 2>/dev/null || true
     # Start TTL watchdog: kills child directly after TTL seconds
     if [ "$_session_max_ttl" -gt 0 ]; then
       local _child_pid_capture="$_CLAUDE_CHILD_PID"
@@ -1695,6 +2176,8 @@ _run_single_entry() {
     fi
     # FORCE-HALT must be able to interrupt THIS entry, not just the next one.
     _start_force_halt_watcher "$_CLAUDE_CHILD_PID"
+    # Start the operator stop watcher (Decision t-0055 clauses 6-7)
+    _start_stop_watcher "$brief_id" "$_CLAUDE_CHILD_PID" "$_stop_grace" "$launch_dir"
     wait "$_CLAUDE_CHILD_PID" || exit_code=$?
     # Re-wait if child is still alive (SIGTERM interrupted wait, not child)
     while [ "$exit_code" -ne 0 ] && kill -0 "$_CLAUDE_CHILD_PID" 2>/dev/null; do
@@ -1727,6 +2210,13 @@ _run_single_entry() {
     wait "$_FORCE_HALT_WATCHER_PID" 2>/dev/null || true
     _FORCE_HALT_WATCHER_PID=""
   fi
+  _stop_stop_watcher
+  # The child has exited — whether it finished, was stopped or was killed, the
+  # entry is no longer running (Decision t-0055). child_pid is cleared so a
+  # reader never mistakes a recycled pid for this session's process.
+  session_record_set "${REPO_OS_SESSION_ID:-}" \
+    "control_state=stopped" \
+    "child_pid=" 2>/dev/null || true
   _CLAUDE_CHILD_PID=""
 
   # Replay the captured output so it still lands in daemon.log (stdout to stdout,
@@ -1737,6 +2227,47 @@ _run_single_entry() {
   fi
   if [ -n "$stderr_file" ] && [ -f "$stderr_file" ]; then
     cat "$stderr_file" >&2
+  fi
+
+  # --- Operator stop detection (Decision t-0055 clauses 6-7) ---
+  # Read before outcome detection, because a stop is not an outcome the session
+  # produced: the exit code of a stopped child says nothing useful about the
+  # work, and detect_outcome would read it as a failure and burn a retry.
+  # FORCE wins over STOP — the watcher escalates by writing FORCE alongside it,
+  # and the mode the operator ends up with is the one that killed the child.
+  local _stopped_mode=""
+  local _control_dir=""
+  _control_dir=$(get_control_dir "$brief_id" 2>/dev/null) || _control_dir=""
+  if [ -n "$_control_dir" ]; then
+    if [ -f "$_control_dir/FORCE" ]; then
+      _stopped_mode="forced"
+    elif [ -f "$_control_dir/STOP" ]; then
+      _stopped_mode="graceful"
+    fi
+  fi
+
+  # Durable resume handle. The session record is deleted by unregister_session()
+  # inside runner_external_cleanup below, so the only way a later resume can
+  # find the Claude session id is a file that outlives the session.
+  if [ -n "$_stopped_mode" ] && [ -n "$_control_dir" ]; then
+    if [ -n "$_claude_session_id" ]; then
+      {
+        printf '# Resume handle for entry %s — written by runner.sh at operator stop (Decision t-0055).\n' "$brief_id"
+        printf '# Lowercase name = durable data; the UPPERCASE siblings are flags.\n'
+        printf 'claude_session_id: "%s"\n' "$_claude_session_id"
+        printf 'worktree: "%s"\n' "$launch_dir"
+        printf 'repo_os_session_id: "%s"\n' "${REPO_OS_SESSION_ID:-}"
+        printf 'stopped_mode: "%s"\n' "$_stopped_mode"
+        printf 'stopped_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      } > "$_control_dir/resume.yaml" 2>/dev/null || \
+        echo "WARNING: failed to write the resume handle for entry $brief_id — it will restart from a fresh session" >&2
+    else
+      echo "WARNING: entry $brief_id was stopped but has no Claude session id — resume will start a fresh session" >&2
+    fi
+    # Both flags are cleared once the stop has been honoured, so the entry can
+    # be resumed (and stopped again) without the stale flag stopping it on its
+    # first tool call.
+    rm -f "$_control_dir/STOP" "$_control_dir/FORCE" 2>/dev/null || true
   fi
 
   # Clear automation context (keep REPO_OS_SESSION_ID alive for cleanup)
@@ -1750,7 +2281,11 @@ _run_single_entry() {
     _RESULT_SOLO_MODE="${_QE_SOLO_MODE:-false}"
     _RESULT_BRANCH=$(git -C "$_CURRENT_WORKTREE_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
     # Outcome detection from worktree context
-    _RESULT_OUTCOME=$(detect_outcome "$exit_code" "$_RESULT_BASELINE" "$_CURRENT_WORKTREE_DIR" "$brief_id" "$stderr_file" "$stdout_file")
+    if [ -n "$_stopped_mode" ]; then
+      _RESULT_OUTCOME="stopped:$_stopped_mode"
+    else
+      _RESULT_OUTCOME=$(detect_outcome "$exit_code" "$_RESULT_BASELINE" "$_CURRENT_WORKTREE_DIR" "$brief_id" "$stderr_file" "$stdout_file")
+    fi
     _RESULT_PRESERVED_PATCH=""
     if [ "$_CURRENT_WORKTREE_IS_GROUP" = true ]; then
       # Snapshot even though the tree is kept: the next brief may reset it, and
@@ -1763,6 +2298,11 @@ _run_single_entry() {
       # window where the final brief's merge may be about to remove it. The
       # caller releases it after the merge/seal step.
       echo "Keeping task group worktree $_CURRENT_WORKTREE_DIR for the next brief (group: $_CURRENT_GROUP_NAME)" >&2
+    elif [ -n "$_stopped_mode" ]; then
+      # An operator stop keeps the worktree: that is where the stopped session's
+      # uncommitted work lives, and the resume relaunches from this exact path
+      # (transcripts are keyed by directory — Decision t-0055 clause 8).
+      echo "Keeping worktree $_CURRENT_WORKTREE_DIR — entry $brief_id was stopped by the operator and stays resumable" >&2
     else
       # Capture uncommitted work, then remove the worktree (Decision t-0062).
       # Never call this inside $(...): the patch path is returned via a global.
@@ -1772,7 +2312,11 @@ _run_single_entry() {
     fi
   else
     # Legacy path or worktree not created
-    _RESULT_OUTCOME=$(detect_outcome "$exit_code" "$_RESULT_BASELINE" "$REPO_ROOT" "$brief_id" "$stderr_file" "$stdout_file")
+    if [ -n "$_stopped_mode" ]; then
+      _RESULT_OUTCOME="stopped:$_stopped_mode"
+    else
+      _RESULT_OUTCOME=$(detect_outcome "$exit_code" "$_RESULT_BASELINE" "$REPO_ROOT" "$brief_id" "$stderr_file" "$stdout_file")
+    fi
     _RESULT_SOLO_MODE="${_QE_SOLO_MODE:-false}"
     _RESULT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
   fi
@@ -2211,6 +2755,7 @@ if [ "$DAEMON_MODE" = false ]; then
   case "$OUTCOME" in
     completed) exit 0 ;;
     review)    exit 2 ;;
+    stopped)   exit 4 ;;  # operator stop — not a failure (Decision t-0055)
     failed)    exit 1 ;;
     *)         exit 1 ;;
   esac
@@ -2629,12 +3174,29 @@ while true; do
   ENTRY_PUSH="${_QE_PUSH_ON_COMPLETE:-false}"
   ENTRY_PERMISSION_PROFILE="${_QE_PERMISSION_PROFILE:-build}"
   ENTRY_MODEL="${_QE_MODEL:-}"
+  # Operator resume (Decision t-0055 clause 8). `resume: true` is set by
+  # queue_resume and consumed here — it is a one-shot instruction, so it is
+  # cleared on the running copy before the session launches and a crash
+  # mid-session cannot leave the entry permanently flagged for resume.
+  ENTRY_RESUME="${_QE_RESUME:-false}"
+  ENTRY_STOPPED_MODE="${_QE_STOPPED_MODE:-}"
+  # t-0055 clause 14. Captured here with the rest, because the Parent task
+  # section is built after several helpers that clobber _QE_*.
+  ENTRY_FOLLOW_UP_OF="${_QE_FOLLOW_UP_OF:-}"
+  if [ "$ENTRY_RESUME" = true ]; then
+    _QE_RESUME="false"
+    _write_queue_entry "$ENTRY_FILE" 2>/dev/null || \
+      echo "WARNING: could not clear the resume flag on entry $ENTRY_ID" >&2
+  fi
 
   echo "Processing entry: $ENTRY_ID (type: $ENTRY_SESSION_TYPE)" >&2
 
   # --- Merge-idempotency check (Phase 4: skip re-execution if already merged) ---
+  # Skipped on a resume: the entry is mid-flight by definition, its branch is
+  # checked out in the worktree it was stopped in, and the branch-deletion arm
+  # below would either fail against that checkout or discard live work.
   _retry_count="${_QE_RETRY_COUNT:-0}"
-  if [ "$_retry_count" -gt 0 ] && [ -n "$ENTRY_BRANCH" ]; then
+  if [ "$ENTRY_RESUME" != true ] && [ "$_retry_count" -gt 0 ] && [ -n "$ENTRY_BRANCH" ]; then
     # Prior attempt created a branch — determine merge state
     _merge_skip=false
     if git rev-parse --verify "$ENTRY_BRANCH" >/dev/null 2>&1; then
@@ -2761,7 +3323,50 @@ while true; do
   fi
 
   # --- Assemble prompt (lazy generation at dequeue time) ---
-  PROMPT=$(assemble_prompt "$ENTRY_FILE")
+  if [ "$ENTRY_RESUME" = true ]; then
+    # A resume continues an existing transcript, so the whole brief is already
+    # in the child's context — re-sending it would duplicate it. The message is
+    # the operator's instruction to carry on. The phase chain, unlike the
+    # transcript, does NOT survive the stop (cleanup_session_files removes
+    # phase-state at close and state_manager_setup re-inits at `init`), so the
+    # message says so rather than letting the agent assume otherwise.
+    PROMPT="Resumed by operator."
+    if [ "$ENTRY_STOPPED_MODE" = "forced" ]; then
+      PROMPT="$PROMPT The previous session was force-stopped; check the working tree before continuing."
+    fi
+    PROMPT="$PROMPT Session state was reset to the init phase at the stop, so re-advance the phases from where your work actually stands."
+  else
+    PROMPT=$(assemble_prompt "$ENTRY_FILE")
+  fi
+
+  # A follow-up's parent context (t-0055 clause 14), appended before the notes
+  # so the ordering reads brief → background → operator amendment. Skipped on a
+  # resume: the resumed transcript already contains the section from the
+  # session's first launch, and re-sending it would compete with the operator's
+  # actual instruction to carry on.
+  if [ "$ENTRY_RESUME" != true ] && [ -n "$ENTRY_FOLLOW_UP_OF" ]; then
+    _ENTRY_PARENT=$(_build_parent_task_section "$ENTRY_ID" "$ENTRY_FOLLOW_UP_OF") || _ENTRY_PARENT=""
+    if [ -n "$_ENTRY_PARENT" ]; then
+      PROMPT="$PROMPT
+
+$_ENTRY_PARENT"
+      review_log_append "entry-parent-context" "$ENTRY_WORK_ORDER_ID" "$ENTRY_ID" \
+        "Entry $ENTRY_ID is a follow-up of $ENTRY_FOLLOW_UP_OF — parent context added to its prompt" 2>/dev/null || true
+    fi
+  fi
+
+  # Operator notes written while this entry was queued or stopped ride in with
+  # the prompt — the one moment before the session starts where context can
+  # still be added (t-0055 clause 13). Appended after the brief in both cases,
+  # so the note reads as an amendment to the brief rather than a replacement.
+  _ENTRY_NOTES=$(_drain_operator_notes "$ENTRY_ID") || _ENTRY_NOTES=""
+  if [ -n "$_ENTRY_NOTES" ]; then
+    PROMPT="$PROMPT
+
+$_ENTRY_NOTES"
+    review_log_append "entry-notes-delivered" "$ENTRY_WORK_ORDER_ID" "$ENTRY_ID" \
+      "Operator notes delivered to entry $ENTRY_ID in its $([ "$ENTRY_RESUME" = true ] && echo "resume message" || echo "prompt")" 2>/dev/null || true
+  fi
 
   # --- Re-check HALT / FORCE-HALT (last stop before the session starts) ---
   # The loop-top check is stale by now. Deliberately placed as late as the loop
@@ -2782,7 +3387,10 @@ while true; do
   # --- Execute (direct call — no subshell, outcome in globals) ---
   _CURRENT_ENTRY_ID="$ENTRY_ID"
   _write_health "running"
+  _RESUME_ENTRY="$ENTRY_RESUME"
   _run_single_entry "$ENTRY_ID" "$PROMPT" "$ENTRY_SESSION_TYPE" "$ENTRY_BRANCH" "$ENTRY_PERMISSION_PROFILE" "$ENTRY_PUSH" "$ENTRY_BRIEF_PATH" "$ENTRY_MODEL"
+  _RESUME_ENTRY=false
+  _RESUME_WORKTREE_EXEMPT=false
 
   # --- Stop heartbeat ---
   _stop_heartbeat
@@ -2910,6 +3518,15 @@ while true; do
           ;;
       esac
       ;;
+    stopped)
+      # Operator stop (Decision t-0055): the entry goes to stopped/, keeping its
+      # worktree, its Claude session and its retry budget. Not a failure, so no
+      # retry is consumed and the circuit breaker is left alone.
+      if ! queue_stop "$ENTRY_ID" "${OUTCOME_RAW#*:}"; then
+        echo "ERROR: queue_stop failed for $ENTRY_ID" >&2
+        _transition_ok=false
+      fi
+      ;;
     failed)
       # Infrastructure failures (empty-result) are non-retriable — go directly to
       # terminal failed/ without incrementing retry_count. Retriable failures use
@@ -3030,6 +3647,16 @@ while true; do
             ;;
         esac
       fi
+      ;;
+    stopped)
+      # Operator-directed, like review — not a failure, so the circuit breaker
+      # and the failure counter are both left alone. The work order stays open
+      # by construction (the entry is non-terminal in stopped/), so there is no
+      # wo_check_completion call to make here.
+      _LAST_SESSION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+      _CONSECUTIVE_SESSION_COUNT=$((_CONSECUTIVE_SESSION_COUNT + 1))
+      review_log_append "entry-stopped" "${ENTRY_WORK_ORDER_ID:-}" "$ENTRY_ID" \
+        "Entry $ENTRY_ID stopped by operator (${OUTCOME_RAW#*:}) — worktree and Claude session kept. Resume with: queue-cli.sh resume-entry $ENTRY_ID" 2>/dev/null || true
       ;;
     failed|*)
       # An operator force-halt is not a repo failure. Since the in-session

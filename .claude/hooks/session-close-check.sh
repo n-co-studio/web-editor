@@ -179,10 +179,9 @@ IS_TEMPLATE=false
 # `git worktree remove` destroyed the group's definition of done along with the
 # worktree. That happened on 2026-10-19 to task-details-header and left every
 # later brief unable to commit anything, because A6.1 requires a contract.
-# Recorded as R16 in docs/ai/logs/known-issues.md — the authority for this
-# rooting. (Earlier revisions cited a "Decision t-0055 clause 4" that does not
-# exist; it would have come from the task-details-header group, which this very
-# defect blocked. Cite it once that group lands it, not before.)
+# Recorded as R16 in docs/ai/logs/known-issues.md, which records the defect;
+# Decision t-0055 clause 4 states the rule (shared per-group and per-entry state
+# resolves through get_main_repo_root(), never the session's own root).
 #
 # One function because this file had THREE copies of the same if/else; it is
 # deliberately file-local rather than a shared repo-wide wrapper, which would be
