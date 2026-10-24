@@ -84,8 +84,17 @@ LAST_MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty' 2>/dev/n
 # When the harness emits a normal final message this path never fires, so the fix
 # is additive, not a behaviour change.
 if [ -z "$LAST_MESSAGE" ]; then
+  _SW_TRIED=""
   for _tp_key in agent_transcript_path transcript_path; do
     TRANSCRIPT=$(echo "$INPUT" | jq -r --arg k "$_tp_key" '.[$k] // empty' 2>/dev/null || true)
+    # Record what each key yielded. TRANSCRIPT survives the loop holding only the
+    # LAST key tried, so a diagnostic built after `done` would describe the parent
+    # transcript — which never contains handbacks — and mislead the next reader.
+    if [ -z "$TRANSCRIPT" ]; then
+      _SW_TRIED="$_SW_TRIED ${_tp_key}=empty-value"
+    elif [ ! -f "$TRANSCRIPT" ]; then
+      _SW_TRIED="$_SW_TRIED ${_tp_key}=file-missing"
+    fi
     [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ] || continue
 
     # Parsed line by line with `fromjson?`, NOT with `jq -rs`. Slurping parses the
@@ -96,23 +105,55 @@ if [ -z "$LAST_MESSAGE" ]; then
     # Each match is emitted as a compact JSON string, so one handback is one output
     # line regardless of newlines in the report; tail -1 therefore takes the LAST
     # handback whole, and the final jq decodes it back to text.
-    _handback=$(jq -R -c '
-      fromjson?
-      | (.message?.content? // [])
-      | .[]?
-      | select(type == "object")
-      | select(.type == "tool_use" and .name == "SubagentHandback")
-      | .input?.message? // empty
-    ' "$TRANSCRIPT" 2>/dev/null | tail -1 || true)
+    # The handback is appended to the subagent's transcript AFTER this hook is
+    # invoked. Measured 2026-10-24: hook at 13:08:04, handback written at
+    # 13:08:04.8 — and the file already EXISTS by then, so the -f guard above
+    # passes and the extraction simply finds nothing. Reading once therefore
+    # loses the verdict, and because this path writes no rejection, nothing
+    # surfaces: 14 verdicts were captured on 2026-10-22 and then zero on the
+    # 23rd and 24th, with only `no_message` in the event log.
+    #
+    # It is a race, not a contract change: 2026-10-22 recovered 11 verdicts via
+    # this very path with 2 misses, and the payload key set is identical between
+    # the hits and the misses.
+    #
+    # So poll rather than read once. Bounded at ~3s, which covers the observed
+    # lag with wide margin while keeping the hook responsive; the hook already
+    # spends seconds on its other work. A verdict is worth 3s, and the failure
+    # being replaced is a silent governance hole — the gate it feeds reports
+    # success while verifying nothing.
+    # Poll ONLY the subagent's own transcript. The parent's never contains a
+    # handback tool_use — that is why the keys are tried in this order — so
+    # polling it would spend another ~3.8s waiting for something that cannot
+    # arrive, doubling the cost of a genuine miss to ~7.6s. Read it once.
+    _hb_budget=30
+    [ "$_tp_key" = "agent_transcript_path" ] || _hb_budget=1
+    _handback=""
+    _hb_waited=0
+    while [ "$_hb_waited" -lt "$_hb_budget" ]; do
+      _handback=$(jq -R -c '
+        fromjson?
+        | (.message?.content? // [])
+        | .[]?
+        | select(type == "object")
+        | select(.type == "tool_use" and .name == "SubagentHandback")
+        | .input?.message? // empty
+      ' "$TRANSCRIPT" 2>/dev/null | tail -1 || true)
+      [ -n "$_handback" ] && break
+      sleep 0.1
+      _hb_waited=$(( _hb_waited + 1 ))
+    done
 
     if [ -n "$_handback" ]; then
       LAST_MESSAGE=$(printf '%s' "$_handback" | jq -r '.' 2>/dev/null || true)
     fi
 
     if [ -n "$LAST_MESSAGE" ]; then
-      log_hook_event "state-writer" "SubagentStop" "$AGENT_TYPE" "recover" "$START_MS" "handback_transcript" "src:$_tp_key"
+      log_hook_event "state-writer" "SubagentStop" "$AGENT_TYPE" "recover" "$START_MS" \
+        "handback_transcript" "src:$_tp_key waited:${_hb_waited}x100ms"
       break
     fi
+    _SW_TRIED="$_SW_TRIED ${_tp_key}=no-handback-after-${_hb_waited}x100ms"
   done
 fi
 
@@ -122,8 +163,14 @@ if [ -z "$LAST_MESSAGE" ]; then
   # the outside; telling them apart previously meant reading a subagent transcript
   # by hand, which is how the handback change stayed invisible for two days.
   PAYLOAD_KEYS=$(echo "$INPUT" | jq -r 'keys | join(",")' 2>/dev/null || true)
-  echo "WARNING: $AGENT_TYPE completed with empty output — state file not written (payload keys: ${PAYLOAD_KEYS:-none})" >&2
-  log_hook_event "state-writer" "SubagentStop" "$AGENT_TYPE" "skip" "$START_MS" "no_message" "keys:${PAYLOAD_KEYS:-none}"
+  # Logging the key NAMES alone made four different failures indistinguishable:
+  # the key absent, the key present but its value empty, the path set but the
+  # file missing, and the file present but the handback not yet written. The
+  # last of those is what actually happened for two days, and telling it apart
+  # from the others needed a controlled probe. Record which one it was.
+  _SW_DIAG="tried:${_SW_TRIED:- none}"
+  echo "WARNING: $AGENT_TYPE completed with empty output — state file not written (payload keys: ${PAYLOAD_KEYS:-none}; $_SW_DIAG)" >&2
+  log_hook_event "state-writer" "SubagentStop" "$AGENT_TYPE" "skip" "$START_MS" "no_message" "keys:${PAYLOAD_KEYS:-none} $_SW_DIAG"
   exit 0
 fi
 

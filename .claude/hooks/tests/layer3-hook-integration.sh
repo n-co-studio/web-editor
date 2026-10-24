@@ -501,6 +501,58 @@ assert_file_exists "$STATE_DIR/cohesion-reviewed" "state-writer writes cohesion-
 phase_after=$(get_phase)
 assert_eq "$phase_after" "verify" "state-writer advances review→verify on critic APPROVED"
 
+# --- The handback write race: the transcript gains the handback AFTER the hook ---
+# Measured 2026-10-24: the hook ran at 13:08:04 and the handback was appended to
+# the subagent's transcript at 13:08:04.8. The file ALREADY EXISTS when the hook
+# checks it, so the -f guard passes and the extraction simply finds nothing. The
+# single read therefore lost the verdict, and because that path writes no
+# rejection, nothing surfaced: 14 verdicts captured on 2026-10-22, then zero on
+# the 23rd and 24th with only `no_message` in the event log. Every pragmatist, QA
+# and A5 gate was silently unverifiable for two days.
+#
+# This case reproduces the race rather than assuming it: the payload points at a
+# transcript that does NOT yet contain the handback, the hook is started, and the
+# handback is appended while it polls. Against a single-read hook it goes red.
+reset_phase "standard"
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "review" 2>/dev/null
+rm -f "$STATE_DIR/cohesion-reviewed"
+
+_RACE_DIR="$SB/.race-transcript"
+mkdir -p "$_RACE_DIR"
+_RACE_T="$_RACE_DIR/agent.jsonl"
+# Exists, is valid JSONL, and carries NO handback — the state the hook observed.
+printf '%s\n' '{"message":{"role":"assistant","content":[{"type":"text","text":"working"}]}}' > "$_RACE_T"
+_RACE_PAYLOAD=$(printf '{"agent_type":"critic","agent_transcript_path":"%s"}' "$_RACE_T")
+
+# Append the handback shortly after the hook starts, in the background.
+(
+  # 1.0s, not 0.4s. The margin only fails in the safe direction — if the hook
+  # were slower than the delay to reach its read, the handback would already be
+  # present and the case would pass VACUOUSLY, testing nothing. That false-green
+  # is the exact failure class this whole fix addresses, so buy margin. Still
+  # well inside the ~3s poll window.
+  sleep 1.0
+  printf '%b' 'Cohesion review complete.\nGATE_RESULT: APPROVED' \
+    | jq -Rs '{message:{role:"assistant",content:[{type:"tool_use",name:"SubagentHandback",input:{message:.}}]}}' -c \
+    >> "$_RACE_T"
+) &
+_RACE_BG=$!
+
+run_hook_rc "state-writer.sh" "$_RACE_PAYLOAD"
+wait "$_RACE_BG" 2>/dev/null || true
+
+assert_ok "$_LAST_RC" "state-writer exits 0 when the handback arrives late"
+assert_file_exists "$STATE_DIR/cohesion-reviewed" \
+  "state-writer waits for a handback written after it starts (verdict-capture race)"
+# The recovered verdict must be the real one, not an empty file that merely exists.
+assert_file_contains "$STATE_DIR/cohesion-reviewed" "GATE_RESULT: APPROVED" \
+  "the late-arriving handback's verdict is the one recorded"
+
+rm -rf "$_RACE_DIR" 2>/dev/null || true
+
 # --- t-0059: a critic dispatched LATE is accepted, with the discrepancy recorded ---
 # Between 2026-10-20 and 22, twenty verdicts were discarded on the dispatch-phase
 # check. Every one was at or after the expected phase — a critic dispatched from
