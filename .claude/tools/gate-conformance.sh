@@ -1052,6 +1052,133 @@ else
 fi
 
 # ============================================================
+# Invoked hooks must be executable
+# ============================================================
+# `.claude/settings.json` invokes every hook it registers by BARE PATH, never as
+# `bash <path>`. So a hook tracked 100644 cannot run once registered: the
+# registration succeeds and the hook is inert.
+#
+# Stated precisely, because the first draft of this comment overstated it.
+# operator-notes.sh and operator-control.sh shipped 100644 on 2026-10-22 and
+# were inert because they were never REGISTERED, not because a registration
+# failed. The exec bit was a precondition for the registration t-0055 asks the
+# operator to apply: without it that registration could not have worked even
+# once applied. See t-0055 Amendment 1.
+#
+# Scope is every non-underscore `*.sh` directly under the hooks directory, which
+# is WIDER than what settings.json currently names — editor-watch.sh,
+# next-live-editor-branch.sh, validate-custom-agent.sh and test-custom-agents.sh
+# are covered too. That is deliberate: a hook is registerable whether or not it
+# is registered yet, and catching the one that ships inert is the whole point.
+#
+# The rule is ONE-DIRECTIONAL on purpose. Non-underscore hooks are invoked and
+# must be 100755. The inverse is NOT asserted: 5 of the 13 underscore-prefixed
+# files are tracked 100755, and they are sourced helpers where the bit is
+# meaningless rather than wrong, so requiring 644 of them would fail on files
+# that work.
+#
+# Mode is read from the INDEX, not the filesystem: the index is what a commit
+# and a sync carry, and `ls -l` would pass on a file whose exec bit was never
+# staged.
+#
+# TEMPLATE-ONLY, same guard and same reason as the manifest check above, but a
+# sharper one: `template-sync-engine.sh` materialises each synced file by
+# redirecting `git show "$ref:$path"` into it, and that carries no mode. The
+# redirect keeps the mode of a file that already EXISTS, which is why children's
+# established hooks still run — but a newly added hook lands at the child's
+# umask default and this check would fail in every child for a defect the child
+# cannot fix. The gap is real and deliberately left unmonitored here; it is
+# tracked as a follow-up, not patched by making this assertion lie.
+printf '\n## invoked hooks are executable\n'
+
+# Prints the offending `<mode> <path>` lines for a repo, empty when clean.
+# Takes the repo root so the probes below can run it against a scratch repo.
+#
+# TOP LEVEL ONLY, and the depth test is in awk rather than the pathspec because
+# a git pathspec `*` CROSSES `/`: `.claude/hooks/*.sh` also matches
+# `.claude/hooks/tests/layer3-hook-integration.sh`. The first run of this check
+# duly reported six test files, which are invoked as `bash <path>` by
+# run-phase-tests.sh and are not registered anywhere, so 644 is correct for
+# them. A probe below covers that skip, because the real-repo case is
+# template-only and so could not catch a regression of it in CI or in a child.
+_hook_mode_offenders() {
+  git -C "$1" ls-files -s -- '.claude/hooks/' 2>/dev/null | awk '
+    {
+      rel = $4
+      sub(/^\.claude\/hooks\//, "", rel)
+      if (rel ~ /\//) next                      # a subdirectory: tests/, fixtures/
+      if (rel !~ /\.sh$/) next
+      if (substr(rel, 1, 1) == "_") next         # sourced helper, bit is meaningless
+      if ($1 != "100755") print $1, $4
+    }'
+}
+
+if [ "$(cat "$REAL_HOOKS/../repo-mode" 2>/dev/null || true)" = "template" ]; then
+  _hm_out=$(_hook_mode_offenders "$(cd "$REAL_HOOKS/../.." && pwd)")
+  if [ -z "$_hm_out" ]; then
+    PASS=$((PASS + 1))
+    printf 'ok   %-58s [all 100755]\n' "every invoked hook is executable in the index"
+  else
+    FAIL=$((FAIL + 1))
+    FAILED_CASES="${FAILED_CASES}    - an invoked hook is not executable in the index"$'\n'
+    printf 'FAIL %-58s [not executable]\n' "every invoked hook is executable in the index"
+    printf '%s\n' "$_hm_out" | sed 's/^/       | /'
+    printf '       | hooks are invoked by bare path, so this cannot run once registered. Fix: chmod 755 <path> && git add <path>\n'
+  fi
+else
+  printf 'skip %-58s [not a template checkout]\n' \
+    "every invoked hook is executable in the index"
+fi
+
+# Probes: the check must discriminate, in both directions of its one rule.
+# The files are empty — this reads the index mode and never the content.
+_HM="$SB/hook-mode-probe"
+_hm_ok=1
+mkdir -p "$_HM/.claude/hooks" \
+  && git -C "$_HM" init -q \
+  && touch "$_HM/.claude/hooks/invoked.sh" "$_HM/.claude/hooks/_helper.sh" \
+  && chmod 755 "$_HM/.claude/hooks/invoked.sh" \
+  && chmod 644 "$_HM/.claude/hooks/_helper.sh" \
+  && git -C "$_HM" add -A && _hm_ok=0
+if [ "$_hm_ok" -ne 0 ]; then
+  FAIL=$((FAIL + 1))
+  FAILED_CASES="${FAILED_CASES}    - hook-mode probe repo could not be built"$'\n'
+  printf 'FAIL %-58s [setup]\n' "hook-mode probe repo builds"
+else
+  # A non-underscore hook at 644 is the defect the check exists for.
+  git -C "$_HM" update-index --chmod=-x .claude/hooks/invoked.sh
+  [ -n "$(_hook_mode_offenders "$_HM")" ] && _hm_rc=0 || _hm_rc=1
+  expect_exit 0 "$_hm_rc" "probe: non-underscore hook at 644 is reported"
+
+  # An underscore helper at 644 is not, and never was, a defect. _helper.sh is
+  # still staged 644 here, so a clean result proves the rule is one-directional
+  # rather than merely silent.
+  git -C "$_HM" update-index --chmod=+x .claude/hooks/invoked.sh
+  [ -z "$(_hook_mode_offenders "$_HM")" ] && _hm_rc=0 || _hm_rc=1
+  expect_exit 0 "$_hm_rc" "probe: underscore helper at 644 is not reported"
+
+  # A 644 test file in a SUBDIRECTORY must not be reported. This is the defect
+  # this check itself shipped with on its first run — the pathspec
+  # `.claude/hooks/*.sh` crosses `/` and swept in six files under tests/ — and
+  # the real-repo case above is template-only, so it cannot catch a regression
+  # of it in CI or in a child.
+  mkdir -p "$_HM/.claude/hooks/tests" \
+    && touch "$_HM/.claude/hooks/tests/layer0-probe.sh" \
+    && chmod 644 "$_HM/.claude/hooks/tests/layer0-probe.sh" \
+    && git -C "$_HM" add -A
+  [ -z "$(_hook_mode_offenders "$_HM")" ] && _hm_rc=0 || _hm_rc=1
+  expect_exit 0 "$_hm_rc" "probe: 644 test file in a subdirectory is not reported"
+
+  # ...and the identical name at the TOP level still is, so the skip is scoped
+  # to the subdirectory and not to the layer*/test* naming.
+  touch "$_HM/.claude/hooks/layer0-probe.sh" \
+    && chmod 644 "$_HM/.claude/hooks/layer0-probe.sh" \
+    && git -C "$_HM" add -A
+  [ -n "$(_hook_mode_offenders "$_HM")" ] && _hm_rc=0 || _hm_rc=1
+  expect_exit 0 "$_hm_rc" "probe: the same name at the top level IS reported"
+fi
+
+# ============================================================
 printf '\n# ------------------------------------------------------------\n'
 printf '# passed: %d   failed: %d\n' "$PASS" "$FAIL"
 if [ "$FAIL" -ne 0 ]; then

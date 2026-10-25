@@ -2558,11 +2558,66 @@ _solo_merge_if_needed() {
     _ho_sha=$(git -C "$REPO_ROOT" rev-parse --short "$entry_current_branch" 2>/dev/null || echo "unknown")
     _close_record "$brief_id" "" "commit" "done" "$entry_current_branch at $_ho_sha"
     if [ -n "$group_name" ]; then
-      if [ -f "$REPO_ROOT/.claude/local/task-groups/${group_name}.yaml" ]; then
-        _ho_contract=".claude/local/task-groups/${group_name}.yaml"
-      elif [ -f "$REPO_ROOT/docs/ai/task-groups/${group_name}.yaml" ]; then
-        _ho_contract="docs/ai/task-groups/${group_name}.yaml"
+      # ONE directory, chosen by operating mode, searched in this process's root
+      # and then the main repo's. This mirrors _scc_contract_dir /
+      # _scc_contract_dir_alt in session-close-check.sh.
+      #
+      # Why the main-repo fallback at all, stated honestly: it fixes no
+      # currently reachable defect, and the route in is narrower than two
+      # earlier drafts of this comment claimed. REPO_ROOT is script-dir-derived
+      # and never rebound. Reaching here needs a non-empty group_name AND a
+      # non-final entry, and of the three _solo_merge_if_needed call sites:
+      #   - the --close-entry close passes "" for group_name;
+      #   - the single-shot --brief-id run passes "" for work_order_id, which
+      #     queue_is_final_taskgroup_entry treats as final by definition, so the
+      #     `! _is_final_taskgroup_entry` guard above excludes it;
+      #   - only the daemon's queue-entry run passes both.
+      # (Draft one claimed --close-entry could reach it; draft two claimed two
+      # reaching sites. Both were wrong. Line numbers are deliberately not cited
+      # here — the first draft's went stale the moment this comment grew.)
+      #
+      # In the supported configuration the daemon runs the main repo's own copy,
+      # so REPO_ROOT is already the main root. That is a property of how the
+      # daemon is started, not something enforced here: queue-cli.sh starts it
+      # as "$AUTOMATION_DIR/runner.sh" --daemon with AUTOMATION_DIR derived from
+      # the CLI's own script directory, so a daemon started from a worktree's
+      # checked-out queue-cli.sh would be worktree-rooted and would reach this
+      # branch with a group name. Whether anything blocks that is not verified.
+      #
+      # It is here because the rooting invariant in gate-conformance.sh is
+      # file-level: a file that resolves a task-group contract must also resolve
+      # the main root. The alternative was adding runner.sh to _CONTRACT_EXEMPT,
+      # which switches the check off for all 4,000-odd lines of it, including any future
+      # consumer — and that check exists precisely because a hand survey of the
+      # consumers once missed three, A6.1 among them. Six lines here is the
+      # cheaper side of that trade. If a future call site passes a group name
+      # from a worktree-rooted process, this is already correct.
+      #
+      # Why ONE directory and not both: searching both would mean a tracked
+      # `docs/ai/` copy in the session root could outrank the live
+      # `.claude/local/` contract in the main root, naming a stale file in the
+      # evidence row. Mode decides which directory is authoritative, so only
+      # the root is in question — and there, session-first is correct, because
+      # briefs write the session copy and a stale main copy must not shadow it.
+      local _ho_root _ho_main _ho_rel _ho_mode_file _ho_dir
+      _ho_mode_file="$REPO_ROOT/.claude/repo-mode"
+      _ho_main=$(get_main_repo_root 2>/dev/null) || _ho_main=""
+      [ -f "$_ho_mode_file" ] || _ho_mode_file="$_ho_main/.claude/repo-mode"
+      if [ -f "$_ho_mode_file" ] && grep -q "template" "$_ho_mode_file" 2>/dev/null; then
+        _ho_dir=".claude/local/task-groups"
+      else
+        _ho_dir="docs/ai/task-groups"
       fi
+      _ho_rel="$_ho_dir/${group_name}.yaml"
+      for _ho_root in "$REPO_ROOT" "$_ho_main"; do
+        [ -n "$_ho_root" ] || continue
+        if [ -f "$_ho_root/$_ho_rel" ]; then
+          # Repo-relative in both cases, so the close_steps row does not change
+          # shape depending on which root held the file.
+          _ho_contract="$_ho_rel"
+          break
+        fi
+      done
     fi
     if [ -n "$_ho_contract" ]; then
       _close_record "$brief_id" "" "contract" "done" "$_ho_contract"

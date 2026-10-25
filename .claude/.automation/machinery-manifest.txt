@@ -35,6 +35,7 @@
 .claude/.automation/lib/outcome-detector.sh
 .claude/.automation/lib/overlap-report.sh
 .claude/.automation/lib/permission-profiles.sh
+.claude/.automation/lib/pr-manager.sh
 .claude/.automation/lib/prompt-assembler.sh
 .claude/.automation/lib/queue-manager.sh
 .claude/.automation/lib/queue-reporter.sh
@@ -67,6 +68,7 @@
 .claude/.automation/templates/build-brief.md
 .claude/.automation/templates/dev-orchestrator-brief.md
 .claude/.automation/templates/finish-loop-brief.md
+.claude/.automation/templates/pr-body.md
 .claude/.automation/templates/taskgroup-brief.md
 .claude/.automation/templates/template-sync-with-cleanup.yml
 .claude/.automation/tests/run-automation-tests.sh
@@ -85,6 +87,7 @@
 .claude/.automation/tests/test-operator-notes.sh
 .claude/.automation/tests/test-overlap-report.sh
 .claude/.automation/tests/test-phase-ordering.sh
+.claude/.automation/tests/test-pr-manager.sh
 .claude/.automation/tests/test-prompt-assembler.sh
 .claude/.automation/tests/test-queue-manipulation.sh
 .claude/.automation/tests/test-reverify-merge.sh

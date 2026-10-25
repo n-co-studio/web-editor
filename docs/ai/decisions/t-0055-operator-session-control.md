@@ -646,6 +646,49 @@ break-glass path and is not a control mechanism. There is no flag that disables
 operator control — the control directory being absent is indistinguishable from
 no flags set, which is the inert default.
 
+## Amendment 1 — The Two Hooks Are Executable (2026-10-24)
+
+**Status:** Accepted
+
+This decision states twice that the two new hooks ship mode `644`, and that the
+exec bit is beyond a session's reach: once for `operator-control.sh` ("the new
+hook file is mode `644` rather than `755` — `chmod` is not on the headless Bash
+allowlist — so the registration an operator applies must invoke it as `bash
+.claude/hooks/operator-control.sh`"), and once for `operator-notes.sh`
+("written, tested and mode `644` ... It needs a `PostToolUse` entry ... and
+`chmod +x`, neither of which a session can do"). Both are now wrong on the mode,
+and the second overstates the constraint.
+
+**What changed.** Both files are tracked `100755`. The constraint was real but
+narrower than written: `chmod` is absent from the *headless* allowlist in
+`_permission-allowlist.sh`, not from an interactive session. These hooks were
+authored in headless brief sessions, where it genuinely could not be run; an
+interactive session can, and did.
+
+**Why this is not cosmetic.** `.claude/settings.json` registers every hook by
+**bare path**, never as `bash <path>`. A registered `644` hook is therefore
+inert — the registration succeeds and the hook never executes. The bare-path
+invocation form quoted above is a workaround for a missing exec bit, not the
+convention. (`pretooluse-permission.sh` does call `bash` on
+`operator-control.sh`, but for an unrelated reason: it delegates mid-hook,
+before any registration exists.) The mode was a precondition for the very
+registration this decision asks the operator to apply, so shipping `644` left
+that registration unable to work even once applied.
+
+**What still holds.** Everything else in the "inert until an operator registers
+it" sections. `.claude/settings.json` remains an immune path; the registration
+is still the operator's action and no session may write it. `operator-notes.sh`
+is still registered nowhere, so the note route remains inert — the exec bit
+clears one of its two blockers, not both.
+
+**Enforcement added.** `gate-conformance.sh`, section "invoked hooks are
+executable", now fails when any non-underscore hook directly under
+`.claude/hooks/` is not `100755` in the index, so a hook cannot ship inert this
+way again. The rule is one-directional (underscore-prefixed sourced helpers are
+unconstrained, and several are legitimately `100755`) and template-only, because
+`template-sync-engine.sh` carries no file modes: a newly added hook lands at the
+child's umask default, a gap tracked as a follow-up rather than closed here.
+
 ## Amends
 
 Nothing. Decisions 0013 (branch isolation and sealing), 0017 (operator
