@@ -315,6 +315,71 @@ else
   nok "child received the longer engine" "engine was not replaced"
 fi
 
+# === Sync 5: the exec bit is carried onto files the sync CREATES ==========
+#
+# known-issue R37. `git show "$ref:$path" > "$path"` CREATES a new file at the
+# child's umask default and merely truncates an existing one, keeping its mode.
+# So a child's established hooks stayed executable and nothing noticed, while any
+# hook ADDED to the template after that child was scaffolded arrived 644 — and
+# `.claude/settings.json` invokes hooks by bare path, so it was registered and
+# silently never ran.
+#
+# All four quadrants are asserted, because R37's own entry warns that the
+# existing-file case passes either way and would hide a wrong fix. The last one
+# is the one-directional guarantee: the sync adds an exec bit where the template
+# has one and must never clear a bit the child set locally.
+printf '\n## sync 5 — file modes carried to created files (R37)\n'
+
+mkdir -p "$TPL/.claude/hooks"
+printf '#!/usr/bin/env bash\necho created-exec\n'  > "$TPL/.claude/hooks/created-exec.sh"
+printf '#!/usr/bin/env bash\necho created-plain\n' > "$TPL/.claude/hooks/created-plain.sh"
+printf '#!/usr/bin/env bash\necho child-owns\n'    > "$TPL/.claude/hooks/child-owns-bit.sh"
+chmod 755 "$TPL/.claude/hooks/created-exec.sh"
+chmod 644 "$TPL/.claude/hooks/created-plain.sh" "$TPL/.claude/hooks/child-owns-bit.sh"
+
+# The child already has this one, executable by its own local choice, while the
+# template ships it 644.
+printf 'stale\n' > "$CHILD/.claude/hooks/child-owns-bit.sh"
+chmod 755 "$CHILD/.claude/hooks/child-owns-bit.sh"
+git_q "$CHILD" add -A
+git_q "$CHILD" commit -m "child: owns an exec bit the template does not set"
+
+write_manifest "$TPL" \
+  ".claude/.automation/lib/child-sync-decisions.sh" \
+  ".claude/.automation/lib/rebuild-trigger-index.sh" \
+  ".claude/.automation/lib/template-sync-engine.sh" \
+  ".claude/.automation/machinery-manifest.txt" \
+  ".claude/agents/critic.md" \
+  ".claude/hooks/child-owns-bit.sh" \
+  ".claude/hooks/created-exec.sh" \
+  ".claude/hooks/created-plain.sh" \
+  ".claude/hooks/kept-hook.sh" \
+  ".templatesyncignore" \
+  "docs/ai/decisions/t-0001-template-decision.md" \
+  "docs/ai/decisions/t-manifest.txt"
+git_q "$TPL" add -A
+git_q "$TPL" commit -m "template v5 — adds hooks with differing modes"
+run_engine
+
+assert_file "$CHILD/.claude/hooks/created-exec.sh" "created hook arrives in the child"
+if [ -x "$CHILD/.claude/hooks/created-exec.sh" ]; then
+  ok "created file with template mode 100755 is executable"
+else
+  nok "created file with template mode 100755 is executable" \
+      "arrived non-executable — a bare-path-registered hook would be inert"
+fi
+if [ -x "$CHILD/.claude/hooks/created-plain.sh" ]; then
+  nok "created file with template mode 100644 is not executable" "unexpectedly executable"
+else
+  ok "created file with template mode 100644 is not executable"
+fi
+if [ -x "$CHILD/.claude/hooks/child-owns-bit.sh" ]; then
+  ok "child's own exec bit survives a 100644 template file"
+else
+  nok "child's own exec bit survives a 100644 template file" \
+      "the sync stripped a bit the child set locally"
+fi
+
 # === Branch guard ==========================================================
 printf '\n## branch guard\n'
 git_q "$CHILD" checkout -b not-main

@@ -37,6 +37,50 @@ Add a persistent knowledge graph that maps semantic connections between codebase
 - Decision 0014 respected: graph read at init, graph write before commit
 - Decision 0030/0033 respected: concurrent write safety via mkdir locking
 
+## Amendment 8 — Node ID Uniqueness Is Validated (2026-10-24)
+
+**Status:** Accepted
+
+Amendment 4 states that `kg-validate.sh` "Does NOT check referential integrity or
+node ID format", and the script's own header repeated it. That is no longer true
+of the first half, and this amendment records what changed and why.
+
+**What was wrong.** `graph.yaml` carried **two** `- id: "tool-gate-conformance"`
+blocks — different descriptions, `last_verified` 2026-10-15 and 2026-10-22 — and
+`kg-validate.sh` reported `CLEAN — no schema violations found`. The graph gave two
+different answers to the same question, decided by whether a consumer took the
+first match or the last, and nothing said so. Filed as known-issue R39; the
+duplicate was removed 2026-10-24 and the validator gap is what this closes.
+
+**Node id uniqueness is now a blocking violation**, per graph file. A duplicate id
+is not a style preference: it makes the graph self-contradictory, which is a
+different kind of defect from the enum and required-field checks around it. The
+first declaration is remembered and each later one is reported against its own
+line, so the message names the copy to delete.
+
+**Dangling edge references are reported, and remain advisory.** §9 of Amendment 2
+already set that level for the equivalent check in `kg-seed.sh`, and this does not
+override it: `_validate_edge_refs` prints its findings, does not touch the
+violation count, and cannot change the exit status even under `--strict`.
+Resolution uses the **union** of the template and product graphs, because §4
+stores each edge in its source node's graph, so a product-graph edge may
+legitimately point at a template node. A missing `product-graph.yaml` is not an
+error — this template ships none.
+
+**Scope limit, stated plainly.** Uniqueness is checked *per graph file*. §10
+intends ids to be unique across both graphs via distinct prefixes, but that is a
+convention the decision asserts and nothing enforces, and a cross-graph check
+would need both files present. Per-file is the part that is unambiguous today.
+Two further gaps are left open rather than silently half-closed: §10's prefix list
+(`decision-*`, `hook-*`, `agent-*`, `prompt-*`, `sot-*`, `convention-*`,
+`concept-*`) is stale — the graph also uses `file-*`, `tool-*` and `artifact-*` —
+and node id *format* is still unvalidated, so `hook--mechanism-helper` with its
+double hyphen passes.
+
+**Measured at the time of the change:** 195 nodes, 322 edge references, 0
+duplicate ids, 0 dangling references. Neither check alters the result for any
+graph in the repo today; both are there so the next one cannot pass unnoticed.
+
 ## Amendment 7 — Compulsory Update Enforcement (2026-08-06)
 
 Promotes the KG update obligation from REQUIRE-attempt/tolerate-failure to mechanically blocking at commit time for governance files. Supersedes the Amendment 3 exclusion sentence "Hook-based enforcement is explicitly excluded (operator constraint)."

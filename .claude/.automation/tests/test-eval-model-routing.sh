@@ -33,10 +33,43 @@ _tap_fail() { _TAP_NUM=$((_TAP_NUM+1)); _TAP_FAIL=$((_TAP_FAIL+1)); printf "not 
 _tap_eq() {
   if [ "$1" = "$2" ]; then _tap_pass "$3"; else _tap_fail "$3" "expected '$2', got '$1'"; fi
 }
+
+# Every case this suite is supposed to emit. Compared in finish(), because the
+# counters alone cannot tell "all passed" from "most never ran": queue-manager.sh
+# runs `set -euo pipefail` and is sourced inside the test subshells below, so an
+# errexit there drops the remaining TAP lines silently. 1 + 3 (1a-1c) + 1 (2) +
+# 1 (3) + 1 (4) + 3 (5a-5c).
+_TAP_EXPECTED=10
+
+# --- TAP relay (known-issues R38) -----------------------------------------
+# Tests 2-5 run in a subshell, so their results come back as text. That text is
+# relayed through a FILE, never a pipe. The right-hand side of a pipe is ITSELF
+# a subshell, so the `_tap_pass`/`_tap_fail` calls that used to live in
+# `... | while read` incremented counters that died with it. The suite printed
+# `not ok` and then reported `Fail: 0` and exited 0 — only test 1 and 1a-1c ever
+# reached the real counters, which is exactly the `Tests: 4` it used to claim.
+# _tap_drain is called as a plain command so it runs in THIS shell.
+_tap_drain() {
+  local _subline
+  while IFS= read -r _subline; do
+    case "$_subline" in
+      "ok - "*)     _tap_pass "${_subline#ok - }" ;;
+      "not ok - "*) _tap_fail "${_subline#not ok - }" ;;
+      "  # "*)      printf '%s\n' "$_subline" ;;
+    esac
+  done < "$1"
+}
+
 finish() {
   printf "\n1..%d\n# Tests: %d  Pass: %d  Fail: %d\n" \
     $((_TAP_PASS+_TAP_FAIL)) $((_TAP_PASS+_TAP_FAIL)) "$_TAP_PASS" "$_TAP_FAIL"
   [ "$_TAP_FAIL" -gt 0 ] && printf "# Failures:\n%b" "$_TAP_FAILURES"
+  # A truncated run is a failure even when every case that ran passed.
+  if [ "$((_TAP_PASS+_TAP_FAIL))" -ne "$_TAP_EXPECTED" ]; then
+    printf "# HARNESS: expected %d cases, counted %d — the run was truncated or a case was added without updating _TAP_EXPECTED\n" \
+      "$_TAP_EXPECTED" "$((_TAP_PASS+_TAP_FAIL))"
+    return 1
+  fi
   return "$_TAP_FAIL"
 }
 
@@ -44,6 +77,9 @@ printf "# === Eval Model Routing: alias map + per-entry model pin ===\n"
 
 setup_adversarial_sandbox
 trap 'teardown_adversarial_sandbox' EXIT
+
+# Inside the sandbox so the existing teardown removes it.
+_TAP_RELAY="$ADV_SANDBOX/.tap-relay"
 
 REPO_ROOT="$ADV_SANDBOX"
 export REPO_ROOT
@@ -212,13 +248,8 @@ export CONFIG_LOCAL_FILE=""
       fi
     fi
   fi
-) | while IFS= read -r _subline; do
-  case "$_subline" in
-    "ok - "*)    _tap_pass "${_subline#ok - }" ;;
-    "not ok - "*) _tap_fail "${_subline#not ok - }" ;;
-    "  # "*)      printf '%s\n' "$_subline" ;;
-  esac
-done
+) > "$_TAP_RELAY"
+_tap_drain "$_TAP_RELAY"
 
 # ================================================================
 # Test 4: eval_trigger_judge enqueues with study model, not dropped
@@ -264,17 +295,35 @@ printf "# --- Test 4: conductor threads judge model to queue entry ---\n"
     printf '  submission_path: ""\n'
   } > "$_CELLS_DIR/B0-T1-r1.yaml"
 
-  # Intercept queue_enqueue: capture arg ${14}.
-  # Defined AFTER sourcing queue-manager.sh to override it.
-  # Bash 3.2: positionals above 9 need brace form.
-  _T4_CAPTURED_MODEL="__NOT_SET__"
+  # Source the conductor BEFORE installing the stub. eval-conductor.sh itself
+  # sources queue-manager.sh, which has no include guard and defines
+  # queue_enqueue unconditionally — so a stub installed first is silently
+  # replaced by the real function. The old comment here said the stub was
+  # "defined AFTER sourcing queue-manager.sh to override it", which was true of
+  # the direct source above and missed the conductor's second one.
+  source "$ADV_SANDBOX/.claude/.automation/lib/eval-conductor.sh"
+
+  # Intercept queue_enqueue: capture arg ${14}. Bash 3.2 needs the brace form
+  # for positionals above 9.
+  #
+  # The capture goes to a FILE, not a variable. The conductor calls
+  # `judge_entry_id="$(queue_enqueue ...)"` — a command substitution — so a
+  # variable the stub assigns dies with that subshell and the parent would still
+  # read __NOT_SET__ and report "queue_enqueue was not called" even when the stub
+  # ran. Reordering alone did not fix this case; both causes had to go.
+  _T4_CAPTURE="$ADV_SANDBOX/.t4-captured-model"
   queue_enqueue() {
-    _T4_CAPTURED_MODEL="${14:-__MISSING__}"
+    printf '%s' "${14:-__MISSING__}" > "$_T4_CAPTURE"
     printf 'mock-judge-entry-id'
   }
 
-  source "$ADV_SANDBOX/.claude/.automation/lib/eval-conductor.sh"
   eval_trigger_judge "$_STUDY_ID" 2>/dev/null || true
+
+  if [ -f "$_T4_CAPTURE" ]; then
+    _T4_CAPTURED_MODEL="$(cat "$_T4_CAPTURE")"
+  else
+    _T4_CAPTURED_MODEL="__NOT_SET__"
+  fi
 
   if [ "$_T4_CAPTURED_MODEL" = "claude-test-sentinel-4321" ]; then
     printf "ok - 4: conductor threads judge model to queue_enqueue arg 14\n"
@@ -288,13 +337,8 @@ printf "# --- Test 4: conductor threads judge model to queue entry ---\n"
     printf "not ok - 4: conductor threads judge model to queue_enqueue arg 14\n"
     printf "  # expected 'claude-test-sentinel-4321', got '%s'\n" "$_T4_CAPTURED_MODEL"
   fi
-) | while IFS= read -r _subline; do
-  case "$_subline" in
-    "ok - "*)    _tap_pass "${_subline#ok - }" ;;
-    "not ok - "*) _tap_fail "${_subline#not ok - }" ;;
-    "  # "*)      printf '%s\n' "$_subline" ;;
-  esac
-done
+) > "$_TAP_RELAY"
+_tap_drain "$_TAP_RELAY"
 
 # ================================================================
 # Test 5: _parse_config_field regression — comment-placement repair
@@ -337,12 +381,7 @@ printf "# --- Test 5: _parse_config_field regression guard ---\n"
     printf "not ok - 5c: model_routing.default parses as bare 'sonnet'\n"
     printf "  # got '%s'\n" "$_val"
   fi
-) | while IFS= read -r _subline; do
-  case "$_subline" in
-    "ok - "*)    _tap_pass "${_subline#ok - }" ;;
-    "not ok - "*) _tap_fail "${_subline#not ok - }" ;;
-    "  # "*)      printf '%s\n' "$_subline" ;;
-  esac
-done
+) > "$_TAP_RELAY"
+_tap_drain "$_TAP_RELAY"
 
 finish

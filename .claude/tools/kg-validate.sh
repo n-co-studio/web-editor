@@ -12,10 +12,18 @@
 #   - status: values against 3 valid statuses
 #   - source_type: values against 2 valid source types
 #   - Required fields presence for nodes and edges
+#   - Node ID uniqueness, per graph file — BLOCKING (t-0034 Amendment 8, R39)
+#
+# Reports but does NOT block:
+#   - Referential integrity (source/target → a node id in the template+product
+#     union). Advisory by decision, not by omission: t-0034 Amendment 2 §9 sets
+#     that level for the equivalent kg-seed.sh check and Amendment 8 keeps it.
 #
 # Does NOT check:
-#   - Referential integrity (source/target → existing node IDs)
-#   - Node ID format (feat: prefix convention)
+#   - Node ID format, so `hook--mechanism-helper` passes (t-0034 Amendment 8)
+#   - Node ID uniqueness ACROSS the two graphs — §10 intends it via distinct
+#     prefixes, but that is a convention nothing enforces and the check would
+#     need both graph files present
 #
 # Usage:
 #   kg-validate.sh [--target template|product|both] [--strict]
@@ -286,6 +294,97 @@ END { flush() }
 }
 
 # ============================================================
+# Node id uniqueness — BLOCKING (known-issue R39)
+# ============================================================
+# The validator reported CLEAN on a graph holding TWO `- id: "tool-gate-conformance"`
+# blocks with different descriptions and different last_verified dates. The graph
+# therefore answered the same question two ways, decided by whether a consumer
+# took the first match or the last, and nothing said so.
+#
+# This is a violation and not a warning because a duplicate id is not a style
+# preference: it makes the graph self-contradictory. Dangling edge references are
+# kept advisory below, matching t-0034 §9.
+#
+# Scope: per graph file. t-0034 §10 intends ids to be unique across the template
+# and product graphs via distinct prefixes, but that is a convention the decision
+# states and nothing enforces; a cross-graph check would need both files present
+# and this template ships no product graph. Per-file is the part that is
+# unambiguous today.
+_validate_node_id_uniqueness() {
+  local graph_file="$1" nlines out
+  nlines=$(wc -l < "$graph_file")
+
+  # First occurrence is remembered, every later one is reported against its own
+  # line, so the message points at the copy a reader should delete.
+  out=$(awk -v last="$nlines" "$_KG_AWK_LIB"'
+NR > last { exit }
+/^  - id: / {
+  id = lastval($0, "id")
+  if (id in seen_line) {
+    emit(NR, "duplicate node id \"" id "\" — first declared at line " seen_line[id] "; the graph answers one question two ways")
+  } else {
+    seen_line[id] = NR
+  }
+}
+' "$graph_file")
+
+  _record_violations "$graph_file" "$out"
+}
+
+# ============================================================
+# Edge referential integrity — ADVISORY (t-0034 §9)
+# ============================================================
+# t-0034 §9 states dangling references are "reported as warnings (advisory)",
+# and kg-seed.sh already checks this at seed time in exactly that spirit. This
+# adds the same reading to the validator without changing the enforcement level
+# the decision set: it prints and does not block, and does not touch
+# TOTAL_VIOLATIONS.
+#
+# Resolution uses the UNION of the template and product graphs, because edges
+# live in the source node's graph (t-0034 §4) so a product-graph edge may
+# legitimately point at a template node. A missing product graph is not an error.
+_KG_ADVISORY_COUNT=0
+_KG_ADVISORY_OUTPUT=""
+
+_kg_union_node_ids() {
+  local f
+  for f in "$TEMPLATE_GRAPH" "$PRODUCT_GRAPH"; do
+    [ -f "$f" ] || continue
+    awk "$_KG_AWK_LIB"'/^  - id: / { print lastval($0, "id") }' "$f"
+  done
+}
+
+_validate_edge_refs() {
+  local graph_file="$1" nlines out ids_file
+  nlines=$(wc -l < "$graph_file")
+  ids_file="$(mktemp "${TMPDIR:-/tmp}/kg-ids-XXXXXX")"
+  _kg_union_node_ids > "$ids_file"
+
+  out=$(awk -v last="$nlines" -v idsfile="$ids_file" "$_KG_AWK_LIB"'
+BEGIN {
+  while ((getline line < idsfile) > 0) { if (line != "") known[line] = 1 }
+  close(idsfile)
+}
+NR > last { exit }
+/^  - source: / { ref = lastval($0, "source"); if (!(ref in known)) emit(NR, "edge source \"" ref "\" resolves to no node in the template+product union") }
+/^    target: / { ref = lastval($0, "target"); if (!(ref in known)) emit(NR, "edge target \"" ref "\" resolves to no node in the template+product union") }
+' "$graph_file")
+
+  rm -f "$ids_file"
+
+  local rec
+  while IFS= read -r rec; do
+    [ -z "$rec" ] && continue
+    _KG_ADVISORY_OUTPUT="${_KG_ADVISORY_OUTPUT}  ${graph_file}:${rec%%$'\t'*}: ${rec#*$'\t'}
+"
+    _KG_ADVISORY_COUNT=$((_KG_ADVISORY_COUNT + 1))
+  done <<EOF
+$out
+EOF
+  return 0
+}
+
+# ============================================================
 # Validate a single graph file
 # ============================================================
 validate_graph() {
@@ -304,6 +403,8 @@ validate_graph() {
   _validate_enums "$graph_file"
   _validate_node_fields "$graph_file"
   _validate_edge_fields "$graph_file"
+  _validate_node_id_uniqueness "$graph_file"
+  _validate_edge_refs "$graph_file"
 
   local file_violations=$(( TOTAL_VIOLATIONS - violations_before ))
   if [ "$file_violations" -eq 0 ]; then
@@ -335,8 +436,21 @@ esac
 
 echo ""
 
+# Advisory findings print whatever the violation count is, and never change the
+# exit status (t-0034 §9). Printed before the result line so a clean run still
+# surfaces them rather than ending on "CLEAN" with warnings hidden above.
+if [ "$_KG_ADVISORY_COUNT" -gt 0 ]; then
+  echo "Advisory: $_KG_ADVISORY_COUNT dangling edge reference(s) — not blocking (Decision t-0034 §9):"
+  printf '%s' "$_KG_ADVISORY_OUTPUT"
+  echo ""
+fi
+
 if [ "$TOTAL_VIOLATIONS" -eq 0 ]; then
-  echo "Result: CLEAN — no schema violations found"
+  if [ "$_KG_ADVISORY_COUNT" -gt 0 ]; then
+    echo "Result: CLEAN — no schema violations found ($_KG_ADVISORY_COUNT advisory finding(s) above)"
+  else
+    echo "Result: CLEAN — no schema violations found"
+  fi
   exit 0
 else
   echo "Result: $TOTAL_VIOLATIONS violation(s) found:"

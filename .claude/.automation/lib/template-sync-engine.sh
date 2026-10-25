@@ -244,8 +244,20 @@ sync_files() {
 
   log "Syncing files from $template_ref..."
 
-  # List all files in the template tree
-  while IFS= read -r file_path; do
+  # List all files in the template tree, WITH their modes.
+  #
+  # `-z` and the tab split rather than `--name-only` (known-issue R37): the
+  # name-only form carries no mode, and this loop needs it. NUL-delimited records
+  # also keep paths containing spaces or newlines intact, and avoid core.quotePath
+  # mangling non-ASCII names.
+  #
+  # Record format: "<mode> SP <type> SP <object> TAB <path>" terminated by NUL.
+  while IFS= read -r -d '' tree_entry; do
+    [ -z "$tree_entry" ] && continue
+
+    local file_mode file_path
+    file_mode="${tree_entry%% *}"
+    file_path="${tree_entry#*$'\t'}"
     [ -z "$file_path" ] && continue
 
     # Check exclusions
@@ -265,8 +277,34 @@ sync_files() {
       continue
     }
 
+    # --- Carry the exec bit (known-issue R37) ---
+    # The redirect above CREATES a new file at the child's umask default, and
+    # merely truncates an existing one, keeping its mode. So a child's
+    # established hooks stayed executable and nothing noticed, while any hook
+    # ADDED to the template after that child was scaffolded arrived 644. Since
+    # `.claude/settings.json` invokes hooks by bare path, such a hook is
+    # registered and silently never runs.
+    #
+    # Deliberately ONE-DIRECTIONAL: add exec where the template says 100755, and
+    # touch nothing otherwise. Clearing the bit on the 100644 side would strip an
+    # exec bit a child had set locally on a shipped file, which is a regression
+    # the sync has no business causing.
+    case "$file_mode" in
+      100755)
+        chmod +x "$REPO_ROOT/$file_path" 2>/dev/null \
+          || log "  WARN: Could not set exec bit on $file_path"
+        ;;
+      120000)
+        # `git show` on a symlink blob yields its target as text, so the sync
+        # writes a regular file containing a path. Pre-existing behaviour, now
+        # visible instead of silent. The template tree contains no such entries
+        # today (verified 2026-10-24).
+        log "  WARN: $file_path is a symlink in the template — written as a regular file"
+        ;;
+    esac
+
     file_count=$((file_count + 1))
-  done < <(git ls-tree -r --name-only "$template_ref")
+  done < <(git ls-tree -r -z "$template_ref")
 
   log "Synced $file_count file(s), skipped $skip_count excluded"
 }

@@ -78,10 +78,60 @@ for suite in $SUITES; do
 
   printf "${BOLD}=== %s ===${RESET}\n" "$suite"
   _rc=0
-  bash "$suite_path" || _rc=$?
+  # Output is teed so the run still streams to the terminal AND can be checked
+  # for the contradiction below. PIPESTATUS[0] is the suite's own status, not
+  # tee's — `|| _rc=$?` on the pipeline would report tee under this file's
+  # pipefail.
+  #
+  # errexit is suspended around the pipeline rather than absorbed with
+  # `|| true`, and that detail is the whole correctness of this block. `|| true`
+  # RUNS a command when the pipeline fails, and running any command resets
+  # PIPESTATUS — so `${PIPESTATUS[0]}` read afterwards is `true`'s 0, never the
+  # suite's. The first version of this change did exactly that, and the damage
+  # was precisely: `_rc` was ALWAYS 0, so any suite exiting non-zero without a
+  # `^not ok` line in its output was reported PASS — which is not only the
+  # silent ones, but every suite that fails while printing a `Fail: N` summary
+  # or a bare error message, including the six here that emit no TAP lines at
+  # all. A suite exiting non-zero WITH a `not ok` line was reported
+  # HARNESS "exited 0": still red, but with the wrong cause and an exit code
+  # that never happened. A regression, in this very runner, of the same
+  # blindness this check exists to remove. Nothing may execute between the
+  # pipeline and the PIPESTATUS read.
+  _out_file="$(mktemp "${TMPDIR:-/tmp}/auto-suite-XXXXXX")"
+  set +e
+  bash "$suite_path" 2>&1 | tee "$_out_file"
+  _rc=${PIPESTATUS[0]}
+  set -e
   printf "\n"
 
-  if [ "$_rc" -eq 0 ]; then
+  # --- Harness integrity: a suite must not pass while printing a failure ---
+  # This runner gates on exit code alone, which is why known-issue R38 stayed
+  # invisible: test-eval-model-routing.sh re-tallied its subshell results through
+  # a pipe, so the counters died, and it printed `not ok` and then reported
+  # `Fail: 0` and exited 0. This runner duly called it PASS for as long as that
+  # lasted. A suite's own report is not trusted over its own output.
+  #
+  # Deliberately NOT a `Fail:`-count comparison: six functional suites print TAP
+  # lines with no reporter summary at all, so there is no count to compare. The
+  # rule only needs the contradiction — exit 0 WITH a `not ok` line — and that
+  # needs no agreement about output format.
+  #
+  # Measured before enabling: across all 16 suites, exactly one `^not ok` line
+  # was emitted in a full run, and it was R38's. No suite trips this for a
+  # legitimate reason today.
+  _notok=0
+  if [ -f "$_out_file" ]; then
+    _notok=$(grep -c '^not ok' "$_out_file" 2>/dev/null || true)
+  fi
+  rm -f "$_out_file"
+
+  if [ "$_rc" -eq 0 ] && [ "${_notok:-0}" -gt 0 ]; then
+    printf "${RED}${BOLD}HARNESS: %s exited 0 while printing %d 'not ok' line(s) — its tally does not match its output.${RESET}\n" \
+      "$suite" "$_notok"
+    _results="${_results}HARNESS  ${suite} (exit 0 with ${_notok} 'not ok')
+"
+    _overall=1
+  elif [ "$_rc" -eq 0 ]; then
     _results="${_results}PASS     ${suite}
 "
   else
