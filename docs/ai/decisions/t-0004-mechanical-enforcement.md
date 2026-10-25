@@ -44,3 +44,31 @@ Enforce Repo OS mechanically using Claude Code native features:
 - `.claude/.state/` is the session-scoped state directory — hooks communicate through state files, cleaned at session close
 - All subsequent decisions (0005–0016) that add enforcement behavior do so by extending this hook infrastructure rather than introducing parallel mechanisms
 - The sentinel protocol (`GATE_RESULT:`) creates a machine-readable contract between governance agents and the state-writer hook
+
+## Amendment — A BLOCKED QA Verdict Blocks the Commit (2026-10-25)
+
+**Status:** Accepted
+
+§8 requires governance agents to emit `GATE_RESULT: APPROVED` or
+`GATE_RESULT: BLOCKED reason="..."`, and names QA among them. The commit gate
+honoured that for the Critic's verdicts and not for QA's: `cohesion-reviewed`
+and `diff-review-complete` blocked on BLOCKED, while `qa-verified` was checked
+only for existence, a matching `session_id` and a non-empty `dispatch_phase` —
+all of which a BLOCKED verdict satisfies.
+
+So a commit could land carrying its own QA verdict recording that it should not
+have. Encountered live on 2026-10-24: `qa-verified` read BLOCKED over four
+unresolved gate items and the gate would have allowed the commit. The session
+re-dispatched QA instead of using it, but nothing mechanical required that.
+
+**`GATE_RESULT: BLOCKED` in `qa-verified` now blocks**, matching the Critic
+half. No session-type skip accompanies it: unlike A5's `_A5_SKIP`, `qa-verified`
+is required on every non-experiment branch, so no session type legitimately
+commits over a blocked QA verdict. `REPO_OS_RECOVER=1` remains the documented
+emergency path.
+
+This was an omission rather than a decision — `state-writer.sh` documents
+BLOCKED as looping back to build, `qa-verifier.md` defines it as a refusal, and
+no decision authorised committing over one. `quality-gates.md` recorded
+"`GATE_RESULT: BLOCKED` is now blocking" for `cohesion-reviewed` only, which was
+the clearest symptom that the QA half had simply never been written.

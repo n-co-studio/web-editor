@@ -928,6 +928,82 @@ stage_sandbox_file "src/clean.ts" "export const x = 1;"
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
 assert_ok "$_LAST_RC" "pre-commit-gates allows commit at commit phase with all state files"
 
+# --- A staged RENAME is visible to the staged-file list (known-issue R30) ---
+# `--diff-filter=ACM` excluded `R`, so a renamed file reached none of the checks
+# that read STAGED_FILES. Renumbering a decision record staged as `R098` and the
+# gate saw no decision file in the change set, so A1 never asked for the trailer
+# it demands for identical content arriving as an addition. Asserted through A4
+# rather than A1, because A4 reads STAGED_FILES and fires on content regardless
+# of session state, which makes it a direct probe of list membership.
+reset_phase "standard"
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "review" 2>/dev/null
+_advance "verify" 2>/dev/null
+_advance "commit" 2>/dev/null
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
+printf 'timestamp: test\nagent: critic\nsession_id: %s\ndispatch_phase: review\nGATE_RESULT: APPROVED\n' "$TEST_SID" > "$STATE_DIR/cohesion-reviewed"
+printf 'timestamp: test\nagent: critic\nsession_id: %s\ndispatch_phase: review\nGATE_RESULT: APPROVED\n' "$TEST_SID" > "$STATE_DIR/diff-review-complete"
+printf 'timestamp: test\nagent: qa-verifier\nsession_id: %s\ndispatch_phase: verify\nGATE_RESULT: APPROVED\n' "$TEST_SID" > "$STATE_DIR/qa-verified"
+
+# Asserted through the HIGH-RISK PATH SCAN, which is the one consequence that
+# depends on STAGED_FILES membership alone. A pure rename has no `+` diff lines,
+# so A4's content scan and A1's keyword matching cannot see it either way — an
+# earlier version of this case asserted through A4 and was wrong about that, and
+# worse, it ran `git diff --diff-filter=ACMR` directly in the sandbox, so it
+# tested git rather than the hook and stayed green with the fix reverted.
+#
+# The path scan reads STAGED_FILES, matches on the path, and demands
+# reviewer-signed + security-signed. Renaming a benign file INTO a risky path is
+# therefore visible to the hook under ACMR and invisible under ACM.
+stage_sandbox_file "src/plain-helper.ts" 'export const h = 1;'
+( cd "$SB" && git commit -qm "seed for rename probe" >/dev/null 2>&1 )
+( cd "$SB" && git mv src/plain-helper.ts src/auth-session-handler.ts >/dev/null 2>&1 )
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "rename into a risky path")"
+assert_hook_blocks "$_LAST_RC" \
+  "a staged RENAME reaches the high-risk path scan (R30: ACM saw nothing)"
+assert_contains "$_LAST_OUTPUT" "auth-session-handler" \
+  "...and the block names the renamed destination"
+
+# The discriminator: with reviewer + security sign-off present, the identical
+# rename is allowed — so the case above blocks on the rename being SEEN, not on
+# something incidental to the fixture.
+printf 'timestamp: test\nagent: reviewer\nsession_id: %s\ndispatch_phase: review\nGATE_RESULT: APPROVED\n' "$TEST_SID" > "$STATE_DIR/reviewer-signed"
+printf 'timestamp: test\nagent: security-privacy\nsession_id: %s\ndispatch_phase: review\nGATE_RESULT: APPROVED\n' "$TEST_SID" > "$STATE_DIR/security-signed"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "rename into a risky path, signed off")"
+assert_ok "$_LAST_RC" "...and is allowed once reviewer + security have signed"
+rm -f "$STATE_DIR/reviewer-signed" "$STATE_DIR/security-signed"
+( cd "$SB" && git reset -q HEAD . 2>/dev/null; git checkout -q -- . 2>/dev/null ) || true
+
+# --- A BLOCKED qa verdict blocks the commit (known-issue: QA gate asymmetry) ---
+# The three pre-existing checks on qa-verified — existence, session id,
+# dispatch_phase — all pass on a file whose terminal line reads BLOCKED, so a
+# commit could land carrying its own QA verdict saying it should not have. The
+# cohesion half has blocked on BLOCKED since t-0039; the qa half never did.
+# Identical setup to the allowing case above, with one word changed.
+reset_phase "standard"
+_advance "plan" 2>/dev/null
+_advance "approval" 2>/dev/null
+_advance "build" 2>/dev/null
+_advance "review" 2>/dev/null
+_advance "verify" 2>/dev/null
+_advance "commit" 2>/dev/null
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
+printf 'timestamp: test\nagent: critic\nsession_id: %s\ndispatch_phase: review\nGATE_RESULT: APPROVED\n' "$TEST_SID" > "$STATE_DIR/cohesion-reviewed"
+printf 'timestamp: test\nagent: qa-verifier\nsession_id: %s\ndispatch_phase: verify\nGATE_RESULT: BLOCKED reason="gate failures"\n' "$TEST_SID" > "$STATE_DIR/qa-verified"
+stage_sandbox_file "src/qablocked.ts" "export const qb = 1;"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_hook_blocks "$_LAST_RC" "pre-commit-gates blocks commit when qa-verified is BLOCKED"
+assert_contains "$_LAST_OUTPUT" "qa-verified records GATE_RESULT: BLOCKED" \
+  "the block names the QA verdict as the cause"
+
+# ...and the same state with APPROVED allows, so the case above discriminates
+# on the verdict rather than on anything else in the fixture.
+printf 'timestamp: test\nagent: qa-verifier\nsession_id: %s\ndispatch_phase: verify\nGATE_RESULT: APPROVED\n' "$TEST_SID" > "$STATE_DIR/qa-verified"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_ok "$_LAST_RC" "the identical state with an APPROVED qa verdict allows the commit"
+
 # --- Phase before commit → blocks ---
 reset_phase "standard"
 _advance "plan" 2>/dev/null

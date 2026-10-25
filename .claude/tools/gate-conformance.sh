@@ -1081,14 +1081,13 @@ fi
 # and a sync carry, and `ls -l` would pass on a file whose exec bit was never
 # staged.
 #
-# TEMPLATE-ONLY, same guard and same reason as the manifest check above, but a
-# sharper one: `template-sync-engine.sh` materialises each synced file by
-# redirecting `git show "$ref:$path"` into it, and that carries no mode. The
-# redirect keeps the mode of a file that already EXISTS, which is why children's
-# established hooks still run — but a newly added hook lands at the child's
-# umask default and this check would fail in every child for a defect the child
-# cannot fix. The gap is real and deliberately left unmonitored here; it is
-# tracked as a follow-up, not patched by making this assertion lie.
+# Runs in children too, which it did not until 2026-10-25. The original reason
+# for restricting it was real: `template-sync-engine.sh` materialised each synced
+# file by redirecting `git show "$ref:$path"` into it, carrying no mode, so a
+# newly added hook arrived at the child's umask default and no child could fix
+# it. The engine now carries the exec bit (known-issue R37), and the restriction
+# was lifted only after a real sync was observed taking both children from 6 and
+# 8 offending hooks to zero — not on the strength of the fix existing.
 printf '\n## invoked hooks are executable\n'
 
 # Prints the offending `<mode> <path>` lines for a repo, empty when clean.
@@ -1099,8 +1098,8 @@ printf '\n## invoked hooks are executable\n'
 # `.claude/hooks/tests/layer3-hook-integration.sh`. The first run of this check
 # duly reported six test files, which are invoked as `bash <path>` by
 # run-phase-tests.sh and are not registered anywhere, so 644 is correct for
-# them. A probe below covers that skip, because the real-repo case is
-# template-only and so could not catch a regression of it in CI or in a child.
+# them. A probe below covers that skip rather than relying on the real-repo case,
+# which only ever sees whatever files its own checkout happens to contain.
 _hook_mode_offenders() {
   git -C "$1" ls-files -s -- '.claude/hooks/' 2>/dev/null | awk '
     {
@@ -1113,21 +1112,53 @@ _hook_mode_offenders() {
     }'
 }
 
-if [ "$(cat "$REAL_HOOKS/../repo-mode" 2>/dev/null || true)" = "template" ]; then
-  _hm_out=$(_hook_mode_offenders "$(cd "$REAL_HOOKS/../.." && pwd)")
-  if [ -z "$_hm_out" ]; then
-    PASS=$((PASS + 1))
-    printf 'ok   %-58s [all 100755]\n' "every invoked hook is executable in the index"
-  else
-    FAIL=$((FAIL + 1))
-    FAILED_CASES="${FAILED_CASES}    - an invoked hook is not executable in the index"$'\n'
-    printf 'FAIL %-58s [not executable]\n' "every invoked hook is executable in the index"
-    printf '%s\n' "$_hm_out" | sed 's/^/       | /'
-    printf '       | hooks are invoked by bare path, so this cannot run once registered. Fix: chmod 755 <path> && git add <path>\n'
-  fi
+# Runs EVERYWHERE, children included, as of 2026-10-25. It was template-only
+# while template-sync carried no file modes: a child could not have fixed a hook
+# that arrived 644, so failing it there would have been a red with no remedy.
+# That is no longer the case, and the evidence is a real sync rather than an
+# argument — before the mode-carrying engine reached them, markpreston.co and
+# web-editor held 6 and 8 non-underscore hooks at 644 respectively; after one
+# sync, both hold zero. A child that now trips this has a hook IT added
+# non-executable, which it can fix, and which would otherwise be registered and
+# silently never run.
+_hm_root="$(cd "$REAL_HOOKS/../.." && pwd)"
+_hm_out=$(_hook_mode_offenders "$_hm_root")
+# An empty offender list is only good news if there was something to examine.
+# `git ls-files` prints nothing when it fails, when the directory is not a work
+# tree, or when no hook is tracked — and this check used to print `ok [all
+# 100755]` for all three, having looked at nothing. That is the exact defect
+# family this section belongs to (R37-R40), so the denominator is asserted
+# before the numerator.
+# Counted through the SAME filter the offender scan applies, not with a bare
+# `ls-files | wc -l`. The bare count included tests/, underscore helpers and
+# non-.sh files, so the reported denominator overstated what was actually
+# examined — a repo whose only tracked hooks were helpers and tests would have
+# printed `ok ... of N` having inspected zero invoked hooks. That is the same
+# vacuous pass this guard exists to prevent, one level in.
+_hm_seen=$(git -C "$_hm_root" ls-files -- '.claude/hooks/' 2>/dev/null | awk '
+  {
+    rel = $0
+    sub(/^\.claude\/hooks\//, "", rel)
+    if (rel ~ /\//) next
+    if (rel !~ /\.sh$/) next
+    if (substr(rel, 1, 1) == "_") next
+    n++
+  }
+  END { print n + 0 }')
+if [ "${_hm_seen:-0}" -eq 0 ]; then
+  FAIL=$((FAIL + 1))
+  FAILED_CASES="${FAILED_CASES}    - hook-mode check examined no files"$'\n'
+  printf 'FAIL %-58s [examined 0 files]\n' "every invoked hook is executable in the index"
+  printf '       | git ls-files returned nothing for .claude/hooks/ — not a work tree, or no tracked hooks. A green line here would mean nothing.\n'
+elif [ -z "$_hm_out" ]; then
+  PASS=$((PASS + 1))
+  printf 'ok   %-58s [all 100755 of %s]\n' "every invoked hook is executable in the index" "$_hm_seen"
 else
-  printf 'skip %-58s [not a template checkout]\n' \
-    "every invoked hook is executable in the index"
+  FAIL=$((FAIL + 1))
+  FAILED_CASES="${FAILED_CASES}    - an invoked hook is not executable in the index"$'\n'
+  printf 'FAIL %-58s [not executable]\n' "every invoked hook is executable in the index"
+  printf '%s\n' "$_hm_out" | sed 's/^/       | /'
+  printf '       | hooks are invoked by bare path, so this cannot run once registered. Fix: chmod 755 <path> && git add <path>\n'
 fi
 
 # Probes: the check must discriminate, in both directions of its one rule.
@@ -1160,14 +1191,26 @@ else
   # A 644 test file in a SUBDIRECTORY must not be reported. This is the defect
   # this check itself shipped with on its first run — the pathspec
   # `.claude/hooks/*.sh` crosses `/` and swept in six files under tests/ — and
-  # the real-repo case above is template-only, so it cannot catch a regression
-  # of it in CI or in a child.
+  # the real-repo case above cannot be relied on to catch a regression of it,
+  # since it only sees whatever files the checkout happens to have.
   mkdir -p "$_HM/.claude/hooks/tests" \
     && touch "$_HM/.claude/hooks/tests/layer0-probe.sh" \
     && chmod 644 "$_HM/.claude/hooks/tests/layer0-probe.sh" \
     && git -C "$_HM" add -A
   [ -z "$(_hook_mode_offenders "$_HM")" ] && _hm_rc=0 || _hm_rc=1
   expect_exit 0 "$_hm_rc" "probe: 644 test file in a subdirectory is not reported"
+
+  # A repo with NO tracked hooks must not read as clean. Before the denominator
+  # guard this printed `ok [all 100755]` having examined nothing, which is the
+  # same shape as the defects this whole section exists to catch.
+  _HM_EMPTY="$SB/hook-mode-empty"
+  mkdir -p "$_HM_EMPTY" && git -C "$_HM_EMPTY" init -q \
+    && touch "$_HM_EMPTY/unrelated.txt" && git -C "$_HM_EMPTY" add -A
+  _hm_seen_probe=$(git -C "$_HM_EMPTY" ls-files -- '.claude/hooks/' 2>/dev/null | wc -l | tr -d ' ')
+  [ "${_hm_seen_probe:-0}" -eq 0 ] && _hm_rc=0 || _hm_rc=1
+  expect_exit 0 "$_hm_rc" "probe: a repo with no tracked hooks examines 0 files"
+  [ -z "$(_hook_mode_offenders "$_HM_EMPTY")" ] && _hm_rc=0 || _hm_rc=1
+  expect_exit 0 "$_hm_rc" "probe: ...and so reports no offenders, which alone would look clean"
 
   # ...and the identical name at the TOP level still is, so the skip is scoped
   # to the subdirectory and not to the layer*/test* naming.

@@ -256,4 +256,12 @@ _source_automation_libs() {
   _tap_pass "[LOW] Retention boundary test setup complete (manual verification needed)"
 )
 
-finish || true
+# Exit with the failure count, not a forced 0.
+#
+# `finish || true` used to end this file. That did NOT fool test-runner.sh, which
+# derives its verdict from TAP lines and severity tags rather than exit codes,
+# and it never masked a truncated run either — a suite dying under `set -e` never
+# reaches this line at all. What it did do was make this suite's exit code
+# meaningless to every DIRECT caller: a human, CI, or verify-pristine.sh when it
+# names this suite, all of which read `$?`. Known-issue R38.
+finish

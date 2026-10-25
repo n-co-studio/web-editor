@@ -12,6 +12,162 @@
 #   Hooks: session-close-check
 #   Automation: runner.sh, queue-cli.sh, intake.sh
 
+# --- The session's evidence set (known-issue R40) ---
+# Every per-session governance verdict and gate marker, in ONE place, because it
+# has two consumers that must not drift apart:
+#
+#   1. cleanup_session_files() below, at session close.
+#   2. init_phase() in _phase-helper.sh, on an authorised same-session re-init.
+#
+# Consumer 2 is why this list exists. init_phase used to rewrite phase-state and
+# remove NOTHING, so a second work unit in one session inherited the first's
+# approvals — same session_id, valid dispatch_phase, every commit-gate check
+# satisfied. Two work units were gated on one unit's verdicts before this was
+# found, and it reproduced twice while being fixed.
+#
+# NOT in this list, deliberately: phase-state, phase-state.gates and
+# session-resume.yaml. Close deletes those too, but a re-init must not: clearing
+# them would either be redundant or destroy the state the re-init is building.
+# They stay as explicit calls in close.
+#
+# Precisely, because an earlier draft of this comment said init_phase "rewrites
+# all three" and that is only true of a re-init that SUCCEEDS: phase-state is
+# rewritten early, while write_resume_marker and compute_phase_gates run near
+# the end of init_phase, after the ancestry check's `return 1` paths. A re-init
+# that fails there leaves phase-state.gates and session-resume.yaml holding the
+# previous unit's contents. Neither carries an approval — the gates file holds
+# branch and overlap verdicts — so this is a staleness wart, not an inheritance
+# hole, but it is not what "rewrites all three" implies.
+#
+# criteria-verdicts.yaml IS here. t-0048 keeps it out of the evidence MANIFEST
+# (manifest entries read as integrity tracking and that sidecar is advisory),
+# which is a different question from whether a new work unit should inherit it —
+# it should not. An earlier write-up of R40 confused the two and said t-0048
+# required excluding it; that was wrong and is corrected in the entry.
+#
+# Order is irrelevant: every entry is an independent _delete_if_owned.
+_SESSION_EVIDENCE_FILES="plan-approved pragmatist-signed cohesion-reviewed diff-review-complete qa-verified reviewer-signed security-signed functional-verified kg-updated criteria-verdicts.yaml"
+
+# --- Clear this session's evidence (known-issue R40) ---
+# Removes only files this session owns, via _delete_if_owned, and logs each one
+# WITH its verdict. The log matters: a re-init silently erasing a
+# `GATE_RESULT: BLOCKED` would leave no trace otherwise, since compare_manifest
+# is advisory and the re-init re-baselines the manifest a moment later. An
+# erased block is a self-inflicted re-review, not a bypass — the gates treat an
+# absent verdict file as blocking — but it should still be visible.
+#
+# Arguments:
+#   $1 — state directory
+#   $2 — session id that owns the clear
+# Always returns 0: a failed clear must not abort init.
+# _is_prewritten_evidence <file> — 0 when the file was placed there legitimately
+# BEFORE this session's agent ran, rather than earned by it.
+#
+# Three writers do this, and all of them are the reason a first init must not
+# clear indiscriminately:
+#   state-manager.sh      plan-approved      `source: runner` / `runner-auto`
+#   _headless-plan-approve.sh                `question_hash: headless-runner`
+#   _phase-helper.sh      plan-approved AND pragmatist-signed via a handoff
+#                                            bundle: `source: handoff-bundle`
+#
+# The runner pre-writes plan-approved precisely so the hooks do not block, and
+# state-manager.sh states that phase-state is NOT pre-seeded — the agent calls
+# init_phase itself. So for every daemon-run and task-group brief, the agent's
+# init IS a first init with a pre-written approval already on disk. Clearing it
+# would strand the brief at "plan-approved missing", which is exactly how brief
+# 2+ of every task group stalled earlier this month.
+#
+# Matched per FILE rather than by filename, because the handoff bundle writes
+# pragmatist-signed the same way; a filename allowlist would have missed it.
+_is_prewritten_evidence() {
+  local file="$1"
+  [ -f "$file" ] || return 1
+  grep -qE '^(source: (runner|handoff-bundle)|question_hash: (runner-auto|headless-runner))$' \
+    "$file" 2>/dev/null
+}
+
+# clear_session_evidence <state_dir> <sid> [scope]
+#
+# scope:
+#   all                (default) clear every owned evidence file. Used by an
+#                      authorised same-session re-init, where the previous work
+#                      unit's approvals must not carry into the next one.
+#   preserve-prewrites clear owned evidence EXCEPT files a runner or handoff
+#                      bundle legitimately placed before the agent ran. Used by
+#                      a first init, where leftover verdicts from a close that
+#                      never ran should go but the brief's own pre-approval
+#                      must survive.
+clear_session_evidence() {
+  local state_dir="$1"
+  local sid="$2"
+  local scope="${3:-all}"
+  [ -n "$state_dir" ] || return 0
+  [ -d "$state_dir" ] || return 0
+
+  local file verdict cleared="" skipped="" preserved=""
+  for file in $_SESSION_EVIDENCE_FILES; do
+    [ -f "$state_dir/$file" ] || continue
+    if [ "$scope" = "preserve-prewrites" ] && _is_prewritten_evidence "$state_dir/$file"; then
+      preserved="${preserved}${file} "
+      continue
+    fi
+    # Captured BEFORE deletion, and tolerant of files that carry no verdict
+    # line (kg-updated uses `result:`, the sidecar carries neither).
+    verdict=$(grep -h '^GATE_RESULT:' "$state_dir/$file" 2>/dev/null | head -1 | sed 's/^GATE_RESULT: *//' || true)
+    [ -n "$verdict" ] || verdict="no-verdict-line"
+    if _delete_if_owned "$state_dir/$file" "$sid" && [ ! -f "$state_dir/$file" ]; then
+      cleared="${cleared}${file}=${verdict} "
+    else
+      # Still present after the attempt. The usual cause is the one worth
+      # reporting — _delete_if_owned found a DIFFERENT session_id and correctly
+      # refused, because one session must not delete another's evidence — but it
+      # is NOT the only cause, so neither the label nor the message claims it is:
+      # an unwritable state directory, or a session_id value carrying a trailing
+      # space or CR, lands here too. _delete_if_owned compares the raw field
+      # while the commit gate normalises with `tr -d '[:space:]'`, so a whitespace
+      # difference can make this refuse a file the gate accepts as ours.
+      #
+      # Whether the next unit actually INHERITS the file depends on the gate, not
+      # on this clear: the gate validates against its own resolved id, so it
+      # rejects a genuinely foreign file as stale. The inheritance case is the
+      # narrow one where the gate's id matches the file and init's id does not —
+      # the daemon session-id cache disagreement this repo has seen before. So
+      # the message says "may be inherited", not "would be".
+      skipped="${skipped}${file}=${verdict} "
+    fi
+  done
+
+  if [ -n "$preserved" ]; then
+    # Not a warning: this is the runner's or the handoff bundle's own pre-write
+    # doing its job. Logged so a brief that later fails a plan gate can be told
+    # apart from one whose approval was cleared out from under it.
+    log_hook_event "clear-session-evidence" "init_phase" "" "allow" "0" "prewritten_evidence_preserved" "$preserved" 2>/dev/null || true
+  fi
+  # The two scopes are named apart in both the message and the event. They were
+  # not: a first-init clear announced itself as a re-init and logged
+  # `reinit_cleared`, so nothing downstream could tell "a second work unit
+  # re-earns its approvals" from "a stale verdict was swept before a fresh
+  # session started" — two different things to read in an audit.
+  local _cse_what="re-init" _cse_reason="reinit_cleared"
+  if [ "$scope" = "preserve-prewrites" ]; then
+    _cse_what="first init"; _cse_reason="first_init_cleared"
+  fi
+  if [ -n "$cleared" ]; then
+    echo "WARNING: $_cse_what cleared this session's governance evidence — this work unit must earn its own: $cleared" >&2
+    log_hook_event "clear-session-evidence" "init_phase" "" "allow" "0" "$_cse_reason" "$cleared" 2>/dev/null || true
+  fi
+  if [ -n "$skipped" ]; then
+    # Deliberately NOT "GATE-RECOVERABLE", and the event outcome is not "block":
+    # this path blocks nothing — clear_session_evidence always returns 0 and
+    # init_phase continues. In this repo that token and that outcome accompany an
+    # actual refusal (hooks block on exit 2 only), so using them here would both
+    # mislead a reader and break the pairing with the real blocking events.
+    echo "WARNING: re-init could NOT clear some evidence — most likely it records a different session_id, which _delete_if_owned correctly refuses to delete. Whether the next work unit inherits it depends on which id the commit gate resolves; it may be inherited. NEXT: inspect $state_dir and remove the stale files by hand if they are not another live session's. Files: $skipped" >&2
+    log_hook_event "clear-session-evidence" "init_phase" "" "advisory" "0" "reinit_evidence_not_cleared" "$skipped" 2>/dev/null || true
+  fi
+  return 0
+}
+
 # --- Session-bound file deletion helper ---
 # Reads session_id from a state file. If the field exists and does NOT match
 # the closing session's ID, the file is skipped (owned by another session).
@@ -30,7 +186,18 @@ _delete_if_owned() {
     # aborting the close hook for any state file that lacks a session_id: line
     # (e.g. phase-state.gates, which uses GATES_SESSION_ID=). `|| true` absorbs
     # the no-match exit so the GATES_SESSION_ID fallback below stays reachable.
-    file_sid=$(grep '^session_id: ' "$file" 2>/dev/null | sed 's/^session_id: *//' || true)
+    # Normalised exactly as _validate_state_session_id in pre-commit-gates.sh
+    # does — including its `head -1`, which is a no-op there and here because
+    # `tr -d '[:space:]'` has already removed the newlines (two session_id lines
+    # concatenate into one token that matches nothing, so such a file is kept).
+    # It is copied rather than tidied so the two cannot drift.
+    # Without the `tr -d` the raw field
+    # keeps a trailing space or CR and a file the GATE treats as this session's
+    # own is refused here as another session's — so close would leave it behind
+    # and a re-init would report it as unclearable, both for a reason that is not
+    # true. The gate is the reference for what "owned by this session" means;
+    # this must not disagree with it.
+    file_sid=$(grep '^session_id:' "$file" 2>/dev/null | sed 's/^session_id: *//' | tr -d '[:space:]' | head -1 || true)
     # Decision 0042: phase-state.gates uses shell-sourceable KEY=VALUE format.
     # Fall back to the GATES_SESSION_ID='<sid>' line when the YAML field is absent.
     if [ -z "$file_sid" ]; then
@@ -103,19 +270,15 @@ cleanup_session_files() {
   local state_dir
   state_dir="$(get_session_state_dir)"
   if [ -d "$state_dir" ]; then
-    # Session-bound files: check session_id before deleting
-    _delete_if_owned "$state_dir/plan-approved" "$closing_sid"
-    _delete_if_owned "$state_dir/cohesion-reviewed" "$closing_sid"
-    _delete_if_owned "$state_dir/diff-review-complete" "$closing_sid"
-    _delete_if_owned "$state_dir/qa-verified" "$closing_sid"
-    _delete_if_owned "$state_dir/reviewer-signed" "$closing_sid"
-    _delete_if_owned "$state_dir/security-signed" "$closing_sid"
-    _delete_if_owned "$state_dir/pragmatist-signed" "$closing_sid"
-    _delete_if_owned "$state_dir/functional-verified" "$closing_sid"
-    _delete_if_owned "$state_dir/kg-updated" "$closing_sid"
-    # Live per-criterion sidecar (Decision t-0048). The durable copy under
-    # docs/ai/governance/criteria-verdicts/ is tracked and deliberately survives.
-    _delete_if_owned "$state_dir/criteria-verdicts.yaml" "$closing_sid"
+    # Session-bound files: check session_id before deleting.
+    # The evidence set is the shared list, so close and re-init cannot drift
+    # apart (known-issue R40). phase-state, phase-state.gates and
+    # session-resume.yaml are NOT in it: init_phase rewrites all three, so a
+    # re-init must not clear them, while close must.
+    local _csf_file
+    for _csf_file in $_SESSION_EVIDENCE_FILES; do
+      _delete_if_owned "$state_dir/$_csf_file" "$closing_sid"
+    done
     _delete_if_owned "$state_dir/phase-state" "$closing_sid"
     _delete_if_owned "$state_dir/phase-state.gates" "$closing_sid"
 

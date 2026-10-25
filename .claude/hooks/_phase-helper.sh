@@ -1360,9 +1360,32 @@ init_phase() {
   local state_dir
   state_dir="$(get_session_state_dir)"
 
+  # Set only when an authorised re-init REPLACES this same session's existing
+  # phase-state. The different-session branch below must never set it: that
+  # path adopts or overwrites another session's state, whose evidence fails
+  # _validate_state_session_id at the gates anyway. See the clear site further
+  # down and known-issue R40.
+  # Which clear this init performs, decided by the guard below:
+  #   all                authorised same-session re-init — the previous work
+  #                      unit's approvals must not carry into this one
+  #   preserve-prewrites first init — clear leftover verdicts from a close that
+  #                      never ran, but keep a runner's or handoff bundle's
+  #                      pre-written approval, which every daemon and task-group
+  #                      brief depends on (state-manager.sh pre-writes
+  #                      plan-approved and deliberately does NOT pre-seed
+  #                      phase-state, so those briefs reach here as a FIRST init)
+  #   ""                 no clear — phase-state belongs to a different session,
+  #                      which is an adopt/overwrite recovery path of its own
+  local _clear_scope="preserve-prewrites"
+
   # Double-init guard (adversarial M1): refuse re-init if phase-state exists
   # for the current session. Prevents progress reset via second init_phase call.
-  # Override: REPO_OS_ALLOW_REINIT=1 for legitimate crash recovery scenarios.
+  #
+  # Override: REPO_OS_ALLOW_REINIT=1. Historically labelled "crash recovery",
+  # which undersold it — the documented crash restart uses a NEW
+  # REPO_OS_SESSION_ID and so takes the different-session branch below. This
+  # same-session branch is what a second work unit in one session uses, and it
+  # now clears the first unit's evidence (R40).
   if [ -f "$state_dir/phase-state" ]; then
     local _existing_sid
     _existing_sid=$(grep '^session_id:' "$state_dir/phase-state" 2>/dev/null | sed 's/^session_id: *//' | tr -d '[:space:]' | head -1)
@@ -1378,11 +1401,20 @@ init_phase() {
     if [ -n "$_existing_sid" ] && [ "$_existing_sid" = "$_current_sid" ]; then
       if [ "${REPO_OS_ALLOW_REINIT:-0}" = "1" ]; then
         echo "WARNING: Re-initializing phase state (REPO_OS_ALLOW_REINIT=1 override)" >&2
+        _clear_scope="all"
+        # Recorded as an override, not just echoed: this is the one branch that
+        # discards governance evidence, and an untracked WARNING on stderr is
+        # not an audit trail.
+        log_override "init_phase" "REPO_OS_ALLOW_REINIT" 2>/dev/null || true
       else
         echo "GATE-RECOVERABLE: Phase state already exists for this session — re-initialization blocked. NEXT: If crash recovery is needed, set REPO_OS_ALLOW_REINIT=1 and retry. (override: REPO_OS_ALLOW_REINIT=1)" >&2
         return 1
       fi
     elif [ -n "$_existing_sid" ] && [ "$_existing_sid" != "$_current_sid" ]; then
+      # Adopting or overwriting ANOTHER session's phase-state. No clear here:
+      # that session's evidence fails _validate_state_session_id at the gates
+      # anyway, and deciding what this path may delete is its own question.
+      _clear_scope=""
       # Stale phase-state from a different session — check if that session is alive
       local _stale_registry="$repo_root/.claude/.state/sessions/${_existing_sid}.yaml"
       if [ -f "$_stale_registry" ]; then
@@ -1423,6 +1455,58 @@ init_phase() {
   # "worktree occupied" message look like a corrupted session.
   if ! _claim_group_worktree_lock_at_init "$sid"; then
     return 1
+  fi
+
+  # --- Clear the previous work unit's evidence (known-issue R40) ---
+  # A same-session re-init used to rewrite phase-state and remove nothing, so
+  # the next work unit inherited plan-approved, pragmatist-signed,
+  # cohesion-reviewed, diff-review-complete, qa-verified and kg-updated — all
+  # with a matching session_id and a valid dispatch_phase, so every commit-gate
+  # check passed. A second unit could commit on the first unit's sign-off.
+  #
+  # PLACEMENT IS LOAD-BEARING, and not where R40's own entry first recorded it.
+  # It must precede the phase-state rewrite below, not merely
+  # write_evidence_manifest: the ancestry check further down appends
+  # `main_ancestry: fail` and returns 1 AFTER that rewrite, so clearing late
+  # would leave a failed re-init with a freshly reset phase beside stale
+  # approvals — the same defect in a worse shape. Clearing here means phase and
+  # evidence reset together, and a re-init that then fails has to re-earn both.
+  #
+  # Being before write_evidence_manifest also matters for the reason R40 gave:
+  # the manifest written at the end of init would otherwise re-baseline the
+  # inherited files as legitimately present, leaving compare_manifest blind.
+  #
+  # Scoped by _clear_scope, which the guard above set to one of three values:
+  # `all` for an authorised same-session re-init, `preserve-prewrites` for a
+  # first init, and empty for the different-session branch, which clears nothing.
+  # _cleanup-helper.sh is sourced lazily with the same
+  # acyclic, type-guarded idiom as _claim_group_worktree_lock_at_init: both
+  # files depend only on _analytics-helper.sh, and a partial deployment
+  # degrades to the old inherit-everything behaviour rather than aborting init.
+  if [ -n "$_clear_scope" ]; then
+    if ! type clear_session_evidence > /dev/null 2>&1; then
+      # Resolved from THIS file's own directory, not from $repo_root. The older
+      # idiom in _claim_group_worktree_lock_at_init uses $repo_root, which
+      # silently finds nothing under a test sandbox: setup_sandbox creates an
+      # empty .claude/hooks/ in the sandbox and sources the real helpers from
+      # the actual repo, so a $repo_root lookup degrades to the no-op branch and
+      # the clear would never be exercised by any test. BASH_SOURCE[0] is this
+      # file, so its sibling is the real _cleanup-helper.sh in both contexts.
+      local _ph_helper_dir
+      _ph_helper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null)" || _ph_helper_dir=""
+      if [ -n "$_ph_helper_dir" ] && [ -f "$_ph_helper_dir/_cleanup-helper.sh" ]; then
+        # shellcheck disable=SC1090
+        . "$_ph_helper_dir/_cleanup-helper.sh" 2>/dev/null || true
+      elif [ -f "$repo_root/.claude/hooks/_cleanup-helper.sh" ]; then
+        # shellcheck disable=SC1090
+        . "$repo_root/.claude/hooks/_cleanup-helper.sh" 2>/dev/null || true
+      fi
+    fi
+    if type clear_session_evidence > /dev/null 2>&1; then
+      clear_session_evidence "$state_dir" "$sid" "$_clear_scope" || true
+    else
+      echo "WARNING: re-init could not load clear_session_evidence — the previous work unit's approvals may still be present. Verify $state_dir before trusting any gate." >&2
+    fi
   fi
 
   # Get tag for init phase

@@ -689,6 +689,35 @@ unconstrained, and several are legitimately `100755`) and template-only, because
 `template-sync-engine.sh` carries no file modes: a newly added hook lands at the
 child's umask default, a gap tracked as a follow-up rather than closed here.
 
+## Amendment 2 — The Hook-Mode Check Now Covers Children (2026-10-25)
+
+**Status:** Accepted
+
+Amendment 1 added the `gate-conformance.sh` check that every non-underscore hook
+is `100755` in the index, and restricted it to a template checkout, recording the
+reason as a deferred follow-up: `template-sync-engine.sh` materialised each
+synced file by redirecting `git show` into it, which carries no mode, so a hook
+added to the template after a child was scaffolded arrived `644` and the child
+could not fix it. Failing children on that would have been a red with no remedy.
+
+**The restriction is lifted.** The engine now carries the exec bit where the
+template's mode is `100755`, one-directionally so a child's own bit is never
+stripped (known-issue R37). The check runs everywhere.
+
+**Lifted on evidence, not on the fix existing.** Amendment 1's condition was that
+a real child be observed receiving an exec bit through a sync, because a scratch
+template/child pair proves the code path and not the delivery. Measured on
+2026-10-25: before the mode-carrying engine reached them,
+`markpreston2/markpreston.co` held **6** and `n-co-studio/web-editor` held **8**
+non-underscore hooks at `100644`; after one sync each, **both hold zero**. Note
+the ordering that made this a two-step rollout — the sync that *delivers* the new
+engine still runs the child's old copy, so the modes apply on the sync after
+that.
+
+A child that trips this check now has a hook it added itself non-executable,
+which it can fix, and which would otherwise be registered by bare path and
+silently never run.
+
 ## Amends
 
 Nothing. Decisions 0013 (branch isolation and sealing), 0017 (operator

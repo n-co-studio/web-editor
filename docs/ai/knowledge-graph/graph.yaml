@@ -245,8 +245,8 @@ nodes:
   - id: "hook-pre-commit-gates"
     type: "hook"
     path: ".claude/hooks/pre-commit-gates.sh"
-    description: "A1 trigger parser, A2 scope, A4 secret scan, A6 contract, state verification; self-filter added 2026-08-06 (matcher widened to Bash); evidence manifest compare_manifest checkpoint added 2026-08-07; A2 hotfix branch skip removed 2026-08-07; A1 staleness check upgraded to two-tier content-digest (mtime pre-filter + SHA-256 over Triggers sections) 2026-08-07"
-    last_verified: "2026-08-07"
+    description: "A1 trigger parser, A2 scope, A4 secret scan, A6 contract, state verification; self-filter added 2026-08-06 (matcher widened to Bash); evidence manifest compare_manifest checkpoint added 2026-08-07; A2 hotfix branch skip removed 2026-08-07; A1 staleness check upgraded to two-tier content-digest (mtime pre-filter + SHA-256 over Triggers sections) 2026-08-07. A BLOCKED qa-verified now blocks the commit, matching the A5 treatment of cohesion-reviewed and diff-review-complete, with no session-type skip because qa is required on every non-experiment branch (t-0004 amendment). STAGED_FILES uses --diff-filter=ACMR so a renamed file is visible to every check that reads it (R30); D stays out, since a deleted path has no content to scan"
+    last_verified: "2026-08-072026-10-25
     status: "active"
     layer: "template"
   - id: "hook-pre-push-gates"
@@ -289,8 +289,8 @@ nodes:
   - id: "hook-phase-helper"
     type: "hook"
     path: ".claude/hooks/_phase-helper.sh"
-    description: "Phase-aware flow management helper; includes evidence manifest (write_evidence_manifest, refresh_manifest_entry, compare_manifest, cleanup_evidence_manifest) added 2026-08-07; _handoff_bundle_path() and _atomic_write_bundle() use get_main_repo_root() for worktree-aware resolution (2026-08-07)"
-    last_verified: "2026-08-07"
+    description: "Phase-aware flow management helper; includes evidence manifest (write_evidence_manifest, refresh_manifest_entry, compare_manifest, cleanup_evidence_manifest) added 2026-08-07; _handoff_bundle_path() and _atomic_write_bundle() use get_main_repo_root() for worktree-aware resolution (2026-08-07). init_phase clears session evidence on an authorised same-session re-init (scope all) and on a first init (scope preserve-prewrites, keeping files marked source: runner / handoff-bundle / question_hash: runner-auto / headless-runner, because state-manager.sh pre-writes plan-approved for every daemon and task-group brief and does not pre-seed phase-state). The clear precedes the phase-state REWRITE, not just write_evidence_manifest: the ancestry check returns 1 after that rewrite, so clearing later would leave a fresh phase beside stale approvals. t-0014 amendment, R40"
+    last_verified: "2026-08-072026-10-25
     status: "active"
     layer: "template"
   - id: "hook-analytics-helper"
@@ -317,8 +317,8 @@ nodes:
   - id: "hook-cleanup-helper"
     type: "hook"
     path: ".claude/hooks/_cleanup-helper.sh"
-    description: "Session cleanup (set -e-safe _delete_if_owned; cross-session marker cleanup outside per-session state-dir gate), branch sealing (record_closed_branch), and editor-live branch deletion/orphan-seal helpers"
-    last_verified: "2026-08-07"
+    description: "Session cleanup (set -e-safe _delete_if_owned; cross-session marker cleanup outside per-session state-dir gate), branch sealing (record_closed_branch), and editor-live branch deletion/orphan-seal helpers. Owns _SESSION_EVIDENCE_FILES, the single list of per-session verdict files, shared with init_phase so close and re-init cannot drift apart (R40); clear_session_evidence removes only files this session owns and reports both what it cleared with each verdict and what it could not, since a silently discarded GATE_RESULT: BLOCKED would otherwise leave no trace. _delete_if_owned normalises session_id exactly as _validate_state_session_id does, so close and the commit gate cannot disagree about ownership"
+    last_verified: "2026-08-072026-10-25
     status: "active"
     layer: "template"
   - id: "hook-headless-plan-approve"

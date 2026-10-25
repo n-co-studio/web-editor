@@ -16,6 +16,10 @@
 #   A5  Cohesion — cohesion-reviewed + diff-review-complete both APPROVED required (blocking);
 #                  session-type-aware: only enforced for session types with a review phase;
 #                  GATE_RESULT: BLOCKED in either file blocks commit
+#   State verification also blocks on GATE_RESULT: BLOCKED in qa-verified, with no
+#   session-type skip (qa is required on every non-experiment branch). That half was
+#   missing until 2026-10-25: a commit could carry its own QA verdict saying it
+#   should not have. See t-0004's amendment.
 #   A2  Process — scope check >100 lines (blocking with large-scope override)
 #   A6  Task Group — contract staging (blocking)
 #   A6.3 Integration points — artifact existence check from contract integration_points (blocking)
@@ -254,7 +258,21 @@ if [ "$IS_EXPERIMENT" = true ]; then
 fi
 
 # --- Staged files (used by multiple checks) ---
-STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || true)
+# `R` is included (known-issue R30). Without it a RENAMED file was invisible to
+# every check that reads this list, A1 among them: renumbering a decision from
+# t-0055 to t-0058 staged as `R098`, and the gate saw no decision file in the
+# change set at all, so it never asked for the `Decisions:` trailer it would have
+# demanded for the same content arriving as an addition.
+#
+# Measured before changing it, because the risk was that a rename yields TWO
+# paths and this list would gain one that no longer exists on disk: with
+# `--name-only`, `ACM` emits 0 lines for a staged rename and `ACMR` emits exactly
+# 1 — the destination, which exists. No phantom entries, so the checks that read
+# file contents from this list are unaffected.
+#
+# `D` stays out: a deleted path has no content to scan and A1 triggers on added
+# lines, so including it would only feed non-existent paths to the readers.
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR 2>/dev/null || true)
 
 # --- Cached staged diff for content scanning (lazy-loaded, shared by A4 + high-risk + A1) ---
 _CACHED_STAGED_DIFF=""
@@ -767,6 +785,34 @@ if [ "$SKIP_STATE" = false ]; then
       echo "GATE-RECOVERABLE: qa-verified lacks dispatch_phase — not produced by a real agent dispatch. NEXT: Re-dispatch QA verification agent. (override: REPO_OS_RECOVER=1)" >&2
       block "state_qa_no_dispatch_evidence"
       log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_qa_no_dispatch_evidence"
+    fi
+    # A BLOCKED QA verdict blocks the commit, the same way a BLOCKED cohesion
+    # verdict does above.
+    #
+    # Until this was added the asymmetry was real and exploitable: the three
+    # checks on this file (existence, session id, dispatch_phase) all pass on a
+    # file whose terminal line reads `GATE_RESULT: BLOCKED`, so a commit could
+    # land with its own QA verdict recording that it should not have. That was
+    # hit live on 2026-10-24 — the verdict read BLOCKED for four unresolved
+    # gate items and the gate would have allowed the commit.
+    #
+    # Not an authorised route: state-writer.sh documents BLOCKED as looping back
+    # to build, qa-verifier.md defines it as a refusal, and no decision permits
+    # committing over one. The omission simply never got written, which is why
+    # `quality-gates.md` documented "BLOCKED is now blocking" for cohesion only.
+    #
+    # No _A5_SKIP equivalent: qa-verified is required on every non-experiment
+    # branch (see the missing-file branch above), so there is no session type
+    # that legitimately commits over a BLOCKED QA verdict.
+    #
+    # The grep matches the same shape as the A5 check — the sentinel's first
+    # word, so a verdict carrying a trailing `reason="..."` is still read as
+    # BLOCKED.
+    _PCG_QA_RESULT=$(grep '^GATE_RESULT: ' "$STATE_DIR/qa-verified" 2>/dev/null | sed 's/^GATE_RESULT: *//' | awk '{print $1}' | head -1 || true)
+    if [ "$_PCG_QA_RESULT" = "BLOCKED" ]; then
+      echo "GATE-RECOVERABLE: qa-verified records GATE_RESULT: BLOCKED — QA found unresolved gate failures. NEXT: Resolve them and re-dispatch the QA verification agent. (override: REPO_OS_RECOVER=1)" >&2
+      block "state_qa_blocked"
+      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_qa_blocked"
     fi
   fi
 
@@ -1380,7 +1426,7 @@ fi
 # ============================================================
 if [ "$SKIP_STATE" = false ]; then
   # Deletions and renames count: removing a verifier is the plainest way to weaken
-  # one. STAGED_FILES (ACM) cannot see them, so this block builds its own list
+  # one. STAGED_FILES (ACMR) still cannot see them, so this block builds its own list
   # (--no-renames turns a rename into delete + add, so the old path is visible).
   # T (typechange, e.g. a script replaced by a symlink) is a mechanism change too.
   _MECH_STAGED=$(git diff --cached --name-only --no-renames --diff-filter=ACMDT 2>/dev/null || true)

@@ -12,7 +12,7 @@
 | Sealed branch reuse | bash-guard / write-guard (Gate 5) | `git checkout -b <category>/<description>` (new branch) |
 | Task group merge outside close phase | bash-guard (Gate 7) | Wait for close phase (`REPO_OS_SKIP_MERGE_GUARD=1`) |
 | State files missing (plan/cohesion/qa/pragmatist) | pre-commit-gates | Dispatch agents in order: Pragmatist plan-gating → plan approval → Critic cohesion → QA verify |
-| Phase re-init blocked | _phase-helper (init_phase) | Set `REPO_OS_ALLOW_REINIT=1` for crash recovery |
+| Phase re-init blocked | _phase-helper (init_phase) | Set `REPO_OS_ALLOW_REINIT=1`. **It clears this session's governance evidence** — the new work unit re-earns plan approval and every verdict (R40). The documented crash restart uses a *new* `REPO_OS_SESSION_ID` and takes a different branch, so it is unaffected |
 | High-risk without sign-off | pre-commit-gates | Dispatch Reviewer + Security agents |
 | Gov file staged without KG node (COVERAGE) | pre-commit-gates | Run `.claude/tools/kg-cover.sh <file>...` then re-stage. `REPO_OS_SKIP_KG_GATE=1` (interactive only). Decision 0034 Amendment 7. |
 | Gov file staged, KG node exists, no graph updated this session (FRESHNESS) | pre-commit-gates | Stage `graph.yaml`/`product-graph.yaml` update, or run `kg-cover.sh` to refresh. `REPO_OS_SKIP_KG_GATE=1` (interactive only). Decision 0034 Amendment 7. |

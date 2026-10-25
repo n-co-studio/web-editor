@@ -94,6 +94,7 @@ See: `.claude/agents/_agent-glossary.md` § State Files for the full state file 
 Gate-specific notes:
 - `plan-approved`: required by state verification and A2 scope (reads `large-scope: true` flag)
 - `cohesion-reviewed`: required by A5 (skipped for session types without a review phase); `GATE_RESULT: BLOCKED` is now blocking (not just file-presence check)
+- `qa-verified`: required on every non-experiment branch. Checked for existence, a matching `session_id`, and a non-empty `dispatch_phase` (proving a real agent dispatch rather than a hand-written file). `GATE_RESULT: BLOCKED` is **also blocking**, since 2026-10-25 — until then it was not, so a commit could land carrying its own QA verdict recording that it should not have. There is no session-type skip: unlike A5's `_A5_SKIP`, qa is required on all non-experiment branches, so no session type legitimately commits over a BLOCKED QA verdict
 - `diff-review-complete`: required by A5 alongside `cohesion-reviewed`; written by `state-writer.sh` when Critic emits a diff-review section — either combined output (both `## Cohesion Brief` and `## Diff-Review Brief` headers, Decision 0039) or single-mode diff-review output (detected via `MODE: diff-review` sentinel)
 - Gate 5 (session isolation, Decision 0013) uses `.claude/local/closed-branches` — a persistent ledger, not a session-scoped state file. Enforced by `write-guard.sh` (Section 3) on Edit/Write and `bash-guard.sh` on Bash.
 

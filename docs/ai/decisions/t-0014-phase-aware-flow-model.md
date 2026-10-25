@@ -181,3 +181,98 @@ Add a phase-aware flow management system that tracks session progress through an
 - **(2026-08-07)** `state-writer.sh` validates verdicts against dispatch phase; rejects with loud stderr + escalation file; adds `dispatch_phase:` field to all verdict state files
 - **(2026-08-07)** `pre-commit-gates.sh` rejects `qa-verified`, `cohesion-reviewed`, `diff-review-complete` that lack `dispatch_phase:` field
 - **(2026-08-07)** `docs/ai/logs/known-issues.md` gains R3: SendMessage-resumed agents do not trigger SubagentStop
+
+## Amendment — Same-Session Re-init Clears Evidence (2026-10-25)
+
+**Status:** Accepted
+
+`init_phase` rewrote `phase-state` on an authorised re-init and removed no
+evidence, so a second work unit in one session inherited the first unit's
+`plan-approved`, `pragmatist-signed`, `cohesion-reviewed`,
+`diff-review-complete`, `qa-verified` and the `kg-updated` marker. Every one
+carried a matching `session_id` and a valid `dispatch_phase`, so every check
+`pre-commit-gates.sh` performs on them passed — including the A5 `BLOCKED` test,
+since the inherited verdicts said APPROVED. A second unit could therefore commit
+on the first unit's sign-off, reviewed by nobody. Filed as known-issue R40,
+reproduced live twice.
+
+**A re-init that replaces this same session's phase-state now clears that
+session's evidence**, and the new work unit re-earns all of it. Three properties
+make this safe rather than destructive:
+
+1. **Scope.** Three cases, decided by one `_clear_scope` value:
+   - **An authorised same-session re-init** (`REPO_OS_ALLOW_REINIT=1`) clears
+     **everything**, pre-write markers included. A second work unit re-earns its
+     approval whatever wrote the first one.
+   - **A first init** clears leftover verdicts but **preserves** any file marked
+     `source: runner`, `source: handoff-bundle`, `question_hash: runner-auto` or
+     `question_hash: headless-runner`. This case was added on operator decision
+     after the amendment's first draft, which said a first init was untouched.
+     The condition attached to it was "assuming this doesn't break the task group
+     chain", and that condition is load-bearing: `state-manager.sh` pre-writes
+     `plan-approved` for every daemon and task-group brief and states that
+     phase-state is *not* pre-seeded, so those briefs reach `init_phase` as a
+     first init with their approval already on disk. Clearing indiscriminately
+     would strand every one at "plan-approved missing". Markers are matched per
+     **file**, not per filename, because `bundle_to_pragmatist_signed` writes
+     `pragmatist-signed` the same way.
+   - **The different-session branch** clears nothing: it adopts or overwrites
+     another session's state, whose evidence already fails
+     `_validate_state_session_id` at the gates, and deciding what that path may
+     delete is a separate question.
+   **The limit, stated rather than implied:** on a first init a *forged* marker
+   preserves its file. That is strictly narrower than the previous behaviour,
+   where a first init preserved everything unconditionally, so it is not a new
+   weakness — but the marker now carries a decision it was not designed for.
+2. **Placement.** The clear precedes the `phase-state` rewrite, not merely
+   `write_evidence_manifest`. The ancestry check later in `init_phase` appends
+   `main_ancestry: fail` and returns 1 *after* that rewrite, so clearing late
+   would leave a failed re-init with a freshly reset phase beside stale
+   approvals — the same defect in a worse shape. Preceding the manifest write
+   also matters: the manifest would otherwise re-baseline the inherited files as
+   legitimately present, leaving `compare_manifest` blind.
+3. **Direction.** The clear only removes files, and every gate treats an absent
+   verdict as blocking. Its worst outcome is a self-inflicted re-review, never a
+   bypass.
+
+**One list, two consumers.** `_SESSION_EVIDENCE_FILES` in `_cleanup-helper.sh`
+is shared by `cleanup_session_files` at close and by the re-init clear, because
+two hand-maintained lists would reproduce exactly the drift this fixes.
+`phase-state`, `phase-state.gates` and `session-resume.yaml` are deliberately
+outside it: close deletes them, and a re-init must not, because it is building
+that state rather than discarding it. Stated precisely, since an earlier draft
+of this paragraph said `init_phase` "rewrites all three" — it rewrites
+`phase-state` early, while `write_resume_marker` and `compute_phase_gates` run
+near the end, after the ancestry check's `return 1` paths. A re-init that fails
+there leaves the other two holding the previous unit's contents. Neither carries
+an approval, so that is staleness and not an inheritance hole.
+`criteria-verdicts.yaml` is inside it — t-0048 keeps that sidecar out of the
+evidence *manifest*, which is a different question from whether a new work unit
+should inherit it.
+
+**The clear is logged with each file's verdict**, and so is each file it could
+NOT clear. A re-init can discard a `GATE_RESULT: BLOCKED`, and nothing else
+would record that. The skip case matters as much: `_delete_if_owned`
+correctly refuses to delete a file owned by a different session id, and that is
+reported rather than passed over in silence. Stated carefully, because an earlier
+draft of this paragraph overstated it: whether the next unit actually *inherits*
+such a file depends on which id the commit gate resolves, and the gate rejects a
+genuinely foreign file as stale — the inheritance case is the narrow one where
+the gate's id matches the file and `init_phase`'s does not. The report is a
+WARNING, not `GATE-RECOVERABLE`, because this path blocks nothing.
+`REPO_OS_ALLOW_REINIT` is now recorded through `log_override` rather than only
+echoed to stderr. **Not yet asserted by any test**, which is the weakest part of
+this amendment: that log line is the only trace of a discarded verdict.
+
+**Label corrected.** The override was documented as "crash recovery" in
+`hook-rules-summary.md` and in the code comment. The documented crash restart
+(t-0032 §3) uses a *new* `REPO_OS_SESSION_ID`, so it takes the other branch and
+is unaffected by this change. The same-session branch is what a second work unit
+uses, which is what the label now says.
+
+**Known gap, recorded not closed:** some test layers do not pin
+`_REPO_OS_ROOT` and use fixed session ids, so a suite resolving to the real repo
+and calling `reset_phase` would clear real evidence for that id. `reset_phase`
+already removes the state directory first, making the clear a no-op there, and
+the hazard predates this change — real `phase-state` is already overwritten by
+that path. Tracked as a numbered finding rather than widened into this change.
