@@ -45,7 +45,10 @@ git -C "$MAIN" symbolic-ref HEAD refs/heads/main
 git -C "$MAIN" config user.email t@t
 git -C "$MAIN" config user.name t
 git -C "$MAIN" config commit.gpgsign false
-printf 'ignored.log\n' > "$MAIN/.gitignore"
+# Escalations are gitignored, as in the real repo (.gitignore) — otherwise an
+# escalation file makes the tree dirty and a case reads review:dirty-noop for the
+# wrong reason.
+printf 'ignored.log\n.claude/.automation/escalations/\n' > "$MAIN/.gitignore"
 printf 'base\n' > "$MAIN/a.txt"
 git -C "$MAIN" add -A
 git -C "$MAIN" commit -q -m base
@@ -105,6 +108,30 @@ _tap_eq "$(_detect 0)" "completed:clean-noop" "gitignored-only file, exit 0 → 
 _reset_wt
 printf 'edit\n' >> "$WT/a.txt"
 _tap_eq "$(_detect 0)" "review:dirty-noop" "tracked modification, exit 0 → review:dirty-noop (unchanged behaviour)"
+
+printf "# --- escalations are read from the main repo (R44) ---\n"
+# Hooks write escalations to the main repo (get_escalations_dir), so a worktree
+# session's escalation must be found there — reading the worktree saw nothing,
+# and the entry could be recorded completed with an open escalation.
+_reset_wt
+mkdir -p "$MAIN/.claude/.automation/escalations"
+printf 'escalation:\n  id: "esc-x"\n  queue_entry_id: "entry-esc"\n  type: "gate-failure"\n' > "$MAIN/.claude/.automation/escalations/esc-x.yaml"
+_out=$(cd "$MAIN" && detect_outcome 0 "$BASE" "$WT" "entry-esc" "" "" 2>/dev/null)
+_tap_eq "$_out" "review:escalation" "a worktree session's escalation in the main repo is seen"
+# An escalation a headless AGENT writes is still written by relative path — the
+# prompts say ".claude/.automation/escalations/" — so from a worktree it lands in
+# the worktree. That directory must still be read alongside the main repo's.
+printf 'escalation:\n  id: "esc-agent"\n  queue_entry_id: "entry-agent"\n  type: "ambiguity"\n' > "$WT/.claude/.automation/escalations/esc-agent.yaml" 2>/dev/null \
+  || { mkdir -p "$WT/.claude/.automation/escalations" && printf 'escalation:\n  id: "esc-agent"\n  queue_entry_id: "entry-agent"\n  type: "ambiguity"\n' > "$WT/.claude/.automation/escalations/esc-agent.yaml"; }
+_out=$(cd "$MAIN" && detect_outcome 0 "$BASE" "$WT" "entry-agent" "" "" 2>/dev/null)
+_tap_eq "$_out" "review:escalation" "an agent-written escalation inside the worktree is still seen"
+rm -f "$WT/.claude/.automation/escalations/esc-agent.yaml"
+# Without an entry id there is nothing to filter the main repo's escalations by,
+# so every stale one there would count as this session's. The detector keeps to
+# the session's own tree in that case, as it always did.
+_out=$(cd "$MAIN" && detect_outcome 0 "$BASE" "$WT" "" "" "" 2>/dev/null)
+_tap_eq "$_out" "completed:clean-noop" "with no entry id, another entry's escalation in the main repo is not counted"
+rm -f "$MAIN/.claude/.automation/escalations/esc-x.yaml"
 
 printf "# --- (b) blocker reports: stored in main, describing the session tree ---\n"
 

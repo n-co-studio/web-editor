@@ -148,12 +148,24 @@ detect_outcome() {
   # pre-commit-gates.sh scope classification gate).
   # Adversarial H5/M3: log warning if escalation dir exists but is empty
   # (possible deletion to suppress escalation detection).
+  # TWO places, read together (R44). The session's own tree, as always: a
+  # headless AGENT writes its escalation by the relative path the prompts give
+  # (.claude/.automation/escalations/), which from a worktree lands in the
+  # worktree. And the MAIN repo, where the hooks write (get_escalations_dir).
+  # The main repo is added only when an entry id is given — the id is what
+  # filters that shared directory to THIS session; with none, every stale
+  # escalation there would count.
   local escalation_dir="$repo_root/.claude/.automation/escalations"
+  local _esc_main_dir=""
+  if [ -n "$entry_id" ]; then
+    _esc_main_dir="$(_session_storage_root "$_git_repo_root")/.claude/.automation/escalations"
+    [ "$_esc_main_dir" = "$escalation_dir" ] && _esc_main_dir=""
+  fi
   local has_scope_deviation=false
   local _esc_count=0
-  if [ -d "$escalation_dir" ]; then
+  if [ -d "$escalation_dir" ] || { [ -n "$_esc_main_dir" ] && [ -d "$_esc_main_dir" ]; }; then
     local esc_file
-    for esc_file in "$escalation_dir"/*.yaml; do
+    for esc_file in "$escalation_dir"/*.yaml ${_esc_main_dir:+"$_esc_main_dir"/*.yaml}; do
       if [ -f "$esc_file" ]; then
         # Filter by entry ID: only count escalation files belonging to the
         # current queue entry (P1 — prevents false positive classification

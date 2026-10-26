@@ -9,7 +9,13 @@ cycle limit is reached (escalation).
 - **Loop**: `reassess → fix` (apply fixes and reassess when any dimension fails)
 - **Cycle limit**: 5 cycles before incomplete escalation
 - **No plan gate**: `has_plan_gate("finish-loop")` returns false — the assessment defines
-  the plan. Pre-approval is written by the runner at launch.
+  the plan. Pre-approval is written by the runner at launch. An **interactive** finish
+  loop must obtain it itself, with `AskUserQuestion` *after* `init_phase` (an earlier
+  approval is cleared by the first-init sweep) — the commit gate still requires
+  `plan-approved`.
+- **Reviewer capture**: critic and qa-verifier verdicts are recorded only when dispatched
+  in `reassess` (state-writer, R43) — finish-loop has no review/verify phase. The commit
+  gate requires `qa-verified`.
 - **Gate profile**: A1, A2 (pre-written), A4, A6 (when task group). A5 cohesion review
   is replaced by the structured dimension assessment.
 - **Convergence signal**: `FINISH_LOOP_RESULT: COMPLETE` in `cohesion-reviewed` state file

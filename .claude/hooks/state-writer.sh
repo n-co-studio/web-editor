@@ -329,18 +329,29 @@ PHASE_OK=true
 # self-contradiction ("dispatch=review:current=review") for what was in fact a
 # correct rejection of a review-phase security-privacy dispatch that belongs in verify.
 EXPECTED_PHASE=""
+# A finish-loop session has no review or verify phase (init assess fix reassess
+# commit close): its reviewers are dispatched in `reassess`, the phase that
+# judges the fix. Without this, every critic and qa-verifier verdict a finish loop
+# earned was rejected and its commit gate could never be satisfied (known-issue
+# R43). Bound to the session TYPE as well as the phase. Today finish-loop is the
+# only type with a `reassess` phase, so the type check changes nothing yet; it is
+# there so a type that adds one later does not silently inherit this acceptance.
+_SW_FINISH_REASSESS=false
+if [ "$VALIDATE_PHASE" = "reassess" ] && [ "$(get_session_type 2>/dev/null)" = "finish-loop" ]; then
+  _SW_FINISH_REASSESS=true
+fi
 if [ -n "$VALIDATE_PHASE" ]; then
   case "$AGENT_TYPE" in
     critic)
       # critic writes cohesion-reviewed (cohesion mode) or diff-review-complete (diff-review mode)
       # both during the review phase — STATE_FILE is already routed correctly above
       EXPECTED_PHASE="review"
-      [ "$VALIDATE_PHASE" != "review" ] && PHASE_OK=false
+      [ "$VALIDATE_PHASE" != "review" ] && [ "$_SW_FINISH_REASSESS" = false ] && PHASE_OK=false
       ;;
     qa-verifier)
-      # qa-verifier writes qa-verified during verify phase
+      # qa-verifier writes qa-verified during verify phase (finish-loop: reassess, R43)
       EXPECTED_PHASE="verify"
-      [ "$VALIDATE_PHASE" != "verify" ] && PHASE_OK=false
+      [ "$VALIDATE_PHASE" != "verify" ] && [ "$_SW_FINISH_REASSESS" = false ] && PHASE_OK=false
       ;;
     reviewer|security-privacy)
       # reviewer/security-privacy write during verify phase

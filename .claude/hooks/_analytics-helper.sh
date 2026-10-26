@@ -165,6 +165,16 @@ get_main_repo_root() {
   echo "$_CACHED_MAIN_REPO_ROOT"
 }
 
+# --- Where escalation files are written (known-issue R44) ---
+# Always the MAIN repo. The daemon, queue-cli and the outcome detector read
+# escalations from the main checkout, and a worktree session's own tree is
+# deleted by the runner right after the session — so a writer rooted at
+# $REPO_ROOT (the worktree, in a worktree session) wrote files nobody read and
+# that did not survive. Every hook writer uses this; a test greps for the old form.
+get_escalations_dir() {
+  printf '%s/.claude/.automation/escalations\n' "$(get_main_repo_root)"
+}
+
 # --- Worktree detection (Decision 0028) ---
 # Returns 0 if the current process is running inside a git worktree.
 # Uses git rev-parse --git-common-dir vs --git-dir (available since git 2.5).
@@ -1357,7 +1367,7 @@ sweep_stale_sessions() {
         _ttl_sid=$(basename "$stale_file" .yaml)
         local _ttl_age_h=$(( (now_epoch - file_epoch) / 3600 ))
         echo "WARNING: Session $_ttl_sid exceeded TTL (${_ttl_age_h}h > $((max_ttl / 3600))h) — writing escalation" >&2
-        local _esc_dir="$repo_root/.claude/.automation/escalations"
+        local _esc_dir; _esc_dir="$(get_escalations_dir)"
         mkdir -p "$_esc_dir" 2>/dev/null || true
         local _esc_id="esc-ttl-${_ttl_sid}-$(date +%Y%m%d-%H%M%S)"
         {

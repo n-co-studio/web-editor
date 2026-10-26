@@ -36,6 +36,13 @@
 #              (the commit gate passes the INDEX copy it extracted).
 #   --strict   Exit non-zero on violations (default: exit 0 with warnings)
 #
+# Grammar contract: the commit gate in .claude/hooks/pre-commit-gates.sh ("KG
+# Product-Graph Gate") has its own small reader for node `path` / `status` /
+# `description` (double- or single-quoted or bare scalars, trailing comments on
+# bare ones, folded/literal `>-` / `|` descriptions). Anything this validator
+# accepts, that reader must read the same way — change one, check the other
+# (.claude/hooks/tests/test-kg-product-gate.sh, "hand-edited YAML forms").
+#
 # Exit codes:
 #   0  Clean (or --strict not set)
 #   1  Violations found (only when --strict)

@@ -30,6 +30,16 @@ Max cycles: 5. At cycle 5 without full convergence, write incomplete sentinel an
 2. Initialize phase state: `source .claude/hooks/_analytics-helper.sh && source .claude/hooks/_phase-helper.sh && init_phase "finish-loop"`
 3. Read compiled specs for context on the affected area
 4. Advance to assess phase: `advance_phase "assess"`
+5. **Interactive sessions only** (headless runs get this from the runner's pre-write):
+   ask for plan approval with `AskUserQuestion` **after** step 2. The question must
+   contain "plan" (and "large-scope" when the change will exceed 100 lines), or the
+   approval is not recorded. An approval given *before* `init_phase` is swept by
+   the first-init evidence clear (R40), and the commit gate requires `plan-approved`.
+
+**Dispatched reviewers (critic, qa-verifier) belong in `reassess`.** That is the
+only finish-loop phase in which `state-writer.sh` records their verdicts (R43); a
+critic or QA verdict dispatched in `assess` or `fix` is recovered and then
+discarded. The commit gate requires `qa-verified`.
 
 ### Assess Phase
 

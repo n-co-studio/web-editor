@@ -179,6 +179,8 @@
 .claude/hooks/tests/layer8-group-worktree.sh
 .claude/hooks/tests/layer9-mechanism-change.sh
 .claude/hooks/tests/run-phase-tests.sh
+.claude/hooks/tests/test-escalation-root.sh
+.claude/hooks/tests/test-finish-loop-capture.sh
 .claude/hooks/tests/test-fixtures.sh
 .claude/hooks/tests/test-helpers.sh
 .claude/hooks/tests/test-kg-product-gate.sh

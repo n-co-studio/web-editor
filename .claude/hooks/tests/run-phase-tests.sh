@@ -138,12 +138,13 @@ l9_exit=0
 bash "$SCRIPT_DIR/layer9-mechanism-change.sh" || l9_exit=$?
 
 printf "\n"
-printf '%s\n' "${BOLD}Knowledge Graph: product-graph gate, validator, tools (t-0034 Amendment 9)${RESET}"
+printf '%s\n' "${BOLD}Standalone suites: KG gate/validator/tools, escalation root, finish-loop capture${RESET}"
 printf '%s\n' "------------------------------------------------------------------------"
 
 # Standalone suites rather than numbered layers: each builds its own /tmp repo.
 kg_exit=0
-for _kg_suite in test-kg-product-gate.sh test-kg-validate.sh test-kg-tools.sh; do
+for _kg_suite in test-kg-product-gate.sh test-kg-validate.sh test-kg-tools.sh \
+                 test-escalation-root.sh test-finish-loop-capture.sh; do
   bash "$SCRIPT_DIR/$_kg_suite" || kg_exit=1
 done
 
@@ -347,9 +348,9 @@ else
   overall=1
 fi
 if [ "$kg_exit" -eq 0 ]; then
-  printf "Knowledge Graph suites:      ${GREEN}PASS${RESET}\n"
+  printf "Standalone suites:           ${GREEN}PASS${RESET}\n"
 else
-  printf "Knowledge Graph suites:      ${RED}FAIL${RESET}\n"
+  printf "Standalone suites:           ${RED}FAIL${RESET}\n"
   overall=1
 fi
 

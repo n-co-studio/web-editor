@@ -283,7 +283,12 @@ if ( cd "$_L1C7_MAIN" && git worktree add --detach "$_L1C7_WT" HEAD > /dev/null 
     source "$_L1C7_WT/.claude/.automation/lib/cohesion-trigger.sh" 2>/dev/null
     _resolve_contract_path "l1c7-group" 2>/dev/null
   )
-  assert_eq "$_L1C7_OUT" "$_L1C7_MAIN/.claude/local/task-groups/l1c7-group.yaml" \
+  # Compared as real paths (known-issue R42): the resolver returns git's realpath
+  # (/private/tmp/...) while $SB is logical (/tmp/... when TMPDIR is under /tmp,
+  # as verify-pristine.sh sets it), so a plain string compare failed on the
+  # symlink alone and read as fail-first evidence in every pristine run.
+  _l1c7_real() { (cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd -P)" "$(basename "$1")"); }
+  assert_eq "$(_l1c7_real "$_L1C7_OUT")" "$(_l1c7_real "$_L1C7_MAIN/.claude/local/task-groups/l1c7-group.yaml")" \
     "L1c.7 resolver finds the MAIN repo contract from inside the worktree"
 
   # And it must still survive the removal that caused the original loss.

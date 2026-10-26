@@ -652,7 +652,7 @@ _write_close_escalation() {
   # silently suppresses the escalation). Backslashes first, then quotes.
   _esc_msg="${_esc_msg//\\/\\\\}"; _esc_msg="${_esc_msg//\"/\\\"}"
   _esc_ctx="${_esc_ctx//\\/\\\\}"; _esc_ctx="${_esc_ctx//\"/\\\"}"
-  local _esc_dir="${_SE_MAIN_REPO:-$REPO_ROOT}/.claude/.automation/escalations"
+  local _esc_dir; _esc_dir="${_SE_MAIN_REPO:+$_SE_MAIN_REPO/.claude/.automation/escalations}"; _esc_dir="${_esc_dir:-$(get_escalations_dir)}"
   mkdir -p "$_esc_dir" 2>/dev/null || true
   local _esc_id="${_esc_prefix}-$(date +%Y%m%d-%H%M%S)"
   {
@@ -1080,7 +1080,7 @@ if [ "$STOP_ATTEMPT" -ge 3 ]; then
     _SV_MATCHES=$(printf '%s\n' "$_SV_ADDED" | grep -iE "$_REPO_OS_SECRET_PATTERN" 2>/dev/null || true)
     if [ -n "$_SV_MATCHES" ]; then
       echo "WARNING: A4 secret scan detected possible secrets in staged diff during safety valve exit" >&2
-      _SV_ESC_DIR="$REPO_ROOT/.claude/.automation/escalations"
+      _SV_ESC_DIR="$(get_escalations_dir)"
       mkdir -p "$_SV_ESC_DIR" 2>/dev/null || true
       {
         printf 'escalation:\n'
@@ -1304,7 +1304,7 @@ self-report is suspect."
         log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" \
             "force_commit_backstop_fired" "$_FCB_COMMIT_SHA" "$_FCB_BRANCH" || true
         # Write an escalation for the audit trail.
-        _FCB_ESC_DIR="$REPO_ROOT/.claude/.automation/escalations"
+        _FCB_ESC_DIR="$(get_escalations_dir)"
         mkdir -p "$_FCB_ESC_DIR" 2>/dev/null
         _FCB_ESC_TS=$(date -u +'%Y%m%d-%H%M%S')
         _FCB_ESC_FILE="$_FCB_ESC_DIR/esc-force-commit-backstop-$_FCB_ESC_TS.yaml"

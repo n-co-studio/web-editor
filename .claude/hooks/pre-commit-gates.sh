@@ -192,7 +192,7 @@ if [ "${REPO_OS_RECOVER:-0}" = "1" ]; then
   log_override "pre-commit-gates" "REPO_OS_RECOVER"
   echo "REPO_OS_RECOVER=1 — skipping all state-dependent checks" >&2
   if [ "${CLAUDE_HEADLESS:-0}" = "1" ]; then
-    _RECOVER_ESC_DIR="$REPO_ROOT/.claude/.automation/escalations"
+    _RECOVER_ESC_DIR="$(get_escalations_dir)"
     mkdir -p "$_RECOVER_ESC_DIR" 2>/dev/null || true
     printf 'type: governance-block\ngate: A3.4\nreason: REPO_OS_RECOVER_used_in_headless\nmessage: REPO_OS_RECOVER=1 bypass in headless mode -- A3.4 checks were skipped\ntimestamp: %s\n' \
       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -560,7 +560,7 @@ if [ "$SKIP_STATE" = false ]; then
         _A34_SKIP_EFFECTIVE=true
       else
         log_override "pre-commit-gates" "SKIP_FUNC_CHECK_IGNORED_HEADLESS"
-        _A34_ESC_DIR_SKIP="$REPO_ROOT/.claude/.automation/escalations"
+        _A34_ESC_DIR_SKIP="$(get_escalations_dir)"
         mkdir -p "$_A34_ESC_DIR_SKIP" 2>/dev/null || true
         printf 'type: governance-block\ngate: A3.4\nreason: SKIP_FUNC_CHECK_ignored_in_headless\nmessage: SKIP_FUNC_CHECK=1 was set but is not honored in headless/auto mode (Decision t-0044 Amendment 1) -- A3.4 checks will run\ntimestamp: %s\n' \
           "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -669,7 +669,7 @@ if [ "$SKIP_STATE" = false ]; then
           if [ "$IS_NO_REVIEW_BACKSTOP" = true ]; then
             echo "GATE-RECOVERABLE: A3.4 functional verification failed — build/pack/test scripts did not pass. NEXT: Fix failures below, or set REPO_OS_RECOVER=1 to bypass in headless/auto mode." >&2
             printf '%b' "$_A34_FAIL_DETAIL" >&2
-            _A34_ESC_DIR="$REPO_ROOT/.claude/.automation/escalations"
+            _A34_ESC_DIR="$(get_escalations_dir)"
             if [ -d "$_A34_ESC_DIR" ]; then
               printf 'type: gate-failure\ngate: A3.4\nreason: functional_verification_failed\ntimestamp: %s\n' \
                 "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -1346,7 +1346,7 @@ $_sp_parent
         log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "scope_out_of_scope" "count:$_oos_count" "$_oos_first"
 
         # Write escalation file for runner integration
-        ESC_DIR="$REPO_ROOT/.claude/.automation/escalations"
+        ESC_DIR="$(get_escalations_dir)"
         mkdir -p "$ESC_DIR" 2>/dev/null || true
         _esc_id="esc-scope-$(date +%Y%m%d-%H%M%S)"
         {
@@ -1378,7 +1378,7 @@ $_sp_parent
         log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "warn" "$START_MS" "scope_unbriefed_in_scope" "count:$_uis_count" "$_uis_first"
 
         # Write advisory escalation with risk/gain (from state file if populated by agent)
-        ESC_DIR="$REPO_ROOT/.claude/.automation/escalations"
+        ESC_DIR="$(get_escalations_dir)"
         mkdir -p "$ESC_DIR" 2>/dev/null || true
         _esc_id="esc-scope-$(date +%Y%m%d-%H%M%S)-adv"
         _rg_risk=""
@@ -1436,7 +1436,7 @@ if [ "$SKIP_STATE" = false ]; then
     printf 'timestamp: %s\nreason: staged files intersect the enforcement mechanism\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
       > "$STATE_DIR/mechanism-change-detected" 2>/dev/null || true
 
-    _MECH_ESC_DIR="$REPO_ROOT/.claude/.automation/escalations"
+    _MECH_ESC_DIR="$(get_escalations_dir)"
     _MECH_COUNT=$(printf '%s\n' "$MECH_FILES" | wc -l | tr -d ' ')
     _MECH_FIRST=$(printf '%s\n' "$MECH_FILES" | head -1)
     _MECH_SKIP=false
@@ -1633,7 +1633,7 @@ if [ -n "$STAGED_FILES" ] && [ -d "$DECISIONS_DIR" ]; then
     # In headless mode, stderr advisories are invisible to operators.
     # Write escalation file for visibility (audit 4.3).
     if [ "$IS_HEADLESS" = true ]; then
-      _A1_ESC_DIR="$REPO_ROOT/.claude/.automation/escalations"
+      _A1_ESC_DIR="$(get_escalations_dir)"
       mkdir -p "$_A1_ESC_DIR" 2>/dev/null || true
       {
         printf 'escalation:\n'
@@ -2020,6 +2020,11 @@ fi
 _KG_GRAPH_REL="docs/ai/knowledge-graph/product-graph.yaml"
 _KG_VALIDATOR="$REPO_ROOT/.claude/tools/kg-validate.sh"
 _KG_GRAPH_INVALID=false
+# Every temp file the two KG gates create is listed here and removed on ANY exit
+# — including the ERR trap's exit 2 — not only on the normal path. This hook sets
+# no other EXIT trap.
+_KG_TMPFILES=""
+trap 'rm -f $_KG_TMPFILES 2>/dev/null' EXIT
 
 # Writes the INDEX copy of the product graph to $1. Returns 1 when the graph is
 # not in the index (absent, or deleted by this commit).
@@ -2035,7 +2040,7 @@ if [ -n "$STAGED_FILES" ]; then
         echo "Advisory: kg-validate.sh not found at $_KG_VALIDATOR — KG schema gate skipped" >&2
         warn "kg_schema_validator_missing"
       else
-        _KG_IDX=$(mktemp "${TMPDIR:-/tmp}/kg-index-graph.XXXXXX")
+        _KG_IDX=$(mktemp "${TMPDIR:-/tmp}/kg-index-graph.XXXXXX"); _KG_TMPFILES="$_KG_TMPFILES $_KG_IDX"
         if _kg_index_graph "$_KG_IDX"; then
           KG_VALIDATE_EXIT=0
           KG_VALIDATE_OUTPUT=$(bash "$_KG_VALIDATOR" --strict --file "$_KG_IDX" 2>&1) || KG_VALIDATE_EXIT=$?
@@ -2125,7 +2130,7 @@ if [ "$SKIP_STATE" = false ]; then
 
   # coverage.yaml as committed: the index copy, or — when this commit deletes
   # it — the HEAD copy, so the deletion can still be judged against its scope.
-  _KGP_COV=$(mktemp "${TMPDIR:-/tmp}/kg-coverage.XXXXXX")
+  _KGP_COV=$(mktemp "${TMPDIR:-/tmp}/kg-coverage.XXXXXX"); _KG_TMPFILES="$_KG_TMPFILES $_KGP_COV"
   _KGP_COV_STATE="none"
   if git cat-file -e ":$_KGP_COV_REL" 2>/dev/null; then
     git show ":$_KGP_COV_REL" > "$_KGP_COV" 2>/dev/null && _KGP_COV_STATE="index"
@@ -2142,12 +2147,20 @@ if [ "$SKIP_STATE" = false ]; then
       warn "kg_product_unconfigured"
     fi
   else
+    # Deleting coverage.yaml switches the gate off entirely. Allowed (a commit
+    # that also changes in-scope files is blocked further down), but never silent.
+    if [ "$_KGP_COV_STATE" = "deleted" ]; then
+      echo "Advisory: KG product-graph — this commit deletes docs/ai/knowledge-graph/coverage.yaml, which switches the product-graph gate off. Logged as an override." >&2
+      log_override "pre-commit-gates" "kg-product-coverage-deleted"
+      warn "kg_product_coverage_deleted"
+    fi
+
     # --- coverage.yaml: three lists, block (`  - value`) or inline ([a, b]) ---
     # Tolerates CRLF, comments and quotes; roots lose a leading ./ and trailing
     # /, extensions a leading dot. Exclude entries keep a trailing / — it marks
     # a directory exclude (see _kgp_in_scope).
-    _kgp_list() {
-      tr -d '\r' < "$_KGP_COV" | awk -v want="$1" '
+    _kgp_list() {   # $1 = roots|extensions|exclude, $2 = file (default: the committed copy)
+      tr -d '\r' < "${2:-$_KGP_COV}" | awk -v want="$1" '
         function emit(v) {
           sub(/[[:space:]]+#.*$/, "", v); gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
           gsub(/^["'\'']|["'\'']$/, "", v)
@@ -2170,6 +2183,37 @@ if [ "$SKIP_STATE" = false ]; then
     _KGP_ROOTS=$(_kgp_list roots)
     _KGP_EXTS=" $(_kgp_list extensions | tr '\n' ' ') "
     _KGP_EXCL=$(_kgp_list exclude)
+
+    # Narrowing coverage.yaml is allowed, but it switches checks off for every
+    # later commit, so it must not pass silently (security review): a root or
+    # extension removed, or an exclude added, versus HEAD's copy is an advisory
+    # AND a logged override. Widening is not logged.
+    if [ "$_KGP_COV_STATE" = "index" ] && printf '%s\n' "$_KGP_NAMES" | grep -qxF "$_KGP_COV_REL" \
+       && git cat-file -e "HEAD:$_KGP_COV_REL" 2>/dev/null; then
+      _KGP_COV_HEAD=$(mktemp "${TMPDIR:-/tmp}/kg-coverage-head.XXXXXX"); _KG_TMPFILES="$_KG_TMPFILES $_KGP_COV_HEAD"
+      if git show "HEAD:$_KGP_COV_REL" > "$_KGP_COV_HEAD" 2>/dev/null; then
+        _KGP_NARROWED=""
+        _kgp_missing() {   # entries of list $1 absent from list $2
+          printf '%s\n' "$1" | while IFS= read -r _kgp_e; do
+            [ -n "$_kgp_e" ] || continue
+            printf '%s\n' "$2" | grep -qxF -- "$_kgp_e" || printf '%s ' "$_kgp_e"
+          done
+        }
+        _kgp_gone=$(_kgp_missing "$(_kgp_list roots "$_KGP_COV_HEAD")" "$_KGP_ROOTS")
+        [ -n "$_kgp_gone" ] && _KGP_NARROWED="${_KGP_NARROWED}roots removed: ${_kgp_gone}; "
+        # Re-read the list rather than word-splitting $_KGP_EXTS: unquoted, a
+        # glob-like extension (`*`) would expand against the filesystem.
+        _kgp_gone=$(_kgp_missing "$(_kgp_list extensions "$_KGP_COV_HEAD")" "$(_kgp_list extensions)")
+        [ -n "$_kgp_gone" ] && _KGP_NARROWED="${_KGP_NARROWED}extensions removed: ${_kgp_gone}; "
+        _kgp_gone=$(_kgp_missing "$_KGP_EXCL" "$(_kgp_list exclude "$_KGP_COV_HEAD")")
+        [ -n "$_kgp_gone" ] && _KGP_NARROWED="${_KGP_NARROWED}excludes added: ${_kgp_gone}; "
+        if [ -n "$_KGP_NARROWED" ]; then
+          echo "Advisory: KG product-graph — this commit narrows coverage.yaml (${_KGP_NARROWED% }), so files it used to check are no longer checked. Logged as an override." >&2
+          log_override "pre-commit-gates" "kg-product-scope-narrowed"
+          warn "kg_product_scope_narrowed"
+        fi
+      fi
+    fi
 
     # In scope = under a root AND extension in the set AND not excluded.
     # Globs are matched with `case`, where `*` crosses `/` (packages/*/src/content
@@ -2253,7 +2297,7 @@ if [ "$SKIP_STATE" = false ]; then
         fi
       fi
 
-      _KGP_IDX=$(mktemp "${TMPDIR:-/tmp}/kg-index-graph.XXXXXX")
+      _KGP_IDX=$(mktemp "${TMPDIR:-/tmp}/kg-index-graph.XXXXXX"); _KG_TMPFILES="$_KG_TMPFILES $_KGP_IDX"
       _KGP_GRAPH_STATE="none"
       if _kg_index_graph "$_KGP_IDX"; then
         _KGP_GRAPH_STATE="index"
@@ -2290,7 +2334,9 @@ if [ "$SKIP_STATE" = false ]; then
       else
         # One record per node: path<TAB>status<TAB>description. Reads what the
         # validator accepts: double- or single-quoted or bare scalars, trailing
-        # comments on bare ones, and folded/literal (>-, |) descriptions.
+        # comments on bare ones, and folded/literal (>-, |) descriptions. This
+        # is a second reader of the same grammar kg-validate.sh checks (see its
+        # "Grammar contract" header): change one, check the other.
         _KGP_NODES=$(awk '
           function val(s,  v) {
             v = s; sub(/^[^:]*:[[:space:]]*/, "", v)
@@ -2312,7 +2358,9 @@ if [ "$SKIP_STATE" = false ]; then
           }
           END { flush() }' "$_KGP_IDX")
 
-        _kgp_live_rows() { printf '%s\n' "$_KGP_NODES" | awk -F'\t' -v p="$1" '$1 == p && $2 != "stale"'; }
+        # The path goes through ENVIRON, not `awk -v`, which would interpret a
+        # backslash in it and never match the node.
+        _kgp_live_rows() { printf '%s\n' "$_KGP_NODES" | KGP_P="$1" awk -F'\t' '$1 == ENVIRON["KGP_P"] && $2 != "stale"'; }
 
         while IFS= read -r _kgp_p; do
           [ -n "$_kgp_p" ] || continue
@@ -2359,7 +2407,7 @@ EOF
         printf '%s' "$_KGP_MSGS" >&2
         echo "       NEXT: fix the above, then git add docs/ai/knowledge-graph/product-graph.yaml and retry. (override: REPO_OS_SKIP_KG_GATE=1, interactive only)" >&2
         if [ "$IS_NO_REVIEW_BACKSTOP" = true ]; then
-          _KGP_ESC_DIR="$REPO_ROOT/.claude/.automation/escalations"
+          _KGP_ESC_DIR="$(get_escalations_dir)"
           if [ -d "$_KGP_ESC_DIR" ]; then
             _KGP_ESC_SID="${REPO_OS_SESSION_ID:-$(date -u +%Y%m%d-%H%M%S)}"
             printf 'escalation:\n  id: "esc-%s-%s"\n  queue_entry_id: "%s"\n  type: "gate-failure"\n  severity: "blocking"\n  phase_at_exit: "commit"\n  tag_at_exit: "agent"\n  message: "KG product-graph gate blocked — product files and product-graph.yaml disagree"\n  created_at: "%s"\n  resolved: false\n  resolution: ""\n' \

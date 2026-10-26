@@ -284,6 +284,14 @@ _reset; _mark; _write "src/app/café.ts" "x"; _stage "src/app/café.ts"
 eq "$(run_gate)" "2" "a non-ASCII in-scope path is judged, not silently skipped"
 has "café.ts has no node" "...under its real name"
 
+printf '# --- a backslash in a path ---\n'
+# awk -v would read "a\bc" as "a<backspace>c" and never match the node.
+_reset; _write 'src/app/a\bc.ts' "x"
+printf '%s\n%s\n' "$(_node product-app-settings src/app/settings.ts "$GOOD")" \
+  "$(_node product-app-abc 'src/app/a\bc.ts' "Formats currency for the checkout summary")" | _graph
+_stage 'src/app/a\bc.ts' "$G"
+eq "$(run_gate)" "0" "a path containing a backslash matches its node"
+
 printf '# --- deleting the graph or its scope in the same commit ---\n'
 _reset; _write src/app/new.ts "x"; ( cd "$SB" && git rm -q "$G" ); _stage src/app/new.ts
 eq "$(run_gate)" "2" "deleting product-graph.yaml alongside in-scope changes blocks"
@@ -336,6 +344,47 @@ _reset; _mark
 printf 'roots:\n  - src/app\nextensions:\n  - ts\nexclude:\n  - storybook/\n' > "$SB/$C"
 _write src/app/storybook/card.ts "x"; _stage "$C" src/app/storybook/card.ts
 eq "$(run_gate)" "0" "a directory exclude written with a trailing slash excludes that directory"
+
+printf '# --- narrowing coverage.yaml leaves a trace ---\n'
+# Narrowing the scope is allowed — but it switches checks off for future
+# commits, so it is logged as an override rather than passing silently.
+_ov_has() { grep -q "$1" "$SB"/.claude/.state/wt-sessions/"$SID"/overrides.log "$SB"/.claude/.state/overrides.log 2>/dev/null; }
+_ov_clear() { rm -f "$SB"/.claude/.state/wt-sessions/"$SID"/overrides.log "$SB"/.claude/.state/overrides.log; }
+
+_reset; _ov_clear
+printf 'roots:\n  - src/app\nextensions:\n  - ts\n  - tsx\n' > "$SB/$C"   # drops the packages root and css
+_stage "$C"
+eq "$(run_gate)" "0" "a commit that narrows coverage.yaml is allowed"
+has "narrows" "...with an advisory saying it narrows the gate"
+if _ov_has kg-product-scope-narrowed; then ok "...and logged as an override"; else nok "...and logged as an override"; fi
+
+_reset; _ov_clear
+printf 'roots:\n  - src/app\n  - packages/*/src/content\nextensions:\n  - ts\n  - tsx\n  - css\nexclude:\n  - "*.stories.*"\n  - "*"\n' > "$SB/$C"
+_stage "$C"
+run_gate > /dev/null
+if _ov_has kg-product-scope-narrowed; then ok "adding an exclude counts as narrowing"; else nok "adding an exclude counts as narrowing"; fi
+
+_reset; _ov_clear
+printf 'roots:\n  - src/app\n  - packages/*/src/content\n  - src/lib\nextensions:\n  - ts\n  - tsx\n  - css\n  - scss\nexclude:\n  - "*.stories.*"\n' > "$SB/$C"
+_stage "$C"
+run_gate > /dev/null
+if _ov_has kg-product-scope-narrowed; then nok "widening coverage.yaml is not logged" "logged"; else ok "widening coverage.yaml is not logged"; fi
+
+_reset; _ov_clear
+( cd "$SB" && git rm -q "$C" )
+eq "$(run_gate)" "0" "deleting coverage.yaml on its own is allowed"
+if _ov_has kg-product-coverage-deleted; then ok "...but logged as an override (it switches the gate off)"; else nok "...but logged as an override (it switches the gate off)"; fi
+
+# An extension that looks like a glob must not expand against the filesystem
+# when the two copies are compared (that comparison runs with globbing on): `*`
+# in BOTH copies would expand to file names in the new one and read as "removed".
+_reset; _ov_clear
+printf 'roots:\n  - src/app\n  - packages/*/src/content\nextensions:\n  - ts\n  - "*"\n' > "$SB/$C"
+_commit_base
+printf 'roots:\n  - src/app\n  - packages/*/src/content\n  - src/lib\nextensions:\n  - ts\n  - "*"\n' > "$SB/$C"
+_stage "$C"; run_gate > /dev/null
+if _ov_has kg-product-scope-narrowed; then nok "a glob-like extension kept in both copies is not misread as removed" "logged"; else ok "a glob-like extension kept in both copies is not misread as removed"; fi
+( cd "$SB" && git reset -q --hard HEAD~1 )
 
 printf '# --- exemptions and configuration ---\n'
 # experiment/* never reaches this gate: pre-commit-gates exits early on those
