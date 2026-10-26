@@ -3,8 +3,9 @@
 # Decision 0034 Amendment 5 — Parallel Task Group Delta Authoring
 #
 # Reads per-brief and merge-brief KG delta files from the shared state path,
-# dedups nodes and edges, and applies the aggregated result to the appropriate
-# shared graph (graph.yaml or product-graph.yaml) in a single locked write.
+# dedups nodes and edges, and applies the aggregated result to product-graph.yaml
+# in a single locked write. A delta that targets `template` — the graph.yaml
+# retired by Decision t-0034 Amendment 9 — is dropped with a warning.
 #
 # Replaces the N+1 per-brief direct graph writes that previously occurred at
 # the close of each parallel content brief.
@@ -39,9 +40,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 STATE_DIR="$REPO_ROOT/.claude/.state"
-TEMPLATE_GRAPH="$REPO_ROOT/docs/ai/knowledge-graph/graph.yaml"
 PRODUCT_GRAPH="$REPO_ROOT/docs/ai/knowledge-graph/product-graph.yaml"
-TEMPLATE_LOCK="$REPO_ROOT/docs/ai/knowledge-graph/.graph-lock"
 PRODUCT_LOCK="$REPO_ROOT/docs/ai/knowledge-graph/.product-graph-lock"
 CONFLICT_LOG="$STATE_DIR/kg-aggregation-conflicts.log"
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -121,11 +120,9 @@ _is_stale() {
 # We accumulate normalized records into temp files keyed by target. A node
 # record is one line: "node\t<id>\t<authored_at>\t<type>\t<path>\t<description>\t<last_verified>\t<status>\t<layer>".
 # An edge record: "edge\t<source>\t<target>\t<relation>\t<authored_at>\t<context>\t<source_type>\t<last_verified>\t<status>\t<confidence>".
-# Tabs are forbidden in YAML scalar values here — graph.yaml emits attributes
+# Tabs are forbidden in YAML scalar values here — the graph emits attributes
 # inside double quotes without literal tabs (verified by inspection of seeded
 # graph). Embedded quotes are not escaped in the existing graph either.
-WORK_TEMPLATE_NODES=$(mktemp)
-WORK_TEMPLATE_EDGES=$(mktemp)
 WORK_PRODUCT_NODES=$(mktemp)
 WORK_PRODUCT_EDGES=$(mktemp)
 
@@ -133,12 +130,12 @@ WORK_PRODUCT_EDGES=$(mktemp)
 # before/after the lock window so an abort under set -euo pipefail still
 # releases the lock directory and cleans the per-function tmpfiles. Without
 # this, a failure between acquire_lock and release_lock would leave a stale
-# .graph-lock / .product-graph-lock blocking all future KG writes.
+# .product-graph-lock blocking all future KG writes.
 ACTIVE_LOCK=""
 ACTIVE_INTERMEDIATES=""
 
 _kg_cleanup() {
-  rm -f "$WORK_TEMPLATE_NODES" "$WORK_TEMPLATE_EDGES" "$WORK_PRODUCT_NODES" "$WORK_PRODUCT_EDGES" 2>/dev/null || true
+  rm -f "$WORK_PRODUCT_NODES" "$WORK_PRODUCT_EDGES" 2>/dev/null || true
   if [ -n "$ACTIVE_LOCK" ]; then
     rmdir "$ACTIVE_LOCK" 2>/dev/null || true
   fi
@@ -154,7 +151,6 @@ _parse_delta() {
   local f="$1" target="$2" authored="$3"
   local node_out edge_out
   case "$target" in
-    template) node_out="$WORK_TEMPLATE_NODES"; edge_out="$WORK_TEMPLATE_EDGES" ;;
     product)  node_out="$WORK_PRODUCT_NODES";  edge_out="$WORK_PRODUCT_EDGES" ;;
     *)
       echo "WARNING: delta $f declares unknown target '$target' — dropped" >&2
@@ -235,9 +231,14 @@ for f in $DELTA_FILES; do
   fi
 
   case "$target" in
-    template|product) ;;
+    product) ;;
+    template)
+      echo "WARNING: delta $f targets the template graph, retired by Decision t-0034 Amendment 9 — dropped (re-author it with target: product if it describes product code)" >&2
+      PARSE_ERR=$((PARSE_ERR + 1))
+      continue
+      ;;
     *)
-      echo "WARNING: delta $f declares unknown target '$target' (valid: template, product) — dropped" >&2
+      echo "WARNING: delta $f declares unknown target '$target' (valid: product) — dropped" >&2
       PARSE_ERR=$((PARSE_ERR + 1))
       continue
       ;;
@@ -306,7 +307,6 @@ _apply_target() {
   local edge_work="$3"
   local graph_file lock_dir
   case "$target" in
-    template) graph_file="$TEMPLATE_GRAPH"; lock_dir="$TEMPLATE_LOCK" ;;
     product)  graph_file="$PRODUCT_GRAPH";  lock_dir="$PRODUCT_LOCK"  ;;
   esac
 
@@ -599,8 +599,7 @@ EOF
   fi
 }
 
-_apply_target template "$WORK_TEMPLATE_NODES" "$WORK_TEMPLATE_EDGES"
-_apply_target product  "$WORK_PRODUCT_NODES"  "$WORK_PRODUCT_EDGES"
+_apply_target product "$WORK_PRODUCT_NODES"  "$WORK_PRODUCT_EDGES"
 
 echo ""
 echo "kg-merge-deltas: done. Run cleanup at session close to remove delta files."

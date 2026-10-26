@@ -20,9 +20,11 @@
 #     the tree is dirty. A session that committed keeps its work on its branch;
 #     a clean tree has nothing to keep. That is what stops this being a blanket
 #     snapshot of every exit — no outcome-string gate is needed, and none is used
-#     because one would silently drop untracked-only work (outcome-detector's
-#     dirty check ignores untracked files, so such a session classifies as
-#     `completed:clean-noop`).
+#     because one would silently drop work the classifier misjudged. (Until
+#     R34, outcome-detector's dirty check ignored untracked files, so an
+#     untracked-only session classified as `completed:clean-noop`; it is now
+#     `review:dirty-noop`. Keying on git, not on the outcome string, is what
+#     kept that work safe while the classifier was wrong.)
 #   - Nothing here may fail the close. Every step is guarded; a failed write
 #     warns and returns 0, so a full disk degrades a reviewable failure into a
 #     warning rather than into a crash. Removal proceeds regardless.

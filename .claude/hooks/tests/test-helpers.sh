@@ -81,6 +81,61 @@ setup_sandbox() {
   source "$real_hooks_dir/_analytics-helper.sh"
   # shellcheck disable=SC1091
   source "$real_hooks_dir/_phase-helper.sh"
+
+  _assert_sandboxed "setup_sandbox"
+}
+
+# --- Refuse to run against any root but the sandbox (known-issue R41) ---
+# The seam can fail SILENTLY: _analytics-helper.sh rejects a non-/tmp
+# _REPO_OS_TEST_ROOT with only a stderr WARNING and falls back to the real
+# repo, and a layer that re-sources the helpers or assigns _REPO_OS_ROOT
+# re-resolves it. From then on get_session_state_dir() names a REAL session
+# directory, and reset_phase deletes and re-initialises it. So check where the
+# helpers actually landed instead of trusting the setup that was supposed to
+# put them there. Coverage is setup_sandbox and every reset_phase — NOT the
+# direct init_phase/advance_phase calls layers make between resets, so a layer
+# that re-roots mid-case and then calls those directly is not caught here.
+#
+# The state dir is read in a command substitution on purpose: a subshell
+# inherits the cache (so a stale or hand-set cache is checked too) but cannot
+# populate it, so the check has no side effect on the case that follows.
+_assert_sandboxed() {
+  local _as_where="$1" _as_sd
+  # Root first: resolving the state dir calls get_session_id, which may itself
+  # write .session-id under whatever root it is given.
+  if [ -z "$_SANDBOX_DIR" ] || [ "${_REPO_OS_ROOT:-}" != "$_SANDBOX_DIR" ]; then
+    printf 'Bail out! %s: _REPO_OS_ROOT is %s, not the sandbox %s — refusing to touch a real repo (R41)\n' \
+      "$_as_where" "${_REPO_OS_ROOT:-<unset>}" "${_SANDBOX_DIR:-<unset>}"
+    exit 2
+  fi
+  _as_sd=$(get_session_state_dir 2>/dev/null || true)
+  case "$_as_sd" in
+    "$_SANDBOX_DIR"/*) ;;
+    *)
+      printf 'Bail out! %s: session state dir is %s, outside the sandbox %s — refusing (R41)\n' \
+        "$_as_where" "${_as_sd:-<empty>}" "$_SANDBOX_DIR"
+      exit 2
+      ;;
+  esac
+  # Third root: get_main_repo_root() decides from the CWD's git-common-dir, not
+  # from _REPO_OS_ROOT, and the session registry, handoff bundles and control
+  # dir all route through it. In test mode it now refuses to leave /tmp
+  # (_analytics-helper.sh), so a suite run from a worktree of the real repo —
+  # the way agent and reverify sessions run it — stays sandboxed instead of
+  # bailing. This checks that the refusal held. The test is the seam's prefix
+  # rule, not equality with the sandbox: a sandbox worktree's main root is
+  # git's realpath (/private/tmp/...) while _SANDBOX_DIR may be the logical
+  # /tmp/... — equality would fail a correct layer on that symlink alone.
+  local _as_main
+  _as_main=$(get_main_repo_root 2>/dev/null || true)
+  case "$_as_main" in
+    /tmp/*|/private/tmp/*) ;;
+    *)
+      printf 'Bail out! %s: main repo root is %s, outside /tmp — a real repo, not the sandbox %s (R41)\n' \
+        "$_as_where" "${_as_main:-<empty>}" "$_SANDBOX_DIR"
+      exit 2
+      ;;
+  esac
 }
 
 teardown_sandbox() {
@@ -438,6 +493,7 @@ stage_sandbox_file() {
 # from blocking re-init within the same test process (same PID appears alive).
 reset_phase() {
   local stype="${1:-standard}"
+  _assert_sandboxed "reset_phase"
   # Deterministically remove the per-session state dir for the CURRENT session
   # id — not just the cached one. init_phase resolves/writes the per-session dir
   # (wt-sessions/{sid}/phase-state) and its double-init guard returns 1 if that

@@ -30,9 +30,9 @@ assert_eq "$_file_sid" "$(cat "$SB/.claude/.session-id")" "get_session_id return
 
 # With env var, uses env var
 _CACHED_SESSION_ID=""
-export REPO_OS_SESSION_ID="wt-test-session-42"
+export REPO_OS_SESSION_ID="wt-test-session-42-$$"
 _env_sid=$(get_session_id "$SB")
-assert_eq "$_env_sid" "wt-test-session-42" "get_session_id returns env var value when REPO_OS_SESSION_ID set"
+assert_eq "$_env_sid" "wt-test-session-42-$$" "get_session_id returns env var value when REPO_OS_SESSION_ID set"
 
 # Cache cleared
 _CACHED_SESSION_ID=""
@@ -54,7 +54,7 @@ fi
 
 # Env var set but not in worktree → false (is_worktree returns false)
 _CACHED_IS_WORKTREE=""
-export REPO_OS_SESSION_ID="wt-test-42"
+export REPO_OS_SESSION_ID="wt-test-42-$$"
 if is_full_worktree_session; then
   _tap_fail "is_full_worktree_session false when env var set but not in worktree"
 else

@@ -95,7 +95,7 @@ Before session close:
 - [ ] PM spec-drift check run (parallel with Critic, advisory — skipped when no compiled spec or mvp-scope.yaml)?
 - [ ] QA verified all gates (A1–A6 + push gates)
 - [ ] Pragmatist plan-gating review completed (`pragmatist-signed` state file present — Decision 0025, enforced by `pre-commit-gates.sh`)
-- [ ] Knowledge graph updated (advisory — if either `graph.yaml` or `product-graph.yaml` exists, update the appropriate graph via shell I/O before session log. Template files → `graph.yaml`, product files → `product-graph.yaml`. Cross-layer edges go in the source node's graph — Decision 0034)
+- [ ] Knowledge graph updated (advisory — if `product-graph.yaml` exists, update it via shell I/O before session log: nodes for touched product files with real descriptions, paths moved on renames, stale on deletions. The commit gate enforces this for files in `coverage.yaml` scope. Governance files are not graphed — the template graph was retired, Decision 0034 Amendment 9)
 - [ ] REQUIRE: Session log must be the last file modified before the close-phase commit. Do not commit the session log before implementation work is complete, and do not modify it after the final commit
 - [ ] Session log updated
 - [ ] Task group contract updated (brief status, session decisions)? (skip if no task group)

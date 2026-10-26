@@ -243,8 +243,9 @@ EOF_ROW
   _ef=$(grep -h '^  error_log:' "$AUTO/queue/failed/entry-f.yaml" "$AUTO/queue/pending-review/entry-f.yaml" "$AUTO/queue/approved/entry-f.yaml" 2>/dev/null || true)
   case "$_ef" in *"$_rel"*) echo "FAIL_OK" ;; *) echo "FAIL_MISSING: $_ef" ;; esac
 
-  # completed path (queue_complete): untracked-only work classifies as
-  # completed:clean-noop, so a completed entry must carry the path too.
+  # completed path (queue_complete): untracked-only work USED to classify as
+  # completed:clean-noop (before R34), and runner.sh still attaches the note on
+  # every transition, so the completed path must carry it too.
   _mk_running entry-c
   queue_complete entry-c "completed:clean-noop; ${NOTE}" 2>/dev/null || true
   _ec=$(grep '^  error_log:' "$AUTO/queue/completed/entry-c.yaml" 2>/dev/null || true)
@@ -284,7 +285,7 @@ _tap_ok "$_ok" "2f ...and the note does not spill into work_order_id" "$(grep RO
 case "$NOTE" in *'|'*) _ok=false ;; *) _ok=true ;; esac
 _tap_ok "$_ok" "2g the note contains no '|' (the review rows are pipe-delimited)"
 _ok=false; grep -q '^COMPLETE_OK' "$T/q.out" && _ok=true
-_tap_ok "$_ok" "2h queue_complete records the patch path (untracked-only work completes)" "$(grep COMPLETE "$T/q.out" || true)"
+_tap_ok "$_ok" "2h queue_complete records the patch path (completed entries carry the note too)" "$(grep COMPLETE "$T/q.out" || true)"
 _ok=false; grep -q '^INCOMPLETE_OK' "$T/q.out" && _ok=true
 _tap_ok "$_ok" "2i queue_incomplete records the patch path" "$(grep INCOMPLETE "$T/q.out" || true)"
 _ok=false; grep -q '^CPLAIN_OK' "$T/q.out" && _ok=true
@@ -312,7 +313,8 @@ _tap_ok "$_ok" "8d runner.sh captures before removal on the normal post-session 
 _ok=false; grep -q '_pw_note=\$(preserved_work_note' "$_codef" && _ok=true
 _tap_ok "$_ok" "8e runner.sh builds the note once, before the outcome transitions"
 # Every outcome transition must carry it: a patch recorded on only some of them is
-# a patch nobody can find for the rest (untracked-only work completes).
+# a patch nobody can find for the rest (and untracked-only work did complete,
+# until R34 — the classifier can be wrong, so no transition is exempt).
 for _fn in queue_complete queue_incomplete queue_escalate queue_fail_terminal; do
   _n=$(grep "$_fn \"\$ENTRY_ID\"" "$_codef" | grep -c '_pw_note' || true)
   _ok=false; [ "$_n" -ge 1 ] && _ok=true

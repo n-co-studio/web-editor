@@ -135,7 +135,7 @@ If the draft reports nothing left undone, say so plainly before writing anything
 4. **Fallback:** when none of the above produces results, dispatch with core specs only (architecture.md, boundaries.md per specialist mapping). Note in context: "No matching feature specs found — grounded in core specs and codebase only." Do NOT load all feature briefs.
 
 1. Read `.claude/agents/_advisory-board-lite.md` in full. Read `.claude/agents/_agent-glossary.md` in full.
-2. Check if either `docs/ai/knowledge-graph/graph.yaml` or `product-graph.yaml` exists. If so, run `.claude/tools/kg-relevance.sh` with the operator's described scope files as arguments and capture the output. Skip silently when neither graph exists.
+2. Check if `docs/ai/knowledge-graph/product-graph.yaml` exists. If so, run `.claude/tools/kg-relevance.sh` with the operator's described scope files as arguments and capture the output. Skip silently when it does not.
 3. Select task-relevant spec excerpts per the selective loading mapping above. If no active version exists, skip this step.
 4. Assemble the inline context payload and pass it in each specialist's dispatch prompt (substituting actual content for each bracketed placeholder):
 

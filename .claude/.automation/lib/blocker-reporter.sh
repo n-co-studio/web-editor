@@ -11,6 +11,8 @@
 #   _analytics-helper.sh — get_session_id
 #   _phase-helper.sh — _validate_phase_session, _PS_* cache variables
 #   queue-manager.sh — _parse_config_field
+#   outcome-detector.sh — _session_tree_dirty, _session_storage_root (runner.sh
+#     sources it first)
 
 set -euo pipefail
 
@@ -79,10 +81,12 @@ _capture_stderr_tail() {
 # --- Capture recent block analytics events ---
 # Greps the current day's analytics NDJSON for block events from current session.
 # Arguments:
-#   $1 — repo_root
+#   $1 — storage root (the MAIN repo: the analytics dir is keyed on its name)
+#   $2 — session root (optional; the session's own tree, default $1)
 # Output: YAML list items on stdout (or "[]" if none)
 _capture_analytics_events() {
   local repo_root="$1"
+  local session_root="${2:-$1}"
 
   local repo_name
   repo_name=$(basename "$repo_root")
@@ -95,9 +99,15 @@ _capture_analytics_events() {
     return
   fi
 
-  local session_id=""
-  if [ -f "$repo_root/.claude/.session-id" ]; then
-    session_id=$(cat "$repo_root/.claude/.session-id" 2>/dev/null || true)
+  # The FAILED session's id, never the main checkout's. runner.sh exports the
+  # brief's REPO_OS_SESSION_ID before launch and only resets it after
+  # classification, so it is the brief's id here. The file fallback reads the
+  # SESSION's tree: the main repo's .claude/.session-id names whichever
+  # interactive or daemon session last ran there, and filtering on it would
+  # quote that session's block events as this one's.
+  local session_id="${REPO_OS_SESSION_ID:-}"
+  if [ -z "$session_id" ] && [ -f "$session_root/.claude/.session-id" ]; then
+    session_id=$(cat "$session_root/.claude/.session-id" 2>/dev/null || true)
   fi
 
   if [ -z "$session_id" ]; then
@@ -152,7 +162,16 @@ write_blocker_report() {
   local stderr_file="${4:-}"
   local last_prompt="${5:-}"
 
-  local reports_dir="$repo_root/.claude/.automation/reports"
+  # Two roots (known-issue R34). Git facts — status, dirtiness, branch — come
+  # from the SESSION's tree, repo_root, which for a worktree session is the
+  # worktree; every git call below used to run with no -C and so described the
+  # runner's CWD, the main repo. Storage — this report and the analytics log it
+  # quotes — belongs to the MAIN repo, because runner.sh removes the worktree
+  # straight after classification and took the report with it.
+  local session_root="${repo_root:-$(pwd)}"
+  local storage_root
+  storage_root=$(_session_storage_root "$session_root")
+  local reports_dir="$storage_root/.claude/.automation/reports"
   mkdir -p "$reports_dir" 2>/dev/null || true
 
   local report_id
@@ -173,7 +192,7 @@ write_blocker_report() {
 
   # Capture git status
   local git_status_raw
-  git_status_raw=$(git status --short 2>/dev/null || echo "unavailable")
+  git_status_raw=$(git -C "$session_root" status --short 2>/dev/null || echo "unavailable")
   local git_status_output="" _gs_line _gs_first=true
   while IFS= read -r _gs_line; do
     _gs_line="${_gs_line//\"/\\\"}"
@@ -187,7 +206,7 @@ write_blocker_report() {
 
   # Dirty tree detection for type classification
   local has_dirty_tree=false
-  if [ -n "$(git diff --name-only 2>/dev/null)" ] || [ -n "$(git diff --cached --name-only 2>/dev/null)" ]; then
+  if _session_tree_dirty "$session_root"; then
     has_dirty_tree=true
   fi
 
@@ -206,11 +225,13 @@ write_blocker_report() {
 
   # Capture analytics block events
   local analytics_events
-  analytics_events=$(_capture_analytics_events "$repo_root")
+  # The analytics log is keyed on the repo's directory name, which for a
+  # worktree is the worktree's own name — so this looked up the wrong file.
+  analytics_events=$(_capture_analytics_events "$storage_root" "$session_root")
 
-  # Current branch
+  # The session's branch, not whatever the runner's CWD has checked out
   local branch
-  branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+  branch=$(git -C "$session_root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 
   # Write report (atomic: tmp then mv)
   local tmp_file="${report_file}.tmp"

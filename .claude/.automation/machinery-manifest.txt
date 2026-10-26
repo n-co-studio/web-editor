@@ -85,6 +85,7 @@
 .claude/.automation/tests/test-group-worktree-lifecycle.sh
 .claude/.automation/tests/test-operator-control.sh
 .claude/.automation/tests/test-operator-notes.sh
+.claude/.automation/tests/test-outcome-detector.sh
 .claude/.automation/tests/test-overlap-report.sh
 .claude/.automation/tests/test-phase-ordering.sh
 .claude/.automation/tests/test-pr-manager.sh
@@ -180,6 +181,9 @@
 .claude/hooks/tests/run-phase-tests.sh
 .claude/hooks/tests/test-fixtures.sh
 .claude/hooks/tests/test-helpers.sh
+.claude/hooks/tests/test-kg-product-gate.sh
+.claude/hooks/tests/test-kg-tools.sh
+.claude/hooks/tests/test-kg-validate.sh
 .claude/hooks/validate-custom-agent.sh
 .claude/hooks/write-guard.sh
 .claude/live-editor-hwm
@@ -289,7 +293,6 @@ docs/ai/governance/.gitkeep
 docs/ai/governance/spec-compiled.yaml
 docs/ai/hook-rules-summary.md
 docs/ai/knowledge-graph/README.md
-docs/ai/knowledge-graph/graph.yaml
 docs/ai/knowledge-graph/schema.yaml
 docs/ai/prompts/prompt-0-spec-builder.md
 docs/ai/prompts/prompt-0.5-prototype.md

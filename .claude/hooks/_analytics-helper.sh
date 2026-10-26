@@ -145,6 +145,19 @@ get_main_repo_root() {
      && [ "${common_dir:0:1}" = "/" ]; then
     # In a worktree: common_dir is absolute path to main repo's .git/
     _CACHED_MAIN_REPO_ROOT="$(dirname "$common_dir")"
+    # Test seam (known-issue R41): this answer comes from the CWD, not from
+    # _REPO_OS_ROOT, so a suite run from inside a worktree of the REAL repo — the
+    # way agent and reverify sessions run — would route the registry, handoff
+    # bundles and control dir to the real main while every other path is
+    # sandboxed. When the seam is active and the CWD's repo is outside the
+    # seam's own /tmp prefix rule, it is not a test repo: stay in the sandbox.
+    # Test worktrees live under /tmp, so they still resolve as worktrees.
+    if [ "${REPO_OS_TEST_MODE:-0}" = "1" ] && [ "$_REPO_OS_ROOT" = "${_REPO_OS_TEST_ROOT:-}" ]; then
+      case "$_CACHED_MAIN_REPO_ROOT" in
+        /tmp/*|/private/tmp/*) ;;
+        *) _CACHED_MAIN_REPO_ROOT="$_REPO_OS_ROOT" ;;
+      esac
+    fi
   else
     # In the main repo (or test mode): _REPO_OS_ROOT is already correct
     _CACHED_MAIN_REPO_ROOT="$_REPO_OS_ROOT"

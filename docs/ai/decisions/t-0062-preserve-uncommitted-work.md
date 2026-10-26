@@ -85,7 +85,10 @@ When **both** hold: no commits since the baseline sha, and `git status --short` 
 - There is **no outcome-string gate**. `outcome-detector.sh`'s dirty check uses
   `git diff --name-only` and ignores untracked files, so a session that left only new files
   classifies as `completed:clean-noop`. Gating on `review:*` would silently drop precisely
-  the work the untracked-file requirement exists to save. The two conditions above already
+  the work the untracked-file requirement exists to save. *(Clarification 2026-10-25: true
+  when written; since known-issue R34 the dirty check counts untracked files and such a
+  session is `review:dirty-noop`. The rule stands for the reason it shows — the classifier
+  can be wrong, so preservation keys on git, not on the outcome string.)* The two conditions above already
   prevent a snapshot on every exit.
 - If the baseline is missing or cannot be resolved, it captures. Preserving something
   redundant is cheaper than losing something.
@@ -105,7 +108,9 @@ the fallback for a halt that arrives with a live worktree.
   optional note, and the `queue_fail` / `queue_fail_terminal` reasons have it appended.
   This is required, not tidiness: untracked-only work classifies as `completed:clean-noop`,
   and an entry that goes to `completed/` with an empty `error_log` would be a patch nobody
-  can find. With nothing preserved, `error_log` is byte-identical to before.
+  can find. *(Clarification 2026-10-25: true when written; since known-issue R34 the
+  classifier counts untracked files and such a session is `review:dirty-noop`. The rule —
+  every transition carries the note — is unchanged.)* With nothing preserved, `error_log` is byte-identical to before.
 - The note never contains `|`. `queue-cli.sh review` reads `queue-reporter.sh`'s
   pipe-delimited rows with `IFS='|'`; a `|` in `error_log` truncates it and shifts
   `work_order_id`. The note is joined to the outcome with `; `.
@@ -127,6 +132,9 @@ the fallback for a halt that arrives with a live worktree.
   silent.
 - **The classification gap is not fixed here.** `detect_outcome` ignoring untracked files is
   a separate defect (see `known-issues.md`). This decision makes it survivable, not correct.
+  *(Clarification 2026-10-25: that defect, known-issue R34(a), is now fixed —
+  `detect_outcome` counts untracked files. This decision's preservation does not depend on
+  the fix and is unchanged.)*
 
 ## Retention fix
 

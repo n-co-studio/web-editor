@@ -151,7 +151,7 @@ When absent, proceed normally — editor-live sessions often start before produc
 
 In the Close Signal sequence, before the final commit:
 
-REQUIRE: attempt knowledge graph writes at close per Decision 0034 Amendment 3 (Light Profile). Write new product-layer nodes for components or files created during the session, and edges for connections discovered. If the write fails, log the failure in the closing summary and proceed to commit — do not block the close sequence.
+REQUIRE: attempt knowledge graph writes at close per Decision 0034 Amendment 3 (Light Profile). Write new product-layer nodes for components or files created during the session — each with a description that says what the file does (not the seeder default `"Product source file"`, 20+ characters) — move a node's `path` on a rename, stale or remove it on a deletion, and add edges for connections discovered. If the write itself fails, log the failure in the closing summary and proceed — but the commit that follows passes through the blocking KG product-graph gate (Decision 0034 Amendment 9): in-scope product files staged without a matching node will block it, so fix the nodes and `git add docs/ai/knowledge-graph/product-graph.yaml` rather than committing around them.
 
 No mid-cycle graph interaction. The close-time write captures product-layer nodes (new components created during visual editing) — the primary value of graph participation for editor-live sessions.
 

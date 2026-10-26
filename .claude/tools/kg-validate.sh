@@ -2,9 +2,11 @@
 # Knowledge Graph Schema Validator
 # Decision 0034 — Knowledge Graph Data Layer (Amendment 4)
 #
-# Validates graph.yaml and/or product-graph.yaml against the enum constraints
-# defined in docs/ai/knowledge-graph/schema.yaml. Uses awk (one pass per check)
-# — no external dependencies (no yq, no Python, no Node.js).
+# Validates product-graph.yaml — the only knowledge graph since the template
+# graph was retired (t-0034 Amendment 9) — against the enum constraints in
+# docs/ai/knowledge-graph/schema.yaml. Uses awk (one pass per check) — no
+# external dependencies (no yq, no Python, no Node.js: the tooling floor is
+# bash and git).
 #
 # Checks:
 #   - relation: values against 8-type taxonomy
@@ -12,23 +14,26 @@
 #   - status: values against 3 valid statuses
 #   - source_type: values against 2 valid source types
 #   - Required fields presence for nodes and edges
-#   - Node ID uniqueness, per graph file — BLOCKING (t-0034 Amendment 8, R39)
+#   - Node ID uniqueness — BLOCKING (t-0034 Amendment 8, R39)
+#   - Node ID format ^[a-z0-9]+(-[a-z0-9]+)*$ — BLOCKING (Amendment 9)
+#   - Unterminated quoted scalars — BLOCKING (Amendment 9). A `key: "...` line
+#     with an odd count of unescaped quotes; this left the template graph
+#     unparseable (commit 5d878c2) while every check above reported CLEAN.
 #
 # Reports but does NOT block:
-#   - Referential integrity (source/target → a node id in the template+product
-#     union). Advisory by decision, not by omission: t-0034 Amendment 2 §9 sets
-#     that level for the equivalent kg-seed.sh check and Amendment 8 keeps it.
-#
-# Does NOT check:
-#   - Node ID format, so `hook--mechanism-helper` passes (t-0034 Amendment 8)
-#   - Node ID uniqueness ACROSS the two graphs — §10 intends it via distinct
-#     prefixes, but that is a convention nothing enforces and the check would
-#     need both graph files present
+#   - Referential integrity (source/target → a node id in the graph). Advisory
+#     by decision, not by omission: t-0034 Amendment 2 §9 sets that level and
+#     Amendments 8 and 9 keep it. Summarised to a count and the first 10, since
+#     every edge a child drew to a retired template node now dangles.
 #
 # Usage:
-#   kg-validate.sh [--target template|product|both] [--strict]
+#   kg-validate.sh [--target product] [--file PATH] [--strict]
 #
-#   --target   Which graph(s) to validate (default: both)
+#   --target   product (default). `both` is accepted as product, and `template`
+#              exits 0 with a note, so a caller older than Amendment 9 keeps
+#              working through the template-sync window.
+#   --file     Validate PATH instead of docs/ai/knowledge-graph/product-graph.yaml
+#              (the commit gate passes the INDEX copy it extracted).
 #   --strict   Exit non-zero on violations (default: exit 0 with warnings)
 #
 # Exit codes:
@@ -39,10 +44,9 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SCHEMA_FILE="$REPO_ROOT/docs/ai/knowledge-graph/schema.yaml"
-TEMPLATE_GRAPH="$REPO_ROOT/docs/ai/knowledge-graph/graph.yaml"
 PRODUCT_GRAPH="$REPO_ROOT/docs/ai/knowledge-graph/product-graph.yaml"
 
-TARGET="both"
+TARGET="product"
 STRICT=false
 
 # --- Parse arguments ---
@@ -50,7 +54,15 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --target)
       shift
-      TARGET="${1:-both}"
+      TARGET="${1:-product}"
+      ;;
+    --file)
+      shift
+      PRODUCT_GRAPH="${1:-}"
+      if [ -z "$PRODUCT_GRAPH" ]; then
+        echo "ERROR: --file needs a path" >&2
+        exit 1
+      fi
       ;;
     --strict)
       STRICT=true
@@ -61,7 +73,7 @@ while [ $# -gt 0 ]; do
       ;;
     *)
       echo "Unknown argument: $1" >&2
-      echo "Usage: kg-validate.sh [--target template|product|both] [--strict]" >&2
+      echo "Usage: kg-validate.sh [--target product] [--file PATH] [--strict]" >&2
       exit 1
       ;;
   esac
@@ -70,9 +82,13 @@ done
 
 # Validate target
 case "$TARGET" in
-  template|product|both) ;;
+  product|both) ;;
+  template)
+    echo "The template knowledge graph was retired (Decision t-0034 Amendment 9) — nothing to validate."
+    exit 0
+    ;;
   *)
-    echo "ERROR: --target must be 'template', 'product', or 'both', got '$TARGET'" >&2
+    echo "ERROR: --target must be 'product', got '$TARGET'" >&2
     exit 1
     ;;
 esac
@@ -332,6 +348,49 @@ NR > last { exit }
 }
 
 # ============================================================
+# Node id format — BLOCKING (t-0034 Amendment 9)
+# ============================================================
+# Lowercase alphanumerics separated by single hyphens. `hook--mechanism-helper`
+# (a sanitised leading underscore) passed for months before this check existed.
+_validate_node_id_format() {
+  local graph_file="$1" nlines out
+  nlines=$(wc -l < "$graph_file")
+  out=$(awk -v last="$nlines" "$_KG_AWK_LIB"'
+NR > last { exit }
+/^  - id: / {
+  id = lastval($0, "id")
+  if (id !~ /^[a-z0-9]+(-[a-z0-9]+)*$/) emit(NR, "malformed node id \"" id "\" — must match ^[a-z0-9]+(-[a-z0-9]+)*$")
+}
+' "$graph_file")
+  _record_violations "$graph_file" "$out"
+}
+
+# ============================================================
+# Unterminated quoted scalars — BLOCKING (t-0034 Amendment 9)
+# ============================================================
+# Every tool that writes this graph emits single-line `key: "value"` scalars, so
+# a line opening a quoted value must close it: an odd count of unescaped quotes
+# means it did not. Commit 5d878c2 wrote `last_verified: "2026-08-072026-10-25`
+# three times; the file stopped parsing as YAML, and because each check above
+# reads one line at a time, every one of them still reported CLEAN. Escaped
+# quotes (\") are removed before counting, so they cannot trip it.
+_validate_quoted_scalars() {
+  local graph_file="$1" nlines out
+  nlines=$(wc -l < "$graph_file")
+  out=$(awk -v last="$nlines" "$_KG_AWK_LIB"'
+NR > last { exit }
+/^ *(- )?[a-z_]+: "/ {
+  s = $0
+  gsub(/\\\\/, "", s)
+  gsub(/\\"/, "", s)
+  n = gsub(/"/, "", s)
+  if (n % 2 == 1) emit(NR, "unterminated quoted value — the line opens a \" it never closes, so the file no longer parses as YAML")
+}
+' "$graph_file")
+  _record_violations "$graph_file" "$out"
+}
+
+# ============================================================
 # Edge referential integrity — ADVISORY (t-0034 §9)
 # ============================================================
 # t-0034 §9 states dangling references are "reported as warnings (advisory)",
@@ -340,18 +399,16 @@ NR > last { exit }
 # the decision set: it prints and does not block, and does not touch
 # TOTAL_VIOLATIONS.
 #
-# Resolution uses the UNION of the template and product graphs, because edges
-# live in the source node's graph (t-0034 §4) so a product-graph edge may
-# legitimately point at a template node. A missing product graph is not an error.
+# Resolution used the UNION of the template and product graphs while there were
+# two. Since Amendment 9 there is one, so an edge a child drew to a template node
+# (e.g. hook-phase-helper) now dangles — expected, reported, never blocking.
 _KG_ADVISORY_COUNT=0
 _KG_ADVISORY_OUTPUT=""
 
+# One graph since Amendment 9; the ids an edge may resolve to are that graph's own.
 _kg_union_node_ids() {
-  local f
-  for f in "$TEMPLATE_GRAPH" "$PRODUCT_GRAPH"; do
-    [ -f "$f" ] || continue
-    awk "$_KG_AWK_LIB"'/^  - id: / { print lastval($0, "id") }' "$f"
-  done
+  [ -f "$PRODUCT_GRAPH" ] || return 0
+  awk "$_KG_AWK_LIB"'/^  - id: / { print lastval($0, "id") }' "$PRODUCT_GRAPH"
 }
 
 _validate_edge_refs() {
@@ -366,8 +423,8 @@ BEGIN {
   close(idsfile)
 }
 NR > last { exit }
-/^  - source: / { ref = lastval($0, "source"); if (!(ref in known)) emit(NR, "edge source \"" ref "\" resolves to no node in the template+product union") }
-/^    target: / { ref = lastval($0, "target"); if (!(ref in known)) emit(NR, "edge target \"" ref "\" resolves to no node in the template+product union") }
+/^  - source: / { ref = lastval($0, "source"); if (!(ref in known)) emit(NR, "edge source \"" ref "\" resolves to no node in the graph") }
+/^    target: / { ref = lastval($0, "target"); if (!(ref in known)) emit(NR, "edge target \"" ref "\" resolves to no node in the graph") }
 ' "$graph_file")
 
   rm -f "$ids_file"
@@ -404,6 +461,8 @@ validate_graph() {
   _validate_node_fields "$graph_file"
   _validate_edge_fields "$graph_file"
   _validate_node_id_uniqueness "$graph_file"
+  _validate_node_id_format "$graph_file"
+  _validate_quoted_scalars "$graph_file"
   _validate_edge_refs "$graph_file"
 
   local file_violations=$(( TOTAL_VIOLATIONS - violations_before ))
@@ -421,27 +480,21 @@ echo "KG Schema Validator — Decision 0034 Amendment 4"
 echo "Schema: $SCHEMA_FILE"
 echo ""
 
-case "$TARGET" in
-  template)
-    validate_graph "$TEMPLATE_GRAPH" "template"
-    ;;
-  product)
-    validate_graph "$PRODUCT_GRAPH" "product"
-    ;;
-  both)
-    validate_graph "$TEMPLATE_GRAPH" "template"
-    validate_graph "$PRODUCT_GRAPH" "product"
-    ;;
-esac
+validate_graph "$PRODUCT_GRAPH" "product"
 
 echo ""
 
 # Advisory findings print whatever the violation count is, and never change the
 # exit status (t-0034 §9). Printed before the result line so a clean run still
 # surfaces them rather than ending on "CLEAN" with warnings hidden above.
+# Capped at 10 lines: after Amendment 9 a child graph can hold hundreds of edges
+# to retired template nodes, and the full list would bury every real finding.
 if [ "$_KG_ADVISORY_COUNT" -gt 0 ]; then
   echo "Advisory: $_KG_ADVISORY_COUNT dangling edge reference(s) — not blocking (Decision t-0034 §9):"
-  printf '%s' "$_KG_ADVISORY_OUTPUT"
+  printf '%s' "$_KG_ADVISORY_OUTPUT" | head -n 10
+  if [ "$_KG_ADVISORY_COUNT" -gt 10 ]; then
+    echo "  ... and $((_KG_ADVISORY_COUNT - 10)) more"
+  fi
   echo ""
 fi
 

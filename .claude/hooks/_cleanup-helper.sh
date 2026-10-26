@@ -34,10 +34,11 @@
 # all three" and that is only true of a re-init that SUCCEEDS: phase-state is
 # rewritten early, while write_resume_marker and compute_phase_gates run near
 # the end of init_phase, after the ancestry check's `return 1` paths. A re-init
-# that fails there leaves phase-state.gates and session-resume.yaml holding the
-# previous unit's contents. Neither carries an approval — the gates file holds
-# branch and overlap verdicts — so this is a staleness wart, not an inheritance
-# hole, but it is not what "rewrites all three" implies.
+# that failed there used to leave phase-state.gates and session-resume.yaml
+# holding the previous unit's contents; since 2026-10-25 both return paths
+# remove them (R40 residual), so a failed init leaves neither file rather than
+# a stale one. Neither ever carried an approval — the gates file holds branch
+# and overlap verdicts — so it was staleness, not an inheritance hole.
 #
 # criteria-verdicts.yaml IS here. t-0048 keeps it out of the evidence MANIFEST
 # (manifest entries read as integrity tracking and that sidecar is advisory),
@@ -148,9 +149,10 @@ clear_session_evidence() {
   # `reinit_cleared`, so nothing downstream could tell "a second work unit
   # re-earns its approvals" from "a stale verdict was swept before a fresh
   # session started" — two different things to read in an audit.
-  local _cse_what="re-init" _cse_reason="reinit_cleared"
+  local _cse_what="re-init" _cse_reason="reinit_cleared" _cse_skip_reason="reinit_evidence_not_cleared"
   if [ "$scope" = "preserve-prewrites" ]; then
     _cse_what="first init"; _cse_reason="first_init_cleared"
+    _cse_skip_reason="first_init_evidence_not_cleared"
   fi
   if [ -n "$cleared" ]; then
     echo "WARNING: $_cse_what cleared this session's governance evidence — this work unit must earn its own: $cleared" >&2
@@ -162,8 +164,8 @@ clear_session_evidence() {
     # init_phase continues. In this repo that token and that outcome accompany an
     # actual refusal (hooks block on exit 2 only), so using them here would both
     # mislead a reader and break the pairing with the real blocking events.
-    echo "WARNING: re-init could NOT clear some evidence — most likely it records a different session_id, which _delete_if_owned correctly refuses to delete. Whether the next work unit inherits it depends on which id the commit gate resolves; it may be inherited. NEXT: inspect $state_dir and remove the stale files by hand if they are not another live session's. Files: $skipped" >&2
-    log_hook_event "clear-session-evidence" "init_phase" "" "advisory" "0" "reinit_evidence_not_cleared" "$skipped" 2>/dev/null || true
+    echo "WARNING: $_cse_what could NOT clear some evidence — most likely it records a different session_id, which _delete_if_owned correctly refuses to delete. Whether the next work unit inherits it depends on which id the commit gate resolves; it may be inherited. NEXT: inspect $state_dir and remove the stale files by hand if they are not another live session's. Files: $skipped" >&2
+    log_hook_event "clear-session-evidence" "init_phase" "" "advisory" "0" "$_cse_skip_reason" "$skipped" 2>/dev/null || true
   fi
   return 0
 }
@@ -273,7 +275,8 @@ cleanup_session_files() {
     # Session-bound files: check session_id before deleting.
     # The evidence set is the shared list, so close and re-init cannot drift
     # apart (known-issue R40). phase-state, phase-state.gates and
-    # session-resume.yaml are NOT in it: init_phase rewrites all three, so a
+    # session-resume.yaml are NOT in it: a successful init_phase rewrites all
+    # three (a failed one rewrites phase-state and removes the other two), so a
     # re-init must not clear them, while close must.
     local _csf_file
     for _csf_file in $_SESSION_EVIDENCE_FILES; do

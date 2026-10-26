@@ -165,9 +165,12 @@ is_carved_out() {
         # config.yaml, schemas/, queue/, decision-cache/, lib/ remain template-only.
         .claude/.automation/reports/*) return 0 ;;
         # product-graph.yaml is child-owned — child Prompt B sessions must write it at close
-        # to fulfil the Decision t-0034 Amendment 3 REQUIRE-attempt obligation. graph.yaml
-        # (template graph) remains template-only and is not carved out here.
+        # to fulfil the Decision t-0034 Amendment 3 REQUIRE-attempt obligation. coverage.yaml
+        # is child-owned too: it declares what product-graph.yaml must cover, and the commit
+        # gate reads it (Amendment 9). The rest of knowledge-graph/ (schema.yaml, README.md)
+        # stays template-owned; the template graph itself was retired in Amendment 9.
         docs/ai/knowledge-graph/product-graph.yaml) return 0 ;;
+        docs/ai/knowledge-graph/coverage.yaml) return 0 ;;
         .claude/agents/custom/*) return 0 ;;  # custom agent namespace — operator-writable in child mode
         *) return 1 ;;
       esac

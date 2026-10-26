@@ -5,7 +5,11 @@
 #
 # Depends on (sourced by runner.sh before this file):
 #   _phase-helper.sh — _load_phase_state, _PS_* cache variables
-#   blocker-reporter.sh — write_blocker_report (optional, for enriched reports)
+# Optional, resolved at call time:
+#   blocker-reporter.sh — write_blocker_report, for enriched reports. runner.sh
+#     sources it AFTER this file, because it uses _session_tree_dirty and
+#     _session_storage_root defined here; without it the inline fallback
+#     writer below is used.
 #
 # Outcomes, in the order the exit-0 path tests them. This list is the only
 # enumeration of them in the codebase, so keep it current — it had drifted four
@@ -55,6 +59,52 @@ if ! declare -f _validate_phase_session > /dev/null 2>&1; then
   return 1 2>/dev/null || exit 1
 fi
 
+# --- Is the session's tree dirty? ---
+# Shared by detect_outcome and blocker-reporter.sh's write_blocker_report, which
+# carried its own copy of this check — without untracked files, and with no -C,
+# so it described the runner's CWD instead of the session.
+# New files count as work (known-issue R34a): without them a session that left
+# only untracked files read as clean and was recorded completed:clean-noop.
+# --exclude-standard keeps gitignored output out.
+# Arguments: $1 — the session's tree (worktree or main checkout)
+# Returns: 0 when dirty, 1 when clean
+_session_tree_dirty() {
+  local _sd_root="$1"
+  [ -n "$(git -C "$_sd_root" diff --name-only 2>/dev/null || true)" ] && return 0
+  [ -n "$(git -C "$_sd_root" diff --cached --name-only 2>/dev/null || true)" ] && return 0
+  [ -n "$(git -C "$_sd_root" ls-files --others --exclude-standard 2>/dev/null || true)" ] && return 0
+  return 1
+}
+
+# --- Where a session's runner-side records are stored ---
+# The MAIN repo, not the session's tree (known-issue R34b). For a worktree
+# session repo_root is the worktree, and runner.sh removes it right after
+# classification, taking every report written there with it. Same rule as R16
+# and Decision t-0055 clause 4: per-entry state outlives the worktree.
+# Only a LINKED worktree is redirected: its --git-dir (.git/worktrees/<name>)
+# differs from its --git-common-dir, and that common dir is "<main>/.git". An
+# absolute common dir alone is not enough — a --separate-git-dir repo or a
+# submodule reports one too, and its parent is not the repo. Everything else —
+# a main checkout (relative .git / ../.git), any other layout, or a path git
+# cannot resolve — leaves repo_root as it is: a no-op off a worktree that never
+# yields an empty path.
+# Arguments: $1 — the session's tree
+# Output: the root to store under
+_session_storage_root() {
+  local _ss_root="$1" _ss_common _ss_gitdir
+  _ss_common=$(git -C "$_ss_root" rev-parse --git-common-dir 2>/dev/null || true)
+  _ss_gitdir=$(git -C "$_ss_root" rev-parse --git-dir 2>/dev/null || true)
+  case "$_ss_common" in
+    /*/.git)
+      if [ "$_ss_gitdir" != "$_ss_common" ]; then
+        dirname "$_ss_common"
+        return
+      fi
+      ;;
+  esac
+  printf '%s\n' "$_ss_root"
+}
+
 # --- Classify post-session outcome ---
 # Arguments:
 #   $1 — exit_code from claude -p
@@ -90,11 +140,7 @@ detect_outcome() {
   fi
 
   # Check for dirty working tree
-  local uncommitted
-  uncommitted=$(git -C "$_git_repo_root" diff --name-only 2>/dev/null || true)
-  local staged
-  staged=$(git -C "$_git_repo_root" diff --cached --name-only 2>/dev/null || true)
-  if [ -n "$uncommitted" ] || [ -n "$staged" ]; then
+  if _session_tree_dirty "$_git_repo_root"; then
     has_dirty_tree=true
   fi
 
@@ -318,7 +364,10 @@ _write_blocker_report() {
   fi
 
   # Fallback: inline basic report (backward compatible with Brief 2)
-  local reports_dir="$repo_root/.claude/.automation/reports"
+  # Stored in the main repo so it outlives a worktree session (R34b); the git
+  # status below is still read from the session's own tree.
+  local reports_dir
+  reports_dir="$(_session_storage_root "${repo_root:-$(pwd)}")/.claude/.automation/reports"
   mkdir -p "$reports_dir" 2>/dev/null || true
 
   local report_id

@@ -1135,22 +1135,42 @@ _hm_out=$(_hook_mode_offenders "$_hm_root")
 # examined — a repo whose only tracked hooks were helpers and tests would have
 # printed `ok ... of N` having inspected zero invoked hooks. That is the same
 # vacuous pass this guard exists to prevent, one level in.
-_hm_seen=$(git -C "$_hm_root" ls-files -- '.claude/hooks/' 2>/dev/null | awk '
-  {
-    rel = $0
-    sub(/^\.claude\/hooks\//, "", rel)
-    if (rel ~ /\//) next
-    if (rel !~ /\.sh$/) next
-    if (substr(rel, 1, 1) == "_") next
-    n++
-  }
-  END { print n + 0 }')
-if [ "${_hm_seen:-0}" -eq 0 ]; then
+_hook_mode_seen() {
+  git -C "$1" ls-files -- '.claude/hooks/' 2>/dev/null | awk '
+    {
+      rel = $0
+      sub(/^\.claude\/hooks\//, "", rel)
+      if (rel ~ /\//) next
+      if (rel !~ /\.sh$/) next
+      if (substr(rel, 1, 1) == "_") next
+      n++
+    }
+    END { print n + 0 }'
+}
+
+# The decision, as a pure function of (examined count, offender lines), so the
+# probes below call the same code the real check does. They did not: the
+# empty-repo probe re-typed `ls-files | wc -l` and asserted zero, never reaching
+# the "examined 0 files" branch — deleting that branch left every probe green.
+# Prints: empty | clean | offenders
+_hook_mode_verdict() {
+  if [ "${1:-0}" -eq 0 ]; then
+    echo empty
+  elif [ -z "$2" ]; then
+    echo clean
+  else
+    echo offenders
+  fi
+}
+
+_hm_seen=$(_hook_mode_seen "$_hm_root")
+_hm_verdict=$(_hook_mode_verdict "$_hm_seen" "$_hm_out")
+if [ "$_hm_verdict" = empty ]; then
   FAIL=$((FAIL + 1))
   FAILED_CASES="${FAILED_CASES}    - hook-mode check examined no files"$'\n'
   printf 'FAIL %-58s [examined 0 files]\n' "every invoked hook is executable in the index"
   printf '       | git ls-files returned nothing for .claude/hooks/ — not a work tree, or no tracked hooks. A green line here would mean nothing.\n'
-elif [ -z "$_hm_out" ]; then
+elif [ "$_hm_verdict" = clean ]; then
   PASS=$((PASS + 1))
   printf 'ok   %-58s [all 100755 of %s]\n' "every invoked hook is executable in the index" "$_hm_seen"
 else
@@ -1206,11 +1226,35 @@ else
   _HM_EMPTY="$SB/hook-mode-empty"
   mkdir -p "$_HM_EMPTY" && git -C "$_HM_EMPTY" init -q \
     && touch "$_HM_EMPTY/unrelated.txt" && git -C "$_HM_EMPTY" add -A
-  _hm_seen_probe=$(git -C "$_HM_EMPTY" ls-files -- '.claude/hooks/' 2>/dev/null | wc -l | tr -d ' ')
-  [ "${_hm_seen_probe:-0}" -eq 0 ] && _hm_rc=0 || _hm_rc=1
-  expect_exit 0 "$_hm_rc" "probe: a repo with no tracked hooks examines 0 files"
   [ -z "$(_hook_mode_offenders "$_HM_EMPTY")" ] && _hm_rc=0 || _hm_rc=1
-  expect_exit 0 "$_hm_rc" "probe: ...and so reports no offenders, which alone would look clean"
+  expect_exit 0 "$_hm_rc" "probe: a repo with no tracked hooks reports no offenders, which alone would look clean"
+  # ...so the verdict, through the same two functions the real check calls,
+  # must be `empty` — the FAIL branch, not the ok one.
+  _hm_v=$(_hook_mode_verdict "$(_hook_mode_seen "$_HM_EMPTY")" "$(_hook_mode_offenders "$_HM_EMPTY")")
+  [ "$_hm_v" = empty ] && _hm_rc=0 || _hm_rc=1
+  expect_exit 0 "$_hm_rc" "probe: ...and is judged 'examined 0 files', not clean (got: $_hm_v)"
+
+  # A repo whose ONLY tracked hooks are a helper and a test is just as empty:
+  # the denominator must use the offender scan's filter, or it reads as N>0.
+  _HM_HELPERS="$SB/hook-mode-helpers-only"
+  mkdir -p "$_HM_HELPERS/.claude/hooks/tests" && git -C "$_HM_HELPERS" init -q \
+    && touch "$_HM_HELPERS/.claude/hooks/_helper.sh" "$_HM_HELPERS/.claude/hooks/tests/layer0.sh" \
+    && git -C "$_HM_HELPERS" add -A
+  _hm_v=$(_hook_mode_verdict "$(_hook_mode_seen "$_HM_HELPERS")" "$(_hook_mode_offenders "$_HM_HELPERS")")
+  [ "$_hm_v" = empty ] && _hm_rc=0 || _hm_rc=1
+  expect_exit 0 "$_hm_rc" "probe: helpers-and-tests-only repo is judged empty too (got: $_hm_v)"
+
+  # The other two verdicts, through the same path, on the probe repo: clean now
+  # (invoked.sh 755, helper and test file not counted), offenders once invoked.sh
+  # drops to 644.
+  _hm_v=$(_hook_mode_verdict "$(_hook_mode_seen "$_HM")" "$(_hook_mode_offenders "$_HM")")
+  [ "$_hm_v" = clean ] && _hm_rc=0 || _hm_rc=1
+  expect_exit 0 "$_hm_rc" "probe: a repo with every invoked hook 755 is judged clean (got: $_hm_v)"
+  git -C "$_HM" update-index --chmod=-x .claude/hooks/invoked.sh
+  _hm_v=$(_hook_mode_verdict "$(_hook_mode_seen "$_HM")" "$(_hook_mode_offenders "$_HM")")
+  [ "$_hm_v" = offenders ] && _hm_rc=0 || _hm_rc=1
+  expect_exit 0 "$_hm_rc" "probe: ...and judged offenders once an invoked hook is 644 (got: $_hm_v)"
+  git -C "$_HM" update-index --chmod=+x .claude/hooks/invoked.sh
 
   # ...and the identical name at the TOP level still is, so the skip is scoped
   # to the subdirectory and not to the layer*/test* naming.

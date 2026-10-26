@@ -1,31 +1,32 @@
 #!/usr/bin/env bash
-# Knowledge Graph Coverage Filler
-# Decision 0034 — Knowledge Graph Data Layer (Amendment 7)
+# Knowledge Graph Coverage Filler — product graph
+# Decision 0034 — Knowledge Graph Data Layer (Amendments 7, 9)
 #
-# Generates schema-complete stub nodes for a given list of file paths and
-# appends them to the appropriate graph (graph.yaml or product-graph.yaml).
-# Designed as the one-command remediation path for the KG Update Gate in
-# pre-commit-gates.sh when a governance file lacks a graph node.
+# Scaffolds stub nodes in docs/ai/knowledge-graph/product-graph.yaml for the
+# given files: the first step of the remediation the KG product-graph gate in
+# pre-commit-gates.sh asks for when a staged product file has no node. The
+# template graph it also used to write was retired in Amendment 9.
 #
-# Reuses add_node() and the mkdir-based locking pattern verbatim from
-# kg-seed.sh — do not reimplement either.
+# A stub is NOT a fix by itself: it carries the description "Product source
+# file", which the gate rejects (Amendment 9 rule 2) until someone writes what
+# the file does. It also writes no kg-updated marker, so the graph must be
+# staged with the commit: git add docs/ai/knowledge-graph/product-graph.yaml.
+#
+# Node ids come from _kg_product_id, the same function kg-seed.sh uses; a test
+# pins that the two agree.
 #
 # Usage:
-#   kg-cover.sh [--target template|product] [--dry-run] <file> [<file>...]
+#   kg-cover.sh [--target product] [--dry-run] <file> [<file>...]
 #
-#   --target template|product   Which graph to write (default: template).
-#   --dry-run                   Print what would be written; write nothing.
+#   --target product   The only graph (default). `template` is retired: exit 1.
+#   --dry-run          Print what would be written; write nothing.
 #
 # Exit codes:
 #   0   All nodes written (or already present); kg-validate.sh --strict passes.
-#   1   Graph not writable in current mode, or schema validation failed.
+#   1   Retired target, graph not writable in the current mode, graph missing,
+#       or schema validation failed.
 #
-# Mode writability:
-#   template graph (graph.yaml)        — writable in template mode only.
-#   product graph (product-graph.yaml) — writable in template or child mode.
-#   If the target graph is not writable in the current mode, exits 1.
-#   This matches the exemption matrix in pre-commit-gates.sh which
-#   downgrades to advisory when the graph is not writable.
+# Mode writability: product-graph.yaml is writable in template and child mode.
 #
 # Constraint: shell I/O only — no Edit/Write tool writes to graph files
 # (Decision 0034 §2). awk is used for in-place node insertion.
@@ -35,7 +36,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TODAY=$(date -u +%Y-%m-%d)
 DRY_RUN=false
-TARGET="template"
+TARGET="product"
 
 # --- Parse arguments ---
 FILE_ARGS=()
@@ -46,11 +47,11 @@ while [ $# -gt 0 ]; do
       ;;
     --target)
       shift
-      TARGET="${1:-template}"
+      TARGET="${1:-product}"
       ;;
     -*)
       echo "Unknown option: $1" >&2
-      echo "Usage: kg-cover.sh [--target template|product] [--dry-run] <file>..." >&2
+      echo "Usage: kg-cover.sh [--target product] [--dry-run] <file>..." >&2
       exit 1
       ;;
     *)
@@ -61,27 +62,25 @@ while [ $# -gt 0 ]; do
 done
 
 if [ "${#FILE_ARGS[@]}" -eq 0 ]; then
-  echo "Usage: kg-cover.sh [--target template|product] [--dry-run] <file>..." >&2
+  echo "Usage: kg-cover.sh [--target product] [--dry-run] <file>..." >&2
   exit 1
 fi
 
 # Validate target
 case "$TARGET" in
-  template|product) ;;
+  product) ;;
+  template)
+    echo "ERROR: the template knowledge graph was retired (Decision t-0034 Amendment 9); kg-cover.sh writes product-graph.yaml only." >&2
+    exit 1
+    ;;
   *)
-    echo "ERROR: --target must be 'template' or 'product', got '$TARGET'" >&2
+    echo "ERROR: --target must be 'product', got '$TARGET'" >&2
     exit 1
     ;;
 esac
 
-# --- Resolve graph path ---
-if [ "$TARGET" = "template" ]; then
-  GRAPH_FILE="$REPO_ROOT/docs/ai/knowledge-graph/graph.yaml"
-  LOCK_DIR="$REPO_ROOT/docs/ai/knowledge-graph/.graph-lock"
-else
-  GRAPH_FILE="$REPO_ROOT/docs/ai/knowledge-graph/product-graph.yaml"
-  LOCK_DIR="$REPO_ROOT/docs/ai/knowledge-graph/.product-graph-lock"
-fi
+GRAPH_FILE="$REPO_ROOT/docs/ai/knowledge-graph/product-graph.yaml"
+LOCK_DIR="$REPO_ROOT/docs/ai/knowledge-graph/.product-graph-lock"
 
 # --- Mode writability check ---
 _current_mode="${REPO_OS_MODE:-}"
@@ -90,26 +89,18 @@ if [ -z "$_current_mode" ] && [ -f "$REPO_ROOT/.claude/repo-mode" ]; then
 fi
 _current_mode="${_current_mode:-child}"
 
-_mode_ok=false
-case "$TARGET" in
-  template)
-    [ "$_current_mode" = "template" ] && _mode_ok=true
-    ;;
-  product)
-    { [ "$_current_mode" = "template" ] || [ "$_current_mode" = "child" ]; } && _mode_ok=true
+case "$_current_mode" in
+  template|child) ;;
+  *)
+    echo "ERROR: kg-cover.sh — product-graph.yaml is not writable in mode '$_current_mode' (template or child mode only)." >&2
+    exit 1
     ;;
 esac
-
-if [ "$_mode_ok" = false ]; then
-  echo "ERROR: kg-cover.sh — target '$TARGET' graph is not writable in mode '$_current_mode'." >&2
-  echo "  template graph: template mode only. product graph: template or child mode." >&2
-  exit 1
-fi
 
 # --- Graph existence check ---
 if [ ! -f "$GRAPH_FILE" ]; then
   echo "ERROR: Graph file not found: $GRAPH_FILE" >&2
-  echo "  Run kg-seed.sh --target $TARGET to initialise the graph first." >&2
+  echo "  Run kg-seed.sh --target product to initialise the graph first." >&2
   exit 1
 fi
 
@@ -131,7 +122,7 @@ release_lock() {
   rmdir "$LOCK_DIR" 2>/dev/null || true
 }
 # Also sweep scratch files: an aborted run (set -e) would otherwise leave
-# graph.yaml.cover-tmp.$$ / .cover-nodes.$$ beside the graph, where they get
+# product-graph.yaml.cover-tmp.$$ / .cover-nodes.$$ beside the graph, where they get
 # picked up by `git add -A` and committed.
 _cover_cleanup() {
   release_lock
@@ -165,62 +156,17 @@ add_node() {
 }
 
 # ============================================================
-# Node ID and type derivation from file path
+# Node id from file path
 # ============================================================
-_derive_node_id() {
-  local p="$1"
-  local fname
-  fname=$(basename "$p")
-  local stem="${fname%.*}"
-  local sanitized
-  sanitized=$(echo "$stem" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g')
-
-  case "$p" in
-    .claude/hooks/*)
-      echo "hook-${sanitized}" ;;
-    .claude/tools/*)
-      echo "tool-${sanitized}" ;;
-    docs/ai/decisions/t-*)
-      local num
-      num=$(echo "$stem" | sed -n 's/^t-\([0-9][0-9]*\)-.*/\1/p')
-      if [ -n "$num" ]; then
-        echo "decision-${num}"
-      else
-        echo "decision-${sanitized}"
-      fi
-      ;;
-    docs/ai/prompts/*)
-      echo "${sanitized}" ;;
-    .claude/agents/*)
-      echo "agent-${sanitized}" ;;
-    *)
-      echo "file-${sanitized}" ;;
-  esac
-}
-
-_derive_node_type() {
-  local p="$1"
-  case "$p" in
-    .claude/hooks/*)          echo "hook" ;;
-    .claude/tools/*)          echo "file" ;;   # No "tool" type in schema (Decision 0034 §4); use "file"
-    docs/ai/decisions/*)      echo "decision" ;;
-    docs/ai/prompts/*)        echo "prompt" ;;
-    *)                        echo "file" ;;
-  esac
-}
-
-_derive_description() {
-  local p="$1"
-  local fname
-  fname=$(basename "$p")
-  case "$p" in
-    .claude/hooks/*)          echo "Hook: $fname" ;;
-    .claude/tools/*)          echo "KG tooling: $fname" ;;
-    docs/ai/decisions/*)      echo "Decision record: $fname" ;;
-    docs/ai/prompts/*)        echo "Prompt: $fname" ;;
-    .claude/agents/*)         echo "Agent: $fname" ;;
-    *)                        echo "Governance file: $fname" ;;
-  esac
+# The SAME function is in kg-seed.sh; .claude/hooks/tests/test-kg-tools.sh pins
+# that both produce the same id, so the two copies cannot drift apart unnoticed.
+# The full path (not parent + file name) keeps monorepo files from colliding, and
+# collapsing runs of '-' means a leading underscore cannot yield '--' (the old
+# governance derivation produced hook--mechanism-helper that way).
+#   src/app/Settings.tsx → product-src-app-settings-tsx
+_kg_product_id() {
+  printf 'product-%s\n' "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' \
+    | sed -e 's/[^a-z0-9]/-/g' -e 's/--*/-/g' -e 's/^-//' -e 's/-$//')"
 }
 
 # ============================================================
@@ -233,19 +179,40 @@ for input_path in "${FILE_ARGS[@]}"; do
   rel_path="${input_path#./}"
   rel_path="${rel_path#$REPO_ROOT/}"
 
-  # Check if a node already exists for this path
-  if grep -qF "path: \"$rel_path\"" "$GRAPH_FILE" 2>/dev/null; then
+  # Skip a path that already has a LIVE node. A stale-only path counts as
+  # uncovered — the commit gate ignores stale nodes — so it gets a new node;
+  # the stale one stays as history.
+  if awk -v p="$rel_path" '
+       /^  - id: / { if (match_p && st != "stale") found = 1; match_p = 0; st = "" }
+       /^edges:/   { exit }
+       /^    path: / { v = $0; sub(/^[^:]*:[[:space:]]*/, "", v); gsub(/^["'\'']|["'\'']$/, "", v); if (v == p) match_p = 1 }
+       /^    status: / { st = $0; sub(/^[^:]*:[[:space:]]*/, "", st); gsub(/^["'\'']|["'\''][[:space:]]*(#.*)?$/, "", st) }
+       END { if (match_p && st != "stale") found = 1; exit !found }' "$GRAPH_FILE" 2>/dev/null; then
     echo "  skip (exists): $rel_path" >&2
     SKIPPED_EXIST=$((SKIPPED_EXIST + 1))
     continue
   fi
 
-  node_id=$(_derive_node_id "$rel_path")
-  node_type=$(_derive_node_type "$rel_path")
-  node_desc=$(_derive_description "$rel_path")
+  node_id=$(_kg_product_id "$rel_path")
+  # Two different paths can sanitise to the same id (a_b.ts / a-b.ts). Suffix
+  # rather than collide — a duplicate id fails kg-validate --strict. Checked
+  # against the graph AND the ids queued by this run: add_node dedupes by id,
+  # so a collision between two files passed together would drop the second.
+  _id_taken() {
+    grep -qF "  - id: \"$1\"" "$GRAPH_FILE" 2>/dev/null && return 0
+    case ",$SEEN_NODES," in *",$1,"*) return 0 ;; esac
+    return 1
+  }
+  if _id_taken "$node_id"; then
+    _n=2
+    while _id_taken "$node_id-$_n"; do _n=$((_n + 1)); done
+    node_id="$node_id-$_n"
+  fi
 
-  echo "  stub: $rel_path  id=$node_id  type=$node_type" >&2
-  add_node "$node_id" "$node_type" "$rel_path" "$node_desc"
+  echo "  stub: $rel_path  id=$node_id" >&2
+  # "Product source file" is the seeder default the commit gate rejects on
+  # purpose: the stub is scaffolding until someone says what the file does.
+  add_node "$node_id" "file" "$rel_path" "Product source file"
 done
 
 if [ "$NODE_COUNT" -eq 0 ]; then

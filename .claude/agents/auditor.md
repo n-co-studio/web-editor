@@ -87,7 +87,7 @@ Does not assess naming consistency or structural coherence (cohesion-drift's sco
 
 ### `graph-health` — Knowledge Graph Health
 
-**Input:** `docs/ai/knowledge-graph/graph.yaml`, `docs/ai/knowledge-graph/product-graph.yaml` (if present), recent git log
+**Input:** `docs/ai/knowledge-graph/product-graph.yaml` (the only graph since Decision 0034 Amendment 9), `docs/ai/knowledge-graph/coverage.yaml` (if present), recent git log
 **Question:** Is the knowledge graph accurate, complete, and current?
 
 Scan for:
@@ -99,7 +99,7 @@ Scan for:
 
 **Scan boundaries:** Read both graph files at `docs/ai/knowledge-graph/`. Run `git log --oneline -20` to identify recently modified files for coverage gap analysis. Do NOT read source code files beyond confirming path existence.
 
-**Pre-graph guard:** If neither `graph.yaml` nor `product-graph.yaml` exists, return: `## Auditor Brief — graph-health — Skipped (no graph files found)`
+**Pre-graph guard:** If `product-graph.yaml` does not exist, return: `## Auditor Brief — graph-health — Skipped (no graph files found)`
 
 **Escalation trigger:** Coverage gaps in governance-critical files (decisions, hooks) → `[ESCALATE: architect]`
 

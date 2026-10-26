@@ -48,7 +48,7 @@ Implements scoped changes exactly as planned. Executes with precision, flags pro
 
 ## Knowledge Graph Delta (Parallel Task Group)
 
-When the task brief has `Execution: parallel` in `### Task Group`, the Builder writes a per-brief KG **delta** at session close instead of locking and writing the shared `graph.yaml` / `product-graph.yaml` directly. The merge brief aggregates all per-brief deltas (plus its own) and performs a single locked write. See Decision 0034 Amendment 5.
+When the task brief has `Execution: parallel` in `### Task Group`, the Builder writes a per-brief KG **delta** at session close instead of locking and writing the shared `product-graph.yaml` directly. The merge brief aggregates all per-brief deltas (plus its own) and performs a single locked write. See Decision 0034 Amendment 5.
 
 **Path:** `$_REPO_OS_ROOT/.claude/.state/tg-{group}-brief-{seq}.kg-delta.yaml` — shared state path, not the per-session state directory (Decision 0032).
 
@@ -64,7 +64,7 @@ brief_seq: "{seq}"                         # the brief's seq from the contract
 group_name: "{group}"
 worktree_branch: "{git rev-parse --abbrev-ref HEAD}"
 authored_at: "<ISO 8601>"
-target: "template" | "product"             # template files → graph.yaml ; product files → product-graph.yaml
+target: "product"                          # product-graph.yaml — the only graph (a "template" delta is dropped: graph.yaml was retired, Decision 0034 Amendment 9)
 
 nodes:
   - id: "..."

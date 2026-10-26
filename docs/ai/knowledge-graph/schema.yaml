@@ -1,7 +1,9 @@
 # Knowledge Graph Schema — Repo OS
 # Decision 0034 — Knowledge Graph Data Layer
 #
-# Defines the structure for graph.yaml. Schema changes require decision amendment.
+# Defines the structure for product-graph.yaml, the only knowledge graph since the
+# template graph (graph.yaml) was retired (Amendment 9). Schema changes require a
+# decision amendment.
 
 schema_version: 1
 
@@ -47,10 +49,9 @@ node_fields:
   layer:
     type: enum
     values:
-      - template
       - product
     required: true
-    description: "Whether this node belongs to template infrastructure or product code"
+    description: "Always product. The template layer (graph.yaml) was retired in t-0034 Amendment 9; the field stays so existing child graphs, which all carry layer: product, remain valid unchanged"
 
 edge_fields:
   source:

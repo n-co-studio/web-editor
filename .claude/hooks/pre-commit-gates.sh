@@ -2009,229 +2009,379 @@ if [ "$SKIP_STATE" = false ] && [ -n "$STAGED_FILES" ]; then
 fi
 
 # ============================================================
-# KG Update Gate (blocking — Decision 0034 Amendment 7)
-# Two-half check on staged governance files:
-#   COVERAGE  — a staged file has no node in the applicable graph (blocking).
-#   FRESHNESS — a staged file HAS a node, but no graph file is staged AND no
-#               session-scoped kg-updated marker is present (blocking).
-# Six-branch exemption matrix downgrades to advisory (never blocks):
-#   audit session | parallel tg-delta | experiment/* | graph not writable
-#   in current mode | REPO_OS_RECOVER | REPO_OS_SKIP_KG_GATE
-# FRESHNESS is a presence proxy: it verifies the graph was touched this
-# session, not that the touch was semantically accurate (accepted limitation).
+# KG Schema Gate (blocking — Decision 0034 Amendments 4, 9)
+# The template graph is retired (Amendment 9); product-graph.yaml is the only
+# graph. When it is staged, the INDEX copy — what the commit will contain, not
+# the working tree — is validated with kg-validate.sh --strict. Runs BEFORE the
+# product-graph gate below, which skips its coverage checks on an invalid graph
+# so the author sees the real schema error instead of misleading "no node"
+# messages built from a graph that does not parse.
 # ============================================================
-if [ "$SKIP_STATE" = false ] && [ -n "$STAGED_FILES" ]; then
-  KG_GRAPH="$REPO_ROOT/docs/ai/knowledge-graph/graph.yaml"
-  KG_PRODUCT_GRAPH="$REPO_ROOT/docs/ai/knowledge-graph/product-graph.yaml"
-  KG_COVER_TOOL="$REPO_ROOT/.claude/tools/kg-cover.sh"
-  if [ -f "$KG_GRAPH" ]; then
-    KG_GOV_PATHS='.claude/hooks/ .claude/tools/ docs/ai/decisions/ docs/ai/prompts/ .claude/agents/'
+_KG_GRAPH_REL="docs/ai/knowledge-graph/product-graph.yaml"
+_KG_VALIDATOR="$REPO_ROOT/.claude/tools/kg-validate.sh"
+_KG_GRAPH_INVALID=false
 
-    # --- Build filtered list of staged governance files ---
-    # Non-entity exclusions: the graph models governance *entities* (hooks, tools,
-    # decisions, prompts, agents). Test artifacts, generated markers, and directory
-    # placeholders are not entities — graphing them yields stub nodes that dilute
-    # kg-relevance.sh scoring without adding signal. Note this forecloses populating
-    # the taxonomy's `tests` relation (Decision 0034 §5) via this gate; test-to-hook
-    # edges must be authored directly.
-    _KG_GOV_STAGED=""
-    while IFS= read -r _kg_file; do
-      [ -z "$_kg_file" ] && continue
-      case "$_kg_file" in
-        *.lock|*.log) continue ;;  # generated artifacts
-        */tests/*)    continue ;;  # test scripts and fixtures
-        */.gitkeep)   continue ;;  # directory placeholders
-        */.[!.]*)     continue ;;  # generated dotfile markers (.a1-trigger-index, etc.)
-      esac
-      _kg_in_gov=false
-      for _kg_gov in $KG_GOV_PATHS; do
-        case "$_kg_file" in "$_kg_gov"*) _kg_in_gov=true; break ;; esac
-      done
-      [ "$_kg_in_gov" = false ] && continue
-      _KG_GOV_STAGED="${_KG_GOV_STAGED:+$_KG_GOV_STAGED }$_kg_file"
-    done <<< "$STAGED_FILES"
+# Writes the INDEX copy of the product graph to $1. Returns 1 when the graph is
+# not in the index (absent, or deleted by this commit).
+_kg_index_graph() {
+  git cat-file -e ":$_KG_GRAPH_REL" 2>/dev/null || return 1
+  git show ":$_KG_GRAPH_REL" > "$1" 2>/dev/null
+}
 
-    if [ -n "$_KG_GOV_STAGED" ]; then
-      # --- Exemption matrix (any hit → advisory, never block) ---
-      _KG_EXEMPT=false
-      _KG_EXEMPT_REASON=""
-
-      # Exemption 1: audit session (Prompt C read-only — Amendment 3 §3)
-      # get_session_type() comes from _phase-helper.sh (sourced above).
-      # Do NOT use infer_session_type() — it is defined only in
-      # session-close-check.sh, so under `set -euo pipefail` it aborts this
-      # hook with 127, which Claude Code treats as non-blocking. That silently
-      # disabled this gate and every check below it.
-      _KG_STYPE=$(get_session_type 2>/dev/null || echo "unknown")
-      if [ "$_KG_STYPE" = "audit" ]; then
-        _KG_EXEMPT=true; _KG_EXEMPT_REASON="audit_session"
-      fi
-
-      # Exemption 2: parallel task-group delta present (Amendment 5 — must not touch shared graph)
-      if [ "$_KG_EXEMPT" = false ]; then
-        for _kgd in "$REPO_ROOT/.claude/.state/tg-"*"-brief-"*".kg-delta.yaml"; do
-          if [ -f "$_kgd" ]; then
-            _KG_EXEMPT=true; _KG_EXEMPT_REASON="parallel_tg_delta"; break
-          fi
-        done
-      fi
-
-      # Exemption 3: experiment/* branch
-      if [ "$_KG_EXEMPT" = false ] && [ "$IS_EXPERIMENT" = true ]; then
-        _KG_EXEMPT=true; _KG_EXEMPT_REASON="experiment_branch"
-      fi
-
-      # Exemption 4: template graph not writable in current mode
-      # Child mode cannot write graph.yaml (_mode-guard-helper.sh:130 carve-out absent).
-      if [ "$_KG_EXEMPT" = false ]; then
-        _KG_MODE="${REPO_OS_MODE:-}"
-        if [ -z "$_KG_MODE" ] && [ -f "$REPO_ROOT/.claude/repo-mode" ]; then
-          _KG_MODE=$(cat "$REPO_ROOT/.claude/repo-mode" 2>/dev/null | tr -d '[:space:]')
-        fi
-        _KG_MODE="${_KG_MODE:-child}"
-        if [ "$_KG_MODE" != "template" ]; then
-          _KG_EXEMPT=true; _KG_EXEMPT_REASON="graph_not_writable_mode:$_KG_MODE"
-        fi
-      fi
-
-      # Exemption 5: REPO_OS_RECOVER=1 (belt-and-suspenders — SKIP_STATE already set above)
-      if [ "$_KG_EXEMPT" = false ] && [ "${REPO_OS_RECOVER:-0}" = "1" ]; then
-        _KG_EXEMPT=true; _KG_EXEMPT_REASON="repo_os_recover"
-      fi
-
-      # Exemption 6: REPO_OS_SKIP_KG_GATE=1 — interactive only; ignored in headless/auto
-      # (precedent: SKIP_FUNC_CHECK in Decision t-0044 Amendment 1)
-      if [ "$_KG_EXEMPT" = false ] && [ "${REPO_OS_SKIP_KG_GATE:-0}" = "1" ]; then
-        if [ "$IS_NO_REVIEW_BACKSTOP" = false ]; then
-          log_override "pre-commit-gates" "REPO_OS_SKIP_KG_GATE"
-          _KG_EXEMPT=true; _KG_EXEMPT_REASON="skip_kg_gate_override"
-        else
-          log_override "pre-commit-gates" "REPO_OS_SKIP_KG_GATE_IGNORED_HEADLESS"
-          echo "Advisory: REPO_OS_SKIP_KG_GATE=1 is ignored in headless/auto mode — KG gate still enforced." >&2
-        fi
-      fi
-
-      if [ "$_KG_EXEMPT" = true ]; then
-        warn "kg_update_advisory"
-        log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "warn" "$START_MS" "kg_update_advisory_exempt" "$_KG_EXEMPT_REASON"
+if [ -n "$STAGED_FILES" ]; then
+  case "$STAGED_FILES" in
+    *"$_KG_GRAPH_REL"*)
+      if [ ! -f "$_KG_VALIDATOR" ]; then
+        echo "Advisory: kg-validate.sh not found at $_KG_VALIDATOR — KG schema gate skipped" >&2
+        warn "kg_schema_validator_missing"
       else
-        # --- COVERAGE half: staged gov file lacks a node in either graph ---
-        _KG_MISSING_NODES=""
-        _KG_HAS_NODES=""
-        for _kg_file in $_KG_GOV_STAGED; do
-          if grep -qF "path: \"$_kg_file\"" "$KG_GRAPH" 2>/dev/null           || { [ -f "$KG_PRODUCT_GRAPH" ] && grep -qF "path: \"$_kg_file\"" "$KG_PRODUCT_GRAPH" 2>/dev/null; }; then
-            _KG_HAS_NODES="${_KG_HAS_NODES:+$_KG_HAS_NODES }$_kg_file"
+        _KG_IDX=$(mktemp "${TMPDIR:-/tmp}/kg-index-graph.XXXXXX")
+        if _kg_index_graph "$_KG_IDX"; then
+          KG_VALIDATE_EXIT=0
+          KG_VALIDATE_OUTPUT=$(bash "$_KG_VALIDATOR" --strict --file "$_KG_IDX" 2>&1) || KG_VALIDATE_EXIT=$?
+          if [ "$KG_VALIDATE_EXIT" -ne 0 ]; then
+            _KG_GRAPH_INVALID=true
+            echo "GATE-RECOVERABLE: KG schema — the staged product-graph.yaml is invalid. NEXT: Fix the violations listed below, then git add docs/ai/knowledge-graph/product-graph.yaml." >&2
+            printf '%s\n' "$KG_VALIDATE_OUTPUT" | sed "s#$_KG_IDX#$_KG_GRAPH_REL (staged)#" >&2
+            block "kg_schema_violation"
+            log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "kg_schema_violation" "target:product"
           else
-            _KG_MISSING_NODES="${_KG_MISSING_NODES:+$_KG_MISSING_NODES }$_kg_file"
-          fi
-        done
-
-        # --- FRESHNESS half: graphed file staged, no graph staged, no session marker ---
-        _KG_STALE=false
-        if [ -n "$_KG_HAS_NODES" ]; then
-          _KG_GRAPH_STAGED=false
-          case "$STAGED_FILES" in
-            *"docs/ai/knowledge-graph/graph.yaml"*)         _KG_GRAPH_STAGED=true ;;
-          esac
-          case "$STAGED_FILES" in
-            *"docs/ai/knowledge-graph/product-graph.yaml"*) _KG_GRAPH_STAGED=true ;;
-          esac
-          if [ "$_KG_GRAPH_STAGED" = false ]; then
-            if ! _validate_state_session_id "$STATE_DIR/kg-updated"; then
-              _KG_STALE=true
-            fi
+            log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "kg_schema_pass" "target:product"
           fi
         fi
-
-        # --- Emit block or pass ---
-        if [ -n "$_KG_MISSING_NODES" ] || [ "$_KG_STALE" = true ]; then
-          if [ -n "$_KG_MISSING_NODES" ]; then
-            _kg_count=$(echo "$_KG_MISSING_NODES" | wc -w | tr -d ' ')
-            if [ -f "$KG_COVER_TOOL" ]; then
-              echo "GATE-RECOVERABLE: KG update — $_kg_count governance file(s) staged without a graph node. NEXT: run .claude/tools/kg-cover.sh $_KG_MISSING_NODES then re-stage. (override: REPO_OS_SKIP_KG_GATE=1)" >&2
-            else
-              echo "GATE-RECOVERABLE: KG update — $_kg_count governance file(s) staged without a graph node. NEXT: add nodes to graph.yaml via shell I/O, then re-stage. (override: REPO_OS_SKIP_KG_GATE=1)" >&2
-            fi
-            log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "kg_update_coverage" "count:$_kg_count"
-          fi
-          if [ "$_KG_STALE" = true ]; then
-            echo "GATE-RECOVERABLE: KG update — governance file(s) have graph nodes but no graph file is staged and no kg-updated marker found for this session. NEXT: update graph.yaml/product-graph.yaml and re-stage (or run .claude/tools/kg-cover.sh to refresh). (override: REPO_OS_SKIP_KG_GATE=1)" >&2
-            log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "kg_update_freshness"
-          fi
-          # Headless/auto escalation (IS_NO_REVIEW_BACKSTOP pattern — A3.4 precedent ~lines 467-473)
-          if [ "$IS_NO_REVIEW_BACKSTOP" = true ]; then
-            _KG_ESC_DIR="$REPO_ROOT/.claude/.automation/escalations"
-            if [ -d "$_KG_ESC_DIR" ]; then
-              _KG_ESC_SID="${REPO_OS_SESSION_ID:-$(date -u +%Y%m%d-%H%M%S)}"
-              _KG_ESC_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-              printf 'escalation:\n  id: "esc-%s-%s"\n  queue_entry_id: "%s"\n  type: "gate-failure"\n  severity: "blocking"\n  phase_at_exit: "commit"\n  tag_at_exit: "agent"\n  message: "KG Update Gate blocked — governance files staged without a corresponding graph update"\n  context: "missing_nodes: %s stale: %s"\n  created_at: "%s"\n  resolved: false\n  resolution: ""\n' \
-                "$_KG_ESC_SID" "$(date -u +%Y%m%d-%H%M%S)" "$_KG_ESC_SID" \
-                "${_KG_MISSING_NODES:-none}" "$_KG_STALE" "$_KG_ESC_TS" \
-                > "$_KG_ESC_DIR/kg-update-fail-$(date -u +%Y%m%d-%H%M%S).yaml" 2>/dev/null || true
-            fi
-          fi
-          block "kg_update_violation"
-          log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "kg_update_violation"
-        else
-          # Both halves pass — write session-scoped kg-updated marker
-          _KG_SID=""
-          if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
-            _KG_SID="$REPO_OS_SESSION_ID"
-          else
-            _KG_SID=$(cat "$REPO_ROOT/.claude/.session-id" 2>/dev/null || echo "")
-          fi
-          printf 'timestamp: %s\nsession_id: %s\nresult: PASSED\n' \
-            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_KG_SID" \
-            > "$STATE_DIR/kg-updated" 2>/dev/null || true
-          log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "kg_update_passed"
-        fi
+        rm -f "$_KG_IDX"
       fi
-    fi
-  fi
+      ;;
+  esac
 fi
 
 # ============================================================
-# KG Schema Gate (blocking — Decision 0034 Amendment 4)
-# Triggered only when graph YAML files are staged.
-# Calls kg-validate.sh --strict to enforce enum constraints.
+# KG Product-Graph Gate (blocking — Decision t-0034 Amendment 9)
+#
+# Child repos model their product code in product-graph.yaml. This gate keeps
+# that model true for the files a commit actually touches. Its rules are the
+# operator's, recorded in Amendment 9:
+#
+#   SCOPE   Per-repo, child-owned docs/ai/knowledge-graph/coverage.yaml:
+#           roots (path globs, `*` crosses `/`), extensions (an INCLUDE list,
+#           so an unknown file type passes — a gate that blocks on a new .svg
+#           is worse than a missed node), and extra exclude globs on top of the
+#           built-ins below. Evaluated on the STAGED change set only, never the
+#           whole repo: coverage is partial in every child today, and a
+#           repo-wide check would block the next commit behind ~40 unrelated
+#           nodes.
+#   NODE    An in-scope added/modified file needs a LIVE node (status other
+#           than stale) with its path. Never an edge or connectivity: seeded
+#           edges like "config-eslint constrains component-neuralgrid" are true
+#           of every file and mean nothing. A stale node is not coverage —
+#           otherwise marking a node stale would satisfy the gate.
+#   MEANING The live node's description must not be the seeder default
+#           "Product source file" and must be >= 20 characters. Presence alone
+#           ships as a no-op: 102 of web-editor's 114 nodes carry the default.
+#   RENAME  R old→new: a node must point at `new`, and none may still point at
+#           `old` unless it is stale — the node is moved, not duplicated.
+#   DELETE  No node may still point at a deleted in-scope path unless stale.
+#           Skipping R and D is how the template graph accumulated phantom
+#           nodes for files that no longer existed.
+#   FRESH   Any in-scope change ⇒ product-graph.yaml staged too, or this
+#           session's kg-updated marker present (written when the gate passes).
+#           Every block message says `git add docs/ai/knowledge-graph/
+#           product-graph.yaml` explicitly: kg-cover.sh writes no marker, so a
+#           retry without staging the graph would fail FRESH.
+#
+# BOTH files are read from the INDEX — what the commit will contain. Deleting
+# either one in the same commit as in-scope changes blocks: otherwise
+# `git rm` of the graph or of coverage.yaml would be a one-command bypass. (An
+# uncommitted coverage.yaml edit cannot change what is judged, either.)
+#
+# Deliberately NOT gated on $STAGED_FILES: that list is --diff-filter=ACMR, so a
+# delete-only commit leaves it empty and the DELETE rule would never run. This
+# gate takes its own `git diff --cached -M --name-status -z` — NUL-separated, so
+# a path git would otherwise print quoted ("caf\303\251.ts") is read as itself.
+#
+# Exemptions (advisory, never block): audit session; a task-group CONTENT brief
+# with a KG delta pending (it writes the delta instead of the graph, and the
+# merge brief's commit is judged — a leftover delta must not exempt anyone
+# else); REPO_OS_RECOVER (via SKIP_STATE); REPO_OS_SKIP_KG_GATE (interactive
+# only — ignored in headless/auto). experiment/* never reaches this gate: the
+# hook exits early on those branches.
+# Not configured:
+#   no coverage.yaml   → nothing is in scope. Child mode: advisory with an
+#                        example (plain warn — no override is being used).
+#                        Template mode: silent; the template ships neither file.
+#   empty roots or extensions → advisory that the gate is inert.
+#   no product graph   → in-scope changes get an advisory pointing at
+#                        kg-seed.sh --target product, logged via log_override
+#                        because the gate is being bypassed.
 # ============================================================
-if [ -n "$STAGED_FILES" ]; then
-  KG_TEMPLATE_STAGED=false
-  KG_PRODUCT_STAGED=false
-  case "$STAGED_FILES" in
-    *"docs/ai/knowledge-graph/graph.yaml"*)         KG_TEMPLATE_STAGED=true ;;
-  esac
-  case "$STAGED_FILES" in
-    *"docs/ai/knowledge-graph/product-graph.yaml"*) KG_PRODUCT_STAGED=true ;;
-  esac
+if [ "$SKIP_STATE" = false ]; then
+  _KGP_COV_REL="docs/ai/knowledge-graph/coverage.yaml"
+  _KGP_MODE="${REPO_OS_MODE:-}"
+  if [ -z "$_KGP_MODE" ] && [ -f "$REPO_ROOT/.claude/repo-mode" ]; then
+    _KGP_MODE=$(tr -d '[:space:]' < "$REPO_ROOT/.claude/repo-mode" 2>/dev/null)
+  fi
+  _KGP_MODE="${_KGP_MODE:-child}"
+  _KGP_NAMES=$(git diff --cached --name-only 2>/dev/null || true)
 
-  if [ "$KG_TEMPLATE_STAGED" = true ] || [ "$KG_PRODUCT_STAGED" = true ]; then
-    KG_VALIDATOR="$REPO_ROOT/.claude/tools/kg-validate.sh"
-    if [ ! -f "$KG_VALIDATOR" ]; then
-      echo "Advisory: kg-validate.sh not found at $KG_VALIDATOR — KG schema gate skipped" >&2
-      warn "kg_schema_validator_missing"
-    else
-      # Determine which target(s) to validate
-      KG_VALIDATE_TARGET="both"
-      if [ "$KG_TEMPLATE_STAGED" = true ] && [ "$KG_PRODUCT_STAGED" = false ]; then
-        KG_VALIDATE_TARGET="template"
-      elif [ "$KG_TEMPLATE_STAGED" = false ] && [ "$KG_PRODUCT_STAGED" = true ]; then
-        KG_VALIDATE_TARGET="product"
+  # coverage.yaml as committed: the index copy, or — when this commit deletes
+  # it — the HEAD copy, so the deletion can still be judged against its scope.
+  _KGP_COV=$(mktemp "${TMPDIR:-/tmp}/kg-coverage.XXXXXX")
+  _KGP_COV_STATE="none"
+  if git cat-file -e ":$_KGP_COV_REL" 2>/dev/null; then
+    git show ":$_KGP_COV_REL" > "$_KGP_COV" 2>/dev/null && _KGP_COV_STATE="index"
+  elif git cat-file -e "HEAD:$_KGP_COV_REL" 2>/dev/null; then
+    git show "HEAD:$_KGP_COV_REL" > "$_KGP_COV" 2>/dev/null && _KGP_COV_STATE="deleted"
+  fi
+
+  if [ -z "$_KGP_NAMES" ]; then
+    :   # nothing staged, nothing to judge
+  elif [ "$_KGP_COV_STATE" = "none" ]; then
+    if [ "$_KGP_MODE" = "child" ]; then
+      echo "Advisory: KG product-graph gate is not configured — create docs/ai/knowledge-graph/coverage.yaml to declare what product-graph.yaml must cover, e.g.:" >&2
+      printf '         roots: [src/app, src/components]\n         extensions: [ts, tsx, css, scss]\n         exclude: ["*.stories.*", storybook/]   (optional; tests, .d.ts, dist/, build/, generated/ are excluded already)\n' >&2
+      warn "kg_product_unconfigured"
+    fi
+  else
+    # --- coverage.yaml: three lists, block (`  - value`) or inline ([a, b]) ---
+    # Tolerates CRLF, comments and quotes; roots lose a leading ./ and trailing
+    # /, extensions a leading dot. Exclude entries keep a trailing / — it marks
+    # a directory exclude (see _kgp_in_scope).
+    _kgp_list() {
+      tr -d '\r' < "$_KGP_COV" | awk -v want="$1" '
+        function emit(v) {
+          sub(/[[:space:]]+#.*$/, "", v); gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
+          gsub(/^["'\'']|["'\'']$/, "", v)
+          if (want == "roots")      { sub(/^\.\//, "", v); sub(/\/+$/, "", v) }
+          if (want == "extensions") { sub(/^\./, "", v) }
+          if (v != "") print v
+        }
+        /^[A-Za-z0-9_-]+:/ {
+          sec = $0; sub(/:.*/, "", sec)
+          rest = $0; sub(/^[^:]*:[[:space:]]*/, "", rest); sub(/[[:space:]]+#.*$/, "", rest)
+          if (sec == want && rest ~ /^\[/) {
+            sub(/^\[/, "", rest); sub(/\][[:space:]]*$/, "", rest)
+            n = split(rest, parts, ",")
+            for (i = 1; i <= n; i++) emit(parts[i])
+          }
+          next
+        }
+        sec == want && /^[[:space:]]*-[[:space:]]*/ { v = $0; sub(/^[[:space:]]*-[[:space:]]*/, "", v); emit(v) }'
+    }
+    _KGP_ROOTS=$(_kgp_list roots)
+    _KGP_EXTS=" $(_kgp_list extensions | tr '\n' ' ') "
+    _KGP_EXCL=$(_kgp_list exclude)
+
+    # In scope = under a root AND extension in the set AND not excluded.
+    # Globs are matched with `case`, where `*` crosses `/` (packages/*/src/content
+    # matches at any depth for its `*`), and set -f keeps them from expanding
+    # against the filesystem in the `for` loops. An exclude ending in / is a
+    # directory: it matches that directory at the top or at any depth.
+    _kgp_in_scope() {
+      local p="$1" ext r x
+      ext="${p##*.}"
+      [ "$ext" = "$p" ] && return 1
+      case "$_KGP_EXTS" in *" $ext "*) ;; *) return 1 ;; esac
+      case "$p" in
+        *.test.*|*.spec.*|*.d.ts) return 1 ;;
+        __tests__/*|*/__tests__/*|__fixtures__/*|*/__fixtures__/*) return 1 ;;
+        generated/*|*/generated/*|dist/*|*/dist/*|build/*|*/build/*) return 1 ;;
+      esac
+      set -f
+      for x in $_KGP_EXCL; do
+        case "$x" in
+          */) case "$p" in "$x"*|*/"$x"*) set +f; return 1 ;; esac ;;
+          *)  case "$p" in $x) set +f; return 1 ;; esac
+              case "${p##*/}" in $x) set +f; return 1 ;; esac ;;
+        esac
+      done
+      for r in $_KGP_ROOTS; do
+        case "$p" in $r/*) set +f; return 0 ;; esac
+      done
+      set +f
+      return 1
+    }
+
+    # --- the staged change set, in scope only (NUL-separated) ---
+    _KGP_AM=""; _KGP_RN=""; _KGP_DEL=""
+    while IFS= read -r -d '' _kgp_st; do
+      _kgp_a=""; _kgp_b=""
+      case "$_kgp_st" in
+        R*|C*) IFS= read -r -d '' _kgp_a || true; IFS= read -r -d '' _kgp_b || true ;;
+        *)     IFS= read -r -d '' _kgp_a || true ;;
+      esac
+      case "$_kgp_st" in
+        R*)
+          if _kgp_in_scope "$_kgp_b"; then
+            _KGP_AM="${_KGP_AM}${_kgp_b}
+"
+            _KGP_RN="${_KGP_RN}${_kgp_a}	${_kgp_b}
+"
+          elif _kgp_in_scope "$_kgp_a"; then
+            _KGP_DEL="${_KGP_DEL}${_kgp_a}
+"
+          fi
+          ;;
+        C*) _kgp_in_scope "$_kgp_b" && _KGP_AM="${_KGP_AM}${_kgp_b}
+" ;;
+        D)  _kgp_in_scope "$_kgp_a" && _KGP_DEL="${_KGP_DEL}${_kgp_a}
+" ;;
+        *)  _kgp_in_scope "$_kgp_a" && _KGP_AM="${_KGP_AM}${_kgp_a}
+" ;;
+      esac
+    done < <(git diff --cached -M --name-status -z 2>/dev/null)
+
+    if [ -z "$_KGP_ROOTS" ] || [ "$_KGP_EXTS" = "  " ]; then
+      echo "Advisory: KG product-graph gate is inert — coverage.yaml declares no roots or no extensions, so no file is in scope. Declare them (block '  - src/app' or inline [src/app, src/components])." >&2
+      warn "kg_product_inert"
+    fi
+
+    if [ -n "$_KGP_AM$_KGP_DEL" ]; then
+      # --- exemption matrix: any hit → advisory, never block ---
+      _KGP_EXEMPT=""
+      _KGP_STYPE=$(get_session_type 2>/dev/null || echo "unknown")
+      if [ "$_KGP_STYPE" = "audit" ]; then
+        _KGP_EXEMPT="audit_session"
+      elif [ "$_KGP_STYPE" = "taskgroup" ] && ls "$REPO_ROOT/.claude/.state/tg-"*"-brief-"*".kg-delta.yaml" > /dev/null 2>&1; then
+        _KGP_EXEMPT="parallel_tg_delta"
+      elif [ "${REPO_OS_SKIP_KG_GATE:-0}" = "1" ]; then
+        if [ "$IS_NO_REVIEW_BACKSTOP" = false ]; then
+          log_override "pre-commit-gates" "REPO_OS_SKIP_KG_GATE"
+          _KGP_EXEMPT="skip_kg_gate_override"
+        else
+          log_override "pre-commit-gates" "REPO_OS_SKIP_KG_GATE_IGNORED_HEADLESS"
+          echo "Advisory: REPO_OS_SKIP_KG_GATE=1 is ignored in headless/auto mode — the KG product-graph gate is still enforced." >&2
+        fi
       fi
 
-      KG_VALIDATE_OUTPUT=$(bash "$KG_VALIDATOR" --strict --target "$KG_VALIDATE_TARGET" 2>&1) || KG_VALIDATE_EXIT=$?
-      KG_VALIDATE_EXIT=${KG_VALIDATE_EXIT:-0}
+      _KGP_IDX=$(mktemp "${TMPDIR:-/tmp}/kg-index-graph.XXXXXX")
+      _KGP_GRAPH_STATE="none"
+      if _kg_index_graph "$_KGP_IDX"; then
+        _KGP_GRAPH_STATE="index"
+      elif git cat-file -e "HEAD:$_KG_GRAPH_REL" 2>/dev/null; then
+        _KGP_GRAPH_STATE="deleted"
+      fi
 
-      if [ "$KG_VALIDATE_EXIT" -ne 0 ]; then
-        echo "GATE-RECOVERABLE: KG schema — invalid graph data in staged file(s). NEXT: Fix the violations listed below and re-stage." >&2
-        printf '%s\n' "$KG_VALIDATE_OUTPUT" >&2
-        block "kg_schema_violation"
-        log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "kg_schema_violation" "target:$KG_VALIDATE_TARGET"
+      _KGP_MSGS=""
+      _KGP_COMMITTED_INVALID=false
+      _kgp_say() { _KGP_MSGS="${_KGP_MSGS}         - $1
+"; }
+
+      if [ -n "$_KGP_EXEMPT" ]; then
+        echo "Advisory: KG product-graph gate exempt ($_KGP_EXEMPT) — product-graph.yaml was not checked for this commit's product files." >&2
+        warn "kg_product_advisory"
+        log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "warn" "$START_MS" "kg_product_exempt" "$_KGP_EXEMPT"
+      elif [ "$_KGP_COV_STATE" = "deleted" ]; then
+        _kgp_say "this commit deletes docs/ai/knowledge-graph/coverage.yaml while changing files it puts in scope — commit the deletion on its own, or keep the file"
+      elif [ "$_KGP_GRAPH_STATE" = "deleted" ]; then
+        _kgp_say "this commit deletes docs/ai/knowledge-graph/product-graph.yaml while changing product files in coverage.yaml's scope — restore it"
+      elif [ "$_KGP_GRAPH_STATE" = "none" ]; then
+        echo "Advisory: KG product-graph gate — coverage.yaml is declared but docs/ai/knowledge-graph/product-graph.yaml does not exist, so these product files were not checked. NEXT: bash .claude/tools/kg-seed.sh --target product, describe the nodes, then git add docs/ai/knowledge-graph/product-graph.yaml." >&2
+        log_override "pre-commit-gates" "kg-product-graph-absent"
+        warn "kg_product_graph_absent"
+      elif [ "$_KG_GRAPH_INVALID" = true ]; then
+        :   # already blocked by the schema gate above, with the real error
+      elif ! bash "$_KG_VALIDATOR" --strict --file "$_KGP_IDX" > /dev/null 2>&1; then
+        # Not staged, so the schema gate did not run — but the committed graph
+        # itself is broken, and coverage read from it would be fiction.
+        echo "GATE-RECOVERABLE: KG product-graph — product-graph.yaml (as committed) fails kg-validate.sh --strict, so coverage cannot be judged. NEXT: bash .claude/tools/kg-validate.sh --strict, fix it, then git add docs/ai/knowledge-graph/product-graph.yaml." >&2
+        _KGP_COMMITTED_INVALID=true
+        block "kg_product_graph_invalid"
+        log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "kg_product_graph_invalid"
       else
-        log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "kg_schema_pass" "target:$KG_VALIDATE_TARGET"
+        # One record per node: path<TAB>status<TAB>description. Reads what the
+        # validator accepts: double- or single-quoted or bare scalars, trailing
+        # comments on bare ones, and folded/literal (>-, |) descriptions.
+        _KGP_NODES=$(awk '
+          function val(s,  v) {
+            v = s; sub(/^[^:]*:[[:space:]]*/, "", v)
+            if (v ~ /^"/)      { sub(/^"/, "", v); sub(/"[[:space:]]*(#.*)?$/, "", v) }
+            else if (v ~ /^'\''/) { sub(/^'\''/, "", v); sub(/'\''[[:space:]]*(#.*)?$/, "", v) }
+            else               { sub(/[[:space:]]+#.*$/, "", v); sub(/[[:space:]]+$/, "", v) }
+            return v
+          }
+          function flush() { if (inode && path != "") printf "%s\t%s\t%s\n", path, status, desc; inode = 0; inblock = 0; path = status = desc = "" }
+          /^edges:/ { flush(); exit }
+          /^  - id: / { flush(); inode = 1; next }
+          inblock && /^      / { line = $0; sub(/^[[:space:]]+/, "", line); desc = (desc == "") ? line : desc " " line; next }
+          { inblock = 0 }
+          inode && /^    path:/   { path = val($0) }
+          inode && /^    status:/ { status = val($0) }
+          inode && /^    description:/ {
+            d = val($0)
+            if (d ~ /^[>|][-+]?$/) { desc = ""; inblock = 1 } else desc = d
+          }
+          END { flush() }' "$_KGP_IDX")
+
+        _kgp_live_rows() { printf '%s\n' "$_KGP_NODES" | awk -F'\t' -v p="$1" '$1 == p && $2 != "stale"'; }
+
+        while IFS= read -r _kgp_p; do
+          [ -n "$_kgp_p" ] || continue
+          _kgp_rows=$(_kgp_live_rows "$_kgp_p")
+          if [ -z "$_kgp_rows" ]; then
+            _kgp_say "$_kgp_p has no node (a stale one does not count) — add one (bash .claude/tools/kg-cover.sh --target product $_kgp_p scaffolds it), then describe it"
+            continue
+          fi
+          _kgp_desc=$(printf '%s\n' "$_kgp_rows" | head -1 | cut -f3)
+          if [ "$_kgp_desc" = "Product source file" ]; then
+            _kgp_say "$_kgp_p has a node, but its description is the seeder default \"Product source file\" — say what the file does"
+          elif [ "${#_kgp_desc}" -lt 20 ]; then
+            _kgp_say "$_kgp_p has a node, but its description (\"$_kgp_desc\") is under 20 characters — say what the file does"
+          fi
+        done <<EOF
+$_KGP_AM
+EOF
+        while IFS="$(printf '\t')" read -r _kgp_old _kgp_new; do
+          [ -n "$_kgp_old" ] || continue
+          if [ -n "$(_kgp_live_rows "$_kgp_old")" ]; then
+            _kgp_say "$_kgp_old was renamed to $_kgp_new, but a node still points at $_kgp_old — update that node's path (do not add a second node), or mark it status: stale"
+          fi
+        done <<EOF
+$_KGP_RN
+EOF
+        while IFS= read -r _kgp_p; do
+          [ -n "$_kgp_p" ] || continue
+          if [ -n "$(_kgp_live_rows "$_kgp_p")" ]; then
+            _kgp_say "$_kgp_p was deleted, but its node is still active — remove the node or mark it status: stale"
+          fi
+        done <<EOF
+$_KGP_DEL
+EOF
+
+        # FRESH: the graph staged with this commit, or this session's marker.
+        if ! printf '%s\n' "$_KGP_NAMES" | grep -qxF "$_KG_GRAPH_REL" \
+           && ! _validate_state_session_id "$STATE_DIR/kg-updated"; then
+          _kgp_say "product files changed but product-graph.yaml is not staged and this session has no kg-updated marker — refresh the touched nodes (last_verified, description)"
+        fi
       fi
+
+      if [ -n "$_KGP_MSGS" ]; then
+        echo "GATE-RECOVERABLE: KG product-graph — this commit's product files and product-graph.yaml disagree:" >&2
+        printf '%s' "$_KGP_MSGS" >&2
+        echo "       NEXT: fix the above, then git add docs/ai/knowledge-graph/product-graph.yaml and retry. (override: REPO_OS_SKIP_KG_GATE=1, interactive only)" >&2
+        if [ "$IS_NO_REVIEW_BACKSTOP" = true ]; then
+          _KGP_ESC_DIR="$REPO_ROOT/.claude/.automation/escalations"
+          if [ -d "$_KGP_ESC_DIR" ]; then
+            _KGP_ESC_SID="${REPO_OS_SESSION_ID:-$(date -u +%Y%m%d-%H%M%S)}"
+            printf 'escalation:\n  id: "esc-%s-%s"\n  queue_entry_id: "%s"\n  type: "gate-failure"\n  severity: "blocking"\n  phase_at_exit: "commit"\n  tag_at_exit: "agent"\n  message: "KG product-graph gate blocked — product files and product-graph.yaml disagree"\n  created_at: "%s"\n  resolved: false\n  resolution: ""\n' \
+              "$_KGP_ESC_SID" "$(date -u +%Y%m%d-%H%M%S)" "$_KGP_ESC_SID" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              > "$_KGP_ESC_DIR/kg-product-fail-$(date -u +%Y%m%d-%H%M%S).yaml" 2>/dev/null || true
+          fi
+        fi
+        block "kg_product_violation"
+        log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "kg_product_violation"
+      elif [ -z "$_KGP_EXEMPT" ] && [ "$_KGP_GRAPH_STATE" = "index" ] \
+           && [ "$_KG_GRAPH_INVALID" = false ] && [ "$_KGP_COMMITTED_INVALID" = false ]; then
+        # The marker means "this session's graph agreed with its product files".
+        # Never written for an exempt, graph-less, or invalid-graph commit.
+        _KGP_SID="${REPO_OS_SESSION_ID:-$(cat "$REPO_ROOT/.claude/.session-id" 2>/dev/null || echo "")}"
+        printf 'timestamp: %s\nsession_id: %s\nresult: PASSED\n' \
+          "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_KGP_SID" > "$STATE_DIR/kg-updated" 2>/dev/null || true
+        log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "kg_product_passed"
+      fi
+      rm -f "$_KGP_IDX"
     fi
   fi
+  rm -f "$_KGP_COV"
 fi
 
 # ============================================================

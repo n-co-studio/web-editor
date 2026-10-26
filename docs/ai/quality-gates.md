@@ -73,10 +73,12 @@ Branch type determines which gates apply and at what strictness.
 ### Conditional Gates
 Project-specific gates defined in decision records or project docs. When their trigger conditions are met, they block commits or pushes. Examples: performance benchmarks, API compatibility checks, migration validation.
 
-**KG Update Gate** (template mode only — Decision 0034 Amendment 7): When governance files (`.claude/hooks/`, `.claude/tools/`, `docs/ai/decisions/`, `docs/ai/prompts/`, `.claude/agents/`) are staged in a template-mode session:
-- **COVERAGE**: staged file has no node in `graph.yaml` or `product-graph.yaml` → blocked. Recovery: `.claude/tools/kg-cover.sh <file>...` then re-stage.
-- **FRESHNESS**: staged file has a node, but no graph file is staged and no `kg-updated` session marker present → blocked. Recovery: stage a graph update or run `kg-cover.sh`.
-Six-branch exemption matrix downgrades to advisory: audit session, parallel tg-delta, `experiment/*` branch, non-template mode, `REPO_OS_RECOVER=1`, `REPO_OS_SKIP_KG_GATE=1` (interactive only).
+**KG product-graph gate** (Decision 0034 Amendment 9; replaces the retired template-mode KG Update Gate): scope is declared per repo in child-owned `docs/ai/knowledge-graph/coverage.yaml` — `roots` (globs), `extensions` (include-list), extra `exclude` globs on top of the built-ins (`*.test.*`, `*.spec.*`, `*.d.ts`, `__tests__/`, `__fixtures__/`, `generated/`, `dist/`, `build/`). Only staged changes are judged (`git diff --cached -M --name-status`), and the graph is read from the index:
+- **NODE**: an added/modified in-scope file needs a live (non-stale) node with its path → otherwise blocked. Recovery: `.claude/tools/kg-cover.sh --target product <file>...`, then describe it.
+- **MEANING**: the node's description must not be `"Product source file"` (the seeder default) and must be ≥ 20 characters.
+- **RENAME / DELETE**: no node may stay active at a renamed-from or deleted path — update the path, or remove / `status: stale` the node.
+- **FRESHNESS**: `product-graph.yaml` staged with the commit, or this session's `kg-updated` marker present. Every block message says `git add docs/ai/knowledge-graph/product-graph.yaml`.
+`coverage.yaml` is read from the index too; deleting it or the graph alongside in-scope changes blocks. Exemptions downgrade to advisory: audit session, a task-group content brief with a KG delta pending, `REPO_OS_RECOVER=1`, `REPO_OS_SKIP_KG_GATE=1` (interactive only); `experiment/*` branches never reach the gate (the hook exits early). Not configured: no `coverage.yaml` → advisory in child mode, silent in template mode; `coverage.yaml` but no graph → advisory pointing at `kg-seed.sh --target product`, logged as an override.
 
 ### Release Gates
 Apply to `release/*` branches before merge to `main`:

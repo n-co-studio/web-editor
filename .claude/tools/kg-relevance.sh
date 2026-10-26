@@ -5,8 +5,9 @@
 # Given a list of scope files from a task brief, produces a ranked list of
 # also-relevant files by weighted graph traversal.
 #
-# Two-graph architecture (Amendment 2): searches both template graph
-# (graph.yaml) and product graph (product-graph.yaml) when both exist.
+# Searches product-graph.yaml, the only graph since Amendment 9 retired the
+# template graph (graph.yaml). Edges to retired template nodes simply resolve
+# to nothing and add no weight.
 #
 # Weight model:
 #   - Files in brief scope: weight x50
@@ -24,21 +25,13 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-TEMPLATE_GRAPH="$REPO_ROOT/docs/ai/knowledge-graph/graph.yaml"
 PRODUCT_GRAPH="$REPO_ROOT/docs/ai/knowledge-graph/product-graph.yaml"
 
-# Build GRAPH_FILES list — both graphs if they exist, at least one required
-GRAPH_FILES=""
-if [ -f "$TEMPLATE_GRAPH" ]; then
-  GRAPH_FILES="$TEMPLATE_GRAPH"
-fi
-if [ -f "$PRODUCT_GRAPH" ]; then
-  GRAPH_FILES="${GRAPH_FILES:+$GRAPH_FILES }$PRODUCT_GRAPH"
-fi
-
-if [ -z "$GRAPH_FILES" ]; then
-  echo "ERROR: No graph files found (checked graph.yaml and product-graph.yaml)" >&2
-  echo "Run .claude/tools/kg-seed.sh first to bootstrap the graph." >&2
+# The product graph is the only graph (t-0034 Amendment 9 retired graph.yaml).
+GRAPH_FILES="$PRODUCT_GRAPH"
+if [ ! -f "$PRODUCT_GRAPH" ]; then
+  echo "ERROR: No graph found at $PRODUCT_GRAPH" >&2
+  echo "Run .claude/tools/kg-seed.sh --target product first to bootstrap it." >&2
   exit 1
 fi
 

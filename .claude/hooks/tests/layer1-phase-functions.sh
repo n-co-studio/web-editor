@@ -377,6 +377,147 @@ assert_eq "$(get_write_phases_for_type ephemeral)" "" "ephemeral write phases = 
 assert_eq "$(get_write_phases_for_type unknown-type)" "" "unknown-type write phases = empty"
 
 # ============================================================
+# L1.R41 — the harness refuses to run against a root outside its sandbox
+# ============================================================
+# Known-issue R41. A layer whose helpers resolve _REPO_OS_ROOT anywhere but
+# its own sandbox operates on that root's REAL session state — reset_phase
+# deletes and re-initialises it. The resolution can fail silently (the seam
+# rejects a non-/tmp root with only a stderr WARNING), so the harness has to
+# check where it actually landed rather than trust that it was told.
+#
+# Decoys are scratch dirs under /tmp, never the real repo: a probe for
+# "touches the wrong root" must not itself be able to touch the real one. Each
+# runs in a child bash because the expected outcome is that the harness exits.
+#
+# Each of the guard's three checks is probed ALONE, with the other two
+# satisfied, and asserted by its own message. A probe that trips several checks
+# at once stays green when any one of them is deleted — which is what the first
+# version of these probes did for the root check.
+tap_section "L1.R41: harness refuses a root outside its sandbox"
+
+# Runs a child harness and leaves its exit code / output in _R41_RC/_R41_OUT.
+# $1 is the body run after setup_sandbox; $2 is passed through as "$2".
+_r41_child() {
+  _R41_RC=0
+  _R41_OUT=$(bash -c '
+    set -euo pipefail
+    source "$1/test-helpers.sh"
+    setup_sandbox
+    eval "$3"
+    reset_phase standard
+    echo "REACHED-AFTER-RESET"
+  ' _ "$SCRIPT_DIR" "${2:-}" "$1" 2>&1) || _R41_RC=$?
+}
+
+# A decoy with a writable .claude/.state, so a leak would actually land and the
+# "nothing written" assertion can fail. Without it, writes under the decoy fail
+# for want of a directory and that assertion passes whatever the guard does.
+_r41_decoy() {
+  _R41_DECOY=$(mktemp -d /tmp/r41-decoy.XXXXXX) || { echo "Bail out! mktemp failed"; exit 2; }
+  mkdir -p "$_R41_DECOY/.claude/.state"
+}
+
+# (1) Root check alone: _REPO_OS_ROOT is foreign, but the state-dir cache and
+# the main-root cache both point INTO the sandbox, so only the root check can
+# fire.
+_r41_decoy
+_r41_child '_REPO_OS_ROOT="$2"
+  _CACHED_SESSION_STATE_DIR="$_SANDBOX_DIR/.claude/.state/wt-sessions/probe"
+  _CACHED_MAIN_REPO_ROOT="$_SANDBOX_DIR"' "$_R41_DECOY"
+assert_neq "$_R41_RC" "0" "L1.R41 a foreign _REPO_OS_ROOT exits non-zero"
+assert_contains "$_R41_OUT" "Bail out! reset_phase: _REPO_OS_ROOT is" \
+  "L1.R41 ...refused by the root check itself"
+case "$_R41_OUT" in
+  *REACHED-AFTER-RESET*) _tap_fail "L1.R41 the suite does not continue past the refusal" "it did" ;;
+  *) _tap_pass "L1.R41 the suite does not continue past the refusal" ;;
+esac
+assert_eq "$(find "$_R41_DECOY" -type f | wc -l | tr -d ' ')" "0" \
+  "L1.R41 nothing was written under the foreign root"
+rm -rf "$_R41_DECOY"
+
+# (2) State-dir check alone: root right, main root right, but a stale or
+# hand-set _CACHED_SESSION_STATE_DIR — which get_session_state_dir returns
+# without consulting the root at all.
+_r41_decoy
+_r41_child '_CACHED_SESSION_STATE_DIR="$2/.claude/.state/wt-sessions/stale"' "$_R41_DECOY"
+assert_neq "$_R41_RC" "0" "L1.R41 a state dir cached outside the sandbox exits non-zero"
+assert_contains "$_R41_OUT" "Bail out! reset_phase: session state dir is" \
+  "L1.R41 ...refused by the state-dir check itself"
+rm -rf "$_R41_DECOY"
+
+# (3a) The realistic case: the suite is run from inside a WORKTREE of the real
+# repo, as agent and reverify-merge sessions run it. get_main_repo_root decides
+# from the CWD's git-common-dir, so before the seam fix it named that real repo
+# while _REPO_OS_ROOT and the state dir were the sandbox. It must now resolve
+# to the sandbox and the suite must RUN — a refusal here would turn every layer
+# red in the normal workflow. The stand-in for the real repo lives in /var/tmp
+# because the seam treats anything under /tmp as a test repo.
+_R41_REAL=$(mktemp -d /var/tmp/r41-realrepo.XXXXXX) || { echo "Bail out! mktemp failed"; exit 2; }
+_R41_WT="$_R41_REAL-wt"
+# On `main`, like the real repo: init_phase's ancestry check reads git in the
+# CWD (a read, never a write), and a repo with no main ref fails it.
+if git -C "$_R41_REAL" init -q 2>/dev/null \
+   && git -C "$_R41_REAL" symbolic-ref HEAD refs/heads/main \
+   && git -C "$_R41_REAL" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init 2>/dev/null \
+   && git -C "$_R41_REAL" worktree add -q "$_R41_WT" 2>/dev/null; then
+  _R41_RC=0
+  _R41_OUT=$(cd "$_R41_WT" && bash -c '
+    set -euo pipefail
+    source "$1/test-helpers.sh"
+    setup_sandbox
+    reset_phase standard
+    [ "$(get_main_repo_root)" = "$_SANDBOX_DIR" ] && echo "MAIN-IS-SANDBOX"
+    echo "REACHED-AFTER-RESET"
+  ' _ "$SCRIPT_DIR" 2>&1) || _R41_RC=$?
+  assert_eq "$_R41_RC" "0" "L1.R41 a suite run from a worktree of a real repo still runs"
+  assert_contains "$_R41_OUT" "MAIN-IS-SANDBOX" "L1.R41 ...with the main repo root held in the sandbox"
+  assert_eq "$(find "$_R41_REAL" "$_R41_WT" -path '*/.git' -prune -o -path '*/.claude*' -print | wc -l | tr -d ' ')" "0" \
+    "L1.R41 ...and nothing written into that real repo or its worktree"
+else
+  _tap_fail "L1.R41 worktree probe could not be built" "git init/commit/worktree add failed"
+fi
+rm -rf "$_R41_WT" "$_R41_REAL"
+
+# (3b) Main-root check alone: root and state dir right, but the main root names
+# a repo outside /tmp (here via the cache, which get_main_repo_root returns
+# as-is) — a real repo, however it got there.
+_r41_child '_CACHED_MAIN_REPO_ROOT="/var/tmp/r41-not-a-sandbox"'
+assert_neq "$_R41_RC" "0" "L1.R41 a main repo root outside /tmp exits non-zero"
+assert_contains "$_R41_OUT" "Bail out! reset_phase: main repo root is" \
+  "L1.R41 ...refused by the main-root check itself"
+
+# (4) test-drift-check.sh's own bail-out. It does not use this harness, so a
+# regression in its seam check would otherwise go unnoticed. Run a copy,
+# rooted in this sandbox, whose sandbox has been moved to /var/tmp — a real
+# temp dir the seam rejects, because its rule is a string prefix of /tmp/ or
+# /private/tmp/ (so a /tmp path with ../ in it would NOT do). The helpers then
+# fall back to the copy's own root, which must be refused. The copy's trap
+# removes its /var/tmp dir on exit.
+SB="$(get_sandbox)"
+_R41_COPY="$SB/r41-drift-copy"
+mkdir -p "$_R41_COPY/.claude/hooks/tests/drift-check"
+cp "$SCRIPT_DIR"/../*.sh "$_R41_COPY/.claude/hooks/"
+cp -R "$SCRIPT_DIR/drift-check/fixtures" "$_R41_COPY/.claude/hooks/tests/drift-check/" 2>/dev/null || true
+sed 's#mktemp -d /tmp/drift-check-test#mktemp -d /var/tmp/drift-check-test#' \
+  "$SCRIPT_DIR/drift-check/test-drift-check.sh" > "$_R41_COPY/.claude/hooks/tests/drift-check/t.sh"
+if grep -q 'mktemp -d /var/tmp/drift-check-test' "$_R41_COPY/.claude/hooks/tests/drift-check/t.sh"; then
+  _R41_RC=0
+  _R41_OUT=$(bash "$_R41_COPY/.claude/hooks/tests/drift-check/t.sh" 2>/dev/null) || _R41_RC=$?
+  assert_eq "$_R41_RC" "2" "L1.R41 test-drift-check.sh exits 2 when its seam is rejected"
+  assert_contains "$_R41_OUT" "Bail out! helpers resolved to" \
+    "L1.R41 ...with its own bail-out, before any case runs"
+else
+  _tap_fail "L1.R41 drift-check probe could not rewrite the sandbox path" "sed pattern did not match"
+fi
+
+# Positive control: the guard must not fire on a correctly rooted sandbox —
+# otherwise every layer would bail and the cases above would pass for the
+# wrong reason.
+_r41_child ':'
+assert_eq "$_R41_RC" "0" "L1.R41 a correctly rooted sandbox passes the guard"
+assert_contains "$_R41_OUT" "REACHED-AFTER-RESET" "L1.R41 ...and continues past reset_phase"
+
+# ============================================================
 # Summary
 # ============================================================
 finish_tests

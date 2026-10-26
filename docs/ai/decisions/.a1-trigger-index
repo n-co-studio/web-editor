@@ -1,7 +1,7 @@
 # A1 trigger index — generated artifact. Do not hand-edit.
 # Regenerate: bash .claude/.automation/lib/rebuild-trigger-index.sh
 # format: 2
-# digest: dfe94a1aa9594649f02ee0f143f6b06e978be3983644afc5a119aa1fdd06bbf3
+# digest: 5c384d11b08dc28deff955afba9b10eff3c2a259d8a3e0ef8a77c33523a1c5ec
 0001AI\.mdprompt system, verification gate, session-based
 0001docs/ai/prompts/prompt-.*\.mdprompt system, verification gate, session-based
 0002docs/ai/decisions/.*\.mdmandatory, commit-blocking
@@ -55,8 +55,8 @@
 0031\.claude/hooks/(bash-guard|write-guard|pre-commit-gates|pre-push-gates)\.shREPO_OS_RECOVER, recover-signal, recovery bypass
 0032docs/ai/(workflow-appendix/session-type-task-group|prompts/prompt-t-task-definition|task-groups/_contract-template)\.parallel, worktree, Execution: parallel, worktree isolation, per-brief branch
 0033\.claude/(\.automation/runner|hooks/(session-close-check|_phase-helper|_cleanup-helper|_analytics-helper))\.shworktree, REPO_OS_WORKTREE_ISOLATE, --worktree, session isolation, concurrent session, .worktrees
-0034docs/ai/knowledge-graph/knowledge graph, knowledge-graph, graph.yaml, product-graph.yaml, schema.yaml, kg-seed, kg-relevance, semantic connection, edge type, staleness, two-graph
-0034.claude/tools/kg-knowledge graph, knowledge-graph, graph.yaml, product-graph.yaml, schema.yaml, kg-seed, kg-relevance, semantic connection, edge type, staleness, two-graph
+0034docs/ai/knowledge-graph/knowledge graph, knowledge-graph, product-graph.yaml, coverage.yaml, schema.yaml, kg-seed, kg-cover, kg-relevance, semantic connection, edge type, staleness
+0034.claude/tools/kg-knowledge graph, knowledge-graph, product-graph.yaml, coverage.yaml, schema.yaml, kg-seed, kg-cover, kg-relevance, semantic connection, edge type, staleness
 0035docs/spec/compiled/spec loading, spec digest, DIGEST.md, selective loading, manifest features, spec_digest_sha, feature index, token reduction, specialist dispatch
 0035.claude/tools/spec-digest.shspec loading, spec digest, DIGEST.md, selective loading, manifest features, spec_digest_sha, feature index, token reduction, specialist dispatch
 0035docs/spec/_templates/spec loading, spec digest, DIGEST.md, selective loading, manifest features, spec_digest_sha, feature index, token reduction, specialist dispatch

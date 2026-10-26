@@ -119,6 +119,8 @@ does not: it prevents *same-line* chaining. The Pragmatist review caught the ove
   rather than verifiers. Kept, because the gates need three distinct scripts from that
   directory headlessly — `gate-conformance.sh` (the documented gate verifier), and
   `kg-cover.sh` / `kg-validate.sh` for the KG Update Gate's COVERAGE and FRESHNESS checks.
+  *(2026-10-25: that gate was retired with the template graph — t-0034 Amendment 9. The
+  same two scripts now serve the product-graph gate, so the allowance stands.)*
   The Pragmatist's own falsifier for the finding was "a brief requires several different
   tools/ scripts", which holds. The writers in that directory are reachable by `source`
   today regardless.

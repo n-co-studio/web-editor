@@ -17,7 +17,7 @@
 
 ## Close Sequence
 
-1. Knowledge graph update (advisory — Decision 0034): update the appropriate graph (`graph.yaml` for template, `product-graph.yaml` for product) via shell I/O if either exists — new nodes, new edges, updated `last_verified`. Cross-layer edges go in source node's graph. Non-blocking
+1. Knowledge graph update (advisory — Decision 0034): update `product-graph.yaml` via shell I/O if it exists — new nodes with real descriptions, moved paths for renames, stale for deletions, new edges, updated `last_verified`. Non-blocking here; the commit gate blocks in-scope gaps (Decision 0034 Amendment 9 — the template graph is retired)
 2. Update session log (product: `docs/ai/logs/sessions/session-{id}.md`; template: `.claude/local/sessions/session-{id}.md`)
 3. Commit all remaining changes including session log
 4. Solo merge: handled by `session-close-check.sh` (stop hook) and/or runner — see `docs/ai/workflow.md` § Close Sequence step 4 for full detail

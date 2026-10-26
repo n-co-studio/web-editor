@@ -1431,40 +1431,13 @@ if [ "$IS_RETRY" = false ]; then
   fi
 fi
 
-# --- Knowledge graph update check (Decision 0034, Amendment 7) ---
-# Blocking enforcement is at commit time (pre-commit-gates.sh KG Update Gate).
-# This close-check is advisory only: fires when modified files have KG nodes but no
-# kg-updated session marker is present (gate may not have been triggered yet).
-# Audit sessions excluded — no write requirement.
-# Two-graph architecture: check both template graph (graph.yaml) and product graph (product-graph.yaml).
-KG_SESSION_TYPE=$(infer_session_type)
-KG_TEMPLATE_GRAPH="$REPO_ROOT/docs/ai/knowledge-graph/graph.yaml"
-KG_PRODUCT_GRAPH="$REPO_ROOT/docs/ai/knowledge-graph/product-graph.yaml"
-if [ "$KG_SESSION_TYPE" != "audit" ] && { [ -f "$KG_TEMPLATE_GRAPH" ] || [ -f "$KG_PRODUCT_GRAPH" ]; }; then
-  # Suppress advisory when kg-updated session marker is present (gate passed this session)
-  _KG_PASS_MARKER="$_SESSION_STATE_DIR/kg-updated"
-  _KG_ALREADY_PASSED=false
-  if [ -f "$_KG_PASS_MARKER" ] && grep -q '^result: PASSED' "$_KG_PASS_MARKER" 2>/dev/null; then
-    _KG_ALREADY_PASSED=true
-  fi
-  if [ "$_KG_ALREADY_PASSED" = false ]; then
-    KG_MODIFIED_FILES=$(git -C "$REPO_ROOT" diff --cached --name-only 2>/dev/null || git -C "$REPO_ROOT" diff --name-only HEAD 2>/dev/null || true)
-    KG_HAS_GRAPH_NODE=false
-    KG_NODE_FILES=""
-    for kgf in $KG_MODIFIED_FILES; do
-      for kg_file in "$KG_TEMPLATE_GRAPH" "$KG_PRODUCT_GRAPH"; do
-        if [ -f "$kg_file" ] && grep -qF "path: \"${kgf}\"" "$kg_file" 2>/dev/null; then
-          KG_HAS_GRAPH_NODE=true
-          KG_NODE_FILES="${KG_NODE_FILES:+$KG_NODE_FILES }$kgf"
-          break
-        fi
-      done
-    done
-    if [ "$KG_HAS_GRAPH_NODE" = true ]; then
-      _add_advisory "Advisory: Modified files have knowledge graph nodes but no kg-updated marker found — ensure graph.yaml/product-graph.yaml is updated before commit. Files: $KG_NODE_FILES. The KG Update Gate (Amendment 7) will block commit if graph not staged or updated this session. See Decision 0034."
-    fi
-  fi
-fi
+# --- Knowledge graph: no close-time check (Decision t-0034 Amendment 9) ---
+# There was one: an advisory whenever a modified file had a node in either graph
+# and no kg-updated marker existed. It is gone deliberately. The template graph
+# is retired, and the product-graph gate in pre-commit-gates.sh now decides —
+# from coverage.yaml's roots, extensions and exclusions — which files need a
+# node. A notice keyed on "has a node anywhere" would warn about files that gate
+# never blocks, and contradict it.
 
 # --- Failure report (Phase 2a: JSON stdout) ---
 if [ "$FAILURE_COUNT" -gt 0 ]; then

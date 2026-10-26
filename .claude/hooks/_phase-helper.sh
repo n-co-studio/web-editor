@@ -1588,12 +1588,21 @@ init_phase() {
           log_hook_event "ancestry-check" "init_phase" "" "block" "0" "error"
           echo "GATE-RECOVERABLE: Cannot verify main-branch ancestry -- main ref not found or HEAD is detached. NEXT: Ensure git fetch origin main:main succeeds, then retry. (override: REPO_OS_SKIP_ANCESTRY_CHECK=1)" >&2
           printf "main_ancestry: fail\n" >> "$state_dir/phase-state" 2>/dev/null || true
+          # The gates cache and resume marker are written at the END of
+          # init_phase, so this return would leave the previous unit's copies
+          # beside the freshly rewritten phase-state (R40 residual). A failed
+          # init has no unit to describe; remove them. Both are caches: a missing
+          # gates file falls through to inline checks, a missing marker means no
+          # resume hint.
+          rm -f "$state_dir/phase-state.gates" "$state_dir/session-resume.yaml" 2>/dev/null || true
           return 1
         else
           _ac_result="fail"
           log_hook_event "ancestry-check" "init_phase" "" "block" "0" "fail"
           echo "GATE-RECOVERABLE: Branch '${_ac_branch}' is not rooted at main. NEXT: Exit this session, run git checkout main && git checkout -b <category>/<description>, then restart. (override: REPO_OS_SKIP_ANCESTRY_CHECK=1)" >&2
           printf "main_ancestry: fail\n" >> "$state_dir/phase-state" 2>/dev/null || true
+          # Same as the status-2 return above (R40 residual).
+          rm -f "$state_dir/phase-state.gates" "$state_dir/session-resume.yaml" 2>/dev/null || true
           return 1
         fi
       fi
@@ -1632,14 +1641,10 @@ init_phase() {
 # Advisory only — failures are silently ignored by the caller.
 _kg_git_freshness() {
   local repo_root="$_REPO_OS_ROOT"
-  local template_graph="$repo_root/docs/ai/knowledge-graph/graph.yaml"
-  local product_graph="$repo_root/docs/ai/knowledge-graph/product-graph.yaml"
-
-  # Collect available graph files
-  local graph_files=""
-  [ -f "$template_graph" ] && graph_files="$template_graph"
-  [ -f "$product_graph" ] && graph_files="${graph_files:+$graph_files }$product_graph"
-  [ -z "$graph_files" ] && return 0
+  # The product graph is the only graph (t-0034 Amendment 9; the template
+  # graph was retired).
+  local graph_files="$repo_root/docs/ai/knowledge-graph/product-graph.yaml"
+  [ -f "$graph_files" ] || return 0
 
   # Single awk pass: extract node IDs, paths, last_verified dates.
   # Resets on each new node entry (  - id: ...) to avoid cross-node pollution.
@@ -1698,15 +1703,14 @@ _kg_git_freshness() {
 # Advisory only — failures are silently ignored.
 _inject_kg_context() {
   local repo_root="$_REPO_OS_ROOT"
-  local template_graph="$repo_root/docs/ai/knowledge-graph/graph.yaml"
   local product_graph="$repo_root/docs/ai/knowledge-graph/product-graph.yaml"
   local contract_file="$repo_root/.claude/local/task-contract.yaml"
   # Use flat .state/ path (not per-session dir) so agents can find it at a
   # well-known location regardless of worktree session state directory scoping.
   local output_file="$repo_root/.claude/.state/kg-relevance-context"
 
-  # Gate: at least one graph must exist
-  [ -f "$template_graph" ] || [ -f "$product_graph" ] || return 0
+  # Gate: the product graph must exist (the only graph since t-0034 Amendment 9)
+  [ -f "$product_graph" ] || return 0
 
   # Gate: task contract must exist with scope_files
   [ -f "$contract_file" ] || return 0

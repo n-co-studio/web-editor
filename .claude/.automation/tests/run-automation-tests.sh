@@ -46,6 +46,7 @@ test-eval-model-routing.sh
 test-queue-manipulation.sh
 test-daemon-recovery-paths.sh
 test-work-preserver.sh
+test-outcome-detector.sh
 test-verify-pristine.sh
 test-overlap-report.sh
 test-reverify-merge.sh

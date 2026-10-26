@@ -8,7 +8,7 @@ Accepted
 - type: file
 - path: `docs/ai/knowledge-graph/`
 - path: `.claude/tools/kg-`
-- keywords: `knowledge graph, knowledge-graph, graph.yaml, product-graph.yaml, schema.yaml, kg-seed, kg-relevance, semantic connection, edge type, staleness, two-graph`
+- keywords: `knowledge graph, knowledge-graph, product-graph.yaml, coverage.yaml, schema.yaml, kg-seed, kg-cover, kg-relevance, semantic connection, edge type, staleness`
 
 ## Decision
 Add a persistent knowledge graph that maps semantic connections between codebase entities, enabling agents to consume pre-computed context and persist connection knowledge across sessions.
@@ -36,6 +36,138 @@ Add a persistent knowledge graph that maps semantic connections between codebase
 - Decision 0009 pattern followed: shell I/O for session-boundary writes
 - Decision 0014 respected: graph read at init, graph write before commit
 - Decision 0030/0033 respected: concurrent write safety via mkdir locking
+
+## Amendment 9 — Template Graph Retired; Blocking Product-Graph Gate (2026-10-25)
+
+**Operator decision.** The template knowledge graph is eliminated: product-graph
+layers only, going forward. This supersedes Amendment 2's two-graph architecture,
+Amendment 7's template-mode KG Update Gate, and the governance seeding of §10 and
+Amendment 2 §10. Where this amendment and an earlier one disagree, this one wins.
+
+**What was retired.**
+1. `docs/ai/knowledge-graph/graph.yaml` (195 governance nodes) is deleted. It is
+   in the machinery manifest, so template sync's withdrawn-file sweep
+   (t-0051) deletes it from every child whose previous manifest lists it. No
+   sync-engine change is needed — do not add one. A child whose engine predates
+   t-0051 keeps an inert copy that no tool reads. Children could never write
+   `graph.yaml` (mode guard), so no child edit is lost.
+2. The KG Update Gate (Amendment 7). It ran only in template mode and only while
+   `graph.yaml` existed, so it is a no-op everywhere once the file is gone.
+3. `kg-seed.sh --target template` / `--source governance`, `kg-cover.sh
+   --target template`, and template branches in `kg-relevance`, `kg-query`,
+   `kg-merge-deltas` (a template-target delta is dropped with a warning),
+   `kg-validate` (`--target template` exits 0 with a note so old callers keep
+   working through the sync window), `_phase-helper.sh` relevance/freshness
+   injection, and the close-time KG advisory in `session-close-check.sh` —
+   removed rather than narrowed, because it fired on "has a node anywhere" and
+   would have contradicted the gate's declared scope.
+4. `schema.yaml`'s `layer` enum is `product` only. Every node in both live
+   children already carries it.
+
+**Consequences for children.** Every edge a child drew to a template node now
+dangles. That stays advisory (§9); `kg-validate.sh` summarises it to a count and
+the first ten. Cross-graph uniqueness (Amendment 8's open question) is moot.
+
+**The product-graph gate** (`pre-commit-gates.sh`, blocking). Specified by the
+operator; recorded here as the rule, with the reasons given for each part:
+
+- *Scope is per repo, never hardcoded.* Child-owned
+  `docs/ai/knowledge-graph/coverage.yaml` declares `roots` (path globs),
+  `extensions` (an include-list — a gate that blocks on a new `.svg` is worse
+  than a missed node), and extra `exclude` globs on top of the built-ins
+  (`*.test.*`, `*.spec.*`, `*.d.ts`, `__tests__/`, `__fixtures__/`, `generated/`,
+  `dist/`, `build/`). `.css`/`.scss` are in scope when declared — tokens live
+  there. One synced hook cannot hardcode both markpreston's
+  `src/{app,components,lib,data}` and web-editor's `packages/*/src/content`.
+  `coverage.yaml` is in `.templatesyncignore` and carved out of the child mode
+  guard so a child session can write it.
+- *Staged files only, never the whole repo* (`git diff --cached -M
+  --name-status`). Coverage was 84/108 and 114/162 at the time; a repo-wide check
+  would block the next commit behind ~40 unrelated nodes. Not gated on the
+  hook's ACMR file list, so a delete-only commit is still judged.
+- *A node, never an edge.* Seeded edges such as "config-eslint constrains
+  component-neuralgrid" are true of every file; web-editor is 75/114 isolated,
+  and an edge rule would demand 75 invented edges.
+- *Presence alone is too weak.* The description must not be the seeder default
+  `"Product source file"` and must be at least 20 characters — 102 of
+  web-editor's 114 nodes carried the default, so presence-only would ship as a
+  no-op; markpreston had none in 84, so the bar is reachable.
+- *Renames and deletions are part of coverage.* R: the node's path is updated,
+  not a second node added (no node may still point at the old path unless
+  stale). D: the node is removed or marked stale. Skipping both is how the
+  template graph accumulated phantom nodes for files that no longer existed.
+- *Freshness:* the graph is staged with the commit, or this session's
+  `kg-updated` marker exists (written when the gate passes). Block messages say
+  `git add docs/ai/knowledge-graph/product-graph.yaml` explicitly, because
+  `kg-cover.sh` writes no marker.
+- *The INDEX copy of the graph is judged* — what the commit contains. The schema
+  gate validates that copy first, and the product gate reports an invalid graph
+  once instead of building coverage messages from a file that does not parse.
+- *Exemptions* mirror Amendment 7's matrix minus its mode exemption: audit
+  session, a task-group content brief with a delta pending, `REPO_OS_RECOVER`,
+  `REPO_OS_SKIP_KG_GATE` (interactive only). `experiment/*` branches never
+  reach the gate — the hook exits early on them. `coverage.yaml` present but no
+  graph: advisory pointing at `kg-seed.sh --target product`, logged via
+  `log_override` because it is a bypass. No `coverage.yaml`: not configured —
+  a plain advisory in child mode (no override is being used), silent in
+  template mode, which ships neither file.
+
+**Tooling the gate relies on.**
+- Node ids derive from the FULL path (`product-src-app-settings-tsx`), in one
+  function present in both `kg-seed.sh` and `kg-cover.sh`, pinned equal by a
+  test. The old `product-<parent>-<file>` scheme collided in monorepos
+  (`packages/a/src/tokens/store.ts` and `packages/b/...` → one id). Both tools
+  dedupe by path; `kg-cover` suffixes an id that two paths sanitise to.
+- `kg-seed.sh` refuses to run on an existing graph. It used to overwrite the file
+  with only the nodes it had just generated.
+- Seeded and scaffolded nodes say `"Product source file"` — deliberately the
+  value the gate rejects: a stub is scaffolding until someone describes the file.
+- `kg-validate.sh` blocks on malformed ids (`^[a-z0-9]+(-[a-z0-9]+)*$`) — closing
+  Amendment 8's open format question — and on unterminated quoted scalars:
+  commit 5d878c2 wrote `last_verified: "2026-08-072026-10-25` three times into
+  `graph.yaml`, the file stopped parsing as YAML, and every line-oriented check
+  still reported CLEAN. awk only; the tooling floor is bash and git.
+
+**Corrections from the dispatched review, before merge.** The first build of
+this gate had defects the review found and its own tests had not:
+- A `status: stale` node counted as coverage for a live file, and its
+  description could be the one judged — so marking a node stale satisfied the
+  gate. NODE and MEANING now read live nodes only; `kg-cover` scaffolds a live
+  node for a stale-only path.
+- The hook's own "not configured" example used inline `[a, b]` lists, which the
+  parser ignored, so a child copying it got an inert gate and no warning. Inline
+  lists, CRLF, `./` roots and dotted extensions are now read; empty roots or
+  extensions produce an "inert" advisory.
+- `coverage.yaml` was read from the working tree while the graph came from the
+  index, and `git rm` of either alongside product changes was a bypass. Both
+  are read from the index; deleting either with in-scope changes blocks.
+- A trailing-slash exclude (`storybook/`) excluded nothing; it now means a
+  directory.
+- Any leftover KG delta exempted every later commit; only a task-group content
+  brief is exempt now, so a merge brief's commit is judged.
+- Paths git quotes (non-ASCII) silently left scope; changes are read
+  NUL-separated. Single-quoted, commented and folded YAML scalars are read as
+  the validator accepts them.
+- The gate's own experiment-branch exemption was dead code (the hook exits early
+  on `experiment/*`) and was removed.
+
+**Known limits, left on purpose.** The task-group exemption is scoped to the
+session TYPE, not to the brief's own group: a `taskgroup` content brief is
+exempt while any group's delta file is present. Narrowing it needs the group
+name, which the hook does not have at that point. Root and exclude entries
+cannot contain whitespace in EITHER form: the scope loops word-split them (a
+block-form `my dir/` becomes `my` and `dir/`). Inline `[a, b]` lists are also
+split on commas, so a glob containing a literal comma needs the block form.
+
+**Rollout, stated plainly.** The hook and tools arrive in the same sync commit,
+so there is no mixed-version window. Until a child adds `coverage.yaml` the gate
+is advisory there. Measured on the live children at the time of this amendment
+(their own data, not changed here): markpreston carries a duplicate id
+`config-next`, which already blocks any commit that stages its graph — fix it
+before adding `coverage.yaml`, or the first in-scope commit deadlocks between
+the two gates. web-editor has two edges with relation `imports`, outside the
+taxonomy, which already fail its own validator; and 102 seeder-default
+descriptions, which the gate will ask to be written as those files are touched.
 
 ## Amendment 8 — Node ID Uniqueness Is Validated (2026-10-24)
 

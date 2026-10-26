@@ -21,7 +21,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 GRAPH_DIR="$REPO_ROOT/docs/ai/knowledge-graph"
-GRAPH_FILE="$GRAPH_DIR/graph.yaml"
+# The product graph is the only graph (t-0034 Amendment 9 retired graph.yaml).
 PRODUCT_FILE="$GRAPH_DIR/product-graph.yaml"
 # Script-level default prevents "unbound variable" from EXIT traps registered
 # inside subcommand functions (local tmpdir goes out of scope on function return).
@@ -69,7 +69,6 @@ parse_graphs() {
   : > "$edges_file"
 
   local files=()
-  [ -f "$GRAPH_FILE" ] && files+=("$GRAPH_FILE")
   [ -f "$PRODUCT_FILE" ] && files+=("$PRODUCT_FILE")
 
   if [ "${#files[@]}" -eq 0 ]; then
@@ -80,7 +79,7 @@ parse_graphs() {
   if command -v yq &>/dev/null && yq --version 2>&1 | grep -q "v4\|version 4"; then
     # yq v4 path
     for f in "${files[@]}"; do
-      yq '.nodes[] | [.id, .type, (.layer // "template"), .description] | @tsv' "$f" >> "$nodes_file" 2>/dev/null || true
+      yq '.nodes[] | [.id, .type, (.layer // "product"), .description] | @tsv' "$f" >> "$nodes_file" 2>/dev/null || true
       yq '.edges[] | [.source, .target, .relation, (.source_type // "agent-inferred"), ((.confidence // 0.5) | tostring)] | @tsv' "$f" >> "$edges_file" 2>/dev/null || true
     done
   elif command -v python3 &>/dev/null; then
@@ -101,7 +100,7 @@ try:
         for n in (data or {}).get('nodes', []):
             nid = str(n.get('id', '')).replace('\t', ' ')
             ntype = str(n.get('type', '')).replace('\t', ' ')
-            nlayer = str(n.get('layer', 'template')).replace('\t', ' ')
+            nlayer = str(n.get('layer', 'product')).replace('\t', ' ')
             ndesc = str(n.get('description', '')).replace('\t', ' ')
             nf.write(f"{nid}\t{ntype}\t{nlayer}\t{ndesc}\n")
     with open(edges_file, 'a') as ef:
@@ -414,7 +413,6 @@ while [ $# -gt 0 ]; do
     --graph-dir)
       shift
       GRAPH_DIR="${1:-}"
-      GRAPH_FILE="$GRAPH_DIR/graph.yaml"
       PRODUCT_FILE="$GRAPH_DIR/product-graph.yaml"
       shift
       ;;

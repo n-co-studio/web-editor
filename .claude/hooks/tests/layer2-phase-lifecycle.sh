@@ -707,6 +707,13 @@ assert_file_exists "$_l2_sd/qa-verified" "a REFUSED re-init leaves evidence unto
 rm -f "$_l2_sd/phase-state"
 init_phase standard > /dev/null 2>&1
 _l2_seed_evidence
+# The two derived files init_phase writes at its END, after the ancestry
+# check's return paths, carrying the previous unit's content. Neither holds an
+# approval, but both describe a unit that no longer exists: the gates cache
+# would serve that unit's overlap/isolation verdicts, and the resume marker
+# would steer a compressed session back into it (R40 residual).
+printf "GATES_SESSION_ID='%s'\nGATES_PHASE='verify'\n" "$_l2_sid" > "$_l2_sd/phase-state.gates"
+printf 'session_type: previous-unit\nphase: verify\n' > "$_l2_sd/session-resume.yaml"
 _l2_real_ancestry=$(declare -f _check_main_ancestry)
 _check_main_ancestry() { return 1; }
 _l2_rc=0
@@ -717,6 +724,26 @@ assert_file_not_exists "$_l2_sd/qa-verified" \
   "a re-init that fails AFTER the rewrite still cleared the approvals (no fresh phase beside stale verdicts)"
 assert_file_not_exists "$_l2_sd/plan-approved" \
   "...and plan-approved too, so the next attempt re-earns approval"
+assert_file_not_exists "$_l2_sd/phase-state.gates" \
+  "...and the previous unit's gates cache does not survive the failed init"
+assert_file_not_exists "$_l2_sd/session-resume.yaml" \
+  "...nor its resume marker"
+
+# The other failure return: ancestry cannot be determined at all (status 2 —
+# no main ref, or a detached HEAD). Same files, same expectation.
+rm -f "$_l2_sd/phase-state"
+init_phase standard > /dev/null 2>&1
+printf "GATES_SESSION_ID='%s'\n" "$_l2_sid" > "$_l2_sd/phase-state.gates"
+printf 'session_type: previous-unit\n' > "$_l2_sd/session-resume.yaml"
+_check_main_ancestry() { return 2; }
+_l2_rc=0
+REPO_OS_ALLOW_REINIT=1 init_phase standard > /dev/null 2>&1 || _l2_rc=$?
+eval "$_l2_real_ancestry"
+assert_fail "$_l2_rc" "a re-init whose ancestry cannot be determined is refused"
+assert_file_not_exists "$_l2_sd/phase-state.gates" \
+  "...and leaves no stale gates cache"
+assert_file_not_exists "$_l2_sd/session-resume.yaml" \
+  "...and no stale resume marker"
 
 # --- Characterization: close must delete exactly the pre-refactor set ---
 # Pins close's BEHAVIOUR, not the variable. An earlier version of this case
@@ -792,6 +819,22 @@ assert_contains "$_l2_clear_err" "qa-verified" \
   "...and names the file"
 rm -f "$_l2_sd/qa-verified"
 
+# --- ...and a FIRST init reports it as a first init, not a re-init ---
+# The first-init/re-init wording split was applied to the cleared branch only,
+# so a first init that could not clear a foreign file announced itself as a
+# re-init and logged reinit_evidence_not_cleared — the confusion the split was
+# made to remove. With no phase-state this is a first init.
+rm -f "$_l2_sd/phase-state"
+printf 'GATE_RESULT: APPROVED\nsession_id: a-different-session\n' > "$_l2_sd/qa-verified"
+_l2_clear_err=$(init_phase standard 2>&1 >/dev/null || true)
+assert_contains "$_l2_clear_err" "first init could NOT clear" \
+  "a first init reports what it could not clear as a FIRST init"
+case "$_l2_clear_err" in
+  *"re-init could NOT clear"*) _tap_fail "...and never calls itself a re-init" "$_l2_clear_err" ;;
+  *) _tap_pass "...and never calls itself a re-init" ;;
+esac
+rm -f "$_l2_sd/qa-verified"
+
 # --- The structured log, not just the stderr line ---
 # The log_hook_event calls are wrapped in `2>/dev/null || true`, so a wrong
 # signature or an unavailable logger fails silently — and that event is the only
@@ -826,6 +869,16 @@ if [ -f "$_l2_events" ]; then
   _l2_ev2=$(grep 'first_init_cleared' "$_l2_events" 2>/dev/null | tail -1 || true)
   assert_contains "$_l2_ev2" "first_init_cleared" \
     "a first-init clear logs first_init_cleared, not reinit_cleared"
+
+  # ...and the could-NOT-clear event carries the same split. It did not: a
+  # first init that hit a foreign file logged reinit_evidence_not_cleared.
+  rm -f "$_l2_sd/phase-state"
+  printf 'GATE_RESULT: APPROVED\nsession_id: a-different-session\n' > "$_l2_sd/qa-verified"
+  init_phase standard > /dev/null 2>&1
+  _l2_ev3=$(grep 'evidence_not_cleared' "$_l2_events" 2>/dev/null | tail -1 || true)
+  assert_contains "$_l2_ev3" "first_init_evidence_not_cleared" \
+    "a first init that cannot clear logs first_init_evidence_not_cleared"
+  rm -f "$_l2_sd/qa-verified"
 else
   assert_eq "missing" "$_l2_events" "analytics event file exists after a clear"
 fi

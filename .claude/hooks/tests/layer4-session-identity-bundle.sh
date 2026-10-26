@@ -812,16 +812,18 @@ rm -f "$SB/.claude/.session-id" "$SB"/.claude/.session-id.* 2>/dev/null || true
 # between the two briefs below; they carry over, exactly as in the daemon loop.
 _CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
 
-export REPO_OS_SESSION_ID="daemon-brief-1"
+# The ids carry $$ so that even a rooting failure cannot land this case on a
+# real session's state directory (known-issue R41).
+export REPO_OS_SESSION_ID="daemon-brief-1-$$"
 get_session_id "$SB" > /dev/null
 get_session_state_dir > /dev/null
 SID_B1="$_CACHED_SESSION_ID"; SD_B1="$_CACHED_SESSION_STATE_DIR"
-assert_eq "$SID_B1" "daemon-brief-1" "brief 1 resolves to its own injected id"
+assert_eq "$SID_B1" "daemon-brief-1-$$" "brief 1 resolves to its own injected id"
 
-export REPO_OS_SESSION_ID="daemon-brief-2"
+export REPO_OS_SESSION_ID="daemon-brief-2-$$"
 get_session_id "$SB" > /dev/null
 SID_B2="$_CACHED_SESSION_ID"
-assert_eq "$SID_B2" "daemon-brief-2" "brief 2 follows the NEW env id despite a populated cache"
+assert_eq "$SID_B2" "daemon-brief-2-$$" "brief 2 follows the NEW env id despite a populated cache"
 
 # The state dir is derived from the id, so a stale dir cache is the same defect
 # wearing a different hat — and it is the one that actually mis-routed
@@ -836,7 +838,7 @@ esac
 
 # Idempotence: re-asserting the SAME id must not thrash the cache.
 get_session_id "$SB" > /dev/null
-assert_eq "$_CACHED_SESSION_ID" "daemon-brief-2" "repeat call with an unchanged env id is stable"
+assert_eq "$_CACHED_SESSION_ID" "daemon-brief-2-$$" "repeat call with an unchanged env id is stable"
 
 unset REPO_OS_SESSION_ID
 _CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""

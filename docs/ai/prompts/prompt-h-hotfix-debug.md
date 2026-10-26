@@ -195,9 +195,9 @@ Read the output before proposing the fix strategy. This surfaces dependency and 
 ### Graph Writes at Close
 
 REQUIRE: attempt knowledge graph writes at close before the final commit per Decision 0034 Amendment 3. Use the same REQUIRE-attempt/tolerate-failure pattern as Prompt B:
-- Write new nodes for files created, new edges for connections discovered
-- If the write fails (lock contention, parse error), log the failure in closing summary and proceed to commit
-- Do not block the close sequence on graph write failures
+- Write new nodes for files created (descriptions that say what the file does — not `"Product source file"`, 20+ characters), move a node's `path` on a rename, stale or remove it on a deletion, and add edges for connections discovered
+- If the write itself fails (lock contention, parse error), log the failure in closing summary and proceed
+- The commit is still subject to the blocking KG product-graph gate (Decision 0034 Amendment 9): in-scope product files staged without a matching node block it. Fix the nodes and `git add docs/ai/knowledge-graph/product-graph.yaml`; do not treat a write failure as licence to commit around the gate
 
 ## Rules
 

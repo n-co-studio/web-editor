@@ -3910,9 +3910,13 @@ $_ENTRY_NOTES"
 
   # Transition call with return-code checks
   _transition_ok=true
-  # A preserved-work patch must be findable from the entry whatever the outcome:
-  # untracked-only work classifies as completed:clean-noop, so every transition
-  # below carries the note. Empty when nothing was preserved (error_log unchanged).
+  # A preserved-work patch must be findable from the entry whatever the outcome,
+  # so every transition below carries the note. The completed branch carried it
+  # because untracked-only work used to classify as completed:clean-noop; since
+  # R34 that work is review:dirty-noop, and work-preserver.sh patches only
+  # commit-less sessions, so no completed outcome is expected to carry one now.
+  # The note stays on every branch so a future outcome cannot silently drop it.
+  # Empty when nothing was preserved (error_log unchanged).
   _pw_note=$(preserved_work_note "$_RESULT_PRESERVED_PATCH" "$REPO_ROOT")
   case "$OUTCOME" in
     completed)

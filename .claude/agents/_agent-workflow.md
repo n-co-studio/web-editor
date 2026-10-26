@@ -194,7 +194,7 @@ User Review agents are dispatched by the Orchestrator during the `user-review` p
 
 ## Knowledge Graph Protocol (Decision 0034)
 
-Canonical definition in `_agent-glossary.md` § Knowledge Graph Protocol. Two-graph architecture (`graph.yaml` for template, `product-graph.yaml` for product). Agents in build sessions read `.claude/.state/kg-relevance-context` (pre-computed by `_phase-helper.sh` at build entry) before broad searches; write graph updates at session close via shell I/O. Session-type profiles: Full (Prompt B), Expedited (Prompt H — call `kg-relevance.sh` directly), Light (Prompt E), Audit (read-only). See glossary for full rules (locking, edge types, write-at-close REQUIRE, lifecycle).
+Canonical definition in `_agent-glossary.md` § Knowledge Graph Protocol. One graph, `product-graph.yaml` (the template graph was retired — Decision 0034 Amendment 9). Agents in build sessions read `.claude/.state/kg-relevance-context` (pre-computed by `_phase-helper.sh` at build entry) before broad searches; write graph updates at session close via shell I/O. Session-type profiles: Full (Prompt B), Expedited (Prompt H — call `kg-relevance.sh` directly), Light (Prompt E), Audit (read-only). See glossary for full rules (locking, edge types, write-at-close REQUIRE, lifecycle).
 
 ---
 

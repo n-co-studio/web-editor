@@ -60,8 +60,12 @@ docs/spec/prototypes/
 # Child-sync config (template-operator-specific local paths)
 .claude/.automation/child-repos.conf
 
-# Product knowledge graph (child-owned, never overwritten by template sync)
+# Product knowledge graph and its coverage scope (child-owned). The template ships
+# neither file, so these entries keep them out of the machinery manifest; they are
+# not what protects a child's copy — the withdrawn-file sweep only ever deletes
+# files that appeared in a previous manifest (t-0034 Amendment 9).
 docs/ai/knowledge-graph/product-graph.yaml
+docs/ai/knowledge-graph/coverage.yaml
 
 # Workflow files (repo-specific; GITHUB_TOKEN cannot push workflow changes)
 #

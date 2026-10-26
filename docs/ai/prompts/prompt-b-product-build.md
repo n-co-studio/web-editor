@@ -151,7 +151,7 @@ Branches merge to main directly at session close. See `.claude/agents/_agent-glo
 
 At session init, after branch creation and spec loading:
 
-**Product graph auto-seeding (first-session guard):** If `docs/ai/knowledge-graph/product-graph.yaml` does not exist, run `.claude/tools/kg-seed.sh --target product` to bootstrap the product graph. Skip if the file already exists. This is a first-session-only operation — the guard prevents redundant re-seeding.
+**Product graph auto-seeding (first-session guard):** If `docs/ai/knowledge-graph/product-graph.yaml` does not exist, run `.claude/tools/kg-seed.sh --target product` to bootstrap the product graph, passing one `--file-pattern` per source extension (e.g. `--file-pattern 'src/**/*.ts' --file-pattern 'src/**/*.tsx'`). Skip if the file already exists — the seeder refuses to overwrite one. This is a first-session-only operation. The seeded nodes all say `"Product source file"`, which the commit gate rejects; they become real as files are touched. The gate stays advisory until the repo declares its scope in `docs/ai/knowledge-graph/coverage.yaml` (roots and extensions — see `docs/ai/knowledge-graph/README.md`); propose that file to the operator rather than inventing its roots.
 
 Extract the task contract from the brief text:
 
@@ -207,15 +207,16 @@ Skip silently when none of the above conditions are met.
 
 ## Knowledge Graph Integration (Decision 0034 — Full Profile)
 
-When either `docs/ai/knowledge-graph/graph.yaml` (template) or `product-graph.yaml` (product) exists, the Builder participates in the knowledge graph lifecycle:
+When `docs/ai/knowledge-graph/product-graph.yaml` exists, the Builder participates in the knowledge graph lifecycle. It is the only graph: the template graph (`graph.yaml`) was retired in Decision 0034 Amendment 9.
 
-### Graph File Routing
-- **Template files** (governance, hooks, prompts, decisions, agents) → update `graph.yaml`
-- **Product files** (application code, product features) → update `product-graph.yaml`
-- **Cross-layer edges** (e.g., product node depends-on template hook) → stored in the source node's graph
+### Graph Writes
+- **Product files** (application code, product features) → update `product-graph.yaml`. A node needs a description that says what the file does — the seeder default `"Product source file"` and anything under 20 characters are rejected at commit.
+- **Renames** → update the existing node's `path`; **deletions** → remove the node or set `status: stale`.
+- Governance files (hooks, prompts, decisions, agents) are not graphed.
+- Edges that point at retired template node ids are left alone; they are reported as dangling, advisory only.
 
 ### Graph-First File Discovery
-REQUIRE: when `.claude/.state/kg-relevance-context` exists and is non-empty, read it before running any broad codebase search (`grep -r`, `find`, repo-wide glob patterns). At build phase entry, `_phase-helper.sh` automatically runs `kg-relevance.sh` (which searches both graphs) and writes pre-computed relevance-scored connections to `.claude/.state/kg-relevance-context`.
+REQUIRE: when `.claude/.state/kg-relevance-context` exists and is non-empty, read it before running any broad codebase search (`grep -r`, `find`, repo-wide glob patterns). At build phase entry, `_phase-helper.sh` automatically runs `kg-relevance.sh` (over the product graph) and writes pre-computed relevance-scored connections to `.claude/.state/kg-relevance-context`.
 
 Use grep/glob search only for:
 - Files not yet in the knowledge graph
@@ -238,7 +239,7 @@ The write path branches on session type:
 - Updated `last_verified` dates for existing edges you traversed and confirmed
 - Edge types are limited to the 8-type taxonomy: `governs`, `constrains`, `implements`, `depends-on`, `produces`, `consumes`, `tests`, `supersedes`
 
-Use `mkdir`-based locking per Decision 0034 before writing. Template graph uses `.graph-lock`, product graph uses `.product-graph-lock`. Operator-curated edges (`source_type: operator-curated`) are never modified by agents.
+Use `mkdir`-based locking per Decision 0034 before writing (`.product-graph-lock`). Operator-curated edges (`source_type: operator-curated`) are never modified by agents.
 
 **Parallel content brief (`Execution: parallel` in `### Task Group`):** Do NOT write to the shared graph. Instead, author a per-brief KG delta at `$_REPO_OS_ROOT/.claude/.state/tg-{group}-brief-{seq}.kg-delta.yaml` via shell I/O from the worktree's main session. Schema and authoring rules: see `.claude/agents/builder.md` § Knowledge Graph Delta and Decision 0034 Amendment 5. The merge brief aggregates all per-brief deltas in a single locked write — eliminates the N+1 lock contention pattern.
 
@@ -247,7 +248,7 @@ Use `mkdir`-based locking per Decision 0034 before writing. Template graph uses 
 2. Run `bash .claude/tools/kg-merge-deltas.sh {group}` — reads all per-brief deltas + the merge-brief delta, dedups (last `authored_at` wins on `last_verified`; max wins on `confidence`; first-seen wins on `status` conflict; operator-curated edges immutable), and applies the union to the shared graph under a single lock.
 3. If `$_REPO_OS_ROOT/.claude/.state/kg-aggregation-conflicts.log` was written, surface those tuples as CRITICAL cohesion findings — do not silently accept.
 
-REQUIRE: attempt graph writes (or delta writes for parallel content briefs) at close before the final commit. If the write fails (lock contention, parse error), log the failure in the closing summary and proceed to commit — do not block the close sequence. Skipping the attempt entirely is a REQUIRE violation (Decision 0034 Amendment 3). Note: this tolerate-failure stance governs close-time writes only. The KG Update Gate in `pre-commit-gates.sh` (Decision 0034 Amendment 7) is separately blocking at commit time — a staged governance file without a graph node or without a graph update this session will block the commit regardless of the close-write outcome.
+REQUIRE: attempt graph writes (or delta writes for parallel content briefs) at close before the final commit. If the write fails (lock contention, parse error), log the failure in the closing summary and proceed to commit — do not block the close sequence. Skipping the attempt entirely is a REQUIRE violation (Decision 0034 Amendment 3). Note: this tolerate-failure stance governs close-time writes only. The KG product-graph gate in `pre-commit-gates.sh` (Decision 0034 Amendment 9) is separately blocking at commit time — a staged product file inside the repo's `coverage.yaml` scope without a described node, a renamed or deleted file whose node was left behind, or no graph update this session will block the commit regardless of the close-write outcome. Fix it, then `git add docs/ai/knowledge-graph/product-graph.yaml`.
 
 ## Operating Rules
 - REQUIRE: at session start, create a branch from main: `git checkout -b <category>/<description>` (standard: `feature/<description>`, hotfix: `hotfix/<description>`)

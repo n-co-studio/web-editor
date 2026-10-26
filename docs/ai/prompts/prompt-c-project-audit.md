@@ -144,7 +144,7 @@ Prompt C uses the **Audit profile** from Amendment 3: read-only KG access via th
 
 ### Graph Context
 
-When the `graph-health` dimension is selected (Standard or Deep tier), the Auditor runs in `graph-health` mode which reads both `docs/ai/knowledge-graph/graph.yaml` and `docs/ai/knowledge-graph/product-graph.yaml` directly. No `kg-relevance-context` injection — the Auditor consumes the full graph for structural analysis.
+When the `graph-health` dimension is selected (Standard or Deep tier), the Auditor runs in `graph-health` mode which reads `docs/ai/knowledge-graph/product-graph.yaml` directly (the only graph since Decision 0034 Amendment 9). No `kg-relevance-context` injection — the Auditor consumes the full graph for structural analysis.
 
 When `graph-health` is NOT selected, `.claude/.state/kg-relevance-context` may still be present from a prior session. It is advisory — check it for relevant connections if it exists, but do not block on its absence.
 

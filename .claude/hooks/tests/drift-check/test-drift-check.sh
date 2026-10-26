@@ -13,11 +13,47 @@ FAIL=0
 _pass() { PASS=$((PASS + 1)); printf 'PASS: %s\n' "$1"; }
 _fail() { FAIL=$((FAIL + 1)); printf 'FAIL: %s\n' "$1"; }
 
+# Root every helper in a sandbox BEFORE sourcing (known-issue R41). This file
+# used to source the helpers bare, so _REPO_OS_ROOT was the real repo and the
+# drift_check fall-through cases below appended to the LIVE session's
+# overrides.log (observed 2026-10-25). /tmp, not mktemp's default: macOS
+# TMPDIR is /var/folders/..., which the seam rejects and silently replaces with
+# the real root. A failed mktemp must stop here — with SANDBOX empty, the lines
+# below would write under /.claude.
+SANDBOX="$(mktemp -d /tmp/drift-check-test.XXXXXX)" || { echo "Bail out! cannot create a sandbox under /tmp"; exit 2; }
+trap 'rm -rf "$SANDBOX"' EXIT
+mkdir -p "$SANDBOX/.claude/.state"
+git init -q "$SANDBOX" 2>/dev/null || true
+echo "drift-check-test-$$" > "$SANDBOX/.claude/.session-id"
+export REPO_OS_TEST_MODE=1
+export _REPO_OS_TEST_ROOT="$SANDBOX"
+export REPO_OS_SESSION_ID="drift-check-test-$$"
+
 # Source helpers
 # shellcheck source=../../_analytics-helper.sh
 source "$REPO_ROOT/.claude/hooks/_analytics-helper.sh"
 # shellcheck source=../../_phase-helper.sh
 source "$REPO_ROOT/.claude/hooks/_phase-helper.sh"
+
+# Refuse to continue if the seam did not take: every case below would then run
+# against the real repository's session state.
+case "$_REPO_OS_ROOT:$(get_session_state_dir)" in
+  "$SANDBOX:$SANDBOX"/*) ;;
+  *)
+    printf 'Bail out! helpers resolved to %s (state %s), not the sandbox %s (R41)\n' \
+      "$_REPO_OS_ROOT" "$(get_session_state_dir)" "$SANDBOX"
+    exit 2
+    ;;
+esac
+# The main root is CWD-based, so it gets the seam's prefix rule: outside /tmp
+# it is a real repo, and handoff-bundle paths route through it.
+case "$(get_main_repo_root)" in
+  /tmp/*|/private/tmp/*) ;;
+  *)
+    printf 'Bail out! main repo root is %s, outside /tmp — a real repo (R41)\n' "$(get_main_repo_root)"
+    exit 2
+    ;;
+esac
 
 # -- bundle_valid tests --
 
@@ -90,26 +126,36 @@ fi
 
 # -- advance_phase forward-jump: drift-check → build (Decision 0038) --
 # Verifies the skippable-set extension lets the bundle path advance correctly.
-TMP_REPO="$(mktemp -d)"
+# The repo is a subdirectory of the sandbox so it passes the seam's /private/tmp
+# prefix rule. The root is redirected through _REPO_OS_TEST_ROOT, never by
+# assigning _REPO_OS_ROOT: re-sourcing the helper recomputes _REPO_OS_ROOT, so
+# an assignment made before it is silently discarded — which is how this case
+# used to write the real repo's cross-session-context on every run (R41).
+TMP_REPO="$SANDBOX/fwdjump-repo"
+FWD_SID="test-session-fwdjump-$$"
 mkdir -p "$TMP_REPO/.claude/.state"
-echo "test-session-fwdjump" > "$TMP_REPO/.claude/.session-id"
+echo "$FWD_SID" > "$TMP_REPO/.claude/.session-id"
 (
-  export REPO_OS_SESSION_ID="test-session-fwdjump"
-  export _REPO_OS_ROOT="$TMP_REPO"
+  export REPO_OS_SESSION_ID="$FWD_SID"
+  export _REPO_OS_TEST_ROOT="$TMP_REPO"
   # Re-source so the helpers re-resolve _REPO_OS_ROOT.
   source "$REPO_ROOT/.claude/hooks/_analytics-helper.sh"
   source "$REPO_ROOT/.claude/hooks/_phase-helper.sh"
   get_session_state_dir() { echo "$TMP_REPO/.claude/.state"; }
   # Seed phase-state at drift-check directly (mirrors what advance_phase would do).
-  printf 'session_type: standard\nsession_id: test-session-fwdjump\nmode: review\ncurrent_phase: drift-check\ncycle: 1\nphases_completed: init\nsolo: false\ntag: agent\ntimestamp: 2099-01-01T00:00:00Z\n' \
+  printf 'session_type: standard\nsession_id: %s\nmode: review\ncurrent_phase: drift-check\ncycle: 1\nphases_completed: init\nsolo: false\ntag: agent\ntimestamp: 2099-01-01T00:00:00Z\n' "$FWD_SID" \
     > "$TMP_REPO/.claude/.state/phase-state"
   # Seed plan-approved and pragmatist-signed (mirrors what drift_check would write).
-  printf 'session_id: test-session-fwdjump\nmode: review\nlarge-scope: true\nquestion_hash: test\n' > "$TMP_REPO/.claude/.state/plan-approved"
-  printf 'GATE_RESULT: APPROVED\nsession_id: test-session-fwdjump\n' > "$TMP_REPO/.claude/.state/pragmatist-signed"
+  printf 'session_id: %s\nmode: review\nlarge-scope: true\nquestion_hash: test\n' "$FWD_SID" > "$TMP_REPO/.claude/.state/plan-approved"
+  printf 'GATE_RESULT: APPROVED\nsession_id: %s\n' "$FWD_SID" > "$TMP_REPO/.claude/.state/pragmatist-signed"
   _PS_VALIDATED=false
   _CACHED_CURRENT_SID=""
+  if [ "$_REPO_OS_ROOT" != "$TMP_REPO" ]; then
+    echo "__FAIL__: helpers resolved to $_REPO_OS_ROOT, not $TMP_REPO — refusing to advance a real session (R41)"
+    exit 0
+  fi
   # Forward-jump drift-check → build (skipping plan + approval)
-  if advance_phase "build" 2>/tmp/adv-err; then
+  if advance_phase "build" 2>"$SANDBOX/adv-err"; then
     new_phase=$(grep '^current_phase:' "$TMP_REPO/.claude/.state/phase-state" | sed 's/^current_phase: *//')
     if [ "$new_phase" = "build" ]; then
       echo "__PASS__: advance_phase drift-check→build succeeds and updates phase-state"
@@ -117,20 +163,20 @@ echo "test-session-fwdjump" > "$TMP_REPO/.claude/.session-id"
       echo "__FAIL__: advance_phase succeeded but phase didn't update — got '$new_phase'"
     fi
   else
-    echo "__FAIL__: advance_phase drift-check→build was rejected — $(cat /tmp/adv-err)"
+    echo "__FAIL__: advance_phase drift-check→build was rejected — $(cat "$SANDBOX/adv-err")"
   fi
-) > /tmp/fwd-jump-out 2>&1
-if grep -q '^__PASS__' /tmp/fwd-jump-out; then
+) > "$SANDBOX/fwd-jump-out" 2>&1
+if grep -q '^__PASS__' "$SANDBOX/fwd-jump-out"; then
   _pass "advance_phase: drift-check → build forward-jump succeeds"
 else
-  _fail "advance_phase: drift-check → build forward-jump — $(cat /tmp/fwd-jump-out)"
+  _fail "advance_phase: drift-check → build forward-jump — $(cat "$SANDBOX/fwd-jump-out")"
 fi
-rm -rf "$TMP_REPO" /tmp/fwd-jump-out /tmp/adv-err
+rm -rf "$TMP_REPO" "$SANDBOX/fwd-jump-out" "$SANDBOX/adv-err"
 
 # -- success-path drift_check test (return 0 with state file writes) --
 
 # Use an isolated temp state dir to avoid clobbering the real session.
-TMP_STATE_DIR="$(mktemp -d)/state"
+TMP_STATE_DIR="$SANDBOX/success-path/state"
 mkdir -p "$TMP_STATE_DIR"
 _orig_state_dir_fn=$(declare -f get_session_state_dir)
 get_session_state_dir() { echo "$TMP_STATE_DIR"; }
