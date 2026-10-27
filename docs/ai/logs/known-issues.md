@@ -27,6 +27,15 @@ Deferred findings from review phases that are out of the current brief's scope a
 - **Scope:** Fixing this means either adding the remaining packages to the root `references` array (and making them composite projects) or changing gate A3.3 to iterate packages. Both are outside a UI-behaviour brief.
 - **Follow-up:** Open a dedicated brief to make root typecheck cover all packages and to align gate A3.3 with it.
 
+### KL-3 — `zod` advisory GHSA-mrhx-c7xc-m3w5 is unfixable until the MCP SDK supports zod 4
+- **File:** `packages/mcp-server/package.json` (`zod: ^3.23.0`), `package-lock.json`
+- **Symptom:** `npm audit --omit=dev` reports one high advisory — zod memory exhaustion while validating oversized constrained collections (CWE-400, availability only). It sits in a production-path dependency, so it reaches consumers.
+- **Why it is not fixed:** the remedy is zod 4.6.7, a **major** bump. `@modelcontextprotocol/sdk@1.32.2` and `zod-to-json-schema@3.25.1` both resolve `zod@3.25.76`, and the SDK declares zod 3.x. `npm audit fix --force` would install an incompatible major under the SDK — a likely runtime break that patches nothing. There is no 3.x backport.
+- **Exposure:** limited. The bridge binds loopback only (`packages/mcp-server/src/bridge.ts:514`, `host: '127.0.0.1'`) with a WebSocket Origin allowlist of `localhost`/`127.0.0.1`/`::1` (`bridge.ts:532-552`). Reaching it requires local access, and the impact is availability with no confidentiality or integrity component.
+- **Discovered:** Session `5d149e99`, security sign-off, 2026-10-26. Accepted as non-blocking by that review on the two conditions recorded here: the loopback binding was verified in code, and the advisory is logged.
+- **Trigger to revisit:** an `@modelcontextprotocol/sdk` release that supports zod 4. Re-run `npm audit --omit=dev` at that point.
+- **Related:** the critical `proxy-addr` advisory (GHSA-jqcg-44mw-7w3h) in the same tree **was** cleared in this session, but note that the SDK bump alone did not do it — `express@5.2.1` held a transitive pin at `proxy-addr@2.0.7` and `npm audit fix` was needed on top. A direct-dependency bump is not evidence that a transitive advisory is gone; check `npm ls <pkg>`.
+
 ---
 
 ## Governance Tooling Defects (fix belongs upstream, in the Repo OS template)
