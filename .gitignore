@@ -82,6 +82,11 @@ docs/ai/knowledge-graph/.product-graph-lock
 packages/chrome-extension/dist-zip/
 dist-zip/
 
+# npm pack output. scripts/smoke-test.mjs is a documented pre-release step and
+# packs both public packages into the package dirs; without this a `git add -A`
+# after running it commits the tarballs.
+*.tgz
+
 # MCP server runtime state (project-local, not template-managed)
 # server.lock holds the running server's PID; pending-queue.json is the
 # crash-recovery queue described in docs/spec/compiled/v1/architecture.md.
