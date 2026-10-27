@@ -9,9 +9,9 @@ AI Agent Visual Editor uses a typed WebSocket protocol (`WS_PROTOCOL_VERSION`) b
 | Component | Current version | npm package |
 |-----------|----------------|-------------|
 | Protocol | **0.4.0** | (defined in `@nco-studio/shared`) |
-| MCP server | **0.2.1** | `@nco-studio/web-editor-mcp` |
-| Chrome extension | **0.2.1** | (Chrome Web Store / manual install) |
-| Dev plugin | **0.2.1** | `@nco-studio/web-editor-plugin` |
+| MCP server | **0.3.0** | `@nco-studio/web-editor-mcp` |
+| Chrome extension | **0.3.0** | (Chrome Web Store / manual install) |
+| Dev plugin | **0.3.0** | `@nco-studio/web-editor-plugin` |
 
 ---
 
@@ -64,29 +64,49 @@ A major version bump signals a breaking protocol change. At that point you will 
 
 ## Upgrade guidance
 
+Within `0.x`, nothing here is required — see "Do I need to do anything?" below.
+These steps are for pinned setups, or for the eventual `1.0.0` bump.
+
 ### Upgrading the MCP server
 
-Update the pin in `.mcp.json`:
+With the recommended `@^0` pin, there is nothing to do: the next `npx`
+resolution picks up the newest `0.x`. If you pinned an exact version, update it
+in `.mcp.json`:
 
 ```json
-"args": ["--yes", "@nco-studio/web-editor-mcp@^2"]
+"args": ["--yes", "@nco-studio/web-editor-mcp@0.3.0"]
 ```
 
-Or pin to a specific version:
+To force a refresh of a cached `npx` resolution, run it once directly:
 
-```json
-"args": ["@nco-studio/web-editor-mcp@2.0.0"]
+```sh
+npx --yes @nco-studio/web-editor-mcp@latest
 ```
 
 ### Upgrading the dev plugin
 
 ```sh
-npm install --save-dev @nco-studio/web-editor-plugin@^2
+npm install --save-dev @nco-studio/web-editor-plugin@^0
 ```
+
+Restart the Vite dev server afterwards — the plugin is a build-time transform,
+so a running server keeps the old one.
 
 ### Upgrading the extension
 
-Download the new version from the [Releases page](../../releases) and follow the install steps in [QUICKSTART.md](QUICKSTART.md#step-3--install-the-chrome-extension).
+Chrome updates it from the [Chrome Web Store](https://chromewebstore.google.com/detail/ai-agent-visual-editor/aifpecjojmlgdhgnkmkaobmfipdmppea)
+automatically, usually within a few hours. To take it immediately, open
+`chrome://extensions`, enable Developer mode and press **Update**. If you
+installed unpacked, download the new `.zip` from the
+[latest release](https://github.com/n-co-studio/web-editor/releases/latest)
+and re-load it.
+
+### Do I need to do anything?
+
+For **0.2.1 → 0.3.0, no.** `WS_PROTOCOL_VERSION` is unchanged at `0.4.0`, so a
+`0.2.1` server and a `0.3.0` extension talk to each other normally and no
+mismatch banner appears. There is no stored-settings migration. The MCP server
+updates itself under the `@^0` pin, and the dev plugin is version-independent.
 
 ---
 
