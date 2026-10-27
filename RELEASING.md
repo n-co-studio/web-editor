@@ -130,6 +130,33 @@ done; no credentials are leaked.
 
 ---
 
+## Deploying the hosted guide (nco.studio/web-editor/)
+
+Easy to forget, because it is not part of the npm or store release and has no
+CI workflow — but it is where the landing page, setup guide and screenshots
+live, and the extension links to it from `GUIDE_URL` and the store listing.
+
+**Build it with `build:site`, never plain `build`:**
+
+```sh
+cd examples/demo-app
+npm run build:site     # sets VITE_BASE_PATH=/web-editor/
+```
+
+`npm run build` defaults the Vite base to `/`, which produces asset paths like
+`/assets/index-*.js` and `/chrome-web-store-badge.png`. Served under the
+`/web-editor/` sub-path those all 404, and the page loads unstyled with broken
+images. `build:site` emits `/web-editor/...` paths instead.
+
+Verify before uploading `examples/demo-app/dist/`:
+
+```sh
+grep -oE '(src|href)="/[^"]*"' dist/index.html
+# every path must start with /web-editor/
+```
+
+Then deploy `examples/demo-app/dist/` to the `nco.studio/web-editor/` host.
+
 ## Tag + GitHub Release steps
 
 1. Commit all version bumps and changelog updates:
