@@ -44,6 +44,8 @@ Deferred findings from review phases that are out of the current brief's scope a
 - **Residual impact after `fe59ab6`:** that commit removed most of the consequence without touching the access. A client that reaches the bridge can no longer write a workflow file, an agent-config file or a `.php` into the project, crash the server, or steer the agent through `sourceFile`. It can still read the token and component registries (including `importPath`, so the project layout), inject diffs into the agent's queue, write bounded image/video files into asset directories, and claim another `tabId` to intercept that tab's pushes. Information disclosure and nuisance, not code execution.
 - **Discovered:** adversarial security review, 2026-10-26, ahead of 0.3.0.
 - **Deferred deliberately:** operator decision 2026-10-26 — ship 0.3.0 with the impact reduced and do the authentication work as its own release rather than rushing a protocol change. Full brief drafted; it needs filing through a `taskdef-brief` session, which is the only session type permitted to write `.claude/.automation/briefs/` (`write-guard.sh:449-464`).
+- **Target:** 0.3.1, together with KL-6 — they are one protocol change, not two.
+- **Reconsidered 2026-10-27:** this was deferred as a peer-authentication issue, which undersold it. The agent-facing framing now tells the agent to follow `notes`, and any script on a `localhost` page is an allowed peer, so the deferral also leaves a page-script peer holding a *trusted instruction channel*. The extension's shadow root is `mode: 'open'`, so page script can drive the note UI directly as well. Severity unchanged, but the reason it matters is broader than "who may connect".
 - **Follow-up:** brief `20261027-013000-bridge-peer-authentication`.
 
 ### KL-5 — SVG assets are refused over the bridge until they can be parsed properly
@@ -52,6 +54,25 @@ Deferred findings from review phases that are out of the current brief's scope a
 - **Why:** SVG is the one allowlisted asset type that is a script-capable document rather than inert bytes, and an SVG written into `public/` is served from the dev origin — so a scripted one is stored XSS on the very page being edited. The first attempt screened it with regexes. A review defeated that screen five ways: a namespace-prefixed `<s:script>` (the `<\s*script` pattern does not match it), entity-encoded or tab-split `javascript:` (the XML parser decodes after the regex has looked), a DOCTYPE `<!ENTITY>` declaration, and a UTF-16 BOM (the check decodes as UTF-8 and sees NUL-interleaved text while the browser honours the BOM). A regex cannot screen SVG; pretending otherwise was worse than refusing, because it read as a control.
 - **Proper fix:** parse with a real XML parser and allowlist elements and attributes, or reject any SVG carrying a DOCTYPE, an ENTITY, a non-UTF-8 BOM, or a prefixed or foreign-namespace element. That needs a parser dependency and a design decision about which SVG features to keep, so it is deliberately not a release-eve change.
 - **Discovered:** review of commit `fe59ab6`, 2026-10-26.
+
+### KL-6 — notes carry a page-built element reference the server cannot separate from the designer's words
+- **File:** `packages/chrome-extension/src/content/batching/notes-store.ts` (`formatElementRef`), `packages/mcp-server/src/bridge.ts` (`sanitizeNote`), `packages/mcp-server/src/server.ts` (framing)
+- **Symptom:** every note has an element reference appended to it — asset path, text content, selector, and `sourceFile:sourceLine` — all read from the live DOM. Server-side the note is a single string, so the designer's typed words and the page-derived suffix cannot be told apart. The agent-facing text says notes are the designer asking for something, which makes a note a comparatively trusted channel carrying untrusted content.
+- **Why it is not closed:** the fix is to send the reference as structured fields rather than splicing it into the text, so the server can screen `sourceFile` with `isPlausibleSourcePath`, allowlist `assetPath`, and cap and label `selector`/`textContent` separately from the designer's words. That is a protocol change across two independently-versioned packages, with the same four-way skew problem as KL-4, and should be done with capability negotiation in the handshake rather than as a flag day.
+- **Mitigated in 0.3.0, not fixed:** note text is type-checked, capped at 4000 characters, has control characters stripped and line breaks collapsed (so a crafted `data-source-file` cannot forge what looks like another numbered instruction in the designer's voice), and the same normalisation runs on restore. The framing says a note's paths, URLs and selectors are data to verify. None of that separates the two sources; it only bounds the damage.
+- **Note also:** the MCP server tells the user to add `.nco-web-editor/` to their project `.gitignore` (`bin/cli.ts:62`) but does not do it. A committed `pending-queue.json` is a shared instruction channel, which is why restore screening was added.
+- **Discovered:** third security review round, 2026-10-27.
+- **Target:** 0.3.1, together with KL-4.
+
+### KL-7 — smaller hardening items deferred from the 0.3.0 security rounds
+- **Per-field type validation of change entries.** `isValidDiff` checks the diff shape, `changes` being an array of non-null objects, and `batchId`. It does not type-check `changes[].property`/`toValue`, `attributeChanges` or `insertChanges`. Throws from those are contained per diff, so one bad entry is dropped rather than aborting the batch, but the entry is skipped silently after `DIFF_ACK` has already gone back — the designer is told the edit was received. Validate per field and report skips back to the extension.
+- **Windows reserved device names.** The asset filename stem is not checked for `CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`. On Windows that yields a silent no-op write or a hang, not an escape.
+- **Non-string `pendingUpload.filename`** throws in `assetFilename`; the caller catches and leaves the inline base64 in the diff.
+- **Unbounded page-derived fields reaching the agent.** `assetPath`, `label`, `element.attributes`, `selector`, `textContent`, `sourceHref`, `outerHTML` and `cssText` are passed through with no length limit and no screening, covered only by the untrusted-data framing.
+- **Duplicate diff ids within one batch** are queued twice; acknowledging removes one and the other is re-served.
+- **Persist and status writes are unserialised.** `safePersistQueue` and `safeWriteStatusFile` are fire-and-forget and share a `.tmp` name, so two quick writes can interleave and leave the older content in place. Serialise through a promise chain and write via temp-file-plus-rename.
+- **Discovered:** second and third security review rounds, 2026-10-26/27.
+- **Target:** 0.3.1.
 
 ---
 

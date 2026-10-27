@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [0.3.0] - 2026-10-26
 
-Rebuilds the hosted guide around what actually makes this different — MCP — and clears a critical dependency advisory. Also fixes a set of contrast and theming faults in the editing panels, including three the theme audit introduced itself.
+Rebuilds the hosted guide around what actually makes this different — MCP — hardens the MCP server against a hostile page, and clears a critical dependency advisory. Also fixes a set of contrast and theming faults in the editing panels, including three the theme audit introduced itself.
 
 ### Added
 
@@ -26,6 +26,19 @@ Rebuilds the hosted guide around what actually makes this different — MCP — 
 - **Several editing-panel controls were hard to see in light mode.** The insert panel's active tab underline and selected-item borders used a green that measures 2.54:1 on the light panel, below the 3:1 a non-text indicator needs. A token swatch lost its border permanently after the first hover, because the hover-out handler wrote a raw colour over the themed one. A log separator in the console pane was invisible on a light background.
 - **On-page measurement colours no longer change with the panel theme.** The measure overlay and multi-select outlines had been switched to a themed colour, so the same measurement drew differently depending on a panel setting, and the distance label fell to 2.54:1 in dark mode. Both now use a fixed colour, with the label on a darker ground at 6.7:1.
 - **Critical dependency advisory cleared** — `proxy-addr` (GHSA-jqcg-44mw-7w3h), reached through the MCP SDK and express. Production-path advisories went from six to one. The remaining one (`zod`, availability only) needs a major upgrade the MCP SDK does not yet support, and is tracked in `docs/ai/logs/known-issues.md` as KL-3.
+
+### Security
+
+An adversarial review of this release, and three review rounds on the fixes themselves, closed a set of issues in the MCP server. All of them are present in 0.2.1 — none is a regression — and none requires anything of you beyond updating.
+
+The one that mattered: **a page could get files written into your project.** A dev server often renders content you did not author (a seeded database, a production dump, user-generated records, a compromised front-end dependency), and script on such a page could reach the local bridge and choose both the directory and the file extension of an asset write. `.github/workflows/*.yml` runs on push with your repository secrets; `.claude/` and `.cursor/` files are read as agent instructions in a later session. Writes are now image and video only — the extension is derived from the declared type, the bytes must match it, and dot-directories are refused.
+
+- **Asset writes are confined.** Type, extension and content must agree; symlinks can no longer carry a write out of the project; `export_session` takes a `.json` name outside dot-directories and will not overwrite an existing file.
+- **The server no longer dies on a malformed message**, and a single bad entry in a batch no longer discards the rest of it. A diff that would have broken the change queue permanently — surviving restarts — is now rejected on the way in.
+- **Page-derived values are screened before they reach your agent.** A `data-source-file` attribute set by page content can no longer point the agent at a file outside the project or carry free text into a field the agent acts on, and the tool result now states in-band that the change data is untrusted page content.
+- **SVG assets are refused over the bridge** (KL-5). It is the one asset type that is a script-capable document, and an SVG written into `public/` is served from your dev origin. Screening it with pattern matching does not work, so it is refused until it can be parsed properly. Add SVGs to the repo directly.
+
+Still open and scheduled for 0.3.1, both recorded in `docs/ai/logs/known-issues.md`: the bridge still authenticates its peer by `Origin` alone, which the dev page itself satisfies (KL-4), and notes carry a page-built element reference that the server cannot fully separate from the designer's own words (KL-6). With the above in place, reaching the bridge yields information disclosure and nuisance rather than code execution.
 
 ### Note
 
