@@ -9,9 +9,9 @@ AI Agent Visual Editor uses a typed WebSocket protocol (`WS_PROTOCOL_VERSION`) b
 | Component | Current version | npm package |
 |-----------|----------------|-------------|
 | Protocol | **0.4.0** | (defined in `@nco-studio/shared`) |
-| MCP server | **0.2.0** | `@nco-studio/web-editor-mcp` |
-| Chrome extension | **0.2.0** | (Chrome Web Store / manual install) |
-| Dev plugin | **0.2.0** | `@nco-studio/web-editor-plugin` |
+| MCP server | **0.2.1** | `@nco-studio/web-editor-mcp` |
+| Chrome extension | **0.2.1** | (Chrome Web Store / manual install) |
+| Dev plugin | **0.2.1** | `@nco-studio/web-editor-plugin` |
 
 ---
 

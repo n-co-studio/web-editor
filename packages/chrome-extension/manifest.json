@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AI Agent Visual Editor",
-  "description": "Design on the real page — adjust any element visually and your AI coding agent applies the change in your source files.",
+  "description": "MCP visual editor for AI agents — adjust the real page, dispatch edits in batches, and your agent codes while you keep designing.",
   "version": "0.2.1",
   "author": "n'co studio",
   "homepage_url": "https://nco.studio/web-editor/",

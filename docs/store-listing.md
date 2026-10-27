@@ -14,13 +14,15 @@ n'co studio
 
 ### Short description (132 chars max)
 
-Design on the real page — adjust any element visually and your AI coding agent applies the change in your source files.
+MCP visual editor for AI agents — adjust the real page, dispatch edits in batches, and your agent codes while you keep designing.
 
 > The store shows the `description` field from `manifest.json` as the summary; keep the two identical.
 
 ### Detailed description
 
-**AI Agent Visual Editor** is for designers who work with AI coding agents. You design on the page itself — point at any element in your running app, adjust spacing, colour, type and layout by eye — and your agent turns those adjustments into real code changes in the right files. No screenshots to annotate, no describing a change in prose and hoping the result matches, no hunting for the component that owns a style.
+**AI Agent Visual Editor** connects to your AI coding agent over MCP. You adjust elements on the real page, queue a batch of changes, and dispatch them — your agent writes the code while you carry on designing.
+
+Because the handoff is a protocol, both halves of the work run at the same time: you keep designing while the agent applies the batch you just sent.
 
 Your edits snap to the design tokens your project already defines, so what you change stays inside your system instead of drifting into one-off values.
 
@@ -41,6 +43,8 @@ Your edits snap to the design tokens your project already defines, so what you c
 - CSS visual effects (filter, mix-blend-mode, clip-path)
 - Design token snapping (Tailwind, CSS variables)
 - Element insertion, deletion, reorder, and reparenting
+
+**Without MCP:** the editor can also produce a copy-paste prompt describing your changes, for agents that don't connect over MCP.
 
 **Requirements:**
 
@@ -129,7 +133,7 @@ If the extension and MCP server versions are incompatible, a persistent red bann
 - All WebSocket traffic goes to `ws://localhost:<port>` — the locally-installed MCP server. No external network calls are made.
 - Because that WebSocket targets a loopback address, Chrome's Local Network Access permission prompt appears on first connect. Allowing it is required for the extension to function; it grants access to the developer's own machine only, and the extension makes no requests beyond `localhost`.
 - The extension uses a Shadow DOM overlay to avoid style conflicts with the host page. All extension UI is isolated inside the shadow root.
-- The extension ID assigned by the Web Store will differ from the sideloaded dev-install ID. This is expected and acceptable for a new extension — no ID-dependent behavior is present.
+- The extension ID assigned by the Web Store will differ from the sideloaded dev-install ID. This is expected and acceptable for a new extension — no ID-dependent behavior is present. (Assigned on approval, 2026-10-15: `aifpecjojmlgdhgnkmkaobmfipdmppea` — listing at https://chromewebstore.google.com/detail/ai-agent-visual-editor/aifpecjojmlgdhgnkmkaobmfipdmppea)
 
 ### Known limitations
 
@@ -141,13 +145,25 @@ If the extension and MCP server versions are incompatible, a persistent red bann
 
 ## Screenshot Shot-list
 
-The Web Store requires up to 5 screenshots at **1280×800** pixels (PNG or JPEG). Capture at device pixel ratio 1:1.
+The Web Store allows up to 5 screenshots at **1280×800** pixels (PNG or JPEG). Capture at device pixel ratio 1:1.
 
-| Frame | Subject | Notes |
-|-------|---------|-------|
-| **Frame 1** — Live Edit Loop | Cyan selection ring around a card component; properties panel open at bottom showing spacing controls; a visible `--fe-primary` token snap indicator; "Apply Changes" button visible. | Captures the core value prop: point → inspect → adjust → send. |
-| **Frame 2** — Change Request Queue | Queue side-panel open on the right showing 2–3 queued diffs with descriptions; toolbar icon showing orange badge; "Review" and "Send All" buttons visible. | Shows the batching / zero-setup workflow. |
-| **Frame 3** — Architecture / Zero-Setup | Split view: browser with overlay active on the left, terminal showing `npx @nco-studio/web-editor-mcp@^0` output on the right. | Shows the one-command setup and local-only architecture for reviewers and skeptical users. |
+Four are shipped, not five. Each carries one claim, and the set leads on MCP,
+because that is the part competitors do not have: they generate a prompt for
+you to paste, while this dispatches a batch to your own MCP server so your
+agent works while you keep designing. See `docs/store-assets/README.md` for
+the files themselves.
+
+| Frame | File | Caption |
+|-------|------|---------|
+| **Frame 1** — Batched changes over MCP | `01-batched-changes-over-mcp.png` | Send batched changes over MCP that map to your source code. |
+| **Frame 2** — The editor itself | `02-drag-and-drop-editor.png` | Turn Chrome into a drag & drop editor with a full suite of tools. |
+| **Frame 3** — Insert and extract | `03-sections-layouts-components.png` | Add new sections, layouts, and components to and from your code. |
+| **Frame 4** — Token-aware edits | `04-edits-from-design-tokens.png` | All edits work from the design tokens established in your CSS. |
+
+**Ground: `#2F2F2F`** with mint `#D2F2CB` caption type, replacing an earlier
+white-ground set on 2026-10-19. The store page is itself white, so a
+white-ground screenshot dissolves into it; a dark frame is what separates this
+listing from the ones above and below it.
 
 ### Small promo tile — 440×280
 
@@ -177,76 +193,57 @@ browses or searches — not a listing-page decoration. It renders at roughly
 - Nothing that claims store status — no "Editor's Choice", no "#1".
 - Author at 2× (880×560) and export at 1×, so it stays sharp on high-DPI.
 
-**Ground: white.** Decided 2026-10-12. Google asks for consistency between the
-tile, the icon and the screenshots, and white is what the other two already
-are — the store icon sits on `#FEFEFE` and all three screenshots in
-`docs/store-assets/` are a white page with light panels. An earlier version of
-this spec called for a dark `rgba(0,0,0,0.9)` ground, which would have left the
-tile as the only dark surface in the listing.
+**Ground: `#2F2F2F`.** Decided 2026-10-19, replacing both the original white
+ground and the later split-band treatment. The screenshots and the store icon
+were re-cut dark at the same time, so all three surfaces now agree without one
+having to overrule another — which is the problem the split band existed to
+work around.
 
 | Role | Value | Why |
 |------|-------|-----|
-Updated 2026-10-12 after the icon was redrawn: the icon now sits on a dark
-`#444444` ground rather than white, and the delivered tile resolves that by
-splitting — a `#444444` header band carrying the lockup, over a near-white
-body carrying the tagline. The header matches the icon, the body matches the
-screenshots, and neither surface has to overrule the other.
+| Ground | `#2F2F2F` | `--color-display-ink`, the landing page's display colour |
+| Type and mark | `#D2F2CB` | `--color-accent-mint`, the same token the landing page uses |
+| Strapline bar | `#D2F2CB` fill, `#2F2F2F` ink | the same pair inverted |
 
-| Role | Value | Why |
-|------|-------|-----|
-| Header band | `#444444` | matches the store icon's ground exactly |
-| Body | `#F7F7F7` | matches the three screenshots |
-| Lockup / accent | `#C5E3BF` | the icon's pale green `#D2F2CB`, as used on the band |
-| Tagline ink | `#474747` | dark grey on the near-white body |
+Two colours, no third. They are the landing page's own tokens
+(`examples/demo-app/src/tokens.css`), so the tile, the site and the product
+resolve to one palette rather than three that merely resemble each other.
 
-Superseded: the earlier spec called for a flat `#FFFFFF` ground with `#609D53`
-accent, both taken from the previous white-ground icon. Neither value survives
-the redraw.
+**On the accent.** Four accents exist across the project: the old icon's green
+`#609D53`, the editor UI's cyan `#06b6d4`, the nco.studio site's orange
+`#ff5c38`, and mint `#D2F2CB`. Mint leads here and on the landing page. The
+site's orange deliberately does not appear — it belongs to nco.studio, not to
+this product. Cyan stays inside the product UI, where the screenshots show it
+in its own context.
 
-**On the accent.** Four different accents exist across the project: the icon's
-green `#609D53`, the editor UI's cyan `#06b6d4`, the nco.studio site's orange
-`#ff5c38`, and no chromatic accent at all in the guide. For this tile the
-icon's green leads, because the icon is the one mark that appears beside the
-tile everywhere it is shown. Cyan is available as a secondary since a viewer
-sees it in the screenshots directly below. The site's orange deliberately does
-not appear here — it belongs to nco.studio, not to this product, and the
-listing is judged against the icon and screenshots rather than the homepage.
+**Tagline — as delivered:**
 
-**Tagline — decided 2026-10-12:**
+> **You design, agents code.**
+>
+> with MCP connection
 
-> **Design it. Don't describe it.**
+Two lines of mint display type, with the strapline reversed out of a mint bar
+beneath it.
 
-Set it as two lines, centred, heavy weight, `#0F0F0F`, as large as the centre
-70% allows. It is the largest thing on the tile.
-
-It replaces "Point → Adjust → Generate". "Generate" was the weakest word in
-the set — vague, and it implies output appears somewhere unspecified when the
-actual claim is that code changes land in your own source files.
+It replaces "Design it. Don't describe it.", which replaced
+"Point → Adjust → Generate". This is the first of the three to name the agent
+rather than only the designer, and the strapline carries the differentiator:
+MCP is the mechanism, and no competing visual editor has one.
 
 The tagline deliberately does **not** restate the short description. In search
-results the description sits directly beneath the tile, so the two should do
-different jobs: the description explains the mechanic ("adjust any element
-visually and your AI coding agent applies the change in your source files"),
-and the tagline names the reason anyone would want that. Every visual editor
-can claim "design on the real page"; only this one is aimed at the problem of
-describing a visual change in prose to an agent and hoping the result matches.
+results the description sits directly beneath the tile, so the two do
+different jobs: the description explains the mechanic, and the tagline names
+the division of labour that makes anyone want it.
 
-It is also the product spec's own framing. `docs/spec/compiled/v1/product.md`
-states the problem as making tweaks "without writing CSS by hand or describing
-changes in natural language" — the tagline is that sentence, shortened.
+**Other content:** the sparkle-and-pencil mark above the type — one abstracted
+gesture rather than a reproduction of the UI. At the ~220px this renders at,
+real panels become texture, and the four screenshots below the tile are what
+show the actual interface.
 
-**Other content:** n'co studio wordmark, and one abstracted gesture rather
-than a reproduction of the UI — an element with a selection ring and the
-pencil mark touching it. At the ~220px this renders at, real panels become
-texture; the three screenshots below the tile are what show the actual
-interface. Accent goes on the gesture, never on the type.
-
-**Contrast, measured against white.** Ink `#0F0F0F` is 19.2:1. Green `#609D53`
-is 3.3:1 and cyan `#06b6d4` is 2.4:1 — both below the 4.5:1 that normal text
-needs, and the cyan below the 3:1 that even large text needs. So: **all type in
-`#0F0F0F`**, and the accents only on arrows, rules and shape work where nothing
-has to be read. This is a listing thumbnail rendered at ~220px, so anything
-marginal at full size is illegible in place.
+**Contrast, measured on `#2F2F2F`.** Mint `#D2F2CB` on the ground is
+**11.03:1**; the strapline bar is the same pair inverted, so it measures
+11.03:1 too. Both clear AAA at any size. It is the same measured pair the
+landing page's stepper badges use — one pair, resolved once, used everywhere.
 
 ### Marquee promo tile — 1400×560
 

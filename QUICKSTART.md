@@ -29,7 +29,7 @@ Add the `nco-web-editor` server to `.mcp.json` at your project root:
 
 **Verification:** Reload Claude Code. Open the MCP panel — `nco-web-editor` should appear with a green connected indicator.
 
-> The `@^0` pin means Claude Code will auto-update within the `0.x` range. For locked environments use an exact version: `@nco-studio/web-editor-mcp@0.2.0`.
+> The `@^0` pin means Claude Code will auto-update within the `0.x` range. For locked environments use an exact version: `@nco-studio/web-editor-mcp@0.2.1`.
 
 ---
 
@@ -68,7 +68,7 @@ The plugin runs in `dev` mode only — it is a no-op in production builds.
 
 ## Step 3 — Install the Chrome extension
 
-Install **AI Agent Visual Editor** from the Chrome Web Store. To install it manually instead, download `nco-studio-web-editor-0.2.0.zip` from the [latest release](https://github.com/n-co-studio/web-editor/releases/latest) and load it unpacked:
+Install **AI Agent Visual Editor** from the [Chrome Web Store](https://chromewebstore.google.com/detail/ai-agent-visual-editor/aifpecjojmlgdhgnkmkaobmfipdmppea). To install it manually instead, download `nco-studio-web-editor-0.2.1.zip` from the [latest release](https://github.com/n-co-studio/web-editor/releases/latest) and load it unpacked:
 
 1. Unzip the archive
 2. Open `chrome://extensions`

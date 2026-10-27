@@ -74,7 +74,7 @@ export default defineConfig({
 
 ### 3. Chrome extension
 
-Install **AI Agent Visual Editor** from the Chrome Web Store, or download the latest `.zip` from [Releases](https://github.com/n-co-studio/web-editor/releases/latest) and load it unpacked.
+Install **AI Agent Visual Editor** from the [Chrome Web Store](https://chromewebstore.google.com/detail/ai-agent-visual-editor/aifpecjojmlgdhgnkmkaobmfipdmppea), or download the latest `.zip` from [Releases](https://github.com/n-co-studio/web-editor/releases/latest) and load it unpacked.
 
 ---
 
