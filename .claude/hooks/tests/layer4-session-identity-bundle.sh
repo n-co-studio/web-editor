@@ -146,7 +146,9 @@ esac
 
 # Case B: no durable file yet — the hook is the first initializer, so the stdin
 # SID seeds the file (bootstrap path; e.g. first turn after a clean prior close).
-rm -f "$SB/.claude/.session-id"
+# A clean close removes the sidecar too (unregister_session), and Case A's
+# adoption wrote one (R47).
+rm -f "$SB/.claude/.session-id" "$SB"/.claude/.session-id.*
 _CACHED_SESSION_ID=""
 export _REPO_OS_STDIN_SID="bootstrap-session-20260608-333333"
 BOOT_SID=$(get_session_id "$SB" 2>/dev/null)
@@ -682,8 +684,8 @@ setup_sandbox
 SB="$(get_sandbox)"
 
 # Adopt: flat exists, NO sidecars -> adopt the durable flat id (turnover / in-flight
-# pre-sidecar session / legacy file). Adoption is cache-only — no sidecar written,
-# so the flat-file path that the integration tests depend on is never disturbed.
+# pre-sidecar session / legacy file). Adoption claims the id with this process's
+# sidecar (R47) and leaves the flat file untouched.
 rm -f "$SB"/.claude/.session-id.* 2>/dev/null || true
 echo "durable-flat-id" > "$SB/.claude/.session-id"
 sleep 60 & PID_AD=$!
@@ -692,7 +694,8 @@ export _REPO_OS_STDIN_SID="fresh-stdin-uuid"
 _CACHED_SESSION_ID=""
 SID_AD=$(get_session_id "$SB")
 assert_eq "$SID_AD" "durable-flat-id" "adopts the durable flat id when no live peer claims it"
-assert_file_not_exists "$SB/.claude/.session-id.$PID_AD" "adoption is cache-only — writes no sidecar"
+assert_eq "$(cat "$SB/.claude/.session-id.$PID_AD" 2>/dev/null)" "durable-flat-id" "adoption claims the id with this process's sidecar (R47)"
+assert_eq "$(cat "$SB/.claude/.session-id" 2>/dev/null)" "durable-flat-id" "adoption leaves the flat file untouched"
 kill "$PID_AD" 2>/dev/null || true; wait "$PID_AD" 2>/dev/null || true
 
 # Mint: a DIFFERENT, live process already claims the flat id via its sidecar.
@@ -855,6 +858,66 @@ unset REPO_OS_SESSION_ID
 _CACHED_SESSION_ID="cached-interactive-id"; _CACHED_SESSION_STATE_DIR=""
 SID_C=$(get_session_id "$SB")
 assert_eq "$SID_C" "cached-interactive-id" "no env var: the cache is still authoritative"
+_CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
+teardown_sandbox
+
+# ============================================================
+# L4.16 — A second process's SessionEnd cannot close a live adopter (R47)
+# ============================================================
+# Replays markpreston 2026-10-26: a resumed VS Code window (A) found .session-id
+# already on disk and adopted it. Adoption wrote no sidecar, and A's registry
+# entry had been swept (its pid was a dead tool shell), so nothing marked the id
+# as owned. A reopened old conversation (B) in the same checkout then resolved
+# A's id too, and its SessionEnd sealed A's branch and cleared A's identity.
+
+tap_section "L4.16: a second process's SessionEnd cannot close a live session that adopted the flat id (R47)"
+
+setup_hook_sandbox
+SB="$(get_sandbox)"
+rm -f "$SB"/.claude/.session-id.* "$SB"/.claude/.state/sessions/*.yaml 2>/dev/null || true
+
+A_SID="live-adopter-20261026"
+echo "$A_SID" > "$SB/.claude/.session-id"
+A_DIR="$SB/.claude/.state/wt-sessions/$A_SID"
+mkdir -p "$A_DIR"
+ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+printf 'session_type: standard\nsession_id: %s\nsession_log_id: %s\nmode: review\ncurrent_phase: build\ncycle: 1\nphases_completed: init,drift-check,plan,approval\nsolo: false\ntag: agent\ntimestamp: %s\n' \
+  "$A_SID" "$A_SID" "$ts" > "$A_DIR/phase-state"
+echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
+(cd "$SB" && git checkout -q -b fix/r47-live-branch 2>/dev/null) || true
+R47_BRANCH=$(cd "$SB" && git rev-parse --abbrev-ref HEAD)
+
+sleep 60 & PID_A=$!
+sleep 60 & PID_B=$!
+
+# A's hooks resolve its identity the way every interactive hook does.
+export _REPO_OS_DURABLE_PID="$PID_A"
+export _REPO_OS_STDIN_SID="a-harness-uuid"
+_CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
+assert_eq "$(get_session_id "$SB")" "$A_SID" "A adopts the flat id it found on disk"
+
+# B, a different live process with its own harness id, ends its session.
+export _REPO_OS_DURABLE_PID="$PID_B"
+unset _REPO_OS_STDIN_SID
+run_hook_rc "session-close-check.sh" '{"hook_event_name":"SessionEnd","session_id":"b-harness-uuid"}' >/dev/null 2>&1 || true
+
+assert_eq "$(cat "$SB/.claude/.session-id" 2>/dev/null)" "$A_SID" "B's SessionEnd leaves A's flat id in place"
+assert_file_exists "$A_DIR/phase-state" "B's SessionEnd leaves A's phase-state in place"
+if grep -qxF "$R47_BRANCH" "$SB/.claude/local/closed-branches" 2>/dev/null; then
+  _tap_fail "B's SessionEnd does not seal A's branch" "$R47_BRANCH was recorded in closed-branches"
+else
+  _tap_pass "B's SessionEnd does not seal A's branch"
+fi
+
+# A's next hook still resolves A's own id.
+export _REPO_OS_DURABLE_PID="$PID_A"
+export _REPO_OS_STDIN_SID="a-harness-uuid"
+_CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
+assert_eq "$(get_session_id "$SB")" "$A_SID" "A still resolves its own id after B's SessionEnd"
+
+kill "$PID_A" "$PID_B" 2>/dev/null || true
+wait "$PID_A" 2>/dev/null || true; wait "$PID_B" 2>/dev/null || true
+unset _REPO_OS_DURABLE_PID _REPO_OS_STDIN_SID
 _CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
 teardown_sandbox
 

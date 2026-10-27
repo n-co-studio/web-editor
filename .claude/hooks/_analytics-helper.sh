@@ -425,7 +425,7 @@ _session_is_live() {
 # --- Is a given session id already claimed by a DIFFERENT, LIVE process? ---
 # Scans the per-process sidecars .claude/.session-id.<pid>. Returns 0 (true) iff
 # some sidecar for a pid != our dpid, whose process is still alive, holds the id.
-# Sidecar presence is written synchronously inside get_session_id (bootstrap/mint),
+# Sidecar presence is written synchronously inside get_session_id (bootstrap/mint/adopt),
 # so it is a race-safe concurrency signal independent of register_session timing.
 # Intentionally does NOT consult the session registry: a registry-only "foreign"
 # owner (no sidecar) is treated as adoptable, so the close-time foreign-state guard
@@ -527,9 +527,10 @@ get_session_id() {
     # UNLESS a DIFFERENT, currently-live process already claims it. In that case
     # this is a concurrent peer (second window / in-place daemon on main): we must
     # NOT alias onto its identity — MINT a fresh per-process id from the harness
-    # stdin SID and claim it via our sidecar. Adoption is cache-only (does not
-    # write a sidecar) so it never disturbs the flat-file path the integration
-    # tests and pre-sidecar sessions resolve through.
+    # stdin SID and claim it via our sidecar. Adoption also writes our sidecar
+    # (R47): an unclaimed adoption left the session invisible to every liveness
+    # check, so a second window in the same checkout resolved the same id and its
+    # SessionEnd sealed this session's branch. The flat file is left untouched.
     if [ -f "$flat_file" ]; then
       local flat_id
       flat_id=$(cat "$flat_file" 2>/dev/null)
@@ -540,6 +541,7 @@ get_session_id() {
         return
       fi
       _CACHED_SESSION_ID="$flat_id"
+      [ -n "$flat_id" ] && { echo "$flat_id" > "$pp_file" 2>/dev/null || true; }
       if [ "${REPO_OS_DEBUG:-0}" = "1" ] && [ "$_CACHED_SESSION_ID" != "$_REPO_OS_STDIN_SID" ]; then
         echo "Warning: session-id mismatch: file=$_CACHED_SESSION_ID, stdin=$_REPO_OS_STDIN_SID. Using file value." >&2
       fi
@@ -1260,7 +1262,7 @@ sweep_stale_sessions() {
   repo_root="$_REPO_OS_ROOT"
 
   # Clean per-process identity sidecars (.session-id.<pid>) whose owning process
-  # is dead. These are written synchronously by get_session_id (bootstrap/mint);
+  # is dead. These are written synchronously by get_session_id (bootstrap/mint/adopt);
   # a crash before close leaves one behind. Sweeping dead-pid sidecars caps
   # accumulation and shrinks the (already narrow) PID-reuse aliasing window. Live
   # sidecars — including the current session's — are preserved by the kill -0
