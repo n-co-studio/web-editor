@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-26
+
+Rebuilds the hosted guide around what actually makes this different — MCP — and clears a critical dependency advisory. Also fixes a set of contrast and theming faults in the editing panels, including three the theme audit introduced itself.
+
+### Added
+
+- **Install button in the hosted guide**, linking straight to the Chrome Web Store listing.
+- **Shared step component** behind the setup and how-to tabs, so a step looks the same wherever it appears. The completed step is announced to screen readers, which it previously was not — an `aria-label` on a bare `<span>` has no role to attach to and most readers drop it.
+
+### Changed
+
+- **The guide leads on MCP.** Every visual editor can claim "design on the real page". The difference here is that others generate a prompt for you to paste, while this dispatches a batch to your own MCP server so your agent writes code while you keep designing. The page, the store listing and the screenshot captions all say that now, instead of describing the editing in isolation.
+- **Store listing is dark.** Four screenshots on `#2F2F2F` with mint captions, replacing five on white, with the promo tile and store icon re-cut to match. The store page is itself white, so a white-ground screenshot dissolved into it. The tile is built from the same two tokens as the guide — `#2F2F2F` and `#D2F2CB`, 11.03:1 against each other — so the listing and the site read as one thing.
+- **Typography is consistent across the guide tabs.** Bold weight no longer varies between tabs, and the hero palette follows the logo's own spectrum.
+
+### Fixed
+
+- **Several editing-panel controls were hard to see in light mode.** The insert panel's active tab underline and selected-item borders used a green that measures 2.54:1 on the light panel, below the 3:1 a non-text indicator needs. A token swatch lost its border permanently after the first hover, because the hover-out handler wrote a raw colour over the themed one. A log separator in the console pane was invisible on a light background.
+- **On-page measurement colours no longer change with the panel theme.** The measure overlay and multi-select outlines had been switched to a themed colour, so the same measurement drew differently depending on a panel setting, and the distance label fell to 2.54:1 in dark mode. Both now use a fixed colour, with the label on a darker ground at 6.7:1.
+- **Critical dependency advisory cleared** — `proxy-addr` (GHSA-jqcg-44mw-7w3h), reached through the MCP SDK and express. Production-path advisories went from six to one. The remaining one (`zod`, availability only) needs a major upgrade the MCP SDK does not yet support, and is tracked in `docs/ai/logs/known-issues.md` as KL-3.
+
+### Note
+
+The on-page indicators — the selection ring, the spacing handles, the drop and insert markers — are deliberately *not* themed. They draw over pages whose colours are unknown, and each hue identifies an edit mode, so they stay fixed while the panels follow the theme.
+
 ## [0.2.1] - 2026-10-12
 
 Renames the product to **AI Agent Visual Editor**, and fixes the editing panels — several colour controls in the shipped 0.2.0 build did nothing at all when clicked.

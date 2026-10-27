@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "AI Agent Visual Editor",
   "description": "MCP visual editor for AI agents — adjust the real page, dispatch edits in batches, and your agent codes while you keep designing.",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "author": "n'co studio",
   "homepage_url": "https://nco.studio/web-editor/",
   "minimum_chrome_version": "116",
