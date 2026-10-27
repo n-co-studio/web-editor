@@ -513,6 +513,11 @@ export class Bridge {
         port,
         host: '127.0.0.1',
         verifyClient: (info: { origin?: string }) => Bridge.isAllowedOrigin(info.origin),
+        // ws defaults to 100 MiB per frame. A legitimate batch is bounded by
+        // MAX_INLINE_ASSET_BYTES (4 MiB) per asset plus base64 inflation, so
+        // 32 MiB is generous for a real payload and well short of letting a
+        // client reserve 100 MiB per connection (HACK-013).
+        maxPayload: 32 * 1024 * 1024,
       });
 
       wss.on('listening', () => {
@@ -569,8 +574,19 @@ export class Bridge {
       },
     });
 
+    // HACK-013: handleMessage dispatches into handlers that index into payload
+    // fields the envelope check does not verify, so a malformed message throws
+    // from inside an event-emitter callback. Unhandled, that takes the whole
+    // process down and the agent silently loses its tools. Any client that
+    // passes the origin check can send one, so this is a one-packet kill.
+    // Contain it here: a bad message closes nothing and the server stays up.
     ws.on('message', (data: Buffer) => {
-      this.handleMessage(ws, data);
+      try {
+        this.handleMessage(ws, data);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[nco-web-editor] Dropped malformed WebSocket message: ${msg}`);
+      }
     });
 
     ws.on('close', () => {
@@ -685,8 +701,15 @@ export class Bridge {
     ws: WebSocket,
     payload: VisualDiffBatchPayload,
   ): void {
+    // The envelope check upstream only proves `payload` is non-null, so the
+    // shape is still unverified here (HACK-013). Reject rather than throw.
+    if (!Array.isArray(payload?.diffs)) {
+      console.error('[nco-web-editor] Ignoring VISUAL_DIFF_BATCH — payload.diffs is not an array');
+      return;
+    }
+
     // Acknowledge immediately so the extension doesn't wait on file I/O
-    const diffIds = payload.diffs.map((d) => d.id);
+    const diffIds = payload.diffs.filter((d) => d && typeof d === 'object').map((d) => d.id);
     this.send(ws, {
       type: MessageType.DIFF_ACK,
       version: PROTOCOL_VERSION,
@@ -712,6 +735,14 @@ export class Bridge {
       : null;
 
     for (const rawDiff of diffs) {
+      // Validate shape before anything indexes into it. Only the import and
+      // restore paths used to do this, so a diff arriving over the bridge
+      // reached the queue unchecked and later threw in getPendingChanges or
+      // acknowledgeDiff (HACK-013).
+      if (!isValidDiff(rawDiff)) {
+        console.error('[nco-web-editor] Dropping malformed diff from batch');
+        continue;
+      }
       // Skip diffs that are already pending or were previously processed
       if (existingIds.has(rawDiff.id) || this.processedIds.has(rawDiff.id)) {
         continue;
@@ -725,6 +756,12 @@ export class Bridge {
         // Pre-batchId extension — stamp the shared synthetic legacy id for this payload.
         diffToProcess = { ...rawDiff, batchId: legacyId };
       }
+      // sourceFile reaches the agent as "the exact place to edit", but it is
+      // copied straight out of a data-source-file attribute in the page, which
+      // untrusted page content can set (HACK-012). Drop any value that is not
+      // a plausible in-project source path so a crafted attribute cannot point
+      // the agent at a workflow file or outside the repo.
+      diffToProcess = Bridge.withCheckedSourcePath(diffToProcess);
       // Extract data URLs in attribute changes → save as files
       const diff = await this.extractDataUrls(diffToProcess);
       this.pendingQueue.push(diff);
@@ -1172,8 +1209,27 @@ export class Bridge {
       ? Buffer.from(payload, 'base64')
       : Buffer.from(decodeURIComponent(payload), 'utf-8');
 
-    // Determine file extension — prefer the picked filename's extension, then MIME.
+    // HACK-011: an asset write is only ever an image or a video. Everything
+    // below is reachable from a page-controlled `src`/`background-image`, so
+    // the declared type, the chosen extension and the actual bytes must all
+    // agree with the allowlist before anything touches the project directory.
+    if (!Bridge.MIME_EXT[mime]) {
+      console.error(`[nco-web-editor] Refusing asset with non-asset MIME type: ${mime}`);
+      return null;
+    }
     const ext = this.assetExt(mime, pendingUpload?.filename);
+    if (!ext) {
+      console.error(`[nco-web-editor] Refusing asset — no allowed extension for MIME ${mime}`);
+      return null;
+    }
+    if (!Bridge.matchesMagic(ext, buffer)) {
+      console.error(`[nco-web-editor] Refusing asset — bytes do not match declared type ${ext}`);
+      return null;
+    }
+    if (ext === '.svg' && !Bridge.svgIsSafe(buffer)) {
+      console.error('[nco-web-editor] Refusing SVG asset — contains script or event handlers');
+      return null;
+    }
 
     // Determine target directory from the original src path
     const targetDir = await this.resolveAssetDir(fromValue);
@@ -1224,15 +1280,66 @@ export class Bridge {
     return this.stripPublicPrefix(relPath);
   }
 
-  /** Resolve the asset extension — prefer the picked filename's, else the MIME type. */
-  private assetExt(mime: string, filename?: string): string {
+  /**
+   * Resolve the asset extension, constrained to the image/video allowlist.
+   *
+   * The picked filename is honoured only when its extension is one we actually
+   * serve as an asset. It used to be taken verbatim, so a caller naming a file
+   * `x.yml` or `x.html` chose the extension of a file written into the project
+   * — the other half of HACK-011. Returns null when neither the filename nor
+   * the MIME type names an allowed asset type; the caller then rejects.
+   */
+  private assetExt(mime: string, filename?: string): string | null {
     if (filename) {
       const dot = filename.lastIndexOf('.');
       if (dot > 0 && dot < filename.length - 1) {
-        return filename.slice(dot).toLowerCase();
+        const picked = filename.slice(dot).toLowerCase();
+        if (Bridge.DEDUP_EXTS.has(picked)) return picked;
       }
     }
-    return Bridge.MIME_EXT[mime] || this.guessExtFromMime(mime);
+    return Bridge.MIME_EXT[mime] ?? null;
+  }
+
+  /**
+   * Verify the decoded bytes look like the declared type, so a mislabelled
+   * payload cannot be written under an image extension. SVG is text and has no
+   * signature, so it is screened separately by svgIsSafe().
+   */
+  private static matchesMagic(ext: string, buf: Buffer): boolean {
+    const startsWith = (...bytes: number[]): boolean =>
+      buf.length >= bytes.length && bytes.every((b, i) => buf[i] === b);
+    const ascii = (off: number, str: string): boolean =>
+      buf.length >= off + str.length
+      && buf.subarray(off, off + str.length).toString('latin1') === str;
+
+    switch (ext) {
+      case '.png':  return startsWith(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
+      case '.jpg':
+      case '.jpeg': return startsWith(0xff, 0xd8, 0xff);
+      case '.gif':  return ascii(0, 'GIF87a') || ascii(0, 'GIF89a');
+      case '.webp': return ascii(0, 'RIFF') && ascii(8, 'WEBP');
+      case '.avif':
+      case '.mp4':  return ascii(4, 'ftyp');
+      case '.webm': return startsWith(0x1a, 0x45, 0xdf, 0xa3);
+      case '.ogg':  return ascii(0, 'OggS');
+      case '.ico':  return startsWith(0x00, 0x00, 0x01, 0x00);
+      case '.svg':  return true; // no signature — see svgIsSafe
+      default:      return false;
+    }
+  }
+
+  /**
+   * Reject an SVG carrying script. SVG is a legitimate and common asset here,
+   * so it is screened rather than refused — but one written into `public/` is
+   * served from the dev origin, where a script element or an event-handler
+   * attribute becomes stored XSS on the very page being edited.
+   */
+  private static svgIsSafe(buf: Buffer): boolean {
+    const text = buf.toString('utf-8');
+    return !/<\s*script/i.test(text)
+      && !/\son\w+\s*=/i.test(text)
+      && !/javascript:/i.test(text)
+      && !/<\s*foreignObject/i.test(text);
   }
 
   /**
@@ -1300,6 +1407,44 @@ export class Bridge {
    * e.g. "/images/hero.jpg" → "public/images" (or "images" if it exists directly)
    * Falls back to "public/images" if nothing can be inferred.
    */
+  /**
+   * Source paths the dev plugin emits are project-relative paths to source
+   * files. Anything else in a `data-source-file` attribute was put there by
+   * page content rather than the build, so it is cleared: the diff still
+   * applies (the selector identifies the element), the agent just loses a hint
+   * it should not have trusted. sourceVerified is cleared with it so the agent
+   * is not told the location was confirmed.
+   */
+  private static readonly SOURCE_EXTS = new Set([
+    '.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs',
+    '.vue', '.svelte', '.astro', '.html', '.htm', '.php', '.erb', '.hbs',
+  ]);
+
+  private static isPlausibleSourcePath(p: unknown): boolean {
+    if (typeof p !== 'string' || p === '' || p.length > 1024) return false;
+    if (p.startsWith('/') || /^[A-Za-z]:[\\/]/.test(p)) return false;      // absolute
+    if (p.includes('\0')) return false;
+    const segs = p.split(/[\\/]/);
+    if (segs.some((seg) => seg === '..')) return false;                    // traversal
+    if (segs.some((seg) => seg.startsWith('.') && seg !== '.')) return false; // dot-dirs
+    const dot = p.lastIndexOf('.');
+    if (dot <= 0) return false;
+    return Bridge.SOURCE_EXTS.has(p.slice(dot).toLowerCase());
+  }
+
+  private static withCheckedSourcePath(diff: VisualDiff): VisualDiff {
+    const el = diff.element as { sourceFile?: unknown } | undefined;
+    if (!el || Bridge.isPlausibleSourcePath(el.sourceFile)) return diff;
+    console.error(
+      `[nco-web-editor] Clearing implausible sourceFile from diff ${diff.id}: ${String(el.sourceFile).slice(0, 120)}`,
+    );
+    return {
+      ...diff,
+      element: { ...diff.element, sourceFile: '' },
+      sourceVerified: false,
+    };
+  }
+
   private async resolveAssetDir(fromValue: string): Promise<string> {
     if (!fromValue) return Bridge.ASSET_DIR_FALLBACK;
 
@@ -1316,7 +1461,14 @@ export class Bridge {
     if (!dirPart || dirPart === '.') return Bridge.ASSET_DIR_FALLBACK;
     // Reject traversal segments — a page-controlled src must not steer the write
     // dir outside the inferred asset tree (defense-in-depth with confineToProject).
-    if (dirPart.split(/[\\/]/).includes('..')) return Bridge.ASSET_DIR_FALLBACK;
+    const segments = dirPart.split(/[\\/]/);
+    if (segments.includes('..')) return Bridge.ASSET_DIR_FALLBACK;
+    // Reject dot-directories (HACK-011). confineToProject keeps the write inside
+    // the repo, which is not the same as keeping it harmless: a workflow file
+    // runs on push with repo secrets, and agent-config directories are read as
+    // instructions on a later session. A page-controlled `src` must never select
+    // one, and no legitimate asset tree is a dot-directory.
+    if (segments.some((seg) => seg.startsWith('.'))) return Bridge.ASSET_DIR_FALLBACK;
 
     // Check common project structures: try "public/<dir>", "src/<dir>", then "<dir>" directly
     const candidates = [
@@ -1340,11 +1492,12 @@ export class Bridge {
     return candidates[0];
   }
 
-  private guessExtFromMime(mime: string): string {
-    const sub = mime.split('/')[1];
-    if (sub) return '.' + sub.replace(/\+.*$/, '');
-    return '.bin';
-  }
+  // guessExtFromMime was removed with HACK-011. It derived an extension from
+  // the MIME sub-type, so `text/html` became `.html` and `application/php`
+  // became `.php` — it was the mechanism that let a non-asset type name a file
+  // written into the project. Extensions now come only from the MIME_EXT
+  // allowlist. It also split on the raw sub-type, so a backslash-bearing value
+  // escaped the directory confinement on Windows; that goes with it.
 
   // -----------------------------------------------------------------------
 

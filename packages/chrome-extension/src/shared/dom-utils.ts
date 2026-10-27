@@ -649,10 +649,29 @@ export function getTopElementAt(
 // `<img onerror>` or `javascript:` URL would run in the host page's context.
 
 /** Elements that can execute script or load external content — removed outright. */
-const DANGEROUS_ELEMENTS = 'script,iframe,object,embed,link,meta,base';
+// `animate` and `set` are here because SVG lets them rewrite another element's
+// attribute at runtime — `<animate attributeName="href" values="javascript:…">`
+// reintroduces a scripted URL after this function has already inspected the
+// href it was given.
+const DANGEROUS_ELEMENTS = 'script,iframe,object,embed,link,meta,base,animate,set,animateTransform';
 
 /** Attributes carrying a URL that could hold a `javascript:` payload. */
 const URL_ATTRS = new Set(['href', 'src', 'xlink:href', 'formaction', 'action']);
+
+/**
+ * True when a URL resolves to the `javascript:` scheme once the characters a
+ * browser ignores are removed.
+ *
+ * A plain `/^\s*javascript:/` test is bypassable: browsers strip tabs, newlines
+ * and C0 control characters from *inside* a scheme before resolving it, so
+ * `java&#9;script:x` and `\u0001javascript:x` both execute while failing that
+ * test. Normalize the same way the browser does, then compare.
+ */
+export function isScriptUrl(value: string): boolean {
+  // eslint-disable-next-line no-control-regex
+  const normalized = value.replace(/[\u0000-  ﻿]/g, '').toLowerCase();
+  return normalized.startsWith('javascript:') || normalized.startsWith('data:text/html');
+}
 
 /**
  * Scrub a parsed fragment/subtree in place: drop dangerous elements, strip every
@@ -667,9 +686,15 @@ export function sanitizeFragment(root: ParentNode): void {
       const name = attr.name.toLowerCase();
       if (name.startsWith('on')) {
         el.removeAttribute(attr.name);
-      } else if (URL_ATTRS.has(name) && /^\s*javascript:/i.test(attr.value)) {
+      } else if (URL_ATTRS.has(name) && isScriptUrl(attr.value)) {
         el.removeAttribute(attr.name);
       }
+    }
+    // A nested <template> keeps its children in a separate .content fragment
+    // that querySelectorAll does not descend into, so a payload parked there
+    // survived scrubbing and became live the moment anything cloned it.
+    if (el instanceof HTMLTemplateElement) {
+      sanitizeFragment(el.content);
     }
   });
 }
