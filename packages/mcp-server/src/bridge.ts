@@ -1,5 +1,5 @@
 import { WebSocketServer, type WebSocket } from 'ws';
-import { readFile, writeFile, unlink, mkdir, rename, stat, readdir } from 'node:fs/promises';
+import { readFile, writeFile, unlink, mkdir, rename, stat, readdir, realpath } from 'node:fs/promises';
 import { join, dirname, resolve, relative, extname } from 'node:path';
 import { createHash } from 'node:crypto';
 import {
@@ -449,6 +449,24 @@ export class Bridge {
       if (!outputPath.toLowerCase().endsWith('.json')) {
         throw new Error('export path must end in .json');
       }
+      // The `.json` rule still left every real `.json` in the repo writable —
+      // package.json and tsconfig.json included — and this tool is reachable
+      // by an agent that an injected hint has steered. Refuse to clobber an
+      // existing file; re-exporting to the same name is only allowed inside
+      // the tool's own directory.
+      const abs = this.confineToProject(outputPath);
+      const inPersistDir = !relative(join(this.cwd, PERSIST_DIR), abs).startsWith('..');
+      if (!inPersistDir) {
+        try {
+          await stat(abs);
+          throw new Error(
+            `refusing to overwrite an existing file: ${outputPath} — export to a new name or into ${PERSIST_DIR}/`,
+          );
+        } catch (err) {
+          // ENOENT is the good case: the target does not exist yet.
+          if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') throw err;
+        }
+      }
     }
     const outPath = outputPath
       ? this.confineToProject(outputPath)
@@ -470,9 +488,22 @@ export class Bridge {
   async importSession(
     inputPath: string,
   ): Promise<{ imported: number; skipped: number; warnings: string[] }> {
+    // Same dot-directory rule as export. Import also used to echo a parse
+    // failure, which leaked the first characters of whatever file it read.
+    if (inputPath.split(/[\\/]/).some((seg) => seg.startsWith('.') && seg !== '.')) {
+      throw new Error('import path must not contain a dot-directory');
+    }
     const absPath = this.confineToProject(inputPath);
     const raw = await readFile(absPath, 'utf-8');
-    const data: unknown = JSON.parse(raw);
+    let data: unknown;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      // Deliberately does not include the parser's message: it quotes the
+      // first bytes of the file, which turned a failed import into a read
+      // oracle for any in-project file.
+      throw new Error(`not a valid JSON session file: ${inputPath}`);
+    }
 
     const warnings: string[] = [];
     let imported = 0;
@@ -507,7 +538,16 @@ export class Bridge {
       // just as attacker-reachable as a diff off the wire — more so, since it
       // can be written by anything with filesystem access and is replayed
       // wholesale — and this path previously skipped the check entirely.
-      this.pendingQueue.push(Bridge.withCheckedSourcePath(diff));
+      // Re-validate after screening, not only before. The screen rebuilds the
+      // object, so a shape that passed on the way in is not proof about what
+      // comes out.
+      const screened = Bridge.withCheckedSourcePath(diff);
+      if (!isValidDiff(screened)) {
+        warnings.push('Skipped diff that failed validation after screening');
+        skipped++;
+        continue;
+      }
+      this.pendingQueue.push(screened);
       imported++;
     }
 
@@ -788,10 +828,20 @@ export class Bridge {
       // a plausible in-project source path so a crafted attribute cannot point
       // the agent at a workflow file or outside the repo.
       diffToProcess = Bridge.withCheckedSourcePath(diffToProcess);
-      // Extract data URLs in attribute changes → save as files
-      const diff = await this.extractDataUrls(diffToProcess);
-      this.pendingQueue.push(diff);
-      newDiffs.push(diff);
+      // Per-diff containment. extractDataUrls indexes change fields that
+      // isValidDiff does not type-check, so a single crafted entry used to
+      // throw and abandon the rest of the batch — after DIFF_ACK had already
+      // gone back for all of them, and with earlier diffs queued but never
+      // persisted. Skip the bad one and keep going.
+      try {
+        const diff = await this.extractDataUrls(diffToProcess);
+        this.pendingQueue.push(diff);
+        newDiffs.push(diff);
+      } catch (err) {
+        console.error(
+          `[nco-web-editor] Skipped diff ${Bridge.forLog(diffToProcess.id)} — ${Bridge.forLog(err instanceof Error ? err.message : err)}`,
+        );
+      }
     }
 
     // Determine the effective batchId for this payload
@@ -803,21 +853,44 @@ export class Bridge {
       this.latestBatchId = effectiveBatchId;
     }
 
-    // Store batch note correlated to its batchId
-    if (batchNote) {
+    // Store batch note correlated to its batchId.
+    //
+    // Typed by the designer, but NOT purely their words: the extension appends
+    // an element reference built from the page (asset path, text content,
+    // selector, source hint — see formatElementRef in notes-store.ts), so a
+    // note carries page-derived text. It is validated and capped here rather
+    // than trusted on type alone, and the agent-facing framing says so.
+    if (typeof batchNote === 'string' && batchNote.length > 0) {
+      const text = batchNote.length > Bridge.MAX_NOTE_CHARS
+        ? `${batchNote.slice(0, Bridge.MAX_NOTE_CHARS)}… [truncated]`
+        : batchNote;
       this.pendingNotes.push({
-        text: batchNote,
+        text,
         receivedAt: new Date().toISOString(),
         batchId: effectiveBatchId,
       });
-      console.error(`[nco-web-editor] Received batch note (${batchNote.length} chars)`);
+      console.error(`[nco-web-editor] Received batch note (${text.length} chars)`);
+    } else if (batchNote !== undefined && batchNote !== null) {
+      console.error('[nco-web-editor] Ignoring non-string batchNote');
     }
 
     if (newDiffs.length > 0 || batchNote) {
-      this.trackDrift(newDiffs);
+      // trackDrift walks change values and can throw on a crafted one. It ran
+      // before the persist and the status write, so a throw left diffs queued
+      // in memory, absent from disk, and the status file still reading
+      // `closed` — which is the file the agent is told to watch. Persisting
+      // first, and isolating drift tracking, keeps the queue and the status
+      // file honest regardless.
       this.safePersistQueue();
       if (newDiffs.length > 0) {
         this.safeWriteStatusFile('active');
+      }
+      try {
+        this.trackDrift(newDiffs);
+      } catch (err) {
+        console.error(
+          `[nco-web-editor] Drift tracking failed — ${Bridge.forLog(err instanceof Error ? err.message : err)}`,
+        );
       }
     }
 
@@ -981,7 +1054,10 @@ export class Bridge {
         // Screened again on restore, not just on ingest: the queue file sits in
         // the project and survives restarts, so anything that reached it once
         // would otherwise be replayed unchecked for the life of the project.
-        const valid = data.diffs.filter(isValidDiff).map((d) => Bridge.withCheckedSourcePath(d));
+        const valid = data.diffs
+          .filter(isValidDiff)
+          .map((d) => Bridge.withCheckedSourcePath(d))
+          .filter(isValidDiff); // re-check: the screen rebuilds the object
         this.pendingQueue = valid;
         if (valid.length < data.diffs.length) {
           console.error(
@@ -1033,6 +1109,8 @@ export class Bridge {
    * asset this large belongs in the repo, not pasted through a diff.
    */
   private static readonly MAX_INLINE_ASSET_BYTES = 4 * 1024 * 1024;
+  /** Cap on a single batch note. It lands in the agent's context verbatim. */
+  private static readonly MAX_NOTE_CHARS = 4000;
   /** Matches a single `data:` URI up to the first quote, paren, or whitespace. */
   private static readonly DATA_URL_RE = /data:[^"')\s]+/gi;
   private static readonly MIME_EXT: Record<string, string> = {
@@ -1304,6 +1382,25 @@ export class Bridge {
     // paths that already call confineToProject.
     const absDir = this.confineToProject(targetDir);
     await mkdir(absDir, { recursive: true });
+    // confineToProject is lexical, so a symlinked asset directory committed in
+    // the repo (`public/media -> ../../elsewhere`) passed it and the write
+    // landed outside the project. Re-confine against the resolved path.
+    //
+    // Both sides are resolved: the project root can itself sit behind a
+    // symlink (on macOS `/var` is a link to `/private/var`, so every tmpdir
+    // does), and comparing a resolved child against an unresolved root
+    // rejects every legitimate write.
+    try {
+      const realDir = await realpath(absDir);
+      const realRoot = await realpath(this.cwd);
+      const rel = relative(realRoot, realDir);
+      if (rel.startsWith('..') || resolve(realRoot, rel) !== realDir) {
+        throw new Error('escapes project after symlink resolution');
+      }
+    } catch {
+      console.error(`[nco-web-editor] Refusing asset — ${Bridge.forLog(targetDir)} resolves outside the project`);
+      return null;
+    }
     const absPath = join(absDir, filename);
     const relPath = '/' + relative(this.cwd, absPath).replace(/\\/g, '/');
 
@@ -1493,6 +1590,14 @@ export class Bridge {
 
       const out: Record<string, unknown> = {};
       for (const [key, val] of Object.entries(node as Record<string, unknown>)) {
+        // Drop prototype-mutating keys. JSON.parse makes `__proto__` an *own*
+        // property, but `out[key] = …` runs the Object.prototype setter, so the
+        // value became the prototype of the cleaned copy. isValidDiff had
+        // already passed on the raw object (where batchId was undefined) and
+        // the poisoned batchId then resolved through the chain — reopening the
+        // exact HACK-013 poison pill on the import and restore paths. Found by
+        // a second review, in the walk added to fix HACK-012.
+        if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
         if (key === 'sourceFile' && !Bridge.isPlausibleSourcePath(val)) {
           // '' is the project's own "unknown source" value, so downstream code
           // already copes with it; the alternative is deleting the key and

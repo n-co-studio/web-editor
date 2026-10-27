@@ -9,6 +9,8 @@
  * - saveDataUrl: MIME-bound extension, magic bytes, SVG refusal (HACK-011)
  * - isValidDiff via poison batchId: queue cannot be permanently broken (HACK-013)
  * - importSession: malformed diffs are skipped, not admitted (HACK-013)
+ * - __proto__ keys cannot smuggle a field past validation (HACK-015)
+ * - exportSession: .json only, no dot-dirs, no clobbering (HACK-016)
  * - isPlausibleSourcePath: page-controlled source hints (HACK-012)
  *
  * All three tested functions are private; accessed via unknown cast (same
@@ -18,7 +20,7 @@
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile, readdir } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, readdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Bridge } from './bridge.js';
@@ -548,5 +550,101 @@ describe('malformed diffs are rejected before they can poison the queue (HACK-01
     assert.ok(imported, 'the diff itself should still import');
     assert.equal(imported.element.sourceFile, '', 'the injected hint must be cleared');
     assert.equal(imported.sourceVerified, false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// HACK-015 — a `__proto__` key must not smuggle a field past validation
+//
+// JSON.parse makes `__proto__` an own property, but `out[key] = …` in the
+// screening walk invoked the Object.prototype setter, so the value became the
+// prototype of the cleaned copy. isValidDiff had already passed on the raw
+// object (batchId undefined there) and the poisoned batchId then resolved
+// through the chain — reopening the HACK-013 poison pill on the import path.
+//
+// These go through JSON.parse deliberately. Hand-built object literals cannot
+// reproduce it, which is exactly why the first round of tests missed it.
+// ---------------------------------------------------------------------------
+
+describe('prototype-key smuggling (HACK-015)', () => {
+  function wellFormedJson(id: string, extra: string): string {
+    return `{
+      "id": ${JSON.stringify(id)},
+      "timestamp": "2026-10-27T00:00:00.000Z",
+      "element": { "sourceFile": "src/App.tsx", "selector": ".x" },
+      "changes": [],
+      "context": {},
+      "status": "pending",
+      "sourceVerified": true,
+      ${extra}
+    }`;
+  }
+
+  async function importRaw(name: string, diffsJson: string[]) {
+    const file = join(tmpDir, name);
+    await writeFile(file, `{"version":"0.4.0","exportedAt":"","diffs":[${diffsJson.join(',')}]}`);
+    return (bridge as unknown as {
+      importSession(p: string): Promise<{ imported: number; skipped: number }>;
+    }).importSession(file);
+  }
+
+  it('does not let a __proto__ batchId poison the queue', async () => {
+    await importRaw('proto-poison.json', [
+      wellFormedJson('proto-1', '"__proto__": { "batchId": 5 }'),
+      wellFormedJson('proto-2', '"__proto__": { "batchId": 6 }'),
+    ]);
+    // The property under test is not how many imported — it is that the main
+    // tool still reads afterwards. Two distinct values are needed: a sort only
+    // calls localeCompare when it has something to compare against.
+    assert.doesNotThrow(() => bridge.getPendingChanges());
+  });
+
+  it('leaves no inherited batchId on an imported diff', async () => {
+    await importRaw('proto-single.json', [
+      wellFormedJson('proto-3', '"__proto__": { "batchId": 7 }'),
+    ]);
+    const { diffs } = bridge.getPendingChanges();
+    const d = diffs.find((x) => x.id === 'proto-3');
+    if (d) {
+      assert.equal(
+        typeof d.batchId === 'string' || d.batchId === undefined, true,
+        `batchId must be a string or absent, got ${typeof d.batchId}`,
+      );
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// HACK-016 — exportSession is a write primitive an injected hint can steer
+// ---------------------------------------------------------------------------
+
+describe('exportSession confinement (HACK-016)', () => {
+  function exportTo(p?: string): Promise<{ path: string; diffCount: number }> {
+    return (bridge as unknown as {
+      exportSession(p?: string): Promise<{ path: string; diffCount: number }>;
+    }).exportSession(p);
+  }
+
+  it('rejects a non-.json target', async () => {
+    await assert.rejects(() => exportTo('CLAUDE.md'), /end in \.json/);
+  });
+
+  it('rejects a dot-directory target', async () => {
+    for (const p of ['.claude/agents/x.json', './.github/x.json', 'a/./.claude/x.json']) {
+      await assert.rejects(() => exportTo(p), /dot-directory/, p);
+    }
+  });
+
+  it('refuses to overwrite an existing file', async () => {
+    const victim = join(tmpDir, 'package.json');
+    await writeFile(victim, '{"name":"victim"}');
+    await assert.rejects(() => exportTo('package.json'), /refusing to overwrite/);
+    const after = await readFile(victim, 'utf-8');
+    assert.equal(after, '{"name":"victim"}', 'the existing file must be untouched');
+  });
+
+  it('allows a fresh name', async () => {
+    const r = await exportTo('fresh-export.json');
+    assert.ok(r.path.endsWith('fresh-export.json'));
   });
 });
