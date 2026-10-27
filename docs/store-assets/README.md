@@ -10,7 +10,8 @@ Screenshots for the store listing. Chrome requires each to be **exactly
 | `03-sections-layouts-components.png` | Insert panel adding sections and layout presets | Add new sections, layouts, and components to and from your code. |
 | `04-edits-from-design-tokens.png` | Token snapping — edited values resolving to named tokens | All edits work from the design tokens established in your CSS. |
 | `promo-tile-440x280.png` | Small promo tile | — |
-| `store-icon-512.png` | Store listing icon | — |
+| `store-icon-128.png` | **Store listing icon — this is the one to upload** | — |
+| `store-icon-512.png` | Master for the store icon; not accepted by the form | — |
 
 Four screenshots, not the five Chrome allows. The fifth was dropped rather
 than padded: each of these four carries one claim, and a fifth frame existed
@@ -42,6 +43,19 @@ takes ~134px off each side, enough to slice it off:
 Drop EXIF and XMP, but **not** with `-strip`: that also removes the ICC colour
 profile, leaving one screenshot rendering differently from the others in the
 same listing.
+
+## Store icon
+
+The dashboard's store-icon field takes **128×128**. The supplied master is
+512×512, which the form rejects, so `store-icon-128.png` is derived from it:
+
+    magick store-icon-512.png -filter Lanczos -resize 128x128 \
+      +profile exif +profile xmp store-icon-128.png
+
+Keep the alpha channel. Chrome expects an icon to carry transparent padding
+rather than fill its square — the opposite of the promo tile, which is
+rejected if it has an alpha channel at all. Re-derive the 128 from the 512
+whenever the master changes rather than editing it directly.
 
 ## Promo tile
 
