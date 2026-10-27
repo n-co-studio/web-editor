@@ -8,6 +8,7 @@
  */
 
 import type { ReactNode } from 'react';
+import { stepBodyStyle } from './Stepper';
 
 /**
  * Support routes: public issues first, email as the private fallback.
@@ -179,8 +180,12 @@ export default function Troubleshooting() {
     <div>
       <p
         style={{
-          fontSize: 'var(--text-body-sm)',
-          color: 'var(--color-secondary)',
+          fontFamily: 'var(--font-sans)',
+          fontWeight: 'var(--fw-regular)',
+          fontSize: '1.125rem',
+          lineHeight: 1.7,
+          letterSpacing: '0.02em',
+          color: 'var(--color-ink)',
           maxWidth: 'var(--measure)',
           marginBottom: 'var(--space-10)',
         }}
@@ -195,9 +200,12 @@ export default function Troubleshooting() {
           <article key={symptom} className="nco-card" style={{ padding: 'var(--space-6)' }}>
             <h3
               style={{
-                fontFamily: 'var(--font-sans)',
-                fontWeight: 'var(--fw-regular)',
-                fontSize: 'var(--text-h3)',
+                fontFamily: 'var(--font-display)',
+                fontWeight: 'var(--fw-bold)',
+                fontSize: '1.375rem',
+                lineHeight: 0.9,
+                letterSpacing: '-0.06em',
+                textTransform: 'uppercase',
                 color: 'var(--color-ink)',
               }}
             >
@@ -205,8 +213,12 @@ export default function Troubleshooting() {
             </h3>
             <div
               style={{
-                fontSize: 'var(--text-body-sm)',
-                color: 'var(--color-secondary)',
+                fontFamily: 'var(--font-sans)',
+                fontWeight: 'var(--fw-regular)',
+                fontSize: '1.125rem',
+                lineHeight: 1.7,
+                letterSpacing: '0.02em',
+                color: 'var(--color-ink)',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 'var(--space-3)',
@@ -238,15 +250,18 @@ export default function Troubleshooting() {
       <div style={{ maxWidth: 'var(--measure)', marginTop: 'var(--space-10)' }}>
         <h3
           style={{
-            fontFamily: 'var(--font-sans)',
-            fontWeight: 'var(--fw-regular)',
-            fontSize: 'var(--text-h3)',
+            fontFamily: 'var(--font-display)',
+            fontWeight: 'var(--fw-bold)',
+            fontSize: '1.375rem',
+            lineHeight: 0.9,
+            letterSpacing: '-0.06em',
+            textTransform: 'uppercase',
             color: 'var(--color-ink)',
           }}
         >
           Resetting the connection
         </h3>
-        <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)', marginTop: 'var(--space-3)' }}>
+        <p style={{ ...stepBodyStyle, marginTop: 'var(--space-3)' }}>
           Close every agent session that has the project open, then start one fresh. That single move
           releases the lock and gives the new session the server — the ordering is what matters, not the
           commands. Your queue is safe across restarts: it lives in{' '}
@@ -257,7 +272,7 @@ rm .nco-web-editor/server.lock
 
 # discard the pending queue as well — this cannot be undone
 rm .nco-web-editor/pending-queue.json`}</Code>
-        <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)', marginTop: 'var(--space-3)' }}>
+        <p style={{ ...stepBodyStyle, marginTop: 'var(--space-3)' }}>
           <Mono>editor-queue-status.yaml</Mono> in the project root is written by the server, not by you —
           it reports <Mono>status</Mono> and <Mono>pending_count</Mono> so a watching agent can react the
           moment a batch arrives. Leave it to the server; it is rewritten on every queue change.
@@ -271,15 +286,18 @@ rm .nco-web-editor/pending-queue.json`}</Code>
       <div style={{ marginTop: 'var(--space-10)', paddingTop: 'var(--space-6)', borderTop: '1px solid var(--color-divider)' }}>
         <h3
           style={{
-            fontFamily: 'var(--font-sans)',
-            fontWeight: 'var(--fw-regular)',
-            fontSize: 'var(--text-h3)',
+            fontFamily: 'var(--font-display)',
+            fontWeight: 'var(--fw-bold)',
+            fontSize: '1.375rem',
+            lineHeight: 0.9,
+            letterSpacing: '-0.06em',
+            textTransform: 'uppercase',
             color: 'var(--color-ink)',
           }}
         >
           Still stuck?
         </h3>
-        <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)', marginTop: 'var(--space-3)' }}>
+        <p style={{ ...stepBodyStyle, marginTop: 'var(--space-3)' }}>
           If your problem is not listed above, open an issue on{' '}
           <a
             href={ISSUES_URL}
@@ -298,7 +316,7 @@ rm .nco-web-editor/pending-queue.json`}</Code>
           instead; that link opens a message with the details below already in it. Either way,
           including them saves a round trip — they are the first things anyone would ask.
         </p>
-        <ul style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)', marginTop: 'var(--space-3)', paddingLeft: 'var(--space-5)', lineHeight: 1.7 }}>
+        <ul style={{ ...stepBodyStyle, marginTop: 'var(--space-3)', paddingLeft: 'var(--space-5)' }}>
           <li>What you expected, and what happened instead</li>
           <li>Your Chrome version and operating system</li>
           <li>Whether the editor connected (the toolbar dot) and what the MCP server printed</li>

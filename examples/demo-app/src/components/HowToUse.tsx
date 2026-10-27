@@ -6,6 +6,7 @@
 
 import type { ReactNode } from 'react';
 import CopyPromptButton from './CopyPromptButton';
+import Stepper, { stepBodyStyle } from './Stepper';
 
 function Code({ children }: { children: string }) {
   return (
@@ -62,7 +63,7 @@ const STEPS: Step[] = [
     title: 'Put your agent on watch',
     body: (
       <>
-        <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
+        <p style={stepBodyStyle}>
           Start an agent session in the project first — it launches the bridge, so nothing can reach
           your code until one is running. Then hand it the loop:
         </p>
@@ -70,7 +71,7 @@ const STEPS: Step[] = [
         <div style={{ marginTop: 'var(--space-4)' }}>
           <CopyPromptButton text={WATCH_PROMPT} />
         </div>
-        <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)', marginTop: 'var(--space-4)' }}>
+        <p style={{ ...stepBodyStyle, marginTop: 'var(--space-4)' }}>
           Agents that read the server's own instructions already work this way; the prompt makes it
           explicit for those that don't.
         </p>
@@ -81,7 +82,7 @@ const STEPS: Step[] = [
     title: 'Activate the editor',
     body: (
       <>
-        <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
+        <p style={stepBodyStyle}>
           On your localhost page, click the pinned icon and click <strong>Extension</strong> in the popup to
           toggle it <strong>On</strong>. The editor toolbar appears — drag the grip to move it, collapse it to
           browse the page normally, press <kbd style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-caption)', border: '1px solid var(--color-border)', padding: '0 4px' }}>ESC</kbd> to exit.
@@ -107,7 +108,7 @@ const STEPS: Step[] = [
     title: 'Select and edit elements',
     body: (
       <>
-        <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
+        <p style={stepBodyStyle}>
           Point and click anything on the page. Build-time tags map every element to its component in
           code, so what you select is exactly what the agent will edit. From there:
         </p>
@@ -119,26 +120,30 @@ const STEPS: Step[] = [
             display: 'flex',
             flexDirection: 'column',
             gap: 'var(--space-3)',
-            fontSize: 'var(--text-body-sm)',
-            color: 'var(--color-secondary)',
+            fontFamily: 'var(--font-sans)',
+            fontWeight: 'var(--fw-regular)',
+            fontSize: '1.125rem',
+            lineHeight: 1.7,
+            letterSpacing: '0.02em',
+            color: 'var(--color-ink)',
           }}
         >
           <li>
-            <strong style={{ color: 'var(--color-ink)', fontWeight: 'var(--fw-regular)' }}>
+            <strong style={{ color: 'var(--color-ink)' }}>
               Edit with your design system.
             </strong>{' '}
             Adjust spacing, size, type, colour and layout. The editor reads the design tokens from
             your code and snaps edits to them, so changes stay on-system.
           </li>
           <li>
-            <strong style={{ color: 'var(--color-ink)', fontWeight: 'var(--fw-regular)' }}>
+            <strong style={{ color: 'var(--color-ink)' }}>
               Rearrange by dragging.
             </strong>{' '}
             Reorder elements directly. The editor understands CSS grid and flexbox auto-layout, so
             the page stays responsive and the generated code stays clean.
           </li>
           <li>
-            <strong style={{ color: 'var(--color-ink)', fontWeight: 'var(--fw-regular)' }}>
+            <strong style={{ color: 'var(--color-ink)' }}>
               Change text, images and structure.
             </strong>{' '}
             Edit copy in place, swap images, insert or remove elements — not just styling.
@@ -150,7 +155,7 @@ const STEPS: Step[] = [
   {
     title: 'Review and send',
     body: (
-      <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)' }}>
+      <p style={stepBodyStyle}>
         Every edit queues as you make it, with before-and-after values — nothing to add by hand.
         Open the queue to review and prune the batch, then send it. Exploratory edits collapse to
         their latest state, and the agent watching your dev environment writes the real code
@@ -163,44 +168,11 @@ const STEPS: Step[] = [
 export default function HowToUse() {
   return (
     <div>
-      <p style={{ fontSize: 'var(--text-body-sm)', color: 'var(--color-secondary)', maxWidth: 'var(--measure)', marginBottom: 'var(--space-10)' }}>
+      <p style={{ ...stepBodyStyle, maxWidth: 'var(--measure)', marginBottom: 'var(--space-10)' }}>
         The editing loop, end to end — from activating the editor to the agent writing code.
       </p>
 
-      <div style={{ position: 'relative' }}>
-        <span
-          aria-hidden="true"
-          style={{ position: 'absolute', left: 15, top: 16, bottom: 16, width: 1, background: 'var(--color-divider)', zIndex: 'var(--z-base)' }}
-        />
-        <ol style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 'var(--space-8)' }}>
-          {STEPS.map((s, i) => (
-            <li key={s.title} style={{ position: 'relative', display: 'grid', gridTemplateColumns: '32px 1fr', gap: 'var(--space-5)', alignItems: 'start' }}>
-              <span
-                style={{
-                  position: 'relative',
-                  zIndex: 'var(--z-raised)',
-                  width: 32,
-                  height: 32,
-                  borderRadius: 'var(--radius-full)',
-                  background: 'var(--color-ink)',
-                  color: 'var(--color-on-ink)',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: 'var(--text-body-sm)',
-                  fontWeight: 'var(--fw-regular)',
-                }}
-              >
-                {i + 1}
-              </span>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', paddingTop: '3px', minWidth: 0, maxWidth: 'var(--measure)' }}>
-                <h3 style={{ fontFamily: 'var(--font-sans)', fontWeight: 'var(--fw-regular)', fontSize: 'var(--text-h3)', color: 'var(--color-ink)' }}>{s.title}</h3>
-                {s.body}
-              </div>
-            </li>
-          ))}
-        </ol>
-      </div>
+        <Stepper steps={STEPS} />
     </div>
   );
 }

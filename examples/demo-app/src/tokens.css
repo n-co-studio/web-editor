@@ -14,13 +14,17 @@
 :root {
   /* ── Colors — monochrome ──────────────────────────────────── */
   --color-ink:           #0f0f0f;   /* primary text, headings, links, dark surfaces */
+  --color-display-ink:   #2f2f2f;   /* display headings + active tab fill (Figma 52:3788) */
+  --color-accent-mint:   #d2f2cb;   /* active tab underline, step numerals (Figma 52:3788) */
   --color-primary:       #0f0f0f;   /* alias */
   --color-secondary:     #767676;   /* secondary text (AA 4.5:1 on white) */
   --color-bg:            #ffffff;   /* page background */
   --color-surface:       #ffffff;   /* surfaces are flat white; structure via borders */
   --color-divider:       #cacaca;   /* section dividers */
   --color-border:        #e2e2e2;   /* hairline card borders (lighter than divider) */
-  --color-success:       #166534;   /* completion — 7.1:1 on white, and white on it, so the badge and its tick both read */
+  --color-success:       #14532D;   /* the lava field's forest green (TopBanner SITE_LAVA),
+                                       not a one-off: #166534 appeared nowhere else on the page.
+                                       Mint tick on it is 7.51:1, white 9.11:1 — both AA. */
 
   --color-on-ink:        #ffffff;
   --color-on-ink-muted:  rgba(255,255,255,0.6);
@@ -28,6 +32,15 @@
 
   /* ── Typography — Adobe Typekit (kit ivy7roo) ────────────── */
   --font-sans:  'hero-new', 'Roboto', system-ui, -apple-system, sans-serif;
+  /* Display face for the Figma guide design (node 52:3788). NOTE: 'new-hero'
+     and 'hero-new' are two different Adobe families with transposed names —
+     the body copy uses hero-new, the display headings use new-hero. Easy to
+     swap by accident; they look different.
+     The design calls for ExtraBold (800), which kit ivy7roo does not serve for
+     this family (100/300/400/700 only). Asking for 800 would make the browser
+     synthesise it — visibly smeared at 60px — so --fw-bold stops at the real
+     700. Add ExtraBold to the kit and this token can move to 800. */
+  --font-display: 'new-hero', 'hero-new', 'Roboto', system-ui, sans-serif;
   --font-serif: 'minion-3-display', 'Playfair Display', Georgia, serif;
   --font-mono:  'JetBrains Mono', ui-monospace, Consolas, monospace;
 
@@ -35,6 +48,17 @@
   --fw-light: 200;    /* h2 / h3 */
   --fw-book: 300;     /* body, UI, nav */
   --fw-regular: 400;  /* labels, emphasis */
+  --fw-bold: 700;     /* display headings, tabs, step titles (Figma 52:3788) */
+  /* Inline emphasis. One token for every <strong> on the page — see the rule
+     at the bottom of this file. Bolding had drifted into three behaviours:
+     ten bare <strong> on the browser default, three pinned to --fw-regular
+     (identical to body copy, so not bold at all), and one to --fw-book, which
+     rendered LIGHTER than the text around it.
+     NOTE: 'hero-new' serves 100/200/300/400 only, and body copy already sits
+     at 400, so there is no heavier real weight in the body face — 700 here is
+     synthesised by the browser. Adding Hero New 700 to Typekit kit ivy7roo
+     makes it a real cut with no code change. */
+  --fw-strong: 700;
 
   --text-display: 4rem;     /* 64px — hero (serif) */
   --text-h1:      2.75rem;  /* 44px */
@@ -87,6 +111,11 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 html { scroll-behavior: smooth; background: var(--color-bg); }
+
+/* Inline emphasis, in one place. Components must not set font-weight on
+   <strong>; doing so is what produced the three-way inconsistency this
+   replaces. */
+strong, b { font-weight: var(--fw-strong); }
 
 body {
   font-family: var(--font-sans);
