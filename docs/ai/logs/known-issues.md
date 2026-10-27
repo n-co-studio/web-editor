@@ -36,6 +36,16 @@ Deferred findings from review phases that are out of the current brief's scope a
 - **Trigger to revisit:** an `@modelcontextprotocol/sdk` release that supports zod 4. Re-run `npm audit --omit=dev` at that point.
 - **Related:** the critical `proxy-addr` advisory (GHSA-jqcg-44mw-7w3h) in the same tree **was** cleared in this session, but note that the SDK bump alone did not do it — `express@5.2.1` held a transitive pin at `proxy-addr@2.0.7` and `npm audit fix` was needed on top. A direct-dependency bump is not evidence that a transitive advisory is gone; check `npm ls <pkg>`.
 
+### KL-4 — the bridge authenticates its peer by `Origin` only, which the dev page itself satisfies (HACK-010)
+- **File:** `packages/mcp-server/src/bridge.ts:539-553` (`isAllowedOrigin`), `packages/chrome-extension/src/content/websocket-client.ts:148`
+- **Symptom:** the allowlist accepts any origin whose hostname is `localhost`, `127.0.0.1` or `::1`, on any port, plus any `chrome-extension://` origin with no ID pinning. There is no token, pairing or challenge. Script executing on the developer's own dev page therefore passes it and can drive the bridge directly, with the extension neither installed nor active.
+- **Why the existing comment is misleading:** it claims the check "blocks drive-by connections from an arbitrary web page open in the same browser". That holds for a remote origin; it does not hold for `http://localhost:3000`, which is the page being edited and the one place untrusted content actually renders (seeded DB, prod dump, user-generated records, a compromised front-end dependency). The comment describes a protection the code does not provide, which is likely why this survived two earlier security passes.
+- **Why it cannot be fixed in place:** the content script opens the socket from the page context, so the browser sends the *page's* origin. Localhost origins must be allowed for the product to work as currently built. Closing this means either moving the socket into the service worker and pinning the extension ID, or introducing a pairing secret — both cross-package protocol changes with four-way extension/server version skew, the same compatibility problem HACK-008 had.
+- **Residual impact after `fe59ab6`:** that commit removed most of the consequence without touching the access. A client that reaches the bridge can no longer write a workflow file, an agent-config file or a `.php` into the project, crash the server, or steer the agent through `sourceFile`. It can still read the token and component registries (including `importPath`, so the project layout), inject diffs into the agent's queue, write bounded image/video files into asset directories, and claim another `tabId` to intercept that tab's pushes. Information disclosure and nuisance, not code execution.
+- **Discovered:** adversarial security review, 2026-10-26, ahead of 0.3.0.
+- **Deferred deliberately:** operator decision 2026-10-26 — ship 0.3.0 with the impact reduced and do the authentication work as its own release rather than rushing a protocol change. Full brief drafted; it needs filing through a `taskdef-brief` session, which is the only session type permitted to write `.claude/.automation/briefs/` (`write-guard.sh:449-464`).
+- **Follow-up:** brief `20261027-013000-bridge-peer-authentication`.
+
 ---
 
 ## Governance Tooling Defects (fix belongs upstream, in the Repo OS template)
@@ -80,3 +90,20 @@ description.
 - **Evidence (2026-09-24):** first question — header "Commit gate", body containing *"plan approval"* and an option labelled *"Approve the plan, replay gates"* — wrote nothing and logged nothing. The second, canonically phrased question wrote `plan-approved` immediately.
 - **Relationship to R13:** `pre-commit-gates.sh:411` already anticipates this hook not firing and names it R13, so the failure mode is known; what is new is a case that appears to satisfy the matcher and still does not fire, which suggests the matcher (or the payload shape it reads) rather than dispatch timing.
 - **Suggested direction:** log every AskUserQuestion payload the hook sees (it already emits a universal event) with the three gate outcomes, so a non-firing case can be diagnosed without re-running it.
+
+### GT-6 — the release workflow runs dependency install scripts while holding the OIDC publish token
+- **File:** `.github/workflows/release.yml` (publish job: `id-token: write`, `cache: 'npm'`, `npm ci`)
+- **Symptom:** the publish job has `id-token: write` and runs a full `npm ci` with the npm cache restored. That executes lifecycle scripts for every dependency — `esbuild` is marked `hasInstallScript` in the lockfile — in the one job where the OIDC token endpoint is reachable.
+- **Attack:** a compromised transitive dependency, or a poisoned cache restored into that job, runs a postinstall that mints an OIDC token and stages its own tarball. The 2FA approval is the only remaining barrier, and the approver sees a staged version that looks expected. `--provenance` is currently skipped for private repos, so the staged package carries no attestation either.
+- **Why it is cheap to fix:** the publish job consumes artifacts the `verify` job already built. It never needs to run dependency code. Dropping `cache: 'npm'` from that job and using `npm ci --ignore-scripts` costs nothing legitimate.
+- **Also worth doing:** pin third-party actions by commit SHA rather than `@v4`; have the approver compare the staged tarball hash against the one built in `verify`; assert the tag commit is on `main` and that the tag matches both `package.json` versions.
+- **Why it is logged rather than fixed:** `.github/workflows/` is a governance path and is not editable in child mode. Operator decision 2026-10-26: fix upstream in `repo-OS-template` so every child repo benefits and the path lock stays meaningful.
+- **Discovered:** adversarial security review, 2026-10-26.
+
+### GT-7 — `template-sync.yml` interpolates a workflow input straight into a shell
+- **File:** `.github/workflows/template-sync.yml:64` — `${{ github.event.inputs.source_repo }}`
+- **Symptom:** a dispatch input is interpolated directly into a `run:` block, giving arbitrary command execution in a job with `contents: write` that pushes to `main`.
+- **Exploitability:** low — it requires write access to dispatch the workflow in the first place. It matters as a privilege-escalation step rather than an entry point, and because the job also runs a script pulled from the template repo, so a compromise of `markpreston2/repo-OS-template` reaches this repo's `main`.
+- **Fix:** pass the input through `env:` and validate it against an expected `owner/repo` pattern rather than interpolating into the shell.
+- **Why it is logged rather than fixed:** same governance path lock and same upstream decision as GT-6.
+- **Discovered:** adversarial security review, 2026-10-26.
