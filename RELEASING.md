@@ -134,28 +134,31 @@ done; no credentials are leaked.
 
 Easy to forget, because it is not part of the npm or store release and has no
 CI workflow — but it is where the landing page, setup guide and screenshots
-live, and the extension links to it from `GUIDE_URL` and the store listing.
-
-**Build it with `build:site`, never plain `build`:**
+live, and both `GUIDE_URL` and the store listing point at it.
 
 ```sh
-cd examples/demo-app
-npm run build:site     # sets VITE_BASE_PATH=/web-editor/
+npm run deploy:site
+# or, if the site repo is elsewhere:
+NCO_SITE_DIR=/path/to/nco-studio-site npm run deploy:site
 ```
 
-`npm run build` defaults the Vite base to `/`, which produces asset paths like
-`/assets/index-*.js` and `/chrome-web-store-badge.png`. Served under the
-`/web-editor/` sub-path those all 404, and the page loads unstyled with broken
-images. `build:site` emits `/web-editor/...` paths instead.
+That builds the guide and syncs it into `<site>/web-editor/`. It deliberately
+stops short of `git` in the site repo: committing and pushing is what triggers
+the host's deploy, and that stays an operator decision. So review the diff in
+the site repo, then commit and push there.
 
-Verify before uploading `examples/demo-app/dist/`:
+**If you ever build it by hand, use `build:site`, not `build`.** `npm run
+build` leaves the Vite base at `/`, producing asset paths like
+`/assets/index-*.js` and `/chrome-web-store-badge.png`. Served under the
+`/web-editor/` sub-path those all 404 and the page comes up unstyled with
+broken images. `build:site` sets `VITE_BASE_PATH=/web-editor/`. To check:
 
 ```sh
-grep -oE '(src|href)="/[^"]*"' dist/index.html
+grep -oE '(src|href)="/[^"]*"' examples/demo-app/dist/index.html
 # every path must start with /web-editor/
 ```
 
-Then deploy `examples/demo-app/dist/` to the `nco.studio/web-editor/` host.
+`deploy:site` already uses `build:site`, so this only bites a manual build.
 
 ## Tag + GitHub Release steps
 
