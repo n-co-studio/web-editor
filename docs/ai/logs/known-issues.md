@@ -46,6 +46,13 @@ Deferred findings from review phases that are out of the current brief's scope a
 - **Deferred deliberately:** operator decision 2026-10-26 — ship 0.3.0 with the impact reduced and do the authentication work as its own release rather than rushing a protocol change. Full brief drafted; it needs filing through a `taskdef-brief` session, which is the only session type permitted to write `.claude/.automation/briefs/` (`write-guard.sh:449-464`).
 - **Follow-up:** brief `20261027-013000-bridge-peer-authentication`.
 
+### KL-5 — SVG assets are refused over the bridge until they can be parsed properly
+- **File:** `packages/mcp-server/src/bridge.ts` (`saveDataUrl`)
+- **Behaviour:** a `data:image/svg+xml` payload arriving over the bridge is refused and logged. Raster images and video are unaffected. SVGs can still be added to the repo directly, which is outside this trust boundary.
+- **Why:** SVG is the one allowlisted asset type that is a script-capable document rather than inert bytes, and an SVG written into `public/` is served from the dev origin — so a scripted one is stored XSS on the very page being edited. The first attempt screened it with regexes. A review defeated that screen five ways: a namespace-prefixed `<s:script>` (the `<\s*script` pattern does not match it), entity-encoded or tab-split `javascript:` (the XML parser decodes after the regex has looked), a DOCTYPE `<!ENTITY>` declaration, and a UTF-16 BOM (the check decodes as UTF-8 and sees NUL-interleaved text while the browser honours the BOM). A regex cannot screen SVG; pretending otherwise was worse than refusing, because it read as a control.
+- **Proper fix:** parse with a real XML parser and allowlist elements and attributes, or reject any SVG carrying a DOCTYPE, an ENTITY, a non-UTF-8 BOM, or a prefixed or foreign-namespace element. That needs a parser dependency and a design decision about which SVG features to keep, so it is deliberately not a release-eve change.
+- **Discovered:** review of commit `fe59ab6`, 2026-10-26.
+
 ---
 
 ## Governance Tooling Defects (fix belongs upstream, in the Repo OS template)

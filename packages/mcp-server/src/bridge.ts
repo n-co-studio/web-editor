@@ -430,8 +430,26 @@ export class Bridge {
   // Session export/import
   // -----------------------------------------------------------------------
 
-  /** Export the pending queue to a file. Path is confined to project directory. */
+  /**
+   * Export the pending queue to a file.
+   *
+   * The path is confined to the project directory, which on its own is not
+   * enough: confineToProject is lexical, so `CLAUDE.md` or `.claude/agents/x.md`
+   * were both accepted and overwritten with JSON containing page-controlled
+   * strings. This is agent-triggered, which is precisely the hop a sourceFile
+   * or note injection aims at, so it gets the same restrictions as an asset
+   * write — no dot-directories, and a `.json` name only.
+   */
   async exportSession(outputPath?: string): Promise<{ path: string; diffCount: number }> {
+    if (outputPath !== undefined) {
+      const segs = outputPath.split(/[\\/]/);
+      if (segs.some((seg) => seg.startsWith('.') && seg !== '.')) {
+        throw new Error('export path must not contain a dot-directory');
+      }
+      if (!outputPath.toLowerCase().endsWith('.json')) {
+        throw new Error('export path must end in .json');
+      }
+    }
     const outPath = outputPath
       ? this.confineToProject(outputPath)
       : join(this.cwd, PERSIST_DIR, 'session-export.json');
@@ -485,7 +503,11 @@ export class Bridge {
         skipped++;
         continue;
       }
-      this.pendingQueue.push(diff);
+      // Same source-path screening as the live ingest path. A session file is
+      // just as attacker-reachable as a diff off the wire — more so, since it
+      // can be written by anything with filesystem access and is replayed
+      // wholesale — and this path previously skipped the check entirely.
+      this.pendingQueue.push(Bridge.withCheckedSourcePath(diff));
       imported++;
     }
 
@@ -724,7 +746,11 @@ export class Bridge {
   }
 
   private async processDiffBatch(payload: VisualDiffBatchPayload): Promise<void> {
-    const { diffs, batchNote, batchId: envelopeBatchId } = payload;
+    const { diffs, batchNote } = payload;
+    // Stamped onto diffs below and then sorted with localeCompare, so a
+    // non-string envelope batchId poisons the queue exactly as a per-diff one
+    // does. Drop it rather than propagate it.
+    const envelopeBatchId = typeof payload.batchId === 'string' ? payload.batchId : undefined;
     const existingIds = new Set(this.pendingQueue.map((d) => d.id));
     const newDiffs: VisualDiff[] = [];
 
@@ -952,7 +978,10 @@ export class Bridge {
       const data = JSON.parse(raw) as PersistedQueue;
 
       if (Array.isArray(data.diffs)) {
-        const valid = data.diffs.filter(isValidDiff);
+        // Screened again on restore, not just on ingest: the queue file sits in
+        // the project and survives restarts, so anything that reached it once
+        // would otherwise be replayed unchecked for the life of the project.
+        const valid = data.diffs.filter(isValidDiff).map((d) => Bridge.withCheckedSourcePath(d));
         this.pendingQueue = valid;
         if (valid.length < data.diffs.length) {
           console.error(
@@ -1209,25 +1238,38 @@ export class Bridge {
       ? Buffer.from(payload, 'base64')
       : Buffer.from(decodeURIComponent(payload), 'utf-8');
 
-    // HACK-011: an asset write is only ever an image or a video. Everything
-    // below is reachable from a page-controlled `src`/`background-image`, so
-    // the declared type, the chosen extension and the actual bytes must all
-    // agree with the allowlist before anything touches the project directory.
-    if (!Bridge.MIME_EXT[mime]) {
-      console.error(`[nco-web-editor] Refusing asset with non-asset MIME type: ${mime}`);
+    // HACK-011: an asset write is only ever a raster image or a video.
+    // Everything below is reachable from a page-controlled `src` or
+    // `background-image`, so the declared type and the actual bytes must agree
+    // with the allowlist before anything touches the project directory.
+    //
+    // The extension is derived from the MIME type and never from the caller's
+    // filename. Binding the two is what stops `image/png` + `q.svg` writing
+    // HTML under an `.svg` name — the first review's fix checked each half
+    // separately and let the mismatch through.
+    const normalizedMime = mime.trim().toLowerCase();
+    // Object.hasOwn, not truthiness: MIME_EXT is a plain object, so `constructor`,
+    // `__proto__`, `toString` and friends are inherited and test truthy.
+    if (!Object.hasOwn(Bridge.MIME_EXT, normalizedMime)) {
+      console.error(`[nco-web-editor] Refusing asset with non-asset MIME type: ${Bridge.forLog(mime)}`);
       return null;
     }
-    const ext = this.assetExt(mime, pendingUpload?.filename);
-    if (!ext) {
-      console.error(`[nco-web-editor] Refusing asset — no allowed extension for MIME ${mime}`);
+    const ext = Bridge.MIME_EXT[normalizedMime];
+    // SVG is refused over the bridge (HACK-011). It is the one allowlisted type
+    // that is a script-capable document rather than inert bytes, and screening
+    // it with regexes does not work: namespace prefixes (`<s:script>`), entity
+    // declarations, entity- or tab-obfuscated `javascript:`, and a UTF-16 BOM
+    // all slip past a textual check while the browser still executes them. An
+    // SVG written into `public/` is served from the dev origin, so that is
+    // stored XSS on the page being edited. Screening it properly needs an XML
+    // parser and an element allowlist — tracked as KL-5. Until then, refuse:
+    // SVGs can be added to the repo directly, which is outside this boundary.
+    if (ext === '.svg') {
+      console.error('[nco-web-editor] Refusing SVG asset — SVG cannot be safely screened here (KL-5); add it to the repo directly');
       return null;
     }
     if (!Bridge.matchesMagic(ext, buffer)) {
       console.error(`[nco-web-editor] Refusing asset — bytes do not match declared type ${ext}`);
-      return null;
-    }
-    if (ext === '.svg' && !Bridge.svgIsSafe(buffer)) {
-      console.error('[nco-web-editor] Refusing SVG asset — contains script or event handlers');
       return null;
     }
 
@@ -1281,29 +1323,22 @@ export class Bridge {
   }
 
   /**
-   * Resolve the asset extension, constrained to the image/video allowlist.
-   *
-   * The picked filename is honoured only when its extension is one we actually
-   * serve as an asset. It used to be taken verbatim, so a caller naming a file
-   * `x.yml` or `x.html` chose the extension of a file written into the project
-   * — the other half of HACK-011. Returns null when neither the filename nor
-   * the MIME type names an allowed asset type; the caller then rejects.
+   * Clamp an attacker-influenced string before it reaches a log line, so a
+   * crafted MIME type or source path cannot inject newlines or flood stderr.
    */
-  private assetExt(mime: string, filename?: string): string | null {
-    if (filename) {
-      const dot = filename.lastIndexOf('.');
-      if (dot > 0 && dot < filename.length - 1) {
-        const picked = filename.slice(dot).toLowerCase();
-        if (Bridge.DEDUP_EXTS.has(picked)) return picked;
-      }
-    }
-    return Bridge.MIME_EXT[mime] ?? null;
+  private static forLog(value: unknown): string {
+    return String(value).replace(/[\r\n\t]/g, ' ').slice(0, 120);
   }
 
   /**
-   * Verify the decoded bytes look like the declared type, so a mislabelled
-   * payload cannot be written under an image extension. SVG is text and has no
-   * signature, so it is screened separately by svgIsSafe().
+   * Check the leading bytes against the declared type's signature.
+   *
+   * This is a prefix check, not content validation: a real PNG header followed
+   * by arbitrary bytes passes, and the `ftyp`-at-offset-4 test for mp4/avif is
+   * especially loose. It is a cheap filter against an obviously mislabelled
+   * payload. The control that actually matters is the extension being derived
+   * from an allowlisted MIME type, so whatever is written is named as — and
+   * served as — a media file.
    */
   private static matchesMagic(ext: string, buf: Buffer): boolean {
     const startsWith = (...bytes: number[]): boolean =>
@@ -1323,24 +1358,10 @@ export class Bridge {
       case '.webm': return startsWith(0x1a, 0x45, 0xdf, 0xa3);
       case '.ogg':  return ascii(0, 'OggS');
       case '.ico':  return startsWith(0x00, 0x00, 0x01, 0x00);
-      case '.svg':  return true; // no signature — see svgIsSafe
       default:      return false;
     }
   }
 
-  /**
-   * Reject an SVG carrying script. SVG is a legitimate and common asset here,
-   * so it is screened rather than refused — but one written into `public/` is
-   * served from the dev origin, where a script element or an event-handler
-   * attribute becomes stored XSS on the very page being edited.
-   */
-  private static svgIsSafe(buf: Buffer): boolean {
-    const text = buf.toString('utf-8');
-    return !/<\s*script/i.test(text)
-      && !/\son\w+\s*=/i.test(text)
-      && !/javascript:/i.test(text)
-      && !/<\s*foreignObject/i.test(text);
-  }
 
   /**
    * Build the persisted asset filename. When a picked filename is supplied its
@@ -1415,34 +1436,88 @@ export class Bridge {
    * it should not have trusted. sourceVerified is cleared with it so the agent
    * is not told the location was confirmed.
    */
+  /** Build/config files an edit to a rendered element can never legitimately map to. */
+  private static readonly CONFIG_BASENAMES =
+    /^(?:vite|next|nuxt|svelte|astro|webpack|rollup|esbuild|babel|jest|vitest|tailwind|postcss|eslint|prettier|metro|remix|gatsby|karma|cypress|playwright)\.config\.[cm]?[jt]sx?$|^(?:gulpfile|gruntfile)\.[cm]?[jt]s$|^(?:postinstall|preinstall|prepare)\.[cm]?[jt]s$/;
+
   private static readonly SOURCE_EXTS = new Set([
     '.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs',
     '.vue', '.svelte', '.astro', '.html', '.htm', '.php', '.erb', '.hbs',
   ]);
 
   private static isPlausibleSourcePath(p: unknown): boolean {
-    if (typeof p !== 'string' || p === '' || p.length > 1024) return false;
-    if (p.startsWith('/') || /^[A-Za-z]:[\\/]/.test(p)) return false;      // absolute
-    if (p.includes('\0')) return false;
-    const segs = p.split(/[\\/]/);
-    if (segs.some((seg) => seg === '..')) return false;                    // traversal
+    if (typeof p !== 'string' || p === '' || p.length > 256) return false;
+    // Character allowlist first. A shape check alone is not a trust check: the
+    // first version accepted anything ending in a source extension, so
+    // `x.tsx IGNORE PREVIOUS INSTRUCTIONS … #.tsx` passed and became a
+    // free-text channel into a field the agent is told to act on. No spaces,
+    // no control characters, no quotes, no shell or markup metacharacters.
+    if (!/^[A-Za-z0-9_\-./@+[\]()]+$/.test(p)) return false;
+    if (p.startsWith('/')) return false;                     // absolute POSIX
+    if (p.startsWith('~')) return false;                     // home-relative
+    if (/^[A-Za-z]:/.test(p)) return false;                  // drive-absolute and drive-relative
+    if (p.startsWith('//') || p.startsWith('\\\\')) return false; // UNC
+    if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(p)) return false;   // any URL scheme, e.g. file:
+    const segs = p.split('/');
+    if (segs.some((seg) => seg === '..')) return false;                       // traversal
     if (segs.some((seg) => seg.startsWith('.') && seg !== '.')) return false; // dot-dirs
+    if (segs.some((seg) => seg === '')) return false;                         // empty / doubled
     const dot = p.lastIndexOf('.');
     if (dot <= 0) return false;
-    return Bridge.SOURCE_EXTS.has(p.slice(dot).toLowerCase());
+    if (!Bridge.SOURCE_EXTS.has(p.slice(dot).toLowerCase())) return false;
+    // Build-time config executes on the next dev-server start or install, so
+    // it is not a plausible target for "the element you just edited" and is a
+    // high-value thing to steer an agent at.
+    const base = segs[segs.length - 1].toLowerCase();
+    if (Bridge.CONFIG_BASENAMES.test(base)) return false;
+    return true;
   }
 
-  private static withCheckedSourcePath(diff: VisualDiff): VisualDiff {
-    const el = diff.element as { sourceFile?: unknown } | undefined;
-    if (!el || Bridge.isPlausibleSourcePath(el.sourceFile)) return diff;
-    console.error(
-      `[nco-web-editor] Clearing implausible sourceFile from diff ${diff.id}: ${String(el.sourceFile).slice(0, 120)}`,
-    );
-    return {
-      ...diff,
-      element: { ...diff.element, sourceFile: '' },
-      sourceVerified: false,
+  /**
+   * Clear every implausible `sourceFile` anywhere in a diff.
+   *
+   * This walks the whole object rather than checking `diff.element` alone.
+   * `sourceFile` also rides on sibling anchors, child snapshots, note element
+   * refs and script-behaviour changes — and the tool description tells the
+   * agent to use the sibling ones as "the exact JSX insertion point", so
+   * checking only the top-level element left the same channel open one field
+   * over. Enumerating carriers invites the next one to be missed; the shape of
+   * the data is what should decide.
+   */
+  private static withCheckedSourcePath<T>(value: T): T {
+    let cleared = false;
+
+    const walk = (node: unknown): unknown => {
+      if (Array.isArray(node)) return node.map(walk);
+      if (typeof node !== 'object' || node === null) return node;
+
+      const out: Record<string, unknown> = {};
+      for (const [key, val] of Object.entries(node as Record<string, unknown>)) {
+        if (key === 'sourceFile' && !Bridge.isPlausibleSourcePath(val)) {
+          // '' is the project's own "unknown source" value, so downstream code
+          // already copes with it; the alternative is deleting the key and
+          // breaking the type.
+          if (val !== '' && val !== undefined) {
+            console.error(
+              `[nco-web-editor] Clearing implausible sourceFile: ${Bridge.forLog(val)}`,
+            );
+            cleared = true;
+          }
+          out[key] = '';
+        } else {
+          out[key] = walk(val);
+        }
+      }
+      return out;
     };
+
+    const result = walk(value) as T & { sourceVerified?: boolean };
+    // Do not tell the agent a location was verified when it has just been
+    // thrown away.
+    if (cleared && typeof result === 'object' && result !== null && 'sourceVerified' in result) {
+      return { ...result, sourceVerified: false };
+    }
+    return result;
   }
 
   private async resolveAssetDir(fromValue: string): Promise<string> {
@@ -1525,9 +1600,18 @@ function isValidDiff(obj: unknown): obj is VisualDiff {
     typeof d.timestamp === 'string' &&
     typeof d.element === 'object' && d.element !== null &&
     Array.isArray(d.changes) &&
+    // Every element is indexed by extractDataUrls and trackDrift. A null or
+    // primitive entry threw there, aborting the rest of the batch silently.
+    d.changes.every((c) => typeof c === 'object' && c !== null) &&
     typeof d.context === 'object' && d.context !== null &&
     typeof d.status === 'string' &&
-    typeof d.sourceVerified === 'boolean'
+    typeof d.sourceVerified === 'boolean' &&
+    // batchId must be a string when present: buildBatchesSummary sorts with
+    // `b.batchId.localeCompare(a.batchId)`, so a numeric one throws there and
+    // takes get_pending_visual_changes down. The queue is persisted and
+    // restoreQueue used the same check, so a single poisoned diff broke the
+    // main tool permanently, across restarts. Found reviewing the first fix.
+    (d.batchId === undefined || typeof d.batchId === 'string')
   );
 }
 
