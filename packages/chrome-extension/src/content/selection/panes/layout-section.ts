@@ -1,5 +1,5 @@
 import { createElement, createText } from '../../../shared/ui-utils';
-import { OVERLAY } from '../../../shared/constants';
+import { OVERLAY, tint } from '../../../shared/constants';
 import { createStyleSnapshot, snapshotGet, getComputedProperty } from '../../../shared/dom-utils';
 import type { ComputedStyleSnapshot } from '../../../shared/dom-utils';
 import type { TokenStore } from '../../tokens/store';
@@ -174,8 +174,8 @@ export class LayoutSection {
     const token = this.inlineEditor.resolveToken(name, value);
     if (token) {
       const badgeEl = createElement('span', {}, {
-        background: 'rgba(6, 182, 212, 0.2)',
-        color: OVERLAY.primary,
+        background: tint(OVERLAY.primary, 12),
+        color: OVERLAY.primaryStrong,
         padding: '1px 4px',
         borderRadius: '2px',
         fontSize: '10px',

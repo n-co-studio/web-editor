@@ -427,7 +427,7 @@ export class TypographyEditor {
     onChange: (value: string, token?: { name: string; value: string }) => void,
   ): HTMLSelectElement {
     const select = createElement('select', {}, {
-      background: 'rgba(255, 255, 255, 0.1)',
+      background: OVERLAY.inputBg,
       color: OVERLAY.text,
       border: `1px solid ${OVERLAY.border}`,
       borderRadius: OVERLAY.radiusSm,
@@ -491,7 +491,7 @@ export class TypographyEditor {
     degraded = false,
   ): HTMLSelectElement {
     const select = createElement('select', {}, {
-      background: 'rgba(255, 255, 255, 0.1)',
+      background: OVERLAY.inputBg,
       color: OVERLAY.text,
       border: `1px solid ${OVERLAY.border}`,
       borderRadius: OVERLAY.radiusSm,

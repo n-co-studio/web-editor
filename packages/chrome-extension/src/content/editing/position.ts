@@ -2,7 +2,7 @@ import type { PropertyChange } from '@nco-studio/shared';
 import { createElement, createText, createButton, makeDraggable } from '../../shared/ui-utils';
 import { getComputedProperty } from '../../shared/dom-utils';
 import { extractUnit } from './token-select';
-import { OVERLAY, TOOLBAR_WIDTH } from '../../shared/constants';
+import { OVERLAY, TOOLBAR_WIDTH, tint } from '../../shared/constants';
 import type { PreviewManager } from './preview';
 import { MoveEditor, getMoveBlockReason } from './move';
 
@@ -312,8 +312,8 @@ export class PositionEditor {
     } else if (this.moveActive) {
       this.moveToggleBtn.style.opacity = '1';
       this.moveToggleBtn.style.cursor = 'pointer';
-      this.moveToggleBtn.style.background = 'rgba(6, 182, 212, 0.12)';
-      this.moveToggleBtn.style.color = OVERLAY.primary;
+      this.moveToggleBtn.style.background = tint(OVERLAY.primary, 12);
+      this.moveToggleBtn.style.color = OVERLAY.primaryStrong;
       this.moveToggleBtn.title = 'Drag to reposition element';
     } else {
       this.moveToggleBtn.style.opacity = '1';
@@ -388,8 +388,8 @@ export class PositionEditor {
         for (const child of Array.from(btnRow.children) as HTMLButtonElement[]) {
           const val = child.dataset.posValue;
           if (val === pos) {
-            child.style.background = 'rgba(6, 182, 212, 0.12)';
-            child.style.color = OVERLAY.primary;
+            child.style.background = tint(OVERLAY.primary, 12);
+            child.style.color = OVERLAY.primaryStrong;
           } else {
             child.style.background = 'transparent';
             child.style.color = OVERLAY.textMuted;
@@ -497,7 +497,7 @@ export class PositionEditor {
       type: 'text',
       value: currentValue === 'auto' ? 'auto' : currentValue,
     }, {
-      background: 'rgba(255, 255, 255, 0.1)',
+      background: OVERLAY.inputBg,
       color: OVERLAY.text,
       border: `1px solid ${OVERLAY.border}`,
       borderRadius: OVERLAY.radiusSm,

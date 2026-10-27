@@ -59,7 +59,7 @@ export class InlineEditor {
 
     if (tokens.length > 0) {
       const select = createElement('select', {}, {
-        background: 'rgba(255, 255, 255, 0.1)',
+        background: OVERLAY.inputBg,
         color: OVERLAY.text,
         border: `1px solid ${OVERLAY.primary}`,
         borderRadius: OVERLAY.radiusSm,
@@ -131,7 +131,7 @@ export class InlineEditor {
       type: 'text',
       value: currentValue,
     }, {
-      background: 'rgba(255, 255, 255, 0.1)',
+      background: OVERLAY.inputBg,
       color: OVERLAY.text,
       border: `1px solid ${OVERLAY.primary}`,
       borderRadius: OVERLAY.radiusSm,
@@ -242,7 +242,7 @@ export class InlineEditor {
 
     if (tokens.length > 0) {
       const select = createElement('select', {}, {
-        background: 'rgba(255, 255, 255, 0.1)',
+        background: OVERLAY.inputBg,
         color: OVERLAY.text,
         border: `1px solid ${OVERLAY.primary}`,
         borderRadius: OVERLAY.radiusSm,
@@ -312,7 +312,7 @@ export class InlineEditor {
       value: currentValue === 'Mixed' ? '' : currentValue,
       placeholder: currentValue === 'Mixed' ? 'Set value for all\u2026' : '',
     }, {
-      background: 'rgba(255, 255, 255, 0.1)',
+      background: OVERLAY.inputBg,
       color: OVERLAY.text,
       border: `1px solid ${OVERLAY.primary}`,
       borderRadius: OVERLAY.radiusSm,

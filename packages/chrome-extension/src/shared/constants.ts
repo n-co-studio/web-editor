@@ -122,6 +122,17 @@ export const OVERLAY = {
   infoFill: 'var(--fe-info-fill)',
   onInfo: 'var(--fe-on-info)',
 
+  // Field / band fills and role colors added in the token-cohesion pass.
+  inputBg: 'var(--fe-input-bg)',
+  band: 'var(--fe-band)',
+  primaryStrong: 'var(--fe-primary-strong)',
+  insertText: 'var(--fe-insert-text)',
+  insertFill: 'var(--fe-insert-fill)',
+  onInsert: 'var(--fe-on-insert)',
+  reorderText: 'var(--fe-reorder-text)',
+  groupText: 'var(--fe-group-text)',
+  varText: 'var(--fe-var-text)',
+
   // Guide overlay (on-page — not themed, mode-coded to read over page content)
   guide: '#8b5cf6',
 
@@ -184,6 +195,20 @@ export const DROP_INDICATOR = {
   pipSize: 9,
 } as const;
 
+// Measure + multi-select indicators — on-page, NOT themed
+//
+// Deliberately fixed literals, like SELECTION.ring and DROP_INDICATOR above.
+// These draw over the user's page, so a themed value would make the same
+// measurement render in two different colours depending on a panel setting.
+// The label uses the darker #1d4ed8 rather than the frame colour: white on
+// #3b82f6 is 3.68:1, under AA for 10px type, while white on #1d4ed8 is 6.7:1.
+export const MEASURE_INDICATOR = {
+  color: '#3b82f6',
+  fill: 'rgba(59, 130, 246, 0.08)',
+  labelBg: '#1d4ed8',
+  labelText: '#ffffff',
+} as const;
+
 // Insert indicator for insert tool drop zones and phantom
 export const INSERT_INDICATOR = {
   color: '#10b981',
@@ -205,10 +230,10 @@ export const BOX_MODEL = {
   borderFill: OVERLAY.active,
   paddingFill: 'rgba(245, 158, 11, 0.20)',
   contentFill: 'rgba(6, 182, 212, 0.20)',
-  marginText: '#fb7185',
-  borderText: '#a1a1aa',
-  paddingText: '#f59e0b',
-  contentText: '#06b6d4',
+  marginText: 'var(--fe-box-margin-text)',
+  borderText: OVERLAY.textMuted,
+  paddingText: 'var(--fe-box-padding-text)',
+  contentText: 'var(--fe-box-content-text)',
 } as const;
 
 // Panel height tier thresholds
@@ -231,3 +256,12 @@ export const GUIDE_LINE_Z = '52';
 export const RULER_BAR_Z = '53';
 export const GUIDE_SNAP_THRESHOLD = 8;
 export const MAX_GUIDES_PER_PAGE = 50;
+
+/**
+ * A translucent tint of a themed color, for chip and row backgrounds.
+ * Derived from the token instead of a hard-coded rgba() so the tint follows
+ * the theme (light primary is #0e7490, dark is #06b6d4).
+ */
+export function tint(color: string, percent: number): string {
+  return `color-mix(in srgb, ${color} ${percent}%, transparent)`;
+}

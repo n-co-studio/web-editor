@@ -1,5 +1,5 @@
 import { createElement } from '../../shared/ui-utils';
-import { OVERLAY, ZONE_OVERLAY } from '../../shared/constants';
+import { OVERLAY, ZONE_OVERLAY, HANDLE_COLORS } from '../../shared/constants';
 
 export interface ZoneOverlayOptions {
   /** Fade-in animation on initial render. Default: true. */
@@ -89,7 +89,13 @@ function createZoneDiv(
   const minDim = Math.min(w, h);
   if (showLabels && minDim >= 14) {
     const label = createElement('span', {}, {
-      color: isPadding ? ZONE_OVERLAY.paddingOutline : ZONE_OVERLAY.marginOutline,
+      // A solid pill in the handle colour with black text, matching the
+      // Padding / Margin handle pills (10.6:1 and 7.8:1). The value used to be
+      // half-opacity rose text on the rose zone fill: 1.53:1.
+      color: '#000',
+      background: isPadding ? HANDLE_COLORS.padding : HANDLE_COLORS.margin,
+      padding: '1px 3px',
+      borderRadius: '3px',
       fontSize: '9px',
       fontWeight: '600',
       fontFamily: OVERLAY.monoFamily,

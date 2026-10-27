@@ -17,7 +17,7 @@
  */
 
 import type { TextChange } from '@nco-studio/shared';
-import { OVERLAY } from '../../shared/constants';
+import { OVERLAY, tint } from '../../shared/constants';
 import {
   type FormatMark,
   toggleMark,
@@ -479,7 +479,7 @@ export class TextEditor {
       });
 
       btn.addEventListener('mouseenter', () => {
-        btn.style.background = 'rgba(255,255,255,0.1)';
+        btn.style.background = OVERLAY.inputBg;
       });
       btn.addEventListener('mouseleave', () => {
         this.refreshButtonBackground(btn);
@@ -555,10 +555,10 @@ export class TextEditor {
       const s = state.get(mark) ?? 'none';
       if (s === 'full') {
         btn.setAttribute('aria-pressed', 'true');
-        btn.style.background = 'rgba(6, 182, 212, 0.12)';
+        btn.style.background = tint(OVERLAY.primary, 12);
       } else if (s === 'partial') {
         btn.setAttribute('aria-pressed', 'mixed');
-        btn.style.background = 'rgba(6, 182, 212, 0.08)';
+        btn.style.background = tint(OVERLAY.primary, 8);
       } else {
         btn.setAttribute('aria-pressed', 'false');
         btn.style.background = 'none';
@@ -569,9 +569,9 @@ export class TextEditor {
   private refreshButtonBackground(btn: HTMLButtonElement): void {
     const pressed = btn.getAttribute('aria-pressed');
     if (pressed === 'true') {
-      btn.style.background = 'rgba(6, 182, 212, 0.12)';
+      btn.style.background = tint(OVERLAY.primary, 12);
     } else if (pressed === 'mixed') {
-      btn.style.background = 'rgba(6, 182, 212, 0.08)';
+      btn.style.background = tint(OVERLAY.primary, 8);
     } else {
       btn.style.background = 'none';
     }

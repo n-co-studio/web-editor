@@ -6,8 +6,8 @@ import type { MatchedRule, MatchResult } from '../../../shared/css-types';
 import { compareSpecificity } from '../../inspection/specificity';
 import type { MatchedRulesCache } from '../../inspection/matched-rules-cache';
 import type { ToggleManager } from '../../inspection/toggle-manager';
-import { createElement, createText } from '../../../shared/ui-utils';
-import { OVERLAY } from '../../../shared/constants';
+import { createElement, createText, muteRowText } from '../../../shared/ui-utils';
+import { OVERLAY, tint } from '../../../shared/constants';
 
 const DEBOUNCE_MS = 150;
 const PAGE_SIZE = 50;
@@ -167,7 +167,7 @@ export class RulesSection {
   private buildAccessBanner(result: MatchResult): HTMLDivElement {
     const banner = createElement('div', {}, {
       padding: '6px 10px',
-      background: 'rgba(245, 158, 11, 0.1)',
+      background: tint(OVERLAY.warning, 12),
       borderBottom: `1px solid ${OVERLAY.border}`,
       fontSize: '10px',
       fontFamily: OVERLAY.monoFamily,
@@ -204,7 +204,7 @@ export class RulesSection {
     });
 
     const selectorEl = createText('span', rule.selectorText, 'mono');
-    selectorEl.style.color = OVERLAY.primary;
+    selectorEl.style.color = OVERLAY.primaryStrong;
     selectorEl.style.fontWeight = '500';
     selectorEl.style.flex = '1';
     selectorEl.style.overflow = 'hidden';
@@ -295,9 +295,10 @@ export class RulesSection {
       alignItems: 'center',
       gap: '6px',
       padding: '1px 0',
-      opacity: isOverridden ? '0.5' : '1',
     });
     row.setAttribute('data-rule-prop', property);
+    // Overridden declarations are muted after the row is built (see below) —
+    // they used to be faded to 0.5 opacity, under 4.5:1 in both themes.
 
     // Toggle checkbox
     const checkbox = createElement('span', {}, {
@@ -360,15 +361,16 @@ export class RulesSection {
     }
     row.appendChild(valueEl);
 
+    if (isOverridden) muteRowText(row);
     return row;
   }
 
   private renderCheckbox(el: HTMLElement, checked: boolean): void {
     if (checked) {
       el.textContent = '\u2713'; // checkmark
-      el.style.background = 'rgba(6, 182, 212, 0.3)';
+      el.style.background = tint(OVERLAY.primary, 30);
       el.style.borderColor = OVERLAY.primary;
-      el.style.color = OVERLAY.primary;
+      el.style.color = OVERLAY.primaryStrong;
     } else {
       el.textContent = '';
       el.style.background = 'transparent';
@@ -449,7 +451,7 @@ export class RulesSection {
       border: `1px solid ${OVERLAY.border}`,
       borderRadius: OVERLAY.radiusSm,
       padding: '4px 12px',
-      color: OVERLAY.primary,
+      color: OVERLAY.primaryStrong,
       fontSize: '11px',
       fontFamily: OVERLAY.monoFamily,
       cursor: 'pointer',

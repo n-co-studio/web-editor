@@ -159,7 +159,7 @@ export class BoxModelSection {
       valEl.textContent = display;
 
       valEl.addEventListener('mouseenter', () => {
-        valEl.style.background = 'rgba(255, 255, 255, 0.1)';
+        valEl.style.background = OVERLAY.inputBg;
       });
       valEl.addEventListener('mouseleave', () => {
         valEl.style.background = '';
@@ -231,7 +231,7 @@ export class BoxModelSection {
     const sep1 = createText('span', '|', 'mono');
     sep1.style.color = OVERLAY.textMuted;
     sep1.style.fontSize = '10px';
-    sep1.style.opacity = '0.5';
+    // Separator stays at full muted colour; at 0.5 opacity it was 2.3:1.
     container.appendChild(sep1);
 
     // P: top right bottom left
@@ -245,7 +245,7 @@ export class BoxModelSection {
     const sep2 = createText('span', '|', 'mono');
     sep2.style.color = OVERLAY.textMuted;
     sep2.style.fontSize = '10px';
-    sep2.style.opacity = '0.5';
+
     container.appendChild(sep2);
 
     // width × height
@@ -278,7 +278,7 @@ export class BoxModelSection {
       border: `1px solid ${OVERLAY.primary}`,
       borderRadius: OVERLAY.radiusSm,
       padding: '4px',
-      boxShadow: OVERLAY.shadowLg ?? '0 10px 15px rgba(0, 0, 0, 0.10)',
+      boxShadow: OVERLAY.shadowLg,
       pointerEvents: 'auto',
     });
 
@@ -286,7 +286,7 @@ export class BoxModelSection {
       type: 'text',
       value: currentValue,
     }, {
-      background: 'rgba(255, 255, 255, 0.1)',
+      background: OVERLAY.inputBg,
       color: OVERLAY.text,
       border: 'none',
       borderRadius: '2px',

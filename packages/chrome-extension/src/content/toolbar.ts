@@ -1,5 +1,5 @@
 import { createElement, createButton, makeDraggable } from '../shared/ui-utils';
-import { OVERLAY, TOOLBAR_WIDTH, TOOLBAR_BUTTON_SIZE, TOOLBAR_COLUMNS } from '../shared/constants';
+import { OVERLAY, TOOLBAR_WIDTH, TOOLBAR_BUTTON_SIZE, TOOLBAR_COLUMNS, tint } from '../shared/constants';
 import type { EditMode, InspectorMode, PanelPosition } from '../shared/types';
 
 type ToolSelectCallback = (mode: EditMode) => void;
@@ -394,8 +394,8 @@ export class FloatingToolbar {
     if (!this.rulersBtn) return;
     this.rulersBtn.setAttribute('aria-pressed', String(enabled));
     if (enabled) {
-      this.rulersBtn.style.background = 'rgba(6, 182, 212, 0.12)';
-      this.rulersBtn.style.color = OVERLAY.primary;
+      this.rulersBtn.style.background = tint(OVERLAY.primary, 12);
+      this.rulersBtn.style.color = OVERLAY.primaryStrong;
     } else {
       this.rulersBtn.style.background = 'transparent';
       this.rulersBtn.style.color = OVERLAY.textMuted;
@@ -444,8 +444,8 @@ export class FloatingToolbar {
     if (!this.notesBtn) return;
     this.notesBtn.setAttribute('aria-pressed', String(open));
     if (open) {
-      this.notesBtn.style.background = 'rgba(6, 182, 212, 0.12)';
-      this.notesBtn.style.color = OVERLAY.primary;
+      this.notesBtn.style.background = tint(OVERLAY.primary, 12);
+      this.notesBtn.style.color = OVERLAY.primaryStrong;
     } else {
       this.notesBtn.style.background = 'transparent';
       this.notesBtn.style.color = OVERLAY.textMuted;
@@ -459,8 +459,8 @@ export class FloatingToolbar {
     if (!this.gridBtn) return;
     this.gridBtn.setAttribute('aria-pressed', String(enabled));
     if (enabled) {
-      this.gridBtn.style.background = 'rgba(6, 182, 212, 0.12)';
-      this.gridBtn.style.color = OVERLAY.primary;
+      this.gridBtn.style.background = tint(OVERLAY.primary, 12);
+      this.gridBtn.style.color = OVERLAY.primaryStrong;
     } else {
       this.gridBtn.style.background = 'transparent';
       this.gridBtn.style.color = OVERLAY.textMuted;
@@ -493,8 +493,8 @@ export class FloatingToolbar {
     if (!btn) return;
     btn.setAttribute('aria-pressed', String(open));
     if (open) {
-      btn.style.background = 'rgba(6, 182, 212, 0.12)';
-      btn.style.color = OVERLAY.primary;
+      btn.style.background = tint(OVERLAY.primary, 12);
+      btn.style.color = OVERLAY.primaryStrong;
     } else {
       btn.style.background = 'transparent';
       btn.style.color = OVERLAY.textMuted;
@@ -520,7 +520,7 @@ export class FloatingToolbar {
     if (!this.reviewBtn) return;
     this.reviewBtn.setAttribute('aria-pressed', String(open));
     if (open) {
-      this.reviewBtn.style.background = `rgba(251, 113, 133, 0.15)`;
+      this.reviewBtn.style.background = `${tint(OVERLAY.accent, 12)}`;
       this.reviewBtn.style.color = OVERLAY.accent;
     } else {
       this.reviewBtn.style.background = 'transparent';
@@ -1170,8 +1170,8 @@ export class FloatingToolbar {
       btn.style.opacity = '1';
       btn.style.cursor = 'pointer';
       btn.style.pointerEvents = 'auto';
-      btn.style.background = 'rgba(6, 182, 212, 0.12)';
-      btn.style.color = OVERLAY.primary;
+      btn.style.background = tint(OVERLAY.primary, 12);
+      btn.style.color = OVERLAY.primaryStrong;
       btn.title = TOOL_LABELS[mode];
     } else {
       btn.style.opacity = '1';
@@ -1318,7 +1318,7 @@ export class FloatingToolbar {
       'aria-label',
       hiddenActive ? `${label} section, in use` : `${label} section`,
     );
-    state.headerBtn.style.color = hiddenActive ? OVERLAY.primary : OVERLAY.textMuted;
+    state.headerBtn.style.color = hiddenActive ? OVERLAY.primaryStrong : OVERLAY.textMuted;
   }
 
   /** Which section's body holds this button, if any. */

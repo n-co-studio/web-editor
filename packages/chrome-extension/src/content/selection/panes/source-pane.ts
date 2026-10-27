@@ -1,6 +1,6 @@
 import type { ElementInfo } from '@nco-studio/shared';
 import { createElement, createText } from '../../../shared/ui-utils';
-import { OVERLAY, SELECTOR_TRUNCATE_LENGTH } from '../../../shared/constants';
+import { OVERLAY, SELECTOR_TRUNCATE_LENGTH, tint } from '../../../shared/constants';
 
 /**
  * Source pane — bottom of the left column.
@@ -37,7 +37,7 @@ export class SourcePane {
       this.container.appendChild(fileLine);
     } else {
       const warning = createElement('div', {}, {
-        background: 'rgba(245, 158, 11, 0.15)',
+        background: tint(OVERLAY.warning, 12),
         border: `1px solid ${OVERLAY.warning}`,
         borderRadius: OVERLAY.radiusSm,
         padding: '4px 8px',

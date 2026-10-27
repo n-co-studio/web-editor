@@ -69,13 +69,13 @@ export class ConsolePane {
     for (const entry of this.logEntries) {
       const line = createElement('div', {}, {
         padding: '1px 0',
-        borderBottom: '1px solid rgba(255,255,255,0.05)',
+        borderBottom: `1px solid ${OVERLAY.border}`,
         wordBreak: 'break-word',
       });
       const colorMap: Record<'info' | 'warn' | 'error', string> = {
         info: OVERLAY.text,
         warn: OVERLAY.warning,
-        error: '#f87171',
+        error: OVERLAY.destructive,
       };
       line.style.color = colorMap[entry.level];
       const time = new Date(entry.time);

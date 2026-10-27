@@ -61,7 +61,7 @@ const OVERLAY_CSS = /* css */ `
     --fe-bg-subtle: rgba(0, 0, 0, 0.65);
     --fe-bg-raised: rgba(30, 30, 35, 0.90);
     --fe-text: #ffffff;
-    --fe-text-muted: #a1a1aa;
+    --fe-text-muted: #b4b4bc;
     --fe-text-inverse: #ffffff;
     --fe-border: rgba(255, 255, 255, 0.15);
     /* Outline for a colour swatch. Distinct from --fe-border because a swatch
@@ -94,7 +94,8 @@ const OVERLAY_CSS = /* css */ `
     --fe-destructive: #f87171;
     --fe-success: #22c55e;
     --fe-warning: #f59e0b;
-    --fe-info: #3b82f6;
+    /* #60a5fa: #3b82f6 was 3.51:1 on its own tint in the multi-select header. */
+    --fe-info: #60a5fa;
 
     /* Fill role: a filled chip or button, always with white text. */
     --fe-destructive-fill: #dc2626;
@@ -102,6 +103,33 @@ const OVERLAY_CSS = /* css */ `
     --fe-on-destructive: #ffffff;
     --fe-info-fill: #1d4ed8;
     --fe-on-info: #ffffff;
+
+    /* Field and band fills. Themed because a white overlay is invisible on the
+       light panel; these were literals (rgba(255,255,255,0.1) / 0.04) before. */
+    --fe-input-bg: rgba(255, 255, 255, 0.10);
+    --fe-band: rgba(255, 255, 255, 0.04);
+
+    /* Primary as TEXT on a primary tint (token chips, element pills). Plain
+       --fe-primary on a 12% tint of itself is 5.12:1 here; kept as its own role
+       so light mode can darken it without touching the primary fill. */
+    --fe-primary-strong: #06b6d4;
+
+    /* Insert mode. Text role is legible on the panel and on a 12% tint
+       (5.18:1); the fill carries white text (5.48:1). */
+    --fe-insert-text: #34d399;
+    --fe-insert-fill: #047857;
+    --fe-on-insert: #ffffff;
+
+    /* Change-type text in the review queue, each >= 4.5:1 on its 12% tint. */
+    --fe-reorder-text: #a5b4fc;
+    --fe-group-text: #c4b5fd;
+    --fe-var-text: #c084fc;
+
+    /* Box-model labels in DevTools. Same hues as the on-page handles, which
+       stay untouched; only their use as panel TEXT is themed. */
+    --fe-box-margin-text: #fb7185;
+    --fe-box-padding-text: #f59e0b;
+    --fe-box-content-text: #06b6d4;
 
     --fe-space: 4px;
     --fe-radius-sm: 4px;
@@ -138,12 +166,13 @@ const OVERLAY_CSS = /* css */ `
     --fe-on-primary: #ffffff;
 
     /* Semantic colors adjusted for AA on light backgrounds */
-    /* --fe-destructive: #dc2626 = 4.87:1 vs white ✓ */
-    --fe-destructive: #dc2626;
+    /* Text role measured on the panel over a DARK page (#f2f2f2), the worst case:
+       #dc2626 was 4.32:1 there; #b91c1c = 5.79:1. The fill keeps #dc2626. */
+    --fe-destructive: #b91c1c;
     /* --fe-success: #166534 = 7.24:1 vs white ✓ */
     --fe-success: #166534;
-    /* --fe-warning: #b45309 = 5.02:1 vs white ✓ */
-    --fe-warning: #b45309;
+    /* #b45309 was 4.50:1 on #f2f2f2 and 3.45:1 on its tint; #92400e = 6.35:1 / 5.30:1. */
+    --fe-warning: #92400e;
     /* --fe-info: #1d4ed8 = 6.77:1 vs white ✓ */
     --fe-info: #1d4ed8;
 
@@ -155,6 +184,24 @@ const OVERLAY_CSS = /* css */ `
     --fe-on-destructive: #ffffff;
     --fe-info-fill: #1d4ed8;
     --fe-on-info: #ffffff;
+
+
+    --fe-input-bg: rgba(0, 0, 0, 0.04);
+    --fe-band: rgba(0, 0, 0, 0.03);
+    /* #0c6479 = 5.07:1 on a 12% primary tint over the panel; #0e7490 was 4.09:1. */
+    --fe-primary-strong: #0c6479;
+    /* #065f46 = 5.72:1 on its 12% tint; #10b981 was 2.54:1 as text on white. */
+    --fe-insert-text: #065f46;
+    --fe-insert-fill: #047857;
+    --fe-on-insert: #ffffff;
+    --fe-reorder-text: #4338ca;
+    --fe-group-text: #6d28d9;
+    --fe-var-text: #7e22ce;
+    /* Handle hues darkened for text: #f59e0b on white was 2.15:1, #fb7185 2.69:1,
+       #06b6d4 2.43:1. */
+    --fe-box-margin-text: #be123c;
+    --fe-box-padding-text: #92400e;
+    --fe-box-content-text: #0c6479;
 
     --fe-shadow-md: 0 4px 6px rgba(0, 0, 0, 0.08);
     --fe-shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.12);

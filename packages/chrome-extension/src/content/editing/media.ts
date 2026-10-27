@@ -411,7 +411,7 @@ export class MediaEditor {
     }) as HTMLSelectElement;
     for (const opt of MECHANISM_OPTIONS) {
       const o = createElement('option', { value: opt.value }, {
-        background: '#1a1a2e',
+        background: OVERLAY.bgRaised,
         color: OVERLAY.text,
       }) as HTMLOptionElement;
       o.textContent = opt.label;
@@ -566,7 +566,7 @@ export class MediaEditor {
     ];
     for (const o of opts) {
       const option = createElement('option', { value: o.value }, {
-        background: '#1a1a2e',
+        background: OVERLAY.bgRaised,
         color: OVERLAY.text,
       }) as HTMLOptionElement;
       option.textContent = o.label;
@@ -978,7 +978,7 @@ export class MediaEditor {
 
     for (const opt of options) {
       const option = createElement('option', { value: opt }, {
-        background: '#1a1a2e',
+        background: OVERLAY.bgRaised,
         color: OVERLAY.text,
       }) as HTMLOptionElement;
       option.textContent = opt;

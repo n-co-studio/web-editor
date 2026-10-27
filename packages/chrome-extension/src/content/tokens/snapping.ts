@@ -218,7 +218,9 @@ export class SnappingEngine {
         swatch.style.transform = 'scale(1.15)';
       });
       swatch.addEventListener('mouseleave', () => {
-        swatch.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+        // Restores the themed value set on construction. A raw rgba here
+        // left the swatch borderless on the light panel after one hover.
+        swatch.style.borderColor = OVERLAY.swatchBorder;
         swatch.style.transform = '';
       });
 

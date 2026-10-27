@@ -1,7 +1,7 @@
 import type { PropertyChange } from '@nco-studio/shared';
 import { createElement, createText, createButton } from '../../shared/ui-utils';
 import { getComputedProperty } from '../../shared/dom-utils';
-import { OVERLAY, TOOLBAR_WIDTH, INSERT_INDICATOR } from '../../shared/constants';
+import { OVERLAY, TOOLBAR_WIDTH, INSERT_INDICATOR, tint } from '../../shared/constants';
 import { computeMeasurements } from '../selection/measure-overlay';
 import type { TokenStore } from '../tokens/store';
 import type { PreviewManager } from './preview';
@@ -156,7 +156,7 @@ export class MultiSelectToolbar {
       justifyContent: 'space-between',
       padding: '6px 10px',
       borderBottom: `1px solid ${OVERLAY.border}`,
-      background: 'rgba(59, 130, 246, 0.08)',
+      background: tint(OVERLAY.info, 8),
       flexShrink: '0',
     });
     const title = createText('span', `${elements.length} elements`, 'heading');
@@ -389,7 +389,7 @@ export class MultiSelectToolbar {
 
     if (tokens.length > 0) {
       const select = createElement('select', {}, {
-        background: 'rgba(255, 255, 255, 0.1)',
+        background: OVERLAY.inputBg,
         color: OVERLAY.text,
         border: `1px solid ${OVERLAY.border}`,
         borderRadius: OVERLAY.radiusSm,
@@ -434,7 +434,7 @@ export class MultiSelectToolbar {
       min: '0',
     }, {
       width: tokens.length > 0 ? '52px' : '100%',
-      background: 'rgba(255, 255, 255, 0.1)',
+      background: OVERLAY.inputBg,
       color: OVERLAY.text,
       border: `1px solid ${OVERLAY.border}`,
       borderRadius: OVERLAY.radiusSm,
@@ -522,7 +522,7 @@ export class MultiSelectToolbar {
     direction: 'horizontal' | 'vertical',
   ): HTMLSelectElement {
     const select = createElement('select', {}, {
-      background: 'rgba(255, 255, 255, 0.1)',
+      background: OVERLAY.inputBg,
       color: OVERLAY.text,
       border: `1px solid ${OVERLAY.border}`,
       borderRadius: OVERLAY.radiusSm,
@@ -573,7 +573,7 @@ export class MultiSelectToolbar {
       value: `${Math.round(currentDistance)}`,
       min: '0',
     }, {
-      background: 'rgba(255, 255, 255, 0.1)',
+      background: OVERLAY.inputBg,
       color: OVERLAY.text,
       border: `1px solid ${OVERLAY.border}`,
       borderRadius: OVERLAY.radiusSm,

@@ -1,5 +1,5 @@
 import { createElement } from '../../shared/ui-utils';
-import { OVERLAY } from '../../shared/constants';
+import { OVERLAY, MEASURE_INDICATOR } from '../../shared/constants';
 import { getTopElementAt } from '../../shared/dom-utils';
 
 // ---------------------------------------------------------------------------
@@ -16,7 +16,9 @@ export interface MeasurementLine {
   distance: number;
 }
 
-const MEASURE_COLOR = OVERLAY.info; // #3b82f6
+// Fixed, not OVERLAY.info: this draws on the page, so it must not flip
+// with the panel theme. See MEASURE_INDICATOR in shared/constants.ts.
+const MEASURE_COLOR = MEASURE_INDICATOR.color;
 
 // ---------------------------------------------------------------------------
 // Distance computation
@@ -321,7 +323,7 @@ export class MeasureOverlay {
       width: `${rect.width}px`,
       height: `${rect.height}px`,
       border: `2px solid ${MEASURE_COLOR}`,
-      background: 'rgba(59, 130, 246, 0.08)',
+      background: MEASURE_INDICATOR.fill,
       borderRadius: '1px',
       pointerEvents: 'none',
     });
@@ -406,8 +408,8 @@ export class MeasureOverlay {
       transform: m.orientation === 'horizontal'
         ? 'translate(-50%, -100%) translateY(-4px)'
         : 'translate(4px, -50%)',
-      background: MEASURE_COLOR,
-      color: '#fff',
+      background: MEASURE_INDICATOR.labelBg,
+      color: MEASURE_INDICATOR.labelText,
       fontFamily: OVERLAY.monoFamily,
       fontSize: '10px',
       fontWeight: '600',

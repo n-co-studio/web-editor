@@ -455,7 +455,7 @@ export class EffectsEditor {
 
     for (const mode of BLEND_MODES) {
       const option = createElement('option', { value: mode }, {
-        background: '#1a1a2e',
+        background: OVERLAY.bgRaised,
         color: OVERLAY.text,
       }) as HTMLOptionElement;
       option.textContent = mode;

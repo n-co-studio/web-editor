@@ -234,3 +234,16 @@ export function animateSnap(
   };
   el.addEventListener('transitionend', cleanup);
 }
+
+/**
+ * Mute every text-bearing element in a row to the themed muted colour.
+ * Used for inactive and overridden CSS declarations instead of lowering the
+ * row's opacity, which dropped their text below WCAG AA contrast.
+ */
+export function muteRowText(row: HTMLElement): void {
+  for (const el of [row, ...Array.from(row.querySelectorAll<HTMLElement>('*'))]) {
+    if (Array.from(el.childNodes).some((n) => n.nodeType === 3 && (n.textContent ?? '').trim())) {
+      el.style.color = OVERLAY.textMuted;
+    }
+  }
+}

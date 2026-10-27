@@ -1,5 +1,5 @@
 import { createElement, createText } from '../../../shared/ui-utils';
-import { OVERLAY } from '../../../shared/constants';
+import { OVERLAY, tint } from '../../../shared/constants';
 import type { PanelSizeTier } from '../../../shared/constants';
 import { createStyleSnapshot } from '../../../shared/dom-utils';
 import type { ComputedStyleSnapshot } from '../../../shared/dom-utils';
@@ -273,7 +273,7 @@ export class PropertiesPane {
       padding: '0 8px',
       border: 'none',
       borderBottom: `1px solid ${OVERLAY.border}`,
-      background: 'rgba(255, 255, 255, 0.04)',
+      background: OVERLAY.band,
       color: OVERLAY.text,
       fontFamily: OVERLAY.monoFamily,
       fontSize: '11px',
@@ -514,7 +514,7 @@ export class PropertiesPane {
         const ruleEl = this.contentArea.querySelector(`[data-rule-selector="${CSS.escape(selectorText)}"]`) as HTMLElement | null;
         if (ruleEl) {
           ruleEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
-          ruleEl.style.background = 'rgba(6, 182, 212, 0.15)';
+          ruleEl.style.background = tint(OVERLAY.primary, 12);
           setTimeout(() => { ruleEl.style.background = ''; }, 1200);
         }
       });

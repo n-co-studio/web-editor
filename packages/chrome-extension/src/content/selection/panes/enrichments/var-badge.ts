@@ -1,5 +1,5 @@
 import { createElement, createText } from '../../../../shared/ui-utils';
-import { OVERLAY } from '../../../../shared/constants';
+import { OVERLAY, tint } from '../../../../shared/constants';
 import type { ResolutionResult, ResolutionStep } from '../../../inspection/variable-resolver';
 
 const VAR_RE = /var\(/;
@@ -29,8 +29,8 @@ export function createVarBadge(
   }, {
     fontSize: '10px',
     fontFamily: OVERLAY.monoFamily,
-    color: 'rgb(168, 85, 247)',
-    background: 'rgba(168, 85, 247, 0.12)',
+    color: OVERLAY.varText,
+    background: tint(OVERLAY.varText, 12),
     borderRadius: '3px',
     padding: '0 4px',
     lineHeight: '14px',
@@ -165,7 +165,7 @@ function buildStepRow(
     gap: '1px',
     padding: '2px 4px',
     borderRadius: '3px',
-    background: 'rgba(255, 255, 255, 0.03)',
+    background: OVERLAY.band,
   });
 
   // Variable name
@@ -175,7 +175,7 @@ function buildStepRow(
     gap: '4px',
   });
   const nameEl = createText('span', step.variableName, 'mono');
-  nameEl.style.color = 'rgb(168, 85, 247)';
+  nameEl.style.color = OVERLAY.varText;
   nameEl.style.fontSize = '11px';
   nameRow.appendChild(nameEl);
 
@@ -184,8 +184,8 @@ function buildStepRow(
     const tokenBadge = createElement('span', {}, {
       fontSize: '9px',
       fontFamily: OVERLAY.monoFamily,
-      color: OVERLAY.primary,
-      background: 'rgba(6, 182, 212, 0.12)',
+      color: OVERLAY.primaryStrong,
+      background: tint(OVERLAY.primary, 12),
       borderRadius: '3px',
       padding: '0 3px',
       lineHeight: '13px',
@@ -217,13 +217,13 @@ function buildStepRow(
     sourceEl.textContent = step.source;
     sourceEl.style.cursor = 'pointer';
     sourceEl.style.textDecoration = 'underline';
-    sourceEl.style.textDecorationColor = 'rgba(255, 255, 255, 0.2)';
+    sourceEl.style.textDecorationColor = OVERLAY.border;
     sourceEl.addEventListener('click', (e) => {
       e.stopPropagation();
       onRuleClick(step.source);
     });
     sourceEl.addEventListener('mouseenter', () => {
-      sourceEl.style.color = OVERLAY.primary;
+      sourceEl.style.color = OVERLAY.primaryStrong;
     });
     sourceEl.addEventListener('mouseleave', () => {
       sourceEl.style.color = OVERLAY.textMuted;

@@ -1,7 +1,7 @@
 import type { PropertyChange } from '@nco-studio/shared';
 import { createElement } from '../../shared/ui-utils';
 import { getComputedProperty } from '../../shared/dom-utils';
-import { OVERLAY, SELECTION } from '../../shared/constants';
+import { OVERLAY, SELECTION, tint } from '../../shared/constants';
 import type { PreviewManager } from './preview';
 
 type ChangeCallback = (changes: PropertyChange[]) => void;
@@ -57,7 +57,7 @@ export class MoveEditor {
       cursor: 'move',
       pointerEvents: 'auto',
       zIndex: '58',
-      background: 'rgba(6, 182, 212, 0.05)',
+      background: tint(OVERLAY.primary, 5),
       border: `1px dashed ${SELECTION.ring}`,
       borderRadius: '2px',
     });

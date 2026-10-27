@@ -8,6 +8,7 @@ import {
   QUEUE_PANEL_DEFAULT_WIDTH,
   QUEUE_PANEL_MIN_WIDTH,
   QUEUE_PANEL_MAX_WIDTH_RATIO,
+  tint,
 } from '../../shared/constants';
 import type { ConnectionStatus, DiffLifecycle } from '../../shared/types';
 import type { PendingQueue } from './queue';
@@ -307,7 +308,7 @@ export class ReviewPanel {
 
     // Applied changes section — grouped by batch (Batch → Element → Property)
     if (applied.length > 0) {
-      body.appendChild(this.renderSectionHeader('Applied', applied.length, '#10b981'));
+      body.appendChild(this.renderSectionHeader('Applied', applied.length, OVERLAY.success));
       for (const batchBlock of this.groupByBatch(applied)) {
         body.appendChild(this.renderBatchBlock(batchBlock, 'applied'));
       }
@@ -358,13 +359,13 @@ export class ReviewPanel {
     const demoMode = (globalThis as any).__NCO_WEB_EDITOR_DEMO__ === true;
 
     const banner = createElement('div', {}, {
-      background: demoMode ? OVERLAY.hover : 'rgba(245, 158, 11, 0.15)',
-      border: `1px solid ${demoMode ? 'rgba(255, 255, 255, 0.2)' : OVERLAY.warning}`,
+      background: demoMode ? OVERLAY.hover : tint(OVERLAY.warning, 12),
+      border: `1px solid ${demoMode ? OVERLAY.border : OVERLAY.warning}`,
       borderRadius: OVERLAY.radiusSm,
       padding: '8px 12px',
       margin: '8px',
       fontSize: OVERLAY.bodySize,
-      color: demoMode ? 'rgba(255, 255, 255, 0.85)' : OVERLAY.warning,
+      color: demoMode ? OVERLAY.text : OVERLAY.warning,
       fontFamily: OVERLAY.fontFamily,
     });
 
@@ -407,7 +408,7 @@ export class ReviewPanel {
     const card = createElement('div', {}, {
       padding: '8px 12px',
       borderBottom: `1px solid ${OVERLAY.border}`,
-      borderLeft: note.elements.length > 0 ? `2px solid rgba(6, 182, 212, 0.4)` : 'none',
+      borderLeft: note.elements.length > 0 ? `2px solid ${tint(OVERLAY.primary, 40)}` : 'none',
     });
 
     // Note header row: icon + text + delete button
@@ -418,7 +419,7 @@ export class ReviewPanel {
     });
 
     const icon = createText('span', '\u270e', 'body');
-    icon.style.color = OVERLAY.primary;
+    icon.style.color = OVERLAY.primaryStrong;
     icon.style.fontSize = '11px';
     icon.style.flexShrink = '0';
     icon.style.marginTop = '1px';
@@ -462,7 +463,7 @@ export class ReviewPanel {
         const pill = createText('span', `<${ref.tagName}> ${label}`, 'mono');
         pill.style.fontSize = '9px';
         pill.style.padding = '1px 4px';
-        pill.style.background = 'rgba(6, 182, 212, 0.15)';
+        pill.style.background = tint(OVERLAY.primary, 12);
         pill.style.border = `1px solid ${OVERLAY.primary}`;
         pill.style.borderRadius = '3px';
         pill.style.cursor = 'pointer';
@@ -480,7 +481,7 @@ export class ReviewPanel {
 
   private renderSourceWarning(): HTMLDivElement {
     const banner = createElement('div', {}, {
-      background: 'rgba(245, 158, 11, 0.08)',
+      background: tint(OVERLAY.warning, 8),
       padding: '6px 12px',
       margin: '4px 8px',
       fontSize: OVERLAY.bodySize,
@@ -502,7 +503,10 @@ export class ReviewPanel {
     const group = createElement('div', {}, {
       padding: '8px 12px',
       borderBottom: `1px solid ${OVERLAY.border}`,
-      opacity: isReadOnly ? '0.65' : '1',
+      // Read-only rows are marked by their Sent / Applied badge and the missing
+      // remove button. They used to be faded to 0.65, which took every label in
+      // them below 4.5:1.
+      opacity: '1',
     });
 
     // Group header
@@ -517,7 +521,7 @@ export class ReviewPanel {
         ? selector.slice(0, SELECTOR_TRUNCATE_LENGTH) + '\u2026'
         : selector;
     const header = createText('span', headerText, 'mono');
-    header.style.color = OVERLAY.primary;
+    header.style.color = OVERLAY.primaryStrong;
     header.style.cursor = 'pointer';
     header.title = selector;
     header.addEventListener('click', () => {
@@ -544,7 +548,7 @@ export class ReviewPanel {
     if (lifecycle === 'sent') {
       headerRow.appendChild(this.renderLifecycleBadge('Sent', OVERLAY.warning));
     } else if (lifecycle === 'applied') {
-      headerRow.appendChild(this.renderLifecycleBadge('\u2713 Applied', '#10b981'));
+      headerRow.appendChild(this.renderLifecycleBadge('\u2713 Applied', OVERLAY.success));
     } else if (!lifecycle && diffs.some((d) => this.queue.isCopied(d.id))) {
       headerRow.appendChild(this.renderLifecycleBadge('Copied', OVERLAY.textMuted));
     }
@@ -570,8 +574,8 @@ export class ReviewPanel {
         // Token badge (if toToken)
         if (change.toToken) {
           const badge = createElement('span', {}, {
-            background: 'rgba(6, 182, 212, 0.2)',
-            color: OVERLAY.primary,
+            background: tint(OVERLAY.primary, 12),
+            color: OVERLAY.primaryStrong,
             padding: '1px 3px',
             borderRadius: '2px',
             fontSize: '9px',
@@ -626,8 +630,8 @@ export class ReviewPanel {
           row.appendChild(desc);
 
           const dirBadge = createElement('span', {}, {
-            background: 'rgba(99, 102, 241, 0.2)',
-            color: '#818cf8',
+            background: tint(OVERLAY.reorderText, 12),
+            color: OVERLAY.reorderText,
             padding: '1px 3px',
             borderRadius: '2px',
             fontSize: '9px',
@@ -676,8 +680,8 @@ export class ReviewPanel {
           row.appendChild(desc);
 
           const badge = createElement('span', {}, {
-            background: 'rgba(16, 185, 129, 0.2)',
-            color: '#10b981',
+            background: tint(OVERLAY.insertText, 12),
+            color: OVERLAY.insertText,
             padding: '1px 3px',
             borderRadius: '2px',
             fontSize: '9px',
@@ -726,8 +730,8 @@ export class ReviewPanel {
           row.appendChild(desc);
 
           const badge = createElement('span', {}, {
-            background: 'rgba(239, 68, 68, 0.2)',
-            color: '#ef4444',
+            background: tint(OVERLAY.destructive, 12),
+            color: OVERLAY.destructive,
             padding: '1px 3px',
             borderRadius: '2px',
             fontSize: '9px',
@@ -776,8 +780,8 @@ export class ReviewPanel {
           row.appendChild(desc);
 
           const badge = createElement('span', {}, {
-            background: 'rgba(168, 85, 247, 0.2)',
-            color: '#a855f7',
+            background: tint(OVERLAY.groupText, 12),
+            color: OVERLAY.groupText,
             padding: '1px 3px',
             borderRadius: '2px',
             fontSize: '9px',
@@ -826,8 +830,8 @@ export class ReviewPanel {
           row.appendChild(attrEl);
 
           const badge = createElement('span', {}, {
-            background: 'rgba(245, 158, 11, 0.2)',
-            color: '#f59e0b',
+            background: tint(OVERLAY.warning, 12),
+            color: OVERLAY.warning,
             padding: '1px 3px',
             borderRadius: '2px',
             fontSize: '9px',
@@ -970,7 +974,7 @@ export class ReviewPanel {
         // Mark diffs as copied for clipboard reconciliation
         this.queue.markCopied(active.map((d) => d.id));
         // Green flash confirmation
-        copyBtn.style.background = 'rgba(34, 197, 94, 0.15)';
+        copyBtn.style.background = tint(OVERLAY.success, 12);
         setTimeout(() => { copyBtn.style.background = 'transparent'; }, 300);
       }).catch(() => {
         // Silent fail — clipboard API may be unavailable
@@ -1101,7 +1105,7 @@ export class ReviewPanel {
 
   private renderLifecycleBadge(label: string, color: string): HTMLSpanElement {
     const badge = createElement('span', {}, {
-      background: `${color}22`,
+      background: tint(color, 12),
       color,
       padding: '1px 4px',
       borderRadius: '3px',
@@ -1228,13 +1232,13 @@ export class ReviewPanel {
       alignItems: 'center',
       gap: '6px',
       padding: '4px 12px',
-      background: 'rgba(255,255,255,0.04)',
+      background: OVERLAY.band,
       fontFamily: OVERLAY.monoFamily,
       fontSize: '10px',
       color: OVERLAY.textMuted,
     });
 
-    const idEl = createElement('span', {}, { color: OVERLAY.primary, fontWeight: '600' });
+    const idEl = createElement('span', {}, { color: OVERLAY.primaryStrong, fontWeight: '600' });
     idEl.textContent = block.batchId ?? 'legacy';
     headerEl.appendChild(idEl);
 

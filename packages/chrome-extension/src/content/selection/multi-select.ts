@@ -1,9 +1,11 @@
 import { createElement } from '../../shared/ui-utils';
-import { OVERLAY } from '../../shared/constants';
+import { OVERLAY, MEASURE_INDICATOR } from '../../shared/constants';
 
 type SelectionChangeCb = (elements: Element[]) => void;
 
-const MULTI_SELECT_COLOR = OVERLAY.info; // #3b82f6
+// Shares the measure blue on purpose — both are secondary on-page
+// indicators, and both must stay fixed rather than follow the panel theme.
+const MULTI_SELECT_COLOR = MEASURE_INDICATOR.color;
 
 /**
  * Manages secondary selected elements for multi-select mode.
@@ -40,7 +42,7 @@ export class MultiSelectManager {
       width: `${rect.width}px`,
       height: `${rect.height}px`,
       border: `2px solid ${MULTI_SELECT_COLOR}`,
-      background: 'rgba(59, 130, 246, 0.08)',
+      background: MEASURE_INDICATOR.fill,
       borderRadius: OVERLAY.radiusSm,
       pointerEvents: 'none',
       zIndex: '2',

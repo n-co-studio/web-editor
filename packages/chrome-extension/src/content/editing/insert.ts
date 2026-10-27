@@ -424,7 +424,12 @@ export class InsertEditor {
     const label = createElement('span', {}, {
       fontFamily: OVERLAY.monoFamily,
       fontSize: '10px',
-      color: INSERT_INDICATOR.phantomBorder,
+      // White on a grey pill (4.83:1) so the tag reads on any page; it was grey
+      // text straight on the page (4.12:1 on near-black).
+      color: '#fff',
+      background: INSERT_INDICATOR.phantomBorder,
+      padding: '1px 4px',
+      borderRadius: '3px',
       pointerEvents: 'none',
     });
     label.textContent = '<div>';

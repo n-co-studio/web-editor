@@ -1,6 +1,6 @@
 import type { NoteElementRef, NoteEntry } from '@nco-studio/shared';
 import { createElement, createText, createButton, makeDraggable } from '../../shared/ui-utils';
-import { OVERLAY, TOOLBAR_WIDTH, NOTES_PANEL_MAX_HEIGHT, NOTES_PANEL_WIDTH } from '../../shared/constants';
+import { OVERLAY, TOOLBAR_WIDTH, NOTES_PANEL_MAX_HEIGHT, NOTES_PANEL_WIDTH, tint } from '../../shared/constants';
 import type { PanelPosition } from '../../shared/types';
 import type { NotesStore } from '../batching/notes-store';
 
@@ -201,7 +201,7 @@ export class NotesEditor {
       placeholder: 'Add a note for Claude Code\u2026',
     }, {
       flex: '1',
-      background: 'rgba(255, 255, 255, 0.1)',
+      background: OVERLAY.inputBg,
       color: OVERLAY.text,
       border: `1px solid ${OVERLAY.border}`,
       borderRadius: OVERLAY.radiusSm,
@@ -400,7 +400,7 @@ export class NotesEditor {
 
     for (const ref of refs) {
       const pill = createElement('div', { title: ref.selector }, {
-        background: 'rgba(6, 182, 212, 0.1)',
+        background: tint(OVERLAY.primary, 12),
         border: `1px solid ${OVERLAY.border}`,
         borderRadius: '3px',
         padding: '1px 4px',
@@ -443,7 +443,7 @@ export class NotesEditor {
 
     const row = createElement('div', {}, {
       padding: '4px 10px',
-      borderLeft: hasElements ? '2px solid rgba(6, 182, 212, 0.4)' : '2px solid transparent',
+      borderLeft: hasElements ? `2px solid ${tint(OVERLAY.primary, 40)}` : '2px solid transparent',
     });
 
     // Top line: number + text + delete button
@@ -518,7 +518,7 @@ export class NotesEditor {
       'aria-pressed': isPicking ? 'true' : 'false',
     }, {
       background: isPicking ? OVERLAY.primary : OVERLAY.hover,
-      color: isPicking ? '#fff' : OVERLAY.textMuted,
+      color: isPicking ? OVERLAY.onPrimary : OVERLAY.textMuted,
       border: `1px solid ${isPicking ? OVERLAY.primary : OVERLAY.border}`,
       borderRadius: OVERLAY.radiusSm,
       padding: '1px 6px',
@@ -573,7 +573,7 @@ export class NotesEditor {
       display: 'flex',
       alignItems: 'center',
       gap: '2px',
-      background: 'rgba(6, 182, 212, 0.15)',
+      background: tint(OVERLAY.primary, 12),
       border: `1px solid ${OVERLAY.primary}`,
       borderRadius: '3px',
       padding: '1px 4px',
@@ -640,7 +640,7 @@ export class NotesEditor {
         width: `${rect.width}px`,
         height: `${rect.height}px`,
         border: `1px dashed ${OVERLAY.primary}`,
-        background: 'rgba(6, 182, 212, 0.05)',
+        background: tint(OVERLAY.primary, 5),
         pointerEvents: 'none',
         zIndex: '2',
         borderRadius: '1px',

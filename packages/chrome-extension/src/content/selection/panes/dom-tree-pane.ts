@@ -1,6 +1,6 @@
 import type { ElementInfo } from '@nco-studio/shared';
 import { createElement, createText } from '../../../shared/ui-utils';
-import { OVERLAY } from '../../../shared/constants';
+import { OVERLAY, tint } from '../../../shared/constants';
 import { createStyleSnapshot } from '../../../shared/dom-utils';
 import type { StateSimulator } from '../../inspection/state-simulator';
 
@@ -159,7 +159,7 @@ export class DomTreePane {
       padding: '1px 4px',
       paddingLeft: `${depth * 16}px`,
       borderRadius: OVERLAY.radiusSm,
-      background: isSelected ? 'rgba(6, 182, 212, 0.12)' : 'transparent',
+      background: isSelected ? tint(OVERLAY.primary, 12) : 'transparent',
       transition: 'background 0.1s',
       pointerEvents: 'auto',
     });
@@ -214,7 +214,7 @@ export class DomTreePane {
 
     const tag = element.tagName.toLowerCase();
     const tagEl = createText('span', tag, 'mono');
-    tagEl.style.color = isSelected ? OVERLAY.primary : OVERLAY.text;
+    tagEl.style.color = isSelected ? OVERLAY.primaryStrong : OVERLAY.text;
     tagEl.style.fontSize = '11px';
     tagEl.style.flexShrink = '0';
     labelArea.appendChild(tagEl);
@@ -222,7 +222,7 @@ export class DomTreePane {
     const descriptor = this.getElementDescriptor(element);
     if (descriptor) {
       const descEl = createText('span', descriptor, 'mono');
-      descEl.style.color = isSelected ? OVERLAY.primary : OVERLAY.textMuted;
+      descEl.style.color = isSelected ? OVERLAY.primaryStrong : OVERLAY.textMuted;
       descEl.style.fontSize = '10px';
       descEl.style.overflow = 'hidden';
       descEl.style.textOverflow = 'ellipsis';
@@ -440,7 +440,7 @@ export class DomTreePane {
     });
 
     const keyEl = createText('span', key, 'mono');
-    keyEl.style.color = OVERLAY.primary;
+    keyEl.style.color = OVERLAY.primaryStrong;
     keyEl.style.fontSize = '10px';
     keyEl.style.flexShrink = '0';
     row.appendChild(keyEl);
@@ -472,7 +472,7 @@ export class DomTreePane {
       const copyText = `${key}="${value}"`;
       navigator.clipboard.writeText(copyText).then(() => {
         // Green flash confirmation
-        row.style.background = 'rgba(34, 197, 94, 0.15)';
+        row.style.background = tint(OVERLAY.success, 12);
         setTimeout(() => { row.style.background = 'transparent'; }, 300);
       }).catch(() => {
         // Silent fail

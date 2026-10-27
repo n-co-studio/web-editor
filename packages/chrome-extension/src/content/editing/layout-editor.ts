@@ -221,7 +221,7 @@ export class LayoutEditor {
     onCommit: ChangeCallback,
   ): HTMLSelectElement {
     const select = createElement('select', {}, {
-      background: 'rgba(255, 255, 255, 0.1)',
+      background: OVERLAY.inputBg,
       color: OVERLAY.text,
       border: `1px solid ${OVERLAY.border}`,
       borderRadius: OVERLAY.radiusSm,
@@ -334,7 +334,7 @@ export class LayoutEditor {
       btn.style.border = `1px solid ${isActive ? OVERLAY.primary : OVERLAY.border}`;
       btn.style.borderRadius = OVERLAY.radiusSm;
       btn.style.justifyContent = 'center';
-      if (isActive) btn.style.color = OVERLAY.primary;
+      if (isActive) btn.style.color = OVERLAY.primaryStrong;
       grid.appendChild(btn);
     }
 

@@ -1,6 +1,6 @@
 import type { VisualDiff } from '@nco-studio/shared';
 import { createElement, createText } from '../../../shared/ui-utils';
-import { OVERLAY } from '../../../shared/constants';
+import { OVERLAY, tint } from '../../../shared/constants';
 import { getComputedProperty, generateSelector, createStyleSnapshot, snapshotGet } from '../../../shared/dom-utils';
 import type { ComputedStyleSnapshot } from '../../../shared/dom-utils';
 import type { TokenStore } from '../../tokens/store';
@@ -129,7 +129,7 @@ export class CssGroupsSection {
       alignItems: 'center',
       padding: '6px 10px',
       borderBottom: `1px solid ${OVERLAY.border}`,
-      background: 'rgba(59, 130, 246, 0.08)',
+      background: tint(OVERLAY.info, 8),
       gap: '6px',
     });
     const badge = createElement('span', {}, {
@@ -182,8 +182,8 @@ export class CssGroupsSection {
 
     if (id) {
       const pill = createElement('span', {}, {
-        background: 'rgba(245, 158, 11, 0.15)',
-        border: '1px solid rgba(245, 158, 11, 0.4)',
+        background: tint(OVERLAY.warning, 12),
+        border: `1px solid ${tint(OVERLAY.warning, 40)}`,
         borderRadius: '3px',
         padding: '1px 5px',
         fontSize: '10px',
@@ -218,13 +218,13 @@ export class CssGroupsSection {
       const hovBtn = createElement('button', {
         title: 'Simulates CSS pseudo-class styles. Some effects may not be captured.',
       }, {
-        background: hasActive ? 'rgba(6, 182, 212, 0.12)' : OVERLAY.hover,
-        border: `1px solid ${hasActive ? 'rgba(6, 182, 212, 0.4)' : OVERLAY.border}`,
+        background: hasActive ? tint(OVERLAY.primary, 12) : OVERLAY.hover,
+        border: `1px solid ${hasActive ? tint(OVERLAY.primary, 40) : OVERLAY.border}`,
         borderRadius: '3px',
         padding: '1px 5px',
         fontSize: '10px',
         fontFamily: OVERLAY.monoFamily,
-        color: hasActive ? OVERLAY.primary : OVERLAY.textMuted,
+        color: hasActive ? OVERLAY.primaryStrong : OVERLAY.textMuted,
         lineHeight: '1.4',
         whiteSpace: 'nowrap',
         cursor: 'pointer',
@@ -269,13 +269,13 @@ export class CssGroupsSection {
     for (const state of PSEUDO_STATES) {
       const isActive = this.stateSimulator.isActive(element, state);
       const chip = createElement('button', {}, {
-        background: isActive ? 'rgba(6, 182, 212, 0.12)' : 'transparent',
-        border: `1px solid ${isActive ? 'rgba(6, 182, 212, 0.4)' : OVERLAY.border}`,
+        background: isActive ? tint(OVERLAY.primary, 12) : 'transparent',
+        border: `1px solid ${isActive ? tint(OVERLAY.primary, 40) : OVERLAY.border}`,
         borderRadius: '3px',
         padding: '1px 6px',
         fontSize: '10px',
         fontFamily: OVERLAY.monoFamily,
-        color: isActive ? OVERLAY.primary : OVERLAY.textMuted,
+        color: isActive ? OVERLAY.primaryStrong : OVERLAY.textMuted,
         cursor: 'pointer',
         pointerEvents: 'auto',
         transition: 'background 0.1s, border-color 0.1s',
@@ -484,8 +484,8 @@ export class CssGroupsSection {
     const token = this.inlineEditor.resolveToken(name, value);
     if (token) {
       const badgeEl = createElement('span', {}, {
-        background: 'rgba(6, 182, 212, 0.2)',
-        color: OVERLAY.primary,
+        background: tint(OVERLAY.primary, 12),
+        color: OVERLAY.primaryStrong,
         padding: '1px 4px',
         borderRadius: '2px',
         fontSize: '10px',
@@ -766,8 +766,8 @@ export class CssGroupsSection {
       const token = this.inlineEditor.resolveToken(name, value);
       if (token) {
         const badgeEl = createElement('span', {}, {
-          background: 'rgba(6, 182, 212, 0.2)',
-          color: OVERLAY.primary,
+          background: tint(OVERLAY.primary, 12),
+          color: OVERLAY.primaryStrong,
           padding: '1px 4px',
           borderRadius: '2px',
           fontSize: '10px',

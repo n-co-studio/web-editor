@@ -1,7 +1,7 @@
 import type { PropertyChange } from '@nco-studio/shared';
 import { createElement, createText, createButton, makeDraggable } from '../../shared/ui-utils';
 import { getComputedProperty } from '../../shared/dom-utils';
-import { OVERLAY, TOOLBAR_WIDTH } from '../../shared/constants';
+import { OVERLAY, TOOLBAR_WIDTH, tint } from '../../shared/constants';
 import type { PreviewManager } from './preview';
 import { buildColorInput, attachColorPopover } from './color-input';
 import type { TokenStore } from '../tokens/store';
@@ -434,8 +434,8 @@ export class AppearanceEditor {
       fontSize: '10px',
       border: `1px solid ${shadow.inset ? OVERLAY.primary : OVERLAY.border}`,
       borderRadius: OVERLAY.radiusSm,
-      background: shadow.inset ? 'rgba(6, 182, 212, 0.12)' : OVERLAY.hover,
-      color: shadow.inset ? OVERLAY.primary : OVERLAY.textMuted,
+      background: shadow.inset ? tint(OVERLAY.primary, 12) : OVERLAY.hover,
+      color: shadow.inset ? OVERLAY.primaryStrong : OVERLAY.textMuted,
       cursor: 'pointer',
       fontFamily: OVERLAY.monoFamily,
     }) as HTMLButtonElement;
@@ -444,8 +444,8 @@ export class AppearanceEditor {
       shadow.inset = !shadow.inset;
       insetToggle.textContent = shadow.inset ? 'On' : 'Off';
       insetToggle.style.borderColor = shadow.inset ? OVERLAY.primary : OVERLAY.border;
-      insetToggle.style.background = shadow.inset ? 'rgba(6, 182, 212, 0.12)' : OVERLAY.hover;
-      insetToggle.style.color = shadow.inset ? OVERLAY.primary : OVERLAY.textMuted;
+      insetToggle.style.background = shadow.inset ? tint(OVERLAY.primary, 12) : OVERLAY.hover;
+      insetToggle.style.color = shadow.inset ? OVERLAY.primaryStrong : OVERLAY.textMuted;
       this.preview.revert();
       const fromValue = getComputedProperty(element, 'box-shadow');
       (element as HTMLElement).style.setProperty('box-shadow', composeShadow(shadow));
@@ -509,7 +509,7 @@ export class AppearanceEditor {
 
     for (const style of OUTLINE_STYLES) {
       const opt = createElement('option', { value: style }, {
-        background: '#1a1a2e',
+        background: OVERLAY.bgRaised,
         color: OVERLAY.text,
       }) as HTMLOptionElement;
       opt.textContent = style;

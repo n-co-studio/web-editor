@@ -1,5 +1,6 @@
 import type { ComputedStyleSnapshot } from '../../../../shared/dom-utils';
-import { createElement } from '../../../../shared/ui-utils';
+import { createElement, muteRowText } from '../../../../shared/ui-utils';
+import { OVERLAY } from '../../../../shared/constants';
 
 const FLEX_GRID_DISPLAYS = new Set([
   'flex', 'inline-flex', 'grid', 'inline-grid',
@@ -43,7 +44,8 @@ export function checkInactive(
 
 /**
  * Apply inactive styling to a property row.
- * Sets opacity to 0.4, italicizes the property name,
+ * Mutes the row's text colour (it was faded to 0.4 opacity, which put the
+ * values under 3:1), italicizes the property name,
  * and places an info icon in the indicator-slot with a tooltip.
  */
 export function applyInactiveStyles(
@@ -52,7 +54,7 @@ export function applyInactiveStyles(
   indicatorSlot: HTMLSpanElement,
   reason: string,
 ): void {
-  row.style.opacity = '0.4';
+  muteRowText(row);
   nameEl.style.fontStyle = 'italic';
 
   const icon = createElement('span', { title: `Inactive: ${reason}` }, {
@@ -60,6 +62,7 @@ export function applyInactiveStyles(
     lineHeight: '1',
     cursor: 'help',
     userSelect: 'none',
+    color: OVERLAY.textMuted,
   });
   icon.textContent = '\u24D8'; // ⓘ circled i
   indicatorSlot.appendChild(icon);

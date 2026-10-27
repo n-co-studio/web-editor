@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { createElement, createText } from '../../../shared/ui-utils';
-import { OVERLAY } from '../../../shared/constants';
+import { OVERLAY, tint } from '../../../shared/constants';
 import type { ComputedStyleSnapshot } from '../../../shared/dom-utils';
 import { computeContrast } from './enrichments/contrast-badge';
 
@@ -369,8 +369,8 @@ export class AccessibilitySection {
 
   private buildPill(text: string, type: 'pass' | 'warning'): HTMLSpanElement {
     const colors = {
-      pass: { bg: 'rgba(34, 197, 94, 0.15)', text: OVERLAY.success },
-      warning: { bg: 'rgba(239, 68, 68, 0.15)', text: OVERLAY.destructive },
+      pass: { bg: tint(OVERLAY.success, 12), text: OVERLAY.success },
+      warning: { bg: tint(OVERLAY.destructive, 12), text: OVERLAY.destructive },
     };
     const c = colors[type];
     const pill = createElement('span', {}, {
@@ -430,7 +430,7 @@ export class AccessibilitySection {
     if (check.scrollTarget) {
       valueEl.style.cursor = 'pointer';
       valueEl.style.textDecoration = 'underline';
-      valueEl.style.textDecorationColor = 'rgba(255, 255, 255, 0.2)';
+      valueEl.style.textDecorationColor = OVERLAY.border;
       valueEl.addEventListener('click', (e) => {
         e.stopPropagation();
         if (!this.scrollTarget) return;
@@ -439,7 +439,7 @@ export class AccessibilitySection {
         ) as HTMLElement | null;
         if (propRow) {
           propRow.scrollIntoView({ block: 'center', behavior: 'smooth' });
-          propRow.style.background = 'rgba(6, 182, 212, 0.15)';
+          propRow.style.background = tint(OVERLAY.primary, 12);
           setTimeout(() => { propRow.style.background = ''; }, 1200);
         }
       });

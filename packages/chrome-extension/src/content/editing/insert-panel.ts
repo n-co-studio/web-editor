@@ -10,9 +10,9 @@ import { createElement, createButton } from "../../shared/ui-utils";
 import { sanitizeToFragment } from "../../shared/dom-utils";
 import {
   OVERLAY,
-  INSERT_INDICATOR,
   INSERT_PANEL_WIDTH,
   INSERT_PANEL_MAX_HEIGHT,
+  tint,
 } from "../../shared/constants";
 import type {
   PropertyChange,
@@ -326,8 +326,12 @@ export class InsertPanel {
         fontWeight: isActive ? "600" : "500",
         border: "none",
         background: isActive ? OVERLAY.hover : "transparent",
-        borderBottom: `2px solid ${isActive ? INSERT_INDICATOR.color : "transparent"}`,
-        color: enabled ? (isActive ? OVERLAY.text : OVERLAY.textMuted) : "rgba(255,255,255,0.25)",
+        // Themed rather than the raw insert green: this underline is panel
+        // chrome, so it sits on the panel background, not on the page. #10b981
+        // is 2.54:1 on the light panel — under the 3:1 WCAG 1.4.11 asks of a
+        // non-text indicator. OVERLAY.insertText is #065f46 light, #34d399 dark.
+        borderBottom: `2px solid ${isActive ? OVERLAY.insertText : "transparent"}`,
+        color: enabled ? (isActive ? OVERLAY.text : OVERLAY.textMuted) : OVERLAY.textMuted,
         cursor: enabled ? "pointer" : "not-allowed",
         pointerEvents: "auto",
         textAlign: "center",
@@ -366,10 +370,10 @@ export class InsertPanel {
       btn.setAttribute("aria-selected", String(isActive));
       btn.style.fontWeight = isActive ? "600" : "500";
       btn.style.background = isActive ? OVERLAY.hover : "transparent";
-      btn.style.borderBottom = `2px solid ${isActive ? INSERT_INDICATOR.color : "transparent"}`;
+      btn.style.borderBottom = `2px solid ${isActive ? OVERLAY.insertText : "transparent"}`;
       btn.style.color = enabled
         ? (isActive ? OVERLAY.text : OVERLAY.textMuted)
-        : "rgba(255,255,255,0.25)";
+        : OVERLAY.textMuted;
       btn.style.cursor = enabled ? "pointer" : "not-allowed";
     };
     apply(this.htmlTabBtn, "html", true);
@@ -514,8 +518,9 @@ export class InsertPanel {
     confirmBtn.style.fontSize = "11px";
     confirmBtn.style.padding = "4px 12px";
     confirmBtn.style.flex = "1";
-    confirmBtn.style.background = INSERT_INDICATOR.color;
-    confirmBtn.style.borderColor = INSERT_INDICATOR.color;
+    confirmBtn.style.background = OVERLAY.insertFill;
+    confirmBtn.style.color = OVERLAY.onInsert;
+    confirmBtn.style.borderColor = OVERLAY.insertFill;
     this.confirmBtn = confirmBtn;
     row.appendChild(confirmBtn);
 
@@ -654,9 +659,9 @@ export class InsertPanel {
         alignItems: "center",
         gap: "8px",
         padding: "6px 8px",
-        border: `1px solid ${isSelected ? INSERT_INDICATOR.color : "transparent"}`,
+        border: `1px solid ${isSelected ? OVERLAY.insertText : "transparent"}`,
         borderRadius: OVERLAY.radiusSm,
-        background: isSelected ? "rgba(16, 185, 129, 0.12)" : "transparent",
+        background: isSelected ? tint(OVERLAY.insertText, 12) : "transparent",
         color: OVERLAY.text,
         cursor: "pointer",
         fontFamily: OVERLAY.fontFamily,
@@ -767,9 +772,9 @@ export class InsertPanel {
         alignItems: "center",
         gap: "6px",
         padding: "4px 6px",
-        border: `1px solid ${isSelected ? INSERT_INDICATOR.color : "transparent"}`,
+        border: `1px solid ${isSelected ? OVERLAY.insertText : "transparent"}`,
         borderRadius: OVERLAY.radiusSm,
-        background: isSelected ? "rgba(16, 185, 129, 0.12)" : "transparent",
+        background: isSelected ? tint(OVERLAY.insertText, 12) : "transparent",
         color: OVERLAY.text,
         cursor: "pointer",
         fontSize: "11px",
@@ -931,10 +936,10 @@ export class InsertPanel {
         {
           padding: "2px 6px",
           fontSize: "10px",
-          border: `1px solid ${isActive ? INSERT_INDICATOR.color : OVERLAY.border}`,
+          border: `1px solid ${isActive ? OVERLAY.insertText : OVERLAY.border}`,
           borderRadius: "3px",
-          background: isActive ? "rgba(16, 185, 129, 0.15)" : "transparent",
-          color: isActive ? INSERT_INDICATOR.color : OVERLAY.textMuted,
+          background: isActive ? tint(OVERLAY.insertText, 12) : "transparent",
+          color: isActive ? OVERLAY.insertText : OVERLAY.textMuted,
           cursor: "pointer",
           pointerEvents: "auto",
           fontFamily: OVERLAY.fontFamily,
@@ -1020,10 +1025,10 @@ export class InsertPanel {
         {
           padding: "2px 6px",
           fontSize: "10px",
-          border: `1px solid ${isActive ? INSERT_INDICATOR.color : OVERLAY.border}`,
+          border: `1px solid ${isActive ? OVERLAY.insertText : OVERLAY.border}`,
           borderRadius: "3px",
-          background: isActive ? "rgba(16, 185, 129, 0.15)" : "transparent",
-          color: isActive ? INSERT_INDICATOR.color : OVERLAY.textMuted,
+          background: isActive ? tint(OVERLAY.insertText, 12) : "transparent",
+          color: isActive ? OVERLAY.insertText : OVERLAY.textMuted,
           cursor: "pointer",
           pointerEvents: "auto",
           fontFamily: OVERLAY.fontFamily,

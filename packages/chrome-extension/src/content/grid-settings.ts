@@ -240,7 +240,7 @@ export class GridSettingsPanel {
       value: String(value),
     }, {
       width: '52px',
-      background: 'rgba(255, 255, 255, 0.1)',
+      background: OVERLAY.inputBg,
       color: OVERLAY.text,
       border: `1px solid ${OVERLAY.border}`,
       borderRadius: OVERLAY.radiusSm,
@@ -350,7 +350,7 @@ export class GridSettingsPanel {
         cursor: 'pointer',
         pointerEvents: 'auto',
         border: preset.value === selected
-          ? '2px solid #fff'
+          ? `2px solid ${OVERLAY.text}`
           : '2px solid transparent',
         boxSizing: 'border-box',
         transition: 'border-color 0.1s',
@@ -361,7 +361,7 @@ export class GridSettingsPanel {
         for (const child of swatches.children) {
           (child as HTMLElement).style.border = '2px solid transparent';
         }
-        swatch.style.border = '2px solid #fff';
+        swatch.style.border = `2px solid ${OVERLAY.text}`;
         onChange(preset.value);
       });
 
