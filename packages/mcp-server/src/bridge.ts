@@ -1,5 +1,5 @@
 import { WebSocketServer, type WebSocket } from 'ws';
-import { readFile, writeFile, unlink, mkdir, rename, stat, readdir, realpath } from 'node:fs/promises';
+import { readFile, writeFile, unlink, mkdir, rename, stat, readdir, realpath, lstat } from 'node:fs/promises';
 import { join, dirname, resolve, relative, extname } from 'node:path';
 import { createHash } from 'node:crypto';
 import {
@@ -460,7 +460,7 @@ export class Bridge {
         try {
           await stat(abs);
           throw new Error(
-            `refusing to overwrite an existing file: ${outputPath} — export to a new name or into ${PERSIST_DIR}/`,
+            `refusing to overwrite an existing file: ${outputPath} — export to a new name, or omit the path to write the default session file`,
           );
         } catch (err) {
           // ENOENT is the good case: the target does not exist yet.
@@ -479,7 +479,12 @@ export class Bridge {
     };
 
     await mkdir(dirname(outPath), { recursive: true });
-    await writeFile(outPath, JSON.stringify(data, null, 2));
+    // 'wx' for a caller-chosen path: export had no symlink resolution at all,
+    // so a committed `linkdir -> ../outside` or a dangling `x.json -> outside`
+    // wrote through it. The default path inside PERSIST_DIR is ours and is
+    // meant to be overwritten.
+    const exportFlag = outputPath ? 'wx' : 'w';
+    await writeFile(outPath, JSON.stringify(data, null, 2), { flag: exportFlag });
 
     return { path: outPath, diffCount: this.pendingQueue.length };
   }
@@ -541,7 +546,14 @@ export class Bridge {
       // Re-validate after screening, not only before. The screen rebuilds the
       // object, so a shape that passed on the way in is not proof about what
       // comes out.
-      const screened = Bridge.withCheckedSourcePath(diff);
+      let screened;
+      try {
+        screened = Bridge.withCheckedSourcePath(diff);
+      } catch (err) {
+        warnings.push(`Skipped diff: ${err instanceof Error ? err.message : 'screening failed'}`);
+        skipped++;
+        continue;
+      }
       if (!isValidDiff(screened)) {
         warnings.push('Skipped diff that failed validation after screening');
         skipped++;
@@ -822,19 +834,18 @@ export class Bridge {
         // Pre-batchId extension — stamp the shared synthetic legacy id for this payload.
         diffToProcess = { ...rawDiff, batchId: legacyId };
       }
-      // sourceFile reaches the agent as "the exact place to edit", but it is
-      // copied straight out of a data-source-file attribute in the page, which
-      // untrusted page content can set (HACK-012). Drop any value that is not
-      // a plausible in-project source path so a crafted attribute cannot point
-      // the agent at a workflow file or outside the repo.
-      diffToProcess = Bridge.withCheckedSourcePath(diffToProcess);
-      // Per-diff containment. extractDataUrls indexes change fields that
-      // isValidDiff does not type-check, so a single crafted entry used to
-      // throw and abandon the rest of the batch — after DIFF_ACK had already
-      // gone back for all of them, and with earlier diffs queued but never
-      // persisted. Skip the bad one and keep going.
+      // Per-diff containment. extractDataUrls and the source screen both index
+      // or recurse into fields isValidDiff does not type-check, so one crafted
+      // entry used to throw and abandon the rest of the batch — after DIFF_ACK
+      // had already gone back for all of them, and with earlier diffs queued
+      // but never persisted. The screen has to be inside this try, not above
+      // it: a deeply nested diff throws in the walk, and a previous attempt
+      // left that call one line outside and so kept the original bug.
       try {
-        const diff = await this.extractDataUrls(diffToProcess);
+        // sourceFile reaches the agent as a place to edit, but it is copied
+        // straight out of a data-source-file attribute the page controls
+        // (HACK-012). Drop anything that is not a plausible in-project path.
+        const diff = await this.extractDataUrls(Bridge.withCheckedSourcePath(diffToProcess));
         this.pendingQueue.push(diff);
         newDiffs.push(diff);
       } catch (err) {
@@ -861,9 +872,7 @@ export class Bridge {
     // note carries page-derived text. It is validated and capped here rather
     // than trusted on type alone, and the agent-facing framing says so.
     if (typeof batchNote === 'string' && batchNote.length > 0) {
-      const text = batchNote.length > Bridge.MAX_NOTE_CHARS
-        ? `${batchNote.slice(0, Bridge.MAX_NOTE_CHARS)}… [truncated]`
-        : batchNote;
+      const text = Bridge.sanitizeNote(batchNote);
       this.pendingNotes.push({
         text,
         receivedAt: new Date().toISOString(),
@@ -1042,7 +1051,10 @@ export class Bridge {
     };
 
     await mkdir(dirname(this.persistPath), { recursive: true });
-    await writeFile(this.persistPath, JSON.stringify(data, null, 2));
+    // Compact, not indented. Indentation is quadratic in nesting depth, which
+    // is what turned a small deep payload into a multi-hundred-megabyte queue
+    // file. Nothing reads this by hand.
+    await writeFile(this.persistPath, JSON.stringify(data));
   }
 
   private async restoreQueue(): Promise<void> {
@@ -1056,7 +1068,16 @@ export class Bridge {
         // would otherwise be replayed unchecked for the life of the project.
         const valid = data.diffs
           .filter(isValidDiff)
-          .map((d) => Bridge.withCheckedSourcePath(d))
+          .map((d) => {
+            // A persisted queue is as untrusted as anything off the wire: it
+            // lives in the target project and can arrive with a clone.
+            try {
+              return Bridge.withCheckedSourcePath(d);
+            } catch {
+              return null;
+            }
+          })
+          .filter((d): d is VisualDiff => d !== null)
           .filter(isValidDiff); // re-check: the screen rebuilds the object
         this.pendingQueue = valid;
         if (valid.length < data.diffs.length) {
@@ -1079,9 +1100,16 @@ export class Bridge {
       }
 
       if (Array.isArray(data.notes) && data.notes.length > 0) {
-        this.pendingNotes = data.notes.filter(
-          (n): n is PendingNote => typeof n === 'object' && n !== null && typeof n.text === 'string',
-        );
+        // Notes get the same normalisation on restore as on receipt. Diffs
+        // were re-screened here and notes were not, which mattered once the
+        // framing started telling the agent to follow notes: a queue file
+        // committed into the target project, or arriving with a clone, was an
+        // uncapped and unscreened instruction channel.
+        this.pendingNotes = data.notes
+          .filter(
+            (n): n is PendingNote => typeof n === 'object' && n !== null && typeof n.text === 'string',
+          )
+          .map((n) => ({ ...n, text: Bridge.sanitizeNote(n.text) }));
         if (this.pendingNotes.length > 0) {
           console.error(
             `[nco-web-editor] Restored ${this.pendingNotes.length} pending notes from disk`,
@@ -1111,6 +1139,8 @@ export class Bridge {
   private static readonly MAX_INLINE_ASSET_BYTES = 4 * 1024 * 1024;
   /** Cap on a single batch note. It lands in the agent's context verbatim. */
   private static readonly MAX_NOTE_CHARS = 4000;
+  /** Maximum object nesting accepted in a diff. Real diffs are a few levels. */
+  private static readonly MAX_DIFF_DEPTH = 64;
   /** Matches a single `data:` URI up to the first quote, paren, or whitespace. */
   private static readonly DATA_URL_RE = /data:[^"')\s]+/gi;
   private static readonly MIME_EXT: Record<string, string> = {
@@ -1404,19 +1434,54 @@ export class Bridge {
     const absPath = join(absDir, filename);
     const relPath = '/' + relative(this.cwd, absPath).replace(/\\/g, '/');
 
-    // Idempotent: the filename embeds the content hash, so a file already present
-    // at this path is the same image — skip the write. (size check is a sanity guard.)
+    // Idempotent: the filename embeds the content hash, so a file already
+    // present at this path is the same image — skip the write. lstat, not
+    // stat: stat follows a symlink, so a planted link at the target name made
+    // this check inspect (and the write below clobber) whatever it pointed at.
     try {
-      const s = await stat(absPath);
-      if (s.isFile() && s.size === buffer.length) return this.stripPublicPrefix(relPath);
+      const st = await lstat(absPath);
+      if (st.isFile() && st.size === buffer.length) return this.stripPublicPrefix(relPath);
+      if (st.isSymbolicLink()) {
+        console.error(`[nco-web-editor] Refusing asset — ${Bridge.forLog(relPath)} is a symlink`);
+        return null;
+      }
     } catch {
       // not present — fall through to write
     }
 
-    await writeFile(absPath, buffer);
+    // 'wx' fails if the path exists, which closes both the symlink-at-target
+    // case (writeFile follows links) and the gap between the check above and
+    // the write. EEXIST means someone won the race with identical bytes, which
+    // is the idempotent case anyway.
+    try {
+      await writeFile(absPath, buffer, { flag: 'wx' });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code !== 'EEXIST') throw err;
+    }
 
     // Return served web path with a leading `/public` stripped (apply-correct).
     return this.stripPublicPrefix(relPath);
+  }
+
+  /**
+   * Normalise a batch note before it reaches the agent.
+   *
+   * A note is the designer's own words, but the extension appends an element
+   * reference built from the page (`formatElementRef` in notes-store.ts), and
+   * `sourceFile` goes in unscreened. That value can contain newlines, so page
+   * content could forge what looks like another numbered instruction in the
+   * designer's voice — which the "treat paths and selectors as data" framing
+   * does not cover, because a forged sentence is neither. Collapsing line
+   * breaks keeps an injected string on the reference line where it belongs.
+   * The real fix is structured refs the server can screen per field; this
+   * bounds the damage until then.
+   */
+  private static sanitizeNote(note: string): string {
+    // eslint-disable-next-line no-control-regex
+    const flattened = note.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, ' ').replace(/\r?\n/g, ' ⏎ ');
+    return flattened.length > Bridge.MAX_NOTE_CHARS
+      ? `${flattened.slice(0, Bridge.MAX_NOTE_CHARS)}… [truncated]`
+      : flattened;
   }
 
   /**
@@ -1584,8 +1649,17 @@ export class Bridge {
   private static withCheckedSourcePath<T>(value: T): T {
     let cleared = false;
 
-    const walk = (node: unknown): unknown => {
-      if (Array.isArray(node)) return node.map(walk);
+    const walk = (node: unknown, depth: number): unknown => {
+      // Depth cap. The walk is recursive and isValidDiff is shallow, so a diff
+      // nested a few thousand levels deep threw RangeError here and took the
+      // whole batch with it. Deep nesting is also quadratic under
+      // JSON.stringify's indentation, which turned a 300 KB payload into a
+      // 251 MB queue file and an unreadable tool response. A real diff is a
+      // handful of levels; anything near this limit is not one.
+      if (depth > Bridge.MAX_DIFF_DEPTH) {
+        throw new Error(`diff nesting exceeds ${Bridge.MAX_DIFF_DEPTH} levels`);
+      }
+      if (Array.isArray(node)) return node.map((n) => walk(n, depth + 1));
       if (typeof node !== 'object' || node === null) return node;
 
       const out: Record<string, unknown> = {};
@@ -1610,13 +1684,13 @@ export class Bridge {
           }
           out[key] = '';
         } else {
-          out[key] = walk(val);
+          out[key] = walk(val, depth + 1);
         }
       }
       return out;
     };
 
-    const result = walk(value) as T & { sourceVerified?: boolean };
+    const result = walk(value, 0) as T & { sourceVerified?: boolean };
     // Do not tell the agent a location was verified when it has just been
     // thrown away.
     if (cleared && typeof result === 'object' && result !== null && 'sourceVerified' in result) {
