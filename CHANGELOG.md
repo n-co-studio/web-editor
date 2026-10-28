@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Security
+
+- **The last production-path dependency advisory is cleared.** The MCP server now uses zod 4 (`^4.6.6`), fixing GHSA-mrhx-c7xc-m3w5. `npm audit --omit=dev` on an install of the package now reports nothing, where 0.3.0 reported "2 high, no fix available".
+- **Tool definitions your agent sees are unchanged.** A snapshot test pins `tools/list` against the zod 3 output. The one difference found was that zod 4 stopped declaring `additionalProperties: false` on tool inputs, and it is fixed.
+
 ## [0.3.0] - 2026-10-26
 
 Rebuilds the hosted guide around what actually makes this different — MCP — hardens the MCP server against a hostile page, and clears a critical dependency advisory. Also fixes a set of contrast and theming faults in the editing panels, including three the theme audit introduced itself.

@@ -88,7 +88,7 @@ export async function createServer(): Promise<void> {
  * queue mechanics (acknowledge, re-check) are not inferable from the tool
  * list alone, and an agent that skips them silently re-does work.
  */
-const SERVER_INSTRUCTIONS = `This server carries visual edits a designer made in their browser back to the source files those elements came from. You apply them.
+export const SERVER_INSTRUCTIONS = `This server carries visual edits a designer made in their browser back to the source files those elements came from. You apply them.
 
 Per batch:
 
@@ -108,7 +108,17 @@ One server runs per project directory, guarded by .nco-web-editor/server.lock. I
 // Tool registration
 // ---------------------------------------------------------------------------
 
-function registerTools(server: McpServer, bridge: Bridge): void {
+/**
+ * Tool input object. zod 3 advertised `additionalProperties: false` in the
+ * tool's JSON Schema; zod 4 omits it for default (strip) objects. Pin it so the
+ * agent-facing schema is unchanged. Runtime behaviour stays zod's default
+ * (unknown keys are stripped, not rejected).
+ */
+function inputObject<T extends z.ZodRawShape>(shape: T) {
+  return z.object(shape).meta({ additionalProperties: false });
+}
+
+export function registerTools(server: McpServer, bridge: Bridge): void {
   // 1. get_pending_visual_changes
   server.registerTool(
     'get_pending_visual_changes',
@@ -240,7 +250,7 @@ function registerTools(server: McpServer, bridge: Bridge): void {
         'Diffs without a `batchId` (legacy) are omitted from `batches` but appear in `changes`. ' +
         'Pass `batchId` to filter `changes` to a single batch. ' +
         'Use `get_queue_status.latest_batch_id` to identify the most recently submitted batch.',
-      inputSchema: z.object({
+      inputSchema: inputObject({
         tabId: z
           .string()
           .optional()
@@ -293,7 +303,7 @@ function registerTools(server: McpServer, bridge: Bridge): void {
         'diff from the queue and notifies the browser that the edit landed. A diff that is never ' +
         'acknowledged (or rejected via reject_visual_change) stays pending and will be returned ' +
         'by the next get_pending_visual_changes call, so skipping this makes the same work repeat.',
-      inputSchema: z.object({
+      inputSchema: inputObject({
         diffId: z.string().describe('The unique ID of the diff to acknowledge'),
       }),
     },
@@ -313,7 +323,7 @@ function registerTools(server: McpServer, bridge: Bridge): void {
       title: 'Reject Visual Change',
       description:
         'Marks a visual diff as rejected and removes it from the pending queue.',
-      inputSchema: z.object({
+      inputSchema: inputObject({
         diffId: z.string().describe('The unique ID of the diff to reject'),
         reason: z.string().describe('Reason for rejecting the change'),
       }),
@@ -334,7 +344,7 @@ function registerTools(server: McpServer, bridge: Bridge): void {
       title: 'Clear Operator Notes',
       description:
         'Clears all pending operator notes after they have been read and processed.',
-      inputSchema: z.object({}),
+      inputSchema: inputObject({}),
     },
     async () => {
       bridge.recordToolCall();
@@ -352,7 +362,7 @@ function registerTools(server: McpServer, bridge: Bridge): void {
       title: 'Get Design Tokens',
       description:
         "Returns the project's parsed design tokens. Optionally filter by category (spacing, typography, colors, radii, shadows, breakpoints).",
-      inputSchema: z.object({
+      inputSchema: inputObject({
         category: z
           .string()
           .optional()
@@ -375,7 +385,7 @@ function registerTools(server: McpServer, bridge: Bridge): void {
       title: 'Resolve to Token',
       description:
         'Maps a CSS value to the nearest design token for a given property.',
-      inputSchema: z.object({
+      inputSchema: inputObject({
         property: z
           .string()
           .describe('CSS property name (e.g., "font-size", "color")'),
@@ -401,7 +411,7 @@ function registerTools(server: McpServer, bridge: Bridge): void {
       title: 'Get Token Drift Report',
       description:
         'Returns a session-scoped report of custom value usage — values that did not match any design token.',
-      inputSchema: z.object({}),
+      inputSchema: inputObject({}),
     },
     async () => {
       bridge.recordToolCall();
@@ -419,7 +429,7 @@ function registerTools(server: McpServer, bridge: Bridge): void {
       title: 'Export Session',
       description:
         'Exports the pending queue to a JSON file for archival or handoff.',
-      inputSchema: z.object({
+      inputSchema: inputObject({
         outputPath: z
           .string()
           .optional()
@@ -447,7 +457,7 @@ function registerTools(server: McpServer, bridge: Bridge): void {
         'and `latest_batch_id` (the batchId of the most recently ingested batch — absent until ' +
         'the first batch arrives). Use this instead of get_pending_visual_changes when you only ' +
         'need to check whether diffs are waiting or to identify the most recent batch.',
-      inputSchema: z.object({}),
+      inputSchema: inputObject({}),
     },
     async () => {
       bridge.recordToolCall();
@@ -465,7 +475,7 @@ function registerTools(server: McpServer, bridge: Bridge): void {
       title: 'Import Session',
       description:
         'Loads a previously exported session file into the pending queue.',
-      inputSchema: z.object({
+      inputSchema: inputObject({
         inputPath: z
           .string()
           .describe('Path to the session export JSON file'),
@@ -495,7 +505,7 @@ function registerTools(server: McpServer, bridge: Bridge): void {
         'Optionally filter by a case-insensitive substring of componentName. ' +
         'Used to resolve InsertChange.componentInsert descriptors emitted by ' +
         'the extension into source-level JSX usages + imports.',
-      inputSchema: z.object({
+      inputSchema: inputObject({
         nameFilter: z
           .string()
           .optional()
