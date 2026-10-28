@@ -1,7 +1,7 @@
 import type { VisualDiff, DesignToken, PropDefault } from './diff.js';
 
 /** Current protocol version. */
-export const PROTOCOL_VERSION = '0.4.0' as const;
+export const PROTOCOL_VERSION = '0.5.0' as const;
 
 export const MessageType = {
   EXTENSION_HELLO: 'EXTENSION_HELLO',
@@ -32,10 +32,44 @@ export interface ServerHelloPayload {
   readonly protocolVersion: string;
 }
 
+/**
+ * One element a designer's note points at. Everything except the designer's
+ * own `text` is read out of the page DOM, so the server screens each field
+ * separately (KL-6) instead of receiving one blended string.
+ */
+export interface NoteRef {
+  readonly tagName: string;
+  readonly selector: string;
+  readonly textContent?: string;
+  readonly sourceFile?: string;
+  readonly sourceLine?: number;
+  /** Root-relative served asset path (e.g. /images/a.jpg). */
+  readonly assetPath?: string;
+}
+
+/** A designer note: their own words plus the elements it refers to. */
+export interface StructuredNote {
+  readonly text: string;
+  readonly elements: readonly NoteRef[];
+}
+
 export interface VisualDiffBatchPayload {
   readonly diffs: readonly VisualDiff[];
-  /** Optional operator note describing intent for this batch. */
+  /**
+   * LEGACY. One blended string of the designer's words plus page-derived
+   * element references. Kept only so a pre-0.5.0 server still receives notes;
+   * slated for removal in a later protocol version. A 0.5.0+ server ignores it
+   * whenever `notes` is present, and treats it as wholly page-derived
+   * (untrusted) when it is the only note field.
+   */
   readonly batchNote?: string;
+  /**
+   * Structured notes (protocol 0.5.0). Additive-optional: the designer's words
+   * (`text`) are kept apart from the page-derived `elements` so the server can
+   * screen each field and the agent can be told which to follow and which to
+   * verify.
+   */
+  readonly notes?: readonly StructuredNote[];
   /**
    * Batch identity shared by all diffs in this dispatch. Matches the
    * `batchId` stamped on each `VisualDiff` in `diffs`. Additive-optional;

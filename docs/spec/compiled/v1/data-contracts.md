@@ -548,7 +548,7 @@ A group is only representable when it has a **real structural boundary**: a cont
 ## API Endpoints
 
 N/A — no HTTP API. Communication uses:
-1. **WebSocket** (extension content script ↔ MCP server) — typed messages per protocol.ts
+1. **WebSocket** (extension service worker ↔ MCP server; the content script reaches it over a `chrome.runtime` Port) — typed messages per protocol.ts
 2. **MCP tools** (server ↔ Claude Code) — JSON-RPC 2.0 over stdio
 
 ---

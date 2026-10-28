@@ -13,6 +13,7 @@ import type {
   InsertChange,
   PropertyChange,
   VisualDiffBatchPayload,
+  NoteRef,
   DesignToken,
   TokenSourceStatus,
   ProjectComponent,
@@ -21,11 +22,34 @@ import type {
   ServerToExtensionMessage,
 } from '@nco-studio/shared';
 import { resolveToToken } from './tokens.js';
-import type { ConnectedClient, PendingNote, PersistedQueue, SessionExport, DriftEntry, BatchSummary } from './types.js';
+import type { ConnectedClient, PendingNote, PersistedQueue, SessionExport, DriftEntry, BatchSummary, AgentNote } from './types.js';
 
 const PERSIST_DIR = '.nco-web-editor';
 const PERSIST_FILE = 'pending-queue.json';
 const LOCK_FILE = 'server.lock';
+
+/** The published Chrome Web Store extension — the only peer allowed by default. */
+export const PUBLISHED_EXTENSION_ID = 'aifpecjojmlgdhgnkmkaobmfipdmppea';
+/** Extra extension IDs (unpacked/dev builds), comma-separated. Each must be 32 chars a-p. */
+export const EXTENSION_IDS_ENV = 'NCO_WEB_EDITOR_EXTENSION_IDS';
+const EXTENSION_ID_RE = /^[a-p]{32}$/;
+/** A page on a local dev origin — what a pre-0.3.1 extension connected as. */
+const PAGE_ORIGIN_RE = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i;
+
+/** Caps on the structured-note fields that reach the agent (KL-6). */
+export const MAX_NOTES_PER_BATCH = 50;
+export const MAX_REFS_PER_NOTE = 100;
+/** Total pending notes held, live or restored. */
+export const MAX_PENDING_NOTES = 200;
+/** Cap on diffs restored from pending-queue.json. */
+export const MAX_RESTORED_DIFFS = 5000;
+/** The extension mints `batch-YYYYMMDD-HHMMSS-xxxx`; allow that shape family only. */
+const BATCH_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
+export const MAX_REF_TAGNAME_CHARS = 32;
+export const MAX_REF_SELECTOR_CHARS = 512;
+export const MAX_REF_TEXTCONTENT_CHARS = 200;
+export const MAX_REF_ASSETPATH_CHARS = 512;
 
 export class Bridge {
   private wss: WebSocketServer | null = null;
@@ -76,6 +100,7 @@ export class Bridge {
     }
 
     try {
+      Bridge.logAcceptedExtensionIds();
       const basePort = parseInt(process.env.NCO_WEB_EDITOR_PORT ?? '7890', 10);
 
       for (let port = basePort; port < basePort + 10; port++) {
@@ -208,20 +233,20 @@ export class Bridge {
         existing.diffCount++;
       }
     }
-    // Correlate batchNotes to batchIds
-    const noteByBatchId = new Map<string, string>();
+    // Count notes per batch. Never carry note text here: it would reach the
+    // agent without the trust label `notes` gives it.
+    const noteCountByBatchId = new Map<string, number>();
     for (const note of this.pendingNotes) {
-      if (note.batchId && !noteByBatchId.has(note.batchId)) {
-        noteByBatchId.set(note.batchId, note.text);
-      }
+      if (!note.batchId) continue;
+      noteCountByBatchId.set(note.batchId, (noteCountByBatchId.get(note.batchId) ?? 0) + 1);
     }
     // Build summary array, newest-first
     const summaries: BatchSummary[] = [];
     for (const [bid, { createdAt, diffCount }] of batchMap) {
       summaries.push({
         batchId: bid,
-        batchNote: noteByBatchId.get(bid),
-        createdAt,
+        noteCount: noteCountByBatchId.get(bid) ?? 0,
+        createdAt: Bridge.isIsoDate(createdAt) ? createdAt : '',
         diffCount,
       });
     }
@@ -528,7 +553,13 @@ export class Bridge {
 
     const existingIds = new Set(this.pendingQueue.map((d) => d.id));
 
-    for (const diff of session.diffs) {
+    // Same ceiling as restore: a session file can be arbitrarily large.
+    if (session.diffs.length > MAX_RESTORED_DIFFS) {
+      warnings.push(`Session has ${session.diffs.length} diffs; importing only the first ${MAX_RESTORED_DIFFS}`);
+      skipped += session.diffs.length - MAX_RESTORED_DIFFS;
+    }
+
+    for (const diff of session.diffs.slice(0, MAX_RESTORED_DIFFS)) {
       // Validate required VisualDiff fields before importing
       if (!isValidDiff(diff)) {
         warnings.push(`Skipped invalid diff entry (missing required fields)`);
@@ -548,7 +579,7 @@ export class Bridge {
       // comes out.
       let screened;
       try {
-        screened = Bridge.withCheckedSourcePath(diff);
+        screened = Bridge.withCleanBatchId(Bridge.withCheckedSourcePath(diff));
       } catch (err) {
         warnings.push(`Skipped diff: ${err instanceof Error ? err.message : 'screening failed'}`);
         skipped++;
@@ -576,17 +607,28 @@ export class Bridge {
 
   private tryPort(port: number): Promise<boolean> {
     return new Promise((resolve) => {
-      // Bind to loopback only and reject cross-origin upgrades. The bridge writes
-      // files into the project directory, so a server reachable off-host or
-      // drivable by any in-browser page is a security risk. Browsers send a
-      // truthful Origin header on WebSocket upgrades, so the origin allowlist
-      // blocks drive-by connections from arbitrary web pages; the loopback bind
-      // blocks off-host access. All legitimate traffic is localhost (spec:
-      // boundaries.md — "all traffic is localhost").
+      // Bind to loopback only and accept upgrades only from the pinned
+      // extension origin (see isAllowedOrigin). The bridge writes files into
+      // the project directory, so it must not be drivable by a script on a
+      // page: the extension's service worker opens the socket, and a browser
+      // always sends the truthful Origin on a WebSocket upgrade, which a page
+      // script cannot change.
+      //
+      // Residual risk, stated plainly. Origin is only a browser guarantee: a
+      // local process can send any Origin header it likes, so this does not
+      // stop a hostile local process from connecting. And nothing here
+      // authenticates the SERVER to the extension: a process that binds
+      // 127.0.0.1 on one of these ports first still passes the extension's
+      // shape-only handshake (HACK-008). Closing either needs a shared secret
+      // (pairing), which is deliberately not part of this change.
       const wss = new WebSocketServer({
         port,
         host: '127.0.0.1',
-        verifyClient: (info: { origin?: string }) => Bridge.isAllowedOrigin(info.origin),
+        verifyClient: (info: { origin?: string }) => {
+          const allowed = Bridge.isAllowedOrigin(info.origin);
+          if (!allowed) this.noteRefusedOrigin(info.origin);
+          return allowed;
+        },
         // ws defaults to 100 MiB per frame. A legitimate batch is bounded by
         // MAX_INLINE_ASSET_BYTES (4 MiB) per asset plus base64 inflation, so
         // 32 MiB is generous for a real payload and well short of letting a
@@ -608,27 +650,69 @@ export class Bridge {
   }
 
   /**
-   * Allowlist for WebSocket Origin headers. Only same-host dev origins and the
-   * browser extension may connect. This blocks drive-by connections from an
-   * arbitrary web page open in the same browser — such a page sends its own
-   * truthful Origin on the WS upgrade, which fails this check. A missing/empty
-   * Origin (a non-browser client) is rejected: the only legitimate client is the
-   * browser extension.
+   * Allowlist for WebSocket Origin headers: exactly the published extension's
+   * origin, plus any IDs in NCO_WEB_EDITOR_EXTENSION_IDS (unpacked builds).
+   * Localhost page origins, other extensions, moz-extension and a missing
+   * Origin are all refused, so a script on a dev page cannot open the socket.
+   *
+   * What this does NOT do: Origin is enforced by the browser, not by the
+   * protocol. A local process can forge any Origin header, so this does not
+   * keep a hostile local process out. Peer authentication beyond that would
+   * need a shared secret.
    */
   private static isAllowedOrigin(origin: string | undefined): boolean {
     if (!origin) return false;
-    if (origin.startsWith('chrome-extension://') || origin.startsWith('moz-extension://')) {
-      return true;
+    const prefix = 'chrome-extension://';
+    if (!origin.startsWith(prefix)) return false;
+    return Bridge.allowedExtensionIds().has(origin.slice(prefix.length));
+  }
+
+  /** Pinned ID plus well-formed IDs from the environment. */
+  private static allowedExtensionIds(): Set<string> {
+    const ids = new Set<string>([PUBLISHED_EXTENSION_ID]);
+    for (const raw of (process.env[EXTENSION_IDS_ENV] ?? '').split(',')) {
+      const id = raw.trim();
+      if (!id) continue;
+      if (EXTENSION_ID_RE.test(id)) {
+        ids.add(id);
+      } else if (!Bridge.warnedBadIds.has(id)) {
+        if (Bridge.warnedBadIds.size < 20) Bridge.warnedBadIds.add(id);
+        console.error(
+          `[nco-web-editor] Ignoring malformed entry in ${EXTENSION_IDS_ENV}: ${Bridge.forLog(id)} (must be 32 characters a-p)`,
+        );
+      }
     }
-    let host: string;
-    try {
-      host = new URL(origin).hostname;
-    } catch {
-      return false;
+    return ids;
+  }
+  private static readonly warnedBadIds = new Set<string>();
+
+  /** Log extra accepted extension IDs once, at startup. */
+  private static logAcceptedExtensionIds(): void {
+    const extras = [...Bridge.allowedExtensionIds()].filter((id) => id !== PUBLISHED_EXTENSION_ID);
+    if (extras.length > 0) {
+      console.error(
+        `[nco-web-editor] Also accepting extension ID(s) from ${EXTENSION_IDS_ENV}: ${extras.join(', ')}`,
+      );
     }
-    // URL.hostname brackets IPv6 literals (e.g. "[::1]"); normalize before compare.
-    const bare = host.replace(/^\[|\]$/g, '');
-    return bare === 'localhost' || bare === '127.0.0.1' || bare === '::1';
+  }
+
+  private readonly refusedPageOrigins = new Set<string>();
+
+  /**
+   * An extension older than 0.3.1 opened this socket from the page itself, so
+   * it arrives with an http(s) localhost Origin. It is refused now; say so once
+   * per origin so the developer knows to update rather than seeing a silent
+   * "disconnected".
+   */
+  private noteRefusedOrigin(origin: string | undefined): void {
+    if (!origin || !PAGE_ORIGIN_RE.test(origin)) return;
+    if (this.refusedPageOrigins.has(origin) || this.refusedPageOrigins.size >= 50) return;
+    this.refusedPageOrigins.add(origin);
+    console.error(
+      `[nco-web-editor] Refused a connection from the page origin ${Bridge.forLog(origin)}. ` +
+        'An outdated extension (pre-0.3.1) connects from the page and must be updated; ' +
+        'a script on the page is also refused by design.',
+    );
   }
 
   private handleConnection(ws: WebSocket): void {
@@ -799,10 +883,11 @@ export class Bridge {
 
   private async processDiffBatch(payload: VisualDiffBatchPayload): Promise<void> {
     const { diffs, batchNote } = payload;
+    const structured = Bridge.screenStructuredNotes(payload.notes);
     // Stamped onto diffs below and then sorted with localeCompare, so a
     // non-string envelope batchId poisons the queue exactly as a per-diff one
     // does. Drop it rather than propagate it.
-    const envelopeBatchId = typeof payload.batchId === 'string' ? payload.batchId : undefined;
+    const envelopeBatchId = Bridge.cleanBatchId(payload.batchId);
     const existingIds = new Set(this.pendingQueue.map((d) => d.id));
     const newDiffs: VisualDiff[] = [];
 
@@ -827,12 +912,12 @@ export class Bridge {
       }
       // Belt-and-suspenders: stamp batchId from envelope onto any diff missing it.
       // The extension stamps diffs at source, but the envelope batchId is the fallback.
-      let diffToProcess = rawDiff;
+      let diffToProcess = Bridge.withCleanBatchId(rawDiff);
       if (!diffToProcess.batchId && envelopeBatchId) {
-        diffToProcess = { ...rawDiff, batchId: envelopeBatchId };
+        diffToProcess = { ...diffToProcess, batchId: envelopeBatchId };
       } else if (!diffToProcess.batchId && legacyId) {
         // Pre-batchId extension — stamp the shared synthetic legacy id for this payload.
-        diffToProcess = { ...rawDiff, batchId: legacyId };
+        diffToProcess = { ...diffToProcess, batchId: legacyId };
       }
       // Per-diff containment. extractDataUrls and the source screen both index
       // or recurse into fields isValidDiff does not type-check, so one crafted
@@ -864,26 +949,44 @@ export class Bridge {
       this.latestBatchId = effectiveBatchId;
     }
 
-    // Store batch note correlated to its batchId.
+    // Store notes correlated to their batchId.
     //
-    // Typed by the designer, but NOT purely their words: the extension appends
-    // an element reference built from the page (asset path, text content,
-    // selector, source hint — see formatElementRef in notes-store.ts), so a
-    // note carries page-derived text. It is validated and capped here rather
-    // than trusted on type alone, and the agent-facing framing says so.
-    if (typeof batchNote === 'string' && batchNote.length > 0) {
+    // Structured notes (protocol 0.5.0): the designer's words and the
+    // page-derived element references arrive as separate fields, so each is
+    // screened on its own terms and the agent can be told which to follow and
+    // which to verify. When `notes` is present the legacy `batchNote` is
+    // ignored outright — it is the same content in blended form, so honouring
+    // it would let page-derived text ride in as if it were the designer's.
+    //
+    // Legacy `batchNote` (pre-0.5.0 extension, or an old queue file): one
+    // blended string that carries page-derived text. Stored, but labelled
+    // `legacy` so the agent treats the whole of it as untrusted. batchNote is
+    // slated for removal in a later protocol version.
+    const receivedAt = new Date().toISOString();
+    let notesAdded = false;
+    if (structured !== null) {
+      for (const note of structured) {
+        if (this.pendingNotes.length >= MAX_PENDING_NOTES) break;
+        this.pendingNotes.push({
+          text: note.text,
+          receivedAt,
+          batchId: effectiveBatchId,
+          source: 'structured',
+          elementRefs: note.elementRefs,
+        });
+        notesAdded = true;
+      }
+      console.error(`[nco-web-editor] Received ${structured.length} structured note(s)`);
+    } else if (typeof batchNote === 'string' && batchNote.length > 0 && this.pendingNotes.length < MAX_PENDING_NOTES) {
       const text = Bridge.sanitizeNote(batchNote);
-      this.pendingNotes.push({
-        text,
-        receivedAt: new Date().toISOString(),
-        batchId: effectiveBatchId,
-      });
-      console.error(`[nco-web-editor] Received batch note (${text.length} chars)`);
+      this.pendingNotes.push({ text, receivedAt, batchId: effectiveBatchId, source: 'legacy' });
+      notesAdded = true;
+      console.error(`[nco-web-editor] Received legacy batch note (${text.length} chars)`);
     } else if (batchNote !== undefined && batchNote !== null) {
       console.error('[nco-web-editor] Ignoring non-string batchNote');
     }
 
-    if (newDiffs.length > 0 || batchNote) {
+    if (newDiffs.length > 0 || notesAdded) {
       // trackDrift walks change values and can throw on a crafted one. It ran
       // before the persist and the status write, so a throw left diffs queued
       // in memory, absent from disk, and the status file still reading
@@ -1067,12 +1170,13 @@ export class Bridge {
         // the project and survives restarts, so anything that reached it once
         // would otherwise be replayed unchecked for the life of the project.
         const valid = data.diffs
+          .slice(0, MAX_RESTORED_DIFFS)
           .filter(isValidDiff)
           .map((d) => {
             // A persisted queue is as untrusted as anything off the wire: it
             // lives in the target project and can arrive with a clone.
             try {
-              return Bridge.withCheckedSourcePath(d);
+              return Bridge.withCleanBatchId(Bridge.withCheckedSourcePath(d));
             } catch {
               return null;
             }
@@ -1080,6 +1184,9 @@ export class Bridge {
           .filter((d): d is VisualDiff => d !== null)
           .filter(isValidDiff); // re-check: the screen rebuilds the object
         this.pendingQueue = valid;
+        if (data.diffs.length > MAX_RESTORED_DIFFS) {
+          console.error(`[nco-web-editor] Persisted queue has ${data.diffs.length} diffs; restoring only the first ${MAX_RESTORED_DIFFS}`);
+        }
         if (valid.length < data.diffs.length) {
           console.error(
             `[nco-web-editor] Skipped ${data.diffs.length - valid.length} invalid entries from persisted queue`,
@@ -1100,16 +1207,43 @@ export class Bridge {
       }
 
       if (Array.isArray(data.notes) && data.notes.length > 0) {
-        // Notes get the same normalisation on restore as on receipt. Diffs
+        // Notes get the same screening on restore as on receipt. Diffs
         // were re-screened here and notes were not, which mattered once the
         // framing started telling the agent to follow notes: a queue file
         // committed into the target project, or arriving with a clone, was an
-        // uncapped and unscreened instruction channel.
+        // uncapped and unscreened instruction channel. The persisted shape is
+        // rebuilt field by field, so a file cannot claim trust it was not
+        // given: structured notes come back as `restored` (text untrusted, refs
+        // screened) and anything else as `legacy`.
         this.pendingNotes = data.notes
+          .slice(0, MAX_PENDING_NOTES)
           .filter(
             (n): n is PendingNote => typeof n === 'object' && n !== null && typeof n.text === 'string',
           )
-          .map((n) => ({ ...n, text: Bridge.sanitizeNote(n.text) }));
+          .map((n): PendingNote => {
+            const base = {
+              receivedAt: Bridge.isIsoDate(n.receivedAt) ? n.receivedAt : new Date().toISOString(),
+              batchId: Bridge.cleanBatchId(n.batchId),
+            };
+            // Never 'structured' from disk: the file is as untrusted as a clone.
+            if (n.source === 'structured' || n.source === 'restored') {
+              return {
+                ...base,
+                text: Bridge.sanitizeNote(n.text),
+                source: 'restored',
+                elementRefs: Bridge.screenRefs((n as { elementRefs?: unknown }).elementRefs),
+              };
+            }
+            return { ...base, text: Bridge.sanitizeNote(n.text), source: 'legacy' };
+          });
+        // Same per-batch cap as live ingest.
+        const perBatch = new Map<string, number>();
+        this.pendingNotes = this.pendingNotes.filter((n) => {
+          const key = n.batchId ?? '';
+          const c = (perBatch.get(key) ?? 0) + 1;
+          perBatch.set(key, c);
+          return c <= MAX_NOTES_PER_BATCH;
+        });
         if (this.pendingNotes.length > 0) {
           console.error(
             `[nco-web-editor] Restored ${this.pendingNotes.length} pending notes from disk`,
@@ -1484,6 +1618,128 @@ export class Bridge {
       : flattened;
   }
 
+  /** A batchId in the shape the extension mints; anything else is dropped. */
+  private static cleanBatchId(v: unknown): string | undefined {
+    return typeof v === 'string' && BATCH_ID_RE.test(v) ? v : undefined;
+  }
+
+  private static isIsoDate(v: unknown): v is string {
+    return typeof v === 'string' && ISO_DATE_RE.test(v) && !Number.isNaN(Date.parse(v));
+  }
+
+  /** Drop a diff's batchId unless it has the expected shape (it is a free-text channel otherwise). */
+  private static withCleanBatchId<T extends { batchId?: unknown }>(d: T): T {
+    if (d.batchId === undefined || Bridge.cleanBatchId(d.batchId) !== undefined) return d;
+    const { batchId: _drop, ...rest } = d;
+    return rest as T;
+  }
+
+  /**
+   * Screen the `notes` field of a batch. Returns null when `notes` is absent
+   * (the caller then falls back to the legacy `batchNote`), otherwise the
+   * notes that survived screening. A present-but-malformed `notes` yields an
+   * empty array rather than null: it must not demote to the legacy path.
+   */
+  private static screenStructuredNotes(
+    raw: unknown,
+  ): Array<{ text: string; elementRefs: NoteRef[] }> | null {
+    if (raw === undefined || raw === null) return null;
+    if (!Array.isArray(raw)) {
+      console.error('[nco-web-editor] Ignoring non-array notes');
+      return [];
+    }
+    const out: Array<{ text: string; elementRefs: NoteRef[] }> = [];
+    for (const item of raw.slice(0, MAX_NOTES_PER_BATCH)) {
+      if (typeof item !== 'object' || item === null) continue;
+      const rec = item as { text?: unknown; elements?: unknown };
+      if (typeof rec.text !== 'string' || rec.text.trim() === '') continue;
+      out.push({ text: Bridge.sanitizeNote(rec.text), elementRefs: Bridge.screenRefs(rec.elements) });
+    }
+    return out;
+  }
+
+  /** Screen a list of element references field by field. */
+  private static screenRefs(raw: unknown): NoteRef[] {
+    if (!Array.isArray(raw)) return [];
+    const out: NoteRef[] = [];
+    for (const item of raw.slice(0, MAX_REFS_PER_NOTE)) {
+      const ref = Bridge.screenRef(item);
+      if (ref) out.push(ref);
+    }
+    return out;
+  }
+
+  private static screenRef(raw: unknown): NoteRef | null {
+    if (typeof raw !== 'object' || raw === null) return null;
+    const r = raw as Record<string, unknown>;
+    if (typeof r.tagName !== 'string' || typeof r.selector !== 'string') return null;
+    const ref: {
+      tagName: string;
+      selector: string;
+      textContent?: string;
+      sourceFile?: string;
+      sourceLine?: number;
+      assetPath?: string;
+    } = {
+      // Kept as data, capped, with control characters and newlines flattened
+      // so a value cannot start a new line of "instruction" in the output.
+      tagName: Bridge.clampField(r.tagName, MAX_REF_TAGNAME_CHARS),
+      selector: Bridge.clampField(r.selector, MAX_REF_SELECTOR_CHARS),
+    };
+    if (typeof r.textContent === 'string' && r.textContent !== '') {
+      ref.textContent = Bridge.clampField(r.textContent, MAX_REF_TEXTCONTENT_CHARS);
+    }
+    // sourceFile is a place the agent is told to edit — the strict screen the
+    // diffs get (HACK-012), not just a cap.
+    if (typeof r.sourceFile === 'string' && r.sourceFile !== '') {
+      if (Bridge.isPlausibleSourcePath(r.sourceFile)) {
+        ref.sourceFile = r.sourceFile;
+        if (typeof r.sourceLine === 'number' && Number.isInteger(r.sourceLine) && r.sourceLine >= 0 && r.sourceLine < 10_000_000) {
+          ref.sourceLine = r.sourceLine;
+        }
+      } else {
+        console.error(`[nco-web-editor] Dropping implausible note sourceFile: ${Bridge.forLog(r.sourceFile)}`);
+      }
+    }
+    if (typeof r.assetPath === 'string' && r.assetPath !== '') {
+      if (Bridge.isPlausibleAssetPath(r.assetPath)) {
+        ref.assetPath = r.assetPath;
+      } else {
+        console.error(`[nco-web-editor] Dropping implausible note assetPath: ${Bridge.forLog(r.assetPath)}`);
+      }
+    }
+    return ref;
+  }
+
+  /** A served asset path: root-relative, no scheme, no traversal, no odd characters. */
+  private static isPlausibleAssetPath(p: string): boolean {
+    if (p.length > MAX_REF_ASSETPATH_CHARS) return false;
+    if (!/^\/[A-Za-z0-9_\-./@+%()[\]]*$/.test(p)) return false;
+    if (p.startsWith('//')) return false; // protocol-relative URL
+    // Re-check after percent-decoding (twice, to catch %252e): `/%2e%2e/x` is a
+    // traversal segment to anything that decodes the path later.
+    let cur = p;
+    for (let i = 0; i < 3; i++) {
+      if (cur.split('/').some((seg) => seg === '..')) return false;
+      if (cur.includes('\\') || cur.startsWith('//')) return false;
+      // eslint-disable-next-line no-control-regex
+      if (/[\u0000-\u001f\u007f]/.test(cur)) return false;
+      if (!cur.includes('%')) break;
+      try {
+        cur = decodeURIComponent(cur);
+      } catch {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private static clampField(value: string, max: number): string {
+    // eslint-disable-next-line no-control-regex
+    const flat = value.replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, ' ');
+    return flat.length > max ? `${flat.slice(0, max)}…` : flat;
+  }
+
   /**
    * Clamp an attacker-influenced string before it reaches a log line, so a
    * crafted MIME type or source path cannot inject newlines or flood stderr.
@@ -1810,4 +2066,30 @@ function isEexist(err: unknown): boolean {
     err !== null &&
     (err as NodeJS.ErrnoException).code === 'EEXIST'
   );
+}
+
+/**
+ * Shape a stored note for the agent. A structured note keeps the designer's
+ * words (`designerText`, follow) apart from the page-derived `elementRefs`
+ * (verify before acting). A legacy note is one blended string and is labelled
+ * as such: nothing in it is the designer's voice we can vouch for.
+ */
+export function toAgentNote(note: PendingNote): AgentNote {
+  if (note.source === 'structured') {
+    return {
+      designerText: note.text,
+      elementRefs: note.elementRefs ?? [],
+      receivedAt: note.receivedAt,
+      batchId: note.batchId,
+    };
+  }
+  if (note.source === 'restored') {
+    return {
+      untrustedRestoredText: note.text,
+      elementRefs: note.elementRefs ?? [],
+      receivedAt: note.receivedAt,
+      batchId: note.batchId,
+    };
+  }
+  return { untrustedLegacyText: note.text, receivedAt: note.receivedAt, batchId: note.batchId };
 }

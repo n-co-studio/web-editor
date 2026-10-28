@@ -49,6 +49,9 @@ Deferred findings from review phases that are out of the current brief's scope a
 - **Target:** 0.3.1, together with KL-6 — they are one protocol change, not two.
 - **Reconsidered 2026-10-27:** this was deferred as a peer-authentication issue, which undersold it. The agent-facing framing now tells the agent to follow `notes`, and any script on a `localhost` page is an allowed peer, so the deferral also leaves a page-script peer holding a *trusted instruction channel*. The extension's shadow root is `mode: 'open'`, so page script can drive the note UI directly as well. Severity unchanged, but the reason it matters is broader than "who may connect".
 - **Follow-up:** brief `20261027-013000-bridge-peer-authentication`.
+- **RESOLVED 2026-10-28 (0.3.1, session `83ab3340`, branch `fix/security-0-3-1`) — Option A.** The socket moved from the content script into the service worker (`service-worker/bridge-socket.ts`, per-tab Port host `service-worker/bridge-port.ts`; `content/websocket-client.ts` is now a Port proxy). The server accepts only `Origin: chrome-extension://aifpecjojmlgdhgnkmkaobmfipdmppea`, plus well-formed IDs from `NCO_WEB_EDITOR_EXTENSION_IDS` for unpacked builds. The tab id comes from `port.sender.tab.id`, prefixed with a per-browser id, never from message content. The extension connects to `127.0.0.1`. The shadow root is `closed`, and every editor listener page script can reach is wrapped in `trustedOnly` (`shared/trusted.ts`), so the page can neither connect nor act for the designer. Spike: an MV3 service worker in Chromium 153 reached `ws://127.0.0.1` with no host permission; branded Chrome is unverified pending a manual check.
+- **Residual, deliberately accepted (actors 3 and 4 of the brief):** `Origin` is a header a local process can forge, and the extension still authenticates the server only by the shape-only HACK-008 check. A process that binds `127.0.0.1:7890` before the server therefore receives diffs, and the `127.0.0.1` target removes only the `::1` variant. Closing this needs a pairing secret (Option B), which costs zero-setup. It is additive on top of A if wanted later. Other installed extensions can read the closed root via `chrome.dom.openOrClosedShadowRoot`, but their clicks are untrusted, so this exposes data only.
+- **Skew:** a new extension accepts a 0.4.0-protocol (0.3.0) server (`shared/protocol-compat.ts`). A 0.3.1 server refuses pre-0.3.1 extensions and logs once per origin that the extension must be updated. Release the extension first.
 
 ### KL-5 — SVG assets are refused over the bridge until they can be parsed properly
 - **File:** `packages/mcp-server/src/bridge.ts` (`saveDataUrl`)
@@ -65,6 +68,9 @@ Deferred findings from review phases that are out of the current brief's scope a
 - **Note also:** the MCP server tells the user to add `.nco-web-editor/` to their project `.gitignore` (`bin/cli.ts:62`) but does not do it. A committed `pending-queue.json` is a shared instruction channel, which is why restore screening was added.
 - **Discovered:** third security review round, 2026-10-27.
 - **Target:** 0.3.1, together with KL-4.
+- **RESOLVED 2026-10-28 (0.3.1, session `83ab3340`).** `VisualDiffBatchPayload.notes` carries `{ text, elements: NoteRef[] }`. The server screens each ref field separately: `sourceFile` through `isPlausibleSourcePath`; `assetPath` must be root-relative, with no scheme and no `..` even after percent-decoding; the other fields are capped and newlines flattened. The agent gets `{ designerText, elementRefs }`. The legacy `batchNote` is still sent for old servers. A new server ignores it whenever `notes` is present, and labels it `untrustedLegacyText` when not.
+- **No disk-read note is ever designer text.** On restore every note becomes `restored`, and its text goes to the agent as `untrustedRestoredText`, because `pending-queue.json` can arrive in a cloned repo. `batches[]` carries `noteCount` only, never text; four reviewers found the unlabelled copy there independently. `batchId` must match `/^[A-Za-z0-9_-]{1,64}$/` on every path, restored `receivedAt` must be ISO, and restore and import are capped (5000 diffs, 200 notes).
+- **Cost, accepted:** the designer's own notes still queued at a server restart come back untrusted. The `.gitignore` gap noted above is unchanged.
 
 ### KL-7 — smaller hardening items deferred from the 0.3.0 security rounds
 - **Per-field type validation of change entries.** `isValidDiff` checks the diff shape, `changes` being an array of non-null objects, and `batchId`. It does not type-check `changes[].property`/`toValue`, `attributeChanges` or `insertChanges`. Throws from those are contained per diff, so one bad entry is dropped rather than aborting the batch, but the entry is skipped silently after `DIFF_ACK` has already gone back — the designer is told the edit was received. Validate per field and report skips back to the extension.
@@ -75,6 +81,12 @@ Deferred findings from review phases that are out of the current brief's scope a
 - **Persist and status writes are unserialised.** `safePersistQueue` and `safeWriteStatusFile` are fire-and-forget and share a `.tmp` name, so two quick writes can interleave and leave the older content in place. Serialise through a promise chain and write via temp-file-plus-rename.
 - **Discovered:** second and third security review rounds, 2026-10-26/27.
 - **Target:** 0.3.1.
+- **Added 2026-10-28** (adversarial review of the KL-4/KL-6 work, session `83ab3340`), all pre-existing rather than introduced by it:
+  - **`export_session` writes through a directory symlink.** `confineToProject` is lexical, and `mkdir`/`writeFile(..., {flag:'wx'})` follow a symlinked directory mid-path; `wx` protects only the last component. Confirmed by proof of concept: a repo containing `linkdir -> /outside` let `exportSession('linkdir/x.json')` write outside the project. Only a `.json` of the queue, and the agent must be steered into calling the tool, but it is a real escape. `realpath` the parent before writing.
+  - **`isPlausibleSourcePath` misses config files.** It accepts `sentry.client.config.ts`, `commitlint.config.js`, `lint-staged.config.js`, `drizzle.config.ts`, `jest.setup.js`, `scripts/setup.js` and `node_modules/x/index.js`. These are file hints, not content, so the harm needs a second hop.
+  - **`get_design_tokens` / `get_project_components` return repo-derived strings without the untrusted framing** the diff tool has.
+  - **Duplicate note on an edit mid-send.** `NotesStore.removeEntries` removes by identity, and `addElementToNote`/`removeElementFromNote` replace the entry, so a note edited while its send is in flight is delivered twice. Nothing is lost.
+  - **No designer-visible send failure.** A failed or partial send logs to the console only.
 
 ---
 
@@ -137,3 +149,14 @@ description.
 - **Fix:** pass the input through `env:` and validate it against an expected `owner/repo` pattern rather than interpolating into the shell.
 - **Why it is logged rather than fixed:** same governance path lock and same upstream decision as GT-6.
 - **Discovered:** adversarial security review, 2026-10-26.
+
+### GT-8 — verdicts are stamped with a stale session id while an earlier session's process is still alive
+- **File:** `.claude/hooks/state-writer.sh:296-301`, `.claude/hooks/pre-commit-gates.sh:416-432` (`_validate_state_session_id`)
+- **Symptom:** both read the flat `.claude/.session-id` whenever `REPO_OS_SESSION_ID` is unset, rather than the per-process sidecar that `get_session_id` uses. With the previous session's process (`5d149e99`, PID 95176) still running, the flat file kept its id. So every verdict in session `83ab3340` (pragmatist, critic) was stamped `5d149e99`, while `plan-approved`, written by a different path, was stamped `83ab3340`. One session's state dir therefore holds evidence under two ids, and the gate compares against whichever the flat file says.
+- **Fix upstream:** resolve the id through `get_session_id` (sidecar-aware) in both places, so writer and validator agree with the state dir that holds the file.
+- **Discovered:** session `83ab3340`, 2026-10-27.
+
+### GT-9 — sign-off verdicts are silently dropped when dispatched from the wrong phase, and re-reviews can vanish entirely
+- **Observed:** Reviewer and Security verdicts dispatched from `review` were discarded with `reason=phase_mismatch` — they must come from `verify`. The rejection went to `.claude/.automation/escalations/` and nowhere visible. This is the second session in a row to hit it. Separately, three re-review dispatches (critic, reviewer, security) left neither a state file nor an escalation, which is consistent with the hand-back verdict loss recorded in project memory.
+- **Fix upstream:** surface the rejection in the dispatching session (stderr or systemMessage), and have `pretooluse-permission.sh` refuse — or warn on — a sign-off dispatch from a phase whose verdict will be discarded.
+- **Also observed (same session):** a large-scope re-approval through `plan-approval.sh` at the `verify` phase reset the session to `build` and opened cycle 2. The `advance_phase` calls at `plan-approval.sh:182-185` are not refused as backward moves, as their warning text suggests they would be. The QA verdict dispatched next was therefore discarded for `phase_mismatch`. A2's large-scope flag should be grantable without resetting the phase chain.

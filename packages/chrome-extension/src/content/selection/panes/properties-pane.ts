@@ -63,6 +63,8 @@ export class PropertiesPane {
     private readonly tokenStore: TokenStore,
     private readonly pendingQueue: PendingQueue,
     private readonly shadowHost: Element | null = null,
+    /** The (closed) shadow root, passed in because host.shadowRoot is null by design. */
+    shadowRoot: ShadowRoot | null = null,
   ) {
     this.cssGroups = new CssGroupsSection(tokenStore, pendingQueue);
     this.boxModelSection = new BoxModelSection();
@@ -70,7 +72,6 @@ export class PropertiesPane {
     this.accessibilitySection = new AccessibilitySection();
 
     // Shadow root for click-outside dismiss in tooltips
-    const shadowRoot = this.shadowHost?.shadowRoot;
     if (shadowRoot) this.cssGroups.setDismissRoot(shadowRoot);
 
     // StateSimulator is eager (no heavy setup until first activation)

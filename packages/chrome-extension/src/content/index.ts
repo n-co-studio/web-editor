@@ -1,4 +1,5 @@
-import { mountShadowHost, unmountShadowHost } from './shadow-host';
+import { mountShadowHost, unmountShadowHost, setHostPointerEvents } from './shadow-host';
+import { trustedOnly } from '../shared/trusted';
 import { showProtocolMismatchBanner } from './protocol-mismatch-banner';
 import { WebSocketClient } from './websocket-client';
 import { HoverHighlight } from './selection/hover';
@@ -79,6 +80,8 @@ import { MultiSelectManager } from './selection/multi-select';
 import { MultiSelectToolbar } from './editing/multi-select-toolbar';
 import { buildElementInfo, buildNoteElementRef, buildSiblingAnchor, getTopElementAt, generateSelector, getComputedProperty, ensureUid, readUid, disambiguateUids, sanitizeFragment } from '../shared/dom-utils';
 import { PROTOCOL_VERSION } from '@nco-studio/shared';
+import { createNotePickHandler } from './editing/note-pick';
+import { isCompatibleServerProtocol } from '../shared/protocol-compat';
 import type { VisualDiff, PropertyChange, AttributeChange, TextChange, ReorderChange, ReparentChange, GroupChange, RemoveChange, StylesheetChange, ScriptBehaviorChange, LayoutContainerDescriptor } from '@nco-studio/shared';
 import { parseLayoutSignal, classifyLayoutRole } from '@nco-studio/shared/layout';
 import type { ExtensionMode, ConnectionStatus, EditMode, IconStatus } from '../shared/types';
@@ -523,11 +526,10 @@ export async function activate(): Promise<void> {
 
   // WebSocket client
   wsClient = new WebSocketClient({
-    tabId,
     getPendingDiffIds: () => queue!.getDiffIds(),
     onStatusChange: handleStatusChange,
     onServerHello: (payload) => {
-      if (payload.protocolVersion !== PROTOCOL_VERSION) {
+      if (!isCompatibleServerProtocol(payload.protocolVersion)) {
         console.error(
           `[nco-web-editor] Protocol version mismatch — extension expects ${PROTOCOL_VERSION}, server sent ${payload.protocolVersion}. Closing connection.`,
         );
@@ -778,8 +780,8 @@ export async function activate(): Promise<void> {
 
   // Wire ruler overlay hover suppression
   rulerOverlay!.setHoverSuppressor(
-    () => { hover!.disable(); if (host) host.style.pointerEvents = 'none'; },
-    () => { hover!.enable(); if (host) host.style.pointerEvents = ''; },
+    () => { hover!.disable(); if (host) setHostPointerEvents(host, 'none'); },
+    () => { hover!.enable(); if (host) setHostPointerEvents(host, ''); },
   );
 
   // Wire selection → panel, toolbar, handles, stale detection
@@ -967,13 +969,13 @@ export async function activate(): Promise<void> {
         toolbar!.setReviewPanelOpen(false);
       }
       document.body.style.cursor = '';
-      if (host) host.style.pointerEvents = 'none';
+      if (host) setHostPointerEvents(host, 'none');
       // Re-enable pointer events on toolbar container only
       const toolbarEl = toolbar!.getContainerElement();
       if (toolbarEl) toolbarEl.style.pointerEvents = 'auto';
     } else {
       // Resume DOM inspection
-      if (host) host.style.pointerEvents = '';
+      if (host) setHostPointerEvents(host, '');
       document.body.style.cursor = 'crosshair';
       hover!.enable();
       selection!.restoreHighlight();
@@ -1134,31 +1136,20 @@ export async function activate(): Promise<void> {
     }
 
     hover?.disable();
-    if (host) host.style.pointerEvents = 'none';
+    if (host) setHostPointerEvents(host, 'none');
     document.body.style.cursor = 'cell';
     // Keep notes panel interactive
     const notePanel = notesEditor!.getContainerElement();
     if (notePanel) notePanel.style.pointerEvents = 'auto';
 
-    const pickHandler = (e: MouseEvent) => {
-      // Let clicks within the notes panel through so buttons remain interactive
-      const noteEl = notesEditor!.getContainerElement();
-      if (noteEl) {
-        const r = noteEl.getBoundingClientRect();
-        if (e.clientX >= r.left && e.clientX <= r.right &&
-            e.clientY >= r.top && e.clientY <= r.bottom) {
-          return;
-        }
-      }
-
-      e.preventDefault();
-      e.stopPropagation();
-
-      const target = getTopElementAt(e.clientX, e.clientY, host!);
-      if (target && target !== document.documentElement && target !== document.body) {
-        notesStore!.addElementToNote(noteIndex, buildNoteElementRef(target));
-      }
-    };
+    const pickHandler = createNotePickHandler({
+      getPanelRect: () => notesEditor!.getContainerElement()?.getBoundingClientRect() ?? null,
+      elementAt: (x, y) => {
+        const target = getTopElementAt(x, y, host!);
+        return target && target !== document.documentElement && target !== document.body ? target : null;
+      },
+      addElement: (el) => notesStore!.addElementToNote(noteIndex, buildNoteElementRef(el)),
+    });
 
     notePickMode = { noteIndex, handler: pickHandler };
     notesEditor!.setPickActive(noteIndex);
@@ -1367,7 +1358,7 @@ export async function activate(): Promise<void> {
   savedFocus = document.activeElement as HTMLElement | null;
 
   // Register global keyboard handler + scroll tracking
-  document.addEventListener('keydown', handleGlobalKeydown, true);
+  document.addEventListener('keydown', onGlobalKeydown, true);
   document.addEventListener('scroll', handleScroll, true);
 
   badge.update();
@@ -1386,7 +1377,7 @@ export function deactivate(): void {
   if (mode === 'inactive') return;
 
   // Remove global listeners
-  document.removeEventListener('keydown', handleGlobalKeydown, true);
+  document.removeEventListener('keydown', onGlobalKeydown, true);
   document.removeEventListener('scroll', handleScroll, true);
   document.body.style.cursor = '';
 
@@ -2731,7 +2722,7 @@ function cleanupMeasurement(): void {
     measureOverlay.disable();
     measureOverlay.clear();
   }
-  document.removeEventListener('mousemove', handleMeasureMouseMove, true);
+  document.removeEventListener('mousemove', onMeasureMouseMove, true);
   if (measureRafId != null) {
     cancelAnimationFrame(measureRafId);
     measureRafId = null;
@@ -2747,7 +2738,7 @@ function exitNotePickMode(): void {
   document.removeEventListener('click', notePickMode.handler, true);
   notePickMode = null;
   hover?.enable();
-  if (host) host.style.pointerEvents = '';
+  if (host) setHostPointerEvents(host, '');
   document.body.style.cursor = mode !== 'inactive' ? 'crosshair' : '';
   notesEditor?.setPickActive(null);
 }
@@ -2794,7 +2785,7 @@ function enterMultiSelectMode(): void {
     measureOverlay.disable();
   }
   measureOverlay?.clear();
-  document.removeEventListener('mousemove', handleMeasureMouseMove, true);
+  document.removeEventListener('mousemove', onMeasureMouseMove, true);
 
   // Render persistent measurement lines
   measureOverlay?.renderPersistentLines(allElements);
@@ -2846,6 +2837,14 @@ function exitMultiSelectMode(): void {
 // Global keyboard handling
 // ---------------------------------------------------------------------------
 
+// Page script can dispatch synthetic key/click events at document; the editor
+// must only react to real ones (KL-4). Left ungated on purpose: scroll
+// (repositioning only) and the colour-popover dismiss listeners (they can only
+// close UI).
+const onGlobalKeydown = trustedOnly(handleGlobalKeydown);
+const onMeasureMouseMove = trustedOnly(handleMeasureMouseMove);
+const onMultiSelectClick = trustedOnly(handleMultiSelectClick);
+
 function handleGlobalKeydown(e: KeyboardEvent): void {
   // While the inline text editor is active, every keystroke belongs to the
   // operator's typing — bail before any shortcut runs. This is stricter than
@@ -2857,7 +2856,10 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
   // Skip all shortcuts when user is typing in a text field/input/contenteditable.
   // Use composedPath() to pierce Shadow DOM boundaries — e.target is retargeted
   // to the shadow host at document level, hiding the actual input element.
-  const composedTarget = e.composedPath()[0] as HTMLElement | undefined;
+  // The overlay's shadow root is closed, so composedPath() from a document
+  // listener stops at the host; the focused node inside it is read from the
+  // root we hold instead.
+  const composedTarget = (shadow?.activeElement ?? e.composedPath()[0]) as HTMLElement | undefined;
   if (composedTarget?.tagName) {
     const tag = composedTarget.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || composedTarget.isContentEditable) {
@@ -2871,13 +2873,13 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
       const selectedEl = selection?.getSelectedElement();
       mode = 'paused';
       hover?.disable();
-      if (host) host.style.pointerEvents = 'none';
+      if (host) setHostPointerEvents(host, 'none');
       if (selectedEl && measureOverlay) {
         measureOverlay.enable();
-        document.addEventListener('mousemove', handleMeasureMouseMove, true);
+        document.addEventListener('mousemove', onMeasureMouseMove, true);
       }
       // Add click listener for multi-select
-      multiSelectClickHandler = handleMultiSelectClick;
+      multiSelectClickHandler = onMultiSelectClick;
       document.addEventListener('click', multiSelectClickHandler, true);
     }
     return;
@@ -2958,7 +2960,7 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
       reviewPanel!.show();
       toolbar!.setReviewPanelOpen(true);
     }
-    reviewPanel!.triggerSend();
+    reviewPanel!.triggerSend(e);
     return;
   }
 
@@ -3181,7 +3183,7 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
 // Listen for Alt release to unpause
 document.addEventListener(
   'keyup',
-  (e: KeyboardEvent) => {
+  trustedOnly((e: KeyboardEvent) => {
     if (e.key === 'Alt' && mode === 'paused') {
       // Remove multi-select click listener
       if (multiSelectClickHandler) {
@@ -3191,7 +3193,7 @@ document.addEventListener(
 
       mode = 'selecting';
       hover?.enable();
-      if (host) host.style.pointerEvents = '';
+      if (host) setHostPointerEvents(host, '');
 
       if (!multiSelect?.isActive()) {
         // No multi-select clicks happened — original behavior
@@ -3201,7 +3203,7 @@ document.addEventListener(
         cleanupMeasurement();
       }
     }
-  },
+  }),
   true,
 );
 

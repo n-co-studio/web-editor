@@ -15,6 +15,7 @@
  * All styling is inline (Shadow DOM isolation — no external CSS).
  */
 
+import { trustedOnly } from '../../shared/trusted';
 import { createElement } from '../../shared/ui-utils';
 import {
   OVERLAY,
@@ -474,14 +475,14 @@ export class ReorderPanel {
 
     this.boundDragMove = (ev) => this.onDragMove(ev);
     this.boundDragUp = (ev) => this.onDragUp(ev, handle);
-    this.boundDragKey = (ev) => {
+    this.boundDragKey = trustedOnly((ev: KeyboardEvent) => {
       // Escape aborts the drag and reverts the preview.
       if (ev.key === 'Escape') {
         ev.preventDefault();
         try { handle.releasePointerCapture(e.pointerId); } catch { /* released */ }
         this.endDrag(true);
       }
-    };
+    });
     handle.addEventListener('pointermove', this.boundDragMove);
     handle.addEventListener('pointerup', this.boundDragUp);
     document.addEventListener('keydown', this.boundDragKey, true);

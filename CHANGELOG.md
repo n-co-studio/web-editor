@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Security
+
+Closes the two issues 0.3.0 left open (KL-4, KL-6). **Update the extension first and the MCP server second** — the protection takes effect only once the server is on 0.3.1, and a 0.3.1 server refuses a pre-0.3.1 extension.
+
+- **Only the extension can reach the MCP server.** The connection now runs from the extension's background worker instead of the page, and the server accepts it only from the published extension's ID. Script on the page being edited — the place untrusted content actually renders — can no longer connect, and neither can another installed extension. The extension connects to `127.0.0.1` explicitly, so a process listening on the IPv6 loopback can no longer intercept it. Still zero setup.
+- **Page script cannot act for the designer.** The editor's panel is closed to page script, and every editor action — selecting, keyboard shortcuts, dragging, text editing, notes, Apply — ignores events the page synthesises. Previously a page could queue its own edits to ride out with the designer's next Apply.
+- **Your notes reach the agent as your words, and only yours.** Each note now carries the element references it mentions as separate, screened fields instead of text spliced into the note, and the agent is told to follow the note and verify the references. Text read back from the on-disk queue file — which can arrive in a cloned repository — is labelled untrusted rather than presented as the designer's.
+- **A batch is only marked sent when the server confirms it**, and notes are removed only once delivered. Notes added while a send is in flight are kept.
+
+### Changed
+
+- **Notes still queued when the MCP server restarts come back labelled untrusted.** The server cannot tell its own queue file from one that arrived with a repository, so it treats both as untrusted, and the agent reads them as data to check rather than as requests.
+- **Unpacked development builds** have a different extension ID and need `NCO_WEB_EDITOR_EXTENSION_IDS=<id>` in the MCP server's environment.
+
 ## [0.3.0] - 2026-10-26
 
 Rebuilds the hosted guide around what actually makes this different — MCP — hardens the MCP server against a hostile page, and clears a critical dependency advisory. Also fixes a set of contrast and theming faults in the editing panels, including three the theme audit introduced itself.

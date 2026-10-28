@@ -1,4 +1,5 @@
 import { createElement } from '../shared/ui-utils';
+import { trustedOnly } from '../shared/trusted';
 import {
   OVERLAY,
   GUIDE_LINE_Z,
@@ -960,12 +961,14 @@ export class RulerOverlay {
   // -----------------------------------------------------------------------
 
   private attachKeyboard(): void {
-    this.keydownHandler = (e: KeyboardEvent) => {
+    this.keydownHandler = trustedOnly((e: KeyboardEvent) => {
       // Skip when the user is typing in a text field/input/contenteditable
       // (including the inline text editor). composedPath() pierces Shadow DOM
       // boundaries — otherwise e.target is retargeted to the shadow host at
       // document level, hiding the actual input element.
-      const composedTarget = e.composedPath()[0] as HTMLElement | undefined;
+      // The shadow root is closed, so composedPath() from document stops at the
+      // host; read the focused node inside it from the root we hold.
+      const composedTarget = (this.shadow.activeElement ?? e.composedPath()[0]) as HTMLElement | undefined;
       if (composedTarget?.tagName) {
         const tag = composedTarget.tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || composedTarget.isContentEditable) {
@@ -981,7 +984,7 @@ export class RulerOverlay {
           this.saveGuides();
         }
       }
-    };
+    });
     document.addEventListener('keydown', this.keydownHandler, true);
   }
 

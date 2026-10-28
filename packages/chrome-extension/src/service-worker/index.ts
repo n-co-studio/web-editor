@@ -1,9 +1,14 @@
 /**
  * Service worker for the AI Agent Visual Editor Chrome extension.
- * Intentionally minimal — the content script owns the WebSocket
- * connection to avoid MV3 service worker termination risk.
+ *
+ * It owns the WebSocket to the MCP server (one socket per connected tab, over
+ * a runtime Port from the content script) so the server sees the extension's
+ * origin and page scripts cannot open the socket (KL-4). minimum_chrome_version
+ * is 116, the release in which WebSocket traffic keeps an MV3 service worker
+ * alive; the 20s keepalive stays inside the 30s idle window.
  *
  * Responsibilities:
+ * 0. The server socket (bridge-port.ts / bridge-socket.ts)
  * 1. Badge text updates from content script
  * 2. Status icon updates from content script (chrome.action.setIcon)
  * 3. Viewport capture for full-page screenshots
@@ -16,6 +21,7 @@
 
 import type { IconStatus } from '../shared/types';
 import { handleInstalled } from './handle-installed';
+import { handleBridgePort } from './bridge-port';
 
 // ---------------------------------------------------------------------------
 // Status icon paths (bundled to dist/icons/status by esbuild.config.js)
@@ -139,6 +145,12 @@ chrome.runtime.onMessage.addListener(
     return false;
   },
 );
+
+// ---------------------------------------------------------------------------
+// Bridge socket ports (registered synchronously so a Port wakes the worker)
+// ---------------------------------------------------------------------------
+
+chrome.runtime.onConnect.addListener((port) => handleBridgePort(port));
 
 // ---------------------------------------------------------------------------
 // Install / update

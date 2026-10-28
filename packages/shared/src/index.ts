@@ -39,6 +39,8 @@ export type {
   ExtensionHelloPayload,
   ServerHelloPayload,
   VisualDiffBatchPayload,
+  NoteRef,
+  StructuredNote,
   DiffAckPayload,
   DiffAppliedPayload,
   TokenSourceStatus,

@@ -7,6 +7,7 @@
  * via moveBefore (Chrome 124+) or insertBefore fallback.
  */
 
+import { trustedOnly } from '../../shared/trusted';
 import { createElement } from '../../shared/ui-utils';
 import { HANDLE_COLORS, DROP_INDICATOR, OVERLAY } from '../../shared/constants';
 import { detectContainerLayout, computeGapZones, hitTestGapZone, detectWrapping, computeGapZones2D, hitTestGapZone2D, type ContainerLayout, type GapZone } from './gap-math';
@@ -205,8 +206,8 @@ export class ReparentEditor {
 
     // Bind pointer handlers
     this.boundPointerDown = this.onPointerDown.bind(this);
-    this.boundPointerMove = this.onPointerMove.bind(this);
-    this.boundPointerUp = this.onPointerUp.bind(this);
+    this.boundPointerMove = trustedOnly(this.onPointerMove.bind(this));
+    this.boundPointerUp = trustedOnly(this.onPointerUp.bind(this));
 
     this.cursorOverlay!.addEventListener('pointerdown', this.boundPointerDown);
     document.addEventListener('pointermove', this.boundPointerMove, true);

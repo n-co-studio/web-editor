@@ -213,7 +213,10 @@ export class NotesEditor {
       minWidth: '0',
     }) as HTMLInputElement;
 
-    const addNote = () => {
+    const addNote = (event: Event) => {
+      // Only a real user gesture adds a note; page script can dispatch
+      // synthetic events but not trusted ones (KL-4).
+      if (!event.isTrusted) return;
       const value = input.value.trim();
       if (value) {
         // Read the selection at commit time, not at panel-open time — the
@@ -233,7 +236,7 @@ export class NotesEditor {
       if (e.key === 'Enter') {
         e.preventDefault();
         e.stopPropagation();
-        addNote();
+        addNote(e);
       }
     });
 
@@ -528,7 +531,8 @@ export class NotesEditor {
       pointerEvents: 'auto',
     }) as HTMLButtonElement;
     refBtn.textContent = '+ Ref';
-    refBtn.addEventListener('click', () => {
+    refBtn.addEventListener('click', (e) => {
+      if (!e.isTrusted) return;
       this.pickCb?.(index);
     });
     actionRow.appendChild(refBtn);
@@ -549,7 +553,8 @@ export class NotesEditor {
         pointerEvents: 'auto',
       }) as HTMLButtonElement;
       selBtn.textContent = '+ Selected';
-      selBtn.addEventListener('click', () => {
+      selBtn.addEventListener('click', (e) => {
+        if (!e.isTrusted) return;
         this.addSelectedCb?.(index);
       });
       actionRow.appendChild(selBtn);

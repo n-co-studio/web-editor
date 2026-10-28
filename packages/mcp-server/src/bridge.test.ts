@@ -2,7 +2,7 @@
  * Security tests for MCP bridge rejection paths.
  *
  * Coverage:
- * - isAllowedOrigin: WebSocket origin allowlist (accept extension + localhost; reject foreign, missing, look-alike)
+ * - isAllowedOrigin: WebSocket origin allowlist (pinned extension ID only; everything else rejected)
  * - confineToProject: path traversal + absolute-outside-project rejection
  * - resolveAssetDir: traversal segment rejection falls back to safe default
  * - resolveAssetDir: dot-directory rejection (HACK-011)
@@ -107,29 +107,13 @@ after(async () => {
 // isAllowedOrigin
 // ---------------------------------------------------------------------------
 
-describe('isAllowedOrigin — accept cases', () => {
-  it('accepts chrome-extension:// origin', () => {
-    assert.equal(allowedOrigin('chrome-extension://abcdefghijklmnop/'), true);
+describe('isAllowedOrigin — pinned extension ID only (KL-4)', () => {
+  // Server-level tests with a real ws client and forged Origin headers live in
+  // bridge-peer-auth.test.ts; these pin the predicate itself.
+  it('accepts the published extension origin', () => {
+    assert.equal(allowedOrigin('chrome-extension://aifpecjojmlgdhgnkmkaobmfipdmppea'), true);
   });
 
-  it('accepts moz-extension:// origin', () => {
-    assert.equal(allowedOrigin('moz-extension://abcdefghijklmnop/'), true);
-  });
-
-  it('accepts http://localhost with port', () => {
-    assert.equal(allowedOrigin('http://localhost:3000'), true);
-  });
-
-  it('accepts http://127.0.0.1 with port', () => {
-    assert.equal(allowedOrigin('http://127.0.0.1:5173'), true);
-  });
-
-  it('accepts http://[::1] (IPv6 loopback)', () => {
-    assert.equal(allowedOrigin('http://[::1]:8080'), true);
-  });
-});
-
-describe('isAllowedOrigin — reject cases', () => {
   it('rejects undefined origin', () => {
     assert.equal(allowedOrigin(undefined), false);
   });
@@ -142,16 +126,24 @@ describe('isAllowedOrigin — reject cases', () => {
     assert.equal(allowedOrigin('https://evil.com'), false);
   });
 
-  it('rejects look-alike host: localhost.evil.com', () => {
-    assert.equal(allowedOrigin('http://localhost.evil.com'), false);
+  it('rejects localhost page origins (a script on the dev page)', () => {
+    assert.equal(allowedOrigin('http://localhost:3000'), false);
+    assert.equal(allowedOrigin('http://127.0.0.1:5173'), false);
+    assert.equal(allowedOrigin('http://[::1]:8080'), false);
   });
 
-  it('rejects look-alike host: 127.0.0.1.attacker.net', () => {
-    assert.equal(allowedOrigin('http://127.0.0.1.attacker.net'), false);
+  it('rejects an unpinned chrome-extension ID', () => {
+    assert.equal(allowedOrigin('chrome-extension://abcdefghijklmnop'), false);
   });
 
-  it('rejects non-loopback private address', () => {
-    assert.equal(allowedOrigin('http://192.168.1.1:3000'), false);
+  it('rejects a look-alike of the pinned ID', () => {
+    assert.equal(allowedOrigin('chrome-extension://aifpecjojmlgdhgnkmkaobmfipdmppeb'), false);
+    assert.equal(allowedOrigin('chrome-extension://aifpecjojmlgdhgnkmkaobmfipdmppea.evil.com'), false);
+    assert.equal(allowedOrigin('https://aifpecjojmlgdhgnkmkaobmfipdmppea'), false);
+  });
+
+  it('rejects moz-extension://', () => {
+    assert.equal(allowedOrigin('moz-extension://aifpecjojmlgdhgnkmkaobmfipdmppea'), false);
   });
 });
 

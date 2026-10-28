@@ -243,6 +243,15 @@ export function attachColorPopover(
       : [];
     if (path.length > 0) {
       if (path.includes(popover) || path.includes(swatch)) return;
+      // The overlay's shadow root is closed, so a document-level listener sees
+      // only the host in the path. Hit-test inside the root we hold instead.
+      const root = popover.getRootNode() as Partial<ShadowRoot>;
+      const px = (e as PointerEvent).clientX;
+      const py = (e as PointerEvent).clientY;
+      if (typeof root.elementFromPoint === 'function' && typeof px === 'number' && typeof py === 'number') {
+        const hit = root.elementFromPoint(px, py);
+        if (hit && (popover.contains(hit) || swatch.contains(hit))) return;
+      }
     } else {
       const t = e.target as Node | null;
       if (t && (popover.contains(t) || swatch.contains(t))) return;

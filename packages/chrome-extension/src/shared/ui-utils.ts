@@ -113,7 +113,7 @@ const BUTTON_VARIANTS: Record<ButtonVariant, Partial<CSSStyleDeclaration>> = {
 export function createButton(
   label: string,
   variant: ButtonVariant,
-  onClick: () => void,
+  onClick: (event: MouseEvent) => void,
   ariaLabel?: string,
 ): HTMLButtonElement {
   const btn = createElement('button', {}, { ...BUTTON_BASE, ...BUTTON_VARIANTS[variant] });

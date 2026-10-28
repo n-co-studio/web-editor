@@ -16,6 +16,7 @@
  * feature-012: Inline Text Styling
  */
 
+import { trustedOnly } from '../../shared/trusted';
 import type { TextChange } from '@nco-studio/shared';
 import { OVERLAY, tint } from '../../shared/constants';
 import {
@@ -113,7 +114,7 @@ export class TextEditor {
   private originalHtml: string = '';
   private commitCb: TextCommitCallback | null = null;
   private closeCb: (() => void) | null = null;
-  private blurHandler: (() => void) | null = null;
+  private blurHandler: ((e: Event) => void) | null = null;
   private keydownHandler: ((e: KeyboardEvent) => void) | null = null;
   private selectionchangeHandler: (() => void) | null = null;
   private pasteHandler: ((e: ClipboardEvent) => void) | null = null;
@@ -172,9 +173,10 @@ export class TextEditor {
     }
 
     // Bind handlers
-    this.blurHandler = () => this.finishEditing();
+    // A page-dispatched blur must not commit the edit, nor a synthetic paste insert text (KL-4).
+    this.blurHandler = trustedOnly((_e: Event) => this.finishEditing());
     this.keydownHandler = (e: KeyboardEvent) => this.handleKeydown(e, element);
-    this.pasteHandler = (e: ClipboardEvent) => this.handlePaste(e);
+    this.pasteHandler = trustedOnly((e: ClipboardEvent) => this.handlePaste(e));
     this.selectionchangeHandler = () => this.repositionToolbar(element);
 
     // Key shield: intercept key events at window capture phase so keys typed
@@ -182,7 +184,7 @@ export class TextEditor {
     // overlay toggles). stopPropagation only — default caret/typing behavior
     // is unaffected. Capture delivery precedes the target, so the shield also
     // dispatches the editor's keydown logic (replaces the element binding).
-    this.keyShieldHandler = (e: KeyboardEvent) => {
+    this.keyShieldHandler = trustedOnly((e: KeyboardEvent) => {
       const el = this.activeElement;
       if (!el) return;
       const target = e.target as Node | null;
@@ -191,7 +193,7 @@ export class TextEditor {
         this.keydownHandler?.(e);
       }
       e.stopPropagation();
-    };
+    });
 
     element.addEventListener('blur', this.blurHandler);
     element.addEventListener('paste', this.pasteHandler);
@@ -204,13 +206,13 @@ export class TextEditor {
     // click handler would otherwise re-enter editElement() and select-all.
     // Window capture precedes document capture, so this fires first. Clicks
     // outside the element are ignored (blur → commit → select flow unchanged).
-    this.pointerShieldHandler = (e: MouseEvent) => {
+    this.pointerShieldHandler = trustedOnly((e: MouseEvent) => {
       const el = this.activeElement;
       if (!el) return;
       const target = e.target as Node | null;
       if (!target || (target !== el && !el.contains(target))) return;
       e.stopPropagation();
-    };
+    });
     window.addEventListener('mousedown', this.pointerShieldHandler, true);
     window.addEventListener('mouseup', this.pointerShieldHandler, true);
     window.addEventListener('click', this.pointerShieldHandler, true);

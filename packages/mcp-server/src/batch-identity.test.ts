@@ -91,7 +91,8 @@ describe('Batch identity — bridge ingest', () => {
     // batches summary lists the batch
     assert.equal(batches.length, 1);
     assert.equal(batches[0].batchId, batchId);
-    assert.equal(batches[0].batchNote, 'Adjust hero colors');
+    assert.equal(batches[0].noteCount, 1);
+    assert.ok(!JSON.stringify(batches).includes('Adjust hero colors'), 'note text must not appear in batches');
     assert.equal(batches[0].diffCount, 3);
 
     // get_queue_status.latest_batch_id matches

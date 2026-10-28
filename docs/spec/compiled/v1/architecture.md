@@ -56,7 +56,7 @@ N/A — communication is WebSocket (extension ↔ server) + MCP JSON-RPC 2.0 (se
 - Monorepo with npm workspaces (4 packages: extension, mcp-server, dev-plugin, shared)
 - Deterministic source mapping via build-time `data-source-file` / `data-source-line` attributes injected by dev-plugin
 - Shadow DOM isolation for all extension overlay UI
-- Content script owns the WebSocket connection (not the service worker) — avoids MV3 service worker termination risk. Keepalive ping every 20s.
+- The service worker owns the WebSocket connection (one socket per tab, reached by the content script over a `chrome.runtime` Port) and connects to `ws://127.0.0.1`. The MCP server accepts only `Origin: chrome-extension://<published extension id>`. Reversed in 0.3.1 (KL-4): a content-script socket carries the page's origin, so the server had to admit localhost origins, which let script on the dev page drive the bridge. The original MV3 termination concern is met by `minimum_chrome_version: 116`, from which WebSocket traffic keeps the service worker alive. Keepalive ping every 20s.
 - MCP server auto-discovers design tokens at startup
 - MCP server auto-discovers project components from convention-gated paths (`src/components/**`, `src/ui/**`, `components/**`, configurable via `nco-web-editor.componentRoots` in the target project's `package.json`) — see feature-008
 - All inter-package communication uses typed protocol definitions from shared package

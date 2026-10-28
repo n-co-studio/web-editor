@@ -52,3 +52,46 @@ describe('NotesStore.toBatchNote ordering format (issue #29)', () => {
     assert.equal(new NotesStore().toBatchNote(), undefined);
   });
 });
+
+describe('NotesStore.toStructuredNotes (KL-6)', () => {
+  it('returns undefined when there are no notes', () => {
+    assert.equal(new NotesStore().toStructuredNotes(), undefined);
+  });
+
+  it('keeps the designer text apart from the element references', () => {
+    const store = new NotesStore();
+    store.add('reorder these', [imgRef('#a', '/images/a.jpg')]);
+    const [note] = store.toStructuredNotes()!;
+    assert.equal(note.text, 'reorder these');
+    assert.deepEqual(note.elements, [
+      { tagName: 'img', selector: '#a', sourceFile: 'src/G.tsx', sourceLine: 1, assetPath: '/images/a.jpg' },
+    ]);
+    assert.ok(!note.text.includes('/images/a.jpg'), 'element data must not be blended into the text');
+  });
+
+  it('omits an empty sourceFile (and its line) rather than sending a blank', () => {
+    const store = new NotesStore();
+    store.add('x', [{ selector: '.a', tagName: 'div', sourceFile: '', sourceLine: 0 }]);
+    const ref = store.toStructuredNotes()![0].elements[0];
+    assert.equal('sourceFile' in ref, false);
+    assert.equal('sourceLine' in ref, false);
+  });
+
+  it('still produces the legacy batchNote alongside', () => {
+    const store = new NotesStore();
+    store.add('reorder these', [imgRef('#a', '/images/a.jpg')]);
+    assert.match(store.toBatchNote()!, /^1\. reorder these$/m);
+  });
+});
+
+describe('NotesStore.removeEntries (KL-6)', () => {
+  it('removes exactly the given entries and keeps later ones', () => {
+    const store = new NotesStore();
+    store.add('a');
+    store.add('b');
+    const sent = store.getAll();
+    store.add('c');
+    store.removeEntries(sent);
+    assert.deepEqual(store.getAll().map((n) => n.text), ['c']);
+  });
+});

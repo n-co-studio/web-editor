@@ -374,19 +374,18 @@ export class ReviewPanel {
       : 'Not connected to MCP server \u2014 check that Claude Code is running with the nco-web-editor MCP configured (port 7890).';
 
     if (!demoMode && !this.wsClient.hasEverConnected) {
-      // Nothing has ever connected in this page session, so Chrome's Local
-      // Network Access prompt (shipped in Chrome 142, extended to WebSockets
-      // in 147) is a plausible cause: the editor reaches the MCP server over
-      // ws://localhost, and a denied or dismissed prompt fails like any other
-      // connection error. Worded as a hint, not a diagnosis — Chrome gives no
-      // distinguishable signal.
+      // Nothing has ever connected in this page session. The usual cause is
+      // simply that the MCP server is not running. The connection is opened by
+      // the extension's service worker to 127.0.0.1, which in Chromium 153 did
+      // not raise a Local Network Access prompt; branded Chrome is unverified,
+      // so that stays a hedged possibility rather than a diagnosis.
       const lnaHint = createElement('div', {}, {
         marginTop: '6px',
         fontSize: '11px',
         opacity: '0.9',
       });
       lnaHint.textContent =
-        'If Chrome asked to allow access to devices on your local network and it was blocked or dismissed, allow it in site settings and reload the page — the editor connects to the MCP server over ws://localhost.';
+        "Can't reach the MCP server \u2014 is it running? If your browser asked to allow access to devices on your local network and that was blocked or dismissed, allow it for this extension and retry.";
       banner.appendChild(lnaHint);
     }
 
@@ -1006,8 +1005,8 @@ export class ReviewPanel {
     const sendDisabled =
       demoMode || pendingTotal === 0 || this.connectionStatus !== 'connected' || this.sending;
 
-    const sendBtn = createButton('Apply Changes', 'primary', () => {
-      this.handleSend();
+    const sendBtn = createButton('Apply Changes', 'primary', (event) => {
+      void this.handleSend(event);
     });
     if (demoMode) {
       sendBtn.title = 'Demo mode — this embed is not connected to a local MCP server, so changes cannot be submitted. Refresh the page to reset.';
@@ -1027,15 +1026,26 @@ export class ReviewPanel {
   // Send logic
   // -----------------------------------------------------------------------
 
-  /** Trigger the send flow programmatically (e.g., from keyboard shortcut). */
-  async triggerSend(): Promise<void> {
-    return this.handleSend();
+  /**
+   * Trigger the send flow from a keyboard shortcut. The originating event is
+   * required so the gate in handleSend can refuse a synthetic one.
+   */
+  async triggerSend(event: Event): Promise<void> {
+    return this.handleSend(event);
   }
 
-  private async handleSend(): Promise<void> {
+  private async handleSend(event: Event): Promise<void> {
+    // Dispatch writes to the developer's project via the agent, so it must be
+    // a real user gesture. Script on the page can dispatch synthetic events
+    // (isTrusted === false) but cannot forge a trusted one (KL-4).
+    if (!event.isTrusted) return;
     if (this.sending) return;
     const allActive = this.queue.getAllActive();
     const note = this.notesStore.toBatchNote();
+    const structuredNotes = this.notesStore.toStructuredNotes();
+    // Exactly the notes this click sends. Notes the designer adds while the send
+    // is in flight are not in it and must survive.
+    const sentNotes = this.notesStore.getAll();
     if (allActive.length === 0 && !note) return;
 
     if (allActive.length >= BATCH_CONFIRM_THRESHOLD) {
@@ -1062,29 +1072,33 @@ export class ReviewPanel {
       const segment = stampedDiffs.slice(offset, offset + MAX_DIFFS_PER_BATCH);
       // Only attach the note to the first segment (one note per logical batch)
       const segmentNote = offset === 0 ? note : undefined;
-      const success = this.wsClient.sendDiffBatch(segment, segmentNote, batchId);
+      const segmentNotes = offset === 0 ? structuredNotes : undefined;
+      const success = await this.wsClient.sendDiffBatch(segment, segmentNote, batchId, segmentNotes);
       if (!success) {
-        console.error('[nco-web-editor] Failed to send batch — WebSocket not connected');
+        console.error(
+          `[nco-web-editor] Batch segment at offset ${offset} was not delivered (not connected, refused, or timed out)`,
+        );
         this.sending = false;
         this.refresh();
         return;
       }
       sentAny = true;
+      // The notes went out with segment 0. Remove them now, not at the end: if a
+      // later segment fails, a retry would otherwise send them again.
+      if (offset === 0) this.notesStore.removeEntries(sentNotes);
     }
 
     // Note-only batch (no diffs)
     if (!sentAny && note) {
-      const success = this.wsClient.sendDiffBatch([], note, batchId);
+      const success = await this.wsClient.sendDiffBatch([], note, batchId, structuredNotes);
       if (!success) {
-        console.error('[nco-web-editor] Failed to send note — WebSocket not connected');
+        console.error('[nco-web-editor] Note was not delivered (not connected, refused, or timed out)');
         this.sending = false;
         this.refresh();
         return;
       }
+      this.notesStore.removeEntries(sentNotes);
     }
-
-    // Clear notes after successful send
-    this.notesStore.clear();
 
     // Reset sending state after a reasonable timeout
     // (The queue updates when DIFF_ACK arrives via queue.acknowledge)

@@ -8,17 +8,19 @@ export function mountShadowHost(): { host: HTMLDivElement; shadow: ShadowRoot } 
   host.id = 'nco-web-editor-overlay';
   host.setAttribute('data-nco-web-editor', 'true');
 
-  Object.assign(host.style, {
-    position: 'fixed',
-    top: '0',
-    left: '0',
-    right: '0',
-    bottom: '0',
-    zIndex: '2147483647',
-    pointerEvents: 'none',
-  } satisfies Partial<CSSStyleDeclaration>);
+  // !important: an inline style loses to a page rule like
+  // `#nco-web-editor-overlay { pointer-events: auto !important }`, which could
+  // make the host swallow the page's clicks or move the overlay under page
+  // content (redress). Inline !important beats any author !important rule.
+  for (const [name, value] of Object.entries(HOST_STYLE)) {
+    host.style.setProperty(name, value, 'important');
+  }
 
-  const shadow = host.attachShadow({ mode: 'open' });
+  // 'closed': host.shadowRoot is null to page script, so a page cannot reach
+  // into the panel to read notes or click its buttons (KL-4). Everything inside
+  // the extension holds the ShadowRoot returned here and passes it on rather
+  // than reading host.shadowRoot.
+  const shadow = host.attachShadow({ mode: 'closed' });
 
   // CSS reset + overlay token declarations (px values, not rem)
   const style = document.createElement('style');
@@ -27,6 +29,25 @@ export function mountShadowHost(): { host: HTMLDivElement; shadow: ShadowRoot } 
 
   document.body.appendChild(host);
   return { host, shadow };
+}
+
+const HOST_STYLE: Record<string, string> = {
+  position: 'fixed',
+  top: '0',
+  left: '0',
+  right: '0',
+  bottom: '0',
+  'z-index': '2147483647',
+  'pointer-events': 'none',
+};
+
+/**
+ * Keep the host's pointer-events at none, with priority. The editor used to
+ * toggle this between 'none' and '' (which fell back to the stylesheet's none);
+ * both are none, so this is the same behaviour without dropping !important.
+ */
+export function setHostPointerEvents(host: HTMLElement, _value?: string): void {
+  host.style.setProperty('pointer-events', 'none', 'important');
 }
 
 /** Remove the shadow host from the page. */

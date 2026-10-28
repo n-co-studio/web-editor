@@ -61,8 +61,10 @@ async function main() {
     });
 
     const bundled = entries.map((e) => resolve(outDir, `${e.out}.js`));
-    const args = ['--test', ...bundled];
-    console.log(`Running ${bundled.length} test bundle(s) via node ${args[0]}...`);
+    // --test-timeout: a leaked retry timer or never-settling fake must fail a test
+    // fast rather than stall CI.
+    const args = ['--test', '--test-timeout=30000', ...bundled];
+    console.log(`Running ${bundled.length} test bundle(s) via node --test...`);
     for (const b of bundled) {
       console.log(`  - ${relative(pkgRoot, b.replace(outDir, 'tmp'))}`);
     }

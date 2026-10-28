@@ -1,13 +1,13 @@
 # Feature: MCP Server Bridge
 
 ## Summary
-Local Node.js process that bridges the Chrome extension to Claude Code. Runs a WebSocket server for the extension and exposes MCP tools for Claude Code. Handles token discovery from project files and pushes token data to the extension. Content script owns the WebSocket connection (not the service worker) to avoid MV3 termination risk.
+Local Node.js process that bridges the Chrome extension to Claude Code. Runs a WebSocket server for the extension and exposes MCP tools for Claude Code. Handles token discovery from project files and pushes token data to the extension. The extension's service worker owns the WebSocket connection, and the server pins the peer to the extension's ID (0.3.1, KL-4 — previously the content script owned it, which forced the server to admit the dev page's own origin).
 
 ## User Flow
 1. Operator adds MCP server to `.mcp.json` at the project root
 2. Claude Code starts → MCP server starts automatically
 3. MCP server opens WebSocket on configurable port — extension tries ports 7890–7899, uses first that accepts
-4. Chrome extension content script connects directly on page load (not via service worker relay)
+4. On page load the content script opens a `chrome.runtime` Port to the extension's service worker, which opens the WebSocket for that tab (0.3.1, KL-4 — previously the content script connected directly)
 5. Visual diffs flow: extension → WebSocket → MCP server → Claude Code
 6. Token data flows: MCP server → WebSocket → extension
 
@@ -50,7 +50,7 @@ TS-config failures are surfaced explicitly: a compile error, an evaluation throw
 - Claude Code not running → diffs queue in server memory, delivered when Claude Code connects
 - Token source file changes while running → rebuild token registry, push update to all connected extensions
 - Server process crashes → Claude Code's MCP client restarts it on next tool call (dependency on Claude Code behavior — documented assumption). Pending queue restored from `.nco-web-editor/pending-queue.json` on restart.
-- Page reload → extension content script reinitializes, restores pending queue from chrome.storage.session, reconnects WebSocket, sends EXTENSION_HELLO for reconciliation
+- Page reload → extension content script reinitializes, restores pending queue from chrome.storage.session, reopens its Port; the service worker reconnects the tab's WebSocket and sends EXTENSION_HELLO for reconciliation
 
 ## Batch Identity Handling
 

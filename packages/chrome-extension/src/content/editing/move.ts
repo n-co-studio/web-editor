@@ -1,4 +1,5 @@
 import type { PropertyChange } from '@nco-studio/shared';
+import { trustedOnly } from '../../shared/trusted';
 import { createElement } from '../../shared/ui-utils';
 import { getComputedProperty } from '../../shared/dom-utils';
 import { OVERLAY, SELECTION, tint } from '../../shared/constants';
@@ -65,8 +66,8 @@ export class MoveEditor {
 
     // Bind pointer handlers
     this.boundPointerDown = this.onPointerDown.bind(this);
-    this.boundPointerMove = this.onPointerMove.bind(this);
-    this.boundPointerUp = this.onPointerUp.bind(this);
+    this.boundPointerMove = trustedOnly(this.onPointerMove.bind(this));
+    this.boundPointerUp = trustedOnly(this.onPointerUp.bind(this));
 
     this.cursorOverlay.addEventListener('pointerdown', this.boundPointerDown);
     document.addEventListener('pointermove', this.boundPointerMove, true);

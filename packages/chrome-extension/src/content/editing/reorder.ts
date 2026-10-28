@@ -4,6 +4,7 @@
  * Phase 1: block-reason guard only. Phase 2: drag interaction. Phase 3: undo/redo.
  */
 
+import { trustedOnly } from '../../shared/trusted';
 import { createElement } from '../../shared/ui-utils';
 import { HANDLE_COLORS, DROP_INDICATOR, OVERLAY } from '../../shared/constants';
 import { OrderPreview } from './order-preview';
@@ -191,8 +192,8 @@ export class ReorderEditor {
 
     // Bind pointer handlers
     this.boundPointerDown = this.onPointerDown.bind(this);
-    this.boundPointerMove = this.onPointerMove.bind(this);
-    this.boundPointerUp = this.onPointerUp.bind(this);
+    this.boundPointerMove = trustedOnly(this.onPointerMove.bind(this));
+    this.boundPointerUp = trustedOnly(this.onPointerUp.bind(this));
 
     this.cursorOverlay!.addEventListener('pointerdown', this.boundPointerDown);
     document.addEventListener('pointermove', this.boundPointerMove, true);

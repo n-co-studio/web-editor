@@ -1,4 +1,5 @@
 import { createElement } from '../../shared/ui-utils';
+import { trustedOnly } from '../../shared/trusted';
 import { getTopElementAt, isElementVisible } from '../../shared/dom-utils';
 import { OVERLAY, SELECTION } from '../../shared/constants';
 import { createZoneOverlays } from '../editing/zone-overlays';
@@ -130,7 +131,7 @@ export class HoverHighlight {
   // Event handlers
   // -----------------------------------------------------------------------
 
-  private handleMouseMove = (e: MouseEvent): void => {
+  private handleMouseMove = trustedOnly((e: MouseEvent): void => {
     if (this.rafId != null) return; // rAF gate — one update per frame
     this.rafId = requestAnimationFrame(() => {
       this.rafId = null;
@@ -154,9 +155,9 @@ export class HoverHighlight {
         this.hideHighlight();
       }
     });
-  };
+  });
 
-  private handleClick = (e: MouseEvent): void => {
+  private handleClick = trustedOnly((e: MouseEvent): void => {
     if (!this.active) return;
 
     // Alt+click — pass through to host page
@@ -178,7 +179,7 @@ export class HoverHighlight {
     e.preventDefault();
     e.stopPropagation();
     this.clickHandler?.(target);
-  };
+  });
 
   // -----------------------------------------------------------------------
   // Programmatic highlight (for review panel click-to-highlight)
