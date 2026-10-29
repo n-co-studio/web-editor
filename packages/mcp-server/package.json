@@ -21,7 +21,7 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test --test-concurrency=1 --test-timeout=30000 src/batch-identity.test.ts src/bridge.test.ts src/bridge-peer-auth.test.ts src/structured-notes.test.ts",
+    "test": "node --import tsx --test --test-concurrency=1 --test-timeout=30000 src/batch-identity.test.ts src/bridge.test.ts src/bridge-peer-auth.test.ts src/structured-notes.test.ts src/tool-schemas.test.ts",
     "prepublishOnly": "npm run build",
     "clean": "rm -rf dist dist-test *.tsbuildinfo"
   },
@@ -31,7 +31,7 @@
     "esbuild": "^0.25.0",
     "react-docgen": "^7.0.0",
     "ws": "^8.21.0",
-    "zod": "^3.23.0"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@nco-studio/shared": "0.2.0",
