@@ -1266,9 +1266,11 @@ export class Bridge {
   private static readonly ASSET_DIR_FALLBACK = 'public/images';
   /**
    * Per-asset size cap (issue #28). An inline `data:` asset larger than this
-   * that cannot be deduplicated to an already-committed file is truncated
-   * (`assetTruncated: true`, empty value) rather than persisted/inlined — an
-   * asset this large belongs in the repo, not pasted through a diff.
+   * that cannot be deduplicated to an already-committed file is refused and
+   * the attribute change is truncated (`assetTruncated: true`, empty value)
+   * rather than persisted/inlined — an asset this large belongs in the repo,
+   * not pasted through a diff. Size is one of several refusal causes; each one
+   * logs its own reason in {@link saveDataUrl}.
    */
   private static readonly MAX_INLINE_ASSET_BYTES = 4 * 1024 * 1024;
   /** Cap on a single batch note. It lands in the agent's context verbatim. */
@@ -1370,7 +1372,7 @@ export class Bridge {
 
   /**
    * Resolve a single attribute change to a base64-free served path (issue #28):
-   *   - `data:` `toValue` → decode + persist (or truncate if oversized).
+   *   - `data:` `toValue` → decode + persist (or truncate if the asset is refused).
    *   - a `pendingUpload` reference (blob-URL-backed pick) → normalize the
    *     provisional served path (strip a leading `/public`); the bytes were
    *     never transmitted, so an existing committed asset is the resolution and
@@ -1382,7 +1384,7 @@ export class Bridge {
       try {
         const savedPath = await this.saveDataUrl(ac.toValue, ac.fromValue, ac.pendingUpload);
         if (savedPath === null) {
-          console.error(`[nco-web-editor] Asset exceeded ${Bridge.MAX_INLINE_ASSET_BYTES}-byte cap — truncating`);
+          console.error('[nco-web-editor] Asset not saved (reason logged above) — truncating');
           return { ...ac, toValue: '', assetTruncated: true };
         }
         console.error(`[nco-web-editor] Saved data URL as ${savedPath}`);
@@ -1458,9 +1460,11 @@ export class Bridge {
    * (`uploaded-<hash>.<ext>`). Either way the content hash is embedded so
    * re-selecting the same image is idempotent.
    *
-   * Size cap: an asset larger than {@link MAX_INLINE_ASSET_BYTES} that cannot be
-   * deduplicated to a committed file returns `null` (caller truncates) rather
-   * than persisting/inlining a multi-MB blob.
+   * Refusals return `null` (the caller truncates), and each logs its own cause:
+   * a non-asset MIME type, SVG, bytes that do not match the declared type, an
+   * asset directory outside the project, a symlink at the target, or an asset
+   * larger than {@link MAX_INLINE_ASSET_BYTES} that cannot be deduplicated to a
+   * committed file (rather than persisting/inlining a multi-MB blob).
    */
   private async saveDataUrl(
     dataUrl: string,
@@ -1536,7 +1540,10 @@ export class Bridge {
     }
 
     // Oversized and unresolvable — do not write a multi-MB new asset or inline it.
-    if (buffer.length > Bridge.MAX_INLINE_ASSET_BYTES) return null;
+    if (buffer.length > Bridge.MAX_INLINE_ASSET_BYTES) {
+      console.error(`[nco-web-editor] Refusing asset — over the ${Bridge.MAX_INLINE_ASSET_BYTES}-byte cap`);
+      return null;
+    }
 
     // Name the file, embedding the content hash so re-uploads are idempotent.
     const filename = this.assetFilename(hash, ext, pendingUpload?.filename);

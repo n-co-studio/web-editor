@@ -7,6 +7,8 @@
  * - resolveAssetDir: traversal segment rejection falls back to safe default
  * - resolveAssetDir: dot-directory rejection (HACK-011)
  * - saveDataUrl: MIME-bound extension, magic bytes, SVG refusal (HACK-011)
+ * - saveDataUrl / resolveAttributeAsset: each refusal logs its own cause (size cap, SVG),
+ *   and the attribute change still comes back assetTruncated with an empty toValue (KL-5)
  * - isValidDiff via poison batchId: queue cannot be permanently broken (HACK-013)
  * - importSession: malformed diffs are skipped, not admitted (HACK-013)
  * - __proto__ keys cannot smuggle a field past validation (HACK-015)
@@ -20,7 +22,7 @@
  * changes were required to reach them.
  */
 
-import { describe, it, before, after } from 'node:test';
+import { describe, it, before, after, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile, readdir, readFile, mkdir, symlink, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -339,6 +341,76 @@ describe('saveDataUrl — the extension is bound to the MIME type (HACK-011)', (
     await saveDataUrl(bridge, `data:image/svg+xml;base64,${html}`, '/images/x.svg');
     await saveDataUrl(bridge, `data:constructor;base64,${PNG_B64}`, '/images/x.png', { filename: 'x.png' });
     assert.equal(await countFiles(tmpDir), before, 'a refused payload must write no file');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// KL-5 — a refused asset reports its real cause, not "too large"
+// ---------------------------------------------------------------------------
+
+describe('refused assets log their own cause (KL-5)', () => {
+  let logged: string[];
+
+  function captureErrors(): void {
+    logged = [];
+    mock.method(console, 'error', (...args: unknown[]) => {
+      logged.push(args.map(String).join(' '));
+    });
+  }
+
+  function resolveAttribute(
+    ac: { attribute: string; fromValue: string; toValue: string },
+  ): Promise<{ toValue: string; assetTruncated?: boolean }> {
+    return (bridge as unknown as {
+      resolveAttributeAsset(a: unknown): Promise<{ toValue: string; assetTruncated?: boolean }>;
+    }).resolveAttributeAsset(ac);
+  }
+
+  afterEach(() => {
+    mock.restoreAll();
+  });
+
+  it('logs the byte cap exactly once for an oversized PNG, and writes nothing', async () => {
+    // Valid PNG magic followed by 4 MiB + 1 of zeros: past the cap, and unique
+    // enough that it cannot dedup to a file another test wrote.
+    const big = Buffer.concat([PNG, Buffer.alloc(4 * 1024 * 1024 + 1)]);
+    const before = await countFiles(tmpDir);
+    captureErrors();
+    const out = await saveDataUrl(bridge, `data:image/png;base64,${big.toString('base64')}`, '/images/big.png');
+    const capLines = logged.filter((l) => l.includes('-byte cap'));
+    mock.restoreAll();
+    assert.equal(out, null);
+    assert.equal(capLines.length, 1, `expected one byte-cap line, got: ${JSON.stringify(logged)}`);
+    assert.equal(await countFiles(tmpDir), before, 'an oversized asset must write no file');
+  });
+
+  it('says SVG is refused, and does not claim a size cap, for an SVG attribute change', async () => {
+    const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>').toString('base64');
+    captureErrors();
+    const result = await resolveAttribute({
+      attribute: 'src',
+      fromValue: '/images/a.svg',
+      toValue: `data:image/svg+xml;base64,${svg}`,
+    });
+    const capLines = logged.filter((l) => l.includes('cap'));
+    const svgLines = logged.filter((l) => l.includes('Refusing SVG asset'));
+    mock.restoreAll();
+    assert.equal(capLines.length, 0, `no line may mention a cap, got: ${JSON.stringify(logged)}`);
+    assert.equal(svgLines.length, 1, `expected one SVG-refused line, got: ${JSON.stringify(logged)}`);
+    assert.equal(result.assetTruncated, true);
+    assert.equal(result.toValue, '');
+  });
+
+  it('still saves a valid PNG through the attribute-change path', async () => {
+    captureErrors();
+    const result = await resolveAttribute({
+      attribute: 'src',
+      fromValue: '/images/a.png',
+      toValue: `data:image/png;base64,${PNG_B64}`,
+    });
+    mock.restoreAll();
+    assert.equal(result.assetTruncated, undefined);
+    assert.equal(result.toValue.endsWith('.png'), true);
   });
 });
 

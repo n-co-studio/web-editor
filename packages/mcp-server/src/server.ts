@@ -195,10 +195,11 @@ export function registerTools(server: McpServer, bridge: Bridge): void {
         'never an inline data: URI. Update the source code to reference this path. ' +
         'A file-picker pick also carries `pendingUpload` (filename, mimeType, sizeBytes); ' +
         'it is metadata the server used to name/dedup the asset and needs no action. ' +
-        'If an attribute change has `assetTruncated: true`, the asset exceeded the ' +
-        'per-asset size cap and could not be resolved: `toValue` is empty — do NOT write an ' +
-        'empty src; leave the existing reference in place and surface it to the operator ' +
-        '(the asset should be committed to the project directly). ' +
+        'If an attribute change has `assetTruncated: true`, the asset could not be saved — it is ' +
+        'over the per-asset size cap, or it is a type or location the bridge refuses (such as SVG): ' +
+        '`toValue` is empty — do NOT write an empty src; leave the existing reference in place and ' +
+        'surface it to the operator (if the asset was oversized or of a refused type, it should be ' +
+        'added to the project directly). ' +
         'Each PropertyChange may also carry an `allBreakpointSources` array of ' +
         'rules that define the same property at OTHER viewport breakpoints — ' +
         'rules collected by walking @media bodies regardless of whether they ' +
