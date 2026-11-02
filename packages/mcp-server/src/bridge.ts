@@ -1456,8 +1456,11 @@ export class Bridge {
         return { ...ac, toValue: savedPath };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[nco-web-editor] Failed to save data URL: ${msg}`);
-        return ac; // keep original value as fallback
+        console.error(`[nco-web-editor] Failed to save data URL: ${msg} — truncating`);
+        // Never fall back to the original: a `data:` URL that skipped the size
+        // cap, MIME allowlist and magic-byte checks would reach the agent
+        // unscreened, up to the full payload size.
+        return { ...ac, toValue: '', assetTruncated: true };
       }
     }
 
@@ -1852,9 +1855,12 @@ export class Bridge {
    * hash names it (`uploaded-<hash>.<ext>`). The hash is always embedded so
    * re-selecting the same bytes is idempotent.
    */
-  private assetFilename(hash: string, ext: string, filename?: string): string {
+  private assetFilename(hash: string, ext: string, filename?: unknown): string {
     const shortHash = hash.slice(0, 12);
-    if (filename) {
+    // `filename` arrives over the wire, so its type is the sender's claim. A
+    // non-string used to throw here, and the throw skipped the size cap, MIME
+    // allowlist and magic-byte checks on the way out (see resolveAttributeAsset).
+    if (typeof filename === 'string' && filename.length > 0 && filename.length <= 255) {
       const base = filename.split(/[\\/]/).pop() ?? '';
       const dot = base.lastIndexOf('.');
       const rawStem = dot > 0 ? base.slice(0, dot) : base;
