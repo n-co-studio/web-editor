@@ -1929,6 +1929,8 @@ export class Bridge {
   private static readonly CONFIG_BASENAMES =
     /^(?:vite|next|nuxt|svelte|astro|webpack|rollup|esbuild|babel|jest|vitest|tailwind|postcss|eslint|prettier|metro|remix|gatsby|karma|cypress|playwright)\.config\.[cm]?[jt]sx?$|^(?:gulpfile|gruntfile)\.[cm]?[jt]s$|^(?:postinstall|preinstall|prepare)\.[cm]?[jt]s$/;
 
+  private static readonly CONFIG_SUFFIX = /(?:^|\.)(?:config|setup|conf|rc)\.[cm]?[jt]s$/;
+
   private static readonly SOURCE_EXTS = new Set([
     '.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs',
     '.vue', '.svelte', '.astro', '.html', '.htm', '.php', '.erb', '.hbs',
@@ -1959,6 +1961,14 @@ export class Bridge {
     // high-value thing to steer an agent at.
     const base = segs[segs.length - 1].toLowerCase();
     if (Bridge.CONFIG_BASENAMES.test(base)) return false;
+    // Tool config follows `<name>.config.js`, `<name>.setup.js`, `<name>.rc.js`
+    // with any prefix (sentry.client.config.ts, lint-staged.config.js), so match
+    // the shape rather than an ever-growing list of tool names. `.tsx`/`.jsx`
+    // are components and stay allowed.
+    if (Bridge.CONFIG_SUFFIX.test(base)) return false;
+    // Dependency code is never what a rendered element maps to. Match any
+    // segment, case-insensitively, so `Node_Modules` on a case-folding disk fails too.
+    if (segs.some((seg) => seg.toLowerCase() === 'node_modules')) return false;
     return true;
   }
 
