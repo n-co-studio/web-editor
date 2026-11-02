@@ -16,18 +16,21 @@
  * - depth-bomb containment: one deep diff cannot abort a batch (HACK-019)
  * - note normalisation: capped, line breaks collapsed (HACK-014)
  * - isPlausibleSourcePath: page-controlled source hints (HACK-012)
+ * - isInside, and writes/reads that must not leave the project through a symlink:
+ *   export, import, assets, the lock, the queue file and the status temp file (KL-7)
  *
- * All three tested functions are private; accessed via unknown cast (same
- * pattern as batch-identity.test.ts which casts processDiffBatch). No logic
- * changes were required to reach them.
+ * Nearly all of the tested functions are private; accessed via unknown cast (same
+ * pattern as batch-identity.test.ts which casts processDiffBatch). `isInside` is
+ * exported. No logic changes were required to reach the private ones.
  */
 
 import { describe, it, before, after, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile, readdir, readFile, mkdir, symlink, stat } from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { Bridge } from './bridge.js';
+import { join, win32, posix } from 'node:path';
+import { Bridge, isInside } from './bridge.js';
 
 // ---------------------------------------------------------------------------
 // Type-cast helpers for private API access
@@ -890,5 +893,207 @@ describe('symlink confinement (HACK-018)', () => {
     }
     assert.equal(victimExists, false, 'the write must not follow the planted symlink');
     await rm(outside, { recursive: true, force: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// KL-7 — every write the server makes stays inside the project
+//
+// The real-path check has to run before any directory is created: `mkdir -p`
+// through a link makes directories outside the project before a later check
+// can object. These tests use a fresh project per case so that nothing left
+// by an earlier one can mask a regression.
+// ---------------------------------------------------------------------------
+
+describe('isInside — containment test (KL-7)', () => {
+  it('rejects another Windows drive and a UNC share', () => {
+    assert.equal(isInside('C:\\proj', 'D:\\x', win32), false);
+    assert.equal(isInside('C:\\proj', '\\\\srv\\share\\x', win32), false);
+  });
+
+  it('accepts the root and paths beneath it', () => {
+    assert.equal(isInside('C:\\proj', 'C:\\proj\\a', win32), true);
+    assert.equal(isInside('C:\\proj', 'C:\\proj', win32), true);
+    assert.equal(isInside('/p', '/p', posix), true);
+  });
+
+  it('treats a directory named ..foo as inside, and a real parent as outside', () => {
+    assert.equal(isInside('/p', '/p/..foo', posix), true);
+    assert.equal(isInside('/p', '/p/../x', posix), false);
+    assert.equal(isInside('/p', '/p/..', posix), false);
+    assert.equal(isInside('/p', '/q', posix), false);
+  });
+});
+
+describe('write confinement through symlinks (KL-7)', () => {
+  type Priv = {
+    exportSession(p?: string): Promise<{ path: string; diffCount: number }>;
+    importSession(p: string): Promise<unknown>;
+    acquireLock(): Promise<boolean>;
+    releaseLock(): Promise<void>;
+  };
+
+  const cleanup: string[] = [];
+  after(async () => {
+    for (const d of cleanup) await rm(d, { recursive: true, force: true });
+  });
+
+  /** A project and a sibling "outside" directory, both fresh. */
+  async function fresh(): Promise<{ root: string; outside: string; b: Bridge; p: Priv }> {
+    const base = await mkdtemp(join(tmpdir(), 'nco-kl7-'));
+    cleanup.push(base);
+    const root = join(base, 'proj');
+    const outside = join(base, 'outside');
+    await mkdir(root, { recursive: true });
+    await mkdir(outside, { recursive: true });
+    const b = new Bridge(root);
+    return { root, outside, b, p: b as unknown as Priv };
+  }
+
+  async function link(target: string, at: string, type: 'dir' | 'file'): Promise<boolean> {
+    try {
+      await symlink(target, at, type);
+      return true;
+    } catch {
+      return false; // no symlink support (e.g. Windows without privilege)
+    }
+  }
+
+  it('refuses an export through a symlinked directory and writes nothing outside', async () => {
+    const { root, outside, p } = await fresh();
+    if (!(await link(outside, join(root, 'linkdir'), 'dir'))) return;
+    await assert.rejects(() => p.exportSession('linkdir/x.json'), /escapes project after symlink resolution/);
+    assert.deepEqual(await readdir(outside), []);
+  });
+
+  it('creates no directory outside the project (the check precedes mkdir)', async () => {
+    const { root, outside, p } = await fresh();
+    if (!(await link(outside, join(root, 'linkdir'), 'dir'))) return;
+    await assert.rejects(() => p.exportSession('linkdir/new/deep/x.json'), /escapes project after symlink resolution/);
+    assert.deepEqual(await readdir(outside), []);
+  });
+
+  it('does not echo the resolved path in the refusal', async () => {
+    const { root, outside, p } = await fresh();
+    if (!(await link(outside, join(root, 'linkdir'), 'dir'))) return;
+    await assert.rejects(
+      () => p.exportSession('linkdir/x.json'),
+      (err: Error) => !err.message.includes('outside') && !err.message.includes(outside),
+    );
+  });
+
+  it('refuses a directory that is a dangling symlink', async () => {
+    const { root, outside, p } = await fresh();
+    if (!(await link(join(outside, 'missing'), join(root, 'dangling'), 'dir'))) return;
+    await assert.rejects(() => p.exportSession('dangling/x.json'), /escapes project after symlink resolution/);
+    assert.deepEqual(await readdir(outside), []);
+  });
+
+  it('refuses the default export when a symlink is planted at its file name', async () => {
+    const { root, outside, p } = await fresh();
+    await p.exportSession(); // creates .nco-web-editor/session-export.json
+    const target = join(root, '.nco-web-editor', 'session-export.json');
+    const victim = join(outside, 'victim.json');
+    await writeFile(victim, 'untouched');
+    await rm(target);
+    if (!(await link(victim, target, 'file'))) return;
+
+    await assert.rejects(() => p.exportSession(), /is a symlink/);
+    assert.equal(await readFile(victim, 'utf-8'), 'untouched');
+  });
+
+  it('still overwrites a regular default export file, and still writes a nested path', async () => {
+    const { root, p } = await fresh();
+    await p.exportSession();
+    const again = await p.exportSession();
+    assert.equal(again.path, join(root, '.nco-web-editor', 'session-export.json'));
+    const nested = await p.exportSession('a/b/x.json');
+    assert.equal(nested.path, join(root, 'a', 'b', 'x.json'));
+    assert.equal(JSON.parse(await readFile(nested.path, 'utf-8')).diffs.length, 0);
+  });
+
+  it('refuses a colon in any export path segment (NTFS alternate data stream)', async () => {
+    const { root, p } = await fresh();
+    // `x.json:s` is stopped by the .json rule on its own; `x.json:s.json` and
+    // `a:b/x.json` pass every other rule, so they are what pins the colon rule.
+    await assert.rejects(() => p.exportSession('x.json:s'));
+    await assert.rejects(() => p.exportSession('x.json:s.json'), /colon/);
+    await assert.rejects(() => p.exportSession('a:b/x.json'), /colon/);
+    assert.deepEqual(await readdir(root), []);
+  });
+
+  it('refuses to import through a symlinked directory or file', async () => {
+    const { root, outside, p } = await fresh();
+    await writeFile(join(outside, 'sess.json'), JSON.stringify({ diffs: [] }));
+    if (!(await link(outside, join(root, 'linkdir'), 'dir'))) return;
+    if (!(await link(join(outside, 'sess.json'), join(root, 'sess.json'), 'file'))) return;
+    await assert.rejects(() => p.importSession('linkdir/sess.json'), /escapes project after symlink resolution/);
+    await assert.rejects(() => p.importSession('sess.json'), /escapes project after symlink resolution/);
+  });
+
+  it('still imports an ordinary in-project session file', async () => {
+    const { p } = await fresh();
+    const out = await p.exportSession('s.json');
+    const r = (await p.importSession('s.json')) as { imported: number };
+    assert.equal(r.imported, 0);
+    assert.equal(out.diffCount, 0);
+  });
+
+  it('refuses to start when .nco-web-editor is a symlink out of the project', async () => {
+    const { root, outside, p } = await fresh();
+    if (!(await link(outside, join(root, '.nco-web-editor'), 'dir'))) return;
+    await assert.rejects(() => p.acquireLock(), /\.nco-web-editor resolves outside the project/);
+    assert.deepEqual(await readdir(outside), []);
+  });
+
+  it('acquires the lock normally when .nco-web-editor is absent', async () => {
+    const { root, p } = await fresh();
+    assert.equal(await p.acquireLock(), true);
+    assert.equal(await readFile(join(root, '.nco-web-editor', 'server.lock'), 'utf-8'), String(process.pid));
+    await p.releaseLock();
+  });
+
+  it('does not write the queue file through a symlink planted at its name', async () => {
+    if (!fsConstants.O_NOFOLLOW) return; // no O_NOFOLLOW on this platform
+    const { root, outside, b } = await fresh();
+    const victim = join(outside, 'victim.json');
+    await writeFile(victim, 'untouched');
+    await mkdir(join(root, '.nco-web-editor'), { recursive: true });
+    if (!(await link(victim, join(root, '.nco-web-editor', 'pending-queue.json'), 'file'))) return;
+    (b as unknown as { pendingNotes: unknown[] }).pendingNotes = [{ text: 'n' }];
+
+    await assert.rejects(() => (b as unknown as { persistQueue(): Promise<void> }).persistQueue(), /ELOOP|symbolic/i);
+    assert.equal(await readFile(victim, 'utf-8'), 'untouched');
+  });
+
+  it('does not write the status temp file through a symlink planted at its name', async () => {
+    if (!fsConstants.O_NOFOLLOW) return;
+    const { outside, b } = await fresh();
+    const victim = join(outside, 'victim.yaml');
+    await writeFile(victim, 'untouched');
+    const statusPath = (b as unknown as { statusFilePath: string }).statusFilePath;
+    if (!(await link(victim, statusPath + '.tmp', 'file'))) return;
+
+    await assert.rejects(
+      () => (b as unknown as { writeStatusFile(s: string): Promise<void> }).writeStatusFile('active'),
+      /ELOOP|symbolic/i,
+    );
+    assert.equal(await readFile(victim, 'utf-8'), 'untouched');
+  });
+
+  it('still writes the queue file when nothing is planted there', async () => {
+    const { root, b } = await fresh();
+    (b as unknown as { pendingNotes: unknown[] }).pendingNotes = [{ text: 'n' }];
+    await (b as unknown as { persistQueue(): Promise<void> }).persistQueue();
+    assert.equal(JSON.parse(await readFile(join(root, '.nco-web-editor', 'pending-queue.json'), 'utf-8')).notes.length, 1);
+  });
+
+  it('refuses an asset directory that is a dangling symlink', async () => {
+    const { root, outside, b } = await fresh();
+    await mkdir(join(root, 'public'), { recursive: true });
+    if (!(await link(join(outside, 'missing'), join(root, 'public', 'images'), 'dir'))) return;
+    const out = await saveDataUrl(b, `data:image/png;base64,${PNG_B64}`, '/images/a.png');
+    assert.equal(out, null);
+    assert.deepEqual(await readdir(outside), []);
   });
 });

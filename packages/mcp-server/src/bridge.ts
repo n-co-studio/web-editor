@@ -1,7 +1,8 @@
 import { WebSocketServer, type WebSocket } from 'ws';
 import { readFile, writeFile, unlink, mkdir, rename, stat, readdir, realpath, lstat } from 'node:fs/promises';
-import { join, dirname, resolve, relative, extname } from 'node:path';
+import nodePath, { join, dirname, resolve, relative, extname } from 'node:path';
 import { createHash } from 'node:crypto';
+import { constants as fsConstants } from 'node:fs';
 import {
   PROTOCOL_VERSION,
   MessageType,
@@ -28,6 +29,18 @@ const PERSIST_DIR = '.nco-web-editor';
 const PERSIST_FILE = 'pending-queue.json';
 const LOCK_FILE = 'server.lock';
 
+/**
+ * Write a file but refuse to follow a symlink at the final component (ELOOP).
+ * The state-directory check covers the directory; this covers a link planted at
+ * the file itself, such as `pending-queue.json` or a `.tmp` name. O_NOFOLLOW is
+ * a no-op on Windows, where creating a link needs elevated rights anyway.
+ */
+function writeFileNoFollow(path: string, data: string): Promise<void> {
+  const flag =
+    fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | (fsConstants.O_NOFOLLOW ?? 0);
+  return writeFile(path, data, { flag });
+}
+
 /** The published Chrome Web Store extension — the only peer allowed by default. */
 export const PUBLISHED_EXTENSION_ID = 'aifpecjojmlgdhgnkmkaobmfipdmppea';
 /** Extra extension IDs (unpacked/dev builds), comma-separated. Each must be 32 chars a-p. */
@@ -50,6 +63,18 @@ export const MAX_REF_TAGNAME_CHARS = 32;
 export const MAX_REF_SELECTOR_CHARS = 512;
 export const MAX_REF_TEXTCONTENT_CHARS = 200;
 export const MAX_REF_ASSETPATH_CHARS = 512;
+
+/**
+ * True when `child` is `root` or lies beneath it. `relative()` returns an
+ * absolute path across Windows drives and UNC shares (`C:\proj` → `D:\x` is
+ * `D:\x`), which a `startsWith('..')` test accepts, so absoluteness is part of
+ * the test. `..foo` is a legal directory name and must not be mistaken for a
+ * parent reference. `p` lets tests exercise `path.win32` on any platform.
+ */
+export function isInside(root: string, child: string, p: typeof nodePath = nodePath): boolean {
+  const rel = p.relative(root, child);
+  return rel === '' || (!p.isAbsolute(rel) && rel !== '..' && !rel.startsWith('..' + p.sep));
+}
 
 export class Bridge {
   private wss: WebSocketServer | null = null;
@@ -144,6 +169,20 @@ export class Bridge {
 
   /** Acquire an exclusive lock file. Returns false if another live server holds it. */
   private async acquireLock(): Promise<boolean> {
+    // The lock is the server's first write, and the lock, the persisted queue
+    // and the default export all live in this directory: a committed
+    // `.nco-web-editor -> elsewhere` link would redirect all three. Checked
+    // once, here (the queue file and the status file's temp name are also
+    // opened without following a link at the file itself, see writeFileNoFollow).
+    // This throws rather than returning false, because false is
+    // reported to the operator as "another server holds the lock".
+    try {
+      await this.assertRealInside(dirname(this.lockPath));
+    } catch {
+      throw new Error(
+        `${PERSIST_DIR} resolves outside the project (symlink?) — refusing to start. Remove or replace the link.`,
+      );
+    }
     await mkdir(dirname(this.lockPath), { recursive: true });
 
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -474,13 +513,22 @@ export class Bridge {
       if (!outputPath.toLowerCase().endsWith('.json')) {
         throw new Error('export path must end in .json');
       }
+      // A colon in a segment is an NTFS alternate data stream (`x.json:stream`)
+      // on Windows, which writes hidden data to an existing file. Refused on
+      // every platform so behaviour does not depend on where the server runs.
+      if (segs.some((seg) => seg.includes(':'))) {
+        throw new Error('export path must not contain a colon');
+      }
       // The `.json` rule still left every real `.json` in the repo writable —
       // package.json and tsconfig.json included — and this tool is reachable
       // by an agent that an injected hint has steered. Refuse to clobber an
       // existing file; re-exporting to the same name is only allowed inside
       // the tool's own directory.
       const abs = this.confineToProject(outputPath);
-      const inPersistDir = !relative(join(this.cwd, PERSIST_DIR), abs).startsWith('..');
+      // Before the stat below, which would otherwise follow a symlinked
+      // directory and report on a file outside the project.
+      await this.assertRealInside(dirname(abs));
+      const inPersistDir = isInside(join(this.cwd, PERSIST_DIR), abs);
       if (!inPersistDir) {
         try {
           await stat(abs);
@@ -503,11 +551,25 @@ export class Bridge {
       diffs: this.pendingQueue,
     };
 
+    // A caller-chosen path was checked above. The default path was not, and
+    // the check must precede mkdir either way: `mkdir -p` through a link
+    // creates directories outside the project before anything else can object.
+    if (!outputPath) await this.assertRealInside(dirname(outPath));
     await mkdir(dirname(outPath), { recursive: true });
     // 'wx' for a caller-chosen path: export had no symlink resolution at all,
     // so a committed `linkdir -> ../outside` or a dangling `x.json -> outside`
     // wrote through it. The default path inside PERSIST_DIR is ours and is
-    // meant to be overwritten.
+    // meant to be overwritten — but `w` follows a link planted at the file
+    // name, so refuse that one case.
+    if (!outputPath) {
+      try {
+        if ((await lstat(outPath)).isSymbolicLink()) {
+          throw new Error('refusing to write the default session file: it is a symlink');
+        }
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') throw err;
+      }
+    }
     const exportFlag = outputPath ? 'wx' : 'w';
     await writeFile(outPath, JSON.stringify(data, null, 2), { flag: exportFlag });
 
@@ -524,6 +586,9 @@ export class Bridge {
       throw new Error('import path must not contain a dot-directory');
     }
     const absPath = this.confineToProject(inputPath);
+    // A symlinked file or directory in the project would otherwise let import
+    // read a JSON file from outside it.
+    await this.assertRealInside(absPath);
     const raw = await readFile(absPath, 'utf-8');
     let data: unknown;
     try {
@@ -1112,7 +1177,7 @@ export class Bridge {
       `pending_count: ${this.pendingQueue.length}\n`;
 
     const tmpPath = this.statusFilePath + '.tmp';
-    await writeFile(tmpPath, content);
+    await writeFileNoFollow(tmpPath, content);
     await rename(tmpPath, this.statusFilePath);
   }
 
@@ -1157,7 +1222,7 @@ export class Bridge {
     // Compact, not indented. Indentation is quadratic in nesting depth, which
     // is what turned a small deep payload into a multi-hundred-megabyte queue
     // file. Nothing reads this by hand.
-    await writeFile(this.persistPath, JSON.stringify(data));
+    await writeFileNoFollow(this.persistPath, JSON.stringify(data));
   }
 
   private async restoreQueue(): Promise<void> {
@@ -1522,6 +1587,23 @@ export class Bridge {
     // Determine target directory from the original src path
     const targetDir = await this.resolveAssetDir(fromValue);
 
+    // Confine the write to the project directory. `targetDir` is inferred from a
+    // page-controlled `src` attribute (resolveAssetDir), so without this a crafted
+    // `../` value could steer writes outside cwd — parity with the export/import
+    // paths that already call confineToProject.
+    const absDir = this.confineToProject(targetDir);
+    // confineToProject is lexical, so a symlinked asset directory committed in
+    // the repo (`public/media -> ../../elsewhere`) passed it and the write
+    // landed outside the project. This resolves symlinks before anything is
+    // read, scanned or created — the dedup scan below would otherwise read
+    // through the link, and `mkdir -p` would create directories beyond it.
+    try {
+      await this.assertRealInside(absDir);
+    } catch {
+      console.error(`[nco-web-editor] Refusing asset — ${Bridge.forLog(targetDir)} resolves outside the project`);
+      return null;
+    }
+
     // Content hash drives both dedup matching and stable (idempotent) naming.
     const hash = createHash('sha256').update(buffer).digest('hex');
 
@@ -1547,31 +1629,7 @@ export class Bridge {
 
     // Name the file, embedding the content hash so re-uploads are idempotent.
     const filename = this.assetFilename(hash, ext, pendingUpload?.filename);
-    // Confine the write to the project directory. `targetDir` is inferred from a
-    // page-controlled `src` attribute (resolveAssetDir), so without this a crafted
-    // `../` value could steer writes outside cwd — parity with the export/import
-    // paths that already call confineToProject.
-    const absDir = this.confineToProject(targetDir);
     await mkdir(absDir, { recursive: true });
-    // confineToProject is lexical, so a symlinked asset directory committed in
-    // the repo (`public/media -> ../../elsewhere`) passed it and the write
-    // landed outside the project. Re-confine against the resolved path.
-    //
-    // Both sides are resolved: the project root can itself sit behind a
-    // symlink (on macOS `/var` is a link to `/private/var`, so every tmpdir
-    // does), and comparing a resolved child against an unresolved root
-    // rejects every legitimate write.
-    try {
-      const realDir = await realpath(absDir);
-      const realRoot = await realpath(this.cwd);
-      const rel = relative(realRoot, realDir);
-      if (rel.startsWith('..') || resolve(realRoot, rel) !== realDir) {
-        throw new Error('escapes project after symlink resolution');
-      }
-    } catch {
-      console.error(`[nco-web-editor] Refusing asset — ${Bridge.forLog(targetDir)} resolves outside the project`);
-      return null;
-    }
     const absPath = join(absDir, filename);
     const relPath = '/' + relative(this.cwd, absPath).replace(/\\/g, '/');
 
@@ -2021,11 +2079,55 @@ export class Bridge {
   /** Resolve a path and ensure it stays within the project directory. */
   private confineToProject(inputPath: string): string {
     const resolved = resolve(this.cwd, inputPath);
-    const rel = relative(this.cwd, resolved);
-    if (rel.startsWith('..') || resolve(this.cwd, rel) !== resolved) {
+    if (!isInside(this.cwd, resolved)) {
       throw new Error(`Path escapes project directory: ${inputPath}`);
     }
     return resolved;
+  }
+
+  /**
+   * Refuse a target that resolves outside the project once symlinks are
+   * followed. {@link confineToProject} is lexical and cannot see a link.
+   *
+   * Walks up to the nearest ancestor that exists, so it works before the
+   * target (or its directories) have been created — which is the point: it
+   * must run before `mkdir -p`, which would otherwise create directories
+   * beyond a link. Both sides are resolved, because the project root can sit
+   * behind a link itself (on macOS `/var` is `/private/var`, so every tmpdir
+   * does). A dangling link fails `realpath` and is refused.
+   *
+   * The message never includes the resolved path: import treats an echoed
+   * path as a read oracle.
+   *
+   * Residual: a component swapped for a symlink between this check and the
+   * open is not closed — Node has no `openat`. It needs a concurrent local
+   * writer. The final component is covered separately by `wx` / `lstat`.
+   */
+  private async assertRealInside(absTarget: string): Promise<void> {
+    let probe = absTarget;
+    for (;;) {
+      try {
+        await lstat(probe);
+        break;
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException)?.code;
+        if (code !== 'ENOENT' && code !== 'ENOTDIR') throw err;
+        const parent = dirname(probe);
+        if (parent === probe) break;
+        probe = parent;
+      }
+    }
+    let realProbe: string;
+    let realRoot: string;
+    try {
+      realProbe = await realpath(probe);
+      realRoot = await realpath(this.cwd);
+    } catch {
+      throw new Error('escapes project after symlink resolution');
+    }
+    if (!isInside(realRoot, realProbe)) {
+      throw new Error('escapes project after symlink resolution');
+    }
   }
 }
 
