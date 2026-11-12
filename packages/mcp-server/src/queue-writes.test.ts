@@ -28,6 +28,8 @@ type Priv = {
   acquireLock(): Promise<boolean>;
   safePersistQueue(): void;
   safeWriteStatusFile(): void;
+  wss: unknown;
+  closeTimeoutMs: number;
 };
 
 const cleanup: string[] = [];
@@ -306,6 +308,22 @@ describe('stop() flushes before it lets go (KL-7)', () => {
 
     assert.equal(await exists(lockPath), false);
   });
+
+  it('(x) a connection close that never completes does not hold stop() forever', async () => {
+    const { root, b, p } = await fresh();
+    const logged = mock.method(console, 'error', () => {});
+    const lockPath = join(root, '.nco-web-editor', 'server.lock');
+    assert.equal(await p.acquireLock(), true);
+    // A server whose close callback never fires: a client that will not hang up.
+    p.wss = { close() {} };
+    p.closeTimeoutMs = 50;
+
+    await b.stop();
+
+    const text = logged.mock.calls.map((c) => c.arguments.join(' ')).join('\n');
+    assert.equal(/Timed out after 50ms closing connections at shutdown/.test(text), true, text);
+    assert.equal(await exists(lockPath), false, 'the lock is still released');
+  });
 });
 
 describe('an id is queued once (KL-7)', () => {
@@ -427,5 +445,19 @@ describe('an id is queued once (KL-7)', () => {
 
     assert.deepEqual(ids(p), ['X', 'Y']);
     assert.equal((p.pendingQueue[0] as { element: { selector: string } }).element.selector, '#a');
+  });
+
+  it('a restore logs at most five duplicate-id reasons', async () => {
+    const { root, p, queuePath } = await fresh();
+    const logged = mock.method(console, 'error', () => {});
+    const dupes = Array.from({ length: 20 }, () => validDiff('X'));
+    await mkdir(join(root, '.nco-web-editor'), { recursive: true });
+    await writeFile(queuePath, JSON.stringify({ version: '0', diffs: dupes }));
+
+    await p.restoreQueue();
+
+    assert.deepEqual(ids(p), ['X']);
+    const text = logged.mock.calls.map((c) => c.arguments.join(' ')).join('\n');
+    assert.equal(text.split('Skipped duplicate diff').length - 1, 5, text);
   });
 });

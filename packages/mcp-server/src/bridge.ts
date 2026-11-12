@@ -96,6 +96,8 @@ class CoalescingWriter {
 
 /** Upper bound on how long `stop()` waits for the writers to finish. */
 const DRAIN_TIMEOUT_MS = 5000;
+/** Upper bound on each of: closing the connections, and waiting for ingests already running. */
+const CLOSE_TIMEOUT_MS = 2000;
 
 /** The published Chrome Web Store extension — the only peer allowed by default. */
 export const PUBLISHED_EXTENSION_ID = 'aifpecjojmlgdhgnkmkaobmfipdmppea';
@@ -162,6 +164,8 @@ export class Bridge {
   private readonly inFlightIds = new Set<string>();
   /** Ingests in flight, so `stop()` can wait for the diffs they are about to queue. */
   private readonly inFlightIngests = new Set<Promise<void>>();
+  /** How long `stop()` waits for connections to close and for in-flight ingests; a field so tests can shorten it. */
+  private closeTimeoutMs = CLOSE_TIMEOUT_MS;
   // The callbacks resolve the write body when the loop runs, not when they are
   // built, so the body is always the current one.
   private readonly queueWriter = new CoalescingWriter('queue file', () => this.persistQueue());
@@ -224,32 +228,52 @@ export class Bridge {
    * is still writing. Works on a Bridge that was never started.
    */
   async stop(): Promise<void> {
+    // Every wait below is bounded, so a peer that never answers the close
+    // handshake cannot keep the process (and the lock) alive.
     if (this.wss) {
+      const wss = this.wss;
       for (const client of this.clients.values()) {
         client.ws.close();
       }
       this.clients.clear();
-      await new Promise<void>((resolve) => {
-        this.wss!.close(() => resolve());
-      });
+      await Bridge.bounded(
+        new Promise<void>((resolve) => wss.close(() => resolve())),
+        this.closeTimeoutMs,
+        'closing connections',
+      );
       this.wss = null;
     }
-    await Promise.allSettled([...this.inFlightIngests]);
-
-    let timer: NodeJS.Timeout | undefined;
-    const timedOut = new Promise<'timeout'>((resolve) => {
-      timer = setTimeout(() => resolve('timeout'), DRAIN_TIMEOUT_MS);
-      timer.unref?.();
-    });
-    const drained = Promise.all([this.queueWriter.drain(), this.statusWriter.drain()]);
-    if ((await Promise.race([drained, timedOut])) === 'timeout') {
-      console.error(`[nco-web-editor] Timed out after ${DRAIN_TIMEOUT_MS}ms flushing writes at shutdown`);
-    }
-    if (timer) clearTimeout(timer);
+    await Bridge.bounded(
+      Promise.allSettled([...this.inFlightIngests]),
+      this.closeTimeoutMs,
+      'finishing in-flight batches',
+    );
+    await Bridge.bounded(
+      Promise.all([this.queueWriter.drain(), this.statusWriter.drain()]),
+      DRAIN_TIMEOUT_MS,
+      'flushing writes',
+    );
 
     this.queueWriter.stop();
     this.statusWriter.stop();
     await this.releaseLock();
+  }
+
+  /** Wait for `p`, but no longer than `ms`; a timeout is logged and not an error. */
+  private static async bounded(p: Promise<unknown>, ms: number, what: string): Promise<void> {
+    let timer: NodeJS.Timeout | undefined;
+    const timedOut = new Promise<'timeout'>((resolve) => {
+      // Not unref'd: if nothing else holds the loop open, an unref'd timer would
+      // let the process exit mid-shutdown, before the lock is released.
+      timer = setTimeout(() => resolve('timeout'), ms);
+    });
+    try {
+      if ((await Promise.race([p, timedOut])) === 'timeout') {
+        console.error(`[nco-web-editor] Timed out after ${ms}ms ${what} at shutdown`);
+      }
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   // -----------------------------------------------------------------------
@@ -1401,7 +1425,9 @@ export class Bridge {
           })
           .filter((d) => {
             if (seenIds.has(d.id)) {
-              console.error(`[nco-web-editor] Skipped duplicate diff ${Bridge.forLog(d.id)} in persisted queue`);
+              if (invalidSeen++ < MAX_RESTORE_REASONS_LOGGED) {
+                console.error(`[nco-web-editor] Skipped duplicate diff ${Bridge.forLog(d.id)} in persisted queue`);
+              }
               return false;
             }
             seenIds.add(d.id);
