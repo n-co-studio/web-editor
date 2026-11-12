@@ -70,6 +70,44 @@ describe('assetFilename — the picked name is untrusted input (KL-7)', () => {
     assert.equal(/\/photo-[0-9a-f]{12}\.png$/.test(result.toValue), true, result.toValue);
   });
 
+  it('prefixes a Windows device name that would sit before the first dot (KL-7)', async () => {
+    // Each picked name is `<stem>.png`; the stem is what the guard looks at.
+    const name = (filename: string): string =>
+      (bridge as unknown as { assetFilename(h: string, e: string, f?: unknown): string }).assetFilename(
+        'abcdef0123456789',
+        '.png',
+        filename,
+      );
+    const changed = ['con.x', 'CON.x', 'Com1.a.b', 'lpt9.x', 'nul.tar.gz', '-con.x', '.con.x'];
+    for (const stem of changed) {
+      const bare = stem.replace(/^[-.]+/, '');
+      assert.equal(name(`${stem}.png`), `_${bare}-abcdef012345.png`, stem);
+    }
+    const unchanged = ['console.x', 'com10.x', 'conx.y', 'x.con', 'communications'];
+    for (const stem of unchanged) {
+      assert.equal(name(`${stem}.png`), `${stem}-abcdef012345.png`, stem);
+    }
+    // No dot in the stem: the hash follows the word, so `con-<hash>.png` is not a device name.
+    assert.equal(name('con.png'), 'con-abcdef012345.png');
+    assert.equal(name('con'), 'con-abcdef012345.png');
+  });
+
+  it('saves a picked con.x.png under a safe name end to end', async () => {
+    const result = await resolveAttribute(change(50, 'con.x.png'));
+    assert.equal(/\/_con\.x-[0-9a-f]{12}\.png$/.test(result.toValue), true, result.toValue);
+  });
+
+  it('keeps the final name within 255 bytes', () => {
+    const name = (bridge as unknown as { assetFilename(h: string, e: string, f?: unknown): string }).assetFilename(
+      'abcdef0123456789',
+      '.png',
+      `${'a'.repeat(251)}.png`, // 255 characters: allowed in, so the stem must give way to the hash and extension
+    );
+    assert.equal(Buffer.byteLength(name), 255);
+    assert.equal(name.endsWith('-abcdef012345.png'), true);
+    assert.equal(name.startsWith('aaaa'), true);
+  });
+
   it('truncates, and never returns the original data: URL, when saving throws', async () => {
     mock.method(console, 'error', () => {});
     mock.method(bridge as unknown as { saveDataUrl: () => Promise<string | null> }, 'saveDataUrl', async () => {

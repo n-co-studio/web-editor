@@ -2044,7 +2044,19 @@ export class Bridge {
       const dot = base.lastIndexOf('.');
       const rawStem = dot > 0 ? base.slice(0, dot) : base;
       const stem = rawStem.replace(/[^A-Za-z0-9._-]/g, '-').replace(/-+/g, '-').replace(/^[-.]+/, '');
-      if (stem) return `${stem}-${shortHash}${ext}`;
+      if (stem) {
+        // Windows treats `con.anything` as the console device whatever follows the
+        // first dot. The hash lands after the stem, so only a stem that already has
+        // a dot can leave a reserved word in front of the first dot; a bare `con`
+        // becomes `con-<hash>`, which is safe.
+        const firstDot = stem.indexOf('.');
+        const reserved = firstDot > 0 && WINDOWS_RESERVED_NAME.test(stem.slice(0, firstDot));
+        const seeded = reserved ? `_${stem}` : stem;
+        // Keep the whole name within the 255-byte limit of common filesystems. The
+        // stem is ASCII by construction, so characters are bytes.
+        const room = 255 - Buffer.byteLength(`-${shortHash}${ext}`);
+        return `${seeded.slice(0, room)}-${shortHash}${ext}`;
+      }
     }
     return `uploaded-${shortHash}${ext}`;
   }
@@ -2417,6 +2429,9 @@ function diffProblem(obj: unknown): string | null {
 function isValidDiff(obj: unknown): obj is VisualDiff {
   return diffProblem(obj) === null;
 }
+
+/** Device names Windows refuses as a file's base name, in any case and with any extension. */
+const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 
 /** What a capped value ends with, so the agent can tell it was shortened. */
 const TRUNCATION_MARKER = '… [truncated]';
