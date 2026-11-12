@@ -1650,7 +1650,7 @@ export class Bridge {
    * Replace every `data:` URI embedded in a string (e.g. `outerHTML`, a
    * `url(data:…)` value) with its persisted served path (issue #28). A URI that
    * is oversized/unresolvable is replaced with an empty reference rather than
-   * left inline; a persistence failure leaves that URI untouched.
+   * left inline; so is one whose persistence fails (fail closed).
    */
   private async replaceDataUrlsInString(str: string): Promise<string> {
     const matches = str.match(Bridge.DATA_URL_RE);
@@ -1664,8 +1664,11 @@ export class Bridge {
         out = out.split(dataUrl).join(saved ?? '');
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[nco-web-editor] Failed to save embedded data URL: ${msg}`);
-        // Leave this occurrence as-is; other matches still get a chance.
+        console.error(`[nco-web-editor] Failed to save embedded data URL: ${msg} — dropping it`);
+        // Fail closed, as resolveAttributeAsset does: a URI left inline would reach
+        // the agent unscreened, up to the full payload size. Other matches still
+        // get their own chance.
+        out = out.split(dataUrl).join('');
       }
     }
     return out;

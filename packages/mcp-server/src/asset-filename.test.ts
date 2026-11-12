@@ -9,7 +9,7 @@
 
 import { describe, it, before, after, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Bridge } from './bridge.js';
@@ -106,6 +106,26 @@ describe('assetFilename — the picked name is untrusted input (KL-7)', () => {
     assert.equal(Buffer.byteLength(name), 255);
     assert.equal(name.endsWith('-abcdef012345.png'), true);
     assert.equal(name.startsWith('aaaa'), true);
+  });
+
+  it('drops an embedded data: URL when persisting it throws (fail closed, KL-7)', async () => {
+    // A regular file where the asset directory's parent should be: mkdir fails with ENOTDIR.
+    const root = await mkdtemp(join(tmpdir(), 'nco-asset-embedded-'));
+    try {
+      await writeFile(join(root, 'public'), 'not a directory');
+      const b = new Bridge(root) as unknown as { replaceDataUrlsInString(s: string): Promise<string> };
+      const logged = mock.method(console, 'error', () => {});
+      const url = `data:image/png;base64,${png(60)}`;
+      const out = await b.replaceDataUrlsInString(`<img src="${url}"><img src="${url}" alt="again">`);
+      assert.equal(out.includes('data:'), false, out);
+      assert.equal(out, '<img src=""><img src="" alt="again">');
+      const text = logged.mock.calls.map((c) => c.arguments.join(' ')).join('\n');
+      assert.equal(/Failed to save embedded data URL/.test(text), true, text);
+      assert.equal(text.includes(png(60)), false);
+    } finally {
+      mock.restoreAll();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('truncates, and never returns the original data: URL, when saving throws', async () => {
