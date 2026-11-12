@@ -21,7 +21,7 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test --test-concurrency=1 --test-timeout=30000 src/batch-identity.test.ts src/bridge.test.ts src/bridge-peer-auth.test.ts src/structured-notes.test.ts src/tool-schemas.test.ts src/asset-filename.test.ts src/source-path-rules.test.ts src/repo-data-framing.test.ts src/queue-writes.test.ts src/diff-validation.test.ts",
+    "test": "node --import tsx --test --test-concurrency=1 --test-timeout=30000 src/batch-identity.test.ts src/bridge.test.ts src/bridge-peer-auth.test.ts src/structured-notes.test.ts src/tool-schemas.test.ts src/asset-filename.test.ts src/source-path-rules.test.ts src/repo-data-framing.test.ts src/queue-writes.test.ts src/diff-validation.test.ts src/diff-caps.test.ts",
     "prepublishOnly": "npm run build",
     "clean": "rm -rf dist dist-test *.tsbuildinfo"
   },

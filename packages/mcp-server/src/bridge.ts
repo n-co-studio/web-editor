@@ -739,7 +739,7 @@ export class Bridge {
       // comes out.
       let screened;
       try {
-        screened = Bridge.withCleanBatchId(Bridge.withCheckedSourcePath(diff));
+        screened = Bridge.withCleanBatchId(withCappedFields(Bridge.withCheckedSourcePath(diff)));
       } catch (err) {
         warnings.push(`Skipped diff: ${err instanceof Error ? err.message : 'screening failed'}`);
         skipped++;
@@ -1112,7 +1112,7 @@ export class Bridge {
           // sourceFile reaches the agent as a place to edit, but it is copied
           // straight out of a data-source-file attribute the page controls
           // (HACK-012). Drop anything that is not a plausible in-project path.
-          const diff = await this.extractDataUrls(Bridge.withCheckedSourcePath(diffToProcess));
+          const diff = await this.extractDataUrls(withCappedFields(Bridge.withCheckedSourcePath(diffToProcess)));
           this.pendingQueue.push(diff);
           newDiffs.push(diff);
         } catch (err) {
@@ -1411,7 +1411,7 @@ export class Bridge {
             // A persisted queue is as untrusted as anything off the wire: it
             // lives in the target project and can arrive with a clone.
             try {
-              return Bridge.withCleanBatchId(Bridge.withCheckedSourcePath(d));
+              return Bridge.withCleanBatchId(withCappedFields(Bridge.withCheckedSourcePath(d)));
             } catch {
               return null;
             }
@@ -2416,6 +2416,97 @@ function diffProblem(obj: unknown): string | null {
 /** Minimal shape check for VisualDiff objects. See {@link diffProblem}. */
 function isValidDiff(obj: unknown): obj is VisualDiff {
   return diffProblem(obj) === null;
+}
+
+/** What a capped value ends with, so the agent can tell it was shortened. */
+const TRUNCATION_MARKER = '… [truncated]';
+
+/**
+ * Shorten `s` to `max` characters plus a marker. Two properties matter:
+ * - Surrogate-safe: a cut that would split a surrogate pair backs up one unit,
+ *   so the result never ends in a lone surrogate.
+ * - Idempotent: a value that already carries the marker and is no longer than
+ *   a capped value can be is returned as is, so a queue that is restored,
+ *   persisted and restored again does not shrink further each time.
+ */
+export function capText(s: string, max: number): string {
+  if (s.length <= max) return s;
+  if (s.endsWith(TRUNCATION_MARKER) && s.length <= max + TRUNCATION_MARKER.length) return s;
+  let end = max;
+  const last = s.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end--;
+  return s.slice(0, end) + TRUNCATION_MARKER;
+}
+
+export const MAX_DIFF_LABEL_CHARS = 200;
+export const MAX_DIFF_ASSETPATH_CHARS = 1024;
+export const MAX_DIFF_ATTRIBUTE_VALUE_CHARS = 2048;
+export const MAX_DIFF_SOURCEHREF_CHARS = 2048;
+
+/**
+ * Bound the page-derived strings a diff carries, by explicit path. Nothing is
+ * walked: a field is capped only if it is named here, so a value that is long
+ * on purpose (insert `outerHTML`, stylesheet `cssText`, a rule's selector, an
+ * insert descriptor's `textContent`) is never touched by accident.
+ *
+ * `element.selector` is not shortened. A selector cut short would target a
+ * different element, so over-long ones are rejected by {@link diffProblem}.
+ * An `assetPath` over its cap is dropped together with its `label`, which is
+ * only meaningful beside it (both present or both absent).
+ */
+function withCappedFields<T>(diff: T): T {
+  if (!isObject(diff)) return diff;
+  let out: Record<string, unknown> = diff;
+
+  if (isObject(out.element)) {
+    const el = out.element;
+    let next = el;
+    const set = (key: string, value: unknown): void => {
+      if (next === el) next = { ...el };
+      next[key] = value;
+    };
+    if (typeof el.textContent === 'string') {
+      const capped = capText(el.textContent, MAX_REF_TEXTCONTENT_CHARS);
+      if (capped !== el.textContent) set('textContent', capped);
+    }
+    if (typeof el.assetPath === 'string' && el.assetPath.length > MAX_DIFF_ASSETPATH_CHARS) {
+      if (next === el) next = { ...el };
+      delete next.assetPath;
+      delete next.label;
+    } else if (typeof el.label === 'string') {
+      const capped = capText(el.label, MAX_DIFF_LABEL_CHARS);
+      if (capped !== el.label) set('label', capped);
+    }
+    if (isObject(el.attributes)) {
+      const attrs = el.attributes;
+      let nextAttrs = attrs;
+      for (const [k, v] of Object.entries(attrs)) {
+        if (typeof v !== 'string') continue;
+        const capped = capText(v, MAX_DIFF_ATTRIBUTE_VALUE_CHARS);
+        if (capped === v) continue;
+        if (nextAttrs === attrs) nextAttrs = { ...attrs };
+        nextAttrs[k] = capped;
+      }
+      if (nextAttrs !== attrs) set('attributes', nextAttrs);
+    }
+    if (next !== el) out = { ...out, element: next };
+  }
+
+  if (Array.isArray(out.changes)) {
+    let changed = false;
+    const changes = out.changes.map((c: unknown) => {
+      if (!isObject(c) || !isObject(c.source)) return c;
+      const href = c.source.sourceHref;
+      if (typeof href !== 'string') return c; // null stays null
+      const capped = capText(href, MAX_DIFF_SOURCEHREF_CHARS);
+      if (capped === href) return c;
+      changed = true;
+      return { ...c, source: { ...c.source, sourceHref: capped } };
+    });
+    if (changed) out = { ...out, changes };
+  }
+
+  return out as T;
 }
 
 /** Probe whether a PID corresponds to a live process (signal 0 is a no-op probe). */
