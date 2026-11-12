@@ -1046,6 +1046,24 @@ describe('write confinement through symlinks (KL-7)', () => {
     assert.deepEqual(await readdir(outside), []);
   });
 
+  // The default export path is checked by the one `!outputPath` guard, and
+  // nothing else covers it: a Bridge that was never start()ed has not been
+  // through acquireLock, so its check is the only thing between mkdir -p and
+  // a directory outside the project.
+  it('refuses the default export when .nco-web-editor is a symlink out of the project (never started)', async () => {
+    const { root, outside, p } = await fresh();
+    if (!(await link(outside, join(root, '.nco-web-editor'), 'dir'))) return;
+    await assert.rejects(() => p.exportSession(), /escapes project after symlink resolution/);
+    assert.deepEqual(await readdir(outside), []);
+  });
+
+  it('refuses the default export when .nco-web-editor is a dangling symlink (never started)', async () => {
+    const { root, outside, p } = await fresh();
+    if (!(await link(join(outside, 'missing'), join(root, '.nco-web-editor'), 'dir'))) return;
+    await assert.rejects(() => p.exportSession(), /escapes project after symlink resolution/);
+    assert.deepEqual(await readdir(outside), []);
+  });
+
   it('acquires the lock normally when .nco-web-editor is absent', async () => {
     const { root, p } = await fresh();
     assert.equal(await p.acquireLock(), true);
