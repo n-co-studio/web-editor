@@ -1,6 +1,6 @@
 import { describe, it, after, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, readdir, readFile, mkdir, symlink, stat } from 'node:fs/promises';
+import { mkdtemp, rm, readdir, readFile, writeFile, mkdir, symlink, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Bridge } from './bridge.js';
@@ -21,6 +21,10 @@ type Priv = {
   writeStatusFile(): Promise<void>;
   extractDataUrls(d: unknown): Promise<unknown>;
   handleDiffBatch(ws: unknown, payload: unknown): void;
+  processDiffBatch(payload: unknown): Promise<void>;
+  restoreQueue(): Promise<void>;
+  importSession(p: string): Promise<{ imported: number; skipped: number; warnings: string[] }>;
+  acknowledgeDiff(id: string): boolean;
   acquireLock(): Promise<boolean>;
   safePersistQueue(): void;
   safeWriteStatusFile(): void;
@@ -301,5 +305,127 @@ describe('stop() flushes before it lets go (KL-7)', () => {
     await stopping;
 
     assert.equal(await exists(lockPath), false);
+  });
+});
+
+describe('an id is queued once (KL-7)', () => {
+  afterEach(() => mock.restoreAll());
+
+  /** Stub extraction so a diff stays "in flight" until its own gate opens. */
+  function holdById(p: Priv, ids: string[]): { open: (id: string) => void; extractions: () => number } {
+    const gates = new Map(ids.map((id) => [id, gate()]));
+    let extractions = 0;
+    p.extractDataUrls = async (d) => {
+      extractions++;
+      await gates.get((d as { id: string }).id)?.promise;
+      return d;
+    };
+    return { open: (id) => gates.get(id)!.open(), extractions: () => extractions };
+  }
+
+  const settle = async (p: Priv): Promise<void> => {
+    await p.queueWriter.drain();
+    await p.statusWriter.drain();
+  };
+  const ids = (p: Priv): string[] => (p.pendingQueue as { id: string }[]).map((d) => d.id);
+
+  it('two overlapping payloads with the same id leave one entry (the reservation)', async () => {
+    const { p } = await fresh();
+    mock.method(console, 'error', () => {});
+    const h = holdById(p, ['X']);
+
+    const first = p.processDiffBatch({ diffs: [validDiff('X')], batchId: 'b1' });
+    const second = p.processDiffBatch({ diffs: [validDiff('X')], batchId: 'b1' });
+    h.open('X');
+    await Promise.all([first, second]);
+    await settle(p);
+
+    assert.deepEqual(ids(p), ['X']);
+    assert.equal(h.extractions(), 1, 'the second payload never started processing X');
+  });
+
+  it('an id that an overlapping payload queued meanwhile is not queued again (the live check)', async () => {
+    const { p } = await fresh();
+    mock.method(console, 'error', () => {});
+    const h = holdById(p, ['X', 'A']);
+
+    const first = p.processDiffBatch({ diffs: [validDiff('X')], batchId: 'b1' });
+    // Arrived while X was in flight; held on A, so it reaches X only later.
+    const second = p.processDiffBatch({ diffs: [validDiff('A'), validDiff('X')], batchId: 'b2' });
+    h.open('X');
+    await first;
+    h.open('A');
+    await second;
+    await settle(p);
+
+    assert.deepEqual(ids(p).sort(), ['A', 'X']);
+  });
+
+  it('acknowledging X between overlapping payloads does not let X back in', async () => {
+    const { p } = await fresh();
+    mock.method(console, 'error', () => {});
+    const h = holdById(p, ['X', 'A']);
+
+    const first = p.processDiffBatch({ diffs: [validDiff('X')], batchId: 'b1' });
+    const second = p.processDiffBatch({ diffs: [validDiff('A'), validDiff('X')], batchId: 'b2' });
+    h.open('X');
+    await first;
+    assert.equal(p.acknowledgeDiff('X'), true);
+    h.open('A');
+    await second;
+    await settle(p);
+
+    assert.deepEqual(ids(p), ['A']);
+    // And a later resend is still refused.
+    await p.processDiffBatch({ diffs: [validDiff('X')], batchId: 'b3' });
+    await settle(p);
+    assert.deepEqual(ids(p), ['A']);
+  });
+
+  it('a repeated id within one payload is queued once', async () => {
+    const { p } = await fresh();
+    mock.method(console, 'error', () => {});
+    await p.processDiffBatch({ diffs: [validDiff('X'), validDiff('X'), validDiff('Y')], batchId: 'b1' });
+    await settle(p);
+    assert.deepEqual(ids(p), ['X', 'Y']);
+  });
+
+  it('releases the reservation when processing throws, so a resend is accepted', async () => {
+    const { p } = await fresh();
+    mock.method(console, 'error', () => {});
+    let calls = 0;
+    p.extractDataUrls = async (d) => {
+      if (++calls === 1) throw new Error('boom');
+      return d;
+    };
+    await p.processDiffBatch({ diffs: [validDiff('X')], batchId: 'b1' });
+    await p.processDiffBatch({ diffs: [validDiff('X')], batchId: 'b1' });
+    await settle(p);
+    assert.deepEqual(ids(p), ['X']);
+  });
+
+  it('an import with a repeated id imports it once', async () => {
+    const { root, p } = await fresh();
+    mock.method(console, 'error', () => {});
+    await writeFile(join(root, 's.json'), JSON.stringify({ diffs: [validDiff('X'), validDiff('X'), validDiff('Y')] }));
+    const r = await p.importSession('s.json');
+    await settle(p);
+    assert.equal(r.imported, 2);
+    assert.equal(r.skipped, 1);
+    assert.deepEqual(ids(p), ['X', 'Y']);
+  });
+
+  it('a restore with a repeated id restores the first occurrence only', async () => {
+    const { root, p, queuePath } = await fresh();
+    mock.method(console, 'error', () => {});
+    const first = validDiff('X');
+    const second = { ...validDiff('X'), element: { selector: '#second', tagName: 'p' } };
+    await mkdir(join(root, '.nco-web-editor'), { recursive: true });
+    await writeFile(queuePath, JSON.stringify({ version: '0', diffs: [first, second, validDiff('Y')] }));
+
+    await p.restoreQueue();
+
+    assert.deepEqual(ids(p), ['X', 'Y']);
+    assert.equal((p.pendingQueue[0] as { element: { selector: string } }).element.selector, '#a');
   });
 });

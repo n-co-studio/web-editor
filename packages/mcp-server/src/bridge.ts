@@ -156,6 +156,8 @@ export class Bridge {
   private lastStatusUpdate: string = new Date().toISOString();
   /** Set once shutdown begins: the status file then reads `closed` whatever the queue holds. */
   private closing = false;
+  /** Ids being processed by an ingest right now: reserved before the first await, released in `finally`. */
+  private readonly inFlightIds = new Set<string>();
   /** Ingests in flight, so `stop()` can wait for the diffs they are about to queue. */
   private readonly inFlightIngests = new Set<Promise<void>>();
   // The callbacks resolve the write body when the loop runs, not when they are
@@ -716,7 +718,8 @@ export class Bridge {
         skipped++;
         continue;
       }
-      if (existingIds.has(diff.id) || this.processedIds.has(diff.id)) {
+      if (existingIds.has(diff.id) || this.processedIds.has(diff.id) || this.inFlightIds.has(diff.id)) {
+        console.error(`[nco-web-editor] Skipped duplicate diff ${Bridge.forLog(diff.id)} in session import`);
         skipped++;
         continue;
       }
@@ -741,6 +744,8 @@ export class Bridge {
         continue;
       }
       this.pendingQueue.push(screened);
+      // So a repeat of this id later in the same file is skipped, not queued twice.
+      existingIds.add(diff.id);
       imported++;
     }
 
@@ -1044,7 +1049,6 @@ export class Bridge {
     // non-string envelope batchId poisons the queue exactly as a per-diff one
     // does. Drop it rather than propagate it.
     const envelopeBatchId = Bridge.cleanBatchId(payload.batchId);
-    const existingIds = new Set(this.pendingQueue.map((d) => d.id));
     const newDiffs: VisualDiff[] = [];
 
     // Mint the legacy id once per payload (not per diff) so all diffs from a pre-batchId
@@ -1062,37 +1066,54 @@ export class Bridge {
         console.error('[nco-web-editor] Dropping malformed diff from batch');
         continue;
       }
-      // Skip diffs that are already pending or were previously processed
-      if (existingIds.has(rawDiff.id) || this.processedIds.has(rawDiff.id)) {
+      // Skip diffs that are already pending, were previously processed, or are
+      // being processed right now by an overlapping payload. Checked live, not
+      // against a snapshot taken when the payload arrived: the loop awaits, so
+      // a snapshot goes stale as soon as another payload (or an earlier diff in
+      // this one) queues the same id, and the id was queued twice.
+      const id = rawDiff.id;
+      if (
+        this.pendingQueue.some((d) => d.id === id) ||
+        this.processedIds.has(id) ||
+        this.inFlightIds.has(id)
+      ) {
         continue;
       }
-      // Belt-and-suspenders: stamp batchId from envelope onto any diff missing it.
-      // The extension stamps diffs at source, but the envelope batchId is the fallback.
-      let diffToProcess = Bridge.withCleanBatchId(rawDiff);
-      if (!diffToProcess.batchId && envelopeBatchId) {
-        diffToProcess = { ...diffToProcess, batchId: envelopeBatchId };
-      } else if (!diffToProcess.batchId && legacyId) {
-        // Pre-batchId extension — stamp the shared synthetic legacy id for this payload.
-        diffToProcess = { ...diffToProcess, batchId: legacyId };
-      }
-      // Per-diff containment. extractDataUrls and the source screen both index
-      // or recurse into fields isValidDiff does not type-check, so one crafted
-      // entry used to throw and abandon the rest of the batch — after DIFF_ACK
-      // had already gone back for all of them, and with earlier diffs queued
-      // but never persisted. The screen has to be inside this try, not above
-      // it: a deeply nested diff throws in the walk, and a previous attempt
-      // left that call one line outside and so kept the original bug.
+      // Reserved before the first await, released in `finally`, so the check
+      // above and the push below are not separated by a gap another payload
+      // can use.
+      this.inFlightIds.add(id);
       try {
-        // sourceFile reaches the agent as a place to edit, but it is copied
-        // straight out of a data-source-file attribute the page controls
-        // (HACK-012). Drop anything that is not a plausible in-project path.
-        const diff = await this.extractDataUrls(Bridge.withCheckedSourcePath(diffToProcess));
-        this.pendingQueue.push(diff);
-        newDiffs.push(diff);
-      } catch (err) {
-        console.error(
-          `[nco-web-editor] Skipped diff ${Bridge.forLog(diffToProcess.id)} — ${Bridge.forLog(err instanceof Error ? err.message : err)}`,
-        );
+        // Belt-and-suspenders: stamp batchId from envelope onto any diff missing it.
+        // The extension stamps diffs at source, but the envelope batchId is the fallback.
+        let diffToProcess = Bridge.withCleanBatchId(rawDiff);
+        if (!diffToProcess.batchId && envelopeBatchId) {
+          diffToProcess = { ...diffToProcess, batchId: envelopeBatchId };
+        } else if (!diffToProcess.batchId && legacyId) {
+          // Pre-batchId extension — stamp the shared synthetic legacy id for this payload.
+          diffToProcess = { ...diffToProcess, batchId: legacyId };
+        }
+        // Per-diff containment. extractDataUrls and the source screen both index
+        // or recurse into fields isValidDiff does not type-check, so one crafted
+        // entry used to throw and abandon the rest of the batch — after DIFF_ACK
+        // had already gone back for all of them, and with earlier diffs queued
+        // but never persisted. The screen has to be inside this try, not above
+        // it: a deeply nested diff throws in the walk, and a previous attempt
+        // left that call one line outside and so kept the original bug.
+        try {
+          // sourceFile reaches the agent as a place to edit, but it is copied
+          // straight out of a data-source-file attribute the page controls
+          // (HACK-012). Drop anything that is not a plausible in-project path.
+          const diff = await this.extractDataUrls(Bridge.withCheckedSourcePath(diffToProcess));
+          this.pendingQueue.push(diff);
+          newDiffs.push(diff);
+        } catch (err) {
+          console.error(
+            `[nco-web-editor] Skipped diff ${Bridge.forLog(diffToProcess.id)} — ${Bridge.forLog(err instanceof Error ? err.message : err)}`,
+          );
+        }
+      } finally {
+        this.inFlightIds.delete(id);
       }
     }
 
@@ -1354,9 +1375,20 @@ export class Bridge {
         // Screened again on restore, not just on ingest: the queue file sits in
         // the project and survives restarts, so anything that reached it once
         // would otherwise be replayed unchecked for the life of the project.
+        // First occurrence of an id wins. A file that repeats an id would
+        // otherwise queue it twice, and acknowledging it once would leave the other.
+        const seenIds = new Set<string>();
         const valid = data.diffs
           .slice(0, MAX_RESTORED_DIFFS)
           .filter(isValidDiff)
+          .filter((d) => {
+            if (seenIds.has(d.id)) {
+              console.error(`[nco-web-editor] Skipped duplicate diff ${Bridge.forLog(d.id)} in persisted queue`);
+              return false;
+            }
+            seenIds.add(d.id);
+            return true;
+          })
           .map((d) => {
             // A persisted queue is as untrusted as anything off the wire: it
             // lives in the target project and can arrive with a clone.
