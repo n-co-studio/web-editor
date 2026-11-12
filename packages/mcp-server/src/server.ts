@@ -76,12 +76,26 @@ export async function createServer(): Promise<void> {
   console.error(`[nco-web-editor] MCP server running (WebSocket port: ${port})`);
 
   // Graceful shutdown
+  // A second signal while the first is still flushing must not start a second
+  // shutdown. stop() bounds its own wait, so no separate timer is needed here.
+  let shuttingDown = false;
   const shutdown = async () => {
-    await bridge.writeShutdownStatus();
-    await watcher.close();
-    await componentWatcher.close();
-    await bridge.stop();
-    process.exit(0);
+    if (shuttingDown) return;
+    shuttingDown = true;
+    try {
+      await bridge.writeShutdownStatus();
+      await watcher.close();
+      await componentWatcher.close();
+    } catch (err) {
+      console.error(
+        `[nco-web-editor] Error during shutdown: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      // Always flush, release the lock and exit — a throw above must not
+      // leave the process (and its lock) alive.
+      await bridge.stop();
+      process.exit(0);
+    }
   };
 
   process.on('SIGINT', shutdown);

@@ -48,9 +48,14 @@ function makeDiff(id: string, batchId?: string): VisualDiff {
 }
 
 /** Access a private Bridge method for testing without a running WebSocket. */
-function ingest(bridge: Bridge, payload: VisualDiffBatchPayload): Promise<void> {
-  return (bridge as unknown as Record<string, (p: VisualDiffBatchPayload) => Promise<void>>)
+async function ingest(bridge: Bridge, payload: VisualDiffBatchPayload): Promise<void> {
+  await (bridge as unknown as Record<string, (p: VisualDiffBatchPayload) => Promise<void>>)
     .processDiffBatch(payload);
+  // The queue and status files are written in the background. Wait for them,
+  // or the suite's cleanup removes the directory while a write is landing.
+  const writers = bridge as unknown as Record<'queueWriter' | 'statusWriter', { drain(): Promise<void> }>;
+  await writers.queueWriter.drain();
+  await writers.statusWriter.drain();
 }
 
 // ---------------------------------------------------------------------------

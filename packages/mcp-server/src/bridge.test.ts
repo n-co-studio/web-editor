@@ -26,7 +26,7 @@
 
 import { describe, it, before, after, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile, readdir, readFile, mkdir, symlink, stat } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, readdir, readFile, mkdir, symlink, stat, lstat } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, win32, posix } from 'node:path';
@@ -1071,13 +1071,32 @@ describe('write confinement through symlinks (KL-7)', () => {
     await p.releaseLock();
   });
 
-  it('does not write the queue file through a symlink planted at its name', async () => {
+  // The queue file is written to a temp name and renamed over the real one, so
+  // a link planted at the real name is replaced rather than followed: the
+  // victim is untouched and the queue file ends up a regular file. (Before
+  // this, the write itself was refused with ELOOP.)
+  it('replaces, rather than writes through, a symlink planted at the queue file name', async () => {
+    const { root, outside, b } = await fresh();
+    const victim = join(outside, 'victim.json');
+    await writeFile(victim, 'untouched');
+    await mkdir(join(root, '.nco-web-editor'), { recursive: true });
+    const queuePath = join(root, '.nco-web-editor', 'pending-queue.json');
+    if (!(await link(victim, queuePath, 'file'))) return;
+    (b as unknown as { pendingNotes: unknown[] }).pendingNotes = [{ text: 'n' }];
+
+    await (b as unknown as { persistQueue(): Promise<void> }).persistQueue();
+    assert.equal(await readFile(victim, 'utf-8'), 'untouched');
+    assert.equal((await lstat(queuePath)).isSymbolicLink(), false);
+    assert.equal(JSON.parse(await readFile(queuePath, 'utf-8')).notes.length, 1);
+  });
+
+  it('does not write the queue temp file through a symlink planted at its name', async () => {
     if (!fsConstants.O_NOFOLLOW) return; // no O_NOFOLLOW on this platform
     const { root, outside, b } = await fresh();
     const victim = join(outside, 'victim.json');
     await writeFile(victim, 'untouched');
     await mkdir(join(root, '.nco-web-editor'), { recursive: true });
-    if (!(await link(victim, join(root, '.nco-web-editor', 'pending-queue.json'), 'file'))) return;
+    if (!(await link(victim, join(root, '.nco-web-editor', 'pending-queue.json.tmp'), 'file'))) return;
     (b as unknown as { pendingNotes: unknown[] }).pendingNotes = [{ text: 'n' }];
 
     await assert.rejects(() => (b as unknown as { persistQueue(): Promise<void> }).persistQueue(), /ELOOP|symbolic/i);

@@ -41,6 +41,62 @@ function writeFileNoFollow(path: string, data: string): Promise<void> {
   return writeFile(path, data, { flag });
 }
 
+/**
+ * One writer per file. `schedule()` marks the file dirty and starts a loop if
+ * none is running; the loop writes until nothing is dirty. A request that
+ * arrives during a write therefore produces exactly one more write, however
+ * many requests there were, and the writes never overlap — so a shared `.tmp`
+ * name cannot be renamed out from under a concurrent writer (ENOENT), and the
+ * last write always reflects the latest state. This is a coalescer, not a
+ * promise chain: the body runs at call time and builds its content then, so a
+ * queued request never writes stale state.
+ */
+class CoalescingWriter {
+  private dirty = false;
+  private loop: Promise<void> | null = null;
+  private stopped = false;
+
+  constructor(
+    private readonly label: string,
+    private readonly write: () => Promise<void>,
+  ) {}
+
+  schedule(): void {
+    if (this.stopped) return;
+    this.dirty = true;
+    if (!this.loop) this.loop = this.run();
+  }
+
+  /** Resolves when no loop is running and nothing is dirty. */
+  async drain(): Promise<void> {
+    while (this.loop) await this.loop;
+  }
+
+  /** After this, `schedule()` does nothing. Does not interrupt a running loop. */
+  stop(): void {
+    this.stopped = true;
+  }
+
+  private async run(): Promise<void> {
+    try {
+      while (this.dirty) {
+        this.dirty = false;
+        try {
+          await this.write();
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          console.error(`[nco-web-editor] Failed to write ${this.label}: ${msg}`);
+        }
+      }
+    } finally {
+      this.loop = null;
+    }
+  }
+}
+
+/** Upper bound on how long `stop()` waits for the writers to finish. */
+const DRAIN_TIMEOUT_MS = 5000;
+
 /** The published Chrome Web Store extension — the only peer allowed by default. */
 export const PUBLISHED_EXTENSION_ID = 'aifpecjojmlgdhgnkmkaobmfipdmppea';
 /** Extra extension IDs (unpacked/dev builds), comma-separated. Each must be 32 chars a-p. */
@@ -98,6 +154,14 @@ export class Bridge {
   private readonly statusFilePath: string;
   private readonly lockPath: string;
   private lastStatusUpdate: string = new Date().toISOString();
+  /** Set once shutdown begins: the status file then reads `closed` whatever the queue holds. */
+  private closing = false;
+  /** Ingests in flight, so `stop()` can wait for the diffs they are about to queue. */
+  private readonly inFlightIngests = new Set<Promise<void>>();
+  // The callbacks resolve the write body when the loop runs, not when they are
+  // built, so the body is always the current one.
+  private readonly queueWriter = new CoalescingWriter('queue file', () => this.persistQueue());
+  private readonly statusWriter = new CoalescingWriter('status file', () => this.writeStatusFile());
 
   constructor(private readonly cwd: string) {
     this.persistPath = join(cwd, PERSIST_DIR, PERSIST_FILE);
@@ -133,7 +197,8 @@ export class Bridge {
         if (bound) {
           await this.restoreQueue();
           // Initialize status file — reflects restored queue state or clean start
-          await this.writeStatusFile(this.pendingQueue.length > 0 ? 'active' : 'closed');
+          this.statusWriter.schedule();
+          await this.statusWriter.drain();
           console.error(`[nco-web-editor] WebSocket server listening on port ${port}`);
           return port;
         }
@@ -148,7 +213,12 @@ export class Bridge {
     }
   }
 
-  /** Stop the WebSocket server. */
+  /**
+   * Stop the server. Order matters: stop taking input, let the ingests already
+   * running queue their diffs, flush both files, and only then give up the
+   * lock — releasing it first would let a second server start while this one
+   * is still writing. Works on a Bridge that was never started.
+   */
   async stop(): Promise<void> {
     if (this.wss) {
       for (const client of this.clients.values()) {
@@ -160,6 +230,21 @@ export class Bridge {
       });
       this.wss = null;
     }
+    await Promise.allSettled([...this.inFlightIngests]);
+
+    let timer: NodeJS.Timeout | undefined;
+    const timedOut = new Promise<'timeout'>((resolve) => {
+      timer = setTimeout(() => resolve('timeout'), DRAIN_TIMEOUT_MS);
+      timer.unref?.();
+    });
+    const drained = Promise.all([this.queueWriter.drain(), this.statusWriter.drain()]);
+    if ((await Promise.race([drained, timedOut])) === 'timeout') {
+      console.error(`[nco-web-editor] Timed out after ${DRAIN_TIMEOUT_MS}ms flushing writes at shutdown`);
+    }
+    if (timer) clearTimeout(timer);
+
+    this.queueWriter.stop();
+    this.statusWriter.stop();
     await this.releaseLock();
   }
 
@@ -302,7 +387,7 @@ export class Bridge {
     this.pendingQueue.splice(idx, 1);
     this.processedIds.add(diffId);
     this.safePersistQueue();
-    this.safeWriteStatusFile(this.pendingQueue.length > 0 ? 'active' : 'closed');
+    this.safeWriteStatusFile();
 
     // Push DIFF_APPLIED to the originating extension tab (best-effort)
     this.pushDiffApplied(diff.context.tabId, [diffId]);
@@ -328,7 +413,7 @@ export class Bridge {
     this.pendingQueue.splice(idx, 1);
     this.processedIds.add(diffId);
     this.safePersistQueue();
-    this.safeWriteStatusFile(this.pendingQueue.length > 0 ? 'active' : 'closed');
+    this.safeWriteStatusFile();
 
     // Push DIFF_APPLIED to the originating extension tab (best-effort)
     // Uses the same message type — the diff is no longer pending regardless of reason
@@ -939,11 +1024,17 @@ export class Bridge {
       payload: { diffIds },
     });
 
-    // Process asynchronously (data URL extraction may involve disk writes)
-    this.processDiffBatch(payload).catch((err) => {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[nco-web-editor] Error processing diff batch: ${msg}`);
-    });
+    // Process asynchronously (data URL extraction may involve disk writes).
+    // Tracked so stop() can wait for the diffs this is about to queue.
+    const inFlight: Promise<void> = this.processDiffBatch(payload)
+      .catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[nco-web-editor] Error processing diff batch: ${msg}`);
+      })
+      .finally(() => {
+        this.inFlightIngests.delete(inFlight);
+      });
+    this.inFlightIngests.add(inFlight);
   }
 
   private async processDiffBatch(payload: VisualDiffBatchPayload): Promise<void> {
@@ -1060,7 +1151,7 @@ export class Bridge {
       // file honest regardless.
       this.safePersistQueue();
       if (newDiffs.length > 0) {
-        this.safeWriteStatusFile('active');
+        this.safeWriteStatusFile();
       }
       try {
         this.trackDrift(newDiffs);
@@ -1163,13 +1254,24 @@ export class Bridge {
     return result;
   }
 
-  /** Write status: closed to the status file (for shutdown). */
+  /**
+   * Write status: closed to the status file (for shutdown). The latch makes
+   * every write from here on read `closed`, so an `active` request still
+   * pending cannot land after this one.
+   */
   async writeShutdownStatus(): Promise<void> {
-    await this.writeStatusFile('closed');
+    this.closing = true;
+    this.statusWriter.schedule();
+    await this.statusWriter.drain();
   }
 
-  /** Atomically write the queue status file (temp + rename). */
-  private async writeStatusFile(status: 'active' | 'closed'): Promise<void> {
+  /**
+   * Atomically write the queue status file (temp + rename). Builds its content
+   * when it runs: the status is derived from the queue as it is now, not as it
+   * was when the write was requested.
+   */
+  private async writeStatusFile(): Promise<void> {
+    const status = !this.closing && this.pendingQueue.length > 0 ? 'active' : 'closed';
     this.lastStatusUpdate = new Date().toISOString();
     const content =
       `status: ${status}\n` +
@@ -1181,27 +1283,31 @@ export class Bridge {
     await rename(tmpPath, this.statusFilePath);
   }
 
-  /** Fire-and-forget status file write with error logging. */
-  private safeWriteStatusFile(status: 'active' | 'closed'): void {
-    this.writeStatusFile(status).catch((error: unknown) => {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.error(`[nco-web-editor] Failed to write status file: ${msg}`);
-    });
+  /** Request a status file write; errors are logged by the writer. */
+  private safeWriteStatusFile(): void {
+    this.statusWriter.schedule();
   }
 
   // -----------------------------------------------------------------------
   // Persistence
   // -----------------------------------------------------------------------
 
-  /** Fire-and-forget persistence with error logging (not process-fatal). */
+  /** Request a queue file write; errors are logged by the writer (not process-fatal). */
   private safePersistQueue(): void {
-    this.persistQueue().catch((error: unknown) => {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.error(`[nco-web-editor] Failed to persist queue: ${msg}`);
-    });
+    this.queueWriter.schedule();
   }
 
+  /**
+   * The queue writer's body: builds its content when it runs, writes a temp
+   * file and renames it over the queue file. Only the writer calls it, so no
+   * two runs overlap and the fixed `.tmp` name is safe.
+   */
   private async persistQueue(): Promise<void> {
+    // The state directory was checked once, when the lock was taken. A link
+    // created after that would redirect this write (and the mkdir below), so
+    // check again on every write. A throw skips the write.
+    await this.assertRealInside(dirname(this.persistPath));
+
     if (this.pendingQueue.length === 0 && this.pendingNotes.length === 0) {
       try {
         await unlink(this.persistPath);
@@ -1222,7 +1328,21 @@ export class Bridge {
     // Compact, not indented. Indentation is quadratic in nesting depth, which
     // is what turned a small deep payload into a multi-hundred-megabyte queue
     // file. Nothing reads this by hand.
-    await writeFileNoFollow(this.persistPath, JSON.stringify(data));
+    // Temp + rename, so a crash mid-write cannot leave a truncated queue file.
+    // The temp is opened without following a link; the rename replaces a link
+    // planted at the queue file's own name instead of writing through it.
+    const tmpPath = this.persistPath + '.tmp';
+    try {
+      await writeFileNoFollow(tmpPath, JSON.stringify(data));
+      await rename(tmpPath, this.persistPath);
+    } catch (err) {
+      try {
+        await unlink(tmpPath);
+      } catch {
+        // Best effort — nothing to clean up if the temp was never created
+      }
+      throw err;
+    }
   }
 
   private async restoreQueue(): Promise<void> {
