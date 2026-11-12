@@ -64,7 +64,28 @@ The bridge is the authoritative point for `batchId` ingest and correlation:
 - **Legacy diffs (no batchId):** Diffs in the pending queue that predate batch identity have no `batchId`. These are passed through in `changes` unchanged and are omitted from the `batches` index (not grouped as a synthetic legacy entry at the bridge level — consumers handle absent `batchId` gracefully).
 
 ## Persistence
-MCP server writes pending queue to `.nco-web-editor/pending-queue.json` on each queue update (add/acknowledge/reject). File is deleted when queue is empty. On crash and restart, queue is restored from this file. `batchId` rides on each persisted `VisualDiff` and on each `PendingNote` automatically — no migration is needed. Extension persists queue to chrome.storage.session — survives page reloads and service worker suspension, cleared on browser close.
+MCP server writes pending queue to `.nco-web-editor/pending-queue.json` on each queue update (add/acknowledge/reject). File is deleted when queue is empty. On crash and restart, queue is restored from this file. `batchId` rides on each persisted `VisualDiff` and on each `PendingNote` automatically — no migration is needed. Extension persists queue to chrome.storage.session — survives page reloads and service worker suspension, cleared on browser close. The queue file and the status file are each written by a single serialised writer (a request that arrives during a write produces exactly one more write, built from the state at that time), through a temp file and a rename. The state directory is checked against its real path before every queue write. On shutdown by signal the server waits for any batch still being ingested, then for the writers to drain, and only then releases the lock. Each wait is bounded: 2 seconds for connections to close, 2 seconds for in-flight batches and 5 seconds for the writers. A timeout is logged and shutdown carries on.
+
+## Ingest Validation
+
+One rule set screens every diff before it is queued, whether it arrives live (`VISUAL_DIFF_BATCH`), through `import_session` or from the persisted queue file on restore.
+
+- **Field checks.** Beyond the diff's own shape (string `id`, `timestamp` and `status`; object `element` and `context`; array `changes` of objects; boolean `sourceVerified`; `batchId` absent or a string), each `changes[]` entry needs a string `property` and `toValue` (`''` is legal) and an absent-or-string `fromValue`, `toToken` and `unit`. `attributeChanges` is absent or an array of objects with string `attribute` and `toValue`, an absent-or-string `fromValue` and an absent-or-object `pendingUpload`. `insertChanges` is absent or an array of objects with an absent-or-string `outerHTML` and an absent-or-array `initialStyles`.
+- **A failed check drops the whole diff.** It is logged once as `Skipped diff <id> — <field path>: <expectation>`, never with the value, and nothing is reported back to the extension, which has already been sent the acknowledgement (report-back is planned for 0.3.2). `import_session` is the exception: it counts the skip and returns it in its `warnings`. Restore logs the first five reasons and then a count.
+- **First id wins.** An id already queued, or repeated within the same payload, session file or queue file, is skipped; ids being ingested concurrently are reserved so two overlapping batches cannot both queue the same one.
+- **Caps, by explicit field path** (`… [truncated]` is appended; applying a cap again changes nothing; a cut never splits a surrogate pair):
+
+  | Field | Rule |
+  |---|---|
+  | `element.textContent` | 200 characters |
+  | `element.label` | 200 characters |
+  | `element.assetPath` | over 1024: `assetPath` and `label` are both removed |
+  | `element.attributes` values | 2048 each; no limit on their number |
+  | `changes[].source.sourceHref` | 2048; `null` stays `null` |
+
+- **Selectors are never shortened.** A shortened `element.selector` would match a different element, so a diff whose selector is over 2048 characters is dropped by the field checks. The selectors inside note element references (`notes[].elements[]`) are a different case: they are display context for the designer's note, not a target to apply, and keep their 512-character truncation.
+- **Not capped, on purpose:** an insert's `outerHTML` and `textContent`, stylesheet `cssText` and a rule source's `selector`, because shortening them would corrupt what the agent applies. They remain covered by the untrusted-data framing.
+- **Not yet capped (known gap, KL-7):** other fields shaped like the capped ones: `allBreakpointSources[].sourceHref`, `relatedChanges[].element` `textContent` and `attributes`, `insertChanges[].initialStyles`, `stylesheetChanges[].elementChanges` sources, and any `assetPath`/`label` pair outside `element`. Array lengths, the number of `element.attributes` and the length of `id` are also unbounded.
 
 ## Configuration
 
