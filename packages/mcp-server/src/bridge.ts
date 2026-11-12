@@ -119,6 +119,8 @@ export const MAX_REF_TAGNAME_CHARS = 32;
 export const MAX_REF_SELECTOR_CHARS = 512;
 export const MAX_REF_TEXTCONTENT_CHARS = 200;
 export const MAX_REF_ASSETPATH_CHARS = 512;
+/** Reasons logged individually when a persisted queue holds invalid diffs; the rest are counted. */
+const MAX_RESTORE_REASONS_LOGGED = 5;
 
 /**
  * True when `child` is `root` or lies beneath it. `relative()` returns an
@@ -713,8 +715,13 @@ export class Bridge {
 
     for (const diff of session.diffs.slice(0, MAX_RESTORED_DIFFS)) {
       // Validate required VisualDiff fields before importing
-      if (!isValidDiff(diff)) {
-        warnings.push(`Skipped invalid diff entry (missing required fields)`);
+      const problem = diffProblem(diff);
+      if (problem !== null) {
+        // The id and the field path only: the warning goes back to the agent,
+        // and the value that failed came from the page.
+        const line = `Skipped diff ${Bridge.diffIdForLog(diff)} — ${problem}`;
+        console.error(`[nco-web-editor] ${line}`);
+        warnings.push(line);
         skipped++;
         continue;
       }
@@ -1062,8 +1069,9 @@ export class Bridge {
       // restore paths used to do this, so a diff arriving over the bridge
       // reached the queue unchecked and later threw in getPendingChanges or
       // acknowledgeDiff (HACK-013).
-      if (!isValidDiff(rawDiff)) {
-        console.error('[nco-web-editor] Dropping malformed diff from batch');
+      const problem = diffProblem(rawDiff);
+      if (problem !== null) {
+        console.error(`[nco-web-editor] Skipped diff ${Bridge.diffIdForLog(rawDiff)} — ${problem}`);
         continue;
       }
       // Skip diffs that are already pending, were previously processed, or are
@@ -1378,9 +1386,19 @@ export class Bridge {
         // First occurrence of an id wins. A file that repeats an id would
         // otherwise queue it twice, and acknowledging it once would leave the other.
         const seenIds = new Set<string>();
+        let invalidSeen = 0;
         const valid = data.diffs
           .slice(0, MAX_RESTORED_DIFFS)
-          .filter(isValidDiff)
+          .filter((d) => {
+            const problem = diffProblem(d);
+            if (problem === null) return true;
+            // A hostile file can hold thousands of bad entries: say why for the
+            // first few, then only count them (the total is logged below).
+            if (invalidSeen++ < MAX_RESTORE_REASONS_LOGGED) {
+              console.error(`[nco-web-editor] Skipped diff ${Bridge.diffIdForLog(d)} — ${problem}`);
+            }
+            return false;
+          })
           .filter((d) => {
             if (seenIds.has(d.id)) {
               console.error(`[nco-web-editor] Skipped duplicate diff ${Bridge.forLog(d.id)} in persisted queue`);
@@ -1969,6 +1987,15 @@ export class Bridge {
   }
 
   /**
+   * The id of a diff that may not be valid, for a log line. A non-string id is
+   * not stringified: `String()` throws on an object with its own `toString`.
+   */
+  private static diffIdForLog(raw: unknown): string {
+    const id = isObject(raw) ? raw.id : undefined;
+    return typeof id === 'string' ? Bridge.forLog(id) : '(no id)';
+  }
+
+  /**
    * Check the leading bytes against the declared type's signature.
    *
    * This is a prefix check, not content validation: a real PNG header followed
@@ -2303,28 +2330,92 @@ export class Bridge {
 // Validation helpers
 // ---------------------------------------------------------------------------
 
-/** Minimal shape check for imported VisualDiff objects. */
-function isValidDiff(obj: unknown): obj is VisualDiff {
-  if (typeof obj !== 'object' || obj === null) return false;
-  const d = obj as Record<string, unknown>;
-  return (
-    typeof d.id === 'string' &&
-    typeof d.timestamp === 'string' &&
-    typeof d.element === 'object' && d.element !== null &&
-    Array.isArray(d.changes) &&
+/** Longest `element.selector` a diff may carry. Longer means the diff is dropped, not shortened. */
+export const MAX_DIFF_SELECTOR_CHARS = 2048;
+
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
+const isOptString = (v: unknown): boolean => v === undefined || typeof v === 'string';
+
+/**
+ * Why a diff is not acceptable, or null when it is. The answer is a field path
+ * plus what was expected there. It never contains the offending value: it ends
+ * up in the server log, and the value came from the page.
+ *
+ * Only fields the server dereferences, or hands to the agent as typed data, are
+ * checked. Dereferenced here: `property`, `toValue` and `toToken` (trackDrift,
+ * extractDataUrls); attribute `toValue`, `fromValue` and `pendingUpload`
+ * (resolveAttributeAsset, saveDataUrl); `outerHTML` (extractDataUrls). Not read
+ * by the server, but passed through to the agent as typed data: change
+ * `fromValue` and `unit`, `attribute`, `initialStyles`, and the length of
+ * `selector`.
+ */
+function diffProblem(obj: unknown): string | null {
+  if (!isObject(obj)) return 'diff: expected an object';
+  const d = obj;
+  if (typeof d.id !== 'string') return 'id: expected a string';
+  if (typeof d.timestamp !== 'string') return 'timestamp: expected a string';
+  if (!isObject(d.element)) return 'element: expected an object';
+  if (!Array.isArray(d.changes)) return 'changes: expected an array';
+  for (let i = 0; i < d.changes.length; i++) {
+    const c: unknown = d.changes[i];
     // Every element is indexed by extractDataUrls and trackDrift. A null or
     // primitive entry threw there, aborting the rest of the batch silently.
-    d.changes.every((c) => typeof c === 'object' && c !== null) &&
-    typeof d.context === 'object' && d.context !== null &&
-    typeof d.status === 'string' &&
-    typeof d.sourceVerified === 'boolean' &&
-    // batchId must be a string when present: buildBatchesSummary sorts with
-    // `b.batchId.localeCompare(a.batchId)`, so a numeric one throws there and
-    // takes get_pending_visual_changes down. The queue is persisted and
-    // restoreQueue used the same check, so a single poisoned diff broke the
-    // main tool permanently, across restarts. Found reviewing the first fix.
-    (d.batchId === undefined || typeof d.batchId === 'string')
-  );
+    if (!isObject(c)) return `changes[${i}]: expected an object`;
+    if (typeof c.property !== 'string') return `changes[${i}].property: expected a string`;
+    // '' is a legal toValue (an emptied property); only a non-string is not.
+    if (typeof c.toValue !== 'string') return `changes[${i}].toValue: expected a string`;
+    if (!isOptString(c.fromValue)) return `changes[${i}].fromValue: expected a string`;
+    if (!isOptString(c.toToken)) return `changes[${i}].toToken: expected a string`;
+    if (!isOptString(c.unit)) return `changes[${i}].unit: expected a string`;
+  }
+  if (!isObject(d.context)) return 'context: expected an object';
+  if (typeof d.status !== 'string') return 'status: expected a string';
+  if (typeof d.sourceVerified !== 'boolean') return 'sourceVerified: expected a boolean';
+  // batchId must be a string when present: buildBatchesSummary sorts with
+  // `b.batchId.localeCompare(a.batchId)`, so a numeric one throws there and
+  // takes get_pending_visual_changes down. The queue is persisted and
+  // restoreQueue used the same check, so a single poisoned diff broke the
+  // main tool permanently, across restarts. Found reviewing the first fix.
+  if (d.batchId !== undefined && typeof d.batchId !== 'string') return 'batchId: expected a string';
+
+  const sel = d.element.selector;
+  if (typeof sel === 'string' && sel.length > MAX_DIFF_SELECTOR_CHARS) {
+    return `element.selector: over ${MAX_DIFF_SELECTOR_CHARS} chars`;
+  }
+
+  if (d.attributeChanges !== undefined) {
+    if (!Array.isArray(d.attributeChanges)) return 'attributeChanges: expected an array';
+    for (let i = 0; i < d.attributeChanges.length; i++) {
+      const a: unknown = d.attributeChanges[i];
+      if (!isObject(a)) return `attributeChanges[${i}]: expected an object`;
+      if (typeof a.attribute !== 'string') return `attributeChanges[${i}].attribute: expected a string`;
+      if (typeof a.toValue !== 'string') return `attributeChanges[${i}].toValue: expected a string`;
+      if (!isOptString(a.fromValue)) return `attributeChanges[${i}].fromValue: expected a string`;
+      // pendingUpload.filename is deliberately not checked: assetFilename
+      // already copes with any type.
+      if (a.pendingUpload !== undefined && !isObject(a.pendingUpload)) {
+        return `attributeChanges[${i}].pendingUpload: expected an object`;
+      }
+    }
+  }
+
+  if (d.insertChanges !== undefined) {
+    if (!Array.isArray(d.insertChanges)) return 'insertChanges: expected an array';
+    for (let i = 0; i < d.insertChanges.length; i++) {
+      const ic: unknown = d.insertChanges[i];
+      if (!isObject(ic)) return `insertChanges[${i}]: expected an object`;
+      if (!isOptString(ic.outerHTML)) return `insertChanges[${i}].outerHTML: expected a string`;
+      if (ic.initialStyles !== undefined && !Array.isArray(ic.initialStyles)) {
+        return `insertChanges[${i}].initialStyles: expected an array`;
+      }
+    }
+  }
+  return null;
+}
+
+/** Minimal shape check for VisualDiff objects. See {@link diffProblem}. */
+function isValidDiff(obj: unknown): obj is VisualDiff {
+  return diffProblem(obj) === null;
 }
 
 /** Probe whether a PID corresponds to a live process (signal 0 is a no-op probe). */
