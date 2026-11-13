@@ -738,7 +738,7 @@ nodes:
   - id: "product-src-server"
     type: "file"
     path: "packages/mcp-server/src/server.ts"
-    description: "Product source file"
+    description: "MCP server entry point: createServer() starts the stdio server and the Bridge, registerTools() registers the agent-facing tools over the Bridge, and the exported SERVER_INSTRUCTIONS is the usage guide sent to agents"
     last_verified: "2026-06-20"
     status: "unverified"
     layer: "product"
