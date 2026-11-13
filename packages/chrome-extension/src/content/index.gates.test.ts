@@ -28,7 +28,7 @@ before(() => {
     storage: { session: { get: async () => ({}), set: async () => {} }, local: { get: async () => ({}), set: async () => {} }, onChanged: { addListener() {}, removeListener() {} } },
   };
 });
-after(() => { for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete g[k]; else g[k] = v; } });
+after(() => { for (const [k, v] of Object.entries(saved)) { if (g[k] === v) continue; if (v === undefined) delete g[k]; else g[k] = v; } });
 
 function trustedFlag<T extends object>(ev: T, value: boolean): T {
   Object.defineProperty(ev, 'isTrusted', { value });
