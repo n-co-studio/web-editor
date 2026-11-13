@@ -110,6 +110,12 @@ Deferred findings from review phases that are out of the current brief's scope a
   - **Duplicate note on an edit mid-send (open; retargeted at 0.3.2).** `NotesStore.removeEntries` removes by identity, and `addElementToNote`/`removeElementFromNote` replace the entry, so a note edited while its send is in flight is delivered twice. Nothing is lost.
   - **No designer-visible send failure (open; retargeted at 0.3.2).** A failed or partial send logs to the console only.
 
+### KL-8 — tsup is no longer actively maintained
+- **File:** `packages/mcp-server/package.json`, `packages/dev-plugin/package.json` (`tsup ^9.0.0`)
+- **Symptom:** tsup's README says it is no longer actively maintained and recommends tsdown. Both packages build with tsup 9 as of 0.3.1.
+- **Follow-up:** evaluate a migration to tsdown after 0.3.1. Its output will differ from tsup's, so it needs its own branch and a dist comparison.
+- **Target:** none.
+
 ---
 
 ## Governance Tooling Defects (fix belongs upstream, in the Repo OS template)

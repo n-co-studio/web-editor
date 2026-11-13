@@ -58,6 +58,7 @@ Run through this before tagging:
   node scripts/smoke-test.mjs
   node scripts/publish-dry-run.mjs
   ```
+  Building from source needs Node 22.18+ or 24.11+ (tsup 9); the published packages still support Node 20+.
 - [ ] **No `@frontend-editor` strings** in published packages:
   ```sh
   grep -rn '@frontend-editor' packages/mcp-server/dist/ packages/dev-plugin/dist/

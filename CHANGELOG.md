@@ -25,6 +25,7 @@ Closes the three issues 0.3.0 left open (KL-3, KL-4, KL-6), makes the asset refu
 
 - **Notes still queued when the MCP server restarts come back labelled untrusted.** The server cannot tell its own queue file from one that arrived with a repository, so it treats both as untrusted, and the agent reads them as data to check rather than as requests.
 - **Unpacked development builds** have a different extension ID and need `NCO_WEB_EDITOR_EXTENSION_IDS=<id>` in the MCP server's environment.
+- **Build tooling: tsup 8 → 9**, clearing the dev-only esbuild advisory GHSA-g7r4-m6w7-qqqr. Building from source needs Node 22.18+ or 24.11+; the published packages still support Node 20+.
 - **The queue file is replaced, not refused, if a link sits at its name.** It used to be opened without following a link, so a link planted at `pending-queue.json` made the write fail. It is now written through a temporary file and renamed into place, which replaces the link itself and never writes through it. The directory check is unchanged and now runs before every write.
 
 ### Fixed
