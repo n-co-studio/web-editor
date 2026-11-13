@@ -1,21 +1,4 @@
-import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-// Resolve version from package.json at runtime (works from both src/ and dist/).
-function getVersion(): string {
-  try {
-    const require = createRequire(import.meta.url);
-    // Walk up from dist/bin/cli.js → dist/ → package root
-    const pkg = require(resolve(__dirname, '../../package.json'));
-    return (pkg as { version?: string }).version ?? '0.0.0';
-  } catch {
-    return '0.0.0';
-  }
-}
+import { PACKAGE_VERSION } from '../version.js';
 
 const HELP_TEXT = `
 nco-web-editor-mcp — MCP server bridge for AI Agent Visual Editor
@@ -70,7 +53,7 @@ SECURITY
 const args = process.argv.slice(2);
 
 if (args.includes('--version') || args.includes('-v')) {
-  process.stdout.write(getVersion() + '\n');
+  process.stdout.write(PACKAGE_VERSION + '\n');
   process.exit(0);
 }
 
@@ -81,7 +64,7 @@ if (args.includes('--help') || args.includes('-h')) {
 
 // Early startup banner on stderr so MCP hosts see stdio activity within
 // the first ~100 ms and do not time out the process during async init.
-process.stderr.write(`[nco-web-editor] MCP server starting (v${getVersion()})...\n`);
+process.stderr.write(`[nco-web-editor] MCP server starting (v${PACKAGE_VERSION})...\n`);
 
 import('../server.js').then(({ createServer }) => {
   return createServer();

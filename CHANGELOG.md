@@ -39,6 +39,7 @@ Changes to what the MCP server does with the queue and with the edits it receive
 - **Long page-derived text is shortened, with `… [truncated]` at the end.** `element.textContent` and `element.label` at 200 characters, each `element.attributes` value at 2048 (no limit on how many attributes), and `changes[].source.sourceHref` at 2048 (`null` stays `null`). An `assetPath` over 1024 characters is removed together with its `label`. Insert markup, stylesheet text, a rule's selector and an insert's own text are not shortened, because shortening them would corrupt what the agent applies. Capping the same value again changes nothing.
 - **Picked image names that Windows reserves are renamed.** A name such as `con.x.png` is saved as `_con.x-<hash>.png` instead of a name Windows treats as a device (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`, any case). A bare `con.png` is unchanged, because the hash follows the name. Saved names are also kept within 255 bytes, and a picked name over 255 characters falls back to `uploaded-<hash>`.
 - **A `data:` URL inside inserted markup or a `background-image` value is removed if saving it fails.** It used to stay inline, up to the full payload, past the size, type and content checks. This matches what attribute images already did.
+- **The MCP server now reports its real version to your agent.** It had announced 0.2.0 in every release since 0.2.0; it now reads the version from the installed package, so it can't drift again.
 
 ## [0.3.0] - 2026-10-26
 

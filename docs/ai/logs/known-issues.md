@@ -170,6 +170,8 @@ description.
 - **Why it is logged rather than fixed:** `.github/workflows/` is a governance path and is not editable in child mode. Operator decision 2026-10-26: fix upstream in `repo-OS-template` so every child repo benefits and the path lock stays meaningful.
 - **Discovered:** adversarial security review, 2026-10-26.
 
+**Deferred docs hygiene (0.3.1, not a GT item):** `COMPATIBILITY.md`, the alignment table in `RELEASING.md` and `examples/demo-app` `Troubleshooting.tsx` still show `0.2.0` as the current version (the matrices' "Current" row and the demo's extension-version line) although 0.3.x is current; left unchanged in 0.3.1 and to be corrected separately.
+
 ### GT-7 — `template-sync.yml` interpolates a workflow input straight into a shell
 - **File:** `.github/workflows/template-sync.yml:64` — `${{ github.event.inputs.source_repo }}`
 - **Symptom:** a dispatch input is interpolated directly into a `run:` block, giving arbitrary command execution in a job with `contents: write` that pushes to `main`.
