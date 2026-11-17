@@ -76,6 +76,7 @@
 .claude/.automation/tests/sandbox-setup.sh
 .claude/.automation/tests/sandbox-teardown.sh
 .claude/.automation/tests/test-branch-manager.sh
+.claude/.automation/tests/test-child-sync.sh
 .claude/.automation/tests/test-close-pipeline.sh
 .claude/.automation/tests/test-daemon-liveness.sh
 .claude/.automation/tests/test-daemon-recovery-paths.sh

@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AUTOMATION_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONF=""
 if [ -f "$AUTOMATION_DIR/child-repos.conf" ]; then
@@ -128,23 +128,83 @@ wait_for_syncs() {
 }
 
 # --- Pull local clones ---
+# Collapse git's multi-line output into one log line, masking any credentials
+# in a remote URL (the log lives in /tmp).
+_oneline() { printf '%s' "$1" | tr '\n' ' ' | sed -e 's#://[^/@ ]*@#://***@#g' -e 's/[[:space:]]*$//'; }
+
+# Bring one clone's local main up to origin/main without touching the branch
+# that is checked out. Template sync only ever lands on main, so a clone sitting
+# on a feature branch must still get main updated (a plain `git pull` there
+# pulls the feature branch's upstream, or fails when it has none).
+# Prints a one-line outcome; returns 1 when main was not brought up to date.
+# Run in a subshell: it cd's into the clone.
+_pull_one() {
+  local out counts ahead behind branch dirty where
+  cd "$1" || { echo "cannot cd into $1"; return 1; }
+  out=$(git fetch origin 2>&1) || { echo "fetch failed: $(_oneline "$out")"; return 1; }
+  git rev-parse --verify -q refs/remotes/origin/main >/dev/null || { echo "origin/main not found"; return 1; }
+  branch=$(git symbolic-ref -q --short HEAD 2>/dev/null || true)
+
+  if ! git rev-parse --verify -q refs/heads/main >/dev/null; then
+    out=$(git branch main origin/main 2>&1) || { echo "could not create main: $(_oneline "$out")"; return 1; }
+    echo "created local main from origin/main$(_branch_note "$branch")"
+    return 0
+  fi
+
+  counts=$(git rev-list --left-right --count refs/heads/main...refs/remotes/origin/main)
+  ahead=${counts%%[[:space:]]*}
+  behind=${counts##*[[:space:]]}
+  if [ "$ahead" -gt 0 ]; then
+    echo "main diverged ($ahead ahead / $behind behind origin/main) — manual"
+    return 1
+  fi
+  if [ "$behind" -eq 0 ]; then
+    echo "main up to date$(_branch_note "$branch")"
+    return 0
+  fi
+
+  if [ "$branch" = "main" ]; then
+    # Untracked files don't block a fast-forward that doesn't touch them.
+    dirty=$(git status --porcelain --untracked-files=no | wc -l | tr -d '[:space:]')
+    if [ "$dirty" -gt 0 ]; then
+      echo "main checked out and dirty, $dirty files — skipped ($behind behind origin/main)"
+      return 1
+    fi
+    out=$(git pull --ff-only origin main 2>&1) || { echo "pull failed: $(_oneline "$out")"; return 1; }
+  else
+    # Fast-forward only; git refuses if main is checked out in another worktree.
+    out=$(git fetch origin main:main 2>&1) || { echo "could not update main: $(_oneline "$out")"; return 1; }
+  fi
+  echo "main updated ($behind commits)$(_branch_note "$branch")"
+}
+
+# "; <branch> checked out, N behind main" — empty when main itself is checked out.
+_branch_note() {
+  case "$1" in
+    main) ;;
+    "") printf '; detached HEAD left alone' ;;
+    *) printf '; %s checked out, %s behind main' "$1" "$(git rev-list --count "refs/heads/$1..refs/heads/main")" ;;
+  esac
+}
+
 pull_locals() {
   _PULL_SUCCESS=0
   _PULL_FAILED=0
 
+  local outcome
   while read -r repo_name local_path; do
-    if [ ! -d "$local_path/.git" ]; then
+    if [ ! -e "$local_path/.git" ]; then
       log "  SKIP: $local_path (not a git clone)"
       _PULL_FAILED=$((_PULL_FAILED + 1))
       continue
     fi
 
     # Subshell prevents persistent cd from corrupting loop iterations (audit 6.2)
-    if (cd "$local_path" && git pull --ff-only) 2>/dev/null; then
-      log "  Pulled: $repo_name → $local_path"
+    if outcome=$(_pull_one "$local_path"); then
+      log "  Pulled: $repo_name → $local_path ($outcome)"
       _PULL_SUCCESS=$((_PULL_SUCCESS + 1))
     else
-      log "  FAIL: $repo_name — pull failed (may have local changes)"
+      log "  FAIL: $repo_name — $outcome"
       _PULL_FAILED=$((_PULL_FAILED + 1))
     fi
   done < <(read_repos)
@@ -197,4 +257,7 @@ main() {
   log "=== Done ==="
 }
 
-main "$@"
+# Sourced by test-child-sync.sh for pull_locals; run main only when executed.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main "$@"
+fi
