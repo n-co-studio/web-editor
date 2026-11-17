@@ -11,6 +11,12 @@
 # Strict mode (tests should fail loudly on unexpected errors)
 set -euo pipefail
 
+# Suites run inside a Claude Code Bash, which exports the operator's own session
+# id and claude pid. Identity resolves from these first (Decision t-0065), so a
+# suite that inherited them would key its sandbox on the operator's real session.
+# Cases that test env resolution set them explicitly.
+unset CLAUDE_CODE_SESSION_ID CLAUDE_PID
+
 # --- TAP counters ---
 _TAP_TEST_NUM=0
 _TAP_PASS=0

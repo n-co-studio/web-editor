@@ -181,6 +181,32 @@ else
 fi
 assert_eq "$GATES_CURRENT_PHASE" "drift-check" "GATES_CURRENT_PHASE reflects post-advance phase"
 
+tap_section "L1d.11: a cached blocked overlap verdict is a miss (R48(c))"
+
+# The cache is computed once per phase. Before R48(c) a blocked verdict was
+# served until the next advance_phase, so a session stayed blocked after the
+# overlapping session had ended. Now a blocked verdict is never served: the
+# hooks re-run check_session_overlap inline.
+compute_phase_gates
+_l1d_tmp="$GATES_FILE.l1d11"
+sed 's/^GATES_SESSION_OVERLAP=.*/GATES_SESSION_OVERLAP=blocked/' "$GATES_FILE" > "$_l1d_tmp"
+mv "$_l1d_tmp" "$GATES_FILE"
+assert_file_contains "$GATES_FILE" "^GATES_SESSION_OVERLAP=blocked" "fixture: cache records a blocked overlap verdict"
+rc=0
+read_phase_gates 2>/dev/null || rc=$?
+assert_neq "$rc" "0" "read_phase_gates misses on a cached blocked verdict"
+# With the blocking record gone (no other session registered), the inline
+# check the hooks fall back to passes.
+rc=0
+check_session_overlap >/dev/null 2>&1 || rc=$?
+assert_eq "$rc" "0" "inline check_session_overlap passes once the overlapping session is gone"
+
+# Positive control: the same cache with an ok verdict is still served.
+compute_phase_gates
+rc=0
+read_phase_gates 2>/dev/null || rc=$?
+assert_ok "$rc" "read_phase_gates serves a cache with GATES_SESSION_OVERLAP=ok"
+
 # ============================================================
 # Summary
 # ============================================================

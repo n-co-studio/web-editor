@@ -40,6 +40,12 @@
 
 set -uo pipefail   # deliberately NOT -e: a failing case must not abort the run
 
+# The cases run real hooks against a sandbox with its own session id. Run from a
+# Claude Code shell, the operator's CLAUDE_CODE_SESSION_ID would be inherited and
+# win over that id (Decision t-0065), so every case would key on the wrong
+# session.
+unset CLAUDE_CODE_SESSION_ID CLAUDE_PID
+
 VERBOSE=0
 [ "${1:-}" = "-v" ] && VERBOSE=1
 

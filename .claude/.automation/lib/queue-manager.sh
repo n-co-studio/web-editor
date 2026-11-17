@@ -349,7 +349,9 @@ _write_queue_entry() {
     printf '  pr:\n'
     printf '    number: %s\n' "${_QE_PR_NUMBER:-0}"
     printf '    url: "%s"\n' "$(_yaml_escape_scalar "${_QE_PR_URL:-}")"
-  } > "$tmp_file"
+  } > "$tmp_file" || return 1
+  # -f: never mv something that is not the file just written into place.
+  [ -f "$tmp_file" ] || return 1
   mv "$tmp_file" "$entry_file"
 }
 
@@ -492,10 +494,14 @@ _rebuild_queue_index() {
 #   $1 — entry_id (UUID, used as filename without .yaml)
 #   $2 — from_status (current directory name)
 #   $3 — to_status (target directory name)
+#   $4 — auto_mode (optional: true | false), set in the same write, so a failed
+#        transition never leaves a changed mode behind (Decision t-0067)
+# Returns 1, leaving the entry where it was, if the destination cannot be written.
 _transition() {
   local entry_id="$1"
   local from_status="$2"
   local to_status="$3"
+  local auto_mode="${4:-}"
   local qdir
   qdir=$(_queue_dir)
   local src_file="$qdir/$from_status/${entry_id}.yaml"
@@ -508,9 +514,16 @@ _transition() {
   _load_queue_entry "$src_file"
   _QE_STATUS="$to_status"
   _QE_UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  if [ -n "$auto_mode" ]; then
+    _QE_AUTO_MODE="$auto_mode"
+  fi
 
   local dst_file="$qdir/$to_status/${entry_id}.yaml"
-  _write_queue_entry "$dst_file"
+  if ! _write_queue_entry "$dst_file" 2>/dev/null; then
+    rm -f "${dst_file}.tmp" 2>/dev/null
+    echo "ERROR: Could not write $dst_file — $entry_id left in $from_status/" >&2
+    return 1
+  fi
   rm -f "$src_file"
   # Post-removal verification: confirm source file is actually gone
   if [ -f "$src_file" ]; then
@@ -904,6 +917,89 @@ queue_enqueue() {
 queue_approve() {
   local entry_id="$1"
   _transition "$entry_id" "pending-review" "approved"
+}
+
+# --- Approve a draft with the approver's mode (Decision t-0067) ---
+# mode review|auto sets auto_mode in the transition's own write; empty keeps the
+# entry's. A failed approval leaves the entry, mode included, as it was.
+# Arguments:
+#   $1 — entry_id
+#   $2 — mode (optional: review | auto)
+queue_approve_with_mode() {
+  local entry_id="$1" mode="${2:-}" auto=""
+  case "$mode" in
+    '') ;;
+    auto)   auto="true" ;;
+    review) auto="false" ;;
+    *) echo "ERROR: --mode must be review or auto" >&2; return 1 ;;
+  esac
+  _transition "$entry_id" "pending-review" "approved" "$auto"
+}
+
+# --- Approve every pending draft of a work order together (Decision t-0067) ---
+# All or nothing: the caller holds the queue lock, every pending child is read
+# first, and if one fails to move the ones already approved go back to
+# pending-review with their own mode. Children already past pending-review are
+# left alone. Prints each approved id once all of them moved.
+# Arguments:
+#   $1 — work order id
+#   $2 — mode (optional: review | auto)
+queue_approve_work_order() {
+  local wo_id="$1" mode="${2:-}" qdir
+  qdir=$(_queue_dir)
+  case "$mode" in
+    ''|review|auto) ;;
+    *) echo "ERROR: --mode must be review or auto" >&2; return 1 ;;
+  esac
+  _load_work_order "$(_wo_dir)/${wo_id}.yaml" || {
+    echo "ERROR: Work order $wo_id not found" >&2
+    return 1
+  }
+  local ids _id _p pending="" moved=""
+  ids=$(printf '%s' "$_WO_ENTRY_IDS" | tr ',' ' ')
+  for _id in $ids; do
+    [ -f "$qdir/pending-review/${_id}.yaml" ] || continue
+    if ! _load_queue_entry "$qdir/pending-review/${_id}.yaml"; then
+      echo "ERROR: Could not read draft $_id — nothing approved" >&2
+      return 1
+    fi
+    pending="$pending $_id:${_QE_AUTO_MODE:-false}"
+  done
+  for _p in $pending; do
+    if ! queue_approve_with_mode "${_p%%:*}" "$mode"; then
+      for _p in $moved; do
+        _transition "${_p%%:*}" "approved" "pending-review" "${_p#*:}" \
+          || echo "ERROR: Could not return ${_p%%:*} to pending-review" >&2
+      done
+      echo "ERROR: Work order $wo_id not approved — its drafts are back in pending-review" >&2
+      return 1
+    fi
+    moved="$moved $_p"
+  done
+  for _p in $moved; do
+    printf '%s\n' "${_p%%:*}"
+  done
+}
+
+# --- Where a draft stands (Decision t-0067) ---
+# Prints "<status> <mode>" (mode review|auto from auto_mode), or "absent -".
+# Arguments:
+#   $1 — entry_id
+queue_entry_state() {
+  local entry_id="$1" qdir status
+  qdir=$(_queue_dir)
+  for status in pending-review approved running completed failed review blocked stopped; do
+    if [ -f "$qdir/$status/${entry_id}.yaml" ]; then
+      _load_queue_entry "$qdir/$status/${entry_id}.yaml"
+      if [ "$_QE_AUTO_MODE" = "true" ]; then
+        printf '%s auto\n' "$status"
+      else
+        printf '%s review\n' "$status"
+      fi
+      return 0
+    fi
+  done
+  printf 'absent -\n'
 }
 
 # --- Return a reviewed entry to the queue ---
@@ -2279,7 +2375,7 @@ queue_defer() {
 # survive; `queue_resume` puts the entry back in approved/.
 # Arguments:
 #   $1 — entry_id
-#   $2 — stopped_mode: graceful | forced
+#   $2 — stopped_mode: graceful | forced | question (Decision t-0068)
 queue_stop() {
   local entry_id="$1"
   local mode="${2:-graceful}"

@@ -72,6 +72,8 @@ source "$LIB_DIR/cache-builder.sh"
 source "$LIB_DIR/file-lock.sh"
 # shellcheck source=lib/health-check.sh
 source "$LIB_DIR/health-check.sh"
+# shellcheck source=lib/question-channel.sh
+source "$LIB_DIR/question-channel.sh"
 # shellcheck source=lib/remediation-trigger.sh
 source "$LIB_DIR/remediation-trigger.sh"
 # shellcheck source=lib/overlap-report.sh
@@ -470,11 +472,74 @@ _start_heartbeat() {
       date -u +%Y-%m-%dT%H:%M:%SZ > "${hb_file}.tmp" 2>/dev/null \
         && mv "${hb_file}.tmp" "$hb_file" 2>/dev/null || true
       # Also update the health file to keep it current during long sessions
-      _write_health "running" 2>/dev/null || true
+      _write_health "$(_entry_health_status "$entry_id")" 2>/dev/null || true
       sleep "$interval"
     done
   ) &
   _HEARTBEAT_PID=$!
+}
+
+# --- Health status for a running entry (Decision t-0064 § 3) ---
+# `awaiting-answer` while the entry has an open question (paused), else
+# `running`. Paused is neither idle nor a failure.
+_entry_health_status() {
+  if qc_entry_has_open_question "$AUTOMATION_DIR" "$1" 2>/dev/null; then
+    printf 'awaiting-answer'
+  else
+    printf 'running'
+  fi
+}
+
+# --- Record whether the entry was paused when its child exited ---
+# Called once the child has exited. A session ended from outside while it was
+# waiting on the operator (TTL, crash) is not a repo failure, so the failure
+# arm reads _ENTRY_PAUSED_AT_EXIT to keep it off the circuit breaker. Any
+# question still open is then closed as abandoned, so a retry of the entry is
+# not reported as paused on a question nobody is waiting on. The record itself
+# stays on disk (Decision t-0064 § 3-4).
+_ENTRY_PAUSED_AT_EXIT=false
+_record_question_pause_at_exit() {
+  _ENTRY_PAUSED_AT_EXIT=false
+  if qc_entry_has_open_question "$AUTOMATION_DIR" "$1" 2>/dev/null; then
+    _ENTRY_PAUSED_AT_EXIT=true
+    echo "Entry $1 exited while awaiting an operator answer — its open question is closed as abandoned." >&2
+  fi
+  qc_close_open_for_entry "$AUTOMATION_DIR" "$1" abandoned 2>/dev/null || true
+}
+
+# --- First message of a resumed session ---
+# A resume continues an existing transcript, so the whole brief is already in
+# the child's context — re-sending it would duplicate it. The message is the
+# operator's instruction to carry on. For an entry parked on a question
+# (Decision t-0068) it is the answer, in the wording the hook uses during the
+# live wait, so the agent cannot tell a late answer from a prompt one. The phase
+# chain, unlike the transcript, does NOT survive the stop (cleanup_session_files
+# removes phase-state at close and state_manager_setup re-inits at `init`), so
+# the message says so rather than letting the agent assume otherwise.
+# Arguments: $1 entry id, $2 stopped_mode. Prints the message.
+_resume_message() {
+  local entry="$1" mode="$2" cdir="" qid="" answer="" msg
+  cdir=$(get_control_dir "$entry" 2>/dev/null) || cdir=""
+  if [ -n "$cdir" ] && [ -f "$cdir/resume.yaml" ]; then
+    qid=$(qc_resume_question_id "$cdir/resume.yaml") || qid=""
+  fi
+  if [ -z "$qid" ] && [ "$mode" = "question" ]; then
+    qid=$(qc_parked_for_entry "$AUTOMATION_DIR" "$entry" 2>/dev/null | tail -1) || qid=""
+  fi
+  if [ -n "$qid" ] && answer=$(qc_read_answer "$AUTOMATION_DIR" "$qid" 2>/dev/null); then
+    msg=$(qc_answer_message "$qid" "$answer")
+  elif [ -n "$qid" ]; then
+    # Only `resume-entry --force` gets here: the operator chose to resume
+    # without answering, which is the operator's decision to let the agent's
+    # choice stand.
+    msg="Resumed by operator without an answer to question $qid. Choose the option that fits the brief and the work so far, state your choice and the reason for it as an explicit ASSUMPTION in your next reply and in your session log, then continue."
+  else
+    msg="Resumed by operator."
+  fi
+  if [ "$mode" = "forced" ]; then
+    msg="$msg The previous session was force-stopped; check the working tree before continuing."
+  fi
+  printf '%s Session state was reset to the init phase at the stop, so re-advance the phases from where your work actually stands.' "$msg"
 }
 
 _stop_heartbeat() {
@@ -826,15 +891,15 @@ _startup_crash_recovery() {
   # six lines above an existing one, so the fix is a deletion.
   #
   # Being precise about what step 5 does guarantee, because an earlier version
-  # of this comment overclaimed it: `sweep_stale_sessions` reaps per-process
-  # sidecars on the decisive sidecar test, and removes a registry entry when the
-  # recorded pid is dead. Its 24h and TTL arms used to remove the entry
+  # of this comment overclaimed it: `sweep_stale_sessions` reaps dead-pid legacy
+  # sidecars, and removes a registry entry when the recorded pid (the claude
+  # process since Decision t-0065) is dead. Its 24h and TTL arms used to remove the entry
   # "regardless of PID" — which took the state directory with it, since the
   # orphaned-state-dir loop keys on a missing registry entry. That is what
   # actually destroyed a live ~16h session's state on 2026-10-21, and both arms
   # are now gated on pid liveness. The deletion site itself — the orphaned
-  # state-dir loop — is gated too, on the per-process sidecar and on
-  # REPO_OS_SESSION_ID, so a live session keeps its state even if something else
+  # state-dir loop — is gated too, on _session_is_live (the session's own env id,
+  # or a live legacy sidecar), so a live session keeps its state even if something else
   # has already removed its registry entry. That belt-and-braces matters because
   # the call below passes no exclude_sid and cannot: the daemon does not register
   # itself and has no way to name a concurrent interactive session.
@@ -1680,6 +1745,7 @@ _run_single_entry() {
 
   # Reset globals
   _RESULT_OUTCOME=""
+  _ENTRY_PAUSED_AT_EXIT=false
   _RESULT_BASELINE=""
   _RESULT_SOLO_MODE=""
   _RESULT_BRANCH=""
@@ -1825,7 +1891,7 @@ _run_single_entry() {
   # Set automation context for analytics hooks (inherited by claude -p child)
   export REPO_OS_AUTOMATION_ENTRY="$brief_id"
   # Set headless flag for hooks. Consumed by:
-  #   ask-user-deny.sh — blocks AskUserQuestion
+  #   ask-user-deny.sh — records the question and waits for an answer (t-0064)
   #   pre-commit-gates.sh — adjusts GATE-RECOVERABLE messages, writes A1 escalation
   #   permission-request.sh — denies fall-through (fail-closed)
   export CLAUDE_HEADLESS=1
@@ -2012,6 +2078,20 @@ _run_single_entry() {
   local _session_launch_epoch
   _session_launch_epoch=$(date +%s)
   local _ttl_watchdog_pid=""
+  # A headless question's live wait counts toward the TTL; parked time does not
+  # (the session has ended). The deadline is exported so ask-user-deny.sh parks
+  # before the watchdog kills the session, and the configured wait is checked
+  # against the TTL so a misconfiguration is visible (Decision t-0068 § 5).
+  unset REPO_OS_SESSION_DEADLINE_EPOCH
+  case "$_session_max_ttl" in ''|*[!0-9]*) _session_max_ttl=21600 ;; esac
+  if [ "$_session_max_ttl" -gt 0 ]; then
+    export REPO_OS_SESSION_DEADLINE_EPOCH=$((_session_launch_epoch + _session_max_ttl))
+    local _q_wait
+    _q_wait=$(qc_config_int "$AUTOMATION_DIR" question_timeout_seconds 1800)
+    if [ "$_q_wait" -ge "$_session_max_ttl" ]; then
+      echo "WARNING: runner.question_timeout_seconds ($_q_wait) is not below runner.session_max_ttl_seconds ($_session_max_ttl) — a question's live wait is cut short to park 60s before the session TTL" >&2
+    fi
+  fi
 
   # Graceful-stop grace period (stop_grace_seconds: 0 = never escalate,
   # default 120). Backstop for a graceful stop the PreToolUse hook never gets
@@ -2190,6 +2270,12 @@ _run_single_entry() {
     _FORCE_HALT_WATCHER_PID=""
   fi
   _stop_stop_watcher
+  unset REPO_OS_SESSION_DEADLINE_EPOCH
+  _record_question_pause_at_exit "$brief_id"
+  # A question parked during THIS launch ended the run (Decision t-0068): the
+  # launch-time bound keeps an earlier park of a resumed entry from counting.
+  local _parked_question=""
+  _parked_question=$(qc_parked_for_entry "$AUTOMATION_DIR" "$brief_id" "$_session_launch_epoch" 2>/dev/null | tail -1) || _parked_question=""
   # The child has exited — whether it finished, was stopped or was killed, the
   # entry is no longer running (Decision t-0055). child_pid is cleared so a
   # reader never mistakes a recycled pid for this session's process.
@@ -2214,15 +2300,18 @@ _run_single_entry() {
   # work, and detect_outcome would read it as a failure and burn a retry.
   # FORCE wins over STOP — the watcher escalates by writing FORCE alongside it,
   # and the mode the operator ends up with is the one that killed the child.
+  # A parked question (Decision t-0068) sits between them: a FORCE killed the
+  # child regardless, but a pending graceful STOP did not end the run — the
+  # park did, and only an answer resumes it usefully.
   local _stopped_mode=""
   local _control_dir=""
   _control_dir=$(get_control_dir "$brief_id" 2>/dev/null) || _control_dir=""
-  if [ -n "$_control_dir" ]; then
-    if [ -f "$_control_dir/FORCE" ]; then
-      _stopped_mode="forced"
-    elif [ -f "$_control_dir/STOP" ]; then
-      _stopped_mode="graceful"
-    fi
+  if [ -n "$_control_dir" ] && [ -f "$_control_dir/FORCE" ]; then
+    _stopped_mode="forced"
+  elif [ -n "$_parked_question" ]; then
+    _stopped_mode="question"
+  elif [ -n "$_control_dir" ] && [ -f "$_control_dir/STOP" ]; then
+    _stopped_mode="graceful"
   fi
 
   # Durable resume handle. The session record is deleted by unregister_session()
@@ -2238,10 +2327,18 @@ _run_single_entry() {
         printf 'repo_os_session_id: "%s"\n' "${REPO_OS_SESSION_ID:-}"
         printf 'stopped_mode: "%s"\n' "$_stopped_mode"
         printf 'stopped_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        # Also under a FORCE that raced the park: the question is still the
+        # thing the resumed session needs answered.
+        if [ -n "$_parked_question" ]; then
+          printf 'question_id: "%s"\n' "$_parked_question"
+        fi
       } > "$_control_dir/resume.yaml" 2>/dev/null || \
         echo "WARNING: failed to write the resume handle for entry $brief_id — it will restart from a fresh session" >&2
     else
       echo "WARNING: entry $brief_id was stopped but has no Claude session id — resume will start a fresh session" >&2
+      # A handle left by an EARLIER stop would otherwise be read on resume: its
+      # Claude session id and (t-0068) its question_id describe that stop, not this one.
+      rm -f "$_control_dir/resume.yaml" 2>/dev/null || true
     fi
     # Both flags are cleared once the stop has been honoured, so the entry can
     # be resumed (and stopped again) without the stale flag stopping it on its
@@ -2269,8 +2366,12 @@ _run_single_entry() {
     if [ "$_CURRENT_WORKTREE_IS_GROUP" = true ]; then
       # Snapshot even though the tree is kept: the next brief may reset it, and
       # the entry's error_log should still lead somewhere (Decision t-0062).
-      preserve_uncommitted_work "$_CURRENT_WORKTREE_DIR" "$_RESULT_BASELINE" "$brief_id" "$_RESULT_OUTCOME" || true
-      _RESULT_PRESERVED_PATCH="$_PRESERVED_PATCH_PATH"
+      # Not for a park (Decision t-0068): the brief holds the group until it is
+      # answered and finishes, so no later brief can reset the tree under it.
+      if [ "$_RESULT_OUTCOME" != "stopped:question" ]; then
+        preserve_uncommitted_work "$_CURRENT_WORKTREE_DIR" "$_RESULT_BASELINE" "$brief_id" "$_RESULT_OUTCOME" || true
+        _RESULT_PRESERVED_PATCH="$_PRESERVED_PATCH_PATH"
+      fi
       # Task group worktree (Decision 0054): keep it for the next brief. The
       # occupancy lock is deliberately NOT released here — it stays held across
       # _solo_merge_if_needed so no other session can claim the worktree in the
@@ -2472,6 +2573,33 @@ _pr_poll_sweep() {
       echo "Pull request #${_PR_NUMBER:-?} for entry $eid has merged — branch sealed, local main synced" >&2
     fi
   done
+}
+
+# --- Push main after a solo merge (Decision t-0066) ---
+# The only place the runner publishes main. Pushes only when the entry asked
+# for it with push_on_complete; there is no fallback push, so an entry queued
+# without --push leaves origin alone. The cwd may be the session's worktree
+# rather than the main checkout; `main` and `origin` are repo-wide, so the
+# merged main is what is pushed either way.
+# Arguments: $1 brief_id, $2 push_on_complete ("true"/"false")
+_push_main_after_merge() {
+  local brief_id="$1" push_on_complete="${2:-false}"
+  if [ "$push_on_complete" != "true" ]; then
+    _close_record "$brief_id" "" "push" "skipped" "push_on_complete false"
+    return 0
+  fi
+  if ! git remote get-url origin >/dev/null 2>&1; then
+    _close_record "$brief_id" "" "push" "skipped" "no origin remote"
+    return 0
+  fi
+  if git push -u origin main >/dev/null 2>&1; then
+    _close_record "$brief_id" "pushed" "push" "done" "origin main"
+  else
+    echo "WARNING: push_on_complete failed — run 'git push origin main' manually" >&2
+    # State stays `merged`: main HAS the work, only origin does not.
+    _close_record "$brief_id" "" "push" "failed" "git push -u origin main failed"
+  fi
+  return 0
 }
 
 # ============================================================
@@ -2810,28 +2938,7 @@ _solo_merge_if_needed() {
             } > "$_esc_dir/${_stale_esc_id}.yaml" 2>/dev/null || true
             echo "Escalation written: $_stale_esc_id" >&2
           fi
-          # Push to remote — push_on_complete or advisory fallback
-          local _repo_mode_file="$REPO_ROOT/.claude/repo-mode"
-          local _is_template=false
-          [ -f "$_repo_mode_file" ] && grep -q "template" "$_repo_mode_file" 2>/dev/null && _is_template=true
-          if [ "$push_on_complete" = "true" ] && git remote get-url origin >/dev/null 2>&1; then
-            if git push -u origin main >/dev/null 2>&1; then
-              _close_record "$brief_id" "pushed" "push" "done" "origin main"
-            else
-              echo "WARNING: push_on_complete failed — run 'git push origin main' manually" >&2
-              # State stays `merged`: main HAS the work, only origin does not.
-              _close_record "$brief_id" "" "push" "failed" "git push -u origin main failed"
-            fi
-          elif [ "$_is_template" = false ] && git remote get-url origin >/dev/null 2>&1; then
-            if git push origin main >/dev/null 2>&1; then
-              _close_record "$brief_id" "pushed" "push" "done" "origin main (advisory push)"
-            else
-              echo "Advisory: push to origin failed — run 'git push origin main' manually" >&2
-              _close_record "$brief_id" "" "push" "failed" "advisory push to origin main failed"
-            fi
-          else
-            _close_record "$brief_id" "" "push" "skipped" "no push configured for this repo"
-          fi
+          _push_main_after_merge "$brief_id" "$push_on_complete"
         elif [ "$_merge_conflict" = true ]; then
           # Merge conflict — write scope-deviation escalation and transition to review
           git checkout "$entry_current_branch" 2>/dev/null || true
@@ -3265,15 +3372,17 @@ _check_same_filesystem
 
 _DAEMON_START_EPOCH=$(date +%s)
 
-# --- Pin a stable daemon-level identity (per-process session identity) ---
+# --- Pin a stable daemon-level identity ---
 # The daemon's own loop calls get_session_id/get_session_state_dir (startup
 # sweeps, review-item scoring, cleanup). Without REPO_OS_SESSION_ID those hit
-# get_session_id's no-stdin fallback and write a SHARED flat .claude/.session-id,
-# which an interactive window can then ADOPT (no sidecar exists to trigger a mint)
-# — re-aliasing the very thing the per-process identity scheme fixes. Pinning an
-# env id here makes the daemon's get_session_id return it and write neither the
-# flat file nor a sidecar. Per-brief processing overrides this with its own
-# isolated daemon-<ts> id (+ worktree); the loop re-asserts this id each iteration.
+# get_session_id's last fallback and write a flat .claude/.session-id. Since
+# Decision t-0065 an interactive window never reads that file, but a fixture or
+# manual shell would adopt the daemon's id from it. A daemon started from a
+# Claude Code shell would instead inherit the operator's CLAUDE_CODE_SESSION_ID
+# and act as the operator's session. Pinning an env id here makes the daemon's
+# get_session_id return it, ahead of both, and write no identity file.
+# Per-brief processing overrides this with its own isolated daemon-<ts> id
+# (+ worktree); the loop re-asserts this id each iteration.
 _DAEMON_SESSION_ID="daemon-main-${_DAEMON_START_EPOCH}-$$"
 export REPO_OS_SESSION_ID="$_DAEMON_SESSION_ID"
 
@@ -3745,17 +3854,7 @@ while true; do
 
   # --- Assemble prompt (lazy generation at dequeue time) ---
   if [ "$ENTRY_RESUME" = true ]; then
-    # A resume continues an existing transcript, so the whole brief is already
-    # in the child's context — re-sending it would duplicate it. The message is
-    # the operator's instruction to carry on. The phase chain, unlike the
-    # transcript, does NOT survive the stop (cleanup_session_files removes
-    # phase-state at close and state_manager_setup re-inits at `init`), so the
-    # message says so rather than letting the agent assume otherwise.
-    PROMPT="Resumed by operator."
-    if [ "$ENTRY_STOPPED_MODE" = "forced" ]; then
-      PROMPT="$PROMPT The previous session was force-stopped; check the working tree before continuing."
-    fi
-    PROMPT="$PROMPT Session state was reset to the init phase at the stop, so re-advance the phases from where your work actually stands."
+    PROMPT=$(_resume_message "$ENTRY_ID" "$ENTRY_STOPPED_MODE")
   else
     PROMPT=$(assemble_prompt "$ENTRY_FILE")
   fi
@@ -4080,8 +4179,15 @@ $_ENTRY_NOTES"
       # wo_check_completion call to make here.
       _LAST_SESSION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
       _CONSECUTIVE_SESSION_COUNT=$((_CONSECUTIVE_SESSION_COUNT + 1))
-      review_log_append "entry-stopped" "${ENTRY_WORK_ORDER_ID:-}" "$ENTRY_ID" \
-        "Entry $ENTRY_ID stopped by operator (${OUTCOME_RAW#*:}) — worktree and Claude session kept. Resume with: queue-cli.sh resume-entry $ENTRY_ID" 2>/dev/null || true
+      if [ "$OUTCOME_RAW" = "stopped:question" ]; then
+        # A park (Decision t-0068) is the session waiting on the operator, not
+        # an operator stop — same counters, different instruction.
+        review_log_append "entry-stopped" "${ENTRY_WORK_ORDER_ID:-}" "$ENTRY_ID" \
+          "Entry $ENTRY_ID parked on an unanswered question — worktree and Claude session kept. Answer with: queue-cli.sh answer $ENTRY_ID --question <q-id> --text TEXT (see queue-cli.sh --json show $ENTRY_ID)" 2>/dev/null || true
+      else
+        review_log_append "entry-stopped" "${ENTRY_WORK_ORDER_ID:-}" "$ENTRY_ID" \
+          "Entry $ENTRY_ID stopped by operator (${OUTCOME_RAW#*:}) — worktree and Claude session kept. Resume with: queue-cli.sh resume-entry $ENTRY_ID" 2>/dev/null || true
+      fi
       ;;
     failed|*)
       # An operator force-halt is not a repo failure. Since the in-session
@@ -4104,6 +4210,10 @@ $_ENTRY_NOTES"
         # resolve. Counting it would let one conflicted group trip the breaker
         # and stall every unrelated queue entry.
         echo "Rebase conflict — not counted against the circuit breaker." >&2
+      elif [ "${_ENTRY_PAUSED_AT_EXIT:-false}" = true ]; then
+        # Ended from outside while waiting on an operator answer (Decision
+        # t-0064 § 3). The operator not answering is not a repo failure.
+        echo "Session ended while awaiting an operator answer — not counted against the circuit breaker." >&2
       else
         _circuit_breaker_increment
       fi

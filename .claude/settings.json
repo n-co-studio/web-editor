@@ -76,7 +76,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/ask-user-deny.sh"
+            "command": ".claude/hooks/ask-user-deny.sh",
+            "timeout": 14430,
+            "onFailure": "block"
           }
         ]
       }

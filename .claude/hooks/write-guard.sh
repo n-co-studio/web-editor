@@ -121,6 +121,20 @@ fi
 
 REPO_ROOT="$_REPO_OS_ROOT"
 
+# --- A write path may not climb with '..' (t-0067 security review) ---
+# Every guard below matches path TEXT — .claude/.state/, .claude/.automation/queue/,
+# .claude/.automation/briefs/ — so a path that climbs out with '..' can name a
+# protected file while matching none of them: briefs/../../.state/<sid>/plan-approved
+# passed the state guard and then the taskdef-brief briefs/ allow. Edit and Write
+# take absolute paths; an honest one never needs a '..' segment. No override.
+case "/$FILE_PATH/" in
+  */../*)
+    log_hook_event "write-guard" "PreToolUse" "" "block" "$START_MS" "dotdot_path"
+    echo "GATE-FINAL: refusing a write path with a '..' segment ($FILE_PATH). The guards match path text, so give the resolved absolute path. (no override)" >&2
+    exit 2
+    ;;
+esac
+
 # ============================================================
 # Section 1: State-Guard (blocks writes to .claude/.state/ and .claude/.session-id)
 #             + Queue-Guard (blocks writes to .claude/.automation/queue/)
@@ -152,17 +166,20 @@ if [ "$SKIP_STATE_GUARD" = false ]; then
     TARGETS="$_CACHED_WRITE_TARGETS"
     while IFS= read -r WT; do
       [ -z "$WT" ] && continue
-      if [[ "$WT" == *".claude/.state/"* ]] || [[ "$WT" == *".claude/.session-id"* ]]; then
-        _wt_abs=$(resolve_path "$WT")
+      # Match on the resolved path: a Bash target may climb with '..'
+      # (briefs/../../.state/...), which the raw text hides (R50). The trailing
+      # '/' keeps a directory target (cp f .claude/.state/./) matching once
+      # normalisation has dropped its slash.
+      _wt_abs=$(resolve_path "$WT")
+      if [[ "$_wt_abs/" == *".claude/.state/"* ]] || [[ "$_wt_abs" == *".claude/.session-id"* ]]; then
         if is_in_repo "$_wt_abs" "$REPO_ROOT"; then
           TARGETS_STATE=true
-          STATE_TARGET_PATH="$WT"
+          STATE_TARGET_PATH="$_wt_abs"
         fi
-      elif [[ "$WT" == *".claude/.automation/queue/"* ]]; then
-        _wt_abs=$(resolve_path "$WT")
+      elif [[ "$_wt_abs/" == *".claude/.automation/queue/"* ]]; then
         if is_in_repo "$_wt_abs" "$REPO_ROOT"; then
           TARGETS_QUEUE=true
-          QUEUE_TARGET_PATH="$WT"
+          QUEUE_TARGET_PATH="$_wt_abs"
         fi
       fi
     done <<< "$TARGETS"
@@ -454,10 +471,20 @@ if [ -n "$FILE_PATH" ]; then
         echo "GATE-FINAL: ${_WG_SESSION_TYPE} sessions are read-only." >&2
         exit 2
       fi
-      # taskdef-brief: allow only .automation/briefs/ writes, skip main-branch gate
+      # taskdef-brief: allow only .automation/briefs/ writes, skip main-branch gate,
+      # and only in its write phases — synthesize (draft and revise) and output
+      # (in-session queue intake), Decision t-0067.
       if [[ "$FILE_PATH" == *".claude/.automation/briefs/"* ]]; then
-        log_hook_event "write-guard" "PreToolUse" "" "allow" "$START_MS" "taskdef_brief_queue_intake"
-        exit 0
+        _WG_TD_PHASE=$(get_phase)
+        case " $(get_write_phases_for_type taskdef-brief) " in
+          *" $_WG_TD_PHASE "*)
+            log_hook_event "write-guard" "PreToolUse" "" "allow" "$START_MS" "taskdef_brief_queue_intake"
+            exit 0
+            ;;
+        esac
+        log_hook_event "write-guard" "PreToolUse" "" "block" "$START_MS" "taskdef_brief_write_phase"
+        echo "GATE-FINAL: taskdef-brief writes brief files only in synthesize (draft) or output (queue intake); current phase: ${_WG_TD_PHASE:-none}." >&2
+        exit 2
       fi
       # taskdef-brief writing anywhere else is blocked
       log_hook_event "write-guard" "PreToolUse" "" "block" "$START_MS" "taskdef_brief_non_intake_write"

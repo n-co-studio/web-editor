@@ -230,13 +230,22 @@ printf "# === Gate Bypass Attacks ===\n"
   else
     _tap_fail "[MEDIUM] AskUserQuestion blocked even without CLAUDE_HEADLESS"
   fi
-  # Now test WITH headless — export so subshell inherits
+  # Now test WITH headless — export so subshell inherits. Since Decision t-0064
+  # the hook waits for an operator answer; a zero wait keeps this case to the
+  # thing it tests (headless never allows the call) instead of a 9-minute poll.
+  # Since Decision t-0068 an unanswered question parks: exit 0 with
+  # continue:false AND a deny decision. Either a deny on stdout with exit 0, or
+  # exit 2, is "not allowed"; a bare exit 0 would be the bypass.
+  printf 'runner:\n  question_timeout_seconds: 0\n' > "$ADV_SANDBOX/.claude/.automation/config.yaml"
   ADV_LAST_RC=0
-  (cd "$ADV_SANDBOX" && export CLAUDE_HEADLESS=1 && printf '%s' "$fixture" | bash "$ADV_SANDBOX/.claude/hooks/ask-user-deny.sh" 2>&1) || ADV_LAST_RC=$?
-  if [ "$ADV_LAST_RC" -ne 0 ]; then
+  _t8_out=$(cd "$ADV_SANDBOX" && export CLAUDE_HEADLESS=1 && printf '%s' "$fixture" | bash "$ADV_SANDBOX/.claude/hooks/ask-user-deny.sh" 2>/dev/null) || ADV_LAST_RC=$?
+  if [ "$ADV_LAST_RC" -eq 2 ]; then
     _tap_pass "[MEDIUM] AskUserQuestion blocked when CLAUDE_HEADLESS=1 (correct)"
+  elif [ "$ADV_LAST_RC" -eq 0 ] && printf '%s' "$_t8_out" | grep -q '"permissionDecision": "deny"' \
+      && printf '%s' "$_t8_out" | grep -q '"continue": false'; then
+    _tap_pass "[MEDIUM] AskUserQuestion blocked when CLAUDE_HEADLESS=1 (parked: deny + continue:false)"
   else
-    _tap_fail "[MEDIUM] AskUserQuestion allowed despite CLAUDE_HEADLESS=1"
+    _tap_fail "[MEDIUM] AskUserQuestion not blocked despite CLAUDE_HEADLESS=1" "got exit $ADV_LAST_RC, stdout: $_t8_out"
   fi
 )
 

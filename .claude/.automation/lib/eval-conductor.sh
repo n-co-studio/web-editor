@@ -10,8 +10,9 @@
 #   - COMPOSES existing libs (intake.sh, queue-manager.sh, work-order-manager.sh,
 #     file-lock.sh, outcome-detector.sh). Does NOT duplicate runner.sh dequeue/launch logic.
 #   - Bash-3 compatible (no associative arrays, no [[ ]] required).
-#   - Each cell runs in its own worktree with a per-cell REPO_OS_SESSION_ID and
-#     a per-process sidecar (.session-id.<PPID>) — no shared session state.
+#   - Each cell runs in its own worktree with a per-cell REPO_OS_SESSION_ID (set
+#     by the runner at launch), which get_session_id returns ahead of any
+#     identity file — no shared session state.
 #   - Cells NEVER merge to main. Cell branches are pruned at study close.
 #   - Mode-aware: template (target = this repo) vs project (target = child repo).
 #   - Fail-fast on missing/uncommitted manifest, branch collision, or unknown study status.

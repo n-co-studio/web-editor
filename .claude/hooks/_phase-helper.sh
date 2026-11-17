@@ -117,7 +117,13 @@ get_write_phases_for_type() {
       echo "all" ;;
     advisory-init|advisory-reinit)
       echo "governance" ;;
-    taskdef-query|taskdef-brief|queue-triage|audit|ephemeral)
+    taskdef-brief)
+      # Decision t-0067: brief files under .claude/.automation/briefs/ only —
+      # the draft and its in-place revisions in synthesize, the in-session queue
+      # intake in output. write-guard's taskdef gate enforces both the path and
+      # these phases.
+      echo "synthesize output" ;;
+    taskdef-query|queue-triage|audit|ephemeral)
       # No writes permitted. taskdef-* and queue-triage are already hard-blocked by the
       # session-type gate at the top of Section 3. For audit/ephemeral: empty write-phases
       # causes the new gate to block. Sessions that call upgrade_session_type() will have
@@ -483,9 +489,9 @@ _validate_phase_session() {
   if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
     current_sid="$REPO_OS_SESSION_ID"
   else
-    # Resolve via get_session_id (per-process identity) rather than reading the
-    # shared flat .session-id directly: a concurrent window holds a distinct id
-    # and must validate its own phase-state, not the flat file's bootstrapper id.
+    # Resolve via get_session_id (Decision t-0065: CLAUDE_CODE_SESSION_ID in an
+    # interactive session) rather than reading the flat .session-id directly: a
+    # concurrent window holds a distinct id and must validate its own phase-state.
     current_sid=$(get_session_id "$_REPO_OS_ROOT")
   fi
   if [ -n "$_PS_SESSION_ID" ] && [ "$_PS_SESSION_ID" = "$current_sid" ]; then
@@ -707,6 +713,225 @@ bundle_to_plan_approved() {
     "$ts" "$question_hash" "$mode" "$sid" "$brief_id" "$approved_at" \
     > "$state_dir/plan-approved" 2>/dev/null || true
   refresh_manifest_entry "plan-approved" "$(get_main_repo_root)" 2>/dev/null || true
+}
+
+# ============================================================
+# Prompt T drafts (Decision t-0067)
+# ============================================================
+# A taskdef-brief session can queue its brief as a pending-review draft, then be
+# released by an approval made OUTSIDE the session (queue-cli.sh approve /
+# approve-wo) or ended by removal. record_draft binds the session to its draft
+# entries; accept_draft_approval turns an external approval into the same
+# plan-approved evidence plan-approval.sh writes (third provenance, after the
+# AskUserQuestion hook and bundle_to_plan_approved: source queue-draft);
+# discard_draft deletes the draft's files once its entries are gone. The binding
+# lives in <state_dir>/taskdef-draft:
+#   entry_ids: <id> ...
+#   files: <repo-relative path> ...
+#   recorded_at: <ts>          (discarded_at: <ts> after discard_draft)
+#   session_id: <sid>
+
+# Where each bound entry stands: lines of "<id> <status> <mode>" from the queue
+# CLI, the one reader of queue state.
+_draft_states() {
+  bash "$(get_main_repo_root)/.claude/.automation/queue-cli.sh" draft-status "$@"
+}
+
+# A draft file path is one this session may delete: a brief under
+# .automation/briefs/ or a task-group bundle under .claude/local/task-groups/.
+_draft_path_ok() {
+  case "$1" in
+    *..*) return 1 ;;
+    .claude/.automation/briefs/*|.claude/local/task-groups/*) return 0 ;;
+  esac
+  return 1
+}
+
+# record_draft <entry_id>... [--also <path>...]
+# Run in synthesize, right after queue-cli.sh add. Each entry must be in
+# pending-review with its brief under .claude/.automation/briefs/. --also adds a
+# task-group bundle under .claude/local/task-groups/ to the files discard_draft
+# deletes. Re-running replaces the binding (a revision that adds a brief).
+record_draft() {
+  local root qdir
+  root="$(get_main_repo_root)"
+  qdir="$root/.claude/.automation/queue"
+  if [ "$(get_session_type)" != "taskdef-brief" ]; then
+    echo "ERROR: record_draft is for taskdef-brief sessions" >&2; return 1
+  fi
+  if [ "$(get_phase)" != "synthesize" ]; then
+    echo "ERROR: record_draft runs in synthesize (phase: $(get_phase))" >&2; return 1
+  fi
+  local ids="" files="" also=false arg bp
+  for arg in "$@"; do
+    if [ "$arg" = "--also" ]; then also=true; continue; fi
+    if [ "$also" = true ]; then
+      arg="${arg#"$root"/}"
+      case "$arg" in
+        .claude/local/task-groups/*) _draft_path_ok "$arg" || { echo "ERROR: unsafe path: $arg" >&2; return 1; } ;;
+        *) echo "ERROR: --also takes task-group bundles under .claude/local/task-groups/ ($arg)" >&2; return 1 ;;
+      esac
+      files="$files $arg"
+      continue
+    fi
+    case "$arg" in
+      ''|.*|*/*|*[!A-Za-z0-9._-]*) echo "ERROR: invalid entry id: '$arg'" >&2; return 1 ;;
+    esac
+    if [ ! -f "$qdir/pending-review/${arg}.yaml" ]; then
+      echo "ERROR: $arg is not a pending-review queue entry" >&2; return 1
+    fi
+    bp=$(sed -n 's/^  brief_path: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$qdir/pending-review/${arg}.yaml" | head -1)
+    bp="${bp#"$root"/}"
+    case "$bp" in
+      .claude/.automation/briefs/*) _draft_path_ok "$bp" || { echo "ERROR: unsafe brief path: $bp" >&2; return 1; } ;;
+      *) echo "ERROR: $arg's brief is not under .claude/.automation/briefs/ ($bp)" >&2; return 1 ;;
+    esac
+    ids="$ids $arg"
+    files="$files $bp"
+  done
+  if [ -z "$ids" ]; then
+    echo "ERROR: record_draft needs at least one entry id" >&2; return 1
+  fi
+  local state_dir
+  state_dir="$(get_session_state_dir)"
+  mkdir -p "$state_dir" 2>/dev/null || true
+  # The binding lives in this session's own state dir; session_id lets the
+  # ownership-checked evidence clear (_SESSION_EVIDENCE_FILES) remove it on a
+  # re-init or at close, so a later Brief in the same session cannot be released
+  # by this draft's approval.
+  printf 'entry_ids:%s\nfiles:%s\nrecorded_at: %s\nsession_id: %s\n' "$ids" "$files" \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(get_session_id "$root")" > "$state_dir/taskdef-draft"
+  echo "Draft bound:$ids"
+}
+
+# accept_draft_approval
+# Returns 0 approved (plan-approved written, phase advanced to output),
+# 1 not applicable (wrong session or phase, nothing bound), 2 still pending,
+# 3 removed (run discard_draft), 4 part removed and part approved (ask).
+accept_draft_approval() {
+  if [ "$(get_session_type)" != "taskdef-brief" ]; then
+    echo "ERROR: accept_draft_approval is for taskdef-brief sessions" >&2; return 1
+  fi
+  local state_dir draft
+  state_dir="$(get_session_state_dir)"
+  draft="$state_dir/taskdef-draft"
+  if [ ! -f "$draft" ]; then
+    echo "ERROR: no draft is bound to this session (record_draft)" >&2; return 1
+  fi
+  if grep -q '^discarded_at:' "$draft" 2>/dev/null; then
+    echo "Draft was discarded."; return 3
+  fi
+  local phase
+  phase="$(get_phase)"
+  case "$phase" in
+    synthesize|approval) ;;
+    *)
+      if grep -q '^source: queue-draft$' "$state_dir/plan-approved" 2>/dev/null; then
+        echo "Draft approval already accepted."; return 0
+      fi
+      echo "ERROR: accept_draft_approval runs in synthesize or approval (phase: $phase)" >&2; return 1 ;;
+  esac
+
+  local ids states
+  ids=$(sed -n 's/^entry_ids: *//p' "$draft")
+  # shellcheck disable=SC2086
+  states=$(_draft_states $ids) || { echo "ERROR: could not read the queue" >&2; return 1; }
+  local pending="" absent="" present="" mode="auto" _id _st _md
+  while read -r _id _st _md; do
+    [ -n "$_id" ] || continue
+    case "$_st" in
+      pending-review) pending="$pending $_id" ;;
+      absent)         absent="$absent $_id" ;;
+      *)              present="$present $_id"; [ "$_md" = "auto" ] || mode="review" ;;
+    esac
+  done <<EOF
+$states
+EOF
+  if [ -n "$pending" ]; then
+    echo "Draft still pending review:$pending"; return 2
+  fi
+  if [ -n "$absent" ] && [ -z "$present" ]; then
+    echo "Draft removed from the queue — run discard_draft."; return 3
+  fi
+  if [ -n "$absent" ]; then
+    echo "ERROR: part of the draft was removed ($absent) and part approved ($present) — ask the operator" >&2
+    return 4
+  fi
+
+  # Into approval first: its gate (pragmatist-signed) must pass before anything
+  # is written, so a refusal leaves no plan-approved behind.
+  if [ "$phase" = "synthesize" ]; then
+    advance_phase "approval" || return 1
+  fi
+
+  # Same fields as plan-approval.sh. question_hash identifies the brief text
+  # that was approved, as it identifies the plan question there.
+  local root files _f question_hash sid
+  root="$(get_main_repo_root)"
+  files=$(sed -n 's/^files: *//p' "$draft")
+  question_hash=$(for _f in $files; do cat "$root/$_f" 2>/dev/null; done | portable_hash 2>/dev/null | cut -c1-12)
+  : "${question_hash:=draft-unhashed}"
+  sid="$(get_session_id "$root")"
+  printf 'timestamp: %s\nquestion_hash: %s\nlarge-scope: false\nmode: %s\nsession_id: %s\nsource: queue-draft\ndraft_entry_ids: %s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$question_hash" "$mode" "$sid" "$ids" \
+    > "$state_dir/plan-approved" 2>/dev/null || { echo "ERROR: could not write plan-approved" >&2; return 1; }
+  refresh_manifest_entry "plan-approved" "$root" 2>/dev/null || true
+  record_agent_verdict "plan_hash" "$question_hash" 2>/dev/null || true
+
+  set_phase_mode "$mode" 2>/dev/null || true
+  advance_phase "$(get_post_approval_phase taskdef-brief)" || return 1
+  echo "Draft approved from the queue (mode: $mode)."
+}
+
+# discard_draft
+# Once every bound entry is gone from the queue, deletes the draft's files —
+# each brief with its .contract.yaml and .bundle.yaml, plus --also bundles — and
+# marks the binding discarded. Refuses while any entry still exists.
+discard_draft() {
+  if [ "$(get_session_type)" != "taskdef-brief" ]; then
+    echo "ERROR: discard_draft is for taskdef-brief sessions" >&2; return 1
+  fi
+  local state_dir draft
+  state_dir="$(get_session_state_dir)"
+  draft="$state_dir/taskdef-draft"
+  if [ ! -f "$draft" ]; then
+    echo "ERROR: no draft is bound to this session (record_draft)" >&2; return 1
+  fi
+  local ids states remaining
+  ids=$(sed -n 's/^entry_ids: *//p' "$draft")
+  # shellcheck disable=SC2086
+  states=$(_draft_states $ids) || { echo "ERROR: could not read the queue" >&2; return 1; }
+  remaining=$(printf '%s\n' "$states" | awk '$2 != "absent" && NF { printf " %s", $1 }')
+  if [ -n "$remaining" ]; then
+    echo "ERROR: draft entries still in the queue:$remaining — remove them first (queue-cli.sh remove <id>)" >&2
+    return 1
+  fi
+  local root root_p files _f _stem _dir_p removed=""
+  root="$(get_main_repo_root)"
+  root_p="$(cd "$root" 2>/dev/null && pwd -P)"
+  files=$(sed -n 's/^files: *//p' "$draft")
+  for _f in $files; do
+    _draft_path_ok "$_f" || continue
+    # A symlinked file, or a symlink anywhere on its directory's path, could
+    # point the rm outside the repo: the physical directory must be the one
+    # the path names under the physical repo root.
+    [ -d "$root/$(dirname "$_f")" ] || continue
+    _dir_p="$(cd "$root/$(dirname "$_f")" 2>/dev/null && pwd -P)"
+    if [ -L "$root/$_f" ] || [ -z "$root_p" ] || [ "$_dir_p" != "$root_p/$(dirname "$_f")" ]; then
+      echo "WARNING: not removing $_f — it or a directory on its path is a symlink" >&2
+      continue
+    fi
+    case "$_f" in
+      *.md)
+        _stem="${_f%.md}"
+        rm -f "$root/$_f" "$root/$_stem.contract.yaml" "$root/$_stem.bundle.yaml"
+        ;;
+      *) rm -f "$root/$_f" ;;
+    esac
+    removed="$removed $_f"
+  done
+  printf 'discarded_at: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$draft"
+  echo "Draft discarded; removed:$removed"
 }
 
 # --- bundle_to_pragmatist_signed ---
@@ -1213,6 +1438,7 @@ compute_phase_gates() {
 #   - GATES_SESSION_ID matches current session
 #   - GATES_CURRENT_BRANCH matches get_branch (invalidates on git checkout)
 #   - GATES_CLOSED_BRANCHES_MTIME matches current mtime (invalidates on seal)
+#   - GATES_SESSION_OVERLAP is not blocked (a block is always re-checked inline)
 # On valid cache, GATES_* vars are exported into caller's scope and returns 0.
 # On any miss, returns 1; caller falls through to inline checks. Silent.
 read_phase_gates() {
@@ -1251,8 +1477,8 @@ read_phase_gates() {
   if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
     current_sid="$REPO_OS_SESSION_ID"
   else
-    # Per-process identity (not the shared flat .session-id) so a concurrent
-    # window validates its own gates cache rather than the flat bootstrapper id.
+    # The session's own id via get_session_id (Decision t-0065), not the flat
+    # .session-id, so a concurrent window validates its own gates cache.
     current_sid=$(get_session_id "$repo_root")
   fi
   [ -n "$current_sid" ] || return 1
@@ -1267,6 +1493,13 @@ read_phase_gates() {
   local current_cb_mtime
   current_cb_mtime=$(_closed_branches_mtime)
   [ "$GATES_CLOSED_BRANCHES_MTIME" = "$current_cb_mtime" ] || return 1
+
+  # A blocked overlap verdict is never served from the cache (R48(c)): it rests
+  # on another session being alive, which can change mid-phase, and a cached
+  # block outlived its registry record until the next phase transition. A miss
+  # sends the hooks to check_session_overlap, which re-tests liveness and reaps
+  # stale records; the cost is paid only while blocked.
+  [ "$GATES_SESSION_OVERLAP" != "blocked" ] || return 1
 
   return 0
 }
@@ -1393,9 +1626,9 @@ init_phase() {
     if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
       _current_sid="$REPO_OS_SESSION_ID"
     else
-      # Per-process identity: state_dir is sidecar-aware (get_session_state_dir),
-      # so the double-init guard must compare against this process's own id, not
-      # the shared flat .session-id (which may hold a concurrent peer's id).
+      # state_dir is keyed by the session's own id (get_session_state_dir,
+      # Decision t-0065), so the double-init guard compares against that same id,
+      # not the flat .session-id (which may hold another session's id).
       _current_sid=$(get_session_id "$repo_root")
     fi
     if [ -n "$_existing_sid" ] && [ "$_existing_sid" = "$_current_sid" ]; then
@@ -1416,7 +1649,8 @@ init_phase() {
       # anyway, and deciding what this path may delete is its own question.
       _clear_scope=""
       # Stale phase-state from a different session — check if that session is alive
-      local _stale_registry="$repo_root/.claude/.state/sessions/${_existing_sid}.yaml"
+      local _stale_registry
+      _stale_registry="$repo_root/.claude/.state/sessions/$(_safe_sid "$_existing_sid").yaml"
       if [ -f "$_stale_registry" ]; then
         local _stale_pid
         _stale_pid=$(grep '^pid: ' "$_stale_registry" 2>/dev/null | sed 's/^pid: *//')
@@ -2742,9 +2976,9 @@ record_dimension_verdict() {
   cache_path="$(_finish_loop_cache_path)"
   local repo_root
   repo_root="$(get_repo_root)"
-  # Per-process identity via get_session_id (handles REPO_OS_SESSION_ID, the
-  # per-process sidecar, and the flat-file fallback) rather than reading the
-  # shared flat .session-id directly, which a concurrent window does not own.
+  # The session's own id via get_session_id (REPO_OS_SESSION_ID, then
+  # CLAUDE_CODE_SESSION_ID — Decision t-0065 — then the fallbacks) rather than
+  # reading the flat .session-id directly, which a concurrent window does not own.
   local sid
   sid=$(get_session_id "$repo_root" 2>/dev/null || echo "")
   [ -z "$sid" ] && sid="unknown"
@@ -2804,10 +3038,7 @@ _get_evidence_manifest_path() {
   [ -z "$sid" ] && return 1
   local manifest_dir
   manifest_dir="$(_get_evidence_manifest_dir "$repo_root")"
-  # Sanitise: replace / and .. sequences that could escape the directory.
-  local sid_safe="${sid//\//_}"
-  sid_safe="${sid_safe//\.\./_}"
-  echo "${manifest_dir}/${sid_safe}.yaml"
+  echo "${manifest_dir}/$(_safe_sid "$sid").yaml"
 }
 
 # Write the evidence manifest at init_phase.

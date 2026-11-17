@@ -302,6 +302,17 @@ The phase model is enforced by hooks — follow the standard phase progression.
 "
     fi
 
+    # AskUserQuestion line follows the permission profile: audit and judge keep
+    # the tool disallowed, so telling them they can ask would be false
+    # (Decision t-0064 § 7).
+    local _ask_line
+    case "${_QE_PERMISSION_PROFILE:-build}" in
+      audit|judge)
+        _ask_line="- AskUserQuestion is not available in the ${_QE_PERMISSION_PROFILE} profile. If a decision only the operator can make blocks you, write an escalation file, then summarise and end — do not guess" ;;
+      *)
+        _ask_line="- AskUserQuestion is for a decision only the operator can make and the brief does not settle. In headless mode the question is recorded and this session waits for the operator's answer, which comes back as the tool's denial reason; continue with it. If no answer arrives in time the session is parked and ends by itself, and the operator's answer later resumes it as your next message (Decision t-0068). If the reason says NO OPERATOR ANSWER, follow the instruction it gives. If it says STOPPED, there is no answer: do not guess, summarise and end the session" ;;
+    esac
+
     # Plan-approval bypass
     prompt="${prompt}
 ## Automation Context
@@ -309,7 +320,7 @@ This is a headless automation session (runner-invoked via claude -p).
 - plan-approved state has been pre-written by the runner (no operator approval prompt needed)
 - Auto mode: ${_QE_AUTO_MODE:-false} (if true, skip op-review phase)
 - Solo mode: ${_QE_SOLO_MODE:-false} (if true, merge to main at close)
-- Do NOT use AskUserQuestion — there is no interactive operator in headless mode
+${_ask_line}
 - Follow the full phase model and gate requirements
 "
 

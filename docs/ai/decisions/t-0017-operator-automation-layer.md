@@ -35,13 +35,13 @@ When the runner invokes a headless session, ten operator decision points are res
 | 3 | Solo mode | Operator chooses solo or collaborative | `true` (solo) | Runner sets `solo=true`; branch merges to main at close |
 | 4 | Large-scope approval | Operator approves scope >100 lines | Pre-approved | Runner sets `large-scope: true` in `.claude/.state/plan-approved` |
 | 5 | Op-review phase | Operator reviews before close | Skipped | Auto mode bypasses `op-review` phase entirely |
-| 6 | AskUserQuestion | Agent prompts operator for clarification | Blocked | `--disallowedTools` blocks `AskUserQuestion` in all profiles |
+| 6 | AskUserQuestion | Agent prompts operator for clarification | **Superseded by Decision t-0064:** recorded, session waits for an operator answer; stop + escalation on timeout | `ask-user-deny.sh` + `lib/question-channel.sh`; still in `--disallowedTools` for the `audit` and `judge` profiles only |
 | 7 | WebSearch / WebFetch | Agent requests web access | Allowed (build) / Blocked (audit) | Build profile permits web tools; audit profile blocks them |
 | 8 | Destructive git | Agent runs `git reset --hard`, `git push --force` | Blocked | `--disallowedTools` blocks destructive patterns in build profile |
 | 9 | Scope classification | Operator reviews unbriefed/out-of-scope files | Classified mechanically | `pre-commit-gates.sh` compares staged files against task contract `scope_files` — briefed passes, unbriefed-in-scope writes advisory escalation, out-of-scope blocks commit |
 | 10 | PermissionRequest auto-approval | VS Code shows permission dialog for each tool use | Auto-decided | `permission-request.sh` hook auto-approves curated tools/commands, denies dangerous patterns, falls through to dialog for unknown — all decisions logged to audit file |
 
-When `AskUserQuestion` is blocked, sessions that encounter ambiguity must escalate via the escalation protocol (file-based) rather than prompting interactively.
+~~When `AskUserQuestion` is blocked, sessions that encounter ambiguity must escalate via the escalation protocol (file-based) rather than prompting interactively.~~ Superseded by Decision t-0064 (2026-10-28): a headless session asks and waits for the operator's answer; the escalation is written by the hook on timeout.
 
 ## Context
 The operator automation layer enables headless CI/CD-style execution of Claude sessions. The headless hook verification experiment confirmed that `claude -p` sessions run all hooks except Stop, validating the three-phase runner pattern. This decision defines only the schema contracts and directory structure — actual runner implementations are out of scope and will be built separately against these schemas. The `enabled: false` default ensures no behavioral change for existing repos until the operator explicitly opts in.
@@ -112,7 +112,7 @@ The never-elevate rule ensures that team-level governance floors cannot be weake
 - `outcome-detector.sh` gains scope-deviation detection in escalation file scanning
 - `.claude/.automation/lib/intake.sh` CLI for standalone queue entry creation — accepts brief path, session type, auto-approve, solo, and push flags; auto-enables runner when entries are added
 - `queue-entry.yaml` gains `push_on_complete` field — per-entry opt-in branch push after session completion (solo pushes main, non-solo pushes feature branch)
-- `.claude/hooks/ask-user-deny.sh` PreToolUse hook blocks `AskUserQuestion` in headless mode (`CLAUDE_HEADLESS=1`) — defense-in-depth alongside `--disallowedTools`
+- `.claude/hooks/ask-user-deny.sh` PreToolUse hook blocks `AskUserQuestion` in headless mode (`CLAUDE_HEADLESS=1`) — defense-in-depth alongside `--disallowedTools` *(superseded by Decision t-0064: the hook now records the question and waits for an operator answer)*
 - `.claude/hooks/_cleanup-helper.sh` extracted as shared cleanup helper — sourced by both `session-close-check.sh` and runner libraries to eliminate divergence (audit C5)
 - `.claude/.automation/lib/cleanup.sh` provides retention-based deletion of stale runtime artifacts (queue entries, reports, escalations, heartbeats, closed-branch compaction)
 - `.claude/.automation/RUNNER-PARITY.md` maintenance contract mapping every `session-close-check.sh` responsibility to its `runner.sh` equivalent
@@ -127,10 +127,10 @@ Three defense layers protect headless automation sessions against command inject
 
 | Profile | Blocks | Use Case |
 |---------|--------|----------|
-| `build` | Destructive git (`push`, `reset --hard`, `push --force`), outbound network (`curl`, `wget`, `nc`, `ncat`, `netcat`), interactive prompts | Standard build sessions. WebSearch/WebFetch remain available (model-mediated, logged) |
+| `build` | Destructive git (`push`, `reset --hard`, `push --force`), outbound network (`curl`, `wget`, `nc`, `ncat`, `netcat`) — interactive prompts no longer blocked (Decision t-0064) | Standard build sessions. WebSearch/WebFetch remain available (model-mediated, logged) |
 | `audit` | Edit, Write, git commit, git push, WebSearch, WebFetch, interactive prompts | Read-only audit sessions |
 | `strict` | All `build` blocks + package installs (`pip install`, `npm install`, `npx`), WebSearch, WebFetch | High-security lockdown. Agent can only read, edit, commit, and run local commands |
-| `default` | git push, interactive prompts | Minimal fallback |
+| `default` | git push — interactive prompts no longer blocked (Decision t-0064) | Minimal fallback |
 
 **Limitation:** `Bash(curl:*)` can be bypassed via language-level HTTP (e.g., `python -c "import urllib..."`). Blocklists are defense-in-depth, not airtight. Layer 3 is the backstop.
 

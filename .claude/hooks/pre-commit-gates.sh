@@ -419,11 +419,7 @@ _validate_state_session_id() {
   local file_sid
   file_sid=$(grep '^session_id:' "$state_file" 2>/dev/null | sed 's/^session_id: *//' | tr -d '[:space:]' | head -1)
   local current_sid
-  if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
-    current_sid="$REPO_OS_SESSION_ID"
-  else
-    current_sid=$(cat "$REPO_ROOT/.claude/.session-id" 2>/dev/null || echo "")
-  fi
+  current_sid="$(peek_session_id "$REPO_ROOT")"
   # No current session → skip validation (pre-session context)
   [ -z "$current_sid" ] && return 0
   # State file missing session_id but session exists → forged/stale (reject)
@@ -635,12 +631,7 @@ if [ "$SKIP_STATE" = false ]; then
         fi
         if [ "$_A34_FAIL" = false ]; then
           # Write functional-verified state file on pass
-          _A34_CURRENT_SID=""
-          if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
-            _A34_CURRENT_SID="$REPO_OS_SESSION_ID"
-          else
-            _A34_CURRENT_SID=$(cat "$REPO_ROOT/.claude/.session-id" 2>/dev/null || echo "")
-          fi
+          _A34_CURRENT_SID="$(peek_session_id "$REPO_ROOT")"
           # Guarded exactly like the high-risk-detected write below: this was the
           # only one of the three $STATE_DIR writes with neither guard, and an
           # absent state dir therefore turned a reportable "no session" condition
@@ -2421,7 +2412,7 @@ EOF
            && [ "$_KG_GRAPH_INVALID" = false ] && [ "$_KGP_COMMITTED_INVALID" = false ]; then
         # The marker means "this session's graph agreed with its product files".
         # Never written for an exempt, graph-less, or invalid-graph commit.
-        _KGP_SID="${REPO_OS_SESSION_ID:-$(cat "$REPO_ROOT/.claude/.session-id" 2>/dev/null || echo "")}"
+        _KGP_SID="$(peek_session_id "$REPO_ROOT")"
         printf 'timestamp: %s\nsession_id: %s\nresult: PASSED\n' \
           "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_KGP_SID" > "$STATE_DIR/kg-updated" 2>/dev/null || true
         log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "kg_product_passed"

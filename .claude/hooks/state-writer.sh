@@ -293,12 +293,10 @@ mkdir -p "$STATE_DIR" 2>/dev/null || true
 
 TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 # Session-bind state file (adversarial C1/C4/H4): embed session_id so
-# pre-commit-gates.sh can reject forged/stale files from other sessions.
-if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
-  STATE_SID="$REPO_OS_SESSION_ID"
-else
-  STATE_SID=$(cat "$REPO_ROOT/.claude/.session-id" 2>/dev/null || echo "")
-fi
+# pre-commit-gates.sh can reject forged/stale files from other sessions. The
+# same resolution as STATE_DIR above, so the stamp always names the directory
+# it is written to (Decision t-0065; it used to read the flat file).
+STATE_SID="$(get_session_id "$REPO_ROOT")"
 
 # --- Resolve dispatch-time phase for this agent ---
 # Dispatch phase was recorded in session-resume.yaml by pretooluse-permission.sh

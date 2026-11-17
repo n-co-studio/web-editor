@@ -14,7 +14,9 @@ _health_file() {
 
 # --- Write health status atomically ---
 # Arguments:
-#   $1 — status string (idle, running, disabled, stopped, circuit-breaker)
+#   $1 — status string (idle, running, awaiting-answer, disabled, stopped,
+#        circuit-breaker). awaiting-answer: the running entry is paused on an
+#        operator question (Decision t-0064).
 # Reads globals: _DAEMON_START_EPOCH, _CURRENT_ENTRY_ID,
 #   _SESSIONS_COMPLETED, _SESSIONS_FAILED, _LAST_SESSION_AT
 _write_health() {

@@ -23,6 +23,10 @@ runner:
   default_solo_mode: false
   # Default push_on_complete for new queue entries.
   default_push_on_complete: false
+  # Interactive sessions only: the SessionEnd hook pushes main to origin after
+  # a merge when true. Never applies to a headless session, whose push is the
+  # runner's and follows push_on_complete. Decision t-0066.
+  push_main_on_session_end: false
   # Default max retries per queue entry.
   max_retries: 3
   # Seconds between runner heartbeat checks.
@@ -58,6 +62,20 @@ runner:
   # Seconds a graceful operator stop waits before the runner escalates it to a
   # forced stop. 0 = never escalate. Added in schema v1.7.0 (Decision t-0055).
   stop_grace_seconds: 120
+  # How long a headless AskUserQuestion waits live for an operator answer, in
+  # seconds, before question_on_timeout applies. 1800 = 30 min. 0 = act at
+  # once. The live wait counts toward session_max_ttl_seconds and should be
+  # below it (the runner warns otherwise). Decisions t-0064, t-0068.
+  question_timeout_seconds: 1800
+  # pause | agent-decides. pause parks the entry on the question (stopped/,
+  # stopped_mode question) until `queue-cli.sh answer`; agent-decides tells the
+  # agent to choose and continue, with an advisory escalation. Absent or
+  # invalid = pause. Added in schema v1.13.0 (Decision t-0068).
+  question_on_timeout: pause
+  # Mirror of the "timeout" on the ask-user-deny.sh hook in .claude/settings.json.
+  # The wait is capped 30s below it so the hook parks the question before
+  # Claude Code kills it. Change both together. Decision t-0064.
+  question_hook_timeout_seconds: 14430
 
 model_routing:
   # Model for claude -p when no model_routing_overrides key matches.

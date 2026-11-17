@@ -351,7 +351,10 @@ fi
 # --- Combined pre-source fast-exit ---
 # When no Gate 7 match AND no write patterns → exit 0 without sourcing.
 # Saves ~14ms sourcing overhead for the majority of Bash calls (~56%).
-if [ "$_TG_MERGE_BLOCK" = false ] && ! _bg_is_write_candidate "$INPUT"; then
+# queue-cli.sh calls go on to the Prompt T draft self-approval check (t-0067):
+# they write no files, so nothing else here would look at them.
+if [ "$_TG_MERGE_BLOCK" = false ] && ! _bg_is_write_candidate "$INPUT" \
+   && [[ "$INPUT" != *'queue-cli.sh'* ]]; then
   exit 0
 fi
 
@@ -413,6 +416,26 @@ _BG_SESSION_TYPE=$(get_session_type)
 if [ "$_BG_SESSION_TYPE" = "ephemeral" ] || [ "$_BG_SESSION_TYPE" = "taskdef-query" ] || [ "$_BG_SESSION_TYPE" = "taskdef-brief" ] || [ "$_BG_SESSION_TYPE" = "queue-triage" ]; then
   _EPHEMERAL_FAST_EXIT=true
   SKIP_MODE_GUARD=true
+fi
+
+# --- Prompt T drafts: the agent cannot approve its own (Decision t-0067) ---
+# A taskdef-brief draft is approved from OUTSIDE the session (Massimo's Submit,
+# or queue-cli.sh approve in another shell). Until the operator has approved
+# in-session (plan-approved present), the session may not run queue-cli.sh
+# approve / approve-wo, nor add / follow-up with --auto-approve, however the
+# script is invoked (bare, path-qualified, or through bash/sh). Matched on the
+# raw tool input here, ahead of the no-write-target exits: these commands write
+# no files. A guard against the agent approving by accident or shortcut, not
+# against deliberate obfuscation (indirection, sourcing the library directly).
+if [ "$_BG_SESSION_TYPE" = "taskdef-brief" ] && [[ "$INPUT" == *'queue-cli.sh'* ]] \
+   && [ ! -f "$(get_session_state_dir)/plan-approved" ]; then
+  if printf '%s' "$INPUT" | grep -qE 'queue-cli\.sh[^[:space:]]*[[:space:]]+(--json[[:space:]]+)?(approve|approve-wo)([[:space:]"]|$)' \
+     || { printf '%s' "$INPUT" | grep -qE 'queue-cli\.sh[^[:space:]]*[[:space:]]+(--json[[:space:]]+)?(add|follow-up|follow-up-entry)([[:space:]"]|$)' \
+          && printf '%s' "$INPUT" | grep -qE '[[:space:]]--auto-approve([[:space:]"]|$)'; }; then
+    log_hook_event "bash-guard" "PreToolUse" "Bash" "block" "$START_MS" "taskdef_draft_self_approval"
+    echo "GATE-FINAL: a Prompt T draft is approved by the operator, not by this session. Submit it from Massimo or run 'queue-cli.sh approve <id> [--mode review|auto]' outside this session (Decision t-0067)." >&2
+    exit 2
+  fi
 fi
 
 # ============================================================
@@ -517,11 +540,15 @@ if [ "$SKIP_STATE_GUARD" = false ]; then
   if [ -n "$COMMAND" ]; then
     while IFS= read -r SG_WT; do
       [ -z "$SG_WT" ] && continue
-      if [[ "$SG_WT" == *".claude/.state/"* ]] || [[ "$SG_WT" == *".claude/.session-id"* ]]; then
-        _sg_abs=$(resolve_path "$SG_WT")
+      # Match on the resolved path: a target may climb with '..'
+      # (briefs/../../.state/...), which the raw text hides (R50). The trailing
+      # '/' keeps a directory target (cp f .claude/.state/./) matching once
+      # normalisation has dropped its slash.
+      _sg_abs=$(resolve_path "$SG_WT")
+      if [[ "$_sg_abs/" == *".claude/.state/"* ]] || [[ "$_sg_abs" == *".claude/.session-id"* ]]; then
         if is_in_repo "$_sg_abs" "$REPO_ROOT"; then
           TARGETS_STATE=true
-          STATE_TARGET_PATH="$SG_WT"
+          STATE_TARGET_PATH="$_sg_abs"
           break
         fi
       fi

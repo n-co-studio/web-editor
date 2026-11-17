@@ -212,8 +212,19 @@ for _i in 1 2 3; do
   run_hook_rc "session-close-check.sh" "$STOP_FIXTURE" >/dev/null 2>&1 || true
 done
 
-assert_file_not_exists "$_L65D_RECORD" \
-  "L6.5d valve released the claim so it cannot block the next session"
+# Decision t-0065: the record is kept (it is the session's liveness signal) and
+# marked released; the overlap readers skip it.
+assert_file_exists "$_L65D_RECORD" \
+  "L6.5d valve keeps the registry record (the session is still alive)"
+assert_file_contains "$_L65D_RECORD" "branch_claim: released" \
+  "L6.5d valve marks the branch claim released"
+_L65D_BRANCH=$(grep '^branch: ' "$_L65D_RECORD" | sed 's/^branch: *//')
+export REPO_OS_SESSION_ID="l65d-next-session"
+if is_session_active "$_L65D_BRANCH"; then
+  _tap_fail "L6.5d valve released the claim so it cannot block the next session"
+else
+  _tap_pass "L6.5d valve released the claim so it cannot block the next session"
+fi
 unset REPO_OS_SESSION_ID
 
 # ============================================================

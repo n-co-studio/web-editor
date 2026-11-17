@@ -7,8 +7,11 @@
 #   queue-cli.sh <subcommand> [options]
 #
 # Subcommands:
-#   add --brief <path> [--branch NAME] [--session-type TYPE] [--auto-approve] [--solo] [--push] [--priority N] [--independent]
-#   approve <id>
+#   add --brief <path> [--branch NAME] [--session-type TYPE] [--auto-approve] [--solo] [--push] [--priority N] [--independent] [--work-order WO]
+#   approve <id> [--mode review|auto]
+#   approve-wo <work-order-id> [--mode review|auto]
+#   draft-status <id>...
+#   draft-wait <id>... [--timeout S] [--interval S]
 #   remove <id>
 #   edit <id> <field> <value>
 #   set-priority <id> <N>
@@ -130,6 +133,8 @@ source "$LIB_DIR/work-preserver.sh"
 # request has already merged, so there is no second merge gate to disagree with
 # the runner's — GitHub holds the only one.
 source "$LIB_DIR/pr-manager.sh"
+# shellcheck source=lib/question-channel.sh
+source "$LIB_DIR/question-channel.sh"
 
 # --- Global flags ---
 JSON_OUTPUT=false
@@ -155,8 +160,13 @@ _usage() {
 Usage: queue-cli.sh [--json] <subcommand> [args]
 
 Subcommands:
-  add --brief <path> [--branch NAME] [--session-type TYPE] [--auto-approve] [--solo] [--push] [--priority N] [--independent]
-  approve <id>
+  add --brief <path> [--branch NAME] [--session-type TYPE] [--auto-approve] [--solo] [--push] [--priority N] [--independent] [--work-order WO]
+  approve <id> [--mode review|auto]           approve a pending entry; --mode sets auto_mode first
+  approve-wo <work-order-id> [--mode review|auto]
+                                              approve every pending entry of a work order together
+  draft-status <id>...                        print "<id> <status> <mode>" (absent if removed)
+  draft-wait <id>... [--timeout S] [--interval S]
+                                              block until no <id> is pending-review (exit 3 on timeout)
   remove <id>
   edit <id> <field> <value>
   set-priority <id> <N>
@@ -173,7 +183,11 @@ Subcommands:
   reset-breaker
   reset-group-worktree <group> [--yes]
   stop-entry <id> [--force] [--reason TEXT]   stop one entry's session (stop again to force)
-  resume-entry <id>                           re-queue a stopped entry, same Claude session
+  resume-entry <id> [--force]                 re-queue a stopped entry, same Claude session
+                                              (--force: resume a parked entry without an answer)
+  answer <id> --question <q-id> (--file PATH | --text TEXT ...)
+                                              answer a headless question; resumes a parked entry
+                                              (one --text per question, in order)
   discard-entry <id> [--reason TEXT]          abandon one entry; escalates whatever it held
   note-entry <id> (--text TEXT | --file PATH) send the agent a note (alias: note; max 2000 chars)
   notes-entry <id>                            list this entry's notes, pending and delivered
@@ -311,6 +325,108 @@ _entry_session_json() {
     "$(_json_kv "claude_session_id" "$csid")"
 }
 
+# --- Question an entry is parked on, if any (Decision t-0068) ---
+# The resume handle names it; without one (no Claude session id was recorded)
+# the newest parked question of the entry stands in. Empty when not parked.
+# Arguments: $1 — entry_id, $2 — stopped_mode
+_entry_parked_question() {
+  local eid="$1" mode="$2" cdir qid=""
+  cdir=$(get_control_dir "$eid" 2>/dev/null) || cdir=""
+  if [ -n "$cdir" ] && [ -f "$cdir/resume.yaml" ]; then
+    qid=$(qc_resume_question_id "$cdir/resume.yaml") || qid=""
+  fi
+  if [ -z "$qid" ] && [ "$mode" = "question" ]; then
+    qid=$(qc_parked_for_entry "$AUTOMATION_DIR" "$eid" 2>/dev/null | tail -1) || qid=""
+  fi
+  printf '%s' "$qid"
+}
+
+# --- question block for `show --json` (Decision t-0068) ---
+# Emits the "question" member: the question the entry is waiting on, and how.
+#   waiting  open    — the live wait: the session is blocked in the hook
+#            parked  — the session ended; an answer resumes it
+#            ""      — not waiting on a question
+# Clobbers _QE_*: call it BEFORE the caller loads the fields it prints.
+# Arguments: $1 — entry_id
+_entry_question_json() {
+  local eid="$1" efile qid="" waiting="" answered=false
+  qid=$(qc_open_for_entry "$AUTOMATION_DIR" "$eid" 2>/dev/null | tail -1) || qid=""
+  if [ -n "$qid" ]; then
+    waiting="open"
+  else
+    efile=$(_find_entry_file "$eid") || efile=""
+    if [ -n "$efile" ]; then
+      _load_queue_entry "$efile"
+      if [ "$_QE_STATUS" = "stopped" ]; then
+        qid=$(_entry_parked_question "$eid" "${_QE_STOPPED_MODE:-}")
+        [ -n "$qid" ] && waiting="parked"
+      fi
+    fi
+  fi
+  if [ -n "$qid" ] && qc_read_answer "$AUTOMATION_DIR" "$qid" >/dev/null 2>&1; then
+    answered=true
+  fi
+  printf '"question":{%s,%s,%s,%s,%s}' \
+    "$(_json_kv "id" "$qid")" \
+    "$(_json_kv "waiting" "$waiting")" \
+    "$(_json_kv_raw "parked" "$([ "$waiting" = parked ] && echo true || echo false)")" \
+    "$(_json_kv_raw "answered" "$answered")" \
+    "$(_json_kv "summary" "$( [ -n "$qid" ] && qc_question_summary "$AUTOMATION_DIR" "$qid" 2>/dev/null)")"
+}
+
+# --- Put a stopped entry back in the queue, same Claude session ---
+# Shared by resume-entry and answer. The caller has loaded the entry and
+# checked that it is in stopped/. Exits non-zero on failure.
+# Arguments: $1 — entry_id
+_resume_stopped_entry() {
+  local RESUME_ID="$1"
+  RESUME_STOPPED_MODE="${_QE_STOPPED_MODE:-graceful}"
+  RESUME_WO_ID="${_QE_WORK_ORDER_ID:-}"
+
+  # Clear the flags BEFORE the entry becomes dequeuable. A flag left in place
+  # would be read by the resumed session's first tool call and stop it again
+  # (and by the runner's exit path, which would send it straight back to
+  # stopped/). The runner clears them too when it honours a stop, so this is
+  # the belt to that braces — a stop the runner never got to observe (daemon
+  # crash, force-halt) leaves a flag behind that only this path removes.
+  RESUME_CONTROL_DIR=$(get_control_dir "$RESUME_ID" 2>/dev/null) || RESUME_CONTROL_DIR=""
+  if [ -n "$RESUME_CONTROL_DIR" ]; then
+    rm -f "$RESUME_CONTROL_DIR/STOP" "$RESUME_CONTROL_DIR/FORCE" 2>/dev/null || true
+  fi
+
+  if ! acquire_queue_lock; then
+    echo "ERROR: Queue lock unavailable" >&2
+    exit 1
+  fi
+  if ! queue_resume "$RESUME_ID"; then
+    release_queue_lock
+    echo "ERROR: Could not resume entry $RESUME_ID" >&2
+    exit 1
+  fi
+  # Resuming resolves the hold (t-0055 clause 9): the entries queued behind
+  # this one were only waiting on its outcome. Any that are still genuinely
+  # related are re-held by the next dequeue tick if it stops again.
+  RESUME_FREED=$(queue_release_holds "$RESUME_ID") || RESUME_FREED=""
+  release_queue_lock
+
+  RESUME_FREED_COUNT=0
+  if [ -n "$RESUME_FREED" ]; then
+    RESUME_FREED_COUNT=$(printf '%s\n' "$RESUME_FREED" | grep -c .)
+  fi
+
+  # The resume handle (control/<id>/resume.yaml) is what makes the relaunch
+  # continue the recorded transcript. Without it the entry still runs, but from
+  # a fresh session — say so now rather than let the operator discover it from
+  # a runner warning.
+  RESUME_CLAUDE_SESSION=""
+  if [ -n "$RESUME_CONTROL_DIR" ] && [ -f "$RESUME_CONTROL_DIR/resume.yaml" ]; then
+    RESUME_CLAUDE_SESSION=$(grep -E '^claude_session_id:' "$RESUME_CONTROL_DIR/resume.yaml" 2>/dev/null | head -1 | sed 's/^claude_session_id: *//; s/^"//; s/"$//') || RESUME_CLAUDE_SESSION=""
+  fi
+
+  review_log_append "entry-resumed" "$RESUME_WO_ID" "$RESUME_ID" \
+    "Entry $RESUME_ID resumed by operator after a $RESUME_STOPPED_MODE stop — back in approved/ with resume: true${RESUME_CLAUDE_SESSION:+, continuing claude session $RESUME_CLAUDE_SESSION}; released $RESUME_FREED_COUNT held entries" 2>/dev/null || true
+}
+
 # --- hold block for `show --json` (t-0055 clause 10) ---
 # Emits the "hold" member: which entries this one is holding back, and which
 # ones queued after it the release predicate let through. Both are derived from
@@ -342,6 +458,17 @@ EOF
   printf ']'
 }
 
+# --- An entry or work-order id must be a plain file stem (t-0067) ---
+# Ids become paths (queue/<status>/<id>.yaml, work-orders/<id>.yaml); refuse
+# anything that could leave the directory.
+_require_queue_id() {
+  case "$1" in
+    ''|.*|*/*|*[!A-Za-z0-9._-]*)
+      echo "ERROR: invalid id: '$1'" >&2
+      exit 1 ;;
+  esac
+}
+
 # --- Parse global flags and extract subcommand ---
 if [ $# -eq 0 ]; then
   _usage
@@ -371,6 +498,7 @@ case "$SUBCOMMAND" in
     ADD_BRIEF="" ADD_BRANCH="" ADD_SESSION_TYPE="standard"
     ADD_AUTO_APPROVE=false ADD_SOLO=false ADD_PUSH=false ADD_PRIORITY="0" ADD_INDEPENDENT=false
     ADD_PROJECT="" ADD_MILESTONE_NAME="" ADD_MILESTONE_INDEX="0" ADD_MILESTONE_TOTAL="0"
+    ADD_WORK_ORDER=""
     SESSION_TYPE_EXPLICIT=false BRANCH_EXPLICIT=false
 
     while [ $# -gt 0 ]; do
@@ -382,6 +510,8 @@ case "$SUBCOMMAND" in
         --solo)             ADD_SOLO=true; shift ;;
         --push)             ADD_PUSH=true; shift ;;
         --independent)      ADD_INDEPENDENT=true; shift ;;
+        --work-order)       [ $# -ge 2 ] || { echo "ERROR: --work-order needs a work order id" >&2; exit 1; }
+                            ADD_WORK_ORDER="$2"; shift 2 ;;
         --project)          ADD_PROJECT="$2"; shift 2 ;;
         --milestone-name)   ADD_MILESTONE_NAME="$2"; shift 2 ;;
         --milestone-index)
@@ -409,6 +539,15 @@ case "$SUBCOMMAND" in
 
     if [ -z "$ADD_BRIEF" ]; then
       echo "ERROR: add requires --brief <path>" >&2
+      exit 1
+    fi
+
+    # --work-order joins an existing work order (t-0067: a task group's drafts
+    # share one, which approve-wo then approves together). queue_enqueue adds the
+    # child fail-silent, so an unknown id is refused here rather than dropped.
+    [ -z "$ADD_WORK_ORDER" ] || _require_queue_id "$ADD_WORK_ORDER"
+    if [ -n "$ADD_WORK_ORDER" ] && [ ! -f "$(_wo_dir)/${ADD_WORK_ORDER}.yaml" ]; then
+      echo "ERROR: Work order $ADD_WORK_ORDER not found" >&2
       exit 1
     fi
 
@@ -496,7 +635,7 @@ case "$SUBCOMMAND" in
     fi
 
     _ensure_queue_dirs
-    ENTRY_ID=$(queue_enqueue "$ADD_BRIEF" "$ADD_SESSION_TYPE" "$ADD_AUTO_MODE" "$ADD_SOLO_STR" "$ADD_BRANCH" "" "$ADD_PUSH_STR" "$ADD_PRIORITY" "build" "$ADD_PROJECT" "$ADD_MILESTONE_NAME" "$ADD_MILESTONE_INDEX" "$ADD_MILESTONE_TOTAL")
+    ENTRY_ID=$(queue_enqueue "$ADD_BRIEF" "$ADD_SESSION_TYPE" "$ADD_AUTO_MODE" "$ADD_SOLO_STR" "$ADD_BRANCH" "$ADD_WORK_ORDER" "$ADD_PUSH_STR" "$ADD_PRIORITY" "build" "$ADD_PROJECT" "$ADD_MILESTONE_NAME" "$ADD_MILESTONE_INDEX" "$ADD_MILESTONE_TOTAL")
 
     if [ -z "$ENTRY_ID" ]; then
       release_queue_lock
@@ -550,19 +689,37 @@ case "$SUBCOMMAND" in
     ;;
 
   # --- approve: move entry to approved ---
+  # --mode is the approver's choice for a draft (t-0067): it sets auto_mode
+  # before the transition. Without it the entry keeps the auto_mode it has.
   approve)
     if [ $# -lt 1 ]; then
       echo "ERROR: approve requires <id>" >&2
       exit 1
     fi
-    APPROVE_ID="$1"
+    APPROVE_ID="$1"; shift
+    _require_queue_id "$APPROVE_ID"
+    APPROVE_MODE=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --mode) [ $# -ge 2 ] || { echo "ERROR: --mode needs review or auto" >&2; exit 1; }
+                APPROVE_MODE="$2"; shift 2 ;;
+        *) echo "ERROR: Unknown approve option: $1" >&2; exit 1 ;;
+      esac
+    done
+    case "$APPROVE_MODE" in
+      ''|review|auto) ;;
+      *) echo "ERROR: --mode must be review or auto" >&2; exit 1 ;;
+    esac
 
     if ! acquire_queue_lock; then
       echo "ERROR: Queue lock unavailable" >&2
       exit 1
     fi
 
-    queue_approve "$APPROVE_ID"
+    if ! queue_approve_with_mode "$APPROVE_ID" "$APPROVE_MODE"; then
+      release_queue_lock
+      exit 1
+    fi
     release_queue_lock
 
     if [ "$JSON_OUTPUT" = true ]; then
@@ -570,6 +727,102 @@ case "$SUBCOMMAND" in
     else
       printf 'Approved: %s\n' "$APPROVE_ID"
     fi
+    ;;
+
+  # --- approve-wo: approve every pending entry of a work order together ---
+  # One lock for the whole group (t-0067), so a task group's drafts never run
+  # half-approved: a pending sibling would otherwise block the group's merge.
+  approve-wo)
+    if [ $# -lt 1 ]; then
+      echo "ERROR: approve-wo requires <work-order-id>" >&2
+      exit 1
+    fi
+    AWO_ID="$1"; shift
+    _require_queue_id "$AWO_ID"
+    AWO_MODE=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --mode) [ $# -ge 2 ] || { echo "ERROR: --mode needs review or auto" >&2; exit 1; }
+                AWO_MODE="$2"; shift 2 ;;
+        *) echo "ERROR: Unknown approve-wo option: $1" >&2; exit 1 ;;
+      esac
+    done
+
+    if ! acquire_queue_lock; then
+      echo "ERROR: Queue lock unavailable" >&2
+      exit 1
+    fi
+    if ! AWO_IDS=$(queue_approve_work_order "$AWO_ID" "$AWO_MODE"); then
+      release_queue_lock
+      exit 1
+    fi
+    release_queue_lock
+
+    if [ "$JSON_OUTPUT" = true ]; then
+      _awo_json=""
+      for _awo in $AWO_IDS; do
+        _awo_json="${_awo_json:+$_awo_json,}\"$_awo\""
+      done
+      printf '{%s,"approved":[%s]}\n' "$(_json_kv "work_order_id" "$AWO_ID")" "$_awo_json"
+    elif [ -z "$AWO_IDS" ]; then
+      printf 'Approved: none pending in %s\n' "$AWO_ID"
+    else
+      for _awo in $AWO_IDS; do
+        printf 'Approved: %s\n' "$_awo"
+      done
+    fi
+    ;;
+
+  # --- draft-status / draft-wait: where a Prompt T draft stands (t-0067) ---
+  # Read-only, no lock. One line per id: "<id> <status> <mode>", or
+  # "<id> absent -" once removed. draft-wait blocks until none is pending-review,
+  # so a Prompt T session can run it in the background and be woken when the
+  # operator submits or removes the draft from outside.
+  draft-status|draft-wait)
+    DS_IDS="" DS_TIMEOUT=0 DS_INTERVAL=2
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --timeout|--interval)
+          [ $# -ge 2 ] || { echo "ERROR: $1 needs a number of seconds" >&2; exit 1; }
+          if [ "$1" = "--timeout" ]; then DS_TIMEOUT="$2"; else DS_INTERVAL="$2"; fi
+          shift 2 ;;
+        -*) echo "ERROR: Unknown $SUBCOMMAND option: $1" >&2; exit 1 ;;
+        *) _require_queue_id "$1"; DS_IDS="$DS_IDS $1"; shift ;;
+      esac
+    done
+    if [ -z "$DS_IDS" ]; then
+      echo "ERROR: $SUBCOMMAND requires at least one <id>" >&2
+      exit 1
+    fi
+    for _ds_n in "$DS_TIMEOUT" "$DS_INTERVAL"; do
+      case "$_ds_n" in
+        ''|*[!0-9]*) echo "ERROR: --timeout and --interval take whole seconds" >&2; exit 1 ;;
+      esac
+    done
+    [ "$DS_INTERVAL" -gt 0 ] || DS_INTERVAL=1
+
+    if [ "$SUBCOMMAND" = "draft-wait" ]; then
+      _ds_waited=0
+      while :; do
+        _ds_pending=false
+        for _ds in $DS_IDS; do
+          case "$(queue_entry_state "$_ds")" in
+            pending-review*) _ds_pending=true; break ;;
+          esac
+        done
+        [ "$_ds_pending" = false ] && break
+        if [ "$DS_TIMEOUT" -gt 0 ] && [ "$_ds_waited" -ge "$DS_TIMEOUT" ]; then
+          echo "draft-wait: still pending after ${DS_TIMEOUT}s" >&2
+          exit 3
+        fi
+        sleep "$DS_INTERVAL"
+        _ds_waited=$((_ds_waited + DS_INTERVAL))
+      done
+    fi
+
+    for _ds in $DS_IDS; do
+      printf '%s %s\n' "$_ds" "$(queue_entry_state "$_ds")"
+    done
     ;;
 
   # --- remove: delete entry from queue ---
@@ -818,6 +1071,7 @@ case "$SUBCOMMAND" in
       # them first, then load the entry's own fields for the flat members.
       _SHOW_SESSION_JSON=$(_entry_session_json "$SHOW_ID")
       _SHOW_HOLD_JSON=$(_entry_hold_json "$SHOW_ID")
+      _SHOW_QUESTION_JSON=$(_entry_question_json "$SHOW_ID")
 
       # Both directions of the follow-up link (t-0055 clause 14). The forward
       # one is the stored field below; this is the reverse, which is a scan
@@ -838,7 +1092,7 @@ EOF
       # safe here after the load; close_steps is already JSON, emitted verbatim.
       _SHOW_CLOSE_PATH=$(queue_close_path)
       _SHOW_CLOSE_STATE=$(queue_close_state)
-      printf '{%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"follow_ups":[%s],%s,%s,%s,%s,%s,"close_steps":%s}\n' \
+      printf '{%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"follow_ups":[%s],%s,%s,%s,%s,%s,%s,"close_steps":%s}\n' \
         "$(_json_kv "id" "$_QE_ID")" \
         "$(_json_kv "status" "$_QE_STATUS")" \
         "$(_json_kv "priority" "${_QE_PRIORITY:-0}")" \
@@ -866,6 +1120,7 @@ EOF
         "$_SHOW_FU_JSON" \
         "$_SHOW_SESSION_JSON" \
         "$_SHOW_HOLD_JSON" \
+        "$_SHOW_QUESTION_JSON" \
         "$(_json_kv "close_path" "$_SHOW_CLOSE_PATH")" \
         "$(_json_kv "close_state" "$_SHOW_CLOSE_STATE")" \
         "$(_json_kv_raw "merge_hold" "${_QE_MERGE_HOLD:-false}")" \
@@ -1784,6 +2039,14 @@ EOF
       exit 1
     fi
     RESUME_ID="$1"
+    shift
+    RESUME_FORCE=false
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --force) RESUME_FORCE=true; shift ;;
+        *) echo "ERROR: unknown resume-entry option: $1" >&2; exit 1 ;;
+      esac
+    done
 
     RESUME_ENTRY_FILE=$(_find_entry_file "$RESUME_ID")
     if [ -z "$RESUME_ENTRY_FILE" ]; then
@@ -1799,51 +2062,18 @@ EOF
         exit 1
         ;;
     esac
-    RESUME_STOPPED_MODE="${_QE_STOPPED_MODE:-graceful}"
-    RESUME_WO_ID="${_QE_WORK_ORDER_ID:-}"
 
-    # Clear the flags BEFORE the entry becomes dequeuable. A flag left in place
-    # would be read by the resumed session's first tool call and stop it again
-    # (and by the runner's exit path, which would send it straight back to
-    # stopped/). The runner clears them too when it honours a stop, so this is
-    # the belt to that braces — a stop the runner never got to observe (daemon
-    # crash, force-halt) leaves a flag behind that only this path removes.
-    RESUME_CONTROL_DIR=$(get_control_dir "$RESUME_ID" 2>/dev/null) || RESUME_CONTROL_DIR=""
-    if [ -n "$RESUME_CONTROL_DIR" ]; then
-      rm -f "$RESUME_CONTROL_DIR/STOP" "$RESUME_CONTROL_DIR/FORCE" 2>/dev/null || true
-    fi
-
-    if ! acquire_queue_lock; then
-      echo "ERROR: Queue lock unavailable" >&2
+    # A parked entry (Decision t-0068) stopped because it needs an answer;
+    # resuming it without one would only re-ask. --force is the operator
+    # deciding to let the agent choose instead.
+    RESUME_QID=$(_entry_parked_question "$RESUME_ID" "${_QE_STOPPED_MODE:-}")
+    if [ -n "$RESUME_QID" ] && [ "$RESUME_FORCE" != true ] \
+        && ! qc_read_answer "$AUTOMATION_DIR" "$RESUME_QID" >/dev/null 2>&1; then
+      echo "ERROR: Entry $RESUME_ID is parked on unanswered question $RESUME_QID. Answer it with: queue-cli.sh answer $RESUME_ID --question $RESUME_QID --text TEXT (or resume-entry --force to let the agent choose)" >&2
       exit 1
     fi
-    if ! queue_resume "$RESUME_ID"; then
-      release_queue_lock
-      echo "ERROR: Could not resume entry $RESUME_ID" >&2
-      exit 1
-    fi
-    # Resuming resolves the hold (t-0055 clause 9): the entries queued behind
-    # this one were only waiting on its outcome. Any that are still genuinely
-    # related are re-held by the next dequeue tick if it stops again.
-    RESUME_FREED=$(queue_release_holds "$RESUME_ID") || RESUME_FREED=""
-    release_queue_lock
 
-    RESUME_FREED_COUNT=0
-    if [ -n "$RESUME_FREED" ]; then
-      RESUME_FREED_COUNT=$(printf '%s\n' "$RESUME_FREED" | grep -c .)
-    fi
-
-    # The resume handle (control/<id>/resume.yaml) is what makes the relaunch
-    # continue the recorded transcript. Without it the entry still runs, but from
-    # a fresh session — say so now rather than let the operator discover it from
-    # a runner warning.
-    RESUME_CLAUDE_SESSION=""
-    if [ -n "$RESUME_CONTROL_DIR" ] && [ -f "$RESUME_CONTROL_DIR/resume.yaml" ]; then
-      RESUME_CLAUDE_SESSION=$(grep -E '^claude_session_id:' "$RESUME_CONTROL_DIR/resume.yaml" 2>/dev/null | head -1 | sed 's/^claude_session_id: *//; s/^"//; s/"$//') || RESUME_CLAUDE_SESSION=""
-    fi
-
-    review_log_append "entry-resumed" "$RESUME_WO_ID" "$RESUME_ID" \
-      "Entry $RESUME_ID resumed by operator after a $RESUME_STOPPED_MODE stop — back in approved/ with resume: true${RESUME_CLAUDE_SESSION:+, continuing claude session $RESUME_CLAUDE_SESSION}; released $RESUME_FREED_COUNT held entries" 2>/dev/null || true
+    _resume_stopped_entry "$RESUME_ID"
 
     if [ "$JSON_OUTPUT" = true ]; then
       printf '{%s,%s,%s,%s,%s}\n' \
@@ -1858,6 +2088,164 @@ EOF
     else
       printf 'Resumed: %s (approved/) — no resume handle found, so the next run starts a fresh session. Released %s held entries\n' \
         "$RESUME_ID" "$RESUME_FREED_COUNT"
+    fi
+    ;;
+
+  # --- answer: answer a headless question (Decision t-0068) ---
+  # Writes questions/q-<id>.answer.yaml (format_version 1, validated, published
+  # by hard link so an answer is never replaced — qc_write_answer).
+  # A parked entry is then resumed in the same Claude session, whose first
+  # message is the answer; an entry still in its live wait reads the file on
+  # the hook's next poll. Every state is checked before anything is written.
+  answer)
+    if [ $# -lt 1 ]; then
+      echo "ERROR: answer requires <id>" >&2
+      exit 1
+    fi
+    ANS_ID="$1"
+    shift
+    _require_queue_id "$ANS_ID"
+    ANS_QID="" ANS_FILE="" ANS_TEXT_COUNT=0
+    ANS_TEXTS=()
+    ANS_TEXTS_FILE=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --question)
+          [ $# -ge 2 ] || { echo "ERROR: --question requires a value" >&2; exit 1; }
+          ANS_QID="$2"; shift 2 ;;
+        --file)
+          [ $# -ge 2 ] || { echo "ERROR: --file requires a value" >&2; exit 1; }
+          ANS_FILE="$2"; shift 2 ;;
+        --text)
+          [ $# -ge 2 ] || { echo "ERROR: --text requires a value" >&2; exit 1; }
+          ANS_TEXTS[$ANS_TEXT_COUNT]="$2"
+          ANS_TEXT_COUNT=$((ANS_TEXT_COUNT + 1))
+          shift 2 ;;
+        *) echo "ERROR: unknown answer option: $1" >&2; exit 1 ;;
+      esac
+    done
+    case "$ANS_QID" in
+      q-[0-9][0-9][0-9][0-9][0-9][0-9]) ;;
+      *) echo "ERROR: answer requires --question q-NNNNNN (got '${ANS_QID}')" >&2; exit 1 ;;
+    esac
+    if [ -n "$ANS_FILE" ] && [ "$ANS_TEXT_COUNT" -gt 0 ]; then
+      echo "ERROR: give --file or --text, not both" >&2; exit 1
+    fi
+    if [ -z "$ANS_FILE" ] && [ "$ANS_TEXT_COUNT" -eq 0 ]; then
+      echo "ERROR: answer requires --file PATH or --text TEXT" >&2; exit 1
+    fi
+    if [ -n "$ANS_FILE" ] && [ ! -f "$ANS_FILE" ]; then
+      echo "ERROR: answer file not found: $ANS_FILE" >&2; exit 1
+    fi
+
+    ANS_QDIR=$(qc_dir "$AUTOMATION_DIR")
+    if [ ! -f "$ANS_QDIR/${ANS_QID}.yaml" ]; then
+      echo "ERROR: No question $ANS_QID in $ANS_QDIR" >&2; exit 1
+    fi
+    if ! grep -q "^entry_id: \"${ANS_ID}\"[[:space:]]*\$" "$ANS_QDIR/${ANS_QID}.yaml" 2>/dev/null; then
+      echo "ERROR: Question $ANS_QID was not asked by entry $ANS_ID" >&2; exit 1
+    fi
+    if [ -e "$ANS_QDIR/${ANS_QID}.answer.yaml" ] || [ -L "$ANS_QDIR/${ANS_QID}.answer.yaml" ]; then
+      # Say who the existing file claims to be from: anything that can write
+      # questions/ can write an answer first (Decision t-0064 Known limits),
+      # and this is where a forged one becomes visible.
+      ANS_EXISTING=$(sed -n 's/^operator: *//p; s/^answered_at: *//p' "$ANS_QDIR/${ANS_QID}.answer.yaml" 2>/dev/null | tr '\n' ' ')
+      if qc_read_answer "$AUTOMATION_DIR" "$ANS_QID" >/dev/null 2>&1; then
+        echo "ERROR: Question $ANS_QID already has an answer (operator, answered_at: ${ANS_EXISTING:-not recorded}) — it is not replaced, because it may already have been delivered" >&2
+      else
+        echo "ERROR: $ANS_QDIR/${ANS_QID}.answer.yaml exists but is not a valid answer — inspect and remove it, then answer again" >&2
+      fi
+      exit 1
+    fi
+
+    ANS_ENTRY_FILE=$(_find_entry_file "$ANS_ID")
+    if [ -z "$ANS_ENTRY_FILE" ]; then
+      echo "ERROR: Entry $ANS_ID not found" >&2; exit 1
+    fi
+    _load_queue_entry "$ANS_ENTRY_FILE"
+    # Which of the two answerable states the entry is in. Anything else (an
+    # agent-decided or abandoned question, an entry that has moved on) has no
+    # reader for the answer, so it is refused rather than written for nobody.
+    ANS_MODE=""
+    if qc_is_open "$AUTOMATION_DIR" "$ANS_QID"; then
+      ANS_MODE="live"
+    elif [ "$_QE_STATUS" = "stopped" ] \
+        && [ "$(_entry_parked_question "$ANS_ID" "${_QE_STOPPED_MODE:-}")" = "$ANS_QID" ]; then
+      ANS_MODE="parked"
+    elif [ "$_QE_STATUS" = "running" ] && [ "$(qc_close_reason "$AUTOMATION_DIR" "$ANS_QID")" = "parked" ]; then
+      # The hook has parked but the runner has not yet moved the entry to
+      # stopped/. The answer is kept; the resume has to wait for the stop.
+      ANS_MODE="parking"
+    else
+      ANS_REASON=$(qc_close_reason "$AUTOMATION_DIR" "$ANS_QID")
+      echo "ERROR: Question $ANS_QID is not waiting for an answer (close reason: ${ANS_REASON:-none}; entry status: $_QE_STATUS)" >&2
+      exit 1
+    fi
+
+    if [ "$ANS_TEXT_COUNT" -gt 0 ]; then
+      ANS_QCOUNT=$(qc_question_count "$AUTOMATION_DIR" "$ANS_QID")
+      ANS_QCOUNT="${ANS_QCOUNT:-0}"
+      if [ "$ANS_QCOUNT" -gt 0 ] && [ "$ANS_TEXT_COUNT" -ne "$ANS_QCOUNT" ]; then
+        echo "ERROR: Question $ANS_QID has $ANS_QCOUNT questions; give one --text per question ($ANS_TEXT_COUNT given)" >&2; exit 1
+      fi
+      # A private random file outside questions/, which the asking session can
+      # write: a predictable name there could be a planted symlink.
+      ANS_TEXTS_FILE=$(mktemp "${TMPDIR:-/tmp}/qc-answer.XXXXXX") || { echo "ERROR: Could not create a temporary file" >&2; exit 1; }
+      # Expanded only when non-empty: bash 3.2 treats "${a[@]}" of an empty
+      # array as unbound under set -u.
+      if ! qc_text_answer "$ANS_QID" "${USER:-operator}" "${ANS_TEXTS[@]}" > "$ANS_TEXTS_FILE" 2>/dev/null; then
+        rm -f "$ANS_TEXTS_FILE"
+        echo "ERROR: Could not build the answer file" >&2; exit 1
+      fi
+      ANS_FILE="$ANS_TEXTS_FILE"
+    fi
+
+    ANS_WRC=0
+    qc_write_answer "$AUTOMATION_DIR" "$ANS_QID" "$ANS_FILE" || ANS_WRC=$?
+    if [ "$ANS_WRC" -ne 0 ]; then
+      [ -n "$ANS_TEXTS_FILE" ] && rm -f "$ANS_TEXTS_FILE"
+      case "$ANS_WRC" in
+        2) echo "ERROR: $ANS_FILE is not a valid answer to $ANS_QID (format_version 1, question_id \"$ANS_QID\", an answers block with a selection or free text — Decision t-0064 § 5)" >&2 ;;
+        3) echo "ERROR: An answer to $ANS_QID was written by someone else while this one was being prepared — it is not replaced" >&2 ;;
+        *) echo "ERROR: Could not write the answer to $ANS_QID in $ANS_QDIR" >&2 ;;
+      esac
+      exit 1
+    fi
+    [ -n "$ANS_TEXTS_FILE" ] && rm -f "$ANS_TEXTS_FILE"
+    # The hook may have parked between the state check and the publish. Its
+    # post-close re-read delivers an answer it can see; past that, the entry
+    # is stopping and is resumed by hand once it has stopped.
+    if [ "$ANS_MODE" = "live" ] && [ "$(qc_close_reason "$AUTOMATION_DIR" "$ANS_QID")" = "parked" ]; then
+      ANS_MODE="parking"
+    fi
+
+    # Set outside $(...): bash 3.2 misparses a case pattern's ')' inside one.
+    case "$ANS_MODE" in
+      live)    ANS_WHEN="during the live wait"; ANS_ACTION="answered" ;;
+      parking) ANS_WHEN="as it parked";         ANS_ACTION="answered-parking" ;;
+      *)       ANS_WHEN="while parked";         ANS_ACTION="answered-resumed" ;;
+    esac
+    review_log_append "question-answered" "${_QE_WORK_ORDER_ID:-}" "$ANS_ID" \
+      "Operator answered question $ANS_QID of entry $ANS_ID ($ANS_WHEN)" 2>/dev/null || true
+
+    if [ "$ANS_MODE" = "parked" ]; then
+      _resume_stopped_entry "$ANS_ID"
+    fi
+
+    if [ "$JSON_OUTPUT" = true ]; then
+      printf '{%s,%s,%s,%s}\n' \
+        "$(_json_kv "entry_id" "$ANS_ID")" \
+        "$(_json_kv "question_id" "$ANS_QID")" \
+        "$(_json_kv "action" "$ANS_ACTION")" \
+        "$(_json_kv "claude_session_id" "${RESUME_CLAUDE_SESSION:-}")"
+    elif [ "$ANS_MODE" = "parked" ]; then
+      printf 'Answered %s and resumed %s (approved/%s) — the answer is the first message of the resumed session\n' \
+        "$ANS_QID" "$ANS_ID" "${RESUME_CLAUDE_SESSION:+, continuing claude session $RESUME_CLAUDE_SESSION}"
+    elif [ "$ANS_MODE" = "parking" ]; then
+      printf 'Answered %s — entry %s was parking on it as the answer arrived. If it shows stopped, resume it with: queue-cli.sh resume-entry %s (the answer is delivered then); if it is still running, the hook delivered the answer\n' \
+        "$ANS_QID" "$ANS_ID" "$ANS_ID"
+    else
+      printf 'Answered %s — entry %s is still waiting in the hook and picks it up within seconds\n' "$ANS_QID" "$ANS_ID"
     fi
     ;;
 

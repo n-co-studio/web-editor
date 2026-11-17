@@ -47,7 +47,7 @@
 # required excluding it; that was wrong and is corrected in the entry.
 #
 # Order is irrelevant: every entry is an independent _delete_if_owned.
-_SESSION_EVIDENCE_FILES="plan-approved pragmatist-signed cohesion-reviewed diff-review-complete qa-verified reviewer-signed security-signed functional-verified kg-updated criteria-verdicts.yaml"
+_SESSION_EVIDENCE_FILES="plan-approved pragmatist-signed cohesion-reviewed diff-review-complete qa-verified reviewer-signed security-signed functional-verified kg-updated criteria-verdicts.yaml taskdef-draft"
 
 # --- Clear this session's evidence (known-issue R40) ---
 # Removes only files this session owns, via _delete_if_owned, and logs each one
