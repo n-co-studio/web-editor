@@ -40,6 +40,7 @@ Changes to what the MCP server does with the queue and with the edits it receive
 - **Picked image names that Windows reserves are renamed.** A name such as `con.x.png` is saved as `_con.x-<hash>.png` instead of a name Windows treats as a device (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`, any case). A bare `con.png` is unchanged, because the hash follows the name. Saved names are also kept within 255 bytes, and a picked name over 255 characters falls back to `uploaded-<hash>`.
 - **A `data:` URL inside inserted markup or a `background-image` value is removed if saving it fails.** It used to stay inline, up to the full payload, past the size, type and content checks. This matches what attribute images already did.
 - **The MCP server now reports its real version to your agent.** It had announced 0.2.0 in every release since 0.2.0; it now reads the version from the installed package, so it can't drift again.
+- **The setup guide's screenshots show the current icon.** The pin and switch-on images still showed the old round icon.
 
 ## [0.3.0] - 2026-10-26
 
