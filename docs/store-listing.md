@@ -79,7 +79,7 @@ These justifications are required for Chrome Web Store review. Copy them verbati
 
 ### Host permission: `http://localhost/*`, `http://127.0.0.1/*`, `https://localhost/*`
 
-> These host matches are required for the content script to run on local development servers. The extension is a developer tool that operates exclusively on `localhost`/`127.0.0.1` — it never runs on public internet pages. The content script opens a WebSocket connection to a **locally-installed** MCP server process (`@nco-studio/web-editor-mcp`) running on the developer's own machine — the extension opens no other connection, and neither it nor that server transmits anything off the machine. (The MCP server's purpose is to hand edits to the developer's own AI agent, which is where they go next.) The WebSocket is opened by the **content script** (not the service worker) to avoid MV3 service-worker termination issues; this is a standard architecture for dev-tool extensions that need persistent WebSocket connections.
+> These host matches let the content script run on local development servers. The extension is a developer tool that operates only on localhost/127.0.0.1 and never runs on public pages. Its service worker opens a WebSocket to a locally installed MCP server (@nco-studio/web-editor-mcp) on 127.0.0.1, on the developer's own machine, and relays messages to the content script. The extension opens no other connection, and neither it nor the server sends anything off the machine; the server hands edits to the developer's own AI agent. The server accepts the connection only from this extension's ID, so page scripts cannot use it.
 
 ---
 
@@ -92,6 +92,19 @@ These notes help the Chrome Web Store review team understand how to test the ext
 This extension is a developer tool that overlays a visual inspection and editing UI on locally-running web pages. It requires a locally-installed companion MCP server. It does not work on public websites.
 
 On first install, the extension opens the setup guide at https://nco.studio/web-editor/ in a new tab. This is a static page; no data is sent to it. Subsequent installs (update, reinstall) do not open a tab.
+
+### Test instructions field
+
+The dashboard's Test instructions field takes at most 500 characters. Submitted for 0.3.1 (482 characters):
+
+```
+Dev tool for localhost/127.0.0.1 pages only; needs a local MCP server.
+1. Node 20+. Run: npx @nco-studio/web-editor-mcp@^0 (ws://127.0.0.1:7890-7899)
+2. Start a dev server, e.g. npx create-next-app@latest demo && cd demo && npm run dev; open http://localhost:3000
+3. Click toolbar icon, toggle Extension On. No permission prompt.
+4. Click an element, change spacing or color, click Apply Changes.
+No external calls. The server is 127.0.0.1-only and accepts only this extension's ID.
+```
 
 ### How to test
 
@@ -116,7 +129,7 @@ On first install, the extension opens the setup guide at https://nco.studio/web-
 2. Navigate to `http://localhost:3000` (or your local dev server).
 3. Click the extension's icon in the Chrome toolbar — a small popup appears with two buttons: **Extension** (toggle On/Off) and **Open Change Queue**.
 4. Click **Extension** in the popup to toggle it **On** — the overlay activates. You should see a cyan selection highlight as you hover over elements.
-   - Chrome asks to allow access to other devices and apps on your local network. **Click Allow.** This is Chrome's Local Network Access permission (Chrome 142+, extended to WebSockets in 147); the extension needs it to reach the MCP server on `ws://localhost`. If it is denied, the extension cannot connect and will appear inert.
+   - No permission prompt appears. The extension connects to the MCP server from its background service worker, so Chrome's Local Network Access prompt is not triggered.
 5. Click an element to inspect it. The properties panel appears at the bottom of the viewport.
 6. Adjust a spacing or color value — the live preview updates instantly and the edit queues automatically.
 7. Click **Apply Changes** to send the diff to the MCP server.
@@ -129,11 +142,11 @@ If the extension and MCP server versions are incompatible, a persistent red bann
 
 **Architecture notes for reviewers:**
 
-- The WebSocket connection is opened by the **content script** (`content.js`), not the service worker. This is intentional: MV3 service workers are terminated after ~30 seconds of inactivity, which would break a persistent WebSocket. The content script remains alive as long as the page is open.
-- All WebSocket traffic goes to `ws://localhost:<port>` — the locally-installed MCP server. No external network calls are made.
-- Because that WebSocket targets a loopback address, Chrome's Local Network Access permission prompt appears on first connect. Allowing it is required for the extension to function; it grants access to the developer's own machine only, and the extension makes no requests beyond `localhost`.
+- The WebSocket connection is opened by the service worker (`service-worker.js`) and relayed to the page's content script by extension messaging. It sends a keepalive message on an interval while connected, which keeps the MV3 service worker running (Chrome 116+, the extension's minimum version). Page scripts cannot reach the connection.
+- All WebSocket traffic goes to `ws://127.0.0.1:<port>` — the locally-installed MCP server. No external network calls are made.
+- The WebSocket targets 127.0.0.1 only. The MCP server accepts the connection only from this extension's ID, so a page script or another extension cannot connect to it.
 - The extension uses a Shadow DOM overlay to avoid style conflicts with the host page. All extension UI is isolated inside the shadow root.
-- The extension ID assigned by the Web Store will differ from the sideloaded dev-install ID. This is expected and acceptable for a new extension — no ID-dependent behavior is present. (Assigned on approval, 2026-10-15: `aifpecjojmlgdhgnkmkaobmfipdmppea` — listing at https://chromewebstore.google.com/detail/ai-agent-visual-editor/aifpecjojmlgdhgnkmkaobmfipdmppea)
+- The MCP server checks the connecting extension's ID. The store ID is built in; a sideloaded copy has a different ID and needs `NCO_WEB_EDITOR_EXTENSION_IDS=<id>` in the server's environment. (Assigned on approval, 2026-10-15: `aifpecjojmlgdhgnkmkaobmfipdmppea` — listing at https://chromewebstore.google.com/detail/ai-agent-visual-editor/aifpecjojmlgdhgnkmkaobmfipdmppea)
 
 ### Known limitations
 
