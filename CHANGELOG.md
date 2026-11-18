@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-17
+
 ### Security
 
 Closes the three issues 0.3.0 left open (KL-3, KL-4, KL-6), makes the asset refusals in KL-5 honest, and closes part of KL-7 (file-write confinement and agent hints). **Update the extension first and the MCP server second** — the protection takes effect only once the server is on 0.3.1, and a 0.3.1 server refuses a pre-0.3.1 extension.

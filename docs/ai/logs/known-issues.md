@@ -170,7 +170,7 @@ description.
 - **Why it is logged rather than fixed:** `.github/workflows/` is a governance path and is not editable in child mode. Operator decision 2026-10-26: fix upstream in `repo-OS-template` so every child repo benefits and the path lock stays meaningful.
 - **Discovered:** adversarial security review, 2026-10-26.
 
-**Deferred docs hygiene (0.3.1, not a GT item):** `COMPATIBILITY.md`, the alignment table in `RELEASING.md` and `examples/demo-app` `Troubleshooting.tsx` still show `0.2.0` as the current version (the matrices' "Current" row and the demo's extension-version line) although 0.3.x is current; left unchanged in 0.3.1 and to be corrected separately.
+**Deferred docs hygiene (0.3.1, not a GT item):** `COMPATIBILITY.md`, the alignment table in `RELEASING.md` and `examples/demo-app` `Troubleshooting.tsx` still show `0.2.0` as the current version (the matrices' "Current" row and the demo's extension-version line) although 0.3.x is current. **Resolved in the 0.3.1 release commit:** the matrices now show 0.5.0 / 0.3.1, and the demo's support template asks for the version from `chrome://extensions` instead of naming one.
 
 ### GT-7 — `template-sync.yml` interpolates a workflow input straight into a shell
 - **File:** `.github/workflows/template-sync.yml:64` — `${{ github.event.inputs.source_repo }}`

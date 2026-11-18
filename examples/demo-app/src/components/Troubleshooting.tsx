@@ -28,7 +28,7 @@ const SUPPORT_BODY = [
   'What happened instead:',
   '',
   'Chrome version / OS:',
-  'Extension version: 0.2.0',
+  'Extension version (chrome://extensions):',
   'Agent (Claude Code, Cursor, …):',
   'Editor connected? (toolbar dot):',
   'MCP server output:',

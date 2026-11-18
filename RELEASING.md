@@ -27,6 +27,8 @@ A breaking change to any of the following = **MAJOR version bump** on both the M
 
 Minor additions to the WebSocket protocol that remain backward-compatible (e.g., new optional message fields) = **minor** bump.
 
+The MAJOR rule applies from `1.0.0` on. Before `1.0.0`, a breaking change takes a patch or minor bump, and `COMPATIBILITY.md` must say which component to update first (0.3.1 is the first case: the extension before the server).
+
 ### Extension ↔ npm version alignment
 
 The Chrome extension and the two npm packages share a common release gate:
@@ -34,7 +36,7 @@ The Chrome extension and the two npm packages share a common release gate:
 - **Bump all three together** when the WebSocket protocol changes (see above).
 - After publishing, record the pairing in `COMPATIBILITY.md`:
   ```
-  | 0.4.0 | 0.2.0 | 0.2.0 | Current — component awareness, status protocol |
+  | 0.5.0 | 0.3.1 | 0.3.1 | Current — extension-only connection, structured notes |
   ```
 - The extension ZIP filename encodes its version (`nco-studio-web-editor-{version}.zip`). Update `packages/chrome-extension/manifest.json` version field to match.
 

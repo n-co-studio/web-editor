@@ -8,10 +8,10 @@ AI Agent Visual Editor uses a typed WebSocket protocol (`WS_PROTOCOL_VERSION`) b
 
 | Component | Current version | npm package |
 |-----------|----------------|-------------|
-| Protocol | **0.4.0** | (defined in `@nco-studio/shared`) |
-| MCP server | **0.3.0** | `@nco-studio/web-editor-mcp` |
-| Chrome extension | **0.3.0** | (Chrome Web Store / manual install) |
-| Dev plugin | **0.3.0** | `@nco-studio/web-editor-plugin` |
+| Protocol | **0.5.0** | (defined in `@nco-studio/shared`) |
+| MCP server | **0.3.1** | `@nco-studio/web-editor-mcp` |
+| Chrome extension | **0.3.1** | (Chrome Web Store / manual install) |
+| Dev plugin | **0.3.1** | `@nco-studio/web-editor-plugin` |
 
 ---
 
@@ -19,7 +19,8 @@ AI Agent Visual Editor uses a typed WebSocket protocol (`WS_PROTOCOL_VERSION`) b
 
 | `WS_PROTOCOL_VERSION` | Min extension version | Min mcp-server version | Notes |
 |-----------------------|-----------------------|------------------------|-------|
-| `0.4.0` | 0.2.0 | 0.2.0 | Current — component awareness, status protocol |
+| `0.5.0` | 0.3.1 | 0.3.1 | Current — extension-only connection, structured notes |
+| `0.4.0` | 0.2.0 | 0.2.0 | Component awareness, status protocol |
 | `0.3.x` | 0.1.x | 0.0.x | Token push, TOKEN_UPDATE messages |
 | `0.2.x` | 0.1.x | 0.0.x | Keepalive, error messages |
 | `0.1.x` | 0.1.x | 0.0.x | Initial VISUAL_DIFF_BATCH protocol |
@@ -64,7 +65,8 @@ A major version bump signals a breaking protocol change. At that point you will 
 
 ## Upgrade guidance
 
-Within `0.x`, nothing here is required — see "Do I need to do anything?" below.
+Within `0.x`, updates are usually automatic. "Do I need to do anything?" below
+says when they are not.
 These steps are for pinned setups, or for the eventual `1.0.0` bump.
 
 ### Upgrading the MCP server
@@ -74,7 +76,7 @@ resolution picks up the newest `0.x`. If you pinned an exact version, update it
 in `.mcp.json`:
 
 ```json
-"args": ["--yes", "@nco-studio/web-editor-mcp@0.3.0"]
+"args": ["--yes", "@nco-studio/web-editor-mcp@0.3.1"]
 ```
 
 To force a refresh of a cached `npx` resolution, run it once directly:
@@ -102,6 +104,15 @@ installed unpacked, download the new `.zip` from the
 and re-load it.
 
 ### Do I need to do anything?
+
+For **0.3.0 → 0.3.1, yes: update the extension first.** A 0.3.1 server
+accepts connections only from the 0.3.1 extension, so an older extension shows
+as disconnected (the server log says "Refused a connection from the page
+origin"). A 0.3.1 extension still works with a 0.3.0 server. Under the `@^0`
+pin the server updates itself on its next start, so if the extension shows
+disconnected after that, open `chrome://extensions` and press **Update**.
+Unpacked development builds have their own extension ID and need
+`NCO_WEB_EDITOR_EXTENSION_IDS=<id>` in the MCP server's environment.
 
 For **0.2.1 → 0.3.0, no.** `WS_PROTOCOL_VERSION` is unchanged at `0.4.0`, so a
 `0.2.1` server and a `0.3.0` extension talk to each other normally and no
