@@ -69,3 +69,7 @@ Changes:
 - `.claude/hooks/_phase-helper.sh` updated: `write_alignment_check_pragmatist_signed()` added (Writer 3 — alignment-check path)
 - `.claude/hooks/pre-commit-gates.sh` updated: pragmatist-signed gate now requires `dispatch_phase:` OR `source: handoff-bundle` OR `source: alignment-check`
 - `docs/ai/prompts/prompt-b-product-build.md` updated: "a session-derived equivalent" replaced with the named helper, with explicit guidance not to write the file by hand
+
+### Amendment — Spec sessions are not Pragmatist-gated (2026-11-17, Decision t-0069)
+
+The Pragmatist reviews implementation plans. spec-fresh and spec-update have an approval phase, but it approves the spec ("Spec complete"), and Prompt 0 never dispatches the Pragmatist, so no spec session could reach approval or commit. `is_pragmatist_exempt` (`_phase-helper.sh`) now covers `experiment|prototype-*|ephemeral|spec-fresh|spec-update`, and both the approval substance check and the commit gate's `pragmatist-signed` check use it. `plan-approved` is still required for spec types. See t-0069.

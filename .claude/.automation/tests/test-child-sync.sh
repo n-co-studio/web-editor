@@ -72,9 +72,12 @@ mkdir -p "$WORK/bin"
 printf '#!/bin/sh\nexit 1\n' > "$WORK/bin/gh"; chmod +x "$WORK/bin/gh"
 export PATH="$WORK/bin:$PATH"
 export REPO_OS_GITHUB_ORG=test-org
+export XDG_STATE_HOME="$WORK/state"
+mkdir -p "$WORK/state/repo-os"; chmod 755 "$WORK/state/repo-os"   # a loose pre-existing dir
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/../lib/child-sync.sh"
 set +e
+SOURCED_LOG="$LOG"
 CONF="$WORK/child-repos.conf"
 LOG="$WORK/child-sync.log"
 {
@@ -127,6 +130,14 @@ _tap_eq "$_PULL_SUCCESS/$_PULL_FAILED" "5/4" "5 clones counted as synced, 4 as f
 # 10. credentials in a remote URL are masked in the log line
 _tap_eq "$(_oneline "fatal: unable to access 'https://tok3n@example.invalid/r.git/'")" \
   "fatal: unable to access 'https://***@example.invalid/r.git/'" "credentials in a URL are masked"
+_tap_eq "$(_oneline "fatal: 'https://tok@en@example.invalid/r.git/'")" \
+  "fatal: 'https://***@example.invalid/r.git/'" "a credential containing '@' is masked whole"
+_tap_eq "$(_oneline "fatal: 'https://tok/en@example.invalid/r.git/'")" \
+  "fatal: 'https://***@example.invalid/r.git/'" "a credential containing '/' is masked whole"
+
+# 11. the log is per-user and owner-only, not a shared /tmp file
+_tap_eq "$SOURCED_LOG" "$WORK/state/repo-os/child-sync.log" "the log lives under the per-user state directory"
+_tap_eq "$(ls -ld "$WORK/state/repo-os" | cut -c1-10)" "drwx------" "the log directory is tightened to owner-only (700)"
 case "$OUT" in
   *"may have local changes"*) _tap_fail "the blanket 'may have local changes' message is gone" ;;
   *) _tap_pass "the blanket 'may have local changes' message is gone" ;;

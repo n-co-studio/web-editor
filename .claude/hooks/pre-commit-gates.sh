@@ -342,6 +342,141 @@ if [ "$IS_EDITOR_LIVE_LOOP" = true ]; then
   _finish "editor_live_loop"
 fi
 
+# --- Governance-close session types (Decision t-0069) ---
+# spec-*, advisory-* and audit have no commit phase, but their prompts commit at
+# close. They commit from the phases get_close_commit_phases names, on their own
+# evidence in place of qa-verified (_close_commit_evidence below). Empty for
+# every other type, which keeps the gates below unchanged for them.
+CLOSE_STYPE=""
+CLOSE_COMMIT_PHASES=""
+if [ "$SKIP_STATE" = false ]; then
+  CLOSE_STYPE=$(get_session_type)
+  # Only with a live phase: get_session_type falls back to .claude/.session-type
+  # when phase-state is missing or stale, and this path must not open on that.
+  if [ -n "$(get_phase)" ]; then
+    CLOSE_COMMIT_PHASES=$(get_close_commit_phases "$CLOSE_STYPE")
+  fi
+fi
+
+# spec_version of a governance evidence file: quotes and trailing whitespace
+# stripped; null, ~, missing and empty all read as "" (Decision 0041).
+_gov_spec_version() {
+  awk -F': *' '
+    /^spec_version:[[:space:]]*/ {
+      v=$2
+      gsub(/^["'\'']|["'\'']$/, "", v)
+      gsub(/[[:space:]]+$/, "", v)
+      if (v == "null" || v == "~") v=""
+      print v
+      exit
+    }
+  ' "$1"
+}
+
+# manifest.json `active`, "" when null or the manifest is missing.
+_manifest_active_version() {
+  local m="$REPO_ROOT/docs/spec/compiled/manifest.json"
+  [ -f "$m" ] || return 0
+  jq -r '.active // ""' "$m" 2>/dev/null || true
+}
+
+# Paths a governance-close session may commit: what its prompt writes and
+# nothing else. The evidence below is a file the agent writes itself, so this
+# scope is what keeps it from carrying product code past QA (t-0069).
+_close_commit_allowed() {
+  case "$1" in
+    docs/ai/logs/sessions/*)
+      case "${1#docs/ai/logs/sessions/}" in
+        */*) ;;                       # `*` crosses `/` in case: no nested paths
+        session-*.md) return 0 ;;
+      esac ;;
+    docs/ai/governance/criteria-verdicts/*)
+      # state-writer.sh writes this whenever a verdict carries criteria (t-0048)
+      case "${1#docs/ai/governance/criteria-verdicts/}" in
+        */*) ;;
+        *.yaml) return 0 ;;
+      esac ;;
+  esac
+  case "$CLOSE_STYPE" in
+    spec-fresh|spec-update)
+      # product-graph.yaml: the close sequence refreshes an existing graph in
+      # every session type (workflow.md step 1); the KG gate still checks it.
+      case "$1" in
+        docs/spec/compiled/*|docs/ai/governance/spec-compiled|docs/ai/knowledge-graph/product-graph.yaml) return 0 ;;
+      esac ;;
+    advisory-init|advisory-reinit)
+      case "$1" in
+        docs/ai/governance/advisory-reviewed|docs/ai/knowledge-graph/coverage.yaml|docs/ai/knowledge-graph/product-graph.yaml) return 0 ;;
+      esac ;;
+    audit)
+      # Prompt C's deferral exception — the only write an audit session makes.
+      case "$1" in docs/ai/logs/known-issues.md|.claude/.deferrals-pending) return 0 ;; esac ;;
+  esac
+  return 1
+}
+
+# Append every out-of-scope change in one `git diff` listing to the caller's
+# `bad`. Own list, not STAGED_FILES: --diff-filter=ACMR hides deletions, and
+# rename detection hides a rename's source. Only additions and modifications
+# pass. A listing that fails counts as out of scope (fail-closed).
+_close_commit_scan() {  # <label> [git diff args...]
+  local label="$1" tmp st p
+  shift
+  tmp=$(mktemp "${TMPDIR:-/tmp}/close-scope-XXXXXX") || { bad="${bad:+$bad, }($label: cannot list)"; return 0; }
+  if ! git diff "$@" --no-renames --name-status -z > "$tmp" 2>/dev/null; then
+    bad="${bad:+$bad, }($label: git diff failed)"
+  else
+    while IFS= read -r -d '' st && IFS= read -r -d '' p; do
+      case "$st" in A|M) _close_commit_allowed "$p" && continue ;; esac
+      bad="${bad:+$bad, }$label $st $p"
+    done < "$tmp"
+  fi
+  rm -f "$tmp"
+}
+
+# What a governance-close type commits on in place of qa-verified: changes
+# within _close_commit_allowed, plus (spec, advisory) its governance evidence.
+_close_commit_evidence() {
+  local ev f v active bad=""
+  # This hook runs before the whole Bash call, so staging chained into it
+  # (`git add x && git commit`) happens after the scans below. With the scope
+  # as the only control, such a call is refused outright. Message text naming
+  # one of these verbs is refused too; commit with -F <file>.
+  if printf '%s' "$COMMIT_CMD" | grep -qE 'git([[:space:]]+-[^[:space:]]+([[:space:]]+[^-[:space:]][^[:space:]]*)?)*[[:space:]]+(add|stage|rm|mv|apply|checkout|restore|reset|update-index|stash|merge|cherry-pick|revert|pull|switch|read-tree)([[:space:]]|$)'; then
+    echo "GATE-RECOVERABLE: a $CLOSE_STYPE commit must not change the index in the same call (Decision t-0069) — this hook checks the index before the call runs. NEXT: Stage in a separate call, then commit alone (git commit -F <file>)." >&2
+    block "close_commit_chained_staging"
+    log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "close_commit_chained_staging"
+  fi
+  _close_commit_scan staged --cached
+  # Unstaged tracked changes too: `commit -a` or a pathspec commits them even
+  # though they were never in the index this hook reads.
+  _close_commit_scan unstaged
+  if [ -n "$bad" ]; then
+    echo "GATE-RECOVERABLE: a $CLOSE_STYPE session commits only what its prompt writes (Decision t-0069) — also changed: $bad. NEXT: Unstage those; stash unstaged tracked changes (commit -a or a pathspec would carry them). Other changes need a build session." >&2
+    block "close_commit_scope"
+    log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "close_commit_scope"
+  fi
+  case "$CLOSE_STYPE" in
+    spec-fresh|spec-update)         ev="spec-compiled" ;;
+    advisory-init|advisory-reinit)  ev="advisory-reviewed" ;;
+    *) return 0 ;;                  # audit: the scope above is the whole check
+  esac
+  f="$REPO_ROOT/docs/ai/governance/$ev"
+  if [ ! -f "$f" ] || ! grep -q '^status:[[:space:]]*complete' "$f"; then
+    echo "GATE-RECOVERABLE: a $CLOSE_STYPE session commits on docs/ai/governance/$ev (Decision t-0069) — it is missing or not 'status: complete'. NEXT: Write the governance evidence file the prompt describes, then commit." >&2
+    block "close_commit_evidence_missing"
+    log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "close_commit_evidence_missing" "$ev"
+    return 0
+  fi
+  v=$(_gov_spec_version "$f")
+  active=$(_manifest_active_version)
+  if [ "$v" != "$active" ]; then
+    echo "GATE-RECOVERABLE: docs/ai/governance/$ev records spec_version '${v:-null}' but manifest.json active is '${active:-null}' (Decision t-0069). NEXT: Rewrite $ev with the active version, then commit." >&2
+    block "close_commit_evidence_stale"
+    log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "close_commit_evidence_stale" "$ev"
+  fi
+}
+
 # ============================================================
 # Phase Gate: assert_phase commit (blocking — skipped by REPO_OS_RECOVER)
 # Primary check: session must have reached commit phase.
@@ -357,7 +492,16 @@ if [ "$SKIP_STATE" = false ]; then
   [ -z "$CURRENT_PHASE" ] && CURRENT_PHASE=$(get_phase)
   if [ -n "$CURRENT_PHASE" ]; then
     # Phase-state active — use phase model as primary check
-    if ! assert_phase "commit"; then
+    if [ -n "$CLOSE_COMMIT_PHASES" ]; then
+      case " $CLOSE_COMMIT_PHASES " in
+        *" $CURRENT_PHASE "*) ;;
+        *)
+          echo "GATE-RECOVERABLE: Session in '$CURRENT_PHASE' phase — a $CLOSE_STYPE session commits from: $CLOSE_COMMIT_PHASES (Decision t-0069). NEXT: Finish the session's work and advance to one of those phases." >&2
+          block "phase_gate_not_close_commit"
+          log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "phase_gate_not_close_commit" "phase:$CURRENT_PHASE"
+          ;;
+      esac
+    elif ! assert_phase "commit"; then
       echo "GATE-RECOVERABLE: Session in '$CURRENT_PHASE' phase — must reach 'commit' phase. NEXT: Complete QA verification (qa-verifier agent) to advance to commit phase." >&2
       block "phase_gate_not_commit"
       log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "phase_gate_not_commit" "phase:$CURRENT_PHASE"
@@ -483,6 +627,8 @@ if [ "$SKIP_STATE" = false ]; then
   # editor-live: skip (never has plan gate — no approval phase)
   if [ "$IS_EDITOR_LIVE_CLOSE" = true ]; then
     : # editor-live never has plan-approved — skip silently
+  elif [ -n "$CLOSE_COMMIT_PHASES" ] && ! has_plan_gate "$CLOSE_STYPE"; then
+    : # advisory-*/audit: no approval phase, so nothing could write plan-approved (t-0069)
   elif [ "${REPO_OS_SKIP_PLAN_GATE:-0}" = "1" ]; then
     log_override "pre-commit-gates" "REPO_OS_SKIP_PLAN_GATE"
   elif [ ! -f "$STATE_DIR/plan-approved" ]; then
@@ -758,8 +904,11 @@ if [ "$SKIP_STATE" = false ]; then
     fi
   fi
 
-  # qa-verified: required on all non-experiment branches
-  if [ ! -f "$STATE_DIR/qa-verified" ]; then
+  # qa-verified: required on all non-experiment branches, except that a
+  # governance-close type commits on its own evidence instead (t-0069)
+  if [ -n "$CLOSE_COMMIT_PHASES" ]; then
+    _close_commit_evidence
+  elif [ ! -f "$STATE_DIR/qa-verified" ]; then
     echo "GATE-RECOVERABLE: qa-verified state file missing. NEXT: Dispatch QA verification agent (after Critic cohesion review passes). (override: REPO_OS_RECOVER=1)" >&2
     block "state_qa_missing"
     log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_qa_missing"
@@ -856,7 +1005,8 @@ if [ "$SKIP_STATE" = false ]; then
     log_override "pre-commit-gates" "REPO_OS_SKIP_PRAGMATIST_GATE"
   else
     _PCG_STYPE=$(get_session_type)
-    if has_plan_gate "$_PCG_STYPE" && [ -f "$STATE_DIR/phase-state" ]; then
+    # Spec types are plan-gated but never Pragmatist-reviewed (t-0069).
+    if has_plan_gate "$_PCG_STYPE" && ! is_pragmatist_exempt "$_PCG_STYPE" && [ -f "$STATE_DIR/phase-state" ]; then
       if [ ! -f "$STATE_DIR/pragmatist-signed" ]; then
         echo "GATE-RECOVERABLE: pragmatist-signed state file missing. NEXT: Dispatch Pragmatist agent in plan-gating mode before presenting plan to operator (Decision 0025). (override: REPO_OS_SKIP_PRAGMATIST_GATE=1)" >&2
         block "state_pragmatist_missing"
@@ -913,7 +1063,6 @@ if [ "$SKIP_STATE" = false ]; then
 
   if [ ! -f "$GOVERNANCE_CHECKED_FILE" ]; then
     GOV_DIR="$REPO_ROOT/docs/ai/governance"
-    MANIFEST_PATH="$REPO_ROOT/docs/spec/compiled/manifest.json"
     GOV_WARNINGS=""
     GOV_ANY_FAIL=false
     MISSING_FILES=""
@@ -922,10 +1071,7 @@ if [ "$SKIP_STATE" = false ]; then
     case "$CURRENT_BRANCH" in
       feature/*|fix/*|hotfix/*|release/*)
         # Read manifest active version (empty when null or manifest missing).
-        ACTIVE_VERSION=""
-        if [ -f "$MANIFEST_PATH" ]; then
-          ACTIVE_VERSION=$(jq -r '.active // ""' "$MANIFEST_PATH" 2>/dev/null || echo "")
-        fi
+        ACTIVE_VERSION=$(_manifest_active_version)
 
         for _ev in spec-compiled advisory-reviewed; do
           _evfile="$GOV_DIR/$_ev"
@@ -940,19 +1086,9 @@ if [ "$SKIP_STATE" = false ]; then
             GOV_ANY_FAIL=true
             continue
           fi
-          # Extract spec_version (inline awk — strips quotes and trailing whitespace;
-          # null/~/missing/empty all normalised to "" so empty == empty matches in
-          # template-mode / pre-spec repos).
-          _ev_version=$(awk -F': *' '
-            /^spec_version:[[:space:]]*/ {
-              v=$2
-              gsub(/^["'\'']|["'\'']$/, "", v)
-              gsub(/[[:space:]]+$/, "", v)
-              if (v == "null" || v == "~") v=""
-              print v
-              exit
-            }
-          ' "$_evfile")
+          # null/~/missing/empty all read as "" so empty == empty matches in
+          # template-mode / pre-spec repos (shared with the t-0069 check).
+          _ev_version=$(_gov_spec_version "$_evfile")
           if [ "$_ev_version" != "$ACTIVE_VERSION" ]; then
             GOV_WARNINGS="${GOV_WARNINGS}Advisory: $_prompt_name not re-run since spec v${_ev_version:-<none>} → v${ACTIVE_VERSION:-<none>} — re-run to refresh docs/ai/governance/$_ev.\n"
             MISMATCH_FILES="${MISMATCH_FILES:+$MISMATCH_FILES,}$_ev"

@@ -28,7 +28,12 @@ else
   echo "  Create child-repos.conf with your child repo registry. See child-repos.conf.example for format." >&2
   exit 1
 fi
-LOG="/tmp/repo-os-child-sync.log"
+# Owner-only, per-user log: it carries git error text and local paths, and a
+# fixed /tmp path was world-readable and open to a planted symlink. With no
+# HOME the directory can't be created and logging stops; the sync still runs.
+LOG_DIR="${XDG_STATE_HOME:-${HOME:-}/.local/state}/repo-os"
+mkdir -p -m 700 "$LOG_DIR" 2>/dev/null && chmod 700 "$LOG_DIR" 2>/dev/null || true
+LOG="$LOG_DIR/child-sync.log"
 MAX_WAIT=180   # seconds to wait for workflow completion
 
 # --- Resolve GitHub org (three-tier fallback) ---
@@ -129,8 +134,10 @@ wait_for_syncs() {
 
 # --- Pull local clones ---
 # Collapse git's multi-line output into one log line, masking any credentials
-# in a remote URL (the log lives in /tmp).
-_oneline() { printf '%s' "$1" | tr '\n' ' ' | sed -e 's#://[^/@ ]*@#://***@#g' -e 's/[[:space:]]*$//'; }
+# in a remote URL. The match runs to the last '@' before whitespace or a quote,
+# so a credential containing '/' or '@' is masked whole; a URL with '@' in its
+# path is over-masked, which is the safe direction.
+_oneline() { printf '%s' "$1" | tr '\n\t' '  ' | sed -e "s#://[^ '\"]*@#://***@#g" -e 's/ *$//'; }
 
 # Bring one clone's local main up to origin/main without touching the branch
 # that is checked out. Template sync only ever lands on main, so a clone sitting
@@ -139,7 +146,7 @@ _oneline() { printf '%s' "$1" | tr '\n' ' ' | sed -e 's#://[^/@ ]*@#://***@#g' -
 # Prints a one-line outcome; returns 1 when main was not brought up to date.
 # Run in a subshell: it cd's into the clone.
 _pull_one() {
-  local out counts ahead behind branch dirty where
+  local out counts ahead behind branch dirty
   cd "$1" || { echo "cannot cd into $1"; return 1; }
   out=$(git fetch origin 2>&1) || { echo "fetch failed: $(_oneline "$out")"; return 1; }
   git rev-parse --verify -q refs/remotes/origin/main >/dev/null || { echo "origin/main not found"; return 1; }

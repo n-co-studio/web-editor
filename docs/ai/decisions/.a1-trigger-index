@@ -1,7 +1,7 @@
 # A1 trigger index — generated artifact. Do not hand-edit.
 # Regenerate: bash .claude/.automation/lib/rebuild-trigger-index.sh
 # format: 2
-# digest: 9a78450cb272174ecbc7a3a1df324ea4d29e4c15d8ab9591ae6b912eb2e14b54
+# digest: 3b7b2e32240bbb32a31844439fd39d6febcc71f5f1a3e4808a028fb6162233c9
 0001AI\.mdprompt system, verification gate, session-based
 0001docs/ai/prompts/prompt-.*\.mdprompt system, verification gate, session-based
 0002docs/ai/decisions/.*\.mdmandatory, commit-blocking
@@ -151,6 +151,7 @@
 0067docs/ai/prompts/prompt-t-task-definition\.md|\.claude/\.automation/queue-cli\.shdraft, pending-review, accept_draft_approval, discard_draft, record_draft, approve-wo, draft-wait, REPO_OS_TASKDEF_DRAFT
 0068\.claude/hooks/ask-user-deny\.shparked, question_on_timeout, agent-decides, queue-cli answer, stopped_mode question, REPO_OS_SESSION_DEADLINE_EPOCH
 0068\.claude/\.automation/lib/question-channel\.shparked, question_on_timeout, agent-decides, queue-cli answer, stopped_mode question, REPO_OS_SESSION_DEADLINE_EPOCH
+0069\.claude/hooks/pre-commit-gates\.shget_close_commit_phases, is_pragmatist_exempt, close_commit_evidence, spec-compiled, advisory-reviewed, governance-close
 0001AI\.mdprompt system, verification gate, session-based
 0001docs/ai/prompts/prompt-.*\.mdprompt system, verification gate, session-based
 0002docs/ai/decisions/.*\.mdmandatory, commit-blocking

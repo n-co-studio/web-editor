@@ -422,11 +422,9 @@ assert_eq "$(get_phase_mode)" "review" "plan-approval sets review mode on bare '
 reset_phase "spec-fresh"
 _advance "interview" 2>/dev/null
 _advance "write" 2>/dev/null
-rm -f "$STATE_DIR/plan-approved"
-# Pragmatist sign-off precedes operator approval (Decision 0025); spec-fresh
-# reaches approval via write (not the standard plan phase), so seed it here so
-# plan-approval's internal approval->governance advance is not gate-blocked.
-printf 'GATE_RESULT: APPROVED\nagent: pragmatist\nsession_id: %s\ndispatch_phase: plan\n' "$TEST_SID" > "$STATE_DIR/pragmatist-signed"
+rm -f "$STATE_DIR/plan-approved" "$STATE_DIR/pragmatist-signed"
+# No Pragmatist sign-off: spec approval is the operator's "Spec complete" and
+# Prompt 0 never dispatches the Pragmatist (Decision t-0069).
 run_hook_rc "plan-approval.sh" \
   "$(fixture_posttooluse_ask "Do you approve this plan?" "Yes approve,No revise" "Yes approve")"
 phase_after=$(get_phase)
@@ -1058,6 +1056,132 @@ stage_sandbox_file "src/hotfix.ts" "export const h = 6;"
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "hotfix commit")"
 assert_ok "$_LAST_RC" "pre-commit-gates allows hotfix commit without cohesion-reviewed"
 switch_sandbox_branch "feature/test"
+
+# --- Governance-close session types commit on their own evidence (t-0069) ---
+# spec-*, advisory-* and audit have no commit phase; their prompts commit at
+# close. Each case starts from an empty index and no gate files beyond the ones
+# named, so a pass cannot come from evidence left by an earlier case.
+_l3_gov="$SB/docs/ai/governance"
+_l3_manifest="$SB/docs/spec/compiled/manifest.json"
+mkdir -p "$_l3_gov" "$(dirname "$_l3_manifest")"
+printf '{"active": "v3"}\n' > "$_l3_manifest"
+_l3_close_reset() {  # <stype> <phase...>: fresh session walked to the last phase given
+  ( cd "$SB" && git reset -q HEAD . 2>/dev/null ) || true
+  reset_phase "$1"; shift
+  local p
+  for p in "$@"; do advance_phase "$p" 2>/dev/null || true; done
+  rm -f "$STATE_DIR/qa-verified" "$STATE_DIR/pragmatist-signed" "$STATE_DIR/cohesion-reviewed"
+}
+
+# spec-fresh: approval needs no Pragmatist; commit from governance on spec-compiled
+_l3_close_reset spec-fresh interview write approval
+assert_eq "$(get_phase)" "approval" "spec-fresh reaches approval without pragmatist-signed (t-0069)"
+printf 'timestamp: test\nsession_id: %s\nmode: auto\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
+advance_phase governance 2>/dev/null || true
+printf 'timestamp: test\nspec_version: v3\nstatus: complete\n' > "$_l3_gov/spec-compiled"
+stage_sandbox_file "docs/spec/compiled/spec.md" "spec"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "spec commit")"
+assert_ok "$_LAST_RC" "spec-fresh commits from governance on matching spec-compiled, no qa-verified or pragmatist-signed"
+
+printf 'timestamp: test\nspec_version: v2\nstatus: complete\n' > "$_l3_gov/spec-compiled"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "spec commit")"
+assert_hook_blocks "$_LAST_RC" "spec-fresh commit blocks when spec_version does not match manifest active"
+assert_contains "$_LAST_OUTPUT" "spec_version 'v2' but manifest.json active is 'v3'" "the block names both versions"
+printf 'timestamp: test\nspec_version: v3\nstatus: complete\n' > "$_l3_gov/spec-compiled"
+
+# The evidence is a file the agent writes, so the scope is what stops it
+# carrying product code past QA.
+stage_sandbox_file "src/spec-smuggled.ts" "export const s = 1;"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "spec commit")"
+assert_hook_blocks "$_LAST_RC" "spec-fresh commit blocks when a file outside the spec paths is staged"
+assert_contains "$_LAST_OUTPUT" "also changed: staged A src/spec-smuggled.ts" "the block names the out-of-scope file"
+( cd "$SB" && git reset -q HEAD src/spec-smuggled.ts 2>/dev/null ) || true
+
+# ...and an unstaged tracked change: `commit -a` would carry it past the index
+_l3_dirty=$(cd "$SB" && git ls-files | grep -v '^docs/' | head -1)
+printf '\n# edited\n' >> "$SB/$_l3_dirty"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "spec commit")"
+assert_hook_blocks "$_LAST_RC" "spec-fresh commit blocks while an out-of-scope tracked file is modified (commit -a)"
+assert_contains "$_LAST_OUTPUT" "unstaged M $_l3_dirty" "the block names the unstaged change"
+( cd "$SB" && git checkout -q -- "$_l3_dirty" ) || true
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "spec commit")"
+assert_ok "$_LAST_RC" "the same spec commit passes once the stray change is gone"
+
+# ...and staging chained into the commit call, which runs after this hook
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_bash "git add src/late.ts && git commit -m \"spec commit\"")"
+assert_hook_blocks "$_LAST_RC" "spec-fresh commit blocks when staging is chained into the same call"
+assert_contains "$_LAST_OUTPUT" "must not change the index in the same call" "the block says to stage separately"
+
+rm -f "$STATE_DIR/plan-approved"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "spec commit")"
+assert_hook_blocks "$_LAST_RC" "spec-fresh commit still needs plan-approved"
+
+# spec-update shares the rules
+_l3_close_reset spec-update interview write approval
+printf 'timestamp: test\nsession_id: %s\nmode: auto\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
+advance_phase governance 2>/dev/null || true
+stage_sandbox_file "docs/spec/compiled/v3/spec.md" "spec v3"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "spec update commit")"
+assert_ok "$_LAST_RC" "spec-update commits from governance on matching spec-compiled"
+
+_l3_close_reset spec-fresh interview write
+printf 'timestamp: test\nsession_id: %s\nmode: auto\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
+stage_sandbox_file "docs/spec/compiled/spec.md" "spec draft"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "spec commit")"
+assert_hook_blocks "$_LAST_RC" "spec-fresh cannot commit from the write phase"
+assert_contains "$_LAST_OUTPUT" "commits from: governance close" "the block names the phases a spec session commits from"
+
+# advisory-init: no approval phase, so no plan-approved; commits on advisory-reviewed
+_l3_close_reset advisory-init tier-select dispatch synthesize op-review validate governance
+rm -f "$STATE_DIR/plan-approved" "$_l3_gov/advisory-reviewed"
+stage_sandbox_file "docs/ai/knowledge-graph/coverage.yaml" "roots: []"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "advisory commit")"
+assert_hook_blocks "$_LAST_RC" "advisory-init commit blocks without advisory-reviewed"
+assert_contains "$_LAST_OUTPUT" "commits on docs/ai/governance/advisory-reviewed" "the block names the missing evidence"
+printf 'timestamp: test\nspec_version: v3\nstatus: complete\n' > "$_l3_gov/advisory-reviewed"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "advisory commit")"
+assert_ok "$_LAST_RC" "advisory-init commits from governance on advisory-reviewed, without plan-approved"
+
+_l3_close_reset advisory-reinit validate governance
+rm -f "$STATE_DIR/plan-approved"
+stage_sandbox_file "docs/ai/governance/advisory-reviewed" "$(cat "$_l3_gov/advisory-reviewed")"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "advisory reinit commit")"
+assert_ok "$_LAST_RC" "advisory-reinit commits its refreshed advisory-reviewed from governance"
+
+# Without a live phase the close-commit path stays shut: qa-verified applies
+rm -f "$STATE_DIR/phase-state"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "advisory reinit commit")"
+assert_hook_blocks "$_LAST_RC" "an advisory type with no live phase-state still needs qa-verified"
+assert_contains "$_LAST_OUTPUT" "qa-verified state file missing" "the block is the ordinary qa-verified requirement"
+
+# audit: commits only Prompt C's deferral files and session log, from close
+_l3_close_reset audit scope dispatch synthesize op-review close
+rm -f "$STATE_DIR/plan-approved"
+stage_sandbox_file "docs/ai/logs/known-issues.md" "deferral"
+stage_sandbox_file "docs/ai/logs/sessions/session-audit.md" "log"
+# state-writer's durable criteria-verdicts file is hook output, in every scope
+stage_sandbox_file "docs/ai/governance/criteria-verdicts/$TEST_SID.yaml" "criteria: []"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "audit deferrals")"
+assert_ok "$_LAST_RC" "audit commits its deferral files, session log and criteria-verdicts file from close"
+stage_sandbox_file "src/audit-fix.ts" "export const a = 1;"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "audit deferrals")"
+assert_hook_blocks "$_LAST_RC" "audit commit blocks when anything beyond the deferral files is staged"
+assert_contains "$_LAST_OUTPUT" "also changed: staged A src/audit-fix.ts" "the block names the extra file"
+( cd "$SB" && git reset -q HEAD src/audit-fix.ts 2>/dev/null ) || true
+
+# A deletion, or a rename's source, is out of scope too (STAGED_FILES hides both)
+_l3_tracked=$(cd "$SB" && git ls-files | grep -v '^docs/ai/logs/' | head -1)
+( cd "$SB" && git rm -q --cached "$_l3_tracked" )
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "audit deferrals")"
+assert_hook_blocks "$_LAST_RC" "audit commit blocks on a staged deletion"
+assert_contains "$_LAST_OUTPUT" "staged D $_l3_tracked" "the block names the deleted file"
+( cd "$SB" && git reset -q HEAD "$_l3_tracked" && git mv "$_l3_tracked" docs/ai/logs/sessions/session-renamed.md )
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "audit deferrals")"
+assert_hook_blocks "$_LAST_RC" "audit commit blocks on a rename into an allowed path"
+( cd "$SB" && git mv docs/ai/logs/sessions/session-renamed.md "$_l3_tracked" && git reset -q HEAD . ) || true
+
+( cd "$SB" && git reset -q HEAD . 2>/dev/null ) || true
+rm -f "$_l3_gov/spec-compiled" "$_l3_gov/advisory-reviewed" "$_l3_manifest"
 
 # --- Phase passed + missing state files → blocks (defense-in-depth) ---
 reset_phase "standard"
