@@ -23,7 +23,9 @@ entry:
   work_order_id: ""         # (v1.1.0) parent work order ID (optional)
   push_on_complete: false   # true = push branch to origin after session completes (opt-in)
   scope_classification: ""  # briefed | unbriefed-in-scope | out-of-scope (schema contract — populated by runner/queue-manager implementations at commit time when scope deviates)
-  stopped_mode: ""          # (v1.7.0) graceful | forced — how an operator stop ended the session (set on stop, kept for the resume message)
+  stopped_mode: ""          # (v1.7.0) graceful | forced — how an operator stop ended the session (set on stop, kept for the resume message).
+                             # (v1.13.0) question — the session parked on an unanswered headless question
+                             # (Decision t-0068); `queue-cli.sh answer` resumes it with the answer.
   resume: false             # (v1.7.0) true = resume the recorded Claude session instead of launching a fresh one (set by resume-entry, cleared at dequeue)
   held_by: ""               # (v1.8.0) id of the stopped entry holding this one back. Set and cleared
                              # by the dequeue tick, never by the operator — the hold is derived state.

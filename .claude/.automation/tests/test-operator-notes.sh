@@ -325,7 +325,7 @@ _tap_eq "$(_drain_operator_notes entry-that-never-existed)" "" "no control direc
 printf "\n# --- the call site ---\n"
 _WIRE="$(awk '/^  if \[ "\$ENTRY_RESUME" = true \]; then$/,/_drain_operator_notes/' "$_RUNNER_SRC")"
 _tap_contains "$_WIRE" 'PROMPT=$(assemble_prompt' "wiring: the drain follows the queued-prompt branch"
-_tap_contains "$_WIRE" 'Resumed by operator.' "wiring: the drain follows the resume-message branch"
+_tap_contains "$_WIRE" 'PROMPT=$(_resume_message' "wiring: the drain follows the resume-message branch"
 _tap_contains "$_WIRE" '_drain_operator_notes "$ENTRY_ID"' "wiring: the main loop drains the entry's notes"
 
 # --- A work order id stands in for 'the next brief' --------------------------

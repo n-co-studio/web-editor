@@ -42,7 +42,7 @@ make_relative() {
 #   • Absolute paths: checked against REPO_ROOT prefix (lexical, no symlink
 #     resolution — consistent with normalize_path/is_in_repo in _analytics-helper.sh).
 #   • Relative paths with ../ traversal: resolved against REPO_ROOT lexically,
-#     then checked. Uses normalize_path (python3-backed when .. present).
+#     then checked. Uses normalize_path (a pure-bash lexical walk; no python3).
 #   • Clean relative paths: assumed in-repo by convention.
 #
 # Do NOT call with paths containing unresolved shell variables ($VAR / ${VAR}).

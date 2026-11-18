@@ -10,7 +10,7 @@ This is a headless automation session (runner-invoked via `claude -p`).
 - Task group: {group_name}
 - Target branch: {branch_name}
 - Permission profile: audit (read-only)
-- Do NOT use `AskUserQuestion` — there is no interactive operator in headless mode
+- `AskUserQuestion` is not available in the audit profile (Decision t-0064 § 7). If a decision only the operator can make blocks you, record it in your report as an escalation, then summarise and end — do not guess
 - Do NOT modify any files — this is a read-only audit session
 - All output goes to `.claude/.automation/reports/`
 

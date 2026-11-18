@@ -47,6 +47,7 @@ editor-queue-status.yaml
 .claude/.automation/reports/
 .claude/.automation/review-items/
 .claude/.automation/escalations/
+.claude/.automation/questions/
 .claude/.automation/briefs/
 .claude/.automation/logs/
 

@@ -101,60 +101,43 @@ assert_file_exists "$SB/.claude/.session-id" "cleanup_session_files(is_closing=f
 teardown_sandbox
 
 # ============================================================
-# L4.3 — First-writer-wins on .session-id (fix for editor-live identity drift)
+# L4.3 — A hook's own id beats a flat file left by someone else (Decision t-0065)
 # ============================================================
-# Inverts the write-through behaviour 9b6ec01 introduced: the on-disk
-# .session-id is the durable identity once written and must win over a rotated
-# harness stdin SID (otherwise a context-window UUID rotation churns the
-# per-session state dir / log filename mid-session). Cross-session bleed is now
-# prevented by close-gated deletion of .session-id, not by overwriting it.
+# Rewritten for t-0065. This case used to pin "first-writer-wins": the flat
+# .session-id beat the hook's stdin id, on the premise that the harness rotates
+# the id across a context-window turnover. Nothing on record shows that
+# rotation, and a flat file beating the hook's own id is how one session's id
+# reached another (R47, R48, GT-8). Now the hook's id wins and no file is
+# written; the flat file is consulted only with no Claude Code id at all.
 
-tap_section "L4.3: First-writer-wins — durable .session-id beats a rotated stdin SID"
+tap_section "L4.3: the hook's stdin id beats a flat file, and nothing is written"
 
 setup_sandbox
 SB="$(get_sandbox)"
 
-# Case A: a durable .session-id exists — file wins, stdin SID does NOT overwrite.
+# Case A: a flat file from another session exists — the hook's id wins, file untouched.
 PRIOR_SID="prior-session-20260608-111111"
 echo "$PRIOR_SID" > "$SB/.claude/.session-id"
 _CACHED_SESSION_ID=""
-export _REPO_OS_STDIN_SID="rotated-harness-session-20260608-222222"
+export _REPO_OS_STDIN_SID="this-hook-session-20260608-222222"
 RESOLVED_SID=$(get_session_id "$SB" 2>/dev/null)
-assert_eq "$RESOLVED_SID" "$PRIOR_SID" "get_session_id returns durable file id, not the rotated stdin sid"
-assert_neq "$RESOLVED_SID" "$_REPO_OS_STDIN_SID" "rotated stdin sid does not override the durable identity"
-FILE_SID=$(cat "$SB/.claude/.session-id" 2>/dev/null)
+assert_eq "$RESOLVED_SID" "$_REPO_OS_STDIN_SID" "get_session_id returns the hook's own stdin id, not a flat file's"
+FILE_SID=$(cat "$SB/.claude/.session-id" 2>/dev/null || true)
 assert_eq "$FILE_SID" "$PRIOR_SID" ".session-id file is NOT overwritten when a different stdin sid arrives"
 
-# Advisory gate: the mismatch warning is debug-gated (REPO_OS_DEBUG). The
-# mismatch is benign (file wins), so it must be SILENT by default to avoid a
-# per-turn stderr nag, and surface only under REPO_OS_DEBUG=1. (.session-id is
-# still PRIOR_SID and _REPO_OS_STDIN_SID still differs from Case A.)
-_CACHED_SESSION_ID=""
-STDERR_DEFAULT=$(get_session_id "$SB" 2>&1 >/dev/null)
-case "$STDERR_DEFAULT" in
-  *"session-id mismatch"*) _tap_fail "mismatch advisory silent by default (no REPO_OS_DEBUG)" "got: $STDERR_DEFAULT" ;;
-  *)                       _tap_pass "mismatch advisory silent by default (no REPO_OS_DEBUG)" ;;
-esac
-_CACHED_SESSION_ID=""
-export REPO_OS_DEBUG=1
-STDERR_DEBUG=$(get_session_id "$SB" 2>&1 >/dev/null)
-unset REPO_OS_DEBUG
-case "$STDERR_DEBUG" in
-  *"session-id mismatch"*) _tap_pass "mismatch advisory surfaces under REPO_OS_DEBUG=1" ;;
-  *)                       _tap_fail "mismatch advisory surfaces under REPO_OS_DEBUG=1" "got: $STDERR_DEBUG" ;;
-esac
-
-# Case B: no durable file yet — the hook is the first initializer, so the stdin
-# SID seeds the file (bootstrap path; e.g. first turn after a clean prior close).
-# A clean close removes the sidecar too (unregister_session), and Case A's
-# adoption wrote one (R47).
+# Case B: no files — the stdin id is used and nothing is seeded.
 rm -f "$SB/.claude/.session-id" "$SB"/.claude/.session-id.*
 _CACHED_SESSION_ID=""
 export _REPO_OS_STDIN_SID="bootstrap-session-20260608-333333"
 BOOT_SID=$(get_session_id "$SB" 2>/dev/null)
-assert_eq "$BOOT_SID" "bootstrap-session-20260608-333333" "get_session_id seeds id from stdin sid when .session-id is absent"
-BOOT_FILE=$(cat "$SB/.claude/.session-id" 2>/dev/null)
-assert_eq "$BOOT_FILE" "bootstrap-session-20260608-333333" "stdin sid written through to .session-id only when absent"
+assert_eq "$BOOT_SID" "bootstrap-session-20260608-333333" "get_session_id uses the stdin sid when no file exists"
+assert_file_not_exists "$SB/.claude/.session-id" "the stdin sid is not written through to .session-id"
+
+# Case C: no Claude Code id at all (a manual shell, a fixture) — the flat file.
+unset _REPO_OS_STDIN_SID
+echo "$PRIOR_SID" > "$SB/.claude/.session-id"
+_CACHED_SESSION_ID=""
+assert_eq "$(get_session_id "$SB" 2>/dev/null)" "$PRIOR_SID" "with no Claude Code id the flat file is read"
 
 # Unset for next tests
 unset _REPO_OS_STDIN_SID
@@ -473,48 +456,46 @@ teardown_sandbox
 # L4.9 — Foreign-state guard: an interactive Stop must not enforce a
 #         CONCURRENT session's close (identity-churn safety)
 # ============================================================
-# When two sessions share the repo-global .claude/.session-id (a concurrent
-# headless/daemon build, or a second interactive window on the same checkout),
-# an interactive Stop can resolve via that shared file to the OTHER session's
-# phase-state. session-close-check.sh must NOT run close enforcement (session-log
-# demand / uncommitted block) against a foreign session owned by a DIFFERENT,
-# independently-live process. Discriminator vs. a legitimate context-window
-# turnover: register_session() records the durable claude PID ($PPID), so a
-# turned-over session's resolved state has registry pid == our $PPID (skip NOT
-# taken); only a different live pid trips the guard. A dead/orphaned foreign
-# owner is intentionally not caught (falls through to normal enforcement).
+# session-close-check.sh must NOT run close enforcement (session-log demand /
+# uncommitted block) against a session owned by a DIFFERENT, independently-live
+# process. Before Decision t-0065 the trigger was a shared flat .session-id
+# resolving to another window's state. Since t-0065 state resolves from the same
+# id the hook's stdin carries, so the guard fires only when CLAUDE_CODE_SESSION_ID
+# and the stdin id disagree — the case L4.9a now builds. L4.9a's control (dead
+# owner) shows the skip comes from the guard and not from an empty state dir.
 
 tap_section "L4.9: Foreign-state guard — live-foreign close skipped, orphan still enforced"
 
 # --- L4.9a — Foreign state owned by a different LIVE process => guard skips ---
-setup_hook_sandbox
-SB="$(get_sandbox)"
+_l49a_run() { # owner_pid -> sets _LAST_OUTPUT
+  setup_hook_sandbox
+  SB="$(get_sandbox)"
+  FSID="foreign-session-20260617-000001"
+  rm -f "$SB/.claude/.session-id" "$SB"/.claude/.session-id.* 2>/dev/null || true
+  # The foreign session's per-session phase-state in a CLOSING standard state
+  # (review completed, no session log) — WITHOUT the guard this blocks on the
+  # session-log check.
+  FS_DIR="$SB/.claude/.state/wt-sessions/$FSID"
+  mkdir -p "$FS_DIR"
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  printf 'session_type: standard\nsession_id: %s\nsession_log_id: %s\nmode: review\ncurrent_phase: review\ncycle: 1\nphases_completed: init,build,review\nsolo: false\ntag: agent\ntimestamp: %s\n' \
+    "$FSID" "$FSID" "$ts" > "$FS_DIR/phase-state"
+  # Non-zero baseline so the zero-change fast path does not pre-empt the guard.
+  echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
+  create_fake_session "$FSID" "standard" "feature/test" "$1"
+  # State resolves to FSID through the env; the hook's stdin carries another id.
+  export CLAUDE_CODE_SESSION_ID="$FSID"
+  _CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
+  assert_eq "$(get_session_state_dir)" "$FS_DIR" "per-session dir resolves for the foreign sid (guard reads crafted phase-state)"
+  run_hook_rc "session-close-check.sh" "$(fixture_stop "live-stdin-uuid-aaaa")" >/dev/null 2>&1 || true
+  unset CLAUDE_CODE_SESSION_ID
+  _CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
+}
 
-FSID="foreign-session-20260617-000001"
-echo "$FSID" > "$SB/.claude/.session-id"
-# Craft the foreign session's per-session phase-state in a CLOSING standard state
-# (review completed, no session log) — WITHOUT the guard this blocks on the
-# session-log check.
-FS_DIR="$SB/.claude/.state/wt-sessions/$FSID"
-mkdir -p "$FS_DIR"
-ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-printf 'session_type: standard\nsession_id: %s\nsession_log_id: %s\nmode: review\ncurrent_phase: review\ncycle: 1\nphases_completed: init,build,review\nsolo: false\ntag: agent\ntimestamp: %s\n' \
-  "$FSID" "$FSID" "$ts" > "$FS_DIR/phase-state"
-# Non-zero baseline so the zero-change fast path does not pre-empt the guard.
-echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
 # Foreign owner: a real, live process whose PID is not the hook's PPID.
 sleep 60 &
 FS_LIVE_PID=$!
-create_fake_session "$FSID" "standard" "feature/test" "$FS_LIVE_PID"
-
-# Confirm the sandbox resolves the per-session dir for this sid (so the hook reads
-# the crafted phase-state, not the flat backward-compat path) — otherwise the
-# guard's outer condition would be false and the test could pass vacuously.
-_CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
-assert_eq "$(get_session_state_dir)" "$FS_DIR" "per-session dir resolves for the foreign sid (guard reads crafted phase-state)"
-
-# Live stdin sid differs from the resolved (foreign) state's session_id.
-run_hook_rc "session-close-check.sh" "$(fixture_stop "live-stdin-uuid-aaaa")" >/dev/null 2>&1 || true
+_l49a_run "$FS_LIVE_PID"
 case "$_LAST_OUTPUT" in
   *"Session log not updated"*)
     _tap_fail "live-foreign close is skipped (no session-log block)" "got block: $_LAST_OUTPUT" ;;
@@ -527,7 +508,21 @@ kill "$FS_LIVE_PID" 2>/dev/null || true
 wait "$FS_LIVE_PID" 2>/dev/null || true
 teardown_sandbox
 
-# --- L4.9b — Orphaned foreign state (owner DEAD) => guard does NOT skip ---
+# Control: the same state with a DEAD owner is enforced, so the skip above is
+# the guard's doing.
+_l49a_run "99999999"
+case "$_LAST_OUTPUT" in
+  *"Session log not updated"*) _tap_pass "control: a dead owner's identical state is enforced (the skip is the guard's)" ;;
+  *) _tap_fail "control: a dead owner's identical state is enforced (the skip is the guard's)" "got: $_LAST_OUTPUT" ;;
+esac
+teardown_sandbox
+
+# --- L4.9b — An orphan in the flat file is not this hook's session (t-0065) ---
+# Rewritten for t-0065. This case used to show that a Stop whose stdin id
+# differed from the flat file's resolved the orphan's state and enforced ITS
+# close requirements. A hook now resolves its own id, so the orphan's state is
+# neither enforced against this session nor touched; the sweep reaps it once
+# its owner is dead.
 setup_hook_sandbox
 SB="$(get_sandbox)"
 
@@ -539,27 +534,23 @@ ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 printf 'session_type: standard\nsession_id: %s\nsession_log_id: %s\nmode: review\ncurrent_phase: review\ncycle: 1\nphases_completed: init,build,review\nsolo: false\ntag: agent\ntimestamp: %s\n' \
   "$OSID" "$OSID" "$ts" > "$OS_DIR/phase-state"
 echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline-sha"
-# Dead owner PID — guard must fall through to normal close enforcement.
 create_fake_session "$OSID" "standard" "feature/test" "99999999"
-
-# Same resolution guard as L4.9a — rule out a vacuous pass on the flat path.
-_CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
-assert_eq "$(get_session_state_dir)" "$OS_DIR" "per-session dir resolves for the orphan sid (guard reads crafted phase-state)"
 
 run_hook_rc "session-close-check.sh" "$(fixture_stop "live-stdin-uuid-bbbb")" >/dev/null 2>&1 || true
 case "$_LAST_OUTPUT" in
   *"Session log not updated"*)
-    _tap_pass "dead-owner orphan is NOT skipped (close enforcement still fires)" ;;
+    _tap_fail "an orphan's close requirements are not enforced against another session" "got: $_LAST_OUTPUT" ;;
   *)
-    _tap_fail "dead-owner orphan is NOT skipped (close enforcement still fires)" "expected session-log block, got: $_LAST_OUTPUT" ;;
+    _tap_pass "an orphan's close requirements are not enforced against another session" ;;
 esac
+assert_file_exists "$OS_DIR/phase-state" "the orphan's phase-state is left for the sweep, not touched by another session's Stop"
 teardown_sandbox
 
 # --- L4.9c — Turnover discriminator (unit): registry pid == our PID -> not foreign ---
-# run_hook_rc runs the hook inside $( ( ... | bash hook ) ), so the hook's $PPID
-# is an ephemeral subshell that the test cannot predict — the PPID discriminator
-# therefore can't be exercised through the full hook. Verify it as a unit
-# mirroring the guard's exact boolean, with $$ standing in for the hook's $PPID.
+# A unit mirror of the guard's exact boolean, with $$ standing in for the hook's
+# durable pid. L4.9d below drives the same discriminator through the full hook,
+# which became possible once the guard compared _resolve_durable_pid (an
+# exportable CLAUDE_PID) instead of the hook's unpredictable $PPID.
 tap_section "L4.9c: Turnover discriminator — resolved-state pid == own PID does not trip the guard"
 
 STATE_SID="self-session-id"
@@ -595,138 +586,115 @@ assert_eq "$fire" "true" "foreign: a different LIVE PID -> guard fires"
 kill "$REG_PID" 2>/dev/null || true
 wait "$REG_PID" 2>/dev/null || true
 
+# --- L4.9d — Through the hook: own durable pid after an id change is enforced ---
+# register_session records _resolve_durable_pid (CLAUDE_PID, Decision t-0065),
+# so the guard must compare against that, not the hook's $PPID. Exporting
+# CLAUDE_PID makes the hook's own pid predictable, which L4.9c could not do.
+# Same state as L4.9a — ids differ, owner live — but the owner is this session's
+# own claude process, as after a /clear, so its close is enforced.
+tap_section "L4.9d: own durable pid with a changed id — close enforced through the hook"
+
+sleep 60 &
+OWN_CLAUDE_PID=$!
+export CLAUDE_PID="$OWN_CLAUDE_PID"
+_l49a_run "$OWN_CLAUDE_PID"
+unset CLAUDE_PID
+case "$_LAST_OUTPUT" in
+  *"Session log not updated"*) _tap_pass "a state owned by this session's own claude pid is enforced, not skipped as foreign" ;;
+  *) _tap_fail "a state owned by this session's own claude pid is enforced, not skipped as foreign" "got: $_LAST_OUTPUT" ;;
+esac
+kill "$OWN_CLAUDE_PID" 2>/dev/null || true
+wait "$OWN_CLAUDE_PID" 2>/dev/null || true
+teardown_sandbox
+
 # ============================================================
 # L4.10 — Concurrent processes resolve to DISTINCT ids and state dirs
 # ============================================================
-# Two claude processes in one checkout must NOT alias. Each has a distinct
-# durable pid (injected via _REPO_OS_DURABLE_PID — the hook harness gives real
-# hooks an ephemeral $PPID, so the per-process path is unit-tested by injection).
-# Process A bootstraps (writes its sidecar + the shared flat .session-id); a
-# concurrent process B, seeing A's flat id claimed by A's LIVE sidecar, mints its
-# own distinct id instead of adopting. Asserts get_session_state_dir() differs —
-# the core property the brief requires.
+# Rewritten for t-0065: each window has its own Claude Code id, and resolving
+# it writes no identity file (this case used to assert a sidecar was written).
 
-tap_section "L4.10: Concurrent processes — distinct ids and state dirs (per-process identity)"
+tap_section "L4.10: Concurrent processes — distinct ids and state dirs, no identity files"
 
 setup_sandbox
 SB="$(get_sandbox)"
 rm -f "$SB/.claude/.session-id" "$SB"/.claude/.session-id.* 2>/dev/null || true
 
-# Process A: a live durable pid bootstraps a fresh identity.
-sleep 60 & PID_A=$!
-export _REPO_OS_DURABLE_PID="$PID_A"
 export _REPO_OS_STDIN_SID="winA-uuid-aaaa"
 _CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
 SID_A=$(get_session_id "$SB")
 SD_A=$(get_session_state_dir)
-assert_eq "$SID_A" "winA-uuid-aaaa" "process A bootstraps its id from the harness stdin sid"
-assert_file_exists "$SB/.claude/.session-id.$PID_A" "process A writes its per-process identity sidecar"
-
-# Process B: different live durable pid + stdin sid, SAME checkout (shares flat).
-sleep 60 & PID_B=$!
-export _REPO_OS_DURABLE_PID="$PID_B"
 export _REPO_OS_STDIN_SID="winB-uuid-bbbb"
 _CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
 SID_B=$(get_session_id "$SB")
 SD_B=$(get_session_state_dir)
-assert_neq "$SID_B" "$SID_A" "concurrent process B resolves a DIFFERENT id (no aliasing onto A)"
+assert_eq "$SID_A" "winA-uuid-aaaa" "process A resolves its own id"
+assert_eq "$SID_B" "winB-uuid-bbbb" "process B resolves its own id"
 assert_neq "$SD_B" "$SD_A" "concurrent process B resolves a DIFFERENT per-session state dir"
-assert_eq "$SID_B" "winB-uuid-bbbb" "process B mints its id from its own stdin sid"
+assert_file_not_exists "$SB/.claude/.session-id" "neither process wrote the flat identity file"
 
-kill "$PID_A" "$PID_B" 2>/dev/null || true
-wait "$PID_A" 2>/dev/null || true; wait "$PID_B" 2>/dev/null || true
-unset _REPO_OS_DURABLE_PID _REPO_OS_STDIN_SID
+unset _REPO_OS_STDIN_SID
 _CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
 teardown_sandbox
 
 # ============================================================
-# L4.11 — Single process across context-window turnover — STABLE identity
+# L4.11 — One conversation across turns keeps one id and state dir
 # ============================================================
-# The same durable process across a turnover (harness rotates the stdin SID)
-# must keep one id and one state dir. The per-process sidecar fast-path makes the
-# first-seeded id win regardless of the rotated stdin value. This is the
-# turnover-stability half of the requirement (companion to the integration tests
-# L4.3/L4.7, which exercise the flat-file path with an unknowable hook $PPID).
+# Rewritten for t-0065. This case used to simulate the harness ROTATING the id
+# mid-conversation and pin a sidecar that ignored the rotation. Measured
+# 2026-11-03: a conversation keeps one id across compactions, and Claude Code
+# documents that it changes only on /clear and fork. So stability is the id's
+# own; /clear starting a new session is correct, not churn.
 
-tap_section "L4.11: Single process across turnover — stable id and state dir (sidecar fast-path)"
+tap_section "L4.11: one conversation keeps its id across turns; /clear starts a new session"
 
 setup_sandbox
 SB="$(get_sandbox)"
 rm -f "$SB/.claude/.session-id" "$SB"/.claude/.session-id.* 2>/dev/null || true
 
-sleep 60 & PID_T=$!
-export _REPO_OS_DURABLE_PID="$PID_T"
-export _REPO_OS_STDIN_SID="turn1-uuid"
+export CLAUDE_CODE_SESSION_ID="conversation-uuid"
 _CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
 SID_T1=$(get_session_id "$SB"); SD_T1=$(get_session_state_dir)
-
-# Context-window turnover: same durable process, rotated harness stdin SID.
-export _REPO_OS_STDIN_SID="turn2-uuid-rotated"
+# Next turn, after a compaction: same conversation id, fresh hook process.
 _CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
 SID_T2=$(get_session_id "$SB"); SD_T2=$(get_session_state_dir)
+assert_eq "$SID_T2" "$SID_T1" "the id is stable across turns of one conversation"
+assert_eq "$SD_T2" "$SD_T1" "per-session state dir stable across turns"
+export CLAUDE_CODE_SESSION_ID="after-clear-uuid"
+_CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
+assert_eq "$(get_session_id "$SB")" "after-clear-uuid" "/clear (a new Claude Code id) is a new session"
 
-assert_eq "$SID_T2" "$SID_T1" "rotated stdin SID does not churn identity (sidecar fast-path wins)"
-assert_eq "$SD_T2" "$SD_T1" "per-session state dir stable across turnover"
-assert_eq "$SID_T2" "turn1-uuid" "identity remains the first-seeded id, not the rotated value"
-
-kill "$PID_T" 2>/dev/null || true; wait "$PID_T" 2>/dev/null || true
-unset _REPO_OS_DURABLE_PID _REPO_OS_STDIN_SID
+unset CLAUDE_CODE_SESSION_ID
 _CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
 teardown_sandbox
 
 # ============================================================
-# L4.12 — Flat-file resolution: adopt when unowned, mint when a LIVE peer owns it
+# L4.12 — A flat id is never adopted while a Claude Code id exists
 # ============================================================
+# Rewritten for t-0065. This case pinned adopt-when-unowned, mint-on-live-peer
+# and recover-on-dead-peer — the rules by which one session's id reached
+# another (R47, R48 d, GT-8). None of them exists now.
 
-tap_section "L4.12: Flat resolution — adopt-when-unowned, mint-on-live-peer, recover-on-dead-peer"
+tap_section "L4.12: a flat id is never adopted, whatever its owner's state"
 
 setup_sandbox
 SB="$(get_sandbox)"
-
-# Adopt: flat exists, NO sidecars -> adopt the durable flat id (turnover / in-flight
-# pre-sidecar session / legacy file). Adoption claims the id with this process's
-# sidecar (R47) and leaves the flat file untouched.
 rm -f "$SB"/.claude/.session-id.* 2>/dev/null || true
 echo "durable-flat-id" > "$SB/.claude/.session-id"
-sleep 60 & PID_AD=$!
-export _REPO_OS_DURABLE_PID="$PID_AD"
+sleep 60 & PEER_PID=$!
+echo "durable-flat-id" > "$SB/.claude/.session-id.$PEER_PID"
+
 export _REPO_OS_STDIN_SID="fresh-stdin-uuid"
-_CACHED_SESSION_ID=""
-SID_AD=$(get_session_id "$SB")
-assert_eq "$SID_AD" "durable-flat-id" "adopts the durable flat id when no live peer claims it"
-assert_eq "$(cat "$SB/.claude/.session-id.$PID_AD" 2>/dev/null)" "durable-flat-id" "adoption claims the id with this process's sidecar (R47)"
-assert_eq "$(cat "$SB/.claude/.session-id" 2>/dev/null)" "durable-flat-id" "adoption leaves the flat file untouched"
-kill "$PID_AD" 2>/dev/null || true; wait "$PID_AD" 2>/dev/null || true
+_CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
+assert_eq "$(get_session_id "$SB")" "fresh-stdin-uuid" "a flat id claimed by a live peer is not adopted"
+kill "$PEER_PID" 2>/dev/null || true; wait "$PEER_PID" 2>/dev/null || true
+_CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
+assert_eq "$(get_session_id "$SB")" "fresh-stdin-uuid" "a flat id whose owner is dead is not adopted either"
+assert_eq "$(cat "$SB/.claude/.session-id")" "durable-flat-id" "the flat file is left as found"
+_n=0; for _f in "$SB"/.claude/.session-id.*; do [ -f "$_f" ] && _n=$((_n + 1)); done
+assert_eq "$_n" "1" "no sidecar was written (only the peer's legacy one remains)"
 
-# Mint: a DIFFERENT, live process already claims the flat id via its sidecar.
-sleep 60 & PID_OWNER=$!
-echo "shared-id" > "$SB/.claude/.session-id"
-echo "shared-id" > "$SB/.claude/.session-id.$PID_OWNER"
-sleep 60 & PID_ME=$!
-export _REPO_OS_DURABLE_PID="$PID_ME"
-export _REPO_OS_STDIN_SID="my-distinct-uuid"
-_CACHED_SESSION_ID=""
-SID_ME=$(get_session_id "$SB")
-assert_neq "$SID_ME" "shared-id" "mints a distinct id when a live peer already claims the flat id"
-assert_eq "$SID_ME" "my-distinct-uuid" "minted id comes from this process's own stdin sid"
-assert_file_exists "$SB/.claude/.session-id.$PID_ME" "mint writes this process's sidecar"
-kill "$PID_OWNER" "$PID_ME" 2>/dev/null || true
-wait "$PID_OWNER" 2>/dev/null || true; wait "$PID_ME" 2>/dev/null || true
-
-# Recover: a sidecar owned by a DEAD pid must NOT force a mint — the orphan flat
-# id is adopted (the dead owner is gone; this is recovery, not a concurrent peer).
-echo "orphan-id" > "$SB/.claude/.session-id"
-echo "orphan-id" > "$SB/.claude/.session-id.99999999"
-sleep 60 & PID_REC=$!
-export _REPO_OS_DURABLE_PID="$PID_REC"
-export _REPO_OS_STDIN_SID="recover-stdin"
-_CACHED_SESSION_ID=""
-SID_REC=$(get_session_id "$SB")
-assert_eq "$SID_REC" "orphan-id" "a dead peer's sidecar does not force a mint — orphan flat id is adopted"
-kill "$PID_REC" 2>/dev/null || true; wait "$PID_REC" 2>/dev/null || true
-
-unset _REPO_OS_DURABLE_PID _REPO_OS_STDIN_SID
-_CACHED_SESSION_ID=""
+unset _REPO_OS_STDIN_SID
+_CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
 teardown_sandbox
 
 # ============================================================
@@ -752,38 +720,31 @@ kill "$PID_LIVE" 2>/dev/null || true; wait "$PID_LIVE" 2>/dev/null || true
 teardown_sandbox
 
 # ============================================================
-# L4.14 — unregister_session removes the closing session's sidecar
+# L4.14 — unregister_session removes the registry record and nothing else
 # ============================================================
-# Close must delete this window's sidecar (whose pid is still alive, so the
-# dead-pid sweep will not reap it) so the SAME window's next session bootstraps a
-# fresh id rather than fast-pathing onto the closed identity.
+# Rewritten for t-0065: no sidecar holds identity, so there is none to delete
+# by content (that deletion is gone). The next session in the same window has
+# its own Claude Code id.
 
-tap_section "L4.14: unregister_session removes the closing session's sidecar (no same-window id bleed)"
+tap_section "L4.14: unregister_session removes the registry record; the next session has its own id"
 
 setup_sandbox
 SB="$(get_sandbox)"
-rm -f "$SB/.claude/.session-id" "$SB"/.claude/.session-id.* 2>/dev/null || true
+rm -f "$SB/.claude/.session-id" "$SB"/.claude/.session-id.* "$SB"/.claude/.state/sessions/*.yaml 2>/dev/null || true
 
-sleep 60 & PID_U=$!
-export _REPO_OS_DURABLE_PID="$PID_U"
-export _REPO_OS_STDIN_SID="session-one-uuid"
+export CLAUDE_CODE_SESSION_ID="closing-sess-uuid"
 _CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
-SID_U=$(get_session_id "$SB")
-assert_file_exists "$SB/.claude/.session-id.$PID_U" "session sidecar present before close"
+create_fake_session "closing-sess-uuid" "standard" "feature/test" "$$"
+assert_file_exists "$SB/.claude/.state/sessions/closing-sess-uuid.yaml" "session registry record present before close"
+unregister_session 2>/dev/null || true
+assert_file_not_exists "$SB/.claude/.state/sessions/closing-sess-uuid.yaml" "unregister_session removes the registry record"
+assert_file_not_exists "$SB/.claude/.session-id" "and writes no identity file"
 
-unregister_session
-assert_file_not_exists "$SB/.claude/.session-id.$PID_U" "unregister_session removes the closing session's sidecar by content-match"
-
-# Same window (same durable pid), next session: with the sidecar (and flat) gone,
-# a fresh stdin sid must bootstrap a NEW id — no bleed from the closed session.
-rm -f "$SB/.claude/.session-id" 2>/dev/null || true
-export _REPO_OS_STDIN_SID="session-two-uuid"
+export CLAUDE_CODE_SESSION_ID="next-sess-uuid"
 _CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
-SID_U2=$(get_session_id "$SB")
-assert_neq "$SID_U2" "$SID_U" "next session in the same window bootstraps a fresh id (no cross-session bleed)"
+assert_eq "$(get_session_id "$SB")" "next-sess-uuid" "the next session in the window resolves its own id"
 
-kill "$PID_U" 2>/dev/null || true; wait "$PID_U" 2>/dev/null || true
-unset _REPO_OS_DURABLE_PID _REPO_OS_STDIN_SID
+unset CLAUDE_CODE_SESSION_ID
 _CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
 teardown_sandbox
 
@@ -862,22 +823,21 @@ _CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
 teardown_sandbox
 
 # ============================================================
-# L4.16 — A second process's SessionEnd cannot close a live adopter (R47)
+# L4.16 — A second process's SessionEnd cannot close a live session (R47)
 # ============================================================
-# Replays markpreston 2026-10-26: a resumed VS Code window (A) found .session-id
-# already on disk and adopted it. Adoption wrote no sidecar, and A's registry
-# entry had been swept (its pid was a dead tool shell), so nothing marked the id
-# as owned. A reopened old conversation (B) in the same checkout then resolved
-# A's id too, and its SessionEnd sealed A's branch and cleared A's identity.
+# Rewritten for t-0065. R47: a window that adopted the flat id without
+# claiming it was invisible to liveness checks, and a reopened old
+# conversation (B) in the same checkout resolved A's id too; its SessionEnd
+# sealed A's branch. Now A and B have their own Claude Code ids, so B's
+# SessionEnd is about B only.
 
-tap_section "L4.16: a second process's SessionEnd cannot close a live session that adopted the flat id (R47)"
+tap_section "L4.16: a second process's SessionEnd cannot close another live session (R47)"
 
 setup_hook_sandbox
 SB="$(get_sandbox)"
-rm -f "$SB"/.claude/.session-id.* "$SB"/.claude/.state/sessions/*.yaml 2>/dev/null || true
+rm -f "$SB/.claude/.session-id" "$SB"/.claude/.session-id.* "$SB"/.claude/.state/sessions/*.yaml 2>/dev/null || true
 
-A_SID="live-adopter-20261026"
-echo "$A_SID" > "$SB/.claude/.session-id"
+A_SID="live-session-a-20261026"
 A_DIR="$SB/.claude/.state/wt-sessions/$A_SID"
 mkdir -p "$A_DIR"
 ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -888,36 +848,144 @@ echo "0000000000000000000000000000000000000000" > "$SB/.claude/.session-baseline
 R47_BRANCH=$(cd "$SB" && git rev-parse --abbrev-ref HEAD)
 
 sleep 60 & PID_A=$!
-sleep 60 & PID_B=$!
+create_fake_session "$A_SID" "standard" "$R47_BRANCH" "$PID_A"
 
-# A's hooks resolve its identity the way every interactive hook does.
-export _REPO_OS_DURABLE_PID="$PID_A"
-export _REPO_OS_STDIN_SID="a-harness-uuid"
-_CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
-assert_eq "$(get_session_id "$SB")" "$A_SID" "A adopts the flat id it found on disk"
+# B, a different process with its own Claude Code id, ends its session.
+(
+  export CLAUDE_CODE_SESSION_ID="b-harness-uuid"
+  run_hook_rc "session-close-check.sh" '{"hook_event_name":"SessionEnd","session_id":"b-harness-uuid"}' >/dev/null 2>&1 || true
+)
 
-# B, a different live process with its own harness id, ends its session.
-export _REPO_OS_DURABLE_PID="$PID_B"
-unset _REPO_OS_STDIN_SID
-run_hook_rc "session-close-check.sh" '{"hook_event_name":"SessionEnd","session_id":"b-harness-uuid"}' >/dev/null 2>&1 || true
-
-assert_eq "$(cat "$SB/.claude/.session-id" 2>/dev/null)" "$A_SID" "B's SessionEnd leaves A's flat id in place"
 assert_file_exists "$A_DIR/phase-state" "B's SessionEnd leaves A's phase-state in place"
+assert_file_exists "$SB/.claude/.state/sessions/$A_SID.yaml" "B's SessionEnd leaves A's registry record in place"
 if grep -qxF "$R47_BRANCH" "$SB/.claude/local/closed-branches" 2>/dev/null; then
   _tap_fail "B's SessionEnd does not seal A's branch" "$R47_BRANCH was recorded in closed-branches"
 else
   _tap_pass "B's SessionEnd does not seal A's branch"
 fi
 
-# A's next hook still resolves A's own id.
-export _REPO_OS_DURABLE_PID="$PID_A"
-export _REPO_OS_STDIN_SID="a-harness-uuid"
+export CLAUDE_CODE_SESSION_ID="$A_SID"
 _CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
 assert_eq "$(get_session_id "$SB")" "$A_SID" "A still resolves its own id after B's SessionEnd"
 
-kill "$PID_A" "$PID_B" 2>/dev/null || true
-wait "$PID_A" 2>/dev/null || true; wait "$PID_B" 2>/dev/null || true
-unset _REPO_OS_DURABLE_PID _REPO_OS_STDIN_SID
+kill "$PID_A" 2>/dev/null || true; wait "$PID_A" 2>/dev/null || true
+unset CLAUDE_CODE_SESSION_ID
+_CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
+teardown_sandbox
+
+# ============================================================
+# L4.17 — A session id cannot steer the registry record out of its directory
+# ============================================================
+# register_session, release_branch_claim and unregister_session build the record
+# path from the session id. An id carrying / or .. must land, be found and be
+# removed inside .claude/.state/sessions, like the state dir and control record.
+
+tap_section "L4.17: registry record paths sanitise the session id"
+
+_l417_records() { # -> the registry records, one per line
+  local f
+  for f in "$SB"/.claude/.state/sessions/*.yaml; do
+    [ -f "$f" ] && printf '%s\n' "$f"
+  done
+  return 0
+}
+
+setup_sandbox
+SB="$(get_sandbox)"
+rm -f "$SB/.claude/.session-id" "$SB"/.claude/.state/sessions/*.yaml 2>/dev/null || true
+mkdir -p "$SB/.claude/.state/sessions"
+
+export CLAUDE_CODE_SESSION_ID="../../escape-sid"
+_CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
+register_session standard 2>/dev/null || true
+assert_file_not_exists "$SB/.claude/escape-sid.yaml" "register_session does not write outside the registry dir"
+_l417_rec=$(_l417_records)
+assert_eq "$(printf '%s' "$_l417_rec" | grep -c .)" "1" "register_session writes one record inside the registry dir"
+
+# Its readers compare record names against the same sanitised id, so the
+# session does not see its own record as another session on its branch.
+_l417_rc=0
+is_session_active "$(get_branch)" 2>/dev/null || _l417_rc=$?
+assert_fail "$_l417_rc" "is_session_active does not count the session's own record"
+_SESSION_OVERLAP_CHECKED=false
+_l417_rc=0
+check_session_overlap 2>/dev/null || _l417_rc=$?
+assert_ok "$_l417_rc" "check_session_overlap does not block on the session's own record"
+
+release_branch_claim 2>/dev/null || true
+assert_eq "$(grep -c '^branch_claim: released$' "$_l417_rec" 2>/dev/null || true)" "1" \
+  "release_branch_claim marks that same record"
+
+unregister_session 2>/dev/null || true
+assert_eq "$(_l417_records | grep -c . || true)" "0" "unregister_session removes that same record"
+
+unset CLAUDE_CODE_SESSION_ID
+_CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
+teardown_sandbox
+
+# ============================================================
+# L4.18 — The id encoding is one-to-one, and every copy of it agrees
+# ============================================================
+# _safe_sid percent-encodes % / and ., so no two ids share a registry record or
+# state dir, and real ids (UUIDs, daemon-<date>-<n>) are unchanged. The close
+# hook's fast path runs before the helpers are sourced and carries its own copy
+# (_zc_safe_sid); it must produce the same names. Names read back from the
+# registry or wt-sessions are encoded, so the sweep's liveness test must compare
+# encoded ids or it deletes a live session's state.
+
+tap_section "L4.18: one-to-one id encoding — no collisions, copies agree, sweep keeps a live encoded id"
+
+assert_eq "$(_safe_sid "6f1e2d3c-aaaa-bbbb-cccc-0123456789ab")" "6f1e2d3c-aaaa-bbbb-cccc-0123456789ab" "a UUID maps to itself"
+assert_eq "$(_safe_sid "daemon-20261112-101500-1234")" "daemon-20261112-101500-1234" "a daemon id maps to itself"
+_l418_ab="$(_safe_sid "a/b")"
+assert_eq "$([ "$_l418_ab" != "$(_safe_sid "a_b")" ] && echo distinct)" "distinct" "a/b and a_b get different names"
+assert_eq "$([ "$(_safe_sid "%2F")" != "$(_safe_sid "/")" ] && echo distinct)" "distinct" "a literal %2F and / get different names"
+assert_eq "$([ "$(_safe_sid "..")" != "$(_safe_sid "__")" ] && echo distinct)" "distinct" ".. and __ get different names"
+case "$(_safe_sid "../x/..")" in
+  */*|*.*) _tap_fail "an encoded name holds no / or ." "got: $(_safe_sid "../x/..")" ;;
+  *) _tap_pass "an encoded name holds no / or ." ;;
+esac
+
+# The close hook's copy, extracted as written.
+eval "$(sed -n '/^_zc_safe_sid() {/,/^}/p' "$HOOKS_DIR/session-close-check.sh")"
+if type _zc_safe_sid >/dev/null 2>&1; then
+  _l418_diff=""
+  for _l418_id in "a/b" "a_b" ".." "%2F" "a.b" "../../x" "%" "6f1e2d3c-aaaa"; do
+    [ "$(_zc_safe_sid "$_l418_id")" = "$(_safe_sid "$_l418_id")" ] || _l418_diff="$_l418_diff $_l418_id"
+  done
+  assert_eq "$_l418_diff" "" "the close hook's fast-path encoding matches _safe_sid"
+else
+  _tap_fail "the close hook's fast-path encoding matches _safe_sid" "_zc_safe_sid not found in session-close-check.sh"
+fi
+
+# Two sessions whose ids collided under the old mapping keep separate records.
+setup_sandbox
+SB="$(get_sandbox)"
+rm -f "$SB/.claude/.session-id" "$SB"/.claude/.state/sessions/*.yaml 2>/dev/null || true
+mkdir -p "$SB/.claude/.state/sessions"
+for _l418_id in "a/b" "a_b"; do
+  export CLAUDE_CODE_SESSION_ID="$_l418_id"
+  _CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
+  register_session standard 2>/dev/null || true
+done
+_l418_n=0
+for _l418_f in "$SB"/.claude/.state/sessions/*.yaml; do
+  [ -f "$_l418_f" ] && _l418_n=$((_l418_n + 1))
+done
+assert_eq "$_l418_n" "2" "a/b and a_b register two separate records"
+
+# A live session with such an id keeps its state dir through the sweep, even
+# with no registry record (the orphaned-state-dir loop's liveness test).
+rm -f "$SB"/.claude/.state/sessions/*.yaml 2>/dev/null || true
+export CLAUDE_CODE_SESSION_ID="x/y"
+_CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
+_l418_dir="$SB/.claude/.state/wt-sessions/$(_safe_sid "x/y")"
+mkdir -p "$_l418_dir"
+echo "session_id: x/y" > "$_l418_dir/phase-state"
+sweep_stale_sessions 2>/dev/null || true
+assert_file_exists "$_l418_dir/phase-state" "a live session whose id needs encoding keeps its state through the sweep"
+
+unset CLAUDE_CODE_SESSION_ID
 _CACHED_SESSION_ID=""; _CACHED_SESSION_STATE_DIR=""
 teardown_sandbox
 

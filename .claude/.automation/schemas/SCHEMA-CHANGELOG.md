@@ -10,6 +10,32 @@ Breaking changes (field removal, type change, required field addition) increment
 
 ---
 
+## v1.13.0 — Question Park
+
+**Date:** 2026-11-16
+**Decision:** t-0068 (amends t-0064)
+
+### Changes
+
+**queue-entry.yaml** (no new field):
+- `stopped_mode` gains `question` — the session parked on an unanswered headless question. Set by the runner when a question of the entry was closed as `parked` during that launch, through the same `queue_stop` path as `graceful` and `forced`. Kept on resume so the runner's first message is the operator's answer. Readers that switch on `stopped_mode` must treat an unknown value as a stop, as `resume-entry` already does.
+
+**runner-config.yaml** (+1 field, 1 default changed):
+- `question_on_timeout` (string, `pause` | `agent-decides`, default `pause`; absent or invalid = `pause`).
+- `question_timeout_seconds` default 14400 → 1800. It is now the live wait only; an unanswered question parks instead of expiring.
+
+**Question channel files** (`format_version` stays 1 — Decision t-0064 § 5):
+- `q-<id>.closed` reasons are now `parked` | `agent-decided` | `abandoned`. `expired` is no longer written; readers must still accept it in records written before t-0068. This is a format change for any reader that enumerated the reasons.
+
+**Control files** (not a schema file, recorded here because Massimo reads it):
+- `control/<entry>/resume.yaml` gains `question_id` when the stop involved a parked question.
+
+**Escalations**: agent-decides writes `type: ambiguity`, `severity: advisory` — both values already in `escalation.yaml`.
+
+**`show --json`** gains a `question` member: `{"id", "waiting": "open" | "parked" | "", "parked", "answered", "summary"}`.
+
+---
+
 ## v1.12.0 — Conflict Resolution
 
 **Date:** 2026-10-23

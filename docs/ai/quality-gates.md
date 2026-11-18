@@ -130,7 +130,7 @@ Which gates apply varies by session type. Enforced at `verify`/`commit` phases. 
 | `audit` | Read-only (no gates unless deferrals create file changes) |
 | `queue-triage` | No gates (fully ephemeral) |
 | `taskdef-query` | No gates (fully ephemeral) |
-| `taskdef-brief` | Plan-approved gate only (Decision 0029 — `approval` phase requires `plan-approved` state file) |
+| `taskdef-brief` | Plan-approved gate only (Decision 0029 — `approval` phase requires `plan-approved` state file, written by the in-session approval or, for a queued draft, by `accept_draft_approval` from the queue — Decision t-0067). Brief files only in `synthesize`/`output`; the session cannot approve its own draft |
 
 **Merge brief gate ordering:** The `taskgroup-merge` session type replaces the `review` phase with `cohesion` (cross-session cohesion review using `git diff main...HEAD`). Gate A5 (cohesion) is satisfied by the `cohesion` phase rather than a separate `review` phase. Gate A6 always applies to merge briefs (task group contract must be updated). The `verify` phase runs all remaining gates (A1–A4, A6, B1–B3) after cohesion completes.
 

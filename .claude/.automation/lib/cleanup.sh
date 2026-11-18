@@ -6,6 +6,7 @@
 # Cleanup targets:
 #   - Completed queue entries older than queue_days config
 #   - Brief files referenced by deleted queue entries (in .automation/briefs/ only)
+#   - Unreferenced Prompt T briefs (prune --briefs-only only — _clean_orphan_briefs)
 #   - Failed/blocked/review queue entries older than 2x queue_days
 #   - Blocker reports older than report_days config
 #   - Resolved escalations older than escalation_days config
@@ -431,18 +432,65 @@ _clean_briefs_only() {
   local dir="$qdir/completed"
   local deleted=0
 
-  [ -d "$dir" ] || { echo "0"; return; }
-
   local f
-  for f in "$dir"/*.yaml; do
-    [ -f "$f" ] || continue
-    local age
-    age=$(_file_age_days "$f")
-    if [ "$age" -ge "$max_days" ]; then
-      local brief_deleted
-      brief_deleted=$(_delete_brief_for_entry "$f")
-      deleted=$((deleted + brief_deleted))
-    fi
+  if [ -d "$dir" ]; then
+    for f in "$dir"/*.yaml; do
+      [ -f "$f" ] || continue
+      local age
+      age=$(_file_age_days "$f")
+      if [ "$age" -ge "$max_days" ]; then
+        local brief_deleted
+        brief_deleted=$(_delete_brief_for_entry "$f")
+        deleted=$((deleted + brief_deleted))
+      fi
+    done
+  fi
+
+  local orphans
+  orphans=$(_clean_orphan_briefs "$max_days")
+  echo "$((deleted + orphans))"
+}
+
+# --- Clean Prompt T briefs that no queue entry references (R49) ---
+# Prompt T writes <stem>.md, <stem>.contract.yaml and <stem>.bundle.yaml into
+# briefs/; a brief the operator never queued (or whose entry was removed) is
+# otherwise kept forever. Removes all three only when the brief has a
+# .bundle.yaml sibling (so hand-written briefs are never touched), none of the
+# files is a symlink, no queue file mentions <stem>.md, and the .md is at least
+# max_days old.
+# Arguments:
+#   $1 — max age in days
+# Output: count of deleted briefs on stdout
+_clean_orphan_briefs() {
+  local max_days="$1"
+  local briefs_dir="${AUTOMATION_DIR:-$REPO_ROOT/.claude/.automation}/briefs"
+  local qdir
+  qdir=$(_queue_dir)
+  local deleted=0
+
+  [ -d "$briefs_dir" ] || { echo "0"; return; }
+  # No queue directory: references cannot be checked, and "unreferenced" must
+  # never be assumed. Delete nothing.
+  [ -d "$qdir" ] || { echo "0"; return; }
+
+  local bundle stem md contract age
+  for bundle in "$briefs_dir"/*.bundle.yaml; do
+    [ -f "$bundle" ] && [ ! -L "$bundle" ] || continue
+    stem="${bundle%.bundle.yaml}"
+    md="$stem.md"
+    contract="$stem.contract.yaml"
+    [ -f "$md" ] && [ ! -L "$md" ] || continue
+    [ ! -L "$contract" ] || continue
+    age=$(_file_age_days "$md")
+    [ "$age" -ge "$max_days" ] || continue
+    # Any mention of the brief's file name in a queue entry or work order keeps
+    # it — over-matching only keeps more. Only grep's "no match" (1) deletes; an
+    # error (2) keeps the brief.
+    local _ref_rc=0
+    grep -rqF --include='*.yaml' -e "${md##*/}" "$qdir" 2>/dev/null || _ref_rc=$?
+    [ "$_ref_rc" -eq 1 ] || continue
+    rm -f "$md" "$contract" "$bundle"
+    deleted=$((deleted + 1))
   done
 
   echo "$deleted"

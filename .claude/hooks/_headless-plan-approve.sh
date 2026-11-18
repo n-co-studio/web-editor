@@ -4,7 +4,8 @@
 # Requires _analytics-helper.sh and _phase-helper.sh to be sourced first.
 #
 # This exists because:
-#   1. AskUserQuestion is blocked in headless mode (ask-user-deny.sh)
+#   1. AskUserQuestion is always denied in headless mode — ask-user-deny.sh
+#      returns any operator answer through the deny reason (Decision t-0064)
 #   2. plan-approval.sh fires on AskUserQuestion PostToolUse (can't fire without it)
 #   3. State files are write-protected from tool-level Bash (bash-guard blocks > to .state/)
 #   4. Shell I/O from sourced functions bypasses bash-guard (established pattern per Decision 0014 §9)

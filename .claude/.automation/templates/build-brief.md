@@ -10,7 +10,7 @@ This is a headless automation session (runner-invoked via `claude -p`).
 - Target branch: {branch_name}
 - Auto mode: {auto_mode} (if true, skip op-review phase)
 - Solo mode: {solo_mode} (if true, merge to main at close)
-- `AskUserQuestion` is mechanically blocked — there is no interactive operator in headless mode. If you encounter ambiguity, escalate via the escalation protocol below
+- `AskUserQuestion` is for a decision only the operator can make and this brief does not settle. In headless mode the question is recorded and the session waits for the operator's answer, which comes back as the tool's denial reason (Decision t-0064). If the reason says STOPPED there is no answer: do not guess — summarise and end. For anything else that blocks you, escalate via the escalation protocol below
 - `WebSearch` and `WebFetch` are available for documentation lookup and research
 - Destructive git operations (`git reset --hard`, `git push --force`) are mechanically blocked
 - Plan-approved state has been pre-written by the runner (no operator approval prompt needed)

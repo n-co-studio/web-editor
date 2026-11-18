@@ -194,6 +194,27 @@ The Orchestrator synthesizes specialist findings into a draft task brief:
 - GUIDE: if the Pragmatist flags the brief as large, note in the brief that pipeline completeness is intentional: "This brief is sized larger than typical because it covers an end-to-end pipeline. Splitting would create cascading fix-on-fix patterns."
 - The Narrow path still applies for truly independent features, but pipeline-crossing changes must NOT be narrowed by stage boundary
 
+#### Draft Mode — queue the brief as a Draft (Decision t-0067)
+
+Draft mode makes the brief a queue entry the moment it is first synthesized, so a front end such as Massimo can show it as a Draft and approve it from outside the session. The session enters draft mode when the environment sets `REPO_OS_TASKDEF_DRAFT=1` (check with `echo "${REPO_OS_TASKDEF_DRAFT:-}"` at session start — Massimo sets it), or when the operator selects **Draft to queue** in Step 4. In draft mode, skip the Step 4 approval question entirely: approval comes from outside.
+
+1. **Write the draft** (still in `synthesize`): the brief, the sidecar contract and the bundle under `.claude/.automation/briefs/`, with exactly the naming and content of Step 4's queue intake (items 1–3), bundle `mode: "review"`.
+2. **Queue it as a draft**: `queue-cli.sh add --brief <path>` — **without** `--auto-approve`. The entry lands in `pending-review`. Do **not** run `start-daemon`. Task groups: add the first brief, read its `work_order_id` (`queue-cli.sh show <id>`), then add every further brief with `--work-order <wo-id>` so the whole group is one work order (parallel content briefs would otherwise each get their own). Branch and `--solo` rules are those of Step 4 item 4: only the final brief — or the merge brief of a parallel group — is `--solo`.
+3. **Bind the draft to the session**:
+   ```bash
+   source .claude/hooks/_analytics-helper.sh && source .claude/hooks/_phase-helper.sh && record_draft <entry-id> [<entry-id>...] [--also <task-group bundle path>...]
+   ```
+   `--also` lists task-group bundles written under `.claude/local/task-groups/` so a discard removes them too. Those bundles are written with shell I/O, as in Step 4 — `write-guard.sh` admits Edit/Write only under `.claude/.automation/briefs/`.
+4. **Report** the entry id (and the work order id for a group) and a one-paragraph summary. Then start a background wait, so the session is woken when the operator acts:
+   `.claude/.automation/queue-cli.sh draft-wait <entry-id>... --timeout 14400` (run it in the background; it exits when no entry is `pending-review` any more, or with code 3 after four hours — then simply start another). The timeout keeps a poller from outliving a session that ended with its draft still pending.
+5. **Revise loop.** While the draft is pending, every operator turn starts with `queue-cli.sh draft-status <entry-id>...`. If still `pending-review`, apply the operator's changes **in place** to the same brief, sidecar contract and bundle files — never a second copy, never a new `add`. The entry id never changes; the runner reads the brief at launch, so the edited file is what runs. If a draft-wait is no longer running, start another.
+6. **Released by approval** (the wait exits, or `draft-status` shows the entries out of `pending-review`): run `accept_draft_approval`. It writes `plan-approved` from the queue (`source: queue-draft`, mode `auto` only if every entry was approved with `auto_mode: true`, otherwise `review`) and moves the session to `output`. Rewrite the bundle's `mode` and `approved_at` to match, confirm "Draft <id> submitted (mode: <mode>)", and close. Do not ask again. Return codes: `2` still pending (keep revising), `3` removed (go to 7), `4` part removed and part approved (tell the operator and stop).
+7. **Discarded** (`draft-status` shows `absent` for every entry — the operator ran `queue-cli.sh remove <id>`): run `discard_draft`. It deletes the brief, sidecar contract and bundle files the session bound, and nothing else. End the session with a one-line note and no output.
+
+The session cannot approve its own draft: `bash-guard.sh` blocks `queue-cli.sh approve`, `approve-wo`, and `add` / `follow-up` with `--auto-approve` in a `taskdef-brief` session until `plan-approved` exists. Approval is the operator's — Massimo's Submit, or in another shell `queue-cli.sh approve <id> [--mode review|auto]` (single brief) or `queue-cli.sh approve-wo <wo-id> [--mode review|auto]` (task group, approved together).
+
+A CLI operator who chose **Draft to queue** can still approve in this session: ask the Step 4 question again. On an `Approve & queue (*)` answer, approve the **existing** entry (`queue-cli.sh approve <id> --mode <review|auto>`, or `approve-wo` for a group) instead of adding a new one, then continue with Step 4 item 5.
+
 #### Step 4 — Operator Review
 
 Present a concise summary of the draft task brief to the operator — title, goal, scope (files/modules), approach outline (numbered steps, one line each), and key risks. Do NOT display the full brief at this stage. Then use `AskUserQuestion` (not conversational text) to request approval — this ensures the operator gets a structured dialog. This triggers `plan-approved` state via `plan-approval.sh` — required for `taskdef-brief` sessions per Decision 0029.
@@ -226,6 +247,10 @@ The approval question merges brief approval and auto/review mode selection into 
           "description": "Brief is final — write the handoff bundle, write the brief to disk, queue for headless execution in auto mode."
         },
         {
+          "label": "Draft to queue",
+          "description": "Queue the brief as a pending-review Draft now, keep revising it here, and submit it later from outside this session (queue-cli.sh approve)."
+        },
+        {
           "label": "Revise",
           "description": "Request changes to the brief"
         },
@@ -245,6 +270,7 @@ The approval question merges brief approval and auto/review mode selection into 
 - `question` text contains "Approve" — Gate 2 passes at line 61 (regex `\b(approv|confirm|proceed|accept|ready)\b`); option labels also provide redundant coverage via line 63
 - Selected answer (Gate 3 — line 89): every `Approve — *` and `Approve & queue (*)` label contains "Approve", satisfying the affirmative check
 - Mode detection (lines 109–113): `DETECTED_MODE` scans the selected label for `\bauto\b` or `\breview\b`; the `(review)` / `(auto)` / `— review` / `— auto` qualifiers in the labels above make mode load-bearing on every approve path
+- `Draft to queue` contains no approval word, so `plan-approval.sh` does not treat it as an approval and writes no `plan-approved` — the draft's approval comes from outside (Decision t-0067)
 - Operators who want **Narrow** (split into smaller briefs) can select "Other" and type "Narrow" or "Split" — see Narrow path documentation below
 
 The operator reviews and may:
@@ -258,6 +284,7 @@ The operator reviews and may:
   5. **Start daemon**: Run `queue-cli.sh start-daemon` (checks PID file, starts daemon if not running).
   6. **Confirm**: "Brief queued. Daemon is running." (or "Briefs queued. Work order created. Daemon is running." for task groups).
   Operators who want non-default queue flags (e.g., push:yes, solo:no) can select "Other" and specify custom flags, or adjust post-hoc via `queue-cli.sh`.
+- **Draft to queue** — Enter draft mode: follow § Draft Mode above from item 1. The brief is queued in `pending-review` and approved later from outside the session.
 - **Revise** — Operator requests changes. Update and re-present.
 - **Abandon** — Operator decides not to proceed. No output.
 
@@ -274,7 +301,7 @@ The operator reviews and may:
 5. Each content brief runs as a full worktree session (`claude --worktree` with `REPO_OS_SESSION_ID`) and commits to its own branch. The merge brief combines these branches. See `docs/ai/workflow-appendix/session-type-task-group.md` § Parallel Execution and Decision 0032
 When the operator selects **sequential** or parallel is not offered: existing behavior unchanged.
 
-Do not finalize without explicit operator approval.
+Do not finalize without explicit operator approval — in-session through this question, or from outside through the queue in Draft Mode.
 
 #### Step 5 — Output (Bundle Write + Display)
 
@@ -451,13 +478,14 @@ See Decision 0038 § 1 for the full handoff bundle YAML schema. Required top-lev
 
 ## Rules
 
-- REQUIRE: **never write files** except for (a) the handoff bundle (Step 5 — always written on `Approve — *` paths under `.claude/local/`), and (b) the queue intake path of Step 4 (`Approve & queue (*)`), where writing brief files + sidecar contract + bundle to `.claude/.automation/briefs/` and calling `queue-cli.sh` are permitted. All other output goes to the terminal.
-- REQUIRE: **never make code changes.** This is an exploration and planning session only. The Step 4 queue intake exception is narrow: only brief files in `.claude/.automation/briefs/` and queue CLI invocations. No product code changes.
+- REQUIRE: **never write files** except for (a) the handoff bundle (Step 5 — always written on `Approve — *` paths under `.claude/local/`), (b) the queue intake path of Step 4 (`Approve & queue (*)`), and (c) the draft and its in-place revisions in Draft Mode (Decision t-0067). In (b) and (c), writing brief files + sidecar contract + bundle to `.claude/.automation/briefs/` and calling `queue-cli.sh` are permitted. `write-guard.sh` enforces the path and the phases: brief files only in `synthesize` (draft) and `output` (queue intake). All other output goes to the terminal.
+- REQUIRE: **never make code changes.** This is an exploration and planning session only. The queue intake and draft exceptions are narrow: only brief files in `.claude/.automation/briefs/` (and task-group bundles under `.claude/local/task-groups/`, written with shell I/O) and queue CLI invocations. No product code changes.
+- REQUIRE: **never approve your own draft.** A draft's approval is the operator's, made outside the session; `bash-guard.sh` blocks `queue-cli.sh approve`, `approve-wo`, and `add` / `follow-up` with `--auto-approve` until the operator has approved in-session.
 - REQUIRE: **never create session log entries.** Prompt T sessions produce no artifacts and are exempt via the zero-change rule.
 - REQUIRE: **never dispatch specialists in Query mode.** Query mode is conversational — the Orchestrator answers directly.
 - REQUIRE: **always dispatch the 4 core specialists in Brief mode** (Architect, Exploration, Critic, Pragmatist). Additionally dispatch PM Advisory when a compiled spec (`manifest.json` `active` ≠ null) or `mvp-scope.yaml` exists. No tier selection — the core team is fixed, PM is conditional.
 - REQUIRE: **never finalize a brief without operator approval.** Always present the draft for review first.
-- REQUIRE: **use AskUserQuestion (not conversational acknowledgment) for operator approval** — consistent with orchestrator.md constraint. Applies to Step 4 (brief approval and queue intake).
+- REQUIRE: **use AskUserQuestion (not conversational acknowledgment) for operator approval** — consistent with orchestrator.md constraint. Applies to Step 4 (brief approval and queue intake). In Draft Mode the approval is the queue's, made outside the session, and `accept_draft_approval` records it — never conversational acknowledgment either.
 - REQUIRE: **if specs don't exist, say so.** Note in the brief's Spec References section that specs were unavailable and the brief was grounded in codebase analysis alone.
 - REQUIRE: **never use the Agent tool with write-capable subagent types** (builder, qa-verifier, security-privacy, general-purpose, reviewer) or request worktree isolation. Only read-only advisory agents are permitted.
 - GUIDE: **if the task is too large for a single brief**, proactively suggest splitting. A brief that maps to more than one Prompt B session should be broken into sequential briefs.

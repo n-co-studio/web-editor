@@ -44,10 +44,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INPUT=$(cat)
 
 # --- Harness session_id plumbing (must precede first get_session_id call) ---
-# Extracts session_id from the Stop hook JSON payload. The harness embeds the
-# live session id here; exporting it allows get_session_id() (in
-# _analytics-helper.sh) to prefer this over the .session-id file, keeping
-# identity stable across turns without relying on file persistence alone.
+# Extracts session_id from the Stop hook JSON payload. get_session_id() uses it
+# when Claude Code does not export CLAUDE_CODE_SESSION_ID (Decision t-0065).
 export _REPO_OS_STDIN_SID
 _REPO_OS_STDIN_SID="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)"
 
@@ -79,29 +77,27 @@ _ZC_BASELINE_FILE="$_EARLY_ROOT/.claude/.session-baseline-sha"
 # Session-scoped state dir for zero-change fast exit (Decision 0030)
 # All session types now route to per-session dirs under wt-sessions/{sid}/.
 # Backward compat: if per-session dir doesn't exist, fall back to flat dir.
+# _zc_safe_sid is _safe_sid (_analytics-helper.sh), copied because the helpers
+# are not sourced yet here. layer4 L4.18 checks the two agree.
+_zc_safe_sid() {
+  local sid="${1//%/%25}"
+  sid="${sid//\//%2F}"
+  printf '%s\n' "${sid//./%2E}"
+}
 if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
-  _ZC_SID="${REPO_OS_SESSION_ID//\//_}"
-  _ZC_SID="${_ZC_SID//\.\./_}"
+  _ZC_SID=$(_zc_safe_sid "$REPO_OS_SESSION_ID")
   _ZC_STATE_DIR="$_EARLY_ROOT/.claude/.state/wt-sessions/$_ZC_SID"
 else
-  # Interactive session: derive SID from this process's per-process identity.
-  # get_session_id is not sourced yet in this pre-source fast path, so mirror its
-  # resolution with builtins: prefer the per-process sidecar .session-id.<dpid>
-  # (dpid = durable claude $PPID, $$ fallback) over the shared flat .session-id,
-  # so a concurrent window resolves its OWN state dir rather than a peer's id.
-  _ZC_DPID="${PPID:-0}"
-  if [ "$_ZC_DPID" -le 1 ] 2>/dev/null || ! kill -0 "$_ZC_DPID" 2>/dev/null; then
-    _ZC_DPID="$$"
-  fi
-  _ZC_SID=""
-  if [ -f "$_EARLY_ROOT/.claude/.session-id.$_ZC_DPID" ]; then
-    _ZC_SID=$(cat "$_EARLY_ROOT/.claude/.session-id.$_ZC_DPID" 2>/dev/null)
-  elif [ -f "$_EARLY_ROOT/.claude/.session-id" ]; then
+  # Interactive session: derive SID the way get_session_id does (Decision
+  # t-0065), with builtins because the helpers are not sourced yet in this
+  # fast path: CLAUDE_CODE_SESSION_ID, then the stdin id, then the flat file
+  # (outside Claude Code only).
+  _ZC_SID="${CLAUDE_CODE_SESSION_ID:-${_REPO_OS_STDIN_SID:-}}"
+  if [ -z "$_ZC_SID" ] && [ -f "$_EARLY_ROOT/.claude/.session-id" ]; then
     _ZC_SID=$(cat "$_EARLY_ROOT/.claude/.session-id" 2>/dev/null)
   fi
   if [ -n "$_ZC_SID" ]; then
-    _ZC_SID="${_ZC_SID//\//_}"
-    _ZC_SID="${_ZC_SID//\.\./_}"
+    _ZC_SID=$(_zc_safe_sid "$_ZC_SID")
     _ZC_PER_SESSION="$_EARLY_ROOT/.claude/.state/wt-sessions/$_ZC_SID"
     if [ -d "$_ZC_PER_SESSION" ]; then
       _ZC_STATE_DIR="$_ZC_PER_SESSION"
@@ -364,9 +360,12 @@ _branch_in_active_contract() {
 }
 
 # --- Advisory push to remote (shared logic) ---
-# Pushes main to origin after a successful merge. Advisory only — failure
-# does not block session close or trigger retry (exit 2).
-# Skipped in template mode and when no remote is configured.
+# Pushes main to origin after a successful merge, only when the operator opted
+# in (Decision t-0066). Advisory only — failure does not block session close or
+# trigger retry (exit 2).
+# Skipped in template mode, when no remote is configured, in every headless
+# session (the runner owns that push and honours the entry's push_on_complete),
+# and in an interactive session unless runner.push_main_on_session_end is true.
 advisory_push_to_remote() {
   # Skip in template mode
   if [ "$IS_TEMPLATE" = true ]; then
@@ -374,6 +373,26 @@ advisory_push_to_remote() {
   fi
   # Skip when no remote configured
   if ! git remote get-url origin >/dev/null 2>&1; then
+    return 0
+  fi
+  if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
+    log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "push_skipped_headless" "" "" || true
+    return 0
+  fi
+  # config.local.yaml first, then config.yaml, from the main root: a worktree
+  # checkout has no copy of the gitignored local file.
+  local _push_root _push_cfg _push_opt=""
+  _push_root=$(get_main_repo_root 2>/dev/null) || _push_root=""
+  [ -n "$_push_root" ] || _push_root="$REPO_ROOT"
+  for _push_cfg in "$_push_root/.claude/.automation/config.local.yaml" "$_push_root/.claude/.automation/config.yaml"; do
+    [ -f "$_push_cfg" ] || continue
+    _push_opt=$(sed -n '/^runner:/,/^[a-z]/{ /^  push_main_on_session_end:/p; }' "$_push_cfg" 2>/dev/null \
+      | sed -e 's/.*push_main_on_session_end: *//' -e 's/[[:space:]]#.*//' | tr -d "[:space:]\"'" | head -1) || _push_opt=""
+    [ -n "$_push_opt" ] && break
+  done
+  if [ "$_push_opt" != "true" ]; then
+    echo "main was not pushed to origin (runner.push_main_on_session_end is off) — run 'git push origin main' when ready" >&2
+    log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "push_skipped_no_opt_in" "" "" || true
     return 0
   fi
   if ! git push origin main >/dev/null 2>&1; then
@@ -677,17 +696,19 @@ _write_close_escalation() {
 # independently-live process. See the long-form rationale at the Stop-path call
 # site below; both paths share this one implementation so they cannot drift.
 #
-# Discriminator vs. legitimate context-window turnover (which ALSO makes the live
-# harness stdin sid differ from the resolved state's session_id): a turned-over
-# session's state still belongs to THIS claude process. register_session() stores
-# the durable claude PID ($PPID) as the session's pid, so the resolved state's
-# registry pid == our $PPID and this returns 1. Only a genuinely separate, live
-# process (pid != $PPID, still alive) returns 0. A dead/orphaned foreign state
-# (owner not live) is intentionally NOT caught — callers fall through to their
-# existing zero-change / no-session-type exit paths.
+# Since Decision t-0065 the state dir is keyed by CLAUDE_CODE_SESSION_ID, which
+# equals the hook's stdin id, so the two ids disagree only when they come from
+# different places (a Claude Code that does not export the variable, or one
+# that rotated the id without the env catching up). A differing id alone is
+# therefore not proof of a foreign owner. The discriminator is the registry
+# pid: register_session() records _resolve_durable_pid() — the claude process
+# (CLAUDE_PID) — so state whose registry pid is our own durable pid is ours and
+# this returns 1. Only a genuinely separate, live process returns 0. A dead or
+# orphaned foreign state (owner not live) is intentionally NOT caught — callers
+# fall through to their existing zero-change / no-session-type exit paths.
 #
 # Only meaningful for interactive sessions: headless/worktree sessions set
-# REPO_OS_SESSION_ID and therefore never alias on the shared .session-id file.
+# REPO_OS_SESSION_ID, which both the state dir and the registry key on.
 _is_foreign_live_state() {
   [ -z "${REPO_OS_SESSION_ID:-}" ] || return 1
   [ -n "${_REPO_OS_STDIN_SID:-}" ] || return 1
@@ -695,11 +716,11 @@ _is_foreign_live_state() {
   _fls_sid=$(_read_phase_field "session_id" "$_SESSION_STATE_DIR/phase-state" 2>/dev/null || true)
   [ -n "$_fls_sid" ] || return 1
   [ "$_fls_sid" != "$_REPO_OS_STDIN_SID" ] || return 1
-  _fls_reg="$REPO_ROOT/.claude/.state/sessions/${_fls_sid}.yaml"
+  _fls_reg="$REPO_ROOT/.claude/.state/sessions/$(_safe_sid "$_fls_sid").yaml"
   [ -f "$_fls_reg" ] || return 1
   _fls_pid=$(grep '^pid: ' "$_fls_reg" 2>/dev/null | sed 's/^pid: *//' | tr -d '[:space:]')
   [ -n "$_fls_pid" ] || return 1
-  [ "$_fls_pid" != "${PPID:-0}" ] || return 1
+  [ "$_fls_pid" != "$(_resolve_durable_pid)" ] || return 1
   kill -0 "$_fls_pid" 2>/dev/null || return 1
   # Export the offending sid for the caller's log line.
   _FOREIGN_STATE_SID="$_fls_sid"
@@ -738,12 +759,14 @@ if [ "$HOOK_EVENT" = "SessionEnd" ]; then
   # guard; when Decision t-0047 moved merge/seal/cleanup here, the guard was left
   # behind at its original position further down the file, which this dispatch
   # exits before ever reaching. That is not merely a skipped check: cleanup_session()
-  # resolves close_sid via get_session_id() against the same shared, first-writer-wins
-  # .claude/.session-id, so a SessionEnd firing for process A would unregister
-  # session B and delete B's session-scoped state — including B's phase-state —
-  # while B is still running. Decision 0019 fail-closed enforcement blocks all edits
-  # without phase-state, so that abruptly breaks a live, unrelated session mid-flight.
-  # Bail out entirely: another live process owns this state and will close it itself.
+  # unregisters and deletes the session-scoped state of whatever id this process
+  # resolved. Before Decision t-0065 that id came from a shared .claude/.session-id,
+  # so a SessionEnd firing for process A could tear down session B's phase-state
+  # while B was still running; since t-0065 the id is A's own, and this guard is
+  # what keeps the remaining id-mismatch cases from doing the same. Decision 0019
+  # fail-closed enforcement blocks all edits without phase-state, so losing it
+  # breaks a live session mid-flight. Bail out entirely: another live process owns
+  # this state and will close it itself.
   if _is_foreign_live_state; then
     log_hook_event "session-close-check" "SessionEnd" "" "allow" "$START_MS" \
       "foreign_state_skip" "${_FOREIGN_STATE_SID:-}" || true
@@ -985,29 +1008,21 @@ if [ "$HOOK_EVENT" = "SessionEnd" ]; then
 fi
 
 # --- Foreign-state guard (identity-churn safety) ---
-# Interactive sessions (REPO_OS_SESSION_ID unset) resolve their per-session state
-# dir via the shared repo-global .claude/.session-id file (first-writer-wins in
-# get_session_id). When a SECOND session co-resides in the same working copy — a
-# concurrent headless/daemon build, or a second interactive window — both
-# processes read the same .session-id and therefore alias to one session id, so
-# get_session_state_dir()/get_session_type()/is_session_closing() resolve to the
-# OTHER session's phase-state. Enforcing close checks (session log, uncommitted
-# changes) against another LIVE session's state produces a spurious block loop:
-# the foreign session's in-flight work looks like unsaved changes, and this
-# session's own ephemeral/queue-triage exemption is bypassed (the resolved type is
-# the foreign one). Guard: if the resolved phase-state is owned by a DIFFERENT,
-# independently-live process, do not enforce its close here.
+# If the phase-state this hook resolved belongs to a DIFFERENT, independently-live
+# session, enforcing its close checks (session log, uncommitted changes) here
+# produces a spurious block loop: the other session's in-flight work looks like
+# unsaved changes, and this session's own ephemeral/queue-triage exemption is
+# bypassed because the resolved type is the other one's. Before Decision t-0065
+# that was routine — interactive sessions resolved their state through a shared,
+# first-writer-wins .claude/.session-id, so a second window or a co-resident
+# daemon build aliased onto the same id. Since t-0065 each session resolves its
+# own CLAUDE_CODE_SESSION_ID and the guard covers what is left: an env id and a
+# stdin id that disagree. Guard: do not enforce a live foreign session's close.
 #
-# Discriminator vs. legitimate context-window turnover (which ALSO makes the live
-# harness stdin sid differ from the resolved state's session_id): a turned-over
-# session's state still belongs to THIS claude process. register_session() stores
-# the durable claude PID ($PPID) as the session's pid, so the resolved state's
-# registry pid == our $PPID and the guard does NOT fire. Only a genuinely
-# separate, live process (pid != $PPID, still alive) trips it. A dead/orphaned
-# foreign state (owner not live) is intentionally NOT caught here — it falls
-# through to the existing zero-change / no-session-type exit paths below.
-# Shared with the SessionEnd dispatch above via _is_foreign_live_state() so the
-# two close paths cannot drift apart (Decision t-0047 hardening, 2026-09-01).
+# The discriminator — the registry pid against our own durable pid — and the
+# reason a dead owner is not caught are documented on _is_foreign_live_state(),
+# shared with the SessionEnd dispatch above so the two close paths cannot drift
+# apart (Decision t-0047 hardening, 2026-09-01).
 if _is_foreign_live_state; then
   log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" \
     "foreign_state_skip" "${_FOREIGN_STATE_SID:-}" || true
@@ -1114,7 +1129,11 @@ if [ "$STOP_ATTEMPT" -ge 3 ]; then
   # rather than protective, and a permanent deadlock for every later session is
   # worse than a lost advisory for this one. This releases the claim only; the
   # seal, merge and state cleanup still belong to SessionEnd (Decision 0047).
-  unregister_session || true
+  #
+  # The registry record stays, marked released (Decision t-0065). Deleting it,
+  # as this used to, also removed the session's liveness signal, and with it
+  # the identity telemetry resolved on the next line (R48 d).
+  release_branch_claim || true
   log_hook_event "session-close-check" "Stop" "" "allow" "$START_MS" "attempt_limit" "$STOP_ATTEMPT" || true
   _emit_kpi_summary 0 "$STOP_ATTEMPT" "" "$(infer_session_type)"
   # Decision 0047: destructive close work (cleanup, seal, merge) moved to SessionEnd.
@@ -1384,7 +1403,10 @@ fi
 KI_MODIFIED=false
 if [ -f "$KNOWN_ISSUES" ]; then
   if [ "$IS_TEMPLATE" = true ]; then
-    SESSION_ID_FILE="$REPO_ROOT/.claude/.session-id"
+    # Session-start anchor: the registry record init_phase writes. It used to be
+    # the flat .session-id, which nothing inside Claude Code writes since
+    # Decision t-0065.
+    SESSION_ID_FILE="$(_registry_record_path)"
     if [ -f "$SESSION_ID_FILE" ] && [ "$KNOWN_ISSUES" -nt "$SESSION_ID_FILE" ]; then
       KI_MODIFIED=true
     fi

@@ -245,33 +245,47 @@ is_full_worktree_session() {
 }
 
 # --- Portable path normalization (macOS-safe) ---
-# Collapses .., ., and duplicate slashes without resolving symlinks.
-# Fast-path: if no special components, return as-is (zero forks).
-# Fallback: python3 os.path.normpath for edge cases (.., ., //).
-# NOTE: python3 is recommended for reliable path normalization. Without it,
-# paths containing .. components pass through un-normalized, which may weaken
-# is_in_repo() boundary checks (a path like /repo/../outside/file would not
-# be collapsed and could pass the prefix check incorrectly).
+# Collapses .., ., and duplicate slashes lexically, without resolving symlinks.
+# Fast-path: if no special components, return as-is (zero forks). That keeps a
+# trailing slash (`a/b/` stays `a/b/`), while the slow path drops it (`a/./b/`
+# becomes `a/b`); callers that compare prefixes append `/` themselves.
+# Otherwise a pure-bash segment walk gives os.path.normpath's result, except
+# that a leading // collapses to / (POSIX leaves it implementation-defined).
+# No python3 dependency: until 2026-11 the slow path needed python3 and, without
+# it, passed the raw path through, so /repo/../outside/file could pass the
+# is_in_repo() prefix check.
 normalize_path() {
-  local raw="$1"
+  local raw="$1" lead="" out="" seg rest
   case "$raw" in
-    */./*|*/../*|*//*|./*|../*)
-      # Has components needing normalization — fall back to Python
-      if command -v python3 &>/dev/null; then
-        python3 -c "import os.path,sys; print(os.path.normpath(sys.argv[1]))" "$raw" 2>/dev/null || echo "$raw"
-      else
-        # Output raw path so callers under set -e get usable output,
-        # but return 1 and emit warning so fail-closed callers can detect degradation
-        echo "$raw"
-        echo "GATE-FINAL: normalize_path requires python3 for paths with .. or . components — python3 not found. Path normalization skipped (fail-closed)." >&2
-        return 1
-      fi
-      ;;
+    */./*|*/../*|*//*|./*|../*|*/.|*/..|.|..) ;;
     *)
       # Common case: clean path, return as-is
-      echo "$raw"
+      printf '%s\n' "$raw"
+      return 0
       ;;
   esac
+  case "$raw" in /*) lead="/" ;; esac
+  rest="$raw/"
+  while [ -n "$rest" ]; do
+    seg="${rest%%/*}"
+    rest="${rest#*/}"
+    case "$seg" in
+      ''|.) ;;
+      ..)
+        if [ -n "$out" ] && [ "${out##*/}" != ".." ]; then
+          case "$out" in */*) out="${out%/*}" ;; *) out="" ;; esac
+        elif [ -z "$lead" ]; then
+          # Relative path climbing past its start keeps the ..; at / it is dropped
+          out="${out:+$out/}.."
+        fi
+        ;;
+      *) out="${out:+$out/}$seg" ;;
+    esac
+  done
+  out="$lead$out"
+  [ -n "$out" ] || out="."
+  # printf, not echo: a result of -n or -e would print nothing through echo
+  printf '%s\n' "$out"
 }
 
 # --- Resolve path to absolute (no symlink resolution) ---
@@ -366,20 +380,32 @@ get_analytics_dir() {
   echo "$HOME/.local/share/repo-os-analytics/$repo_name/events"
 }
 
-# --- Durable per-process id (per-process session identity) ---
-# The long-lived `claude` process that spawns each hook subprocess is identified
-# by $PPID: stable across a window's turns (so identity survives context-window
-# turnover) and distinct per concurrent window (so two windows don't alias). We
-# key interactive identity on it via per-process sidecar files (.session-id.<dpid>)
-# rather than the single shared .session-id, which collapses concurrent processes.
-# Tests inject _REPO_OS_DURABLE_PID because the hook test harness runs hooks in a
-# subshell pipeline, giving them an ephemeral, unpredictable $PPID (see L4.9c).
-# Fall back to $$ when $PPID is 0/1/unavailable (mirrors register_session).
+# --- Durable session pid ---
+# The long-lived `claude` process a session belongs to. Recorded as the session
+# registry's `pid:`, which is the liveness signal for interactive sessions
+# (Decision t-0065). Claude Code exports CLAUDE_PID (2.1.214+) to hooks and to
+# Bash tool commands; $PPID is only the claude process when the caller is a
+# direct child of it, and from the agent's shell it is often a short-lived tool
+# shell. Tests inject _REPO_OS_DURABLE_PID because the hook test harness runs
+# hooks in a subshell pipeline, giving them an ephemeral, unpredictable $PPID
+# (see L4.9c). Fall back to $$ when $PPID is 0/1/unavailable.
 _resolve_durable_pid() {
   if [ -n "${_REPO_OS_DURABLE_PID:-}" ]; then
     echo "$_REPO_OS_DURABLE_PID"
     return
   fi
+  # Not inside a headless brief: a daemon started from a Claude Code shell
+  # inherits the OPERATOR's CLAUDE_PID, and recording it would tie the brief's
+  # registry liveness to the operator's window.
+  case "${REPO_OS_SESSION_ID:+headless}${CLAUDE_PID:-}" in
+    headless*|''|*[!0-9]*) ;;
+    *)
+      if kill -0 "$CLAUDE_PID" 2>/dev/null; then
+        echo "$CLAUDE_PID"
+        return
+      fi
+      ;;
+  esac
   local p="${PPID:-0}"
   if [ "$p" -le 1 ] 2>/dev/null || ! kill -0 "$p" 2>/dev/null; then
     p="$$"
@@ -389,24 +415,29 @@ _resolve_durable_pid() {
 
 # --- Is a given session id live (by any signal)? ---
 # Returns 0 (true) if the session is provably alive; 1 (false) otherwise.
-# Checks two independent signals in priority order:
-#   1. REPO_OS_SESSION_ID env var — set by daemon and worktree sessions. These
-#      sessions are authoritative from an external process tree and never write
-#      a sidecar (Decision 0030), so the env var is the only signal available.
-#   2. Per-process sidecars (.session-id.<pid>) — written by interactive sessions.
-#      A sidecar with a live pid is the decisive signal for interactive sessions.
+# The registry pid itself is checked by the sweep before it gets here; since
+# Decision t-0065 that pid is the claude process (CLAUDE_PID), so a live session
+# keeps its record and never reaches this function. What remains are the cases
+# the registry pid cannot answer:
+#   1. REPO_OS_SESSION_ID / CLAUDE_CODE_SESSION_ID equal to sid — the sweep is
+#      running inside that session (daemon/worktree, or interactive).
+#   2. Legacy, read-only: a per-process sidecar (.session-id.<pid>) with a live
+#      pid. Nothing writes these since t-0065; a session that started before it
+#      may have a registry pid that was a short-lived tool shell, and this keeps
+#      its state from being swept while it is still running.
 # Called by sweep_stale_sessions from both its registry arm and the orphaned-
 # state-dir loop, so the two halves share a single liveness test (R29).
 _session_is_live() {
+  # sid is a name read back from the registry or wt-sessions, so it is encoded;
+  # every id compared with it is encoded the same way (_safe_sid).
   local sid="$1"
   local repo_root="${2:-$_REPO_OS_ROOT}"
-  # Env check: daemon/worktree sessions set REPO_OS_SESSION_ID. This is only
-  # useful when the sweep itself runs inside that same process tree, but it is
-  # cost-free and prevents a daemon from evicting its own current session.
-  if [ -n "${REPO_OS_SESSION_ID:-}" ] && [ "$REPO_OS_SESSION_ID" = "$sid" ]; then
+  if [ -n "${REPO_OS_SESSION_ID:-}" ] && [ "$(_safe_sid "$REPO_OS_SESSION_ID")" = "$sid" ]; then
     return 0
   fi
-  # Sidecar check: an interactive session writes .session-id.<pid>.
+  if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] && [ "$(_safe_sid "$CLAUDE_CODE_SESSION_ID")" = "$sid" ]; then
+    return 0
+  fi
   local _sl_sc
   for _sl_sc in "$repo_root"/.claude/.session-id.*; do
     [ -f "$_sl_sc" ] || continue
@@ -417,38 +448,17 @@ _session_is_live() {
     kill -0 "$_sl_pid" 2>/dev/null || continue
     local _sl_content
     _sl_content=$(cat "$_sl_sc" 2>/dev/null)
-    [ "$_sl_content" = "$sid" ] && return 0
+    [ "$(_safe_sid "$_sl_content")" = "$sid" ] && return 0
   done
   return 1
 }
 
-# --- Is a given session id already claimed by a DIFFERENT, LIVE process? ---
-# Scans the per-process sidecars .claude/.session-id.<pid>. Returns 0 (true) iff
-# some sidecar for a pid != our dpid, whose process is still alive, holds the id.
-# Sidecar presence is written synchronously inside get_session_id (bootstrap/mint/adopt),
-# so it is a race-safe concurrency signal independent of register_session timing.
-# Intentionally does NOT consult the session registry: a registry-only "foreign"
-# owner (no sidecar) is treated as adoptable, so the close-time foreign-state guard
-# in session-close-check.sh remains the safety net for that case (keeps L4.9a green).
-_sid_claimed_by_live_foreign() {
-  local claim_id="$1" dpid="$2" repo_root="$3"
-  local f base fpid content
-  for f in "$repo_root"/.claude/.session-id.*; do
-    [ -f "$f" ] || continue
-    base="${f##*/}"            # .session-id.<pid>
-    fpid="${base##*.}"         # <pid>
-    case "$fpid" in
-      ''|*[!0-9]*) continue ;;  # skip non-numeric suffixes
-    esac
-    [ "$fpid" = "$dpid" ] && continue
-    kill -0 "$fpid" 2>/dev/null || continue
-    content=$(cat "$f" 2>/dev/null)
-    [ "$content" = "$claim_id" ] && return 0
-  done
-  return 1
-}
-
-# --- Session ID (created on first hook fire, cleaned by Stop hook) ---
+# --- Session ID (Decision t-0065) ---
+# Order: REPO_OS_SESSION_ID (headless/worktree) > CLAUDE_CODE_SESSION_ID
+# (interactive: hooks, the agent's shell, subagents) > the hook's stdin id (a
+# Claude Code that does not export the variable) > the flat .claude/.session-id
+# or a minted id (outside Claude Code only: fixtures, manual shells).
+# The first three read and write no identity file.
 _CACHED_SESSION_ID=""
 get_session_id() {
   local repo_root="$1"
@@ -466,12 +476,8 @@ get_session_id() {
   # mode. It exited having done nothing and the runner logged review:dirty-noop.
   # Only the FIRST brief of a daemon run could ever complete, which is exactly
   # why single-brief tests never caught it. Diagnosed 2026-10-12, hit again
-  # 2026-10-13 on brief 3 of a 6-brief group after ~45 minutes of work.
-  #
-  # The cache is NOT removed: it still serves interactive sessions, which never
-  # set this variable, and that path is what keeps identity stable across a
-  # context-window turnover (the 2026-06-18 sidecar fix, 3647acf). Both
-  # requirements are pinned by layer4 L4.11 and L4.15.
+  # 2026-10-13 on brief 3 of a 6-brief group after ~45 minutes of work. Pinned
+  # by L4.15.
   if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
     if [ "$_CACHED_SESSION_ID" != "$REPO_OS_SESSION_ID" ]; then
       _CACHED_SESSION_ID="$REPO_OS_SESSION_ID"
@@ -485,81 +491,30 @@ get_session_id() {
     echo "$_CACHED_SESSION_ID"
     return
   fi
+  # Interactive (Decision t-0065): Claude Code exports CLAUDE_CODE_SESSION_ID to
+  # every hook and Bash tool command; it equals the hook stdin session_id and
+  # changes only on /clear and fork. It is returned as is — no identity file is
+  # read or written, so no session can reach another's id through the checkout.
+  # Stability across context-window turnover is the id's own (L4.11).
+  if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then
+    echo "$CLAUDE_CODE_SESSION_ID"
+    return
+  fi
+  # The cache serves only the fallbacks below. Every hook calls get_session_id
+  # inside $(...), so in practice it never fills in a hook.
   if [ -n "$_CACHED_SESSION_ID" ]; then
     echo "$_CACHED_SESSION_ID"
     return
   fi
-  # Harness stdin contract: hook entrypoints extract session_id from the JSON
-  # payload into _REPO_OS_STDIN_SID before sourcing libraries. The stdin SID is
-  # used for validation/analytics only — it is NOT authoritative for file-path
-  # keying. First-writer-wins (fix for the editor-live identity drift regressed
-  # by 9b6ec01): the on-disk .session-id is the durable identity once written,
-  # so it keys the per-session state dir, session-log filename, and cycle
-  # counter stably across turns even when the harness rotates session_id on a
-  # context-window turnover. We therefore write-through ONLY when no durable
-  # identity file exists yet; when the file is present it wins, regardless of
-  # the stdin value. (Cross-session bleed is prevented by close-gated deletion
-  # of .session-id, not by overwriting it mid-session.)
+  # A hook on a Claude Code that does not export the variable still has its
+  # stdin session_id (entrypoints set _REPO_OS_STDIN_SID before sourcing).
   if [ -n "${_REPO_OS_STDIN_SID:-}" ]; then
-    local dpid pp_file flat_file
-    dpid="$(_resolve_durable_pid)"
-    pp_file="$repo_root/.claude/.session-id.$dpid"
-    flat_file="$repo_root/.claude/.session-id"
-
-    # (a) This process already has a durable per-process identity — it wins.
-    # Stable across context-window turnover (same $PPID maps back to the same
-    # id even when the harness rotates the stdin SID); distinct per window
-    # (a second window has a different $PPID, hence a different sidecar). The
-    # turnover mismatch is benign, so the advisory is REPO_OS_DEBUG-gated to
-    # avoid a per-turn stderr nag. Default: silent.
-    if [ -f "$pp_file" ]; then
-      _CACHED_SESSION_ID=$(cat "$pp_file" 2>/dev/null)
-      if [ "${REPO_OS_DEBUG:-0}" = "1" ] && [ "$_CACHED_SESSION_ID" != "$_REPO_OS_STDIN_SID" ]; then
-        echo "Warning: session-id mismatch: file=$_CACHED_SESSION_ID, stdin=$_REPO_OS_STDIN_SID. Using file value." >&2
-      fi
-      echo "$_CACHED_SESSION_ID"
-      return
-    fi
-
-    # (b) No per-process file yet, but a flat .session-id exists. ADOPT it as
-    # the durable identity (a prior turn whose $PPID is now unknowable — e.g. the
-    # test harness, an in-flight pre-sidecar session, or a legacy/orphan file)
-    # UNLESS a DIFFERENT, currently-live process already claims it. In that case
-    # this is a concurrent peer (second window / in-place daemon on main): we must
-    # NOT alias onto its identity — MINT a fresh per-process id from the harness
-    # stdin SID and claim it via our sidecar. Adoption also writes our sidecar
-    # (R47): an unclaimed adoption left the session invisible to every liveness
-    # check, so a second window in the same checkout resolved the same id and its
-    # SessionEnd sealed this session's branch. The flat file is left untouched.
-    if [ -f "$flat_file" ]; then
-      local flat_id
-      flat_id=$(cat "$flat_file" 2>/dev/null)
-      if [ -n "$flat_id" ] && _sid_claimed_by_live_foreign "$flat_id" "$dpid" "$repo_root"; then
-        _CACHED_SESSION_ID="$_REPO_OS_STDIN_SID"
-        echo "$_CACHED_SESSION_ID" > "$pp_file" 2>/dev/null || true
-        echo "$_CACHED_SESSION_ID"
-        return
-      fi
-      _CACHED_SESSION_ID="$flat_id"
-      [ -n "$flat_id" ] && { echo "$flat_id" > "$pp_file" 2>/dev/null || true; }
-      if [ "${REPO_OS_DEBUG:-0}" = "1" ] && [ "$_CACHED_SESSION_ID" != "$_REPO_OS_STDIN_SID" ]; then
-        echo "Warning: session-id mismatch: file=$_CACHED_SESSION_ID, stdin=$_REPO_OS_STDIN_SID. Using file value." >&2
-      fi
-      echo "$_CACHED_SESSION_ID"
-      return
-    fi
-
-    # (c) Neither per-process nor flat file — this hook is the first initializer.
-    # Seed BOTH: the per-process sidecar (durable identity for this window) and
-    # the flat file (legacy/compat anchor and the stable anchor that hook fires
-    # with an unknowable $PPID resolve through). Cross-session bleed is prevented
-    # by close-gated deletion of both, not by overwriting them mid-session.
     _CACHED_SESSION_ID="$_REPO_OS_STDIN_SID"
-    echo "$_CACHED_SESSION_ID" > "$pp_file" 2>/dev/null || true
-    echo "$_CACHED_SESSION_ID" > "$flat_file" 2>/dev/null || true
     echo "$_CACHED_SESSION_ID"
     return
   fi
+  # Outside Claude Code (test fixtures, a manual shell): the flat file, or a
+  # minted id written there.
   local sid_file="$repo_root/.claude/.session-id"
   if [ -f "$sid_file" ]; then
     _CACHED_SESSION_ID=$(cat "$sid_file")
@@ -574,6 +529,30 @@ get_session_id() {
     echo "$_CACHED_SESSION_ID" > "$sid_file" 2>/dev/null || true
   fi
   echo "$_CACHED_SESSION_ID"
+}
+
+# --- The current session id if there is one; never mints or writes ---
+# Same order as get_session_id. For checks that must tell "no session" apart
+# from "some session", e.g. pre-commit-gates' state-file validation, which skips
+# when there is no current session and would otherwise mint one and write it.
+peek_session_id() {
+  if [ -n "${REPO_OS_SESSION_ID:-}" ]; then echo "$REPO_OS_SESSION_ID"; return; fi
+  if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then echo "$CLAUDE_CODE_SESSION_ID"; return; fi
+  if [ -n "${_REPO_OS_STDIN_SID:-}" ]; then echo "$_REPO_OS_STDIN_SID"; return; fi
+  cat "${1:-$_REPO_OS_ROOT}/.claude/.session-id" 2>/dev/null || true
+}
+
+# --- A session id made safe to use as one path component ---
+# Percent-encodes % then / then ., so an id cannot leave the directory it names
+# a file in (Decision 0030 security) and no two ids share a name. Real ids
+# (UUIDs, daemon-<date>-<n>) contain none of the three and map to themselves.
+# Every path built from a session id goes through it, and so does every
+# comparison against a name read back from such a path. session-close-check.sh
+# carries a copy (_zc_safe_sid) for its fast path; layer4 L4.18 pins the two.
+_safe_sid() {
+  local sid="${1//%/%25}"
+  sid="${sid//\//%2F}"
+  printf '%s\n' "${sid//./%2E}"
 }
 
 # --- Session-scoped state directory (Decision 0030) ---
@@ -592,10 +571,7 @@ get_session_state_dir() {
   fi
   local repo_root="$_REPO_OS_ROOT"
   local sid
-  sid=$(get_session_id "$repo_root")
-  # Sanitize: strip path components to prevent directory traversal (Decision 0030 security)
-  sid="${sid//\//_}"
-  sid="${sid//\.\./_}"
+  sid=$(_safe_sid "$(get_session_id "$repo_root")")
   local per_session="$repo_root/.claude/.state/wt-sessions/$sid"
 
   if [ -d "$per_session" ]; then
@@ -747,9 +723,10 @@ get_session_type() {
     if [ -n "${REPO_OS_SESSION_ID:-}" ]; then
       current_sid="$REPO_OS_SESSION_ID"
     else
-      # Per-process identity (not the shared flat .session-id): state_file is
-      # resolved via get_session_state_dir (sidecar-aware), so a concurrent
-      # window must validate against its OWN id or it loses its session type.
+      # The session's own id (Decision t-0065), not the flat .session-id:
+      # state_file is resolved via get_session_state_dir, keyed by that id, so a
+      # concurrent window must validate against its OWN id or it loses its
+      # session type.
       current_sid=$(get_session_id "$repo_root")
     fi
     if [ -n "$sid" ] && [ "$sid" = "$current_sid" ]; then
@@ -984,12 +961,22 @@ epoch_to_iso() {
     || printf '%s' "$epoch"
 }
 
+# --- This checkout's registry record for the current session ---
+# Rooted at _REPO_OS_ROOT, unlike session_record_path below: a worktree session
+# registers in its own checkout (Decision 0030).
+_registry_record_path() {
+  printf '%s/.claude/.state/sessions/%s.yaml\n' "$_REPO_OS_ROOT" \
+    "$(_safe_sid "$(get_session_id "$_REPO_OS_ROOT")")"
+}
+
 # --- Register session in the session registry ---
 # Writes a YAML file to .claude/.state/sessions/{session-id}.yaml.
 # Called at session init (from init_phase in _phase-helper.sh).
 # Checks for same-branch overlap and emits an advisory warning.
 # Fail-silent: registry failures never block session start.
 register_session() {
+  local rec
+  rec="$(_registry_record_path)"
   local repo_root
   repo_root="$_REPO_OS_ROOT"
   local sid
@@ -997,13 +984,9 @@ register_session() {
   local stype="${1:-}"
   local branch
   branch="$(get_branch)"
-  # Durable PID: use _resolve_durable_pid() — the same function the sidecar
-  # writer uses — so the registry and the sidecar agree on what "the process"
-  # is. _resolve_durable_pid respects _REPO_OS_DURABLE_PID for test injection,
-  # prefers $PPID (the long-lived claude process that spawns each hook
-  # subprocess) over $$ (the short-lived subprocess itself), and falls back to
-  # $$ when $PPID is 0/1/unavailable. Using the shared helper is what keeps the
-  # two halves of sweep_stale_sessions from disagreeing about liveness (R29).
+  # Durable PID: _resolve_durable_pid() — CLAUDE_PID for an interactive session
+  # (Decision t-0065), else $PPID, else $$; _REPO_OS_DURABLE_PID for tests. This
+  # pid is the session's liveness signal for sweep_stale_sessions (R29).
   local pid
   pid="$(_resolve_durable_pid)"
   local started_at
@@ -1021,9 +1004,9 @@ register_session() {
   # worktree isolation the runner's record is the main repo's and is untouched
   # here — but the cost of being unconditional is one grep.
   local preserved_control=""
-  if [ -f "$sessions_dir/${sid}.yaml" ]; then
+  if [ -f "$rec" ]; then
     preserved_control=$(grep -E '^(entry_id|work_order_id|claude_session_id|child_pid|worktree|control_state):' \
-      "$sessions_dir/${sid}.yaml" 2>/dev/null || true)
+      "$rec" 2>/dev/null || true)
   fi
 
   # Write session file (add worktree_path for full worktree sessions — Decision 0030)
@@ -1036,15 +1019,17 @@ register_session() {
     if [ -n "$preserved_control" ]; then
       printf '%s\n' "$preserved_control"
     fi
-  } > "$sessions_dir/${sid}.yaml" 2>/dev/null || true
+  } > "$rec" 2>/dev/null || true
 
   # Check for same-branch overlap (advisory at registration time)
-  local overlap_file
+  local safe_sid overlap_file
+  safe_sid=$(_safe_sid "$sid")
   for overlap_file in "$sessions_dir"/*.yaml; do
     [ -f "$overlap_file" ] || continue
     local other_sid
     other_sid=$(basename "$overlap_file" .yaml)
-    [ "$other_sid" = "$sid" ] && continue
+    [ "$other_sid" = "$safe_sid" ] && continue
+    _branch_claim_released "$overlap_file" && continue
 
     local other_branch
     other_branch=$(grep '^branch: ' "$overlap_file" 2>/dev/null | sed 's/^branch: *//')
@@ -1075,10 +1060,7 @@ register_session() {
 session_record_path() {
   local sid="${1:-}"
   [ -n "$sid" ] || return 1
-  # Sanitize: strip path components to prevent directory traversal
-  sid="${sid//\//_}"
-  sid="${sid//\.\./_}"
-  printf '%s/.claude/.state/sessions/%s.yaml\n' "$(get_main_repo_root)" "$sid"
+  printf '%s/.claude/.state/sessions/%s.yaml\n' "$(get_main_repo_root)" "$(_safe_sid "$sid")"
 }
 
 # --- Merge-write fields into a session record ---
@@ -1258,16 +1240,18 @@ ensure_control_dir() {
 # Configurable: SESSION_MAX_TTL env var (seconds, default 21600 = 6h).
 sweep_stale_sessions() {
   local exclude_sid="${1:-}"
+  # Compared against registry and state-dir names, which are sanitised.
+  if [ -n "$exclude_sid" ]; then
+    exclude_sid=$(_safe_sid "$exclude_sid")
+  fi
   local repo_root
   repo_root="$_REPO_OS_ROOT"
 
-  # Clean per-process identity sidecars (.session-id.<pid>) whose owning process
-  # is dead. These are written synchronously by get_session_id (bootstrap/mint/adopt);
-  # a crash before close leaves one behind. Sweeping dead-pid sidecars caps
-  # accumulation and shrinks the (already narrow) PID-reuse aliasing window. Live
-  # sidecars — including the current session's — are preserved by the kill -0
-  # check, so no exclude_sid handling is needed here. Runs BEFORE the registry-dir
-  # guard below so sidecars are reaped even when no session registry dir exists.
+  # Clean legacy per-process identity sidecars (.session-id.<pid>) whose owning
+  # process is dead. Nothing writes them since Decision t-0065; this clears the
+  # ones left by sessions that started before it. Live ones are kept (kill -0):
+  # _session_is_live still reads them for those sessions. Runs BEFORE the
+  # registry-dir guard below so they are reaped even with no registry dir.
   local sidecar base scpid
   for sidecar in "$repo_root"/.claude/.session-id.*; do
     [ -f "$sidecar" ] || continue
@@ -1303,12 +1287,11 @@ sweep_stale_sessions() {
     # PID check: if process is dead, remove stale entry
     if [ -n "$file_pid" ] && ! kill -0 "$file_pid" 2>/dev/null; then
       # Dead registry pid — but confirm the session is truly gone before
-      # evicting. The registry pid can be dead while the session is alive:
-      # register_session is called from a hook subprocess, and even using
-      # _resolve_durable_pid() the recorded pid can die if $PPID itself is a
-      # short-lived wrapper (tool-call context). The sidecar is the decisive
-      # signal for interactive sessions; REPO_OS_SESSION_ID covers daemon/
-      # worktree sessions that have no sidecar (Decision 0030). Using the same
+      # evicting. Since t-0065 the registry pid is CLAUDE_PID, the claude
+      # process itself; a session registered before that may hold a short-lived
+      # tool shell's pid, and _session_is_live still covers it through its
+      # legacy sidecar. REPO_OS_SESSION_ID covers daemon/worktree sessions
+      # (Decision 0030). Using the same
       # _session_is_live helper as the orphaned-state-dir loop below means the
       # two halves cannot disagree — one shared notion of "live" (R29).
       if _session_is_live "$_sw_sid" "$repo_root"; then
@@ -1343,10 +1326,10 @@ sweep_stale_sessions() {
         # Observed 2026-10-21 against a ~16h interactive session.
         #
         # Residual: `kill -0` cannot see pid REUSE, so a dead session whose pid
-        # was recycled keeps its entry. The decisive liveness test in this repo
-        # is the per-process sidecar, and the sidecar reap earlier in this
-        # function already handles that class. An entry that outlives its
-        # process is a smaller problem than a live session losing its state.
+        # was recycled keeps its entry. Since Decision t-0065 the registry pid
+        # is the claude process itself (CLAUDE_PID), long-lived and rarely
+        # recycled while its entry stands. An entry that outlives its process is
+        # a smaller problem than a live session losing its state.
         if [ -n "$file_pid" ] && kill -0 "$file_pid" 2>/dev/null; then
           echo "WARNING: Session $_sw_sid is over 24h old but its process ($file_pid) is still alive — leaving its registry entry and state intact." >&2
         else
@@ -1427,8 +1410,9 @@ sweep_stale_sessions() {
         # approval, every verdict — with it on the same pass. The two arms that
         # did that are now liveness-gated, but gating them is not the same as
         # guarding the deletion, so check liveness here too, at the point of no
-        # return. The per-process sidecar is this repo's decisive test and does
-        # not depend on a registry entry existing.
+        # return. _session_is_live answers from the session's own env id and,
+        # for sessions that predate Decision t-0065, a live legacy sidecar —
+        # neither depends on a registry entry existing.
         if _session_is_live "$dir_sid" "$repo_root"; then
           echo "WARNING: State dir for $dir_sid has no registry entry but its process is still live — leaving it intact." >&2
         else
@@ -1449,22 +1433,8 @@ unregister_session() {
   local sid
   sid="$(get_session_id "$repo_root")"
 
-  local sessions_dir="$repo_root/.claude/.state/sessions"
-
   # Remove this session's file
-  rm -f "$sessions_dir/${sid}.yaml" 2>/dev/null || true
-
-  # Remove this session's per-process identity sidecar(s) by content-match. The
-  # owning process (this window) is still alive, so the dead-pid sweep below will
-  # NOT reap it; without this, the same window's next session would fast-path onto
-  # the closed id and bleed identity across sessions. Mirrors the close-gated
-  # deletion of the flat .session-id in cleanup_session_files.
-  local _us_sidecar _us_content
-  for _us_sidecar in "$repo_root"/.claude/.session-id.*; do
-    [ -f "$_us_sidecar" ] || continue
-    _us_content=$(cat "$_us_sidecar" 2>/dev/null)
-    [ "$_us_content" = "$sid" ] && rm -f "$_us_sidecar" 2>/dev/null || true
-  done
+  rm -f "$(_registry_record_path)" 2>/dev/null || true
 
   # Sweep remaining stale entries. Exclude the current session id: although its
   # registry file was just removed above, the orphan-state-dir loop in
@@ -1473,6 +1443,30 @@ unregister_session() {
   # this and performs the ordered governance-file cleanup + rmdir). Passing
   # exclude_sid keeps that teardown ordering intact.
   sweep_stale_sessions "$sid"
+}
+
+# --- Release this session's branch claim without ending the session ---
+# Called by the Stop safety valve (session-close-check.sh). The registry record
+# is this session's claim on its branch, and the overlap gate blocks every other
+# session on that branch while it stands; after three failed close attempts the
+# claim is obstructive, so the valve gives it up. The record itself is kept: it
+# is the session's liveness signal (Decision t-0065), and without it the next
+# sweep would delete a still-running session's state directory. `branch:` keeps
+# its real value because group-worktree-sweep.sh and overlap-report.sh read it.
+# One-way: register_session rewrites the record only from init_phase. Appended,
+# not rewritten, like the sweep's ttl marker.
+release_branch_claim() {
+  local rec
+  rec="$(_registry_record_path)"
+  [ -f "$rec" ] || return 0
+  _branch_claim_released "$rec" && return 0
+  printf 'branch_claim: released\nbranch_claim_released_at: %s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$rec" 2>/dev/null || true
+}
+
+# True when a registry record's branch claim was released by the safety valve.
+_branch_claim_released() {
+  grep -q '^branch_claim: released$' "$1" 2>/dev/null
 }
 
 # --- Check if another session is active on a given branch ---
@@ -1494,12 +1488,14 @@ is_session_active() {
   local sid
   sid="$(get_session_id "$repo_root")"
 
-  local check_file
+  local safe_sid check_file
+  safe_sid=$(_safe_sid "$sid")
   for check_file in "$sessions_dir"/*.yaml; do
     [ -f "$check_file" ] || continue
     local other_sid
     other_sid=$(basename "$check_file" .yaml)
-    [ "$other_sid" = "$sid" ] && continue
+    [ "$other_sid" = "$safe_sid" ] && continue
+    _branch_claim_released "$check_file" && continue
 
     local other_branch
     other_branch=$(grep '^branch: ' "$check_file" 2>/dev/null | sed 's/^branch: *//')
@@ -1558,12 +1554,14 @@ check_session_overlap() {
     taskdef-query|taskdef-brief) return 0 ;;
   esac
 
-  local check_file
+  local safe_sid check_file
+  safe_sid=$(_safe_sid "$sid")
   for check_file in "$sessions_dir"/*.yaml; do
     [ -f "$check_file" ] || continue
     local other_sid
     other_sid=$(basename "$check_file" .yaml)
-    [ "$other_sid" = "$sid" ] && continue
+    [ "$other_sid" = "$safe_sid" ] && continue
+    _branch_claim_released "$check_file" && continue
 
     local other_branch
     other_branch=$(grep '^branch: ' "$check_file" 2>/dev/null | sed 's/^branch: *//')

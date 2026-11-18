@@ -4,10 +4,15 @@
 # Decision 0017 — Operator Automation Layer.
 #
 # Profiles:
-#   build   — standard build sessions (blocks push, destructive git, outbound network, interactive prompts; allows web tools)
+#   build   — standard build sessions (blocks push, destructive git, outbound network; allows web tools)
 #   audit   — read-only audit sessions (blocks edits, commits, push, web access, interactive prompts)
-#   strict  — high-security lockdown (blocks all outbound network, package installs, web tools, push, interactive prompts)
-#   default — fallback (blocks push and interactive prompts)
+#   strict  — high-security lockdown (blocks all outbound network, package installs, web tools, push)
+#   default — fallback (blocks push)
+#
+# AskUserQuestion is allowed in build, strict and default: in headless mode
+# ask-user-deny.sh records the question and waits for an operator answer
+# (Decision t-0064). A disallowed tool never reaches that hook. It stays
+# blocked in audit and judge, which have no operator in the loop.
 #
 # Depends on (sourced by runner.sh before this file):
 #   runner.sh sets REPO_ROOT
@@ -23,7 +28,7 @@ get_disallowed_tools() {
   local profile="${1:-default}"
   case "$profile" in
     build)
-      echo "Bash(git push:*),Bash(git reset --hard:*),Bash(git push --force:*),Bash(curl:*),Bash(wget:*),Bash(nc:*),Bash(ncat:*),Bash(netcat:*),AskUserQuestion"
+      echo "Bash(git push:*),Bash(git reset --hard:*),Bash(git push --force:*),Bash(curl:*),Bash(wget:*),Bash(nc:*),Bash(ncat:*),Bash(netcat:*)"
       ;;
     audit)
       echo "Edit,Write,Bash(git commit:*),Bash(git push:*),Bash(curl:*),Bash(wget:*),WebSearch,WebFetch,AskUserQuestion"
@@ -37,11 +42,11 @@ get_disallowed_tools() {
     strict)
       # Maximum lockdown — blocks all outbound network, package installs, web tools.
       # Agent can only read, edit, commit, and run local commands.
-      echo "Bash(curl:*),Bash(wget:*),Bash(nc:*),Bash(ncat:*),Bash(netcat:*),Bash(pip install:*),Bash(npm install:*),Bash(npx:*),WebSearch,WebFetch,AskUserQuestion,Bash(git push:*),Bash(git reset --hard:*),Bash(git push --force:*)"
+      echo "Bash(curl:*),Bash(wget:*),Bash(nc:*),Bash(ncat:*),Bash(netcat:*),Bash(pip install:*),Bash(npm install:*),Bash(npx:*),WebSearch,WebFetch,Bash(git push:*),Bash(git reset --hard:*),Bash(git push --force:*)"
       ;;
     *)
-      # Default: block push and interactive prompts only
-      echo "Bash(git push:*),AskUserQuestion"
+      # Default: block push only
+      echo "Bash(git push:*)"
       ;;
   esac
 }

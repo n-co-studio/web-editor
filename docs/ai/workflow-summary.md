@@ -23,7 +23,7 @@
 4. Solo merge: handled by `session-close-check.sh` (stop hook) and/or runner — see `docs/ai/workflow.md` § Close Sequence step 4 for full detail
    - **Worktree sessions (default):** stop hook acquires merge lock, runs `git -C <main-repo-path> merge --ff-only <branch>` (fallback `--no-ff`), aborts on failure, syncs main working tree. Agent does NOT merge directly. Prohibited: `git checkout main`, `git branch -f main`, and other ref-move commands — they advance the pointer without updating the working tree (Decision t-0030)
    - **Non-worktree sessions (rare):** `git checkout main && git merge --ff-only <branch>` (fallback `--no-ff`); on success `write_merge_signal "<branch>"`; on failure `git merge --abort && git checkout <branch>`, notify operator
-   - Post-merge push: `git push origin main` (advisory, skip template mode / no remote, never force-push)
+   - Post-merge push is opt-in (t-0066): interactive only with `runner.push_main_on_session_end: true`; headless only with `--push`; skip template mode / no remote; never force-push
 5. Present closing summary — final agent message
 
 Zero-change sessions: exempt from session log (stop hook downgrades to advisory).

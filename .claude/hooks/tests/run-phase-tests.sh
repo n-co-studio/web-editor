@@ -75,6 +75,15 @@ bash "$SCRIPT_DIR/layer1c-worktree-functions.sh" || l1c_exit=$?
 
 printf "\n"
 
+# --- Run Layer 1d ---
+printf '%s\n' "${BOLD}Layer 1d: Gates Cache Tests${RESET}"
+printf '%s\n' "---------------------------"
+
+l1d_exit=0
+bash "$SCRIPT_DIR/layer1d-gates-cache.sh" || l1d_exit=$?
+
+printf "\n"
+
 # --- Run Layer 2 ---
 printf '%s\n' "${BOLD}Layer 2: Lifecycle Walk Tests${RESET}"
 printf '%s\n' "-----------------------------"
@@ -138,13 +147,15 @@ l9_exit=0
 bash "$SCRIPT_DIR/layer9-mechanism-change.sh" || l9_exit=$?
 
 printf "\n"
-printf '%s\n' "${BOLD}Standalone suites: KG gate/validator/tools, escalation root, finish-loop capture${RESET}"
+printf '%s\n' "${BOLD}Standalone suites: KG gate/validator/tools, escalation root, finish-loop capture, question channel, session identity${RESET}"
 printf '%s\n' "------------------------------------------------------------------------"
 
 # Standalone suites rather than numbered layers: each builds its own /tmp repo.
 kg_exit=0
 for _kg_suite in test-kg-product-gate.sh test-kg-validate.sh test-kg-tools.sh \
-                 test-escalation-root.sh test-finish-loop-capture.sh; do
+                 test-escalation-root.sh test-finish-loop-capture.sh \
+                 test-question-channel.sh test-session-identity-env.sh \
+                 test-push-opt-in.sh; do
   bash "$SCRIPT_DIR/$_kg_suite" || kg_exit=1
 done
 
@@ -289,6 +300,13 @@ if [ "$l1c_exit" -eq 0 ]; then
   printf "Layer 1c (Worktree Functions): ${GREEN}PASS${RESET}\n"
 else
   printf "Layer 1c (Worktree Functions): ${RED}FAIL${RESET}\n"
+  overall=1
+fi
+
+if [ "$l1d_exit" -eq 0 ]; then
+  printf "Layer 1d (Gates Cache):      ${GREEN}PASS${RESET}\n"
+else
+  printf "Layer 1d (Gates Cache):      ${RED}FAIL${RESET}\n"
   overall=1
 fi
 

@@ -11,6 +11,10 @@ runner:
   default_auto_mode: false
   default_solo_mode: false
   default_push_on_complete: false
+  # Interactive sessions only: SessionEnd pushes main to origin after a merge
+  # when true. Never applies to headless sessions (the runner pushes those, and
+  # only with push_on_complete). Set it in config.local.yaml. Decision t-0066.
+  push_main_on_session_end: false
   max_retries: 3
   heartbeat_interval: 30
   stderr_tail_lines: 50
@@ -54,6 +58,28 @@ runner:
   # for the same reason as the fields above: a trailing comment is read as part
   # of the value and the field then parses as absent.
   stop_grace_seconds: 120
+  # How long a headless AskUserQuestion waits live for an operator answer
+  # (1800 = 30 minutes) before question_on_timeout applies. 0 = act at once.
+  # The live wait counts toward session_max_ttl_seconds and must stay below it
+  # (the hook parks 60s before the TTL either way); for a task group it holds
+  # the group worktree. Decisions t-0064, t-0068.
+  question_timeout_seconds: 1800
+  # What an unanswered question does after the live wait (Decision t-0068):
+  #   pause          park: the entry is stopped on the question, keeping its
+  #                  worktree and Claude session, and `queue-cli.sh answer`
+  #                  resumes it with the answer. Later briefs of a task group
+  #                  wait. No escalation; the breaker is untouched.
+  #   agent-decides  the agent chooses, states its assumption and continues;
+  #                  an advisory escalation records the question.
+  # Absent or any other value = pause.
+  question_on_timeout: pause
+  # Mirror of the "timeout" on the ask-user-deny.sh hook in .claude/settings.json
+  # (Claude Code's default is 600). The wait is capped 30s below it so the hook
+  # parks the question before Claude Code kills it. A killed PreToolUse hook
+  # lets the call through unless the hook sets "onFailure": "block", which
+  # settings.json does (Claude Code 2.1.295+). Raise this only together with
+  # settings.json (operator action: settings.json is immune).
+  question_hook_timeout_seconds: 14430
 
 # Model routing — controls the --model flag passed to claude -p in runner.sh.
 # Agent frontmatter controls per-subagent model (cost layer 1: subagent routing).

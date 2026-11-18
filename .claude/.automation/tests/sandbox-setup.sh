@@ -82,6 +82,12 @@ setup_adversarial_sandbox() {
   # --- Session ID ---
   echo "adv-test-$(date +%s)-$$" > "$ADV_SANDBOX/.claude/.session-id"
 
+  # --- Clear the operator's own Claude Code session ---
+  # Suites run inside a Claude Code Bash, which exports CLAUDE_CODE_SESSION_ID
+  # and CLAUDE_PID. Identity resolves from them first (Decision t-0065), so
+  # without this every sandbox session would carry the operator's real id.
+  unset CLAUDE_CODE_SESSION_ID CLAUDE_PID
+
   # --- Export test seam ---
   export REPO_OS_TEST_MODE=1
   export _REPO_OS_TEST_ROOT="$ADV_SANDBOX"

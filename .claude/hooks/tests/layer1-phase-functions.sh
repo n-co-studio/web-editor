@@ -368,7 +368,7 @@ assert_eq "$(get_write_phases_for_type advisory-reinit)" \
 
 # No-write session types return empty
 assert_eq "$(get_write_phases_for_type taskdef-query)" "" "taskdef-query write phases = empty"
-assert_eq "$(get_write_phases_for_type taskdef-brief)" "" "taskdef-brief write phases = empty"
+assert_eq "$(get_write_phases_for_type taskdef-brief)" "synthesize output" "taskdef-brief write phases = synthesize output (t-0067 draft + queue intake)"
 assert_eq "$(get_write_phases_for_type queue-triage)" "" "queue-triage write phases = empty"
 assert_eq "$(get_write_phases_for_type audit)" "" "audit write phases = empty"
 assert_eq "$(get_write_phases_for_type ephemeral)" "" "ephemeral write phases = empty"
@@ -516,6 +516,50 @@ fi
 _r41_child ':'
 assert_eq "$_R41_RC" "0" "L1.R41 a correctly rooted sandbox passes the guard"
 assert_contains "$_R41_OUT" "REACHED-AFTER-RESET" "L1.R41 ...and continues past reset_phase"
+
+# ============================================================
+# L1.NP — normalize_path is pure bash (no python3)
+# ============================================================
+# Until 2026-11 the slow path shelled out to python3 and, without it, passed
+# the raw path through — /repo/../outside then passed is_in_repo's prefix
+# check. Each case runs with PATH emptied, so no external command (python3
+# included) is reachable; the expected values are os.path.normpath's, except
+# that a leading // collapses to /.
+tap_section "L1.NP: normalize_path — lexical normalisation without python3"
+
+_np() { ( PATH=""; normalize_path "$1" ) 2>&1; }
+while IFS='|' read -r _np_in _np_want; do
+  assert_eq "$(_np "$_np_in")" "$_np_want" "normalize_path '$_np_in' -> '$_np_want'"
+done <<'EOF'
+/repo/../outside/file|/outside/file
+/a/b/../c|/a/c
+/a/./b|/a/b
+/a//b|/a/b
+//a|/a
+/a/b/.|/a/b
+/a/b/..|/a
+/..|/
+/../a|/a
+/a/b/../../../../c|/c
+a/b/../../..|..
+../a|../a
+./a|a
+./../a|../a
+a/..|.
+.|.
+..|..
+a//b/./c/|a/b/c
+/x/y z/../w|/x/w
+/a/.../b|/a/.../b
+/a/..b/c|/a/..b/c
+/a/b..|/a/b..
+/a/b/|/a/b/
+./-n|-n
+-e|-e
+EOF
+_np_rc=0
+( PATH=""; normalize_path "/repo/../outside" >/dev/null ) 2>/dev/null || _np_rc=$?
+assert_eq "$_np_rc" "0" "normalize_path returns 0 on the slow path without python3"
 
 # ============================================================
 # Summary
