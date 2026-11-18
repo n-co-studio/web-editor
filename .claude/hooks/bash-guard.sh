@@ -271,6 +271,19 @@ _bg_is_write_candidate() {
   [[ "$input" == *'"file_path"'* ]] || [[ "$input" == *'>'* ]] || [[ "$input" == *'tee '* ]]
 }
 
+# --- Removal/move of a .state path (Decision t-0071) ---
+# 0 if the text runs a removal or move verb and names a .state path. These are not
+# write targets, so the two early exits below would wave them through; both ask
+# this first, and Phase 8 refuses. Works on the raw payload or the command (a
+# JSON-escaped quote may follow the path). The glob test keeps the fast path cheap.
+_bg_is_state_removal() {
+  # Under the state-guard override Phase 8 refuses nothing, so keep the early exits.
+  [ "${SKIP_STATE_GUARD:-false}" = false ] || return 1
+  [[ "$1" == *'.state'* ]] || return 1
+  printf '%s' "$1" | grep -qE '\.state([/[:space:];&|)"'"'"'\\]|$)' \
+    && printf '%s' "$1" | grep -qE '(^|[^A-Za-z0-9_.-])['"'"'"\\]*(rm|unlink|rmdir|truncate|shred|mv)['"'"'"\\]*([[:space:]]|$)|[[:space:]]-delete([[:space:];&|)"\\]|$)|git[[:space:]]+clean'
+}
+
 # --- Phase 1d: Inter-session governance version check (Decision 0041) ---
 # Fires on first Bash-write call of session. Predicate: governance evidence
 # files exist AND embedded spec_version matches manifest.json `active`.
@@ -354,7 +367,7 @@ fi
 # queue-cli.sh calls go on to the Prompt T draft self-approval check (t-0067):
 # they write no files, so nothing else here would look at them.
 if [ "$_TG_MERGE_BLOCK" = false ] && ! _bg_is_write_candidate "$INPUT" \
-   && [[ "$INPUT" != *'queue-cli.sh'* ]]; then
+   && [[ "$INPUT" != *'queue-cli.sh'* ]] && ! _bg_is_state_removal "$INPUT"; then
   exit 0
 fi
 
@@ -476,7 +489,7 @@ fi
 # Phase 5: Fast-exit for no-write-target Bash (post-sourcing)
 # ============================================================
 # Commands that triggered Gate 7 detection but weren't blocked land here.
-if ! _bg_is_write_candidate "$INPUT"; then
+if ! _bg_is_write_candidate "$INPUT" && ! _bg_is_state_removal "$INPUT"; then
   log_hook_event "bash-guard" "PreToolUse" "Bash" "allow" "$START_MS" "bash_no_write_target"
   exit 0
 fi
@@ -518,7 +531,7 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
       break
     fi
   done <<< "$WRITE_TARGETS"
-  if [ "$HAS_INREPO_WRITE" = false ]; then
+  if [ "$HAS_INREPO_WRITE" = false ] && ! _bg_is_state_removal "$COMMAND"; then
     log_hook_event "bash-guard" "PreToolUse" "Bash" "allow" "$START_MS" "bash_out_of_repo"
     exit 0
   fi
@@ -553,6 +566,19 @@ if [ "$SKIP_STATE_GUARD" = false ]; then
         fi
       fi
     done <<< "$WRITE_TARGETS"
+  fi
+
+  # --- Removal and move verbs (Decision t-0071) ---
+  # The loop above sees write targets only. The commit gate now blocks on files
+  # being PRESENT (a BLOCKED sign-off, a verdict-discarded marker), so deleting or
+  # moving one would let a commit through. Text-based, like the indirect check
+  # below: a command that runs a removal/move verb and names a .state path is
+  # refused. The hooks and the runner remove state files as processes, not as
+  # agent commands, so they never reach this.
+  if [ "$TARGETS_STATE" = false ] && [ -n "$COMMAND" ] && _bg_is_state_removal "$COMMAND"; then
+    log_hook_event "state-guard" "PreToolUse" "Bash" "block" "$START_MS" "state_removal_protected"
+    echo "GATE-FINAL: removing or moving files under .claude/.state/ is refused — the commit gate reads them, and a deleted verdict is a skipped one (Decision t-0071). The check is textual: a delete/move verb plus a .state path in one command. If .state is only read or mentioned (e.g. text written via a heredoc), run the delete/move separately, or write the text with the Write tool and commit with git commit -F. (override: REPO_OS_RECOVER=1)" >&2
+    exit 2
   fi
 
   # --- Indirect path construction hardening ---

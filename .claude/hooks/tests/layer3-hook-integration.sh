@@ -887,6 +887,41 @@ if [ -n "$_esc_match" ]; then
 else
   _tap_fail "phase-mismatch escalation names the expected phase" "expected_phase=verify not found in escalation"
 fi
+# t-0071: a discarded APPROVED leaves no marker — its sign-off is simply missing.
+assert_file_not_exists "$STATE_DIR/verdict-discarded-security-privacy" \
+  "t-0071: a discarded APPROVED verdict leaves no discard marker"
+# ...a discarded BLOCKED one does, and binds until that agent's verdict is accepted.
+run_hook_rc "state-writer.sh" \
+  "$(fixture_subagentstop "security-privacy" $'Bypass found.\nGATE_RESULT: BLOCKED reason="bypass"')"
+assert_file_exists "$STATE_DIR/verdict-discarded-security-privacy" \
+  "t-0071: a discarded BLOCKED verdict leaves a discard marker"
+assert_eq "$(sed -n 's/^reason: *//p' "$STATE_DIR/verdict-discarded-security-privacy")" "phase_mismatch" \
+  "t-0071: the marker records why it was discarded"
+_advance "verify" 2>/dev/null
+run_hook_rc "state-writer.sh" \
+  "$(fixture_subagentstop "security-privacy" $'Fixed.\nGATE_RESULT: APPROVED')"
+assert_file_exists "$STATE_DIR/security-signed" "t-0071: the re-run in verify is captured"
+assert_file_not_exists "$STATE_DIR/verdict-discarded-security-privacy" \
+  "t-0071: an accepted verdict from the same agent clears its discard marker"
+rm -f "$STATE_DIR/security-signed"
+# Output with no GATE_RESULT: line may never have been a verdict (the Critic's
+# hypothesis mode has none) and no re-run could clear a marker for it: none.
+rm -f "$STATE_DIR"/verdict-discarded-*
+run_hook_rc "state-writer.sh" \
+  "$(fixture_subagentstop "critic" $'## Hypothesis Review\n\nH1 is sound; H2 lacks evidence.')"
+assert_file_not_exists "$STATE_DIR/verdict-discarded-critic" \
+  "t-0071: no-sentinel output with no GATE_RESULT line leaves no marker"
+# ...but a BLOCKED that lost its terminal position still binds (reason no_sentinel).
+run_hook_rc "state-writer.sh" \
+  "$(fixture_subagentstop "reviewer" $'Found a bypass.\nGATE_RESULT: BLOCKED reason="x"\n\nThanks!')"
+assert_eq "$(sed -n 's/^reason: *//p' "$STATE_DIR/verdict-discarded-reviewer" 2>/dev/null)" "no_sentinel" \
+  "t-0071: a BLOCKED followed by trailing prose leaves a no_sentinel marker"
+# ...and a combined output whose sections disagree binds on the BLOCKED half.
+run_hook_rc "state-writer.sh" \
+  "$(fixture_subagentstop "critic" $'## Cohesion Brief\n\nGATE_RESULT: BLOCKED\n\nstray prose\n\n## Diff-Review Brief\n\nMODE: diff-review\nGATE_RESULT: APPROVED\n\ntrailing')"
+assert_file_exists "$STATE_DIR/verdict-discarded-critic" \
+  "t-0071: a discarded combined output with one BLOCKED section leaves a marker"
+rm -f "$STATE_DIR"/verdict-discarded-*
 
 # --- happy path unchanged: well-formed verdict still writes, no escalation ---
 reset_phase "standard"
@@ -1001,6 +1036,143 @@ assert_contains "$_LAST_OUTPUT" "qa-verified records GATE_RESULT: BLOCKED" \
 printf 'timestamp: test\nagent: qa-verifier\nsession_id: %s\ndispatch_phase: verify\nGATE_RESULT: APPROVED\n' "$TEST_SID" > "$STATE_DIR/qa-verified"
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
 assert_ok "$_LAST_RC" "the identical state with an APPROVED qa verdict allows the commit"
+
+# --- t-0071: completeness counts only when scored against the contract ---
+# A Critic dispatched without the contract scores 0/0 and reports APPROVED; the
+# gate used to block only on NEEDS_WORK, so that passed. Same commit-ready state
+# as the allowing case above; only the cohesion file and the contract change.
+_t71_co() {
+  printf 'timestamp: test\nagent: critic\nsession_id: %s\ndispatch_phase: review\nGATE_RESULT: APPROVED\n%s' \
+    "$TEST_SID" "$1" > "$STATE_DIR/cohesion-reviewed"
+}
+mkdir -p "$SB/.claude/local"
+printf 'task: "t"\nverification:\n  - "one"\n  - "two"\n  - "three"\nnotes: x\n' > "$SB/.claude/local/task-contract.yaml"
+_t71_co $'COMPLETENESS: 0/0 criteria met\nCOMPLETENESS_GATE: APPROVED\n'
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_hook_blocks "$_LAST_RC" "t-0071: a 0/0 completeness blocks when the contract lists criteria"
+assert_contains "$_LAST_OUTPUT" "not scored against the contract" "...and says why"
+_t71_co $'COMPLETENESS: 2/2 criteria met\nCOMPLETENESS_GATE: APPROVED\n'
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_hook_blocks "$_LAST_RC" "t-0071: scoring fewer criteria than the contract lists blocks"
+_t71_co ''
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_hook_blocks "$_LAST_RC" "t-0071: no completeness score at all blocks when the contract lists criteria"
+_t71_co $'COMPLETENESS: 2/3 criteria met\nCOMPLETENESS_GATE: APPROVED\n'
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_ok "$_LAST_RC" "t-0071: every contract criterion scored allows (the list ends at the next key)"
+# [deferred] items are N/A to the Critic and left out of its count, so they are
+# left out of the gate's too; a CRLF contract counts the same.
+printf 'task: "t"\r\nverification:\r\n  - "one"\r\n\r\n  - "[deferred] two"\r\n  - "three"\r\n' > "$SB/.claude/local/task-contract.yaml"
+_t71_co $'COMPLETENESS: 2/2 criteria met\nCOMPLETENESS_GATE: APPROVED\n'
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_ok "$_LAST_RC" "t-0071: a [deferred] criterion is not required in the score (CRLF contract)"
+_t71_co $'COMPLETENESS: 1/1 criteria met\nCOMPLETENESS_GATE: APPROVED\n'
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_hook_blocks "$_LAST_RC" "t-0071: ...but the non-deferred ones still are"
+_t71_co $'COMPLETENESS: 3/3 criteria met\n'
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_hook_blocks "$_LAST_RC" "t-0071: a score without its COMPLETENESS_GATE line blocks"
+printf 'task: "t"\nverification: [one, "two", "[deferred] three"]\n' > "$SB/.claude/local/task-contract.yaml"
+_t71_co $'COMPLETENESS: 1/1 criteria met\nCOMPLETENESS_GATE: APPROVED\n'
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_hook_blocks "$_LAST_RC" "t-0071: an inline verification list is counted"
+_t71_co $'COMPLETENESS: 2/2 criteria met\nCOMPLETENESS_GATE: APPROVED\n'
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_ok "$_LAST_RC" "t-0071: ...and passes when its non-deferred items are scored"
+rm -f "$SB/.claude/local/task-contract.yaml"
+_t71_co $'COMPLETENESS: 0/0 criteria met\nCOMPLETENESS_GATE: APPROVED\n'
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_ok "$_LAST_RC" "t-0071: with no contract, 0/0 keeps today's behaviour"
+_t71_co ''
+
+# --- t-0071: a Reviewer/Security verdict that is not APPROVED binds ---
+# state-writer writes reviewer-signed/security-signed for BLOCKED verdicts too,
+# and the high-risk gate only checked that they existed. src/qablocked.ts is not
+# high-risk, so these block on the verdict alone.
+printf 'timestamp: test\nagent: security-privacy\nsession_id: %s\ndispatch_phase: verify\nGATE_RESULT: BLOCKED reason="bypass"\n' "$TEST_SID" > "$STATE_DIR/security-signed"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_hook_blocks "$_LAST_RC" "t-0071: a BLOCKED security verdict blocks a non-high-risk commit"
+assert_contains "$_LAST_OUTPUT" "security-signed records GATE_RESULT: BLOCKED" "...and names it"
+rm -f "$STATE_DIR/security-signed"
+printf 'timestamp: test\nagent: reviewer\nsession_id: %s\ndispatch_phase: verify\nGATE_RESULT: BLOCKED\n' "$TEST_SID" > "$STATE_DIR/reviewer-signed"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_hook_blocks "$_LAST_RC" "t-0071: a BLOCKED reviewer verdict blocks a non-high-risk commit"
+printf 'timestamp: test\nagent: reviewer\nsession_id: other-session\ndispatch_phase: verify\nGATE_RESULT: BLOCKED\n' > "$STATE_DIR/reviewer-signed"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_ok "$_LAST_RC" "t-0071: another session's BLOCKED verdict does not bind this one"
+rm -f "$STATE_DIR/reviewer-signed"
+
+# --- t-0071: a discarded non-APPROVED verdict binds until re-run ---
+printf 'agent: security-privacy\nsession_id: %s\nreason: phase_mismatch\nverdict: GATE_RESULT: BLOCKED\n' "$TEST_SID" > "$STATE_DIR/verdict-discarded-security-privacy"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_hook_blocks "$_LAST_RC" "t-0071: a discarded BLOCKED verdict blocks the commit"
+assert_contains "$_LAST_OUTPUT" "security-privacy verdict was discarded (phase_mismatch)" "...and names the agent and reason"
+_LAST_RC=0
+_LAST_OUTPUT=$( (cd "$SB" && fixture_pretooluse_commit "test commit" | REPO_OS_RECOVER=1 bash "$_HOOKS_DIR/pre-commit-gates.sh" 2>&1) ) || _LAST_RC=$?
+assert_ok "$_LAST_RC" "t-0071: REPO_OS_RECOVER=1 lets the operator past a discarded verdict"
+rm -f "$STATE_DIR/verdict-discarded-security-privacy"
+
+# --- t-0071: the guards are high-risk by name, and a sign-off must be APPROVED ---
+( cd "$SB" && git reset -q HEAD . 2>/dev/null ) || true
+stage_sandbox_file ".claude/hooks/write-guard.sh" '# probe'
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_contains "$_LAST_OUTPUT" "High-risk patterns detected" "t-0071: a staged write-guard.sh is high-risk"
+( cd "$SB" && git reset -q HEAD . 2>/dev/null ) || true
+stage_sandbox_file ".claude/hooks/editor-watch.sh" '# probe'
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+case "$_LAST_OUTPUT" in
+  *"High-risk patterns detected"*) _tap_fail "t-0071: a hook outside the guard list is not" "classified high-risk" ;;
+  *) _tap_pass "t-0071: a hook outside the guard list is not" ;;
+esac
+# A guard deleted or renamed away never appears in STAGED_FILES (ACMR names a
+# rename by its destination) — it must still be high-risk.
+( cd "$SB" && git reset -q HEAD . 2>/dev/null ) || true
+stage_sandbox_file ".claude/hooks/pre-push-gates.sh" '# probe'
+( cd "$SB" && git commit -qm "seed guard for removal probe" >/dev/null 2>&1 )
+( cd "$SB" && git rm -q .claude/hooks/pre-push-gates.sh >/dev/null 2>&1 )
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_contains "$_LAST_OUTPUT" "pre-push-gates.sh (removed)" "t-0071: a deleted guard file is high-risk"
+( cd "$SB" && git reset -q HEAD . 2>/dev/null; git checkout -q -- . 2>/dev/null ) || true
+( cd "$SB" && git mv .claude/hooks/pre-push-gates.sh .claude/hooks/pre-push-gates.sh.off >/dev/null 2>&1 )
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_contains "$_LAST_OUTPUT" "pre-push-gates.sh (removed)" "t-0071: a guard renamed away is high-risk"
+( cd "$SB" && git reset -q HEAD . 2>/dev/null; git checkout -q -- . 2>/dev/null; rm -f .claude/hooks/pre-push-gates.sh.off ) || true
+
+# --- t-0071: the state guard refuses removal and move verbs on .state ---
+# Deleting a BLOCKED sign-off or a discard marker would undo the binding above.
+_t71_bg() {  # command expect(block|allow) description
+  run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "$1")"
+  case "$2:$_LAST_OUTPUT" in
+    block:*"removing or moving files under .claude/.state"*) _tap_pass "$3" ;;
+    allow:*"removing or moving files under .claude/.state"*) _tap_fail "$3" "refused: $1" ;;
+    allow:*) _tap_pass "$3" ;;
+    *) _tap_fail "$3" "not refused: $1" ;;
+  esac
+}
+_t71_bg 'rm -f .claude/.state/sessions/x/verdict-discarded-critic' block "t-0071: rm of a state file is refused"
+_t71_bg "find .claude/.state -name 'verdict-*' -delete" block "t-0071: find -delete under .state is refused"
+_t71_bg 'mv .claude/.state/sessions/x/security-signed /tmp/s' block "t-0071: moving a state file out is refused"
+_t71_bg 'cd .claude/.state && rm -f sessions/x/reviewer-signed' block "t-0071: cd into .state then rm is refused"
+_t71_bg 'cat .claude/.state/sessions/x/security-signed' allow "t-0071: reading a state file is allowed"
+_t71_bg 'rm -f /tmp/scratch-file' allow "t-0071: an rm that names no .state path is allowed"
+_t71_bg '/bin/rm -f .claude/.state/sessions/x/security-signed' block "t-0071: a path-qualified rm is refused"
+_t71_bg "'rm' -f .claude/.state/sessions/x/security-signed" block "t-0071: a quoted rm is refused"
+_t71_bg 'git clean -fdx .claude/.state' block "t-0071: git clean of .state is refused"
+_t71_bg 'unlink .claude/.state/sessions/x/verdict-discarded-critic' block "t-0071: unlink of a state file is refused"
+# Documented side effect (t-0071 Known limits): the check is textual, so text that
+# merely mentions both is refused too. Pinned so a change to it is deliberate.
+_t71_bg 'git commit -m "docs: rm stale notes about .claude/.state"' block "t-0071: a commit message naming rm and .state is refused (known side effect)"
+( cd "$SB" && git reset -q HEAD . 2>/dev/null ) || true
+stage_sandbox_file "src/auth-t71.ts" 'export const a = 1;'
+printf 'timestamp: test\nagent: reviewer\nsession_id: %s\ndispatch_phase: verify\nGATE_RESULT: APPROVED\n' "$TEST_SID" > "$STATE_DIR/reviewer-signed"
+printf 'timestamp: test\nagent: security-privacy\nsession_id: %s\ndispatch_phase: verify\nGATE_RESULT: BLOCKED\n' "$TEST_SID" > "$STATE_DIR/security-signed"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_contains "$_LAST_OUTPUT" "not APPROVED sign-offs: security-signed" "t-0071: a high-risk sign-off file holding BLOCKED does not count"
+printf 'timestamp: test\nagent: security-privacy\nsession_id: %s\ndispatch_phase: verify\nGATE_RESULT: APPROVED\n' "$TEST_SID" > "$STATE_DIR/security-signed"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_ok "$_LAST_RC" "t-0071: ...and the same high-risk commit with both APPROVED is allowed"
+rm -f "$STATE_DIR/reviewer-signed" "$STATE_DIR/security-signed"
+( cd "$SB" && git reset -q HEAD . 2>/dev/null; git checkout -q -- . 2>/dev/null ) || true
 
 # --- Phase before commit → blocks ---
 reset_phase "standard"

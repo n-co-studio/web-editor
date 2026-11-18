@@ -571,6 +571,29 @@ _validate_state_session_id() {
   [ "$file_sid" = "$current_sid" ]
 }
 
+# Number of items in the contract's top-level `verification:` list that the Critic
+# must score (0 when the contract or the list is absent). `[deferred]` items are
+# left out, as the Critic leaves them out of its count (critic.md, N/A). Items may
+# sit at any indent; the list ends at the next top-level key. CRLF-tolerant.
+_contract_verification_count() {
+  [ -f "$1" ] || { echo 0; return; }
+  awk '{ sub(/\r$/, "") }
+       /^verification:[ \t]*\[/  {          # inline list: verification: [a, b]
+         s = $0; sub(/^verification:[ \t]*\[/, "", s); sub(/\][ \t]*$/, "", s)
+         k = split(s, it, ",")
+         for (i = 1; i <= k; i++) if (it[i] ~ /[^ \t]/ && it[i] !~ /\[deferred\]/) n++
+         next }
+       /^verification:/          { v = 1; next }
+       v && /^[^ \t#-]/          { v = 0 }
+       v && /^[ \t]*- / && !/\[deferred\]/ { n++ }
+       END { print n + 0 }' "$1"
+}
+
+# GATE_RESULT value (first word) recorded in a state file; empty if none.
+_state_gate_result() {
+  grep '^GATE_RESULT: ' "$1" 2>/dev/null | sed 's/^GATE_RESULT: *//' | awk '{print $1}' | head -1 || true
+}
+
 # --- Plan content hash validation (compensating control for session-ID mismatch) ---
 # Compares plan-approved.question_hash against session-resume.yaml plan_hash verdict
 # to verify the approval matches the current plan (content-addressed confirmation).
@@ -874,6 +897,20 @@ if [ "$SKIP_STATE" = false ]; then
       echo "GATE-RECOVERABLE: A5 completeness check failed — ${_PCG_COMPLETENESS_SCORE:-N/M criteria not met}. NEXT: Loop back to Builder to address incomplete criteria, then re-run Critic and QA. (override: REPO_OS_RECOVER=1)" >&2
       block "A5_completeness_needs_work"
       log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A5_completeness_needs_work" "${_PCG_COMPLETENESS_SCORE:-unknown}"
+    fi
+    # t-0071: a completeness verdict counts only if it scored the contract. With
+    # N verification items the score must read k/M with M >= N — a Critic
+    # dispatched without the contract scores 0/0 and reports APPROVED.
+    _PCG_CONTRACT_CRITERIA=$(_contract_verification_count "$REPO_ROOT/.claude/local/task-contract.yaml")
+    if [ "$_PCG_CONTRACT_CRITERIA" -gt 0 ] && [ "$_PCG_COMPLETENESS_GATE" != "NEEDS_WORK" ]; then
+      _PCG_COMPLETENESS_SCORE=$(grep '^COMPLETENESS: ' "$STATE_DIR/cohesion-reviewed" 2>/dev/null | sed 's/^COMPLETENESS: *//' | head -1 || true)
+      _PCG_SCORED_OF=$(printf '%s' "$_PCG_COMPLETENESS_SCORE" | sed -n 's#^[0-9][0-9]*/\([0-9][0-9]*\).*#\1#p')
+      if [ -z "$_PCG_SCORED_OF" ] || [ "$_PCG_SCORED_OF" -lt "$_PCG_CONTRACT_CRITERIA" ] \
+         || [ -z "$_PCG_COMPLETENESS_GATE" ]; then
+        echo "GATE-RECOVERABLE: A5 completeness not scored against the contract — Critic reported '${_PCG_COMPLETENESS_SCORE:-no score}', the contract lists $_PCG_CONTRACT_CRITERIA verification item(s). NEXT: Re-dispatch the Critic with .claude/local/task-contract.yaml and have it score every item. (override: REPO_OS_RECOVER=1)" >&2
+        block "A5_completeness_unscored"
+        log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A5_completeness_unscored" "${_PCG_COMPLETENESS_SCORE:-none}/$_PCG_CONTRACT_CRITERIA"
+      fi
     fi
   fi
 
@@ -1611,7 +1648,14 @@ fi
 # High-Risk Pattern Detection (blocking)
 # Requires reviewer-signed + security-signed state files
 # ============================================================
-if [ "$SKIP_STATE" = false ] && [ -n "$STAGED_FILES" ]; then
+# The guards themselves (Decision t-0071): a change to what enforces the gates is
+# high-risk by name. The words below missed write-guard.sh, a security guard.
+GUARD_PATH_PATTERN='^\.claude/(hooks/(write-guard|bash-guard|pre-commit-gates|pre-push-gates|state-writer|pretooluse-permission|permission-request|agent-git-guard|ask-user-deny|_mode-guard-helper|_permission-allowlist)\.sh|settings\.json)$'
+# STAGED_FILES is ACMR and names a rename by its destination, so a guard deleted
+# or renamed away is invisible there. --no-renames splits a rename into D + A,
+# so the D list holds both deletions and rename sources.
+_GUARD_REMOVED=$(git diff --cached --name-only --no-renames --diff-filter=D 2>/dev/null | grep -E "$GUARD_PATH_PATTERN" || true)
+if [ "$SKIP_STATE" = false ] && { [ -n "$STAGED_FILES" ] || [ -n "$_GUARD_REMOVED" ]; }; then
   HIGH_RISK=false
 
   # --- Path-based risk patterns ---
@@ -1642,10 +1686,15 @@ HR_EOF
   RISK_PATH_MATCHES=""
   RISK_CONTENT_MATCHES=""
   if [ -n "$PATH_SCAN_FILES" ]; then
-    RISK_PATH_MATCHES=$(echo "$PATH_SCAN_FILES" | grep -iE "$RISK_PATH_PATTERN" || true)
+    RISK_PATH_MATCHES=$(echo "$PATH_SCAN_FILES" | grep -iE "$RISK_PATH_PATTERN|$GUARD_PATH_PATTERN" || true)
     if [ -n "$RISK_PATH_MATCHES" ]; then
       HIGH_RISK=true
     fi
+  fi
+  if [ -n "$_GUARD_REMOVED" ]; then
+    RISK_PATH_MATCHES="${RISK_PATH_MATCHES:+$RISK_PATH_MATCHES
+}$(printf '%s' "$_GUARD_REMOVED" | sed 's/$/ (removed)/')"
+    HIGH_RISK=true
   fi
 
   # --- Content-based risk patterns (on non-test staged + lines) ---
@@ -1670,17 +1719,18 @@ HR_EOF
     printf 'timestamp: %s\nreason: high-risk patterns detected in staged files\n' "$TIMESTAMP" \
       > "$STATE_DIR/high-risk-detected" 2>/dev/null || true
 
-    # Check for required sign-offs
+    # Check for required sign-offs. A sign-off is an APPROVED verdict from this
+    # session: state-writer writes the file for BLOCKED verdicts too (t-0071).
     MISSING_SIGNOFFS=""
-    if [ ! -f "$STATE_DIR/reviewer-signed" ]; then
-      MISSING_SIGNOFFS="reviewer-signed"
-    fi
-    if [ ! -f "$STATE_DIR/security-signed" ]; then
-      MISSING_SIGNOFFS="${MISSING_SIGNOFFS:+$MISSING_SIGNOFFS, }security-signed"
-    fi
+    for _so in reviewer-signed security-signed; do
+      if [ "$(_state_gate_result "$STATE_DIR/$_so")" != "APPROVED" ] || \
+         ! _validate_state_session_id "$STATE_DIR/$_so"; then
+        MISSING_SIGNOFFS="${MISSING_SIGNOFFS:+$MISSING_SIGNOFFS, }$_so"
+      fi
+    done
 
     if [ -n "$MISSING_SIGNOFFS" ]; then
-      echo "GATE-RECOVERABLE: High-risk patterns detected — missing sign-offs: $MISSING_SIGNOFFS. NEXT: Dispatch Reviewer and Security agents for sign-off." >&2
+      echo "GATE-RECOVERABLE: High-risk patterns detected — missing or not APPROVED sign-offs: $MISSING_SIGNOFFS. NEXT: Dispatch Reviewer and Security agents for sign-off (in the verify phase)." >&2
       # Build detail with risk source (path or content match)
       RISK_DETAIL=""
       if [ -n "$RISK_PATH_MATCHES" ]; then
@@ -1695,6 +1745,36 @@ HR_EOF
       log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "high_risk_no_signoff" "$RISK_DETAIL"
     fi
   fi
+fi
+
+# ============================================================
+# A dispatched review binds (Decision t-0071)
+# ============================================================
+# Whether or not the change is high-risk: a Reviewer or Security verdict from this
+# session that is not APPROVED blocks, and so does a non-APPROVED verdict that
+# state-writer discarded (wrong phase, no sentinel) until that agent is re-run
+# and its verdict captured — a block must change an outcome, not just leave a file.
+# Any staged change, not just STAGED_FILES (ACMR): a deletion-only commit binds too.
+if [ "$SKIP_STATE" = false ] && ! git diff --cached --quiet 2>/dev/null; then
+  # A high-risk commit has already required both as APPROVED above; say it once.
+  [ "${HIGH_RISK:-false}" = true ] && _SO_CHECK="" || _SO_CHECK="reviewer-signed security-signed"
+  for _so in $_SO_CHECK; do
+    [ -f "$STATE_DIR/$_so" ] && _validate_state_session_id "$STATE_DIR/$_so" || continue
+    _so_result=$(_state_gate_result "$STATE_DIR/$_so")
+    if [ "$_so_result" != "APPROVED" ]; then
+      echo "GATE-RECOVERABLE: $_so records GATE_RESULT: ${_so_result:-none} — a Reviewer/Security verdict that is not APPROVED blocks the commit. NEXT: Resolve its findings and re-dispatch that agent in the verify phase. (override: REPO_OS_RECOVER=1)" >&2
+      block "signoff_not_approved"
+      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "signoff_not_approved" "$_so:${_so_result:-none}"
+    fi
+  done
+  for _vd in "$STATE_DIR"/verdict-discarded-*; do
+    [ -f "$_vd" ] || continue
+    _vd_agent="${_vd##*/verdict-discarded-}"
+    _vd_reason=$(sed -n 's/^reason: *//p' "$_vd" 2>/dev/null | head -1)
+    echo "GATE-RECOVERABLE: a non-APPROVED $_vd_agent verdict was discarded (${_vd_reason:-unknown reason}) — it still binds. NEXT: Resolve its findings and re-dispatch $_vd_agent from the phase it belongs to so its verdict is captured; if no such phase exists in this session type, the operator can clear it with REPO_OS_RECOVER=1. (override: REPO_OS_RECOVER=1)" >&2
+    block "verdict_discarded"
+    log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "verdict_discarded" "$_vd_agent"
+  done
 fi
 
 # --- Platform guard: timeout command availability ---

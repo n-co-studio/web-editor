@@ -4183,7 +4183,7 @@ $_ENTRY_NOTES"
         # A park (Decision t-0068) is the session waiting on the operator, not
         # an operator stop — same counters, different instruction.
         review_log_append "entry-stopped" "${ENTRY_WORK_ORDER_ID:-}" "$ENTRY_ID" \
-          "Entry $ENTRY_ID parked on an unanswered question — worktree and Claude session kept. Answer with: queue-cli.sh answer $ENTRY_ID --question <q-id> --text TEXT (see queue-cli.sh --json show $ENTRY_ID)" 2>/dev/null || true
+          "Entry $ENTRY_ID parked on an unanswered question — worktree and Claude session kept. The operator answers with: queue-cli.sh answer $ENTRY_ID --question <q-id> --text TEXT (see queue-cli.sh --json show $ENTRY_ID)" 2>/dev/null || true
       else
         review_log_append "entry-stopped" "${ENTRY_WORK_ORDER_ID:-}" "$ENTRY_ID" \
           "Entry $ENTRY_ID stopped by operator (${OUTCOME_RAW#*:}) — worktree and Claude session kept. Resume with: queue-cli.sh resume-entry $ENTRY_ID" 2>/dev/null || true

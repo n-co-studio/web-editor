@@ -234,6 +234,24 @@ _write_verdict_rejection() {
     printf '  resolved: false\n'
     printf '  resolution: ""\n'
   } > "$_vr_file" 2>/dev/null || true
+
+  # The escalation alone changed nothing (see NOTE above). A discarded verdict that
+  # says anything other than APPROVED on a GATE_RESULT: line also leaves a marker in
+  # the session state dir, and the commit gate blocks while it exists. An accepted
+  # verdict from the same agent removes it; re-init clears it (Decision t-0071).
+  # Output with no GATE_RESULT: line at all leaves none: it may never have been a
+  # verdict (the Critic's hypothesis mode has no sentinel), and nothing re-run could
+  # clear it. A discarded APPROVED needs no marker: its sign-off is simply missing.
+  local _vr_results _vr_state_dir
+  _vr_results=$(printf '%s\n' "${LAST_MESSAGE:-}" | sed -n 's/^GATE_RESULT: *\([A-Z_]*\).*/\1/p')
+  if printf '%s\n' "$_vr_results" | grep -q '^.' && printf '%s\n' "$_vr_results" | grep -qv '^APPROVED$'; then
+    _vr_state_dir="$(get_session_state_dir)"
+    mkdir -p "$_vr_state_dir" 2>/dev/null || true
+    printf 'agent: %s\nsession_id: %s\nreason: %s\nverdict: %s\ndiscarded_at: %s\n' \
+      "$AGENT_TYPE" "$(get_session_id "$(get_repo_root)" 2>/dev/null || true)" "$_vr_reason" \
+      "$(printf '%s' "${LAST_LINE:-}" | tr -d '\n' | cut -c1-200)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      > "$_vr_state_dir/verdict-discarded-$AGENT_TYPE" 2>/dev/null || true
+  fi
 }
 
 # --- Last MEANINGFUL line of an agent message ---
@@ -461,6 +479,11 @@ if [ "$PHASE_OK" = false ]; then
   log_hook_event "state-writer" "SubagentStop" "$AGENT_TYPE" "skip" "$START_MS" "phase_mismatch:agent=${AGENT_TYPE}:dispatch=${DISPATCH_PHASE:-none}:expected=${EXPECTED_PHASE:-unknown}:current=${CURRENT_PHASE:-unknown}"
   exit 0
 fi
+
+# Accepted from here on: this agent's verdict now stands in its state file, so an
+# earlier discarded one no longer binds (t-0071). A combined-mode rejection below
+# writes the marker again.
+rm -f "$STATE_DIR/verdict-discarded-$AGENT_TYPE" 2>/dev/null || true
 
 # --- Per-criterion verdict capture (Decision t-0048) ---
 # The cohesion brief carries two independent per-criterion tables:
