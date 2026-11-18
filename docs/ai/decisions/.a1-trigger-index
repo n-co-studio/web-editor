@@ -1,7 +1,7 @@
 # A1 trigger index — generated artifact. Do not hand-edit.
 # Regenerate: bash .claude/.automation/lib/rebuild-trigger-index.sh
 # format: 2
-# digest: 3b7b2e32240bbb32a31844439fd39d6febcc71f5f1a3e4808a028fb6162233c9
+# digest: 1e9a648038420993ba640465c963ca33cd51ab7f30b29c6fcbde2a82ef70439f
 0001AI\.mdprompt system, verification gate, session-based
 0001docs/ai/prompts/prompt-.*\.mdprompt system, verification gate, session-based
 0002docs/ai/decisions/.*\.mdmandatory, commit-blocking
@@ -152,6 +152,7 @@
 0068\.claude/hooks/ask-user-deny\.shparked, question_on_timeout, agent-decides, queue-cli answer, stopped_mode question, REPO_OS_SESSION_DEADLINE_EPOCH
 0068\.claude/\.automation/lib/question-channel\.shparked, question_on_timeout, agent-decides, queue-cli answer, stopped_mode question, REPO_OS_SESSION_DEADLINE_EPOCH
 0069\.claude/hooks/pre-commit-gates\.shget_close_commit_phases, is_pragmatist_exempt, close_commit_evidence, spec-compiled, advisory-reviewed, governance-close
+0070\.claude/\.automation/lib/question-channel\.shanswered_via, answered_session, qc_stamp_answer, Questions-Guard, questions_path_protected
 0001AI\.mdprompt system, verification gate, session-based
 0001docs/ai/prompts/prompt-.*\.mdprompt system, verification gate, session-based
 0002docs/ai/decisions/.*\.mdmandatory, commit-blocking

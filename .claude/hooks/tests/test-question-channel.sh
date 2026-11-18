@@ -403,6 +403,45 @@ for _p in audit judge; do
   _tap_contains "$(get_disallowed_tools "$_p")" 'AskUserQuestion' "profile $_p: AskUserQuestion still disallowed"
 done
 
+# ---------------------------------------------------------------------------
+printf "\n# --- Questions-Guard: no agent write reaches questions/ (Decision t-0070) ---\n"
+# Records come from this hook and answers from queue-cli, never a tool write:
+# an answer written directly would be delivered as the operator's.
+_wg() {  # tool-json -> exit code; stderr in _WG_ERR
+  _WG_ERR=$(cd "$SB" && printf '%s' "$1" | bash "$SB/.claude/hooks/write-guard.sh" 2>&1 >/dev/null)
+}
+_wg "$(printf '{"tool_name":"Write","session_id":"wg","tool_input":{"file_path":"%s","content":"x"}}' "$QDIR/q-000009.answer.yaml")"; _rc=$?
+_tap_eq "$_rc" "2" "Questions-Guard: a Write to an answer file is refused"
+_tap_contains "$_WG_ERR" 'questions/ is write-protected' "Questions-Guard: says why"
+_wg "$(printf '{"tool_name":"Edit","session_id":"wg","tool_input":{"file_path":"%s","old_string":"a","new_string":"b"}}' "$QDIR/q-000009.yaml")"; _rc=$?
+_tap_eq "$_rc" "2" "Questions-Guard: an Edit of a question record is refused"
+_wg '{"tool_name":"Bash","session_id":"wg","tool_input":{"command":"printf x > .claude/.automation/questions/q-000009.answer.yaml"}}'; _rc=$?
+_tap_eq "$_rc" "2" "Questions-Guard: a Bash redirect into questions/ is refused"
+# The Write path is matched after resolving, so '.' and '//' segments hide nothing.
+_wg "$(printf '{"tool_name":"Write","session_id":"wg","tool_input":{"file_path":"%s","content":"x"}}' "$SB/.claude/./.automation/questions/q-000009.answer.yaml")"; _rc=$?
+_tap_eq "$_rc" "2" "Questions-Guard: a Write through a './' segment is refused"
+_wg "$(printf '{"tool_name":"Write","session_id":"wg","tool_input":{"file_path":"%s","content":"x"}}' "$SB/.claude/.automation//questions/q-000009.answer.yaml")"; _rc=$?
+_tap_eq "$_rc" "2" "Questions-Guard: a Write through a '//' segment is refused"
+_wg "$(printf '{"tool_name":"Write","session_id":"wg","tool_input":{"file_path":"%s","content":"x"}}' "$ADIR/questions-notes.md")"
+_tap_lacks "$_WG_ERR" 'questions/ is write-protected' "Questions-Guard: a sibling path is not mistaken for questions/"
+_WG_ERR=$(cd "$SB" && printf '{"tool_name":"Write","session_id":"wg","tool_input":{"file_path":"%s","content":"x"}}' "$QDIR/q-000009.answer.yaml" \
+  | REPO_OS_RECOVER=1 bash "$SB/.claude/hooks/write-guard.sh" 2>&1 >/dev/null)
+_tap_lacks "$_WG_ERR" 'questions/ is write-protected' "Questions-Guard: REPO_OS_RECOVER=1 overrides it"
+# questions/ is shared through the main repo (t-0064); a worktree session's
+# absolute path to it lies outside the worktree's own root. git names the main
+# repo by its physical path (/private/tmp on macOS), so the target does too.
+_WT="$SB-wt"
+_QDIR_P=$(cd "$QDIR" && pwd -P)
+rm -rf "$_WT"
+if git -C "$SB" worktree add -q -b qc-wg-wt "$_WT" >/dev/null 2>&1; then
+  _WG_ERR=$(cd "$_WT" && printf '{"tool_name":"Write","session_id":"wg","tool_input":{"file_path":"%s","content":"x"}}' "$_QDIR_P/q-000009.answer.yaml" \
+    | _REPO_OS_TEST_ROOT="$_WT" bash "$SB/.claude/hooks/write-guard.sh" 2>&1 >/dev/null); _rc=$?
+  _tap_eq "$_rc" "2" "Questions-Guard: a worktree session's write to the main repo's questions/ is refused"
+  git -C "$SB" worktree remove --force "$_WT" >/dev/null 2>&1; git -C "$SB" branch -D qc-wg-wt >/dev/null 2>&1
+else
+  _tap_fail "Questions-Guard: fixture: worktree of the sandbox" "git worktree add failed"
+fi
+
 printf "\n1..%d\n" "$_TAP_NUM"
 printf "# pass %d fail %d\n" "$_TAP_PASS" "$_TAP_FAIL"
 [ "$_TAP_FAIL" -eq 0 ]

@@ -301,6 +301,7 @@ docs/ai/decisions/t-0066-push-main-is-opt-in.md
 docs/ai/decisions/t-0067-taskdef-draft-intake.md
 docs/ai/decisions/t-0068-question-park.md
 docs/ai/decisions/t-0069-governance-close-commits.md
+docs/ai/decisions/t-0070-answer-provenance.md
 docs/ai/decisions/t-manifest.txt
 docs/ai/eval/.gitkeep
 docs/ai/eval/_nomenclature.md

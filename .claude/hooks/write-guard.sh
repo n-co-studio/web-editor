@@ -138,6 +138,7 @@ esac
 # ============================================================
 # Section 1: State-Guard (blocks writes to .claude/.state/ and .claude/.session-id)
 #             + Queue-Guard (blocks writes to .claude/.automation/queue/)
+#             + Questions-Guard (blocks writes to .claude/.automation/questions/)
 # ============================================================
 
 if [ "$SKIP_STATE_GUARD" = false ]; then
@@ -145,19 +146,33 @@ if [ "$SKIP_STATE_GUARD" = false ]; then
   STATE_TARGET_PATH=""
   TARGETS_QUEUE=false
   QUEUE_TARGET_PATH=""
+  TARGETS_QUESTIONS=false
+  QUESTIONS_TARGET_PATH=""
+
+  # queue/ and questions/ are shared through the main repo (t-0064): a worktree
+  # session reaches them by an absolute path outside its own root.
+  _in_automation_repo() {
+    is_in_repo "$1" "$REPO_ROOT" || is_in_repo "$1" "$(get_main_repo_root)"
+  }
 
   if [ -n "$FILE_PATH" ]; then
-    if [[ "$FILE_PATH" == *".claude/.state/"* ]] || [[ "$FILE_PATH" == *".claude/.session-id"* ]]; then
-      _fp_abs=$(resolve_path "$FILE_PATH")
+    # Match on the resolved path, as for Bash targets below: '.' and '//'
+    # segments (.claude/./.automation/questions/) hide the raw text (t-0070).
+    _fp_abs=$(resolve_path "$FILE_PATH")
+    if [[ "$_fp_abs/" == *".claude/.state/"* ]] || [[ "$_fp_abs" == *".claude/.session-id"* ]]; then
       if is_in_repo "$_fp_abs" "$REPO_ROOT"; then
         TARGETS_STATE=true
-        STATE_TARGET_PATH="$FILE_PATH"
+        STATE_TARGET_PATH="$_fp_abs"
       fi
-    elif [[ "$FILE_PATH" == *".claude/.automation/queue/"* ]]; then
-      _fp_abs=$(resolve_path "$FILE_PATH")
-      if is_in_repo "$_fp_abs" "$REPO_ROOT"; then
+    elif [[ "$_fp_abs/" == *".claude/.automation/queue/"* ]]; then
+      if _in_automation_repo "$_fp_abs"; then
         TARGETS_QUEUE=true
-        QUEUE_TARGET_PATH="$FILE_PATH"
+        QUEUE_TARGET_PATH="$_fp_abs"
+      fi
+    elif [[ "$_fp_abs/" == *".claude/.automation/questions/"* ]]; then
+      if _in_automation_repo "$_fp_abs"; then
+        TARGETS_QUESTIONS=true
+        QUESTIONS_TARGET_PATH="$_fp_abs"
       fi
     fi
   fi
@@ -177,9 +192,14 @@ if [ "$SKIP_STATE_GUARD" = false ]; then
           STATE_TARGET_PATH="$_wt_abs"
         fi
       elif [[ "$_wt_abs/" == *".claude/.automation/queue/"* ]]; then
-        if is_in_repo "$_wt_abs" "$REPO_ROOT"; then
+        if _in_automation_repo "$_wt_abs"; then
           TARGETS_QUEUE=true
           QUEUE_TARGET_PATH="$_wt_abs"
+        fi
+      elif [[ "$_wt_abs/" == *".claude/.automation/questions/"* ]]; then
+        if _in_automation_repo "$_wt_abs"; then
+          TARGETS_QUESTIONS=true
+          QUESTIONS_TARGET_PATH="$_wt_abs"
         fi
       fi
     done <<< "$TARGETS"
@@ -199,6 +219,17 @@ if [ "$SKIP_STATE_GUARD" = false ]; then
     QUEUE_FILE_NAME="${QUEUE_TARGET_PATH##*.claude/.automation/queue/}"
     log_hook_event "write-guard" "PreToolUse" "" "block" "$START_MS" "queue_path_protected" "" "$QUEUE_FILE_NAME"
     echo "GATE-FINAL: .claude/.automation/queue/ is write-protected — queue entries are managed by intake.sh and the runner only. (override: REPO_OS_RECOVER=1)" >&2
+    exit 2
+  fi
+
+  # Question records come from ask-user-deny.sh and answers from
+  # `queue-cli.sh answer`, both their own processes rather than tool writes,
+  # so no agent write belongs here — an answer written directly would be
+  # delivered as the operator's (Decision t-0070).
+  if [ "$TARGETS_QUESTIONS" = true ]; then
+    QUESTIONS_FILE_NAME="${QUESTIONS_TARGET_PATH##*.claude/.automation/questions/}"
+    log_hook_event "write-guard" "PreToolUse" "" "block" "$START_MS" "questions_path_protected" "" "$QUESTIONS_FILE_NAME"
+    echo "GATE-FINAL: .claude/.automation/questions/ is write-protected — questions are recorded by ask-user-deny.sh and answered with queue-cli.sh answer by the operator (Decision t-0070). (override: REPO_OS_RECOVER=1)" >&2
     exit 2
   fi
 fi

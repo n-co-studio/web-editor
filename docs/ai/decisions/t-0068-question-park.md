@@ -160,3 +160,10 @@ reader treats an unknown close reason as closed. The queue entry's `stopped_mode
   `queue-cli.sh answer` refuses a second answer, so a forged first one would win.
 - **`continue: false` ends the run without a summary turn.** The parked session writes no
   closing message; the resume continues mid-task.
+
+## Amendment — Answer provenance (2026-11-17, Decision t-0070)
+
+§ 3 is amended: `queue-cli.sh answer` is refused in a headless session and stamps
+`answered_via`/`answered_session`; `write-guard.sh` refuses agent writes under `questions/`;
+`resume-entry` shows an answer on file and its provenance before delivering it. Readers still
+accept an unstamped answer. See t-0070.
