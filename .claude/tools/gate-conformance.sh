@@ -541,6 +541,29 @@ expect_exit 2 "$rc" "bash-guard refuses a path-qualified rm under .state"
 rc=$(run_gate "bash-guard.sh" "cat .claude/.state/sessions/$SID/security-signed")
 expect_exit 0 "$rc" "bash-guard allows reading a state file"
 
+printf '\n## the contract is the one the operator approved (t-0072)\n'
+# Independent digest (SHA-256, first 16 hex) -- not the hooks' portable_hash.
+_contract_digest() { shasum -a 256 < "$SB/.claude/local/task-contract.yaml" | cut -c1-16; }
+_bind_contract() {  # digest
+  local d
+  for d in $(_state_dirs); do printf 'contract_sha: %s\n' "$1" >> "$d/plan-approved"; done
+}
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence; _contract
+_critic_scored "$(printf 'COMPLETENESS: 2/2 criteria met\nCOMPLETENESS_GATE: APPROVED')"
+_bind_contract "$(_contract_digest)"
+stage "docs/ai/logs/note.md" "bound"
+rc=$(run_gate "pre-commit-gates.sh" "git commit -m chore-bound")
+expect_exit 0 "$rc" "allows a commit when the contract is the approved one"
+
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence; _contract
+_critic_scored "$(printf 'COMPLETENESS: 2/2 criteria met\nCOMPLETENESS_GATE: APPROVED')"
+_bind_contract "$(_contract_digest)"
+printf 'notes: widened\n' >> "$SB/.claude/local/task-contract.yaml"
+stage "docs/ai/logs/note.md" "rebound"
+rc=$(run_gate "pre-commit-gates.sh" "git commit -m chore-widened")
+expect_exit 2 "$rc" "blocks when the contract changed since approval"
+rm -f "$SB/.claude/local/task-contract.yaml"
+
 printf '\n## pre-push-gates.sh\n'
 
 # C11/C12 — B1 branch naming

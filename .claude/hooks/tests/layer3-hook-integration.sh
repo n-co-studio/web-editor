@@ -338,6 +338,28 @@ assert_file_exists "$STATE_DIR/plan-approved" "plan-approval writes plan-approve
 phase_after=$(get_phase)
 assert_eq "$phase_after" "build" "plan-approval advances phase to build"
 
+# --- t-0072: an approval binds the contract on disk ---
+rm -f "$SB/.claude/local/task-contract.yaml"
+assert_eq "$(sed -n 's/^contract_sha: *//p' "$STATE_DIR/plan-approved")" "absent" \
+  "t-0072: an approval with no contract records contract_sha: absent"
+mkdir -p "$SB/.claude/local"
+printf 'task: "t"\nverification:\n  - "one"\n' > "$SB/.claude/local/task-contract.yaml"
+_t72_a=$(portable_hash < "$SB/.claude/local/task-contract.yaml" | cut -c1-16)
+reset_phase "standard"; _advance "plan" 2>/dev/null
+run_hook_rc "plan-approval.sh" \
+  "$(fixture_posttooluse_ask "Do you approve this plan?" "Yes approve,No revise" "Yes approve")"
+assert_eq "$(sed -n 's/^contract_sha: *//p' "$STATE_DIR/plan-approved")" "$_t72_a" \
+  "t-0072: an approval records the contract's digest"
+# Re-approval with a changed contract re-binds — and keeps the old digest and says so.
+printf '  - "two"\n' >> "$SB/.claude/local/task-contract.yaml"
+# No reset_phase here: it clears plan-approved, and the earlier approval is the point.
+run_hook_rc "plan-approval.sh" \
+  "$(fixture_posttooluse_ask "Do you approve this amended plan?" "Yes approve,No revise" "Yes approve")"
+assert_eq "$(sed -n 's/^contract_previous_sha: *//p' "$STATE_DIR/plan-approved")" "$_t72_a" \
+  "t-0072: re-approval of a changed contract records the previous digest"
+assert_contains "$_LAST_OUTPUT" "binds a CHANGED task contract" "t-0072: ...and says so"
+rm -f "$SB/.claude/local/task-contract.yaml"
+
 # --- Plan question + negative answer → no state written ---
 reset_phase "standard"
 _advance "plan" 2>/dev/null
@@ -1079,6 +1101,32 @@ assert_hook_blocks "$_LAST_RC" "t-0071: an inline verification list is counted"
 _t71_co $'COMPLETENESS: 2/2 criteria met\nCOMPLETENESS_GATE: APPROVED\n'
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
 assert_ok "$_LAST_RC" "t-0071: ...and passes when its non-deferred items are scored"
+
+# --- t-0072: the contract is the one the operator approved ---
+# plan-approval.sh records contract_sha; the gate needs the contract to still hash
+# to it. Same commit-ready state as above; only plan-approved and the contract move.
+_t72_sha=$(portable_hash < "$SB/.claude/local/task-contract.yaml" | cut -c1-16)
+printf 'timestamp: test\nsession_id: %s\ncontract_sha: %s\n' "$TEST_SID" "$_t72_sha" > "$STATE_DIR/plan-approved"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_ok "$_LAST_RC" "t-0072: the approved contract, unchanged, commits"
+printf 'notes: widened after approval\n' >> "$SB/.claude/local/task-contract.yaml"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_hook_blocks "$_LAST_RC" "t-0072: a contract changed since approval blocks"
+assert_contains "$_LAST_OUTPUT" "task contract changed since the operator approved the plan" "...and says why"
+printf 'timestamp: test\nsession_id: %s\ncontract_sha: absent\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_hook_blocks "$_LAST_RC" "t-0072: a contract created after an approval made without one blocks"
+# Unreadable on both sides is not a match (exit 2, never the exit-1 fail-open).
+printf 'timestamp: test\nsession_id: %s\ncontract_sha: unreadable\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
+chmod 000 "$SB/.claude/local/task-contract.yaml"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_eq "$_LAST_RC" "2" "t-0072: an unreadable contract blocks, even against an 'unreadable' approval"
+chmod 644 "$SB/.claude/local/task-contract.yaml"
+printf 'timestamp: test\nsession_id: %s\ncontract_sha: absent\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
+rm -f "$SB/.claude/local/task-contract.yaml"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_ok "$_LAST_RC" "t-0072: no contract at approval and none now commits"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
 rm -f "$SB/.claude/local/task-contract.yaml"
 _t71_co $'COMPLETENESS: 0/0 criteria met\nCOMPLETENESS_GATE: APPROVED\n'
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"

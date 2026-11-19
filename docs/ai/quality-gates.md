@@ -94,7 +94,7 @@ Apply to `release/*` branches before merge to `main`:
 See: `.claude/agents/_agent-glossary.md` § State Files for the full state file schema, writers, and lifecycle.
 
 Gate-specific notes:
-- `plan-approved`: required by state verification and A2 scope (reads `large-scope: true` flag)
+- `plan-approved`: required by state verification and A2 scope (reads `large-scope: true` flag). When it carries `contract_sha` (written by `plan-approval.sh`), `.claude/local/task-contract.yaml` must still hash to it — a contract changed or created since the approval blocks (`contract_changed_since_approval`) until the operator re-approves (Decision t-0072). Approvals from a handoff bundle or a queued draft carry no `contract_sha` and skip the check.
 - `cohesion-reviewed`: required by A5 (skipped for session types without a review phase); `GATE_RESULT: BLOCKED` is now blocking (not just file-presence check)
 - `qa-verified`: required on every non-experiment branch. Checked for existence, a matching `session_id`, and a non-empty `dispatch_phase` (proving a real agent dispatch rather than a hand-written file). `GATE_RESULT: BLOCKED` is **also blocking**, since 2026-10-25 — until then it was not, so a commit could land carrying its own QA verdict recording that it should not have. There is no session-type skip: unlike A5's `_A5_SKIP`, qa is required on all non-experiment branches, so no session type legitimately commits over a BLOCKED QA verdict
 - `diff-review-complete`: required by A5 alongside `cohesion-reviewed`; written by `state-writer.sh` when Critic emits a diff-review section — either combined output (both `## Cohesion Brief` and `## Diff-Review Brief` headers, Decision 0039) or single-mode diff-review output (detected via `MODE: diff-review` sentinel)

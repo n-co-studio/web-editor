@@ -41,7 +41,7 @@ A crashed brief leaves its worktree on disk with whatever the crash left behind.
 1. **Inspect.** `cd .worktrees/tg-{group}` and look at `git status`, build output, logs — this is the state the old per-brief worktree destroyed.
 2. **Clean, or the restart will refuse.** The clean-start check runs on restart, so commit the work (`git add -A && git commit`) or discard it (`git checkout -- . && git clean -fd`, keeping gitignored state). Leaving the tree dirty produces a `dirty-tree` escalation instead of a started brief — that is intended, not a bug.
 3. **Restart the brief.** Relaunch with `REPO_OS_ALLOW_REINIT=1` so the crashed session's stale phase-state is cleared. The existing worktree is reused.
-4. **If the lock looks stuck**, confirm the recorded holder is dead (`cat .claude/.state/.tg-worktree-{group}.lock.dir/pid`, then `kill -0 <pid>`); a dead holder's lock is broken automatically on the next acquire. Remove the directory by hand only if the holder is dead and the automatic break did not fire.
+4. **If the lock looks stuck**, confirm the recorded holder is dead (`cat .claude/.state/.tg-worktree-{group}.lock.dir/pid`, then `kill -0 <pid>`); a dead holder's lock is broken automatically on the next acquire. If the holder is dead and the automatic break did not fire, the **operator** removes the directory from a terminal — an agent's `rm` under `.claude/.state/` is refused by bash-guard (Decision t-0071).
 
 ### Operator — interactive brief in the group worktree
 

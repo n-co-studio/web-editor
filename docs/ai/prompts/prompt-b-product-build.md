@@ -143,6 +143,8 @@ When in alignment review mode, the Critic's cohesion review also receives the `i
 
 See `orchestrator.md` § Constraints for the canonical AskUserQuestion plan approval template and hook contract annotations.
 
+**The contract is approved with the plan (REQUIRE — Decision t-0072):** write `.claude/local/task-contract.yaml` **before** the plan question, and show its `scope_files` and `verification` items in the question. `plan-approval.sh` records the contract's digest when it records the approval; the commit gate blocks if the contract changes afterwards. To amend scope or criteria, rewrite the contract and ask again — the new approval re-binds it, and `plan-approval.sh` records the previous digest and says the contract changed.
+
 ### Solo Mode (Decision 0015)
 
 Branches merge to main directly at session close. See `.claude/agents/_agent-glossary.md` § Phase Model for full merge semantics and branch type applicability, and `docs/ai/workflow-appendix/session-type-task-group.md` for task group branch strategy.

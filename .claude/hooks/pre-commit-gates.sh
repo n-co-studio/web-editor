@@ -682,6 +682,29 @@ if [ "$SKIP_STATE" = false ]; then
     fi
   fi
 
+  # The task contract is what the operator approved (Decision t-0072). plan-approval.sh
+  # records contract_sha when it records an approval; the contract on disk must still
+  # hash to it, or the scope and criteria the gates check against are not the ones
+  # approved. No field (bundle, queue-draft, older approvals) skips the check.
+  if [ -f "$STATE_DIR/plan-approved" ]; then
+    _PCG_APPROVED_CONTRACT=$(sed -n 's/^contract_sha: *//p' "$STATE_DIR/plan-approved" 2>/dev/null | head -1 | tr -d '[:space:]')
+    if [ -n "$_PCG_APPROVED_CONTRACT" ]; then
+      _PCG_CONTRACT_NOW=absent
+      if [ -f "$REPO_ROOT/.claude/local/task-contract.yaml" ]; then
+        # Same digest as plan-approval.sh.
+        # An unreadable contract must block (exit 2), not abort the gate (exit 1 fails open).
+        _PCG_CONTRACT_NOW=$(portable_hash < "$REPO_ROOT/.claude/local/task-contract.yaml" 2>/dev/null | cut -c1-16) || _PCG_CONTRACT_NOW=unreadable
+        [ -n "$_PCG_CONTRACT_NOW" ] || _PCG_CONTRACT_NOW=unreadable
+      fi
+      # `unreadable` on either side never counts as a match.
+      if [ "$_PCG_CONTRACT_NOW" != "$_PCG_APPROVED_CONTRACT" ] || [ "$_PCG_CONTRACT_NOW" = unreadable ]; then
+        echo "GATE-RECOVERABLE: the task contract changed since the operator approved the plan (approved $_PCG_APPROVED_CONTRACT, now $_PCG_CONTRACT_NOW). NEXT: Show the operator the amended contract (scope_files and verification) in a plan question and get it re-approved — that re-binds it. The approval resets the phase, so Critic and QA must be earned again. (override: REPO_OS_RECOVER=1)" >&2
+        block "contract_changed_since_approval"
+        log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "contract_changed_since_approval" "$_PCG_APPROVED_CONTRACT:$_PCG_CONTRACT_NOW"
+      fi
+    fi
+  fi
+
   # A3.3: Build Verification — TypeScript type-check
   # Placed before A5 (cohesion gate) so build errors surface before review state checks.
   # Skips silently when tsconfig.json is absent (non-TypeScript projects).

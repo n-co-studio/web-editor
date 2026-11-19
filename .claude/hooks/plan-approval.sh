@@ -148,12 +148,37 @@ mkdir -p "$STATE_DIR" 2>/dev/null || true
 TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 QUESTION_HASH=$(printf '%s' "$QUESTIONS_TEXT" | portable_hash | cut -c1-12)
 
+# --- Bind the task contract to this approval (Decision t-0072) ---
+# Hashed now, when the approval is recorded, so a write between question and
+# answer is covered too. The commit gate requires the contract to still hash to
+# this. When this replaces an approval that bound a different contract, the old
+# digest is kept and the change is said out loud: re-approval must not re-bind a
+# widened contract silently.
+CONTRACT_SHA=absent
+if [ -f "$REPO_ROOT/.claude/local/task-contract.yaml" ]; then
+  CONTRACT_SHA=$(portable_hash < "$REPO_ROOT/.claude/local/task-contract.yaml" 2>/dev/null | cut -c1-16) || CONTRACT_SHA=unreadable
+  [ -n "$CONTRACT_SHA" ] || CONTRACT_SHA=unreadable
+fi
+PREV_CONTRACT_SHA=$(sed -n 's/^contract_sha: *//p' "$STATE_DIR/plan-approved" 2>/dev/null | head -1 | tr -d '[:space:]' || true)
+CONTRACT_CHANGED=false
+if [ -n "$PREV_CONTRACT_SHA" ] && [ "$PREV_CONTRACT_SHA" != "$CONTRACT_SHA" ]; then
+  CONTRACT_CHANGED=true
+  if [ "$PREV_CONTRACT_SHA" = absent ]; then
+    echo "plan-approval: this approval binds a task contract ADDED since the last approval (none -> $CONTRACT_SHA). The operator should have seen its scope_files and verification in the question." >&2
+  else
+    echo "plan-approval: this approval binds a CHANGED task contract ($PREV_CONTRACT_SHA -> $CONTRACT_SHA). The operator should have seen the amended scope_files and verification in the question." >&2
+  fi
+  log_hook_event "plan-approval" "PostToolUse" "AskUserQuestion" "write" "$START_MS" "contract_rebound" "$PREV_CONTRACT_SHA:$CONTRACT_SHA"
+fi
+
 {
   printf 'timestamp: %s\n' "$TIMESTAMP"
   printf 'question_hash: %s\n' "$QUESTION_HASH"
   printf 'large-scope: %s\n' "$LARGE_SCOPE"
   printf 'mode: %s\n' "$DETECTED_MODE"
   printf 'session_id: %s\n' "$SID"
+  printf 'contract_sha: %s\n' "$CONTRACT_SHA"
+  if [ "$CONTRACT_CHANGED" = true ]; then printf 'contract_previous_sha: %s\n' "$PREV_CONTRACT_SHA"; fi
   # Staleness hint: compare timestamp above against the phase-state mtime to
   # detect an approval that predates a plan revision. A new plan generates a
   # different question_hash; if the hash here no longer matches the current plan
