@@ -383,10 +383,23 @@ _start_force_halt_watcher "$_child"
 touch "$ADIR/FORCE-HALT"
 _i=0; while kill -0 "$_child" 2>/dev/null && [ "$_i" -lt 200 ]; do sleep 0.1; _i=$((_i+1)); done
 _tap_true "! kill -0 $_child 2>/dev/null" "FORCE-HALT: watcher terminated the paused child on its next poll"
-_i=0; while [ -n "$_hookpid" ] && kill -0 "$_hookpid" 2>/dev/null && [ "$_i" -lt 150 ]; do sleep 0.1; _i=$((_i+1)); done
-_tap_true "[ -n '$_hookpid' ] && ! kill -0 $_hookpid 2>/dev/null" "FORCE-HALT: the orphaned hook stopped polling"
+# The hook notices it was orphaned through `ps`, which the Bash sandbox blocks
+# (t-0076); real hooks run outside it. Where ps cannot report a parent the two
+# cases that depend on that are not run — and say so; a skip is never a pass.
+if [ -n "$(ps -o ppid= -p $$ 2>/dev/null | tr -d '[:space:]')" ]; then
+  _i=0; while [ -n "$_hookpid" ] && kill -0 "$_hookpid" 2>/dev/null && [ "$_i" -lt 150 ]; do sleep 0.1; _i=$((_i+1)); done
+  _tap_true "[ -n '$_hookpid' ] && ! kill -0 $_hookpid 2>/dev/null" "FORCE-HALT: the orphaned hook stopped polling"
+else
+  for _c in "FORCE-HALT: the orphaned hook stopped polling" "FORCE-HALT: the hook did not expire the question on its way out"; do
+    printf 'SKIPPED (sandbox): %s — ps cannot read a parent pid here\n' "$_c"
+    [ -n "${REPO_OS_TEST_SKIP_LOG:-}" ] && printf 'test-question-channel: %s\n' "$_c" >> "$REPO_OS_TEST_SKIP_LOG"
+  done
+  [ -n "$_hookpid" ] && kill "$_hookpid" 2>/dev/null
+fi
 _tap_true "[ -f '$QDIR/q-000001.yaml' ] && [ -f '$QDIR/q-000001.payload.json' ]" "FORCE-HALT: question record left on disk"
-_tap_true "[ ! -f '$QDIR/q-000001.closed' ]" "FORCE-HALT: the hook did not expire the question on its way out"
+if [ -n "$(ps -o ppid= -p $$ 2>/dev/null | tr -d '[:space:]')" ]; then
+  _tap_true "[ ! -f '$QDIR/q-000001.closed' ]" "FORCE-HALT: the hook did not expire the question on its way out"
+fi
 _tap_eq "$(ls "$ADIR/escalations" | wc -l | tr -d ' ')" "0" "FORCE-HALT: no timeout escalation"
 rm -f "$ADIR/FORCE-HALT"
 [ -n "${_FORCE_HALT_WATCHER_PID:-}" ] && { kill "$_FORCE_HALT_WATCHER_PID" 2>/dev/null; wait "$_FORCE_HALT_WATCHER_PID" 2>/dev/null; }

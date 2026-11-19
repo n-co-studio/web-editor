@@ -794,8 +794,17 @@ remove_group_worktree() {
   main_repo="$(get_main_repo_root)"
 
   if [ -d "$wt_dir" ]; then
+    # Compared logically AND physically (t-0076): a caller who reached the tree
+    # through a symlink (macOS /tmp -> /private/tmp) has a $PWD that names a
+    # different string from wt_dir, and the logical test alone missed it.
+    local here_phys wt_phys
+    here_phys=$(pwd -P 2>/dev/null) || here_phys="$PWD"
+    wt_phys=$(cd "$wt_dir" 2>/dev/null && pwd -P) || wt_phys="$wt_dir"
     case "$PWD" in
-      "$wt_dir"|"$wt_dir"/*)
+      "$wt_dir"|"$wt_dir"/*) here_phys="$wt_phys" ;;
+    esac
+    case "$here_phys" in
+      "$wt_phys"|"$wt_phys"/*)
         echo "WARNING: Refusing to remove group worktree '$wt_dir' from inside it — left for the stale sweep" >&2
         return 1
         ;;

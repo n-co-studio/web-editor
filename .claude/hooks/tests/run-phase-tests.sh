@@ -13,6 +13,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Cases a suite could not run here — e.g. under the Bash sandbox (t-0076) — are
+# appended to this file by the suite; the summary lists them, never as passes.
+REPO_OS_TEST_SKIP_LOG="$(mktemp "${TMPDIR:-/tmp}/repo-os-skips.XXXXXX")"
+export REPO_OS_TEST_SKIP_LOG
+
 # --- Colors (if terminal supports them) ---
 if [ -t 1 ]; then
   GREEN='\033[0;32m'
@@ -373,7 +378,17 @@ else
 fi
 
 printf "\n"
-if [ "$overall" -eq 0 ]; then
+_skipped=$(cat "$REPO_OS_TEST_SKIP_LOG" 2>/dev/null || true)
+rm -f "$REPO_OS_TEST_SKIP_LOG"
+_skip_n=0
+[ -n "$_skipped" ] && _skip_n=$(printf '%s\n' "$_skipped" | grep -c . || true)
+if [ "$_skip_n" -gt 0 ]; then
+  printf "${YELLOW}${BOLD}SKIPPED, not run here (%d):${RESET}\n" "$_skip_n"
+  printf '%s\n' "$_skipped" | sed 's/^/  /'
+fi
+if [ "$overall" -eq 0 ] && [ "$_skip_n" -gt 0 ]; then
+  printf "${YELLOW}${BOLD}All run tests passed — %d case(s) SKIPPED (sandbox), not run here.${RESET}\n" "$_skip_n"
+elif [ "$overall" -eq 0 ]; then
   printf "${GREEN}${BOLD}All tests passed.${RESET}\n"
 else
   printf "${RED}${BOLD}Some tests failed.${RESET}\n"

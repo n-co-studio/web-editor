@@ -506,6 +506,24 @@ _tap_true "grep -A4 'has no Claude session id — resume will start a fresh sess
 
 # ---------------------------------------------------------------------------
 printf "\n# --- FORCE-HALT during the live wait still closes as abandoned ---\n"
+# The hook notices it was orphaned through `ps`, which the Bash sandbox blocks
+# (t-0076). Real hooks run outside the sandbox, so where ps cannot report a
+# parent these cases are not run — and say so; a skip is never a pass.
+_sbx_skip() {  # case...
+  local c
+  for c in "$@"; do
+    printf 'SKIPPED (sandbox): %s — ps cannot read a parent pid here\n' "$c"
+    [ -n "${REPO_OS_TEST_SKIP_LOG:-}" ] && printf 'test-question-park: %s\n' "$c" >> "$REPO_OS_TEST_SKIP_LOG"
+  done
+  return 0
+}
+if [ -z "$(ps -o ppid= -p $$ 2>/dev/null | tr -d '[:space:]')" ]; then
+  _sbx_skip "FORCE-HALT: the orphaned hook stopped polling" \
+    "FORCE-HALT: the hook did not park on its way out" \
+    "FORCE-HALT: the runner flags the wait (breaker exempt)" \
+    "FORCE-HALT: the question closes as abandoned" \
+    "FORCE-HALT: not a park, so the entry is not stopped on a question"
+else
 _reset_questions; _config 120
 ( cd "$SB" && CLAUDE_HEADLESS=1 REPO_OS_SESSION_ID=sess-fh REPO_OS_AUTOMATION_ENTRY=entry-fh \
     exec bash -c 'bash "$1" < "$2" > /dev/null 2>&1 & echo $! > "$3"; wait' _ "$HOOK" "$PAYLOAD" "$WORK/fh-hook.pid" ) &
@@ -521,6 +539,7 @@ _record_question_pause_at_exit entry-fh 2>/dev/null
 _tap_eq "$_ENTRY_PAUSED_AT_EXIT" "true" "FORCE-HALT: the runner flags the wait (breaker exempt)"
 _tap_eq "$(qc_close_reason "$ADIR" q-000001)" "abandoned" "FORCE-HALT: the question closes as abandoned"
 _tap_eq "$(qc_parked_for_entry "$ADIR" entry-fh)" "" "FORCE-HALT: not a park, so the entry is not stopped on a question"
+fi
 
 printf "\n1..%d\n" "$_TAP_NUM"
 printf "# pass %d fail %d\n" "$_TAP_PASS" "$_TAP_FAIL"

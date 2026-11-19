@@ -456,6 +456,20 @@ _rc=0
 assert_eq "$_rc" "1" "remove_group_worktree refuses when the caller is inside the worktree"
 assert_dir_exists "$_WT" "refused removal leaves the worktree in place"
 
+# t-0076: the same refusal when the caller reached the worktree through a
+# symlinked path (macOS /tmp -> /private/tmp, a symlinked ~/Developer). The
+# logical $PWD then names a different string from the worktree path, and the
+# check used to miss it and delete the tree under the caller.
+[ -d "$_WT" ] || git -C "$SB" worktree add "$_WT" "feature/tg-demo" > /dev/null 2>&1 || true
+_L8_LINK="${SB%/}.l8link"
+ln -s "$SB" "$_L8_LINK" 2>/dev/null || true
+assert_dir_exists "$_L8_LINK/.worktrees/tg-demo" "t-0076: fixture: the worktree is reachable through the symlink"
+_rc=0
+( cd "$_L8_LINK/.worktrees/tg-demo" || exit 9; remove_group_worktree "demo" "$$" "sid-final" ) 2> /dev/null || _rc=$?
+assert_eq "$_rc" "1" "t-0076: remove_group_worktree refuses when the caller is inside it through a symlinked path"
+assert_dir_exists "$_WT" "t-0076: ...and the worktree survives"
+rm -f "$_L8_LINK"
+
 # ============================================================
 # L8.5 — current_group_worktree_name
 # ============================================================
