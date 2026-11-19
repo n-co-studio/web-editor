@@ -5,7 +5,7 @@
 # We detect pushes to refs/heads/main and trigger the sync pipeline.
 #
 # The sync runs in the background so the push returns immediately.
-# Progress is logged to /tmp/repo-os-child-sync.log.
+# Progress is logged to ~/.local/state/repo-os/child-sync.log ($XDG_STATE_HOME if set).
 # A macOS notification fires when complete.
 #
 # Install: .claude/.automation/lib/install-hooks.sh
@@ -25,7 +25,7 @@ done
 
 if [ "$PUSH_TO_MAIN" = true ]; then
   # Brief delay so the push completes before workflows trigger.
-  # Script logs directly to /tmp/repo-os-child-sync.log.
+  # Script writes its own log (see child-sync.sh LOG).
   (sleep 5 && "$SYNC_SCRIPT") &
   disown
 fi

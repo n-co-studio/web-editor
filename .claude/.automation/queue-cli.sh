@@ -366,12 +366,15 @@ _entry_question_json() {
   if [ -n "$qid" ] && qc_read_answer "$AUTOMATION_DIR" "$qid" >/dev/null 2>&1; then
     answered=true
   fi
-  printf '"question":{%s,%s,%s,%s,%s}' \
+  # answered_via / answered_session: as stored, empty when absent (t-0070)
+  printf '"question":{%s,%s,%s,%s,%s,%s,%s}' \
     "$(_json_kv "id" "$qid")" \
     "$(_json_kv "waiting" "$waiting")" \
     "$(_json_kv_raw "parked" "$([ "$waiting" = parked ] && echo true || echo false)")" \
     "$(_json_kv_raw "answered" "$answered")" \
-    "$(_json_kv "summary" "$( [ -n "$qid" ] && qc_question_summary "$AUTOMATION_DIR" "$qid" 2>/dev/null)")"
+    "$(_json_kv "summary" "$( [ -n "$qid" ] && qc_question_summary "$AUTOMATION_DIR" "$qid" 2>/dev/null)")" \
+    "$(_json_kv "answered_via" "$( [ -n "$qid" ] && qc_answer_field "$AUTOMATION_DIR" "$qid" answered_via)")" \
+    "$(_json_kv "answered_session" "$( [ -n "$qid" ] && qc_answer_field "$AUTOMATION_DIR" "$qid" answered_session)")"
 }
 
 # --- Put a stopped entry back in the queue, same Claude session ---
@@ -2073,6 +2076,20 @@ EOF
       exit 1
     fi
 
+    # The answer on file is delivered as the session's first message. Say what
+    # it is and where it came from first (t-0070): an answer the operator did
+    # not write through queue-cli shows here as "not recorded".
+    if [ -n "$RESUME_QID" ] && [ "$JSON_OUTPUT" != true ] \
+        && RESUME_ANSWER=$(qc_read_answer "$AUTOMATION_DIR" "$RESUME_QID" 2>/dev/null); then
+      RESUME_VIA=$(qc_answer_field "$AUTOMATION_DIR" "$RESUME_QID" answered_via)
+      RESUME_SESS=$(qc_answer_field "$AUTOMATION_DIR" "$RESUME_QID" answered_session)
+      printf 'Delivering the answer to %s:\n%s\n  operator: %s · answered_at: %s · answered_via: %s · answered_session: %s\n' \
+        "$RESUME_QID" "$RESUME_ANSWER" \
+        "$(qc_answer_field "$AUTOMATION_DIR" "$RESUME_QID" operator)" \
+        "$(qc_answer_field "$AUTOMATION_DIR" "$RESUME_QID" answered_at)" \
+        "${RESUME_VIA:-not recorded}" "${RESUME_SESS:-${RESUME_VIA:+none}}"
+    fi
+
     _resume_stopped_entry "$RESUME_ID"
 
     if [ "$JSON_OUTPUT" = true ]; then
@@ -2102,10 +2119,17 @@ EOF
       echo "ERROR: answer requires <id>" >&2
       exit 1
     fi
+    # A headless session answering would be one entry answering another's
+    # question (Decision t-0070). Env-based: it stops the accident and the
+    # casual forgery, not a session that clears the variable.
+    if [ "${CLAUDE_HEADLESS:-0}" = "1" ]; then
+      echo "ERROR: answer is refused in a headless session — questions are answered by the operator (Decision t-0070)" >&2
+      exit 1
+    fi
     ANS_ID="$1"
     shift
     _require_queue_id "$ANS_ID"
-    ANS_QID="" ANS_FILE="" ANS_TEXT_COUNT=0
+    ANS_QID="" ANS_FILE="" ANS_TEXT_COUNT=0 ANS_STAMPED=""
     ANS_TEXTS=()
     ANS_TEXTS_FILE=""
     while [ $# -gt 0 ]; do
@@ -2200,8 +2224,17 @@ EOF
       ANS_FILE="$ANS_TEXTS_FILE"
     fi
 
+    # Stamp the provenance the operator is shown at resume (t-0070). A private
+    # file outside questions/, like the text answer above.
+    ANS_STAMPED=$(mktemp "${TMPDIR:-/tmp}/qc-answer.XXXXXX") || { [ -n "$ANS_TEXTS_FILE" ] && rm -f "$ANS_TEXTS_FILE"; echo "ERROR: Could not create a temporary file" >&2; exit 1; }
+    if ! qc_stamp_answer "$ANS_FILE" "${CLAUDE_CODE_SESSION_ID:-}" > "$ANS_STAMPED" 2>/dev/null; then
+      rm -f "$ANS_STAMPED"; [ -n "$ANS_TEXTS_FILE" ] && rm -f "$ANS_TEXTS_FILE"
+      echo "ERROR: Could not stamp the answer file" >&2; exit 1
+    fi
+
     ANS_WRC=0
-    qc_write_answer "$AUTOMATION_DIR" "$ANS_QID" "$ANS_FILE" || ANS_WRC=$?
+    qc_write_answer "$AUTOMATION_DIR" "$ANS_QID" "$ANS_STAMPED" || ANS_WRC=$?
+    rm -f "$ANS_STAMPED"
     if [ "$ANS_WRC" -ne 0 ]; then
       [ -n "$ANS_TEXTS_FILE" ] && rm -f "$ANS_TEXTS_FILE"
       case "$ANS_WRC" in

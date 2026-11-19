@@ -189,7 +189,7 @@ if _qc_answer="$(qc_read_answer "$_qc_adir" "$_qc_id" 2>/dev/null)"; then
   qc_answer_message "$_qc_id" "$_qc_answer" >&2
   exit 2
 fi
-_qc_reason="Parked on question ${_qc_id}: no operator answer within ${_qc_wait}s. The entry is stopped and resumes in this session when answered (queue-cli.sh answer ${_qc_entry:-<entry>} --question ${_qc_id} --text TEXT)."
+_qc_reason="Parked on question ${_qc_id}: no operator answer within ${_qc_wait}s. The entry is stopped and resumes in this session when the operator answers (operator: queue-cli.sh answer ${_qc_entry:-<entry>} --question ${_qc_id} --text TEXT)."
 # What the agent sees if the run were not ended: stop, do not decide.
 _qc_deny="${_qc_reason} Do not continue and do not guess an answer: end the session now. The answer arrives as your next message when the operator gives it."
 # Plain %s interpolation is safe: the ids are runner-generated (q-NNNNNN and the

@@ -314,6 +314,30 @@ has_plan_gate() {
   return 1
 }
 
+# --- Pragmatist exemption (Decisions 0025, t-0069) ---
+# Returns 0 for session types whose plan is not reviewed by the Pragmatist.
+# Spec types do have an approval phase, but it approves the spec ("Spec
+# complete"), not an implementation plan, and Prompt 0 never dispatches the
+# Pragmatist. Used by the approval substance check and the commit gate.
+is_pragmatist_exempt() {
+  case "$1" in
+    experiment|prototype-*|ephemeral|spec-fresh|spec-update) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# --- Governance-close commit phases (Decision t-0069) ---
+# Session types with no commit phase whose prompts still commit at close: the
+# phases they may commit from. Empty for every other type — the commit gate
+# then requires the commit phase as before.
+get_close_commit_phases() {
+  case "$1" in
+    spec-fresh|spec-update|advisory-init|advisory-reinit) echo "governance close" ;;
+    audit) echo "close" ;;
+    *) echo "" ;;
+  esac
+}
+
 # --- Post-approval phase lookup ---
 # Returns the phase immediately after "approval" in the session type's sequence.
 # Returns empty string if the type has no approval phase.
@@ -2168,18 +2192,13 @@ advance_phase() {
   # --- Substance check: pragmatist-signed required before approval ---
   # When the session type has a plan gate, the Pragmatist agent must have
   # reviewed the plan before the operator can approve it (Decision 0025).
-  if [ "$new_phase" = "approval" ] && has_plan_gate "$stype"; then
-    case "$stype" in
-      experiment|prototype-*|ephemeral) ;; # exempt — no governance agents
-      *)
-        if [ "${REPO_OS_SKIP_PRAGMATIST_GATE:-0}" != "1" ]; then
-          if [ ! -f "$state_dir/pragmatist-signed" ]; then
-            echo "GATE-RECOVERABLE: pragmatist-signed state file missing — cannot advance to 'approval' without Pragmatist review. NEXT: Dispatch Pragmatist agent in plan-gating mode. (override: REPO_OS_SKIP_PRAGMATIST_GATE=1)" >&2
-            return 1
-          fi
-        fi
-        ;;
-    esac
+  if [ "$new_phase" = "approval" ] && has_plan_gate "$stype" && ! is_pragmatist_exempt "$stype"; then
+    if [ "${REPO_OS_SKIP_PRAGMATIST_GATE:-0}" != "1" ]; then
+      if [ ! -f "$state_dir/pragmatist-signed" ]; then
+        echo "GATE-RECOVERABLE: pragmatist-signed state file missing — cannot advance to 'approval' without Pragmatist review. NEXT: Dispatch Pragmatist agent in plan-gating mode. (override: REPO_OS_SKIP_PRAGMATIST_GATE=1)" >&2
+        return 1
+      fi
+    fi
   fi
 
   # --- Substance check: cohesion-reviewed required before verify ---

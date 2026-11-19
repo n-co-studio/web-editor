@@ -34,6 +34,10 @@ printf "# === Question park (Decision t-0068) ===\n"
 setup_adversarial_sandbox >/dev/null 2>&1
 set +e
 trap 'teardown_adversarial_sandbox >/dev/null 2>&1' EXIT
+# queue-cli answers as the operator would, whatever shell runs the suite:
+# headless refusal and the session stamp (t-0070) read these. Cases that need
+# them set them per call.
+unset CLAUDE_HEADLESS CLAUDECODE CLAUDE_CODE_SESSION_ID
 SB="$ADV_SANDBOX"
 ADIR="$SB/.claude/.automation"
 QDIR="$ADIR/questions"
@@ -385,7 +389,52 @@ _mk_entry entry-pf stopped "2026-11-10T12:00:00Z" standard "" "" question
 printf 'format_version: 1\nquestion_id: "q-000001"\nanswers:\n  - question_index: 0\n    selected:\n      - "Redis"\n    free_text: ""\n' > "$WORK/file-answer.yaml"
 OUT="$(bash "$CLI" answer entry-pf --question q-000001 --file "$WORK/file-answer.yaml" 2>&1)"; _rc=$?
 _tap_eq "$_rc" "0" "answer --file: accepted"
-_tap_true "cmp -s '$WORK/file-answer.yaml' '$QDIR/q-000001.answer.yaml'" "answer --file: published byte for byte"
+_tap_true "grep -v '^answered_via:\|^answered_session:' '$QDIR/q-000001.answer.yaml' | cmp -s '$WORK/file-answer.yaml' -" "answer --file: published as given, apart from the stamp"
+_tap_true "grep -qx 'answered_via: \"queue-cli\"' '$QDIR/q-000001.answer.yaml'" "answer: stamps answered_via: queue-cli (t-0070)"
+_tap_true "grep -qx 'answered_session: \"\"' '$QDIR/q-000001.answer.yaml'" "answer: answered_session is empty outside Claude Code"
+
+printf "\n# --- answer provenance (Decision t-0070) ---\n"
+_reset_questions; _config 0
+_run_hook hl entry-hl >/dev/null
+_mk_entry entry-hl stopped "2026-11-10T12:10:00Z" standard "" "" question
+OUT="$(CLAUDE_HEADLESS=1 bash "$CLI" answer entry-hl --question q-000001 --text x 2>&1)"; _rc=$?
+_tap_eq "$_rc" "1" "answer: refused in a headless session"
+_tap_contains "$OUT" 'refused in a headless session' "answer: says why"
+_tap_true "[ ! -e '$QDIR/q-000001.answer.yaml' ] && [ -f '$QQ/stopped/entry-hl.yaml' ]" "headless refusal: nothing written, entry still stopped"
+
+# A preset stamp in --file is replaced, so a caller cannot choose what is shown
+printf 'format_version: 1\nquestion_id: "q-000001"\nanswered_via: "terminal"\nanswered_session: "forged"\nanswers:\n  - question_index: 0\n    selected: []\n    free_text: "Relayed"\n' > "$WORK/preset.yaml"
+OUT="$(CLAUDECODE=1 CLAUDE_CODE_SESSION_ID=cc-relay bash "$CLI" answer entry-hl --question q-000001 --file "$WORK/preset.yaml" 2>&1)"; _rc=$?
+_tap_eq "$_rc" "0" "answer: relayed from a Claude session"
+_tap_eq "$(grep -c '^answered_via:' "$QDIR/q-000001.answer.yaml")" "1" "answer: exactly one answered_via line"
+_tap_eq "$(qc_answer_field "$ADIR" q-000001 answered_via)" "queue-cli" "answer: a preset answered_via is replaced"
+_tap_eq "$(qc_answer_field "$ADIR" q-000001 answered_session)" "cc-relay" "answer: answered_session records the relaying Claude session"
+# The session id stays one escaped YAML scalar, whatever it holds
+_tap_eq "$(qc_stamp_answer "$WORK/preset.yaml" 'a"b\c' | grep '^answered_session:')" 'answered_session: "a\"b\\c"' "stamp: a quote or backslash in the session id stays escaped"
+
+# resume-entry shows what it delivers and where it came from
+_reset_questions; _config 0
+_run_hook rs entry-rs >/dev/null
+_mk_entry entry-rs stopped "2026-11-10T12:20:00Z" standard "" "" question
+qc_text_answer q-000001 tester 'Postgres' > "$WORK/rs-raw.yaml"
+qc_stamp_answer "$WORK/rs-raw.yaml" "cc-rs" > "$WORK/rs.yaml"
+qc_write_answer "$ADIR" q-000001 "$WORK/rs.yaml"
+OUT="$(bash "$CLI" --json show entry-rs 2>&1)"
+_tap_contains "$OUT" '"answered_via":"queue-cli","answered_session":"cc-rs"' "show --json: the question block carries the stored provenance"
+OUT="$(bash "$CLI" resume-entry entry-rs 2>&1)"; _rc=$?
+_tap_eq "$_rc" "0" "resume-entry: resumes a parked entry whose answer is on file"
+_tap_contains "$OUT" 'Delivering the answer to q-000001' "resume-entry: says it is delivering an answer"
+_tap_contains "$OUT" '"Postgres"' "resume-entry: shows the answer"
+_tap_contains "$OUT" 'answered_via: queue-cli · answered_session: cc-rs' "resume-entry: shows where it came from"
+
+# An answer file not written by queue-cli is delivered, but shows as such
+_reset_questions; _config 0
+_run_hook ns entry-ns >/dev/null
+_mk_entry entry-ns stopped "2026-11-10T12:25:00Z" standard "" "" question
+qc_text_answer q-000001 someone 'Unstamped' > "$QDIR/q-000001.answer.yaml"
+OUT="$(bash "$CLI" resume-entry entry-ns 2>&1)"; _rc=$?
+_tap_eq "$_rc" "0" "resume-entry: an unstamped answer is still delivered (provenance is shown, not required)"
+_tap_contains "$OUT" 'answered_via: not recorded · answered_session: ' "resume-entry: an unstamped answer shows its source as not recorded"
 _run_hook pf2 entry-pf2 >/dev/null
 _mk_entry entry-pf2 stopped "2026-11-10T12:30:00Z" standard "" "" question
 OUT="$(bash "$CLI" --json resume-entry entry-pf2 --force 2>&1)"; _rc=$?

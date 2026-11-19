@@ -884,6 +884,33 @@ else
 fi
 
 # ============================================================
+# L2.t0069 — spec approval needs no Pragmatist; implementation plans still do
+# ============================================================
+tap_section "L2.t0069: Pragmatist exemption at approval; governance-close commit phases"
+
+_l2_sd="$(get_session_state_dir)"
+for _l2_st in spec-fresh spec-update; do
+  rm -f "$_l2_sd/phase-state" "$_l2_sd/pragmatist-signed"
+  init_phase "$_l2_st" > /dev/null 2>&1 || true
+  advance_phase interview 2>/dev/null || true; advance_phase write 2>/dev/null || true
+  _l2_rc=0; advance_phase approval 2>/dev/null || _l2_rc=$?
+  assert_ok "$_l2_rc" "$_l2_st advances write -> approval without pragmatist-signed"
+done
+
+rm -f "$_l2_sd/phase-state" "$_l2_sd/pragmatist-signed"
+init_phase standard > /dev/null 2>&1 || true
+advance_phase drift-check 2>/dev/null || true; advance_phase plan 2>/dev/null || true
+_l2_rc=0; _l2_out=$(advance_phase approval 2>&1) || _l2_rc=$?
+assert_fail "$_l2_rc" "standard still cannot reach approval without pragmatist-signed"
+assert_contains "$_l2_out" "pragmatist-signed state file missing" "the standard block names the missing sign-off"
+
+assert_eq "$(get_close_commit_phases spec-update)" "governance close" "spec types commit from governance or close"
+assert_eq "$(get_close_commit_phases advisory-reinit)" "governance close" "advisory types commit from governance or close"
+assert_eq "$(get_close_commit_phases audit)" "close" "audit commits from close"
+assert_eq "$(get_close_commit_phases standard)" "" "standard has no close-commit phases (commit phase rules apply)"
+rm -f "$_l2_sd/phase-state"
+
+# ============================================================
 # Summary
 # ============================================================
 finish_tests

@@ -314,6 +314,30 @@ qc_text_answer() {
   done
 }
 
+# --- Stamp an answer with where it came from (Decision t-0070) ---
+# Prints $1 with answered_via/answered_session set just before `answers:`.
+# Any such lines already in $1 are dropped: only queue-cli stamps, so a caller
+# cannot choose what the operator is later shown. The stamp is provenance to
+# display, not proof — anything that writes the file can write these lines.
+# Arguments: $1 answer file, $2 Claude session id (empty outside Claude Code)
+qc_stamp_answer() {
+  # ENVIRON, not -v: awk -v would undo the escaping _qc_yaml_str adds.
+  QC_STAMP_SESS="$(_qc_yaml_str "$2")" awk '
+    /^answered_via:/ || /^answered_session:/ { next }
+    /^answers:/ && !done {
+      printf "answered_via: \"queue-cli\"\nanswered_session: \"%s\"\n", ENVIRON["QC_STAMP_SESS"]
+      done = 1
+    }
+    { print }
+  ' "$1"
+}
+
+# --- One top-level field of an answer file, unquoted (empty if absent) ---
+# Arguments: $1 automation dir, $2 question id, $3 field name
+qc_answer_field() {
+  sed -n "s/^${3}: *//p" "$(qc_dir "$1")/${2}.answer.yaml" 2>/dev/null | head -1 | sed 's/^"//; s/"$//'
+}
+
 # Escape for a double-quoted YAML scalar on one line.
 _qc_yaml_str() {
   printf '%s' "$1" | tr '\r\n\t' '   ' | sed 's/\\/\\\\/g; s/"/\\"/g'

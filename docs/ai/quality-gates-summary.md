@@ -49,7 +49,7 @@
 | `plan-approved` | A2 | Required for scope check; reads `large-scope: true` flag. Written by `plan-approval.sh` (legacy AskUserQuestion path) OR by `_phase-helper.sh::drift_check` (handoff bundle path — Decision 0038). Both provenances share schema and session_id binding |
 | `cohesion-reviewed` | A5 | Skipped for session types without review phase; GATE_RESULT: BLOCKED now blocks commit |
 | `diff-review-complete` | A5 | New (Brief 3); written by state-writer.sh when Critic runs diff-review mode; GATE_RESULT: BLOCKED blocks commit |
-| `reviewer-signed`, `security-signed` | A4 | Required on high-risk detection |
+| `reviewer-signed`, `security-signed` | A4 | Required APPROVED on high-risk detection (incl. the guard hooks by name); not APPROVED blocks any commit (t-0071) |
 | `pragmatist-signed` | Plan-gating | Written by Pragmatist plan-review (legacy dispatch), by `_phase-helper.sh::bundle_to_pragmatist_signed` (handoff bundle path), or by the Orchestrator's `deterministic_alignment_check` (alignment-aligned outcome). Decisions 0025 + 0038. Checked at commit time |
 | `functional-verified` | A3.4 (headless/auto only) | Written by `pre-commit-gates.sh` inline on script pass; required by binding gate when `_A34_APPLICABLE=true` and `IS_NO_REVIEW_BACKSTOP=true`. Decision 0044. |
 | `kg-updated` | KG product-graph gate (conditional) | Written by `pre-commit-gates.sh` when the gate passes for a commit with in-scope product files; session-scoped; satisfies FRESHNESS for later commits in the session. Decision 0034 Amendment 9. |

@@ -454,6 +454,38 @@ hasnt "KG product-graph" "...silently"
 echo child > "$SB/.claude/repo-mode"
 ( cd "$SB" && git reset -q --hard HEAD~1 )
 
+# --- t-0069: a spec session closes with a product graph present ------------
+# The close sequence refreshes an existing graph in every session type, so a
+# spec commit may carry product-graph.yaml; with no product file touched, the
+# graph is not required either. spec-fresh commits from governance, with no
+# qa-verified or pragmatist-signed.
+_reset; _coverage
+printf '%s\n' "$(_node product-app-settings src/app/settings.ts "$GOOD")" | _graph
+_write src/app/settings.ts "export const s = 1"
+_commit_base
+_spec_session() {
+  local d ts; ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  for d in "$SB/.claude/.state" "$SB/.claude/.state/sessions/$SID" "$SB/.claude/.state/wt-sessions/$SID"; do
+    printf 'session_type: spec-fresh\nsession_id: %s\nsession_log_id: %s\nmode: review\ncurrent_phase: governance\ncycle: 1\nphases_completed: init,interview,write,approval\nsolo: false\ntag: agent\ntimestamp: %s\n' "$SID" "$SID" "$ts" > "$d/phase-state"
+    rm -f "$d/qa-verified" "$d/pragmatist-signed" "$d/cohesion-reviewed" "$d/diff-review-complete"
+  done
+  _write docs/ai/governance/spec-compiled 'spec_version: null
+status: complete'
+}
+
+_spec_session
+_write docs/spec/compiled/v1/spec.md "spec"
+_stage docs/spec/compiled/v1/spec.md docs/ai/governance/spec-compiled
+eq "$(run_gate)" "0" "spec-fresh commits its spec with a product graph present and untouched"
+
+_spec_session
+printf '%s\n' "$(_node product-app-settings src/app/settings.ts "$GOOD - refreshed")" | _graph
+_write docs/spec/compiled/v1/spec.md "spec v1"
+_stage docs/spec/compiled/v1/spec.md docs/ai/governance/spec-compiled "$G"
+eq "$(run_gate)" "0" "spec-fresh commits a close-sequence refresh of product-graph.yaml"
+hasnt "commits only what its prompt writes" "...the graph is inside the spec session's scope"
+( cd "$SB" && git reset -q --hard HEAD~1 )
+
 printf '\n1..%d\n# pass %d / fail %d\n' "$_N" "$_P" "$_F"
 if [ "$_F" -gt 0 ]; then printf '%b' "$_FAILS"; exit 1; fi
 exit 0

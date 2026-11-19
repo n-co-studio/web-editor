@@ -76,3 +76,6 @@ t-0065-interactive-session-identity.md
 t-0066-push-main-is-opt-in.md
 t-0067-taskdef-draft-intake.md
 t-0068-question-park.md
+t-0069-governance-close-commits.md
+t-0070-answer-provenance.md
+t-0071-verdict-enforcement.md

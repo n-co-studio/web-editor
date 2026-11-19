@@ -475,6 +475,72 @@ stage "docs/ai/logs/note.md" "hand-written pragmatist evidence"
 rc=$(run_gate "pre-commit-gates.sh" "git commit -m chore-noprov2")
 expect_exit 2 "$rc" "blocks pragmatist-signed with no provenance marker"
 
+printf '\n## a review counts only if it checked something (t-0071)\n'
+# Writes one evidence file into every candidate state dir.
+_put_state() {  # name content
+  local d
+  for d in $(_state_dirs); do printf '%s\n' "$2" > "$d/$1"; done
+}
+_critic_scored() {  # completeness lines, or empty
+  _put_state cohesion-reviewed "$(printf 'timestamp: t\nagent: critic\nsession_id: %s\ndispatch_phase: review\nGATE_RESULT: APPROVED\n%s' "$SID" "$1")"
+}
+# Written after each reset: the sandbox ignores nothing, so reset_worktree's
+# `git clean` removes an untracked contract.
+_contract() {
+  mkdir -p "$SB/.claude/local"
+  printf 'task: "conformance"\nverification:\n  - "a"\n  - "b"\n' > "$SB/.claude/local/task-contract.yaml"
+}
+
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence; _contract
+_critic_scored "$(printf 'COMPLETENESS: 0/0 criteria met\nCOMPLETENESS_GATE: APPROVED')"
+stage "docs/ai/logs/note.md" "unscored"
+rc=$(run_gate "pre-commit-gates.sh" "git commit -m chore-unscored")
+expect_exit 2 "$rc" "blocks a 0/0 completeness when the contract lists criteria"
+
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence; _contract
+_critic_scored "$(printf 'COMPLETENESS: 2/2 criteria met\nCOMPLETENESS_GATE: APPROVED')"
+stage "docs/ai/logs/note.md" "scored"
+rc=$(run_gate "pre-commit-gates.sh" "git commit -m chore-scored")
+expect_exit 0 "$rc" "allows the same commit with every contract criterion scored"
+rm -f "$SB/.claude/local/task-contract.yaml"
+
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+_put_state security-signed "$(printf 'timestamp: t\nagent: security-privacy\nsession_id: %s\ndispatch_phase: verify\nGATE_RESULT: BLOCKED' "$SID")"
+stage "docs/ai/logs/note.md" "security said no"
+rc=$(run_gate "pre-commit-gates.sh" "git commit -m chore-secblocked")
+expect_exit 2 "$rc" "blocks on a BLOCKED security verdict, high-risk or not"
+
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+_put_state verdict-discarded-reviewer "$(printf 'agent: reviewer\nsession_id: %s\nreason: phase_mismatch' "$SID")"
+stage "docs/ai/logs/note.md" "reviewer verdict lost"
+rc=$(run_gate "pre-commit-gates.sh" "git commit -m chore-discarded")
+expect_exit 2 "$rc" "blocks while a discarded non-APPROVED verdict is on record"
+
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+_put_state reviewer-signed "$(printf 'timestamp: t\nagent: reviewer\nsession_id: %s\ndispatch_phase: verify\nGATE_RESULT: APPROVED' "$SID")"
+_put_state security-signed "$(printf 'timestamp: t\nagent: security-privacy\nsession_id: %s\ndispatch_phase: verify\nGATE_RESULT: BLOCKED' "$SID")"
+stage "src/auth-probe.ts" "export const a = 1;"
+rc=$(run_gate "pre-commit-gates.sh" "git commit -m chore-hr-blocked")
+expect_exit 2 "$rc" "a high-risk sign-off file holding BLOCKED does not count"
+
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+_put_state reviewer-signed "$(printf 'timestamp: t\nagent: reviewer\nsession_id: %s\ndispatch_phase: verify\nGATE_RESULT: APPROVED' "$SID")"
+_put_state security-signed "$(printf 'timestamp: t\nagent: security-privacy\nsession_id: %s\ndispatch_phase: verify\nGATE_RESULT: APPROVED' "$SID")"
+stage "src/auth-probe.ts" "export const a = 1;"
+rc=$(run_gate "pre-commit-gates.sh" "git commit -m chore-hr-approved")
+expect_exit 0 "$rc" "allows the same high-risk commit with both sign-offs APPROVED"
+
+# Deleting a BLOCKED sign-off or a discard marker would undo the two blocks above.
+reset_worktree; clear_state; write_phase_state "build"
+rc=$(run_gate "bash-guard.sh" "rm -f .claude/.state/sessions/$SID/security-signed")
+expect_exit 2 "$rc" "bash-guard refuses rm of a state file"
+rc=$(run_gate "bash-guard.sh" "find .claude/.state -name verdict-discarded-reviewer -delete")
+expect_exit 2 "$rc" "bash-guard refuses find -delete under .state"
+rc=$(run_gate "bash-guard.sh" "/bin/rm -f .claude/.state/sessions/$SID/reviewer-signed")
+expect_exit 2 "$rc" "bash-guard refuses a path-qualified rm under .state"
+rc=$(run_gate "bash-guard.sh" "cat .claude/.state/sessions/$SID/security-signed")
+expect_exit 0 "$rc" "bash-guard allows reading a state file"
+
 printf '\n## pre-push-gates.sh\n'
 
 # C11/C12 — B1 branch naming
