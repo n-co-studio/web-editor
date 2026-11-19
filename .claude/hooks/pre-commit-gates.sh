@@ -571,6 +571,35 @@ _validate_state_session_id() {
   [ "$file_sid" = "$current_sid" ]
 }
 
+# --- A verdict counts only for the approval it followed (Decision t-0075) ---
+# state-writer stamps each verdict with approval_ref: the first 16 hex of the
+# plan-approved digest at capture (`none` without one). Returns 1, saying why, when
+# the stamp names a different approval: a previous work unit's verdict that init
+# could not delete (the sandbox refuses the agent's delete) must not count. A
+# verdict without the stamp predates t-0075 and is accepted with an advisory.
+# Callers use it for APPROVED verdicts only — a block binds whatever it followed.
+_PCG_APPROVAL_REF_NOTED=""
+_verdict_follows_approval() {  # state_file
+  local f="$1" name ref cur
+  name=$(basename "$f")
+  ref=$(sed -n 's/^approval_ref: *//p' "$f" 2>/dev/null | head -1 | tr -d '[:space:]')
+  if [ -z "$ref" ]; then
+    case " $_PCG_APPROVAL_REF_NOTED " in *" $name "*) ;; *)
+      echo "Advisory: $name has no approval_ref (written before t-0075) — accepted; re-run that agent to bind it to this approval." >&2
+      _PCG_APPROVAL_REF_NOTED="$_PCG_APPROVAL_REF_NOTED $name" ;;
+    esac
+    return 0
+  fi
+  cur="none"
+  if [ -f "$STATE_DIR/plan-approved" ]; then
+    cur=$(portable_hash < "$STATE_DIR/plan-approved" 2>/dev/null | cut -c1-16) || true
+    [ -n "$cur" ] || cur="unreadable"
+  fi
+  [ "$ref" = "$cur" ] && [ "$cur" != "unreadable" ] && return 0
+  echo "GATE-RECOVERABLE: $name was written before the current plan approval (approval_ref $ref, current $cur) — it does not count for this work unit. NEXT: Re-dispatch that agent from its phase. (override: REPO_OS_RECOVER=1)" >&2
+  return 1
+}
+
 # Number of items in the contract's top-level `verification:` list that the Critic
 # must score (0 when the contract or the list is absent). `[deferred]` items are
 # left out, as the Critic leaves them out of its count (critic.md, N/A). Items may
@@ -895,6 +924,10 @@ if [ "$SKIP_STATE" = false ]; then
     echo "GATE-RECOVERABLE: A5 — cohesion-reviewed state file has stale session_id. NEXT: Re-run Critic cohesion review in this session. (override: REPO_OS_RECOVER=1)" >&2
     block "state_cohesion_stale_session"
     log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_cohesion_stale_session"
+  elif [ "$_A5_SKIP" = false ] && [ "$(_state_gate_result "$STATE_DIR/cohesion-reviewed")" != "BLOCKED" ] && \
+       ! _verdict_follows_approval "$STATE_DIR/cohesion-reviewed"; then
+    block "state_cohesion_stale_approval"
+    log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_cohesion_stale_approval"
   elif [ "$_A5_SKIP" = false ] && [ -f "$STATE_DIR/cohesion-reviewed" ] && \
        _validate_state_session_id "$STATE_DIR/cohesion-reviewed"; then
     # Dispatch evidence check: reject verdict files lacking dispatch_phase field.
@@ -904,11 +937,11 @@ if [ "$SKIP_STATE" = false ]; then
       block "A5_cohesion_no_dispatch_evidence"
       log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A5_cohesion_no_dispatch_evidence"
     fi
-    # A5 hardening: block if cohesion-reviewed contains GATE_RESULT: BLOCKED
-    # This enforces that critical cohesion findings were resolved before committing.
+    # A5 hardening: only an APPROVED cohesion verdict passes (t-0075 — this used to
+    # block on exactly BLOCKED, so NEEDS_WORK, the Critic's own word, let a commit through).
     _PCG_COHESION_RESULT=$(grep '^GATE_RESULT: ' "$STATE_DIR/cohesion-reviewed" 2>/dev/null | sed 's/^GATE_RESULT: *//' | awk '{print $1}' | head -1 || true)
-    if [ "$_PCG_COHESION_RESULT" = "BLOCKED" ]; then
-      echo "GATE-RECOVERABLE: A5 cohesion review blocked — Critic found critical findings that were not resolved. NEXT: Resolve all critical cohesion findings and re-run Critic in cohesion mode. (override: REPO_OS_RECOVER=1)" >&2
+    if [ "$_PCG_COHESION_RESULT" != "APPROVED" ]; then
+      echo "GATE-RECOVERABLE: A5 cohesion review not approved — cohesion-reviewed records GATE_RESULT: ${_PCG_COHESION_RESULT:-none}. NEXT: Resolve the Critic's findings and re-run Critic in cohesion mode. (override: REPO_OS_RECOVER=1)" >&2
       block "A5_cohesion_blocked"
       log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A5_cohesion_blocked"
     fi
@@ -947,6 +980,10 @@ if [ "$SKIP_STATE" = false ]; then
     echo "GATE-RECOVERABLE: A5 — diff-review-complete state file has stale session_id. NEXT: Re-run Critic in diff-review mode in this session. (override: REPO_OS_RECOVER=1)" >&2
     block "state_diff_review_stale_session"
     log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_diff_review_stale_session"
+  elif [ "$_A5_SKIP" = false ] && [ "$(_state_gate_result "$STATE_DIR/diff-review-complete")" != "BLOCKED" ] && \
+       ! _verdict_follows_approval "$STATE_DIR/diff-review-complete"; then
+    block "state_diff_review_stale_approval"
+    log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_diff_review_stale_approval"
   elif [ "$_A5_SKIP" = false ] && [ -f "$STATE_DIR/diff-review-complete" ] && \
        _validate_state_session_id "$STATE_DIR/diff-review-complete"; then
     # Dispatch evidence check: reject verdict files lacking dispatch_phase field.
@@ -957,8 +994,8 @@ if [ "$SKIP_STATE" = false ]; then
       log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A5_diff_no_dispatch_evidence"
     fi
     _PCG_DIFF_REVIEW_RESULT=$(grep '^GATE_RESULT: ' "$STATE_DIR/diff-review-complete" 2>/dev/null | sed 's/^GATE_RESULT: *//' | awk '{print $1}' | head -1 || true)
-    if [ "$_PCG_DIFF_REVIEW_RESULT" = "BLOCKED" ]; then
-      echo "GATE-RECOVERABLE: A5 diff-review blocked — Critic found critical mechanical bugs. NEXT: Resolve all critical diff-review findings and re-run Critic in diff-review mode. (override: REPO_OS_RECOVER=1)" >&2
+    if [ "$_PCG_DIFF_REVIEW_RESULT" != "APPROVED" ]; then  # only APPROVED passes (t-0075)
+      echo "GATE-RECOVERABLE: A5 diff-review not approved — diff-review-complete records GATE_RESULT: ${_PCG_DIFF_REVIEW_RESULT:-none}. NEXT: Resolve all critical diff-review findings and re-run Critic in diff-review mode. (override: REPO_OS_RECOVER=1)" >&2
       block "A5_diff_review_blocked"
       log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A5_diff_review_blocked"
     fi
@@ -976,6 +1013,10 @@ if [ "$SKIP_STATE" = false ]; then
     echo "GATE-RECOVERABLE: qa-verified state file has stale session_id. NEXT: Re-run QA verification in this session. (override: REPO_OS_RECOVER=1)" >&2
     block "state_qa_stale_session"
     log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_qa_stale_session"
+  elif [ "$(_state_gate_result "$STATE_DIR/qa-verified")" != "BLOCKED" ] && \
+       ! _verdict_follows_approval "$STATE_DIR/qa-verified"; then
+    block "state_qa_stale_approval"
+    log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_qa_stale_approval"
   elif [ -f "$STATE_DIR/qa-verified" ] && _validate_state_session_id "$STATE_DIR/qa-verified"; then
     # Dispatch evidence check: reject verdict files lacking dispatch_phase field.
     # Files written by state-writer.sh always contain this field (written since
@@ -1009,8 +1050,10 @@ if [ "$SKIP_STATE" = false ]; then
     # word, so a verdict carrying a trailing `reason="..."` is still read as
     # BLOCKED.
     _PCG_QA_RESULT=$(grep '^GATE_RESULT: ' "$STATE_DIR/qa-verified" 2>/dev/null | sed 's/^GATE_RESULT: *//' | awk '{print $1}' | head -1 || true)
-    if [ "$_PCG_QA_RESULT" = "BLOCKED" ]; then
-      echo "GATE-RECOVERABLE: qa-verified records GATE_RESULT: BLOCKED — QA found unresolved gate failures. NEXT: Resolve them and re-dispatch the QA verification agent. (override: REPO_OS_RECOVER=1)" >&2
+    # Only APPROVED passes (t-0075): QA returned NEEDS_WORK (the Critic's word) in practice, which
+    # an exact-BLOCKED test let through.
+    if [ "$_PCG_QA_RESULT" != "APPROVED" ]; then
+      echo "GATE-RECOVERABLE: qa-verified records GATE_RESULT: ${_PCG_QA_RESULT:-none} — QA did not approve. NEXT: Resolve them and re-dispatch the QA verification agent. (override: REPO_OS_RECOVER=1)" >&2
       block "state_qa_blocked"
       log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "state_qa_blocked"
     fi
@@ -1743,11 +1786,13 @@ HR_EOF
       > "$STATE_DIR/high-risk-detected" 2>/dev/null || true
 
     # Check for required sign-offs. A sign-off is an APPROVED verdict from this
-    # session: state-writer writes the file for BLOCKED verdicts too (t-0071).
+    # session: state-writer writes the file for BLOCKED verdicts too (t-0071) —
+    # and from this work unit's approval (t-0075).
     MISSING_SIGNOFFS=""
     for _so in reviewer-signed security-signed; do
       if [ "$(_state_gate_result "$STATE_DIR/$_so")" != "APPROVED" ] || \
-         ! _validate_state_session_id "$STATE_DIR/$_so"; then
+         ! _validate_state_session_id "$STATE_DIR/$_so" || \
+         ! _verdict_follows_approval "$STATE_DIR/$_so"; then
         MISSING_SIGNOFFS="${MISSING_SIGNOFFS:+$MISSING_SIGNOFFS, }$_so"
       fi
     done

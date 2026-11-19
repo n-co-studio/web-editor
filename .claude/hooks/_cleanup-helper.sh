@@ -64,11 +64,10 @@ _SESSION_EVIDENCE_FILES="plan-approved pragmatist-signed cohesion-reviewed diff-
 # _is_prewritten_evidence <file> — 0 when the file was placed there legitimately
 # BEFORE this session's agent ran, rather than earned by it.
 #
-# Three writers do this, and all of them are the reason a first init must not
-# clear indiscriminately:
+# Two writers do this, and both are the reason a first init must not clear
+# indiscriminately (a third, _headless-plan-approve.sh with `question_hash:
+# headless-runner`, was deleted by t-0074; t-0075 stopped accepting its marker):
 #   state-manager.sh      plan-approved      `source: runner` / `runner-auto`
-#   (none since t-0074)                      `question_hash: headless-runner` — its
-#                                            writer was deleted; still accepted below
 #   _phase-helper.sh      plan-approved AND pragmatist-signed via a handoff
 #                                            bundle: `source: handoff-bundle`
 #
@@ -84,7 +83,7 @@ _SESSION_EVIDENCE_FILES="plan-approved pragmatist-signed cohesion-reviewed diff-
 _is_prewritten_evidence() {
   local file="$1"
   [ -f "$file" ] || return 1
-  grep -qE '^(source: (runner|handoff-bundle)|question_hash: (runner-auto|headless-runner))$' \
+  grep -qE '^(source: (runner|handoff-bundle)|question_hash: runner-auto)$' \
     "$file" 2>/dev/null
 }
 

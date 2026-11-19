@@ -649,7 +649,7 @@ assert_file_not_exists "$_l2_sd/plan-approved" \
 
 # THE REGRESSION GUARD for the task group chain. Each of the three legitimate
 # pre-writes must survive a first init, or every headless brief breaks.
-for _l2_pre in 'source: runner' 'source: handoff-bundle' 'question_hash: runner-auto' 'question_hash: headless-runner'; do
+for _l2_pre in 'source: runner' 'source: handoff-bundle' 'question_hash: runner-auto'; do
   rm -f "$_l2_sd/phase-state"
   init_phase standard > /dev/null 2>&1
   printf 'timestamp: t\n%s\nlarge-scope: true\nmode: auto\nsession_id: %s\n' "$_l2_pre" "$_l2_sid" \
@@ -663,6 +663,17 @@ for _l2_pre in 'source: runner' 'source: handoff-bundle' 'question_hash: runner-
   assert_file_not_exists "$_l2_sd/qa-verified" \
     "...while still clearing the stale verdict beside it ('$_l2_pre')"
 done
+
+# t-0075: the deleted headless helper's marker (t-0074) no longer has a writer, so
+# a plan-approved carrying it is cleared like any other leftover approval.
+rm -f "$_l2_sd/phase-state"
+init_phase standard > /dev/null 2>&1
+printf 'timestamp: t\nquestion_hash: headless-runner\nlarge-scope: true\nmode: auto\nsession_id: %s\n' "$_l2_sid" \
+  > "$_l2_sd/plan-approved"
+rm -f "$_l2_sd/phase-state"
+init_phase standard > /dev/null 2>&1
+assert_file_not_exists "$_l2_sd/plan-approved" \
+  "t-0075: first init clears a plan-approved marked 'question_hash: headless-runner'"
 
 # pragmatist-signed arrives via the handoff bundle the same way, which is why
 # the marker is matched per FILE rather than by filename.

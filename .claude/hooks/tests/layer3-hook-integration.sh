@@ -706,6 +706,26 @@ run_hook_rc "state-writer.sh" \
   "$(fixture_subagentstop "security-privacy" $'No issues.\nGATE_RESULT: APPROVED')"
 assert_file_exists "$STATE_DIR/security-signed" "state-writer writes security-signed"
 
+# --- t-0075: every verdict records the approval it followed ---
+# approval_ref is the first 16 hex of the SHA-256 of plan-approved at capture, or
+# `none` without one. The commit gate compares it with the current approval.
+_t75_saved_pa=""
+[ -f "$STATE_DIR/plan-approved" ] && _t75_saved_pa=$(cat "$STATE_DIR/plan-approved")
+printf 'timestamp: t75-a\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
+_t75_ref=$(portable_hash < "$STATE_DIR/plan-approved" | cut -c1-16)
+rm -f "$STATE_DIR/reviewer-signed"
+run_hook_rc "state-writer.sh" \
+  "$(fixture_subagentstop "reviewer" $'Code looks good.\nGATE_RESULT: APPROVED')"
+assert_contains "$(cat "$STATE_DIR/reviewer-signed" 2>/dev/null)" "approval_ref: $_t75_ref" \
+  "t-0075: state-writer stamps a verdict with the plan-approved digest"
+rm -f "$STATE_DIR/plan-approved" "$STATE_DIR/security-signed"
+run_hook_rc "state-writer.sh" \
+  "$(fixture_subagentstop "security-privacy" $'No issues.\nGATE_RESULT: APPROVED')"
+assert_contains "$(cat "$STATE_DIR/security-signed" 2>/dev/null)" "approval_ref: none" \
+  "t-0075: ...and with 'none' when there is no plan approval"
+[ -n "$_t75_saved_pa" ] && printf '%s\n' "$_t75_saved_pa" > "$STATE_DIR/plan-approved"
+rm -f "$STATE_DIR/reviewer-signed" "$STATE_DIR/security-signed"
+
 # --- Non-governance agent → early exit, no file written ---
 rm -f "$STATE_DIR/cohesion-reviewed" "$STATE_DIR/qa-verified" "$STATE_DIR/reviewer-signed" "$STATE_DIR/security-signed"
 run_hook_rc "state-writer.sh" \
@@ -1159,6 +1179,74 @@ _LAST_RC=0
 _LAST_OUTPUT=$( (cd "$SB" && fixture_pretooluse_commit "test commit" | REPO_OS_RECOVER=1 bash "$_HOOKS_DIR/pre-commit-gates.sh" 2>&1) ) || _LAST_RC=$?
 assert_ok "$_LAST_RC" "t-0071: REPO_OS_RECOVER=1 lets the operator past a discarded verdict"
 rm -f "$STATE_DIR/verdict-discarded-security-privacy"
+
+# --- t-0075: an approving verdict counts only for the approval it followed ---
+# Under the sandbox, init_phase cannot delete the previous unit's verdicts, so a
+# verdict from an earlier approval must not count. Same commit-ready state as above.
+_t75_cur=$(portable_hash < "$STATE_DIR/plan-approved" | cut -c1-16)
+_t75_v() {  # file agent verdict ref
+  local ph=verify; [ "$2" = critic ] && ph=review
+  printf 'timestamp: test\nagent: %s\nsession_id: %s\ndispatch_phase: %s\napproval_ref: %s\nGATE_RESULT: %s\n' \
+    "$2" "$TEST_SID" "$ph" "$4" "$3" > "$STATE_DIR/$1"
+}
+_t75_v qa-verified qa-verifier APPROVED "$_t75_cur"
+_t75_v cohesion-reviewed critic APPROVED "$_t75_cur"
+_t75_v diff-review-complete critic APPROVED "$_t75_cur"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_ok "$_LAST_RC" "t-0075: verdicts stamped with the current approval commit"
+# Only APPROVED passes. The gate used to block on exactly BLOCKED, so a current
+# NEEDS_WORK — the Critic's word, and one QA has returned in practice — let a commit through.
+_t75_v qa-verified qa-verifier NEEDS_WORK "$_t75_cur"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_hook_blocks "$_LAST_RC" "t-0075: a current NEEDS_WORK qa-verified blocks"
+assert_contains "$_LAST_OUTPUT" "qa-verified records GATE_RESULT: NEEDS_WORK" "...and names the verdict"
+_t75_v qa-verified qa-verifier PASS "$_t75_cur"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_hook_blocks "$_LAST_RC" "t-0075: an unknown verdict word (PASS) in qa-verified blocks"
+_t75_v qa-verified qa-verifier APPROVED "$_t75_cur"
+_t75_v cohesion-reviewed critic NEEDS_WORK "$_t75_cur"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_hook_blocks "$_LAST_RC" "t-0075: a NEEDS_WORK cohesion-reviewed blocks"
+_t75_v cohesion-reviewed critic APPROVED "$_t75_cur"
+_t75_v diff-review-complete critic NEEDS_WORK "$_t75_cur"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_hook_blocks "$_LAST_RC" "t-0075: a NEEDS_WORK diff-review-complete blocks"
+_t75_v diff-review-complete critic APPROVED "$_t75_cur"
+_t75_v qa-verified qa-verifier APPROVED "0123456789abcdef"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_hook_blocks "$_LAST_RC" "t-0075: an APPROVED qa-verified from an earlier approval blocks"
+assert_contains "$_LAST_OUTPUT" "qa-verified was written before the current plan approval" "...and says why"
+_t75_v qa-verified qa-verifier APPROVED "$_t75_cur"
+_t75_v cohesion-reviewed critic APPROVED "none"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_hook_blocks "$_LAST_RC" "t-0075: an APPROVED cohesion-reviewed stamped 'none' blocks once there is an approval"
+assert_contains "$_LAST_OUTPUT" "cohesion-reviewed was written before the current plan approval" "...and names it"
+_t75_v cohesion-reviewed critic APPROVED "$_t75_cur"
+# A block binds whatever approval it followed (t-0071): a re-approval cannot void it.
+_t75_v reviewer-signed reviewer BLOCKED "0123456789abcdef"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_hook_blocks "$_LAST_RC" "t-0075: a BLOCKED reviewer verdict from an earlier approval still blocks"
+assert_contains "$_LAST_OUTPUT" "reviewer-signed records GATE_RESULT: BLOCKED" "...as the t-0071 block"
+rm -f "$STATE_DIR/reviewer-signed"
+# High-risk: a sign-off must follow the current approval too.
+stage_sandbox_file "src/auth-t75.ts" "export const a = 1;"
+_t75_v reviewer-signed reviewer APPROVED "$_t75_cur"
+_t75_v security-signed security-privacy APPROVED "$_t75_cur"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_ok "$_LAST_RC" "t-0075: current high-risk sign-offs commit"
+_t75_v reviewer-signed reviewer APPROVED "0123456789abcdef"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_hook_blocks "$_LAST_RC" "t-0075: an APPROVED reviewer-signed from an earlier approval does not sign off"
+assert_contains "$_LAST_OUTPUT" "reviewer-signed was written before the current plan approval" "...and says why"
+( cd "$SB" && git reset -q HEAD src/auth-t75.ts 2>/dev/null; rm -f src/auth-t75.ts ) || true
+rm -f "$STATE_DIR/reviewer-signed" "$STATE_DIR/security-signed"
+# Written before this change: no approval_ref. Accepted, with an advisory.
+printf 'timestamp: test\nagent: qa-verifier\nsession_id: %s\ndispatch_phase: verify\nGATE_RESULT: APPROVED\n' "$TEST_SID" > "$STATE_DIR/qa-verified"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_ok "$_LAST_RC" "t-0075: a verdict with no approval_ref (pre-change) is accepted"
+assert_contains "$_LAST_OUTPUT" "qa-verified has no approval_ref" "...with an advisory"
+printf 'timestamp: test\nagent: critic\nsession_id: %s\ndispatch_phase: review\nGATE_RESULT: APPROVED\n' "$TEST_SID" > "$STATE_DIR/cohesion-reviewed"
+printf 'timestamp: test\nagent: critic\nsession_id: %s\ndispatch_phase: review\nGATE_RESULT: APPROVED\n' "$TEST_SID" > "$STATE_DIR/diff-review-complete"
 
 # --- t-0071: the guards are high-risk by name, and a sign-off must be APPROVED ---
 ( cd "$SB" && git reset -q HEAD . 2>/dev/null ) || true

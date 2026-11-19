@@ -310,6 +310,17 @@ STATE_DIR="$(get_session_state_dir)"
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 
 TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+# The approval this verdict follows (Decision t-0075): the first 16 hex of the
+# plan-approved digest, or `none`. The commit gate counts an APPROVED verdict only
+# while plan-approved still hashes to it, so a previous work unit's verdict that
+# init could not delete does not carry over.
+APPROVAL_REF="none"
+if [ -f "$STATE_DIR/plan-approved" ]; then
+  # `|| true`: an unreadable file must not abort the hook under pipefail — the
+  # verdict is still written, stamped `unreadable`, which never matches (Critic).
+  APPROVAL_REF=$(portable_hash < "$STATE_DIR/plan-approved" 2>/dev/null | cut -c1-16) || true
+  [ -n "$APPROVAL_REF" ] || APPROVAL_REF="unreadable"
+fi
 # Session-bind state file (adversarial C1/C4/H4): embed session_id so
 # pre-commit-gates.sh can reject forged/stale files from other sessions. The
 # same resolution as STATE_DIR above, so the stamp always names the directory
@@ -681,8 +692,8 @@ if [ "$CRITIC_COMBINED" = true ]; then
 "
   fi
 
-  printf 'timestamp: %s\nagent: %s\nsession_id: %s\ndispatch_phase: %s\n%s%s\n' \
-    "$TIMESTAMP" "$AGENT_TYPE" "$STATE_SID" "${DISPATCH_PHASE:-$CURRENT_PHASE}" "$_DISPATCH_NOTE" "$COHESION_LAST" \
+  printf 'timestamp: %s\nagent: %s\nsession_id: %s\ndispatch_phase: %s\napproval_ref: %s\n%s%s\n' \
+    "$TIMESTAMP" "$AGENT_TYPE" "$STATE_SID" "${DISPATCH_PHASE:-$CURRENT_PHASE}" "$APPROVAL_REF" "$_DISPATCH_NOTE" "$COHESION_LAST" \
     > "$STATE_DIR/cohesion-reviewed" 2>/dev/null || true
 
   COMBINED_COMPLETENESS_LINE=$(echo "$COHESION_PART" | grep -E '^COMPLETENESS: ' | tail -1 || true)
@@ -696,8 +707,8 @@ if [ "$CRITIC_COMBINED" = true ]; then
 
   _capture_criteria_verdicts "$COHESION_PART"
 
-  printf 'timestamp: %s\nagent: %s\nsession_id: %s\ndispatch_phase: %s\n%s%s\n' \
-    "$TIMESTAMP" "$AGENT_TYPE" "$STATE_SID" "${DISPATCH_PHASE:-$CURRENT_PHASE}" "$_DISPATCH_NOTE" "$DIFF_REVIEW_LAST" \
+  printf 'timestamp: %s\nagent: %s\nsession_id: %s\ndispatch_phase: %s\napproval_ref: %s\n%s%s\n' \
+    "$TIMESTAMP" "$AGENT_TYPE" "$STATE_SID" "${DISPATCH_PHASE:-$CURRENT_PHASE}" "$APPROVAL_REF" "$_DISPATCH_NOTE" "$DIFF_REVIEW_LAST" \
     > "$STATE_DIR/diff-review-complete" 2>/dev/null || true
 
   COHESION_GATE_VALUE=$(echo "$COHESION_LAST" | sed 's/^GATE_RESULT: *//' | awk '{print $1}')
@@ -721,8 +732,8 @@ if [ "${_DISPATCH_LATE:-false}" = true ]; then
 "
 fi
 
-printf 'timestamp: %s\nagent: %s\nsession_id: %s\ndispatch_phase: %s\n%s%s\n' \
-  "$TIMESTAMP" "$AGENT_TYPE" "$STATE_SID" "${DISPATCH_PHASE:-$CURRENT_PHASE}" "$_DISPATCH_NOTE" "$LAST_LINE" \
+printf 'timestamp: %s\nagent: %s\nsession_id: %s\ndispatch_phase: %s\napproval_ref: %s\n%s%s\n' \
+  "$TIMESTAMP" "$AGENT_TYPE" "$STATE_SID" "${DISPATCH_PHASE:-$CURRENT_PHASE}" "$APPROVAL_REF" "$_DISPATCH_NOTE" "$LAST_LINE" \
   > "$STATE_DIR/$STATE_FILE" 2>/dev/null || true
 
 # --- Completeness capture (critic cohesion mode only) ---

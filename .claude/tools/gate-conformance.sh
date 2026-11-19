@@ -516,6 +516,28 @@ stage "docs/ai/logs/note.md" "reviewer verdict lost"
 rc=$(run_gate "pre-commit-gates.sh" "git commit -m chore-discarded")
 expect_exit 2 "$rc" "blocks while a discarded non-APPROVED verdict is on record"
 
+# t-0075: an APPROVED verdict counts only for the plan approval it followed.
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+for _d in $(_state_dirs); do
+  _ref=$(shasum -a 256 < "$_d/plan-approved" | cut -c1-16)
+  printf 'timestamp: t\nagent: qa-verifier\nsession_id: %s\ndispatch_phase: verify\napproval_ref: %s\nGATE_RESULT: APPROVED\n' "$SID" "$_ref" > "$_d/qa-verified"
+done
+stage "docs/ai/logs/note.md" "qa follows this approval"
+rc=$(run_gate "pre-commit-gates.sh" "git commit -m chore-qacurrent")
+expect_exit 0 "$rc" "allows an APPROVED qa-verified stamped with the current approval"
+
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+_put_state qa-verified "$(printf 'timestamp: t\nagent: qa-verifier\nsession_id: %s\ndispatch_phase: verify\napproval_ref: 0123456789abcdef\nGATE_RESULT: APPROVED' "$SID")"
+stage "docs/ai/logs/note.md" "qa from an earlier approval"
+rc=$(run_gate "pre-commit-gates.sh" "git commit -m chore-qastale")
+expect_exit 2 "$rc" "blocks an APPROVED qa-verified from an earlier plan approval"
+
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+_put_state qa-verified "$(printf 'timestamp: t\nagent: qa-verifier\nsession_id: %s\ndispatch_phase: verify\nGATE_RESULT: NEEDS_WORK' "$SID")"
+stage "docs/ai/logs/note.md" "qa said needs work"
+rc=$(run_gate "pre-commit-gates.sh" "git commit -m chore-qaneedswork")
+expect_exit 2 "$rc" "blocks a current NEEDS_WORK qa-verified (only APPROVED passes)"
+
 reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
 _put_state reviewer-signed "$(printf 'timestamp: t\nagent: reviewer\nsession_id: %s\ndispatch_phase: verify\nGATE_RESULT: APPROVED' "$SID")"
 _put_state security-signed "$(printf 'timestamp: t\nagent: security-privacy\nsession_id: %s\ndispatch_phase: verify\nGATE_RESULT: BLOCKED' "$SID")"
