@@ -263,6 +263,29 @@ OUT12=$( cd "$T" && bash "$VP_TOOL" --repo="$R" --base=main --suite=.claude/hook
 eq "$(field "$OUT12" total)" "pass=1 fail=0" "the staged version of a test is what runs"
 has "$OUT12" "unstaged edits" "...and the unstaged edit is flagged"
 git -C "$R" reset -q --hard HEAD
+
+# 9f. R53: a hook's stderr without a trailing newline puts the next TAP line mid-line.
+#     Those results are counted; prose that merely contains "ok" is not.
+cat > "$R/.claude/hooks/tests/test-midline.sh" <<'EOF'
+echo "ok 1 - first"
+printf 'hook said: denied'; echo "not ok 2 - second"
+printf '(override: X=1)'; echo "ok 3 - third"
+printf 'warn: '; echo "not ok - fourth"
+exit 1
+EOF
+OUT13=$( cd "$T" && bash "$VP_TOOL" --repo="$R" --base=main --suite=.claude/hooks/tests/test-midline.sh 2>&1 || true )
+eq "$(field "$OUT13" total)" "pass=2 fail=2" "TAP lines that start mid-line are counted (2/2)"
+cat > "$R/.claude/hooks/tests/test-midline.sh" <<'EOF'
+echo "ok 1 - real"
+echo "the output looks ok here"
+echo "this is not ok yet"
+echo "token ok 5 and stroke"
+echo "look - at this"
+echo "the book - nice"
+EOF
+OUT14=$( cd "$T" && bash "$VP_TOOL" --repo="$R" --base=main --suite=.claude/hooks/tests/test-midline.sh 2>&1 || true )
+eq "$(field "$OUT14" total)" "pass=1 fail=0" "prose containing 'ok' or 'not ok' is not counted"
+rm -f "$R/.claude/hooks/tests/test-midline.sh"
 eq "$(tmp_dirs)" "$TMP_BEFORE" "no throwaway checkout left behind by these runs"
 
 # --- 8. Static: the tool cannot reach the real state by construction ------------------------

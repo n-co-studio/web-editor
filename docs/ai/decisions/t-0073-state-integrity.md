@@ -64,7 +64,8 @@ passing both guards with nothing logged except the first:
    (`cat … | bash`, `source <(cat …)`, `bash < …`). `headless_approve_refused`. No code, prompt or
    headless allowlist entry runs it, so only an interactive agent could; reading, grepping, diffing,
    staging and `bash -n` of the file stay allowed. (A check inside the helper on `CLAUDE_HEADLESS`
-   was rejected: the agent controls that environment — Pragmatist.)
+   was rejected: the agent controls that environment — Pragmatist.) **Since t-0074** the helper is
+   deleted; the refusal stays, so the name is reserved.
 3. **The recover signal is the operator's.** The two plan-approval misfire messages now say to
    re-ask the question and, failing that, to ask the operator to recover from a terminal.
 

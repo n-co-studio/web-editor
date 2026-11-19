@@ -140,8 +140,6 @@
 .claude/hooks/_cleanup-helper.sh
 .claude/hooks/_commit-message-helper.sh
 .claude/hooks/_cross-session-context.sh
-.claude/hooks/_headless-plan-approve.sh
-.claude/hooks/_headless-state-write.sh
 .claude/hooks/_mechanism-helper.sh
 .claude/hooks/_mode-guard-helper.sh
 .claude/hooks/_permission-allowlist.sh
@@ -305,6 +303,7 @@ docs/ai/decisions/t-0070-answer-provenance.md
 docs/ai/decisions/t-0071-verdict-enforcement.md
 docs/ai/decisions/t-0072-contract-bound-to-approval.md
 docs/ai/decisions/t-0073-state-integrity.md
+docs/ai/decisions/t-0074-forging-helpers-removed.md
 docs/ai/decisions/t-manifest.txt
 docs/ai/eval/.gitkeep
 docs/ai/eval/_nomenclature.md

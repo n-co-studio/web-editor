@@ -239,8 +239,15 @@ run_suite() {
   done
   S_RC=0
   wait "$pid" 2>/dev/null || S_RC=$?
-  S_PASS=$(grep -c '^ok ' "$log" || true)
-  S_FAIL=$(grep -c '^not ok ' "$log" || true)
+  # A result can start mid-line: a hook's stderr without a trailing newline lands in
+  # front of it (R53). A numbered result `[not ]ok N - ` counts anywhere on a line; an
+  # unnumbered `[not ]ok - ` only at line start or after a non-word character, so
+  # "look - " or "book - " is not a pass. Prose that merely says "ok" never counts.
+  local tap total
+  tap=$( { grep -oE '(not )?ok [0-9]+ - ' "$log"; grep -oE '(^|[^[:alnum:]_])(not )?ok - ' "$log"; } || true)
+  total=$(printf '%s\n' "$tap" | grep -c 'ok' || true)
+  S_FAIL=$(printf '%s\n' "$tap" | grep -c 'not ok' || true)
+  S_PASS=$((total - S_FAIL))
 }
 
 TIMED_OUT_SUITE=""

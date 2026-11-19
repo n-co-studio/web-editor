@@ -165,7 +165,7 @@ Add a phase-aware flow management system that tracks session progress through an
 
     **Known limitation:** `SubagentStop` does NOT fire when a governance agent is resumed via `SendMessage`. Verdicts from resumed agents are lost with no error visible to the orchestrator. Workaround: always re-dispatch governance agents via the Task tool. See `docs/ai/logs/known-issues.md` R3.
 
-    **Preservation note:** `_headless-plan-approve.sh` writes `plan-approved` directly (sanctioned system auto-approval for headless plan phase) and is unaffected — it does not go through `state-writer.sh` and `plan-approved` is not subject to the `dispatch_phase:` check.
+    **Preservation note:** `_headless-plan-approve.sh` writes `plan-approved` directly (sanctioned system auto-approval for headless plan phase) and is unaffected — it does not go through `state-writer.sh` and `plan-approved` is not subject to the `dispatch_phase:` check. **Withdrawn by t-0074:** the helper was deleted (no caller remained).
 
 ## Consequences
 - `.claude/hooks/_phase-helper.sh` added (new sourced helper)

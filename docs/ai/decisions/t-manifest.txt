@@ -81,3 +81,4 @@ t-0070-answer-provenance.md
 t-0071-verdict-enforcement.md
 t-0072-contract-bound-to-approval.md
 t-0073-state-integrity.md
+t-0074-forging-helpers-removed.md

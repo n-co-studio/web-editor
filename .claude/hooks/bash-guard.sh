@@ -404,8 +404,8 @@ EOF
 }
 
 # --- Running the headless plan-approval helper (Decision t-0073) ---
-# _headless-plan-approve.sh writes plan-approved by shell I/O. No code, prompt or
-# headless-allowlist entry runs it, so an agent command that does is an interactive
+# _headless-plan-approve.sh wrote plan-approved by shell I/O; nothing ran it, and
+# t-0074 deleted it. The name stays reserved, so a re-created copy is still an
 # agent approving its own plan. Refused: any simple command naming it whose command
 # word is not a read tool (source, ., a shell, direct execution, cp/ln of it, …),
 # and any command naming it that also runs a shell, source, eval or exec anywhere
@@ -732,7 +732,7 @@ if [ "$SKIP_STATE_GUARD" = false ]; then
   fi
   if [ -n "$COMMAND" ] && _bg_runs_headless_approve "$COMMAND"; then
     log_hook_event "state-guard" "PreToolUse" "Bash" "block" "$START_MS" "headless_approve_refused"
-    echo "GATE-FINAL: _headless-plan-approve.sh writes plan-approved and is not for agent commands — plan approval is the operator's, through AskUserQuestion (Decision t-0073). (override: REPO_OS_RECOVER=1)" >&2
+    echo "GATE-FINAL: _headless-plan-approve.sh (a reserved name — it wrote plan-approved, removed by t-0074) is not for agent commands — plan approval is the operator's, through AskUserQuestion (Decision t-0073). (override: REPO_OS_RECOVER=1)" >&2
     exit 2
   fi
 

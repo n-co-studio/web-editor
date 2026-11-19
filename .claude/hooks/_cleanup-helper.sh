@@ -67,7 +67,8 @@ _SESSION_EVIDENCE_FILES="plan-approved pragmatist-signed cohesion-reviewed diff-
 # Three writers do this, and all of them are the reason a first init must not
 # clear indiscriminately:
 #   state-manager.sh      plan-approved      `source: runner` / `runner-auto`
-#   _headless-plan-approve.sh                `question_hash: headless-runner`
+#   (none since t-0074)                      `question_hash: headless-runner` — its
+#                                            writer was deleted; still accepted below
 #   _phase-helper.sh      plan-approved AND pragmatist-signed via a handoff
 #                                            bundle: `source: handoff-bundle`
 #

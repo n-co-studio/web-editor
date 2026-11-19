@@ -70,7 +70,7 @@ determined agent that edits state files by routes the guards do not see (below, 
   `_headless-plan-approve.sh` has no `CLAUDE_HEADLESS` guard and can be sourced from an
   interactive agent's Bash call, which both drops the binding and self-approves the plan (the
   latter predates t-0072). Recorded as R56; **since t-0073** bash-guard refuses any agent command
-  that sources or runs it.
+  that sources or runs it, and **since t-0074** it is deleted.
 - **The block outlives the plan-gate skip.** `REPO_OS_SKIP_PLAN_GATE=1` does not lift it (it is
   outside that `elif` chain); `REPO_OS_RECOVER=1` does.
 - **Re-approval is not free.** An approval resets the phase, so after one Critic and QA must be

@@ -1180,7 +1180,7 @@ fi
 # ============================================================
 # A2: Process — Scope Check (blocking with large-scope override)
 # Any diff over 100 lines requires large-scope: true in plan-approved.
-# Headless sessions: _headless-plan-approve.sh always writes large-scope: true.
+# Headless sessions: the runner's plan-approved carries large-scope: true.
 # Hotfix sessions: approval phase exists; interactive sessions can obtain approval.
 # ============================================================
 if [ "$SKIP_STATE" = false ] && [ -n "$STAGED_FILES" ]; then

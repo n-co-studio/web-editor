@@ -31,7 +31,7 @@ Decision 0030 built per-session state directories (`wt-sessions/{sid}/`) and wor
 
 7. **Mode guard carve-out**: `.gitignore` added to `is_governance()` in `_mode-guard-helper.sh` and carved out in template mode, since it is template-managed (REPO-OS MANAGED markers).
 
-8. **Headless plan approval helper**: `_headless-plan-approve.sh` provides shell I/O plan-approved state file writing for headless sessions where AskUserQuestion is blocked. Uses the established pattern (Decision 0014 §9) of shell I/O bypassing tool-level hooks.
+8. **Headless plan approval helper**: `_headless-plan-approve.sh` provides shell I/O plan-approved state file writing for headless sessions where AskUserQuestion is blocked. Uses the established pattern (Decision 0014 §9) of shell I/O bypassing tool-level hooks. **Withdrawn by t-0074:** deleted, no caller remained.
 
 ### What This Does NOT Change
 - Decision 0028 (subagent worktree state block) remains in effect
