@@ -658,7 +658,7 @@ if [ "$SKIP_STATE" = false ]; then
     # R13 diagnostic: distinguish "hook didn't fire" from "approval not given"
     _CURRENT_PHASE=$(get_phase)
     if [ "$_CURRENT_PHASE" = "build" ] || [ "$_CURRENT_PHASE" = "plan" ] || [ "$_CURRENT_PHASE" = "approval" ]; then
-      echo "GATE-RECOVERABLE: Phase is '$_CURRENT_PHASE' but plan-approved state file is missing — plan-approval.sh hook may not have fired after AskUserQuestion (see known-issues.md R13). NEXT: Create recovery signal (touch .claude/.state/.recover-signal) or set REPO_OS_SKIP_PLAN_GATE=1." >&2
+      echo "GATE-RECOVERABLE: Phase is '$_CURRENT_PHASE' but plan-approved state file is missing — plan-approval.sh hook may not have fired after AskUserQuestion (see known-issues.md R13). NEXT: Re-ask the plan approval question. If the hook still does not fire, stop and ask the operator to recover it from a terminal (recover signal or REPO_OS_SKIP_PLAN_GATE=1) — not for the agent to do (Decision t-0073)." >&2
     elif [ "$IS_HEADLESS" = true ]; then
       echo "GATE-RECOVERABLE: plan-approved state file missing. NEXT: Write escalation file to .claude/.automation/escalations/ with type 'governance-block'. (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
     else

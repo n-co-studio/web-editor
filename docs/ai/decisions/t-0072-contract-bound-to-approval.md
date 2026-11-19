@@ -59,7 +59,9 @@ determined agent that edits state files by routes the guards do not see (below, 
   `.claude/.state/…/plan-approved` can rewrite `contract_sha` to match a widened contract, or delete
   the line so the check skips. Neither is a write target, so neither guard refuses it, and nothing
   is logged (security review, 2026-11-18). The same route edits any state file — a BLOCKED
-  sign-off to APPROVED — so it undercuts t-0071 too. R2's class; open as R56.
+  sign-off to APPROVED — so it undercuts t-0071 too. R2's class; recorded as R56. **Since
+  t-0073** bash-guard refuses `sed -i`/`perl -i` (and other mutation verbs) on a state path;
+  interpreters and variable-built paths remain.
 - **Only `plan-approval.sh` binds, and other writers replace the file.** `plan-approved` written by
   `drift_check` / `bundle_to_plan_approved` (handoff bundle), `accept_draft_approval` (queued
   draft), `_headless-plan-approve.sh`, or the runner's `state-manager.sh` (every headless task)
@@ -67,7 +69,8 @@ determined agent that edits state files by routes the guards do not see (below, 
   the whole file, so one that runs after an interactive approval drops the binding silently.
   `_headless-plan-approve.sh` has no `CLAUDE_HEADLESS` guard and can be sourced from an
   interactive agent's Bash call, which both drops the binding and self-approves the plan (the
-  latter predates t-0072). Open as R56.
+  latter predates t-0072). Recorded as R56; **since t-0073** bash-guard refuses any agent command
+  that sources or runs it.
 - **The block outlives the plan-gate skip.** `REPO_OS_SKIP_PLAN_GATE=1` does not lift it (it is
   outside that `elif` chain); `REPO_OS_RECOVER=1` does.
 - **Re-approval is not free.** An approval resets the phase, so after one Critic and QA must be
@@ -81,8 +84,9 @@ determined agent that edits state files by routes the guards do not see (below, 
   (`.claude/.state/.recover-signal`) is reachable: `touch` is not a write target, and neither
   bash-guard nor write-guard refuses `touch .claude/.state/.recover-signal` (checked 2026-11-18;
   a redirect or the Write tool is refused). The signal lifts every state gate for the next guarded
-  call, and two gate messages tell the agent to create it (R13 recovery). This predates t-0072 and
-  applies to every state gate — known-issue R55. The use is recorded in `overrides.log`.
+  call, and two gate messages told the agent to create it (R13 recovery). This predates t-0072 and
+  applies to every state gate — known-issue R55. **Since t-0073** bash-guard refuses `touch` (and
+  any mutation) of a state path, and the messages send the operator.
 - **An unreadable contract** hashes to `unreadable`, which the gate never treats as a match — even
   against an approval that recorded `unreadable` — so it blocks.
 - **Task groups are not covered.** Their contract lives in the task-group contract YAML.

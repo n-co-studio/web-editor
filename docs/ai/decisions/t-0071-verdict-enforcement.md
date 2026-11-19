@@ -65,7 +65,8 @@ In the t-0070 unit (2026-11-18) four ways for that to happen were found, each in
    and names a `.state` path (`state_removal_protected`, `GATE-FINAL`, override
    `REPO_OS_RECOVER=1`). Its three early exits for commands with no write target ask this first.
    The hooks and the runner remove state files as processes, not agent commands, so are unaffected.
-   Operator-approved amendment, 2026-11-18.
+   Operator-approved amendment, 2026-11-18. Widened by Decision t-0073 to every mutation of a
+   state path (touch, ln, install, dd of=, in-place editors) and to the headless approval helper.
 
 The parked-question hint text (`ask-user-deny.sh`, `runner.sh`) now says the operator runs
 `queue-cli.sh answer`, which t-0070 refuses in a headless session.

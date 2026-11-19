@@ -1191,8 +1191,8 @@ assert_contains "$_LAST_OUTPUT" "pre-push-gates.sh (removed)" "t-0071: a guard r
 _t71_bg() {  # command expect(block|allow) description
   run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "$1")"
   case "$2:$_LAST_OUTPUT" in
-    block:*"removing or moving files under .claude/.state"*) _tap_pass "$3" ;;
-    allow:*"removing or moving files under .claude/.state"*) _tap_fail "$3" "refused: $1" ;;
+    block:*"changing files under .claude/.state"*|block:*"is not for agent commands"*) _tap_pass "$3" ;;
+    allow:*"changing files under .claude/.state"*|allow:*"is not for agent commands"*) _tap_fail "$3" "refused: $1" ;;
     allow:*) _tap_pass "$3" ;;
     *) _tap_fail "$3" "not refused: $1" ;;
   esac
@@ -1210,6 +1210,98 @@ _t71_bg 'unlink .claude/.state/sessions/x/verdict-discarded-critic' block "t-007
 # Documented side effect (t-0071 Known limits): the check is textual, so text that
 # merely mentions both is refused too. Pinned so a change to it is deliberate.
 _t71_bg 'git commit -m "docs: rm stale notes about .claude/.state"' block "t-0071: a commit message naming rm and .state is refused (known side effect)"
+
+# --- t-0073: any mutation of a state path, and the headless approval helper ---
+# The recover signal lifts every state gate; an in-place edit can turn a BLOCKED
+# sign-off into APPROVED or rewrite contract_sha; neither is a write target.
+_t71_bg 'touch .claude/.state/.recover-signal' block "t-0073: touch of the recover signal is refused"
+_t71_bg 'cd .claude/.state && touch .recover-signal' block "t-0073: cd into .state then touch is refused"
+_t71_bg "sed -i '' 's/BLOCKED/APPROVED/' .claude/.state/sessions/x/security-signed" block "t-0073: sed -i on a state file is refused"
+_t71_bg 'sed --in-place s/a/b/ .claude/.state/sessions/x/plan-approved' block "t-0073: sed --in-place on a state file is refused"
+_t71_bg 'perl -pi -e s/a/b/ .claude/.state/sessions/x/plan-approved' block "t-0073: perl -pi on a state file is refused"
+_t71_bg 'ln -sf /tmp/x .claude/.state/sessions/x/security-signed' block "t-0073: ln into .state is refused"
+_t71_bg 'dd if=/tmp/x of=.claude/.state/sessions/x/plan-approved' block "t-0073: dd of= a state file is refused"
+_t71_bg 'dd if=.claude/.state/sessions/x/plan-approved of=/tmp/copy' allow "t-0073: dd if= a state file (a read) is allowed"
+_t71_bg 'sed -n 1p .claude/.state/sessions/x/plan-approved' allow "t-0073: sed -n of a state file is allowed"
+_t71_bg "sed -i '' s/a/b/ src/app.ts" allow "t-0073: sed -i on a non-state file is allowed"
+_t71_bg 'touch /tmp/x; cat .claude/.state/sessions/x/plan-approved' allow "t-0073: an unrelated touch beside a .state read is allowed"
+_t71_bg 'source .claude/hooks/_headless-plan-approve.sh' block "t-0073: sourcing the headless approval helper is refused"
+_t71_bg 'bash .claude/hooks/_headless-plan-approve.sh' block "t-0073: running the headless approval helper is refused"
+_t71_bg 'git add .claude/hooks/_headless-plan-approve.sh' allow "t-0073: staging the helper file is allowed"
+# Critic round 1: path-qualified, direct, dot and eval runs of the helper; reads of
+# it; in-place flags glued to a quote; command substitution; grep/perl reads.
+_t71_bg '/bin/bash .claude/hooks/_headless-plan-approve.sh' block "t-0073: a path-qualified shell running the helper is refused"
+_t71_bg './.claude/hooks/_headless-plan-approve.sh' block "t-0073: executing the helper directly is refused"
+_t71_bg '. .claude/hooks/_headless-plan-approve.sh' block "t-0073: dot-sourcing the helper is refused"
+_t71_bg 'eval "source .claude/hooks/_headless-plan-approve.sh"' block "t-0073: eval of the helper is refused"
+_t71_bg 'bash -n .claude/hooks/_headless-plan-approve.sh' allow "t-0073: bash -n (syntax check) of the helper is allowed"
+_t71_bg 'grep -n . .claude/hooks/_headless-plan-approve.sh' allow "t-0073: grep of the helper is allowed"
+_t71_bg "sed -i'' s/a/b/ .claude/.state/sessions/x/plan-approved" block "t-0073: sed -i'' (quote glued to the flag) is refused"
+_t71_bg 'echo $(touch .claude/.state/.recover-signal)' block "t-0073: touch inside \$(...) is refused"
+_t71_bg '/usr/bin/touch .claude/.state/.recover-signal' block "t-0073: a path-qualified touch is refused"
+_t71_bg 'mkdir .claude/.state/.recover-signal' block "t-0073: mkdir of the recover signal is refused"
+_t71_bg 'grep -n "install" .claude/.state/sessions/x/log' allow "t-0073: grep for a verb word in a state file is allowed"
+_t71_bg 'perl -Mstrict -ne print .claude/.state/sessions/x/plan-approved' allow "t-0073: perl -M (not -i) reading a state file is allowed"
+# Security round 1: payloads built with jq, as Claude Code sends them (a newline is
+# \n inside the JSON — the shared fixture does not escape it). Wrappers, multi-line
+# and piped forms, cd/pushd routes, and the helper fed to a shell.
+_t73_bgj() {  # command expect(block|allow) description
+  run_hook_rc "bash-guard.sh" "$(jq -nc --arg c "$1" '{tool_name:"Bash",session_id:"t",tool_input:{command:$c,description:"probe"}}')"
+  case "$2:$_LAST_OUTPUT" in
+    block:*"changing files under .claude/.state"*|block:*"is not for agent commands"*|block:*".claude/.state/ is write-protected"*) _tap_pass "$3" ;;
+    allow:*"changing files under .claude/.state"*|allow:*"is not for agent commands"*|allow:*".claude/.state/ is write-protected"*) _tap_fail "$3" "refused: $1" ;;
+    allow:*) _tap_pass "$3" ;;
+    *) _tap_fail "$3" "not refused: $1" ;;
+  esac
+}
+_t73_bgj $'echo hi\ntouch .claude/.state/.recover-signal' block "t-0073: a touch on the second line of a command is refused"
+_t73_bgj $'echo hi\nrm .claude/.state/sessions/x/security-signed' block "t-0073: an rm on the second line is refused (t-0071 too)"
+_t73_bgj $'touch\t.claude/.state/.recover-signal' block "t-0073: a tab-separated touch is refused"
+_t73_bgj 'cp /dev/null .claude/.state/.recover-signal' block "t-0073: cp onto the recover signal is refused"
+_t73_bgj 'rsync /dev/null .claude/.state/.recover-signal' block "t-0073: rsync onto the recover signal is refused"
+_t73_bgj 'env FOO=1 touch .claude/.state/.recover-signal' block "t-0073: touch behind env VAR=… is refused"
+_t73_bgj 'sudo -u root touch .claude/.state/.recover-signal' block "t-0073: touch behind sudo -u is refused"
+_t73_bgj 'timeout 5 touch .claude/.state/.recover-signal' block "t-0073: touch behind timeout is refused"
+_t73_bgj "bash -c 'touch .claude/.state/.recover-signal'" block "t-0073: touch inside bash -c is refused"
+_t73_bgj 'echo .claude/.state/.recover-signal | xargs touch' block "t-0073: a state path piped to xargs touch is refused"
+_t73_bgj 'pushd .claude/.state && touch .recover-signal' block "t-0073: pushd into .state then touch is refused"
+_t73_bgj 'cd .claude/.state && : > .recover-signal' block "t-0073: cd into .state then a redirect is refused"
+_t73_bgj 'perl -0pi -e s/a/b/ .claude/.state/sessions/x/plan-approved' block "t-0073: perl -0pi on a state file is refused"
+_t73_bgj 'cat .claude/hooks/_headless-plan-approve.sh | bash' block "t-0073: the helper piped into a shell is refused"
+_t73_bgj 'source <(cat .claude/hooks/_headless-plan-approve.sh)' block "t-0073: the helper via process substitution is refused"
+_t73_bgj 'bash < .claude/hooks/_headless-plan-approve.sh' block "t-0073: the helper on a shell's stdin is refused"
+_t73_bgj $'echo\n. .claude/hooks/_headless-plan-approve.sh' block "t-0073: the helper dot-sourced on a second line is refused"
+# Round 2 (Critic, reviewer, security): a redirect after cd into .state even from a
+# read tool; yq -i; a brace group carrying a fake "command": marker (only the raw
+# payload is decoded); a padded command (no pipe into grep -q); a $(…)-built state
+# path (split both with and without parentheses); a state path piped into a shell.
+_t73_bgj 'cd .claude/.state && echo x > .recover-signal' block "t-0073: cd into .state then echo > is refused (read tool or not)"
+_t73_bgj "yq -i '.a=1' .claude/.state/sessions/x/plan-approved" block "t-0073: yq -i on a state file is refused"
+_t73_bgj "{ touch .claude/.state/.recover-signal; echo '\"command\":\"x\"'; }" block "t-0073: a fake \"command\" marker does not hide a touch"
+_t73_bgj "rm .claude/.state/sessions/x/security-signed; echo $(printf '%070000d' 0)" block "t-0073: a 70KB command does not hide an rm"
+_t73_bgj 'touch "$(git rev-parse --show-toplevel)/.claude/.state/.recover-signal"' block "t-0073: touch of a \$(…)-built state path is refused"
+_t73_bgj 'cd "$(git rev-parse --show-toplevel)/.claude/.state" && touch .recover-signal' block "t-0073: cd into a \$(…)-built state path then touch is refused"
+_t73_bgj 'echo touch .claude/.state/.recover-signal | sh' block "t-0073: a state path piped into a shell is refused"
+_t73_bgj 'jq . x | sponge .claude/.state/sessions/x/plan-approved' block "t-0073: sponge onto a state file is refused"
+_t73_bgj 'cd .claude/.state && cat sessions/x/plan-approved 2>&1' allow "t-0073: cd into .state then a read with 2>&1 is allowed"
+_t73_bgj 'ls "$(git rev-parse --show-toplevel)/.claude/.state"' allow "t-0073: ls of a \$(…)-built state path is allowed"
+# Round 3: a backslash-newline continuation, and separators inside $(…).
+_t73_bgj $'touch \\\n.claude/.state/.recover-signal' block "t-0073: a touch continued onto the next line is refused"
+_t73_bgj 'touch "$(cd .. && pwd)/.claude/.state/.recover-signal"' block "t-0073: && inside \$(…) does not split a touch from its state path"
+_t73_bgj 'echo "$(date; whoami)" && cat .claude/.state/sessions/x/plan-approved' allow "t-0073: ; inside \$(…) beside a state read is allowed"
+# Round 4: after an even run of backslashes, or in a comment, the newline is a real
+# separator — checked unjoined as well as joined.
+_t73_bgj $'echo a \\\\\ntouch .claude/.state/.recover-signal' block "t-0073: touch after an escaped backslash at line end is refused"
+_t73_bgj $'echo hi # c \\\ntouch .claude/.state/.recover-signal' block "t-0073: touch after a comment ending in a backslash is refused"
+_t73_bgj 'chmod 000 .claude/.state/sessions/x/plan-approved' block "t-0073: chmod of a state file is refused"
+_t73_bgj 'install /dev/null .claude/.state/.recover-signal' block "t-0073: install onto the recover signal is refused"
+_t73_bgj 'touch /tmp/x; cat .claude/.state/sessions/x/plan-approved' allow "t-0073: (jq payload) an unrelated touch beside a state read is allowed"
+_t73_bgj 'grep -n "install" .claude/.state/sessions/x/log' allow "t-0073: (jq payload) grep of a verb word in a state file is allowed"
+# The plan-approval misfire messages no longer tell the agent to create the signal:
+# no NEXT: line names the signal's path.
+# (grep -c exits 1 on a zero count — the passing case — so it must not abort the suite.)
+_t73_misfire=$( { grep -c 'NEXT:.*\.recover-signal' "$_HOOKS_DIR/bash-guard.sh" "$_HOOKS_DIR/pre-commit-gates.sh" || true; } | awk -F: '{s+=$2} END {print s+0}')
+assert_eq "$_t73_misfire" "0" "t-0073: no gate message tells the agent to create the recover signal"
 ( cd "$SB" && git reset -q HEAD . 2>/dev/null ) || true
 stage_sandbox_file "src/auth-t71.ts" 'export const a = 1;'
 printf 'timestamp: test\nagent: reviewer\nsession_id: %s\ndispatch_phase: verify\nGATE_RESULT: APPROVED\n' "$TEST_SID" > "$STATE_DIR/reviewer-signed"

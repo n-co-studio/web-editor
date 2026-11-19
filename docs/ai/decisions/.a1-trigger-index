@@ -1,7 +1,7 @@
 # A1 trigger index — generated artifact. Do not hand-edit.
 # Regenerate: bash .claude/.automation/lib/rebuild-trigger-index.sh
 # format: 2
-# digest: 6b2776bd473ba452364a07b4bda3014487d6325e479f970ec73c6696cfdfaea1
+# digest: 86c1b3c45613ea0120b773829edf2f10102ba6db6a23187b8c8186e8d1c8983b
 0001AI\.mdprompt system, verification gate, session-based
 0001docs/ai/prompts/prompt-.*\.mdprompt system, verification gate, session-based
 0002docs/ai/decisions/.*\.mdmandatory, commit-blocking
@@ -155,6 +155,7 @@
 0070\.claude/\.automation/lib/question-channel\.shanswered_via, answered_session, qc_stamp_answer, Questions-Guard, questions_path_protected
 0071\.claude/hooks/state-writer\.shverdict-discarded, A5_completeness_unscored, signoff_not_approved, GUARD_PATH_PATTERN, _bg_is_state_removal
 0072\.claude/hooks/plan-approval\.shcontract_sha, contract_previous_sha, contract_changed_since_approval
+0073\.claude/hooks/_headless-plan-approve\.sh_bg_is_state_mutation, _bg_runs_headless_approve, state_mutation_protected, headless_approve_refused
 0001AI\.mdprompt system, verification gate, session-based
 0001docs/ai/prompts/prompt-.*\.mdprompt system, verification gate, session-based
 0002docs/ai/decisions/.*\.mdmandatory, commit-blocking

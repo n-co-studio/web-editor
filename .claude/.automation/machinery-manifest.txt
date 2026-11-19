@@ -304,6 +304,7 @@ docs/ai/decisions/t-0069-governance-close-commits.md
 docs/ai/decisions/t-0070-answer-provenance.md
 docs/ai/decisions/t-0071-verdict-enforcement.md
 docs/ai/decisions/t-0072-contract-bound-to-approval.md
+docs/ai/decisions/t-0073-state-integrity.md
 docs/ai/decisions/t-manifest.txt
 docs/ai/eval/.gitkeep
 docs/ai/eval/_nomenclature.md

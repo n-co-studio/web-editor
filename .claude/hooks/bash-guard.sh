@@ -271,17 +271,166 @@ _bg_is_write_candidate() {
   [[ "$input" == *'"file_path"'* ]] || [[ "$input" == *'>'* ]] || [[ "$input" == *'tee '* ]]
 }
 
-# --- Removal/move of a .state path (Decision t-0071) ---
-# 0 if the text runs a removal or move verb and names a .state path. These are not
-# write targets, so the two early exits below would wave them through; both ask
-# this first, and Phase 8 refuses. Works on the raw payload or the command (a
-# JSON-escaped quote may follow the path). The glob test keeps the fast path cheap.
-_bg_is_state_removal() {
+# --- Mutation of a .state path (Decisions t-0071, t-0073) ---
+# 0 if the text changes a .state path by a route that is not a write target, so
+# the three early exits below would wave it through; they ask this first, and
+# Phase 8 refuses. The glob test keeps the fast path cheap. Text-based: an
+# interpreter, a variable-built or quote-split path or verb, or a sourced function
+# is not seen (R2).
+#   - delete/move verbs (t-0071): anywhere in the command, so
+#     `cd .claude/.state && rm x` counts;
+#   - dd: when its of= target is a .state path (dd if= is a read);
+#   - after a cd/pushd into .state: a redirect (other than to /dev/null or N>&M),
+#     tee or dd of= — relative targets land there, whatever the command word;
+#   - in-place editors (sed/gsed -i in any spelling, perl -…i…) and the words
+#     touch ln install ed ex mkdir chmod cp rsync (t-0073): in a simple command
+#     that names a .state path, or anywhere after a cd/pushd into .state. A word
+#     anywhere in the simple command counts — so wrappers (sudo -u x, env A=1,
+#     nice, timeout 5, bash -c '…', find -exec, xargs, if/then, { }) do not hide
+#     it — unless the command word is a read tool (grep, cat, git, echo, …), so
+#     `grep install .claude/.state/log` and `touch /tmp/x; cat .claude/.state/y`
+#     stay allowed.
+# Every grep reads a here-string, not a pipe: under pipefail, `printf … | grep -q`
+# can report failure when grep exits before printf finishes (Critic).
+_BG_STATE_PATH='\.state([/[:space:];&|)"'"'"'\\]|$)'
+_BG_REMOVE_VERBS='(^|[^A-Za-z0-9_.-])['"'"'"\\]*(rm|unlink|rmdir|truncate|shred|mv)['"'"'"\\]*([[:space:]]|$)|[[:space:]]-delete([[:space:];&|)"\\]|$)|git[[:space:]]+clean'
+_BG_MUTATE_WORDS='(^|[^A-Za-z0-9_.-])['"'"'"\\]*(touch|ln|install|ed|ex|mkdir|chmod|cp|rsync|sponge)['"'"'"\\]*([[:space:]]|$)'
+_BG_INPLACE='(^|[^A-Za-z0-9_.-])g?sed[[:space:]]([^;&|]*[[:space:]])?(-i|--in-place|-[A-Za-z]*i[A-Za-z]*)([[:space:]=.'"'"'"]|$)|(^|[^A-Za-z0-9_.-])perl[[:space:]]([^;&|]*[[:space:]])?-[0-9a-hj-ln-zA-LN-Z]*i|(^|[^A-Za-z0-9_.-])yq[[:space:]]([^;&|]*[[:space:]])?(-i|--inplace)([[:space:]=]|$)'
+# A state path piped into a shell (`echo touch .claude/.state/x | sh`).
+_BG_PIPE_SHELL='\|[[:space:]]*((sudo|env|command|exec)[[:space:]]+)*([^[:space:]]*/)?(bash|sh|zsh|ksh|dash)([[:space:]]|$)'
+# yq is not here: `yq -i` edits in place (reviewer).
+_BG_READ_CMD='^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*([^[:space:]]*/)?(grep|egrep|fgrep|rg|cat|ls|head|tail|less|more|wc|diff|cmp|jq|file|stat|echo|printf|git|test|\[|shellcheck)([[:space:]]|$)|^[[:space:]]*([^[:space:]]*/)?bash[[:space:]]+-n([[:space:]]|$)'
+_BG_SHELL_WORD='(^|[^A-Za-z0-9_.-])(bash|sh|zsh|ksh|dash|source|eval|exec)([[:space:]]|$)|(^|[;&|(`[:space:]])\.[[:space:]]'
+_BG_INTO_STATE='(^|[^A-Za-z0-9_.-])(cd|pushd)[[:space:]]+[^;&|]*\.state'
+_BG_WRITES_HERE='>|(^|[^A-Za-z0-9_.-])tee([[:space:]]|$)|(^|[^A-Za-z0-9_.-])dd[[:space:]][^;&|]*of='
+
+# The command split into simple commands, one per line — twice: at newline ; & |
+# (so a $(…) path stays with its verb: `touch "$(pwd)/.claude/.state/x"`, security
+# review), and again also at ( and backtick (so `echo $(touch …)` is its own
+# command). Both sets are checked. `>&` is kept whole so `2>&1` is not split at its
+# `&`. With "raw", $1 is the PreToolUse payload (the
+# early exits run before it is parsed): the command is decoded with jq — a newline
+# sent as \n must split like one, and the JSON around the command must not glue
+# onto its words (security review). Without jq, the escapes are undone by hand.
+# A decoded command is never decoded again: a brace group with a fake
+# "command": " marker must not hide what precedes it (Critic).
+_bg_decode() {  # text [raw] — the command itself
+  local s="$1" d=""
+  if [ "${2:-}" = raw ]; then
+    d=$(jq -r '.tool_input.command // empty' <<<"$s" 2>/dev/null) || d=""
+    if [ -n "$d" ]; then
+      s="$d"
+    else
+      s="${s//\\n/$'\n'}"; s="${s//\\r/$'\n'}"; s="${s//\\t/ }"; s="${s//\\\"/\"}"
+    fi
+  fi
+  printf '%s' "$s"
+}
+_bg_simple_commands() {  # decoded command
+  # Checked twice — as written, and with every backslash-newline joined. A
+  # continuation (`touch \⏎.claude/.state/x`) is one command only joined; after an
+  # even run of backslashes or in a `#` comment the newline is a real separator
+  # (`echo a \\⏎touch …`), seen only unjoined (security). An extra reading can only
+  # refuse more, so neither the backslash count nor comments need parsing.
+  _bg_split_once "$1"
+  _bg_split_once "${1//\\$'\n'/ }"
+}
+_bg_split_once() {
+  local s="$1" flat
+  s="${s//>&/>%FD%}"
+  # First split: separators inside $(…) or `…` belong to the substitution, not the
+  # command — `touch "$(cd .. && pwd)/.claude/.state/x"` is one command (security).
+  flat=$(awk '{
+    out = ""; n = length($0)
+    for (i = 1; i <= n; i++) {
+      c = substr($0, i, 1)
+      if (c == "`") bt = !bt
+      else if (c == "(" && (p == "$" || d > 0)) d++
+      else if (c == ")" && d > 0) d--
+      else if ((d > 0 || bt) && (c == ";" || c == "&" || c == "|")) c = " "
+      out = out c; p = c
+    }
+    print out
+  }' <<<"$s")
+  tr ';&|' '\n\n\n' <<<"$flat"
+  tr ';&|(`' '\n\n\n\n\n' <<<"$s"
+}
+
+_bg_is_state_mutation() {  # text [raw]
   # Under the state-guard override Phase 8 refuses nothing, so keep the early exits.
   [ "${SKIP_STATE_GUARD:-false}" = false ] || return 1
   [[ "$1" == *'.state'* ]] || return 1
-  printf '%s' "$1" | grep -qE '\.state([/[:space:];&|)"'"'"'\\]|$)' \
-    && printf '%s' "$1" | grep -qE '(^|[^A-Za-z0-9_.-])['"'"'"\\]*(rm|unlink|rmdir|truncate|shred|mv)['"'"'"\\]*([[:space:]]|$)|[[:space:]]-delete([[:space:];&|)"\\]|$)|git[[:space:]]+clean'
+  local text cmds seg into_state=false
+  text=$(_bg_decode "$1" "${2:-}")
+  cmds=$(_bg_simple_commands "$text")
+  if grep -qE "$_BG_STATE_PATH" <<<"$cmds" && grep -qE "$_BG_REMOVE_VERBS" <<<"$cmds"; then
+    return 0
+  fi
+  if grep -qE '(^|[^A-Za-z0-9_.-])dd[[:space:]][^;&|]*of=[^[:space:];&|]*\.state' <<<"$cmds"; then
+    return 0
+  fi
+  grep -qE "$_BG_INTO_STATE" <<<"$cmds" && into_state=true
+  # A state path piped into a shell runs whatever names it.
+  if grep -qE "$_BG_STATE_PATH" <<<"$text" && grep -qE "$_BG_PIPE_SHELL" <<<"$text"; then
+    return 0
+  fi
+  # xargs takes its targets from the pipe, so a state path anywhere in the command
+  # (`echo .claude/.state/x | xargs touch`) is its target.
+  if grep -qE "$_BG_STATE_PATH" <<<"$cmds" \
+     && grep -E '(^|[^A-Za-z0-9_.-])xargs[[:space:]]' <<<"$cmds" | grep -E "$_BG_INPLACE|$_BG_MUTATE_WORDS" >/dev/null; then
+    return 0
+  fi
+  while IFS= read -r seg; do
+    [ -n "$seg" ] || continue
+    # After a cd into .state a relative redirect, tee or dd of= writes there — read
+    # tool or not (`cd .claude/.state && echo x > .recover-signal`, reviewer).
+    if [ "$into_state" = true ]; then
+      local _w="$seg"
+      _w=$(sed -E 's/[0-9]*>%FD%[0-9-]+//g; s/[0-9]*>>?[[:space:]]*\/dev\/null//g' <<<"$_w")
+      if grep -qE "$_BG_WRITES_HERE" <<<"$_w"; then
+        return 0
+      fi
+    fi
+    grep -qE "$_BG_READ_CMD" <<<"$seg" && continue
+    if grep -qE "$_BG_INPLACE|$_BG_MUTATE_WORDS" <<<"$seg"; then
+      if [ "$into_state" = true ] || grep -qE "$_BG_STATE_PATH" <<<"$seg"; then
+        return 0
+      fi
+    fi
+  done <<EOF
+$cmds
+EOF
+  return 1
+}
+
+# --- Running the headless plan-approval helper (Decision t-0073) ---
+# _headless-plan-approve.sh writes plan-approved by shell I/O. No code, prompt or
+# headless-allowlist entry runs it, so an agent command that does is an interactive
+# agent approving its own plan. Refused: any simple command naming it whose command
+# word is not a read tool (source, ., a shell, direct execution, cp/ln of it, …),
+# and any command naming it that also runs a shell, source, eval or exec anywhere
+# (`cat helper | bash`, `source <(cat helper)`). Reading, grepping, diffing,
+# staging or `bash -n` of the file stay allowed.
+_bg_runs_headless_approve() {  # text [raw]
+  [ "${SKIP_STATE_GUARD:-false}" = false ] || return 1
+  [[ "$1" == *'_headless-plan-approve'* ]] || return 1
+  local cmds seg
+  cmds=$(_bg_simple_commands "$(_bg_decode "$1" "${2:-}")")
+  while IFS= read -r seg; do
+    [ -n "$seg" ] || continue
+    grep -qE "$_BG_READ_CMD" <<<"$seg" && continue
+    if [[ "$seg" == *'_headless-plan-approve'* ]] || grep -qE "$_BG_SHELL_WORD" <<<"$seg"; then
+      return 0
+    fi
+  done <<EOF
+$cmds
+EOF
+  return 1
+}
+
+# Either check above: the early exits must not wave these through.
+_bg_needs_state_check() {  # text [raw]
+  _bg_is_state_mutation "$1" "${2:-}" || _bg_runs_headless_approve "$1" "${2:-}"
 }
 
 # --- Phase 1d: Inter-session governance version check (Decision 0041) ---
@@ -367,7 +516,7 @@ fi
 # queue-cli.sh calls go on to the Prompt T draft self-approval check (t-0067):
 # they write no files, so nothing else here would look at them.
 if [ "$_TG_MERGE_BLOCK" = false ] && ! _bg_is_write_candidate "$INPUT" \
-   && [[ "$INPUT" != *'queue-cli.sh'* ]] && ! _bg_is_state_removal "$INPUT"; then
+   && [[ "$INPUT" != *'queue-cli.sh'* ]] && ! _bg_needs_state_check "$INPUT" raw; then
   exit 0
 fi
 
@@ -489,7 +638,7 @@ fi
 # Phase 5: Fast-exit for no-write-target Bash (post-sourcing)
 # ============================================================
 # Commands that triggered Gate 7 detection but weren't blocked land here.
-if ! _bg_is_write_candidate "$INPUT" && ! _bg_is_state_removal "$INPUT"; then
+if ! _bg_is_write_candidate "$INPUT" && ! _bg_needs_state_check "$INPUT" raw; then
   log_hook_event "bash-guard" "PreToolUse" "Bash" "allow" "$START_MS" "bash_no_write_target"
   exit 0
 fi
@@ -531,7 +680,7 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
       break
     fi
   done <<< "$WRITE_TARGETS"
-  if [ "$HAS_INREPO_WRITE" = false ] && ! _bg_is_state_removal "$COMMAND"; then
+  if [ "$HAS_INREPO_WRITE" = false ] && ! _bg_needs_state_check "$COMMAND"; then
     log_hook_event "bash-guard" "PreToolUse" "Bash" "allow" "$START_MS" "bash_out_of_repo"
     exit 0
   fi
@@ -568,16 +717,22 @@ if [ "$SKIP_STATE_GUARD" = false ]; then
     done <<< "$WRITE_TARGETS"
   fi
 
-  # --- Removal and move verbs (Decision t-0071) ---
-  # The loop above sees write targets only. The commit gate now blocks on files
-  # being PRESENT (a BLOCKED sign-off, a verdict-discarded marker), so deleting or
-  # moving one would let a commit through. Text-based, like the indirect check
-  # below: a command that runs a removal/move verb and names a .state path is
-  # refused. The hooks and the runner remove state files as processes, not as
-  # agent commands, so they never reach this.
-  if [ "$TARGETS_STATE" = false ] && [ -n "$COMMAND" ] && _bg_is_state_removal "$COMMAND"; then
-    log_hook_event "state-guard" "PreToolUse" "Bash" "block" "$START_MS" "state_removal_protected"
-    echo "GATE-FINAL: removing or moving files under .claude/.state/ is refused — the commit gate reads them, and a deleted verdict is a skipped one (Decision t-0071). The check is textual: a delete/move verb plus a .state path in one command. If .state is only read or mentioned (e.g. text written via a heredoc), run the delete/move separately, or write the text with the Write tool and commit with git commit -F. (override: REPO_OS_RECOVER=1)" >&2
+  # --- Mutation verbs (Decisions t-0071, t-0073) ---
+  # The loop above sees write targets only. Deleting, moving, touching, linking
+  # or editing in place a state file are not write targets — and the commit gate
+  # blocks on files being PRESENT (a BLOCKED sign-off, a verdict-discarded
+  # marker), reads their content (contract_sha, GATE_RESULT), and the recover
+  # signal lifts every state gate. Text-based, like the indirect check below.
+  # The hooks and the runner change state files as processes, not as agent
+  # commands, so they never reach this.
+  if [ "$TARGETS_STATE" = false ] && [ -n "$COMMAND" ] && _bg_is_state_mutation "$COMMAND"; then
+    log_hook_event "state-guard" "PreToolUse" "Bash" "block" "$START_MS" "state_mutation_protected"
+    echo "GATE-FINAL: changing files under .claude/.state/ from an agent command is refused (delete, move, touch, link, dd of=, in-place edit) — the gates read them, and the recover signal there switches them off (Decisions t-0071, t-0073). The check is textual: if .state is only read or mentioned, run the other command separately, or write text with the Write tool and commit with git commit -F. The recover signal is the operator's to create, from a terminal. (override: REPO_OS_RECOVER=1)" >&2
+    exit 2
+  fi
+  if [ -n "$COMMAND" ] && _bg_runs_headless_approve "$COMMAND"; then
+    log_hook_event "state-guard" "PreToolUse" "Bash" "block" "$START_MS" "headless_approve_refused"
+    echo "GATE-FINAL: _headless-plan-approve.sh writes plan-approved and is not for agent commands — plan approval is the operator's, through AskUserQuestion (Decision t-0073). (override: REPO_OS_RECOVER=1)" >&2
     exit 2
   fi
 
@@ -828,7 +983,7 @@ if [ "$ALLOW_REASON" = "pass" ]; then
             echo "GATE-RECOVERABLE: Session in 'drift-check' phase — Bash writes blocked. NEXT: source .claude/hooks/_analytics-helper.sh and _phase-helper.sh, then call drift_check. On return 0: advance_phase \"build\" (skips plan/approval). On non-zero return: advance_phase \"plan\" and use the legacy AskUserQuestion flow. (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
           elif [ ! -f "$(get_session_state_dir)/plan-approved" ] && \
              { [ "$CURRENT_PHASE" = "plan" ] || [ "$CURRENT_PHASE" = "approval" ]; }; then
-            echo "GATE-RECOVERABLE: Session in '$CURRENT_PHASE' phase and plan-approved state file is missing — plan-approval.sh hook may not have fired after AskUserQuestion (see known-issues.md R13). NEXT: Create recovery signal (touch .claude/.state/.recover-signal) or set REPO_OS_SKIP_PLAN_GATE=1." >&2
+            echo "GATE-RECOVERABLE: Session in '$CURRENT_PHASE' phase and plan-approved state file is missing — plan-approval.sh hook may not have fired after AskUserQuestion (see known-issues.md R13). NEXT: Re-ask the plan approval question. If the hook still does not fire, stop and ask the operator to recover it from a terminal (recover signal or REPO_OS_SKIP_PLAN_GATE=1) — not for the agent to do (Decision t-0073)." >&2
           else
             echo "GATE-RECOVERABLE: Session in '$CURRENT_PHASE' phase — Bash writes blocked until plan approved. NEXT: Call AskUserQuestion with your plan summary. Include options: \"Auto — proceed autonomously\" and \"Review — pause for my review before commit\". Conversational confirmation does NOT trigger the approval hook. (override: REPO_OS_SKIP_PLAN_GATE=1)" >&2
           fi

@@ -540,6 +540,15 @@ rc=$(run_gate "bash-guard.sh" "/bin/rm -f .claude/.state/sessions/$SID/reviewer-
 expect_exit 2 "$rc" "bash-guard refuses a path-qualified rm under .state"
 rc=$(run_gate "bash-guard.sh" "cat .claude/.state/sessions/$SID/security-signed")
 expect_exit 0 "$rc" "bash-guard allows reading a state file"
+# t-0073: the recover signal and in-place edits are not write targets either.
+rc=$(run_gate "bash-guard.sh" "touch .claude/.state/.recover-signal")
+expect_exit 2 "$rc" "bash-guard refuses touch of the recover signal"
+rc=$(run_gate "bash-guard.sh" "sed -i s/BLOCKED/APPROVED/ .claude/.state/sessions/$SID/security-signed")
+expect_exit 2 "$rc" "bash-guard refuses sed -i on a state file"
+# A newline inside the command arrives JSON-escaped; run_gate's printf builds the
+# payload, so \n here is the two characters, as in a real payload.
+rc=$(run_gate "bash-guard.sh" 'echo hi\ntouch .claude/.state/.recover-signal')
+expect_exit 2 "$rc" "bash-guard refuses a touch of the recover signal on a second line"
 
 printf '\n## the contract is the one the operator approved (t-0072)\n'
 # Independent digest (SHA-256, first 16 hex) -- not the hooks' portable_hash.
