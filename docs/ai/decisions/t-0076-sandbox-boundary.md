@@ -102,8 +102,19 @@ run outside it, so they still record verdicts; Write and Edit stay under `write-
   refuses writes to `.claude/agents/*` from sandboxed commands, even inside `.worktrees/`. The
   runner (outside the sandbox) is unaffected.
 - **`ps` and `pgrep` are refused for agent commands.** Hooks are unaffected.
-- **child-sync after an agent's push** runs inside that `git push`, so it cannot pull the
-  operator's local clones (children still update on GitHub). Run it from a terminal, or push from one.
+- **An agent cannot merge a change to `.claude/hooks/`.** Claude Code protects that directory
+  from every sandboxed command, git included: a commit works (it writes `.git`), but `git checkout`
+  and `git merge` must rewrite the hook files and fail. Found closing t-0076 itself, whose merge the
+  operator ran from a terminal (`git checkout -f main && git merge --no-ff …`). A unit that changes
+  a hook ends with that operator step; one that does not can be merged by the agent.
+- **Live `claude -p` checks are the operator's.** bash-guard refuses an agent spawning `claude`, so
+  e.g. `.claude/tools/smoke-claude-continue-false.sh` (R51(a)) is run from a terminal.
+- **child-sync after an agent's push does nothing.** It runs inside that `git push`, so it can
+  neither trigger the children's sync workflows (all three triggers failed on 2026-11-19,
+  "check SOURCE_REPO_TOKEN" — the token is fine; the call cannot be made from the sandbox) nor pull
+  the operator's local clones. An earlier version of this line said the children still updated on
+  GitHub; they do not. After an agent's push, run
+  `bash .claude/.automation/lib/child-sync.sh` from a terminal, or push from one.
 - **The mode guard refuses `$TMPDIR` write targets** (unresolved variable) while the sandbox says
   to use `$TMPDIR`; use the literal path (`/tmp/claude-<uid>`).
 - **Write and Edit are outside the sandbox.** They are governed by `write-guard.sh` and Claude

@@ -172,6 +172,10 @@ is_carved_out() {
         docs/ai/knowledge-graph/product-graph.yaml) return 0 ;;
         docs/ai/knowledge-graph/coverage.yaml) return 0 ;;
         .claude/agents/custom/*) return 0 ;;  # custom agent namespace — operator-writable in child mode
+        # The session's own task contract (t-0077): a child's headless queue run writes
+        # it before drift_check, and without it A6 and the Critic have no criteria.
+        # One fixed path, as in template mode — not .claude/local/* (Decision 0012).
+        .claude/local/task-contract.yaml) return 0 ;;
         *) return 1 ;;
       esac
       ;;

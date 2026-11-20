@@ -164,7 +164,7 @@ clear_session_evidence() {
     # init_phase continues. In this repo that token and that outcome accompany an
     # actual refusal (hooks block on exit 2 only), so using them here would both
     # mislead a reader and break the pairing with the real blocking events.
-    echo "WARNING: $_cse_what could NOT clear some evidence — most likely it records a different session_id, which _delete_if_owned correctly refuses to delete. Whether the next work unit inherits it depends on which id the commit gate resolves; it may be inherited. NEXT: inspect $state_dir and remove the stale files by hand if they are not another live session's. Files: $skipped" >&2
+    echo "WARNING: $_cse_what could NOT clear some evidence — either it records a different session_id, which _delete_if_owned correctly refuses to delete, or the operator's Bash sandbox denies the delete (Decision t-0076). Either way an APPROVED verdict stamped for an earlier plan approval does not count at the commit gate (t-0075), so a new approval and fresh reviews are what this work unit needs. If you are outside the sandbox and the files are not another live session's, they can be removed by hand from $state_dir. Files: $skipped" >&2
     log_hook_event "clear-session-evidence" "init_phase" "" "advisory" "0" "$_cse_skip_reason" "$skipped" 2>/dev/null || true
   fi
   return 0

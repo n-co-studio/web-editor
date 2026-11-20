@@ -84,3 +84,4 @@ t-0073-state-integrity.md
 t-0074-forging-helpers-removed.md
 t-0075-verdict-bound-to-approval.md
 t-0076-sandbox-boundary.md
+t-0077-stop-denies-and-child-contract.md

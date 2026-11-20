@@ -13,8 +13,9 @@
 #
 # Reads the per-entry control directory for THIS session's entry. If the
 # operator has set STOP (or FORCE), returns
-# {"continue": false, "stopReason": "..."} so the run ends at a tool boundary —
-# no partial edit, no half-written file. The session is NOT deleted: it stays
+# {"continue": false, "stopReason": "...", "hookSpecificOutput": {… "deny" …}}
+# so the run ends at a tool boundary — the interrupted call is denied, not run
+# (t-0077) — no partial edit, no half-written file. The session is NOT deleted: it stays
 # resumable by its claude_session_id (`queue-cli.sh resume-entry`).
 #
 # Inert unless all three hold, so the common path costs one env read:
@@ -108,6 +109,9 @@ _oc_stop_reason="${_oc_stop_reason//$'\t'/ }"
 cat > /dev/null 2>&1 || true
 
 log_hook_event "operator-control" "PreToolUse" "" "block" "$_OC_START_MS" "operator_stop_$_oc_flag" "" "$_oc_entry" 2>/dev/null || true
-printf '{"continue": false, "stopReason": "%s"}\n' "$_oc_stop_reason"
+# The deny is what keeps the interrupted call from running: continue:false alone
+# ends the run only after that call executes (live smoke test, R61; t-0077). It
+# is the shape the question park uses.
+printf '{"continue": false, "stopReason": "%s", "hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "%s"}}\n' "$_oc_stop_reason" "$_oc_stop_reason"
 echo "Operator stop honoured for entry $_oc_entry ($_oc_flag). The entry moves to queue/stopped/; its worktree and Claude session are kept. Resume with: .claude/.automation/queue-cli.sh resume-entry $_oc_entry" >&2
 exit 0

@@ -1771,6 +1771,17 @@ assert_hook_blocks "$_LAST_RC" "mode-guard blocks template decision (t-*.md) in 
 REPO_OS_MODE=child run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/docs/ai/decisions/0100-test.md")"
 assert_ok "$_LAST_RC" "mode-guard allows child decision (0100+) in child mode"
 
+# --- Child mode: the task contract is the session's own (t-0077, web-editor handoff) ---
+# A child repo's headless queue run writes its brief's contract before drift_check;
+# without the carve-out the write was refused and A6 skipped silently. Only that
+# one path: the rest of .claude/local/ stays protected (Decision 0012).
+REPO_OS_MODE=child run_hook_rc "write-guard.sh" "$(fixture_pretooluse_write "$SB/.claude/local/task-contract.yaml")"
+assert_ok "$_LAST_RC" "t-0077: child mode allows a Write of .claude/local/task-contract.yaml"
+REPO_OS_MODE=child run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/.claude/local/task-contract.yaml")"
+assert_ok "$_LAST_RC" "t-0077: child mode allows an Edit of .claude/local/task-contract.yaml"
+REPO_OS_MODE=child run_hook_rc "write-guard.sh" "$(fixture_pretooluse_write "$SB/.claude/local/other.yaml")"
+assert_hook_blocks "$_LAST_RC" "t-0077: child mode still blocks a neighbouring .claude/local/other.yaml"
+
 # --- Autonomous mode: template decision (t-*.md) → blocks (Decision 0022) ---
 REPO_OS_MODE=autonomous run_hook_rc "write-guard.sh" "$(fixture_pretooluse_edit "$SB/docs/ai/decisions/t-0001-test.md")"
 assert_hook_blocks "$_LAST_RC" "mode-guard blocks template decision (t-*.md) in autonomous mode"

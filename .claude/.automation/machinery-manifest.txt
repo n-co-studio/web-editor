@@ -96,6 +96,7 @@
 .claude/.automation/tests/test-queue-manipulation.sh
 .claude/.automation/tests/test-reverify-merge.sh
 .claude/.automation/tests/test-runner.sh
+.claude/.automation/tests/test-smoke-continue-false.sh
 .claude/.automation/tests/test-state-corruption.sh
 .claude/.automation/tests/test-taskdef-draft.sh
 .claude/.automation/tests/test-verify-pristine.sh
@@ -216,6 +217,7 @@
 .claude/tools/kg-relevance.sh
 .claude/tools/kg-seed.sh
 .claude/tools/kg-validate.sh
+.claude/tools/smoke-claude-continue-false.sh
 .claude/tools/spec-digest.sh
 .claude/tools/sync-conformance.sh
 .claude/tools/verify-pristine.sh
@@ -306,6 +308,7 @@ docs/ai/decisions/t-0073-state-integrity.md
 docs/ai/decisions/t-0074-forging-helpers-removed.md
 docs/ai/decisions/t-0075-verdict-bound-to-approval.md
 docs/ai/decisions/t-0076-sandbox-boundary.md
+docs/ai/decisions/t-0077-stop-denies-and-child-contract.md
 docs/ai/decisions/t-manifest.txt
 docs/ai/eval/.gitkeep
 docs/ai/eval/_nomenclature.md

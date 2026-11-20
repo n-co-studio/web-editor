@@ -131,6 +131,7 @@ printf "\n# --- criterion 1: graceful stop ---\n"
 printf 'operator reason text\n' > "$CONTROL_DIR/STOP"
 OUT="$(_run_hook)"
 _tap_contains "$OUT" '"continue": false' "STOP: emits continue:false so the run ends at a tool boundary"
+_tap_contains "$OUT" '"permissionDecision": "deny"' "STOP: also denies the call it interrupts (t-0077 — continue:false alone let it run, R61)"
 _tap_contains "$OUT" 'Stopped by operator' "STOP: stopReason names the operator"
 _tap_contains "$OUT" 'operator reason text' "STOP: the operator's reason is carried through"
 _tap_lacks "$OUT" 'Force-stopped' "STOP: not reported as a force stop"
@@ -146,6 +147,7 @@ printf 'forced by operator\n' > "$CONTROL_DIR/FORCE"
 OUT="$(_run_hook)"
 _tap_contains "$OUT" 'Force-stopped by operator' "FORCE: takes precedence over STOP"
 _tap_contains "$OUT" '"continue": false' "FORCE: also ends the run at a tool boundary"
+_tap_contains "$OUT" '"permissionDecision": "deny"' "FORCE: also denies the call it interrupts (t-0077)"
 rm -f "$CONTROL_DIR/FORCE"
 
 # --- JSON safety: operator text reaches stdout as a JSON string value -------
@@ -173,6 +175,7 @@ printf 'relayed stop\n' > "$CONTROL_DIR/STOP"
 _PTL_PAYLOAD='{"session_id":"daemon-oc-test","tool_name":"Bash","tool_input":{"command":"git status"}}'
 OUT="$(printf '%s' "$_PTL_PAYLOAD" | CLAUDE_HEADLESS=1 bash "$ADV_SANDBOX/.claude/hooks/pretooluse-permission.sh" 2>&1)"
 _tap_contains "$OUT" '"continue": false' "delegation: pretooluse-permission relays continue:false"
+_tap_contains "$OUT" '"permissionDecision": "deny"' "delegation: ...and relays the deny with it (t-0077)"
 _tap_contains "$OUT" 'relayed stop' "delegation: the operator reason survives the relay"
 
 # Interactive sessions must pay nothing: no CLAUDE_HEADLESS, no stop check.
@@ -180,6 +183,7 @@ _tap_contains "$OUT" 'relayed stop' "delegation: the operator reason survives th
 # exports it as 1 for every other case, and a child inherits that.
 OUT="$(printf '%s' "$_PTL_PAYLOAD" | CLAUDE_HEADLESS=0 bash "$ADV_SANDBOX/.claude/hooks/pretooluse-permission.sh" 2>&1)"
 _tap_lacks "$OUT" '"continue": false' "delegation: interactive sessions are not stopped"
+_tap_lacks "$OUT" '"permissionDecision": "deny"' "delegation: interactive sessions are not denied either"
 rm -f "$CONTROL_DIR/STOP"
 
 # --- Criterion 4: close-phase guard, hook side ------------------------------
@@ -191,6 +195,7 @@ printf 'session_type: taskgroup\nsession_id: %s\ncurrent_phase: close\ncycle: 1\
 printf 'stop me\n' > "$CONTROL_DIR/STOP"
 OUT="$(_run_hook)"
 _tap_lacks "$OUT" '"continue": false' "close phase: STOP is NOT honoured mid-close"
+_tap_lacks "$OUT" '"permissionDecision": "deny"' "close phase: nor is the call denied mid-close"
 _tap_contains "$OUT" 'close phase' "close phase: says why it is holding"
 
 # Any other phase still stops.
