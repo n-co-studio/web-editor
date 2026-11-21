@@ -1,7 +1,7 @@
 # A1 trigger index — generated artifact. Do not hand-edit.
 # Regenerate: bash .claude/.automation/lib/rebuild-trigger-index.sh
 # format: 2
-# digest: 78c8bb498717d8c36cd1d3f0315ec8741d9c21cc6447d654bd8db459ce8dcdc4
+# digest: a6b1f7695bdb8258e00853c8d07addd12a82be728a0c30ae4422cfc628810ab3
 0001AI\.mdprompt system, verification gate, session-based
 0001docs/ai/prompts/prompt-.*\.mdprompt system, verification gate, session-based
 0002docs/ai/decisions/.*\.mdmandatory, commit-blocking
@@ -160,6 +160,7 @@
 0075\.claude/hooks/state-writer\.shapproval_ref, _verdict_follows_approval, stale_approval
 0076\.claude/hooks/tests/run-phase-tests\.shsandbox, denyWrite, allowWrite, REPO_OS_TEST_SKIP_LOG, SKIPPED (sandbox)
 0077\.claude/hooks/operator-control\.shpermissionDecision, operator stop, child task contract, task-contract.yaml child
+0078\.claude/hooks/pre-commit-gates\.shscope_contract_missing, A6_claim_not_run, REPO_OS_AUTOMATION_ENTRY, Gates-A
 0001AI\.mdprompt system, verification gate, session-based
 0001docs/ai/prompts/prompt-.*\.mdprompt system, verification gate, session-based
 0002docs/ai/decisions/.*\.mdmandatory, commit-blocking

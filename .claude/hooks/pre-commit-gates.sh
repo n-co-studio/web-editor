@@ -23,6 +23,8 @@
 #   A2  Process — scope check >100 lines (blocking with large-scope override)
 #   A6  Task Group — contract staging (blocking)
 #   A6.3 Integration points — artifact existence check from contract integration_points (blocking)
+#   A6 claim — outside a task group, a Gates-A trailer saying A6-pass is refused (t-0078)
+#   Scope — staged files vs task-contract scope_files; a queue run with no contract blocks (t-0078)
 #   High-risk — pattern detection + sign-off enforcement (blocking)
 #   A1  Decision trigger parser (blocking — enforced by .a1-triggers-enforced sentinel)
 #
@@ -1317,6 +1319,19 @@ if [ "$SKIP_STATE" = false ] && [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
       block "A6_contract_missing"
       log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A6_contract_missing" "session_type:$A6_SESSION_TYPE"
     fi
+  else
+    # Decision t-0078: A6 runs only for task groups, so outside one an `A6-pass`
+    # trailer records a check that never happened. The other Gates-A entries are
+    # still the agent's own record; this is the one the session type settles.
+    # The rest of the line, not extract_trailer: its `[^\n]` class also excludes
+    # the letter n, so it stops at the first `n/a` and would hide a later A6-pass
+    # (R64). Unanchored, so `-m "Gates-A: …"` on the command line is seen too.
+    _A6_CLAIM=$(printf '%s\n' "$COMMIT_TEXT" | grep -oE 'Gates-A:.*' || true)
+    if printf '%s' "$_A6_CLAIM" | grep -qE '(^|[^[:alnum:]])A6-pass([^[:alnum:]]|$)'; then
+      echo "GATE-RECOVERABLE: A6 — the Gates-A trailer says A6-pass, but A6 runs only for task group sessions and this is '${A6_SESSION_TYPE:-unknown}'. NEXT: Write A6-n/a in the Gates-A trailer." >&2
+      block "A6_claim_not_run"
+      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A6_claim_not_run" "session_type:${A6_SESSION_TYPE:-unknown}"
+    fi
   fi
 
   # A6.2: Contract staging (blocking for all sessions with modified contracts)
@@ -1478,13 +1493,14 @@ fi
 # ============================================================
 # Scope Classification Gate (blocking for out-of-scope, advisory for unbriefed)
 # Compares staged files against task contract scope_files list.
-# Skip: no contract, no scope_files, experiment, REPO_OS_RECOVER.
+# Skip: no contract, no scope_files, experiment, REPO_OS_RECOVER — except a queue
+# run's standard session, where no contract or no scope_files blocks (t-0078).
 # ============================================================
 if [ "$SKIP_STATE" = false ] && [ -n "$STAGED_FILES" ]; then
   CONTRACT_FILE="$REPO_ROOT/.claude/local/task-contract.yaml"
+  SCOPE_FILES=""
   if [ -f "$CONTRACT_FILE" ]; then
     # Extract scope_files list from contract (YAML list items after scope_files:)
-    SCOPE_FILES=""
     _IN_SCOPE=false
     while IFS= read -r _sc_line; do
       case "$_sc_line" in
@@ -1639,6 +1655,21 @@ $_sp_parent
           printf '  resolution: ""\n'
         } > "$ESC_DIR/${_esc_id}.yaml" 2>/dev/null || true
       fi
+    fi
+  fi
+
+  # Decision t-0078 (R62): a queue run's standard session must commit against
+  # its contract. Without one this gate and A5's contract scoring both skip, so
+  # the run is unenforced and nothing says so. REPO_OS_AUTOMATION_ENTRY is set
+  # by runner.sh for queue runs only; interactive sessions are unchanged.
+  if [ -z "$SCOPE_FILES" ] && [ "$IS_HEADLESS" = true ] && [ -n "${REPO_OS_AUTOMATION_ENTRY:-}" ]; then
+    _SCM_STYPE=$(get_session_type 2>/dev/null || echo "unknown")
+    _SCM_PHASE=$(get_phase 2>/dev/null || echo "")
+    if [ "$_SCM_STYPE" = "standard" ] && [ "$_SCM_PHASE" != "close" ]; then
+      if [ -f "$CONTRACT_FILE" ]; then _scm_why="lists no scope_files (read as '  - path' items under scope_files:)"; else _scm_why="is missing"; fi
+      echo "GATE-RECOVERABLE: Scope — queue run (entry $REPO_OS_AUTOMATION_ENTRY) but .claude/local/task-contract.yaml $_scm_why, so scope and completeness cannot be checked. NEXT: Write the contract with scope_files and verification items (Prompt B), have the Critic score it, then commit." >&2
+      block "scope_contract_missing"
+      log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "scope_contract_missing" "entry:$REPO_OS_AUTOMATION_ENTRY" "$_scm_why"
     fi
   fi
 fi

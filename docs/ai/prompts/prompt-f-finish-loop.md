@@ -269,7 +269,7 @@ The runner outcome-detector reads these sentinels (scoped to finish-loop session
 
    Session: <session_number>
    Decisions: <applicable decisions>
-   Gates-A: A1-pass A2-pass A3-<result> A4-pass A5-n/a A6-<result>
+   Gates-A: A1-pass A2-pass A3-<result> A4-pass A5-n/a A6-n/a
    Gates-B: B1-pass B2-pass B3-pass
    Automation: runner
    ```

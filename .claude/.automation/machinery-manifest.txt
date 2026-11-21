@@ -309,6 +309,7 @@ docs/ai/decisions/t-0074-forging-helpers-removed.md
 docs/ai/decisions/t-0075-verdict-bound-to-approval.md
 docs/ai/decisions/t-0076-sandbox-boundary.md
 docs/ai/decisions/t-0077-stop-denies-and-child-contract.md
+docs/ai/decisions/t-0078-queue-contract-and-gate-claims.md
 docs/ai/decisions/t-manifest.txt
 docs/ai/eval/.gitkeep
 docs/ai/eval/_nomenclature.md

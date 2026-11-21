@@ -409,6 +409,35 @@ printf 'chore: hook change\n\nno trailer here\n' > "$SB/.git/COMMIT_MSG_PROBE"
 rc=$(run_gate "pre-commit-gates.sh" "git commit -F $SB/.git/COMMIT_MSG_PROBE")
 expect_exit 2 "$rc" "A1 still blocks when the -F file carries no trailer"
 
+# C8t — Decision t-0078: A6 runs only for task groups, so a standard commit whose
+#       Gates-A trailer says A6-pass is refused, and the same with A6-n/a is not.
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+stage "docs/ai/logs/note.md" "claim"
+printf 'chore: note\n\nGates-A: A1-pass A2-pass A6-pass\n' > "$SB/.git/COMMIT_MSG_PROBE"
+rc=$(run_gate "pre-commit-gates.sh" "git commit -F $SB/.git/COMMIT_MSG_PROBE")
+expect_exit 2 "$rc" "A6 claim: a standard commit saying A6-pass is blocked (t-0078)"
+printf 'chore: note\n\nGates-A: A1-pass A2-pass A3-n/a A4-pass A5-pass A6-pass\n' > "$SB/.git/COMMIT_MSG_PROBE"
+rc=$(run_gate "pre-commit-gates.sh" "git commit -F $SB/.git/COMMIT_MSG_PROBE")
+expect_exit 2 "$rc" "A6 claim: A6-pass after an n/a entry is still blocked (t-0078, R64)"
+rc=$(run_gate "pre-commit-gates.sh" "git commit -m chore-note -m 'Gates-A: A1-pass A3-n/a A6-pass'")
+expect_exit 2 "$rc" "A6 claim: a Gates-A passed as a second -m on the command line is seen (t-0078)"
+printf 'chore: note\n\nGates-A: A1-pass A2-pass A6-n/a\n' > "$SB/.git/COMMIT_MSG_PROBE"
+rc=$(run_gate "pre-commit-gates.sh" "git commit -F $SB/.git/COMMIT_MSG_PROBE")
+expect_exit 0 "$rc" "A6 claim: the same commit saying A6-n/a passes (t-0078)"
+
+# C8q — Decision t-0078 (R62): a queue run's standard commit with no task
+#       contract is blocked; with a scoped contract it passes.
+reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
+stage "docs/ai/logs/note.md" "queue"
+rm -f "$SB/.claude/local/task-contract.yaml"
+rc=$(CLAUDE_HEADLESS=1 REPO_OS_AUTOMATION_ENTRY=conformance-entry run_gate "pre-commit-gates.sh" "git commit -m chore-queue")
+expect_exit 2 "$rc" "queue run: a standard commit with no task contract is blocked (t-0078)"
+mkdir -p "$SB/.claude/local"
+printf 'task: "probe"\nscope_files:\n  - "docs/ai/logs/note.md"\n' > "$SB/.claude/local/task-contract.yaml"
+rc=$(CLAUDE_HEADLESS=1 REPO_OS_AUTOMATION_ENTRY=conformance-entry run_gate "pre-commit-gates.sh" "git commit -m chore-queue")
+expect_exit 0 "$rc" "queue run: the same commit with a scoped contract passes (t-0078)"
+rm -f "$SB/.claude/local/task-contract.yaml"
+
 # C8c — the documented residual. PreToolUse fires before the command runs, so a
 #       -F file built by that same command line does not exist yet. Behaviour
 #       must fall back to today's: command string only, so A1 blocks. Asserted

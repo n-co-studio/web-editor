@@ -24,7 +24,9 @@ same output, and its call did not run (R61).
 queue run in child mode cannot write `.claude/local/task-contract.yaml`, which Prompt B requires
 before `drift_check`: `is_carved_out`'s `template)` case lists the path, its `child)` case does not,
 so the mode guard refused it. The run then either stopped with no edits or carried on without a
-contract — and the A6 scope gate skips when the file is absent, so scope went unenforced silently.
+contract — and the commit gate's scope check and A5's contract scoring (t-0071) both skip when the
+file is absent, so scope went unenforced silently. (This said "the A6 scope gate" until t-0078: A6
+checks only task-group contracts.)
 Pre-seeding cannot help: the run works in its own worktree.
 
 ## Decision
@@ -36,9 +38,10 @@ Pre-seeding cannot help: the run works in its own worktree.
 2. **A child repo may write its task contract**: `is_carved_out`'s `child)` case gains the single
    fixed path `.claude/local/task-contract.yaml`, as in template mode. The rest of `.claude/local/`
    stays protected (Decision 0012: no `.claude/local/*`).
-3. **Not decided here:** whether A6 should fail, rather than skip, when a session that ran from a
-   queue brief has no contract (the handoff's optional item 3). It changes every queue brief; it
-   waits until the carve-out has been seen working in a child run (known-issues R62).
+3. **Not decided here:** whether the commit gate should fail, rather than skip, when a session that
+   ran from a queue brief has no contract (the handoff's optional item 3; the handoff called it A6).
+   It changes every queue brief; it waits until the carve-out has been seen working in a child run
+   (known-issues R62). **Decided in t-0078:** it fails, for queue runs' standard sessions.
 
 ## Known limits
 

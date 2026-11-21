@@ -1003,6 +1003,53 @@ stage_sandbox_file "src/clean.ts" "export const x = 1;"
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
 assert_ok "$_LAST_RC" "pre-commit-gates allows commit at commit phase with all state files"
 
+# --- t-0078: Gates-A may not claim A6-pass outside a task group ---
+# fixture_pretooluse_commit does not escape newlines, so a trailer needs the JSON
+# written out: \\n here is the JSON escape, a real newline once the hook parses it.
+_l3_trailer_commit() { printf '{"tool_name":"Bash","tool_input":{"command":"git commit -m \\"test commit\\n\\nGates-A: %s\\""}}' "$1"; }
+run_hook_rc "pre-commit-gates.sh" "$(_l3_trailer_commit "A1-pass A2-pass A6-pass")"
+assert_hook_blocks "$_LAST_RC" "t-0078: a standard commit claiming A6-pass is blocked"
+assert_contains "$_LAST_OUTPUT" "A6 runs only for task group sessions" "t-0078: the block says why"
+# The templates' own shape: an n/a before A6 must not hide the claim (R64).
+run_hook_rc "pre-commit-gates.sh" "$(_l3_trailer_commit "A1-pass A2-pass A3-n/a A4-pass A5-pass A6-pass")"
+assert_hook_blocks "$_LAST_RC" "t-0078: A6-pass after an n/a entry is still blocked"
+run_hook_rc "pre-commit-gates.sh" "$(_l3_trailer_commit "A1-pass A2-pass A6-n/a")"
+assert_ok "$_LAST_RC" "t-0078: the same commit with A6-n/a passes"
+# In a task group A6 does run, so its A6-pass is not this check's business (A6.1
+# may still block for its own reasons; only the claim message is asserted absent).
+reset_phase "taskgroup"
+run_hook_rc "pre-commit-gates.sh" "$(_l3_trailer_commit "A1-pass A2-pass A6-pass")"
+case "$_LAST_OUTPUT" in
+  *"A6 runs only for task group sessions"*) _tap_fail "t-0078: a task group's A6-pass is not refused as a claim" "claim block fired" ;;
+  *) _tap_pass "t-0078: a task group's A6-pass is not refused as a claim" ;;
+esac
+assert_contains "$_LAST_OUTPUT" "no contract with 'status: in_progress'" "t-0078: ...and A6 itself ran for that task group (the case is not vacuous)"
+reset_phase "standard"
+_advance "plan" 2>/dev/null; _advance "approval" 2>/dev/null; _advance "build" 2>/dev/null
+_advance "review" 2>/dev/null; _advance "verify" 2>/dev/null; _advance "commit" 2>/dev/null
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
+printf 'timestamp: test\nagent: critic\nsession_id: %s\ndispatch_phase: review\nGATE_RESULT: APPROVED\n' "$TEST_SID" > "$STATE_DIR/cohesion-reviewed"
+printf 'timestamp: test\nagent: qa-verifier\nsession_id: %s\ndispatch_phase: verify\nGATE_RESULT: APPROVED\n' "$TEST_SID" > "$STATE_DIR/qa-verified"
+
+# --- t-0078 (R62): a queue run's standard commit needs its task contract ---
+_l3_tc="$SB/.claude/local/task-contract.yaml"
+mkdir -p "$SB/.claude/local"; rm -f "$_l3_tc"
+export CLAUDE_HEADLESS=1 REPO_OS_AUTOMATION_ENTRY=l3-entry
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_hook_blocks "$_LAST_RC" "t-0078: a queue-run standard commit with no task contract is blocked"
+assert_contains "$_LAST_OUTPUT" "task-contract.yaml is missing" "t-0078: the block names the missing contract"
+printf 'task: "t"\nscope_files: []\n' > "$_l3_tc"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_hook_blocks "$_LAST_RC" "t-0078: a queue-run commit whose contract lists no scope_files is blocked"
+assert_contains "$_LAST_OUTPUT" "lists no scope_files" "t-0078: the block says the scope is empty"
+printf 'task: "t"\nscope_files:\n  - "src/clean.ts"\n' > "$_l3_tc"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_ok "$_LAST_RC" "t-0078: a queue-run commit with a scoped contract passes"
+unset CLAUDE_HEADLESS REPO_OS_AUTOMATION_ENTRY
+rm -f "$_l3_tc"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_ok "$_LAST_RC" "t-0078: an interactive commit with no contract is not blocked by the queue-run check"
+
 # --- A staged RENAME is visible to the staged-file list (known-issue R30) ---
 # `--diff-filter=ACM` excluded `R`, so a renamed file reached none of the checks
 # that read STAGED_FILES. Renumbering a decision record staged as `R098` and the
