@@ -1323,10 +1323,8 @@ if [ "$SKIP_STATE" = false ] && [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
     # Decision t-0078: A6 runs only for task groups, so outside one an `A6-pass`
     # trailer records a check that never happened. The other Gates-A entries are
     # still the agent's own record; this is the one the session type settles.
-    # The rest of the line, not extract_trailer: its `[^\n]` class also excludes
-    # the letter n, so it stops at the first `n/a` and would hide a later A6-pass
-    # (R64). Unanchored, so `-m "Gates-A: …"` on the command line is seen too.
-    _A6_CLAIM=$(printf '%s\n' "$COMMIT_TEXT" | grep -oE 'Gates-A:.*' || true)
+    # Unanchored, so `-m "Gates-A: …"` on the command line is seen too.
+    _A6_CLAIM=$(extract_trailer "$COMMIT_TEXT" 'Gates-A')
     if printf '%s' "$_A6_CLAIM" | grep -qE '(^|[^[:alnum:]])A6-pass([^[:alnum:]]|$)'; then
       echo "GATE-RECOVERABLE: A6 — the Gates-A trailer says A6-pass, but A6 runs only for task group sessions and this is '${A6_SESSION_TYPE:-unknown}'. NEXT: Write A6-n/a in the Gates-A trailer." >&2
       block "A6_claim_not_run"

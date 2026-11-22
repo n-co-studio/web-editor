@@ -126,7 +126,11 @@ resolve_commit_text() {
 
 # Echo the value of a `<Key>:` trailer found in TEXT, or nothing.
 # Replaces three near-identical greps that each had to remember `|| true`.
+# The rest of the line: grep is line-based, so `.` never crosses a newline. (It
+# was `[^\n]+`, which in ERE means "not backslash and not n", and cut a value at
+# its first letter n — R64.) A literal two-character \n inside a -m argument is
+# not a line break: git stores it on the same line, so the value runs past it.
 extract_trailer() {
   local text="$1" key="$2"
-  printf '%s' "$text" | grep -oE "${key}:[^\\n]+" || true
+  printf '%s' "$text" | grep -oE "${key}:.+" || true
 }

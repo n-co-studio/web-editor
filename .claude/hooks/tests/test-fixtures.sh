@@ -18,8 +18,16 @@
 # (use fixture_subagentstop's multiline handling for that).
 _json_escape() {
   local s="$1"
+  # Backslash first, or the escapes added below would be doubled.
   s="${s//\\/\\\\}"
   s="${s//\"/\\\"}"
+  # A raw newline, CR or tab makes the payload invalid JSON; the hook then reads
+  # no command and allows the call, so a test expecting a pass passes for the
+  # wrong reason (R63). Other control characters: escape them when a fixture
+  # needs one.
+  s="${s//$'\n'/\\n}"
+  s="${s//$'\r'/\\r}"
+  s="${s//$'\t'/\\t}"
   printf '%s' "$s"
 }
 
@@ -189,6 +197,10 @@ _fixtures_self_test() {
 
   json=$(fixture_pretooluse_commit "test message")
   echo "$json" | jq -e '.tool_input.command | startswith("git commit")' >/dev/null 2>&1 || { echo "FAIL: fixture_pretooluse_commit"; failures=$((failures + 1)); }
+
+  # R63: a multi-line message is valid JSON and decodes to the same newlines.
+  json=$(fixture_pretooluse_commit $'subject\n\nGates-A: A6-n/a\ttab')
+  echo "$json" | jq -e '.tool_input.command | contains("\n\nGates-A: A6-n/a\ttab")' >/dev/null 2>&1 || { echo "FAIL: fixture_pretooluse_commit multi-line"; failures=$((failures + 1)); }
 
   json=$(fixture_posttooluse_ask "Do you approve this plan?" "Yes approve,No revise" "Yes approve")
   echo "$json" | jq -e '.tool_name == "AskUserQuestion"' >/dev/null 2>&1 || { echo "FAIL: fixture_posttooluse_ask tool_name"; failures=$((failures + 1)); }

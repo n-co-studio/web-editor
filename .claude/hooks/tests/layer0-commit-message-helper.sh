@@ -121,6 +121,19 @@ eq    "-F pointing at a directory" \
 eq    "-F as the last token with no argument" \
       "$(extract_trailer "$(resolve_commit_text 'git commit -F')" 'Decisions')" ""
 
+# --- R64: the value runs to the end of the line, letter n included ---
+has   "a Decisions value with an n in it is returned whole" \
+      "$(extract_trailer "$(resolve_commit_text 'git commit -m "x" -m "Decisions: t-0077 and 0004"')" 'Decisions')" \
+      "Decisions: t-0077 and 0004"
+has   "a Gates-A value keeps everything after A3-n/a" \
+      "$(extract_trailer "$(resolve_commit_text 'git commit -m "body
+Gates-A: A1-pass A3-n/a A6-pass"')" 'Gates-A')" "Gates-A: A1-pass A3-n/a A6-pass"
+# A literal two-character \n in a -m argument is not a line break: git stores it
+# on the same line, so the value runs past it.
+eq    "a literal backslash-n does not end the value" \
+      "$(extract_trailer "$(resolve_commit_text 'git commit -m "Decisions: 0004\nmore"')" 'Decisions')" \
+      'Decisions: 0004\nmore"'
+
 # --- extract_trailer is key-scoped ---
 eq    "a different key is not matched" \
       "$(extract_trailer "$(resolve_commit_text "git commit -F $MSG")" 'Overrides')" ""
