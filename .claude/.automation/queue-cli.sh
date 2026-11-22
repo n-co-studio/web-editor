@@ -121,6 +121,8 @@ source "$LIB_DIR/file-lock.sh"
 source "$LIB_DIR/queue-validator.sh"
 # shellcheck source=lib/project-registry.sh
 source "$LIB_DIR/project-registry.sh"
+# shellcheck source=lib/milestone-plan.sh
+source "$LIB_DIR/milestone-plan.sh"
 # shellcheck source=lib/branch-manager.sh
 source "$LIB_DIR/branch-manager.sh"
 # shellcheck source=lib/cleanup.sh
@@ -173,6 +175,10 @@ Subcommands:
   remove <id>
   projects list                               the project registry: projects and numbered milestones
   projects add <name> [--milestone NAME]...   register a project (exit 3 + NAME_TAKEN if taken)
+  milestones <project> --file <plan.yaml> [--dry-run]
+                                              apply a milestone plan to the registry and every
+                                              entry and work order in the project, all or nothing
+                                              (exit 3 + NAME_TAKEN if rename_to is taken)
   edit <id> <field> <value>
   set-priority <id> <N>
   status
@@ -894,6 +900,12 @@ case "$SUBCOMMAND" in
       exit 1
     fi
     EDIT_ID="$1" EDIT_FIELD="$2" EDIT_VALUE="$3"
+    # One line only. A newline would be written into the YAML as extra lines,
+    # which override other fields on the next load (the work-order writer does
+    # not quote values). queue_edit refuses one too; wo_edit has no other caller.
+    case "$EDIT_VALUE" in
+      *$'\n'*|*$'\r'*) echo "ERROR: $EDIT_FIELD must be one line" >&2; exit 1 ;;
+    esac
 
     if ! acquire_queue_lock; then
       echo "ERROR: Queue lock unavailable" >&2
@@ -997,7 +1009,7 @@ case "$SUBCOMMAND" in
   # --- projects: the project registry (Decision t-0079) ---
   # list prints the registry; add creates a project with its milestones. The
   # file is docs/ai/project-registry.yaml and belongs to the repo. Milestone
-  # renames, reorders and deletes are not here (Massimo R2).
+  # renames, reorders and deletes are `milestones` below (t-0080).
   projects)
     PJ_ACTION="${1:-}"
     [ $# -gt 0 ] && shift
@@ -1054,6 +1066,41 @@ case "$SUBCOMMAND" in
       *)
         echo "ERROR: projects requires list or add" >&2
         exit 1 ;;
+    esac
+    ;;
+
+  # --- milestones: apply a milestone plan (Decision t-0080) ---
+  # Adds, renames, reorders and deletes a project's milestones, and optionally
+  # renames the project, in the registry and on every entry and work order in
+  # all statuses, all or nothing. The plan schema is schemas/milestone-plan.yaml.
+  milestones)
+    MP_PROJECT="${1:-}"
+    [ $# -gt 0 ] && shift
+    case "$MP_PROJECT" in
+      ''|--*) echo "ERROR: milestones requires <project>" >&2; exit 1 ;;
+    esac
+    MP_FILE="" MP_DRY=false
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --file)
+          [ $# -ge 2 ] || { echo "ERROR: --file requires a path" >&2; exit 1; }
+          MP_FILE="$2"; shift 2 ;;
+        --dry-run) MP_DRY=true; shift ;;
+        *) echo "ERROR: Unknown milestones option: $1" >&2; exit 1 ;;
+      esac
+    done
+    [ -n "$MP_FILE" ] || { echo "ERROR: milestones requires --file <plan.yaml>" >&2; exit 1; }
+    if ! acquire_queue_lock; then
+      echo "ERROR: Queue lock unavailable" >&2
+      exit 1
+    fi
+    _mp_rc=0
+    milestone_plan_apply "$MP_PROJECT" "$MP_FILE" "$MP_DRY" || _mp_rc=$?
+    release_queue_lock
+    case "$_mp_rc" in
+      0) ;;
+      3) exit 3 ;;
+      *) exit 1 ;;
     esac
     ;;
 

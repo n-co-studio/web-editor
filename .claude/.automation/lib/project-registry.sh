@@ -170,10 +170,11 @@ _project_registry_ms_name() {
   printf '%s' "${_PR_MS[$((_PR_MS_START[i] + idx - 1))]}"
 }
 
-# Write the loaded state back, atomically.
+# Write the loaded state back, atomically. An optional path writes there instead
+# (milestone-plan.sh stages the registry before moving it into place).
 _project_registry_write() {
   local f tmp i j start
-  f=$(project_registry_file)
+  f="${1:-$(project_registry_file)}"
   mkdir -p "$(dirname "$f")" || return 1
   tmp="$f.tmp.$$"
   {

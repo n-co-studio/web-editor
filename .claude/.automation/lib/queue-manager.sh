@@ -3031,10 +3031,22 @@ queue_edit() {
 
   _load_queue_entry "$entry_file"
 
-  # Running entries are immutable
+  # A newline would be written into the YAML as extra lines, and the loader
+  # keeps a key's last occurrence, so it could override another field. The
+  # registry check refuses one too, but only when a registry exists.
+  case "$value" in
+    *$'\n'*|*$'\r'*) echo "ERROR: $field must be one line" >&2; return 1 ;;
+  esac
+
+  # Running entries are immutable, except project and milestone.*: they are
+  # display metadata no session reads (Decision t-0080).
   if [ "$_QE_STATUS" = "running" ]; then
-    echo "ERROR: Cannot edit running entry $entry_id" >&2
-    return 1
+    case "$field" in
+      project|milestone.name|milestone.index|milestone.total) ;;
+      *)
+        echo "ERROR: Cannot edit running entry $entry_id (only project and milestone.* can change while it runs)" >&2
+        return 1 ;;
+    esac
   fi
 
   # Warn on review/blocked unless force-edit

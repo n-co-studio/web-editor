@@ -10,6 +10,24 @@ Breaking changes (field removal, type change, required field addition) increment
 
 ---
 
+## v1.15.0 — Milestone Plans
+
+**Date:** 2026-11-22
+**Decision:** t-0080 (Massimo R2, R3)
+
+### Changes
+
+**milestone-plan.yaml** (new schema, `schema_version: "1.0.0"`):
+- Input to `queue-cli.sh milestones <project> --file <plan.yaml> [--dry-run]`: the project's complete new milestone list (`milestones[]` `{name, from?}`), optional `rename_to`, and `moves[]` `{from, to: <index>|none}` for each deleted milestone. Same strict line layout as the registry.
+
+**queue-entry.yaml / work-order.yaml** (no field change):
+- A plan rewrites `project` and `milestone.{name,index,total}` on every entry (all statuses) and work order in the project, all or nothing.
+- `project` and `milestone.*` are editable on a `running` entry. Every other field is still refused there.
+
+**queue-cli.sh**: new `milestones` subcommand (exit 3 and `NAME_TAKEN: <name>` when `rename_to` is taken).
+
+---
+
 ## v1.14.0 — Project Registry
 
 **Date:** 2026-11-22

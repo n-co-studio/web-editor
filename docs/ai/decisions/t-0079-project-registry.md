@@ -67,10 +67,10 @@ milestone edits), R3 (edits on running entries) and R4 (Prompt T suggestions) bu
 
 ## Known limits
 
-- **No rename, reorder or delete yet.** `projects add` only creates. R2 brings the batch command.
-  Until then the file can be edited by hand, keeping the layout.
-- **Running entries stay uneditable.** `queue_edit` still refuses them outright. R3 relaxes that for
-  the display fields.
+- **Rename, reorder and delete are t-0080.** `projects add` only creates. `queue-cli.sh milestones
+  <project> --file <plan.yaml>` changes a project's milestones and name everywhere at once.
+- **Running entries:** t-0080 allows `project` and `milestone.*` edits on them. Every other field
+  is still refused.
 - **Auto-add can register a typo.** It prints a note rather than refusing, because the spec wants
   projects found on tasks registered.
 - **Only queue-cli takes the lock.** Re-reading before the write keeps another writer's change, but

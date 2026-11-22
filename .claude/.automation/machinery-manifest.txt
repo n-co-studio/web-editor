@@ -33,6 +33,7 @@
 .claude/.automation/lib/health-check.sh
 .claude/.automation/lib/install-hooks.sh
 .claude/.automation/lib/intake.sh
+.claude/.automation/lib/milestone-plan.sh
 .claude/.automation/lib/outcome-detector.sh
 .claude/.automation/lib/overlap-report.sh
 .claude/.automation/lib/permission-profiles.sh
@@ -64,6 +65,7 @@
 .claude/.automation/schemas/eval-cell.yaml
 .claude/.automation/schemas/eval-study.yaml
 .claude/.automation/schemas/eval-suite.yaml
+.claude/.automation/schemas/milestone-plan.yaml
 .claude/.automation/schemas/project-registry.yaml
 .claude/.automation/schemas/queue-entry.yaml
 .claude/.automation/schemas/review-log-entry.yaml
@@ -89,6 +91,7 @@
 .claude/.automation/tests/test-followups.sh
 .claude/.automation/tests/test-gate-bypass.sh
 .claude/.automation/tests/test-group-worktree-lifecycle.sh
+.claude/.automation/tests/test-milestone-plan.sh
 .claude/.automation/tests/test-operator-control.sh
 .claude/.automation/tests/test-operator-notes.sh
 .claude/.automation/tests/test-outcome-detector.sh
@@ -316,6 +319,7 @@ docs/ai/decisions/t-0076-sandbox-boundary.md
 docs/ai/decisions/t-0077-stop-denies-and-child-contract.md
 docs/ai/decisions/t-0078-queue-contract-and-gate-claims.md
 docs/ai/decisions/t-0079-project-registry.md
+docs/ai/decisions/t-0080-milestone-plan.md
 docs/ai/decisions/t-manifest.txt
 docs/ai/eval/.gitkeep
 docs/ai/eval/_nomenclature.md

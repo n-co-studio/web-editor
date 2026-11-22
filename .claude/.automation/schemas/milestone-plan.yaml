@@ -1,0 +1,60 @@
+# Milestone Plan Schema — v1.0.0 (Decision t-0080)
+#
+# Input to `queue-cli.sh milestones <project> --file <plan.yaml> [--dry-run]`.
+# A plan is the project's COMPLETE new milestone list, in order. It is applied
+# to the project registry (schemas/project-registry.yaml) and to every queue
+# entry, in all statuses, and every work order in the project, all or nothing.
+#
+#   - A milestone with `from: <old index>` keeps that old milestone: a different
+#     name renames it, and its position is its new index (reorder).
+#   - A milestone without `from` is new.
+#   - An old milestone that no `from` names is deleted, and MUST have a move
+#     saying where its tasks go: `to: <new index>` or `to: none`.
+#   - `rename_to` renames the project (optional).
+#
+# For a project registered with no milestones (an auto-added one), `from` and
+# `moves` are refused, and each task's milestone is matched by name to the new
+# list. A task whose milestone the plan cannot map refuses the whole plan.
+#
+# Layout: the same strict line layout as the registry (bash 3.2 line matchers,
+# no YAML library). Two-space indentation, one key per line, names double-quoted
+# with \" and \\ escaped and nothing after the closing quote. Blank lines, lines
+# starting with # (any indentation) and trailing whitespace are ignored.
+# Anything else refuses the plan.
+#
+#   schema_version: "1.0.0"
+#   rename_to: "Core"             # optional
+#   milestones:                   # `milestones: []` deletes every milestone
+#     - name: "Build"
+#       from: 2
+#     - name: "Design v2"
+#       from: 1
+#     - name: "Launch"            # new
+#   moves:                        # optional; one per deleted milestone
+#     - from: 3
+#       to: 1                     # or: to: none
+#
+# Refused (exit 1, nothing changed): a deleted milestone with no move, a `from`
+# used twice, an index out of range, a move for a kept milestone, two new names
+# that match ignoring case and spacing, a malformed line, an unregistered
+# project, no registry. A `rename_to` that matches another project prints
+# `NAME_TAKEN: <name>` and exits 3.
+#
+# Fields (comments on their own lines, so this block is itself a valid plan):
+
+# string; major version 1 is the only one read
+schema_version: "1.0.0"
+# string, optional, one line: the project's new name
+rename_to: "Example"
+# list, ordered: the complete new milestone list
+milestones:
+    # string, required, one line, unique ignoring case and whitespace
+  - name: "First"
+      # integer, optional: the old index this milestone was; absent = new
+    from: 1
+# list, optional: one per old milestone the plan deletes
+moves:
+    # integer, required: the deleted old index
+  - from: 2
+      # integer (a new index) or none
+    to: none
