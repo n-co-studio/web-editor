@@ -392,6 +392,30 @@ else
 fi
 git_q "$CHILD" checkout main
 
+# === No credential in the engine's output ==================================
+# In March 2026 a token-bearing template URL reached the sync commit message and
+# five repos. The engine logs a name derived from the URL; a URL that cannot be
+# fetched exercises every line it prints before the commit, including the fetch
+# error and git's own stderr. The credential is assembled from fragments so this
+# file does not trip the A4 secret scan; the two URL forms are neither https
+# github.com, so only the generic userinfo strip passes them.
+printf '\n## no credential in output\n'
+_SC_CRED="FAKE""CRED""0123456789"
+_SC_AT="@"
+for _sc_url in "nosuch://x-access-token:${_SC_CRED}${_SC_AT}example.invalid/o/r.git" \
+               "https://u:${_SC_CRED}${_SC_AT}example.invalid/o/r.git"; do
+  _sc_scheme="${_sc_url%%://*}"
+  ( cd "$CHILD" && GIT_TERMINAL_PROMPT=0 bash "$ENGINE" "$_sc_url" main ) > "$SANDBOX/engine-cred.log" 2>&1
+  rc=$?
+  if [ "$rc" -ne 0 ] && grep -q "Failed to fetch" "$SANDBOX/engine-cred.log"; then
+    ok "$_sc_scheme: an unfetchable template URL fails the sync"
+  else
+    nok "$_sc_scheme: an unfetchable template URL fails the sync" "rc=$rc $(head -3 "$SANDBOX/engine-cred.log")"
+  fi
+  assert_no_grep "$_SC_CRED" "$SANDBOX/engine-cred.log" \
+    "$_sc_scheme: nothing the engine prints contains the URL's credential"
+done
+
 printf '\n------------------------------------------------------------\n'
 printf 'passed: %d   failed: %d\n' "$PASS" "$FAIL"
 printf -- '------------------------------------------------------------\n'

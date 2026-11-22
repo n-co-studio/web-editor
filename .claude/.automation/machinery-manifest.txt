@@ -15,6 +15,7 @@
 .claude/.automation/config.yaml
 .claude/.automation/decision-cache.yaml
 .claude/.automation/docs/blocker-playbook.md
+.claude/.automation/git-hooks/commit-msg
 .claude/.automation/git-hooks/pre-commit
 .claude/.automation/git-hooks/pre-push
 .claude/.automation/lib/blocker-reporter.sh
@@ -78,6 +79,7 @@
 .claude/.automation/tests/test-branch-manager.sh
 .claude/.automation/tests/test-child-sync.sh
 .claude/.automation/tests/test-close-pipeline.sh
+.claude/.automation/tests/test-commit-msg-scan.sh
 .claude/.automation/tests/test-daemon-liveness.sh
 .claude/.automation/tests/test-daemon-recovery-paths.sh
 .claude/.automation/tests/test-escalation-suppression.sh

@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# commit-msg — scans the commit MESSAGE for secrets.
+#
+# WHY THIS EXISTS
+# ---------------
+# The pre-commit hook and the A4 gate scan staged file changes only. A secret
+# in the message itself passed every check. That is how the template-sync
+# token leaked in March 2026: the engine wrote a token-bearing URL into the
+# "Synced from ..." line, and the commit reached five repos, one of them
+# public. GitHub's documentation does not say that push protection covers
+# commit messages, so this check runs before the commit exists.
+#
+# Uses the shared pattern in .claude/hooks/_secret-pattern.sh, the same
+# source as pre-commit and A4. Every line is scanned, '#' lines included:
+# `git commit -m` and `-F` keep them in the commit (cleanup mode "whitespace"),
+# and this hook runs before an editor session's comments are stripped.
+#
+# PROTOCOL NOTE: git hooks block on ANY non-zero exit (see pre-commit).
+#
+# Escape hatch: `git commit --no-verify`.
+#
+# Install: .claude/.automation/lib/install-hooks.sh
+
+set -uo pipefail
+
+MSG_FILE="${1:-}"
+[ -n "$MSG_FILE" ] && [ -f "$MSG_FILE" ] || exit 0
+
+# git runs hooks from the top of the working tree, so ask git for the root
+# rather than counting up from $0: with core.hooksPath outside .git/hooks the
+# count lands in the wrong directory and the scan would silently turn off.
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$(dirname "$0")/../.." && pwd))"
+PATTERN_FILE="$REPO_ROOT/.claude/hooks/_secret-pattern.sh"
+
+if [ ! -f "$PATTERN_FILE" ]; then
+  echo "WARNING: commit-msg secret scan inactive — pattern file not found at $PATTERN_FILE" >&2
+  echo "         Reinstall with: .claude/.automation/lib/install-hooks.sh" >&2
+  exit 0
+fi
+# shellcheck disable=SC1090
+. "$PATTERN_FILE"
+
+[ -n "${_REPO_OS_SECRET_PATTERN:-}" ] || exit 0
+
+MATCHES=$(grep -niE "$_REPO_OS_SECRET_PATTERN" "$MSG_FILE" 2>/dev/null || true)
+
+if [ -n "$MATCHES" ]; then
+  {
+    echo "BLOCKED: possible secret in the commit message."
+    echo
+    # Show line numbers only. Echoing the line would print the secret again.
+    printf '%s\n' "$MATCHES" | cut -d: -f1 | sed 's/^/  message line /' | head -10
+    echo
+    echo "Remove the secret from the message, then commit again."
+    echo "If this is a false positive, review .claude/hooks/_secret-pattern.sh"
+    echo "or bypass this one commit with: git commit --no-verify"
+  } >&2
+  exit 1
+fi
+
+exit 0
