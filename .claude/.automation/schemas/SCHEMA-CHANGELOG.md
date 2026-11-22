@@ -10,6 +10,38 @@ Breaking changes (field removal, type change, required field addition) increment
 
 ---
 
+## v1.17.0 — Review Findings
+
+**Date:** 2026-11-22
+**Decision:** t-0082 (Massimo R5)
+
+### Changes
+
+**review-findings.yaml** (new schema, `schema_version: "1.0.0"`):
+- Prompt A's advisory review findings at `docs/spec/review-findings/<spec-version>.yaml`, child-owned (`.templatesyncignore`).
+- `findings[]` `{id, severity (Blocking|Advisory, derived from kind), kind (critical|recommendation|idea), agent, spec_file, section, finding, suggested_fix, status (open|applied|dismissed|deferred), reason}`. Same strict line layout as the project registry.
+
+**`.claude/tools/review-findings.sh`** (new): `write`, `set`, `check`. `check` passes only when every Blocking finding is applied or dismissed with a reason.
+
+**advisory-reviewed evidence**: gains `findings: <path>` in Initialize mode.
+
+---
+
+## v1.16.0 — Suggested Project and Milestone
+
+**Date:** 2026-11-22
+**Decision:** t-0081 (Massimo R4)
+
+### Changes
+
+**queue-entry.yaml**:
+- New optional field `metadata_suggested` (boolean, default `false`). `true` means Prompt T suggested the entry's `project` / `milestone` in draft mode and the operator has not confirmed them. Entries without the field read as `false`.
+- Set by `queue-cli.sh add ... --suggested` (refused unless the registry exists and `--project` is registered). Cleared by `edit <id> metadata_suggested false` and by any edit of `project` or `milestone.*`. Editable on running entries.
+
+**queue-cli.sh**: `add --suggested`; `show --json` and `list --json` report `metadata_suggested` as a JSON boolean.
+
+---
+
 ## v1.15.0 — Milestone Plans
 
 **Date:** 2026-11-22

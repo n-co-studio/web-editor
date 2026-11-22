@@ -47,15 +47,39 @@ Run after Prompt 0 completes (spec or feature brief is ready). Skip this phase i
 Skip entirely in Re-initialize mode.
 
 1. Synthesize specialist briefs into a single Refinement Report (see `_advisory-board.md` format)
-2. Present to operator organized as:
+2. **Write the findings file (Decision t-0082)** before presenting the report, so a front end such as Massimo can show each finding as data. Write every finding with `bash .claude/tools/review-findings.sh write <version>`, where `<version>` is the active spec version. Pass the findings on stdin as a quoted heredoc. Give only the `findings:` list, with no `schema_version`, `spec_version` or `severity` lines, and double-quote every value:
+   ```bash
+   bash .claude/tools/review-findings.sh write v1 <<'EOF'
+   findings:
+     - id: "F1"
+       kind: "critical"
+       agent: "critic"
+       spec_file: "docs/spec/compiled/v1/data-contracts.md"
+       section: "ProjectRegistry"
+       finding: "Project names are not unique ignoring case"
+       suggested_fix: "Match names ignoring case and spacing"
+   EOF
+   ```
+   - Number the findings `F1`, `F2`, … in report order.
+   - `kind` is `critical` (Critical Findings and Unresolved Critic Findings), `recommendation` (Recommendations and PM spec-edit proposals) or `idea` (Ideas). The tool writes `severity` from it: Blocking for critical, Advisory otherwise.
+   - `agent`, `spec_file`, `section`, `finding` and `suggested_fix` are each one line.
+   - Do not use the `>` character in any value. The command guard (not the tool) reads it as a file write. Write "greater than" or "to" instead.
+
+   The full layout is in `.claude/.automation/schemas/review-findings.yaml`. That example is the stored form; your input omits its header and severity. Use the tool, not Edit/Write: this session may write files only in its governance phase. If the file already exists from an earlier round, the tool refuses. Read the operator's decisions in it first, then pass `--replace` only for a genuinely new review round.
+3. Present the report to the operator with each finding's id, organized as:
    - **Critical Findings** — must address before build
    - **Recommendations** — operator decides
    - **Ideas** — from Exploration and nice-to-haves
    - **Activation Summary** — which specialists ran and why
-3. Operator reviews each item: Accept / Reject / Defer
-4. For accepted items: note what changes to make (spec updates, new constraints, follow-ups)
-5. If PM Advisory ran and included spec-edit proposals: present each proposal to the operator (accept / reject / defer). For accepted proposals, execute the edit using Edit tool (Orchestrator writes on behalf of PM). Record outcomes in session log
-6. All Critical findings must be addressed (accepted or explicitly rejected with reason) before proceeding
+4. Operator reviews each item: Accept / Reject / Defer. Record each decision with `bash .claude/tools/review-findings.sh set <version> <id> <status>`:
+   - Accept → `applied`, once the change is made;
+   - Reject → `dismissed`, with `--reason "<the operator's reason>"`, which a Blocking finding requires;
+   - Defer → `deferred`.
+
+   When the decisions are made in Massimo, it records them with the same tool. Re-read the findings file to learn them; do not ask again.
+5. For accepted items: note what changes to make (spec updates, new constraints, follow-ups)
+6. If PM Advisory ran and included spec-edit proposals: present each proposal to the operator (accept / reject / defer). For accepted proposals, execute the edit using Edit tool (Orchestrator writes on behalf of PM). Record each outcome with `set`, as in step 4, since each proposal is a finding in the file. Also record outcomes in the session log
+7. All Critical findings must be resolved before proceeding. Run `bash .claude/tools/review-findings.sh check <version>`: it exits 0 only when every Blocking finding is `applied`, or `dismissed` with a reason. A `deferred` or `open` Blocking finding does not pass. Advisory findings never block. Do not start Phase 3 until it exits 0.
 
 ## Phase 3 — Repo OS Validation (both modes)
 
@@ -93,6 +117,7 @@ session: <current session number>
 spec_version: <active version from manifest.json>
 review_tier: <lite | standard | full | skip>
 mode: <initialize | re-initialize>
+findings: docs/spec/review-findings/<version>.yaml   # Initialize mode; omit when the review was skipped
 status: complete
 ```
 

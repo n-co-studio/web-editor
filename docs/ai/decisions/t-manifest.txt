@@ -88,3 +88,5 @@ t-0077-stop-denies-and-child-contract.md
 t-0078-queue-contract-and-gate-claims.md
 t-0079-project-registry.md
 t-0080-milestone-plan.md
+t-0081-suggested-metadata.md
+t-0082-review-findings.md

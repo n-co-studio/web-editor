@@ -40,6 +40,11 @@ entry:
                              # children, and `follow_ups` in `show --json` is a scan, not a field.
                              # Read by the hold release predicate (a follow-up is never released
                              # from its parent's hold) and by the dequeue follow-up guard.
+  metadata_suggested: false # (v1.16.0) true = project / milestone were suggested by Prompt T in draft
+                             # mode (Decision t-0081), not chosen by the operator. Set by
+                             # `add --suggested` (registered projects only); cleared by
+                             # `edit <id> metadata_suggested false` and by any edit of project or
+                             # milestone.*. Absent in older entries, which read as false.
   project: ""               # (v1.4.0) free-text project name; overrides work order value (optional, standalone entries)
   milestone:                # (v1.4.0) milestone override; entry wins over work order (optional)
     name: ""                # milestone label

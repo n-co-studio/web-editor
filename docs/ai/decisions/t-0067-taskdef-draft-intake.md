@@ -107,3 +107,5 @@ No queue-entry field is added, so `queue-entry.yaml` is not bumped.
 - Approval provenance is recorded: `source: queue-draft` in `plan-approved`.
 - `queue-cli.sh approve` without `--mode` leaves `auto_mode` as it was, so existing callers
   see no change.
+- A draft may carry a project and milestone that Prompt T suggested from the project registry,
+  marked `metadata_suggested: true` until the operator confirms or changes them (Decision t-0081).

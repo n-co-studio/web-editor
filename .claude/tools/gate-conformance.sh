@@ -624,6 +624,33 @@ rc=$(run_gate "pre-commit-gates.sh" "git commit -m chore-widened")
 expect_exit 2 "$rc" "blocks when the contract changed since approval"
 rm -f "$SB/.claude/local/task-contract.yaml"
 
+printf '\n## governance-close scope: the review findings file (t-0082)\n'
+# Prompt A writes docs/spec/review-findings/<v>.yaml in an advisory session, which
+# may commit only what _close_commit_allowed lists. One level, .yaml only.
+_rf_close_case() {   # <path> <content>
+  local active
+  reset_worktree; clear_state; write_phase_state "governance" "advisory-init"
+  # The evidence must name the sandbox's active version, so only scope decides.
+  active=$(jq -r '.active // ""' "$SB/docs/spec/compiled/manifest.json" 2>/dev/null || true)
+  stage "docs/ai/governance/advisory-reviewed" "$(printf 'spec_version: %s\nfindings: %s\nstatus: complete' "${active:-null}" "$1")"
+  stage "$1" "$2"
+  run_gate "pre-commit-gates.sh" "git commit -m advisory-close"
+}
+# A block must be the scope rule's, not some other gate's: 0 = the scope message.
+_rf_scope_block() { grep -q "commits only what its prompt writes" "$SB/.last-gate-output" 2>/dev/null && echo 0 || echo 1; }
+rc=$(_rf_close_case "docs/spec/review-findings/v1.yaml" 'findings: []')
+expect_exit 0 "$rc" "an advisory-init close commit may include its review findings file"
+rc=$(_rf_close_case "docs/spec/review-findings/sub/v1.yaml" 'findings: []')
+expect_exit 2 "$rc" "a nested path under review-findings/ is still out of close-commit scope"
+expect_exit 0 "$(_rf_scope_block)" "...blocked by the close-commit scope"
+rc=$(_rf_close_case "docs/spec/review-findings/notes.md" 'notes')
+expect_exit 2 "$rc" "a non-.yaml file under review-findings/ is still out of close-commit scope"
+expect_exit 0 "$(_rf_scope_block)" "...blocked by the close-commit scope"
+rc=$(_rf_close_case "docs/spec/compiled/v1/product.md" 'product')
+expect_exit 2 "$rc" "an advisory session still cannot commit a compiled spec"
+expect_exit 0 "$(_rf_scope_block)" "...blocked by the close-commit scope"
+reset_worktree; clear_state
+
 printf '\n## pre-push-gates.sh\n'
 
 # C11/C12 — B1 branch naming

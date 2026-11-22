@@ -382,6 +382,17 @@ _manifest_active_version() {
   jq -r '.active // ""' "$m" 2>/dev/null || true
 }
 
+# The advisory review's findings file (t-0082): docs/spec/review-findings/<v>.yaml,
+# one level deep and .yaml only. Prompt A writes it, and the spec sessions will
+# too once the review runs before compile (R6).
+_close_commit_review_findings() {
+  case "$1" in
+    docs/spec/review-findings/*/*) return 1 ;;
+    docs/spec/review-findings/?*.yaml) return 0 ;;
+  esac
+  return 1
+}
+
 # Paths a governance-close session may commit: what its prompt writes and
 # nothing else. The evidence below is a file the agent writes itself, so this
 # scope is what keeps it from carrying product code past QA (t-0069).
@@ -405,11 +416,13 @@ _close_commit_allowed() {
       # every session type (workflow.md step 1); the KG gate still checks it.
       case "$1" in
         docs/spec/compiled/*|docs/ai/governance/spec-compiled|docs/ai/knowledge-graph/product-graph.yaml) return 0 ;;
-      esac ;;
+      esac
+      _close_commit_review_findings "$1" && return 0 ;;
     advisory-init|advisory-reinit)
       case "$1" in
         docs/ai/governance/advisory-reviewed|docs/ai/knowledge-graph/coverage.yaml|docs/ai/knowledge-graph/product-graph.yaml) return 0 ;;
-      esac ;;
+      esac
+      _close_commit_review_findings "$1" && return 0 ;;
     audit)
       # Prompt C's deferral exception — the only write an audit session makes.
       case "$1" in docs/ai/logs/known-issues.md|.claude/.deferrals-pending) return 0 ;; esac ;;

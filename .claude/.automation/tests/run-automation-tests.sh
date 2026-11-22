@@ -66,6 +66,8 @@ test-child-sync.sh
 test-smoke-continue-false.sh
 test-project-registry.sh
 test-milestone-plan.sh
+test-suggested-metadata.sh
+test-review-findings.sh
 "
 # Note: test-queue-manipulation.sh uses adversarial severity labels ([HIGH]/[MEDIUM]/[LOW])
 # in its test names, but its cases gate on exit code — not on the tags. This runner only

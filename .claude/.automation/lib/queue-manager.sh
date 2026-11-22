@@ -43,6 +43,8 @@ _QE_PROJECT="" _QE_MILESTONE_NAME="" _QE_MILESTONE_INDEX="" _QE_MILESTONE_TOTAL=
 _QE_STOPPED_MODE="" _QE_RESUME=""
 # (v1.8.0) hold the line behind a stopped entry — t-0055 clauses 9-11
 _QE_HELD_BY="" _QE_INDEPENDENT="" _QE_FOLLOW_UP_OF=""
+# (v1.16.0) project / milestone were suggested by Prompt T, not yet confirmed (t-0081)
+_QE_METADATA_SUGGESTED=""
 # (t-0056) close-time re-verification
 _QE_REVERIFIED="" _QE_OVERLAP_FILES=""
 # (v1.10.0) close pipeline — t-0057
@@ -112,7 +114,7 @@ _load_queue_entry() {
   _QE_PROJECT="" _QE_MILESTONE_NAME="" _QE_MILESTONE_INDEX="" _QE_MILESTONE_TOTAL=""
   _QE_REVERIFIED="" _QE_OVERLAP_FILES=""
   _QE_STOPPED_MODE="" _QE_RESUME=""
-  _QE_HELD_BY="" _QE_INDEPENDENT="" _QE_FOLLOW_UP_OF=""
+  _QE_HELD_BY="" _QE_INDEPENDENT="" _QE_FOLLOW_UP_OF="" _QE_METADATA_SUGGESTED=""
   _QE_CLOSE_PATH="" _QE_CLOSE_STATE="" _QE_CLOSE_STEPS="" _QE_MERGE_HOLD=""
   _QE_PR_NUMBER="" _QE_PR_URL="" _QE_CONFLICT_RESOLUTION=""
   [ -f "$entry_file" ] || return 1
@@ -182,6 +184,7 @@ ${_line#    }"
       "  resume: "*)       _QE_RESUME="${_line#  resume: }" ;;
       "  held_by: "*)      _QE_HELD_BY="${_line#  held_by: }" ;;
       "  independent: "*)  _QE_INDEPENDENT="${_line#  independent: }" ;;
+      "  metadata_suggested: "*) _QE_METADATA_SUGGESTED="${_line#  metadata_suggested: }" ;;
       "  follow_up_of: "*) _QE_FOLLOW_UP_OF="${_line#  follow_up_of: }" ;;
       "  project: "*)      _QE_PROJECT="${_line#  project: }" ;;
       "  milestone:")      _in_milestone=true ;;
@@ -233,6 +236,7 @@ ${_line#    }"
   _QE_RESUME=$(_strip_quotes "$_QE_RESUME")
   _QE_HELD_BY=$(_strip_quotes "$_QE_HELD_BY")
   _QE_INDEPENDENT=$(_strip_quotes "$_QE_INDEPENDENT")
+  _QE_METADATA_SUGGESTED=$(_strip_quotes "$_QE_METADATA_SUGGESTED")
   _QE_FOLLOW_UP_OF=$(_strip_quotes "$_QE_FOLLOW_UP_OF")
   _QE_PROJECT=$(_strip_quotes "$_QE_PROJECT")
   _QE_MILESTONE_NAME=$(_strip_quotes "$_QE_MILESTONE_NAME")
@@ -310,6 +314,7 @@ _write_queue_entry() {
     printf '  resume: "%s"\n' "$(_yaml_escape_scalar "${_QE_RESUME:-false}")"
     printf '  held_by: "%s"\n' "$(_yaml_escape_scalar "${_QE_HELD_BY:-}")"
     printf '  independent: "%s"\n' "$(_yaml_escape_scalar "${_QE_INDEPENDENT:-false}")"
+    printf '  metadata_suggested: "%s"\n' "$(_yaml_escape_scalar "${_QE_METADATA_SUGGESTED:-false}")"
     # Written from v1.8.0 but populated by a later brief's follow-up-entry.
     # Round-tripped from the start so a v1.8.0 rewrite of an entry created later
     # cannot silently drop the pointer — _write_queue_entry rewrites whole files.
@@ -843,7 +848,7 @@ queue_enqueue() {
   # they are exactly the fields a scanned entry is likely to have set. Reset
   # them explicitly rather than relying on the caller having a fresh process.
   _QE_STOPPED_MODE="" _QE_RESUME="false"
-  _QE_HELD_BY="" _QE_INDEPENDENT="false"
+  _QE_HELD_BY="" _QE_INDEPENDENT="false" _QE_METADATA_SUGGESTED="false"
   _QE_REVERIFIED="" _QE_OVERLAP_FILES=""
   _QE_CLOSE_PATH="" _QE_CLOSE_STATE="" _QE_CLOSE_STEPS="" _QE_MERGE_HOLD="false"
 
@@ -3015,9 +3020,9 @@ queue_edit() {
   # Editable fields whitelist
   case "$field" in
     brief_path|session_type|branch|auto_mode|solo_mode|push_on_complete|max_retries|priority|\
-    independent|project|milestone.name|milestone.index|milestone.total) ;;
+    independent|project|milestone.name|milestone.index|milestone.total|metadata_suggested) ;;
     *)
-      echo "ERROR: Field '$field' is not editable (allowed: brief_path, session_type, branch, auto_mode, solo_mode, push_on_complete, max_retries, priority, independent, project, milestone.name, milestone.index, milestone.total)" >&2
+      echo "ERROR: Field '$field' is not editable (allowed: brief_path, session_type, branch, auto_mode, solo_mode, push_on_complete, max_retries, priority, independent, project, milestone.name, milestone.index, milestone.total, metadata_suggested)" >&2
       return 1
       ;;
   esac
@@ -3038,13 +3043,13 @@ queue_edit() {
     *$'\n'*|*$'\r'*) echo "ERROR: $field must be one line" >&2; return 1 ;;
   esac
 
-  # Running entries are immutable, except project and milestone.*: they are
-  # display metadata no session reads (Decision t-0080).
+  # Running entries are immutable, except project, milestone.* and whether
+  # they were suggested: display metadata no session reads (t-0080, t-0081).
   if [ "$_QE_STATUS" = "running" ]; then
     case "$field" in
-      project|milestone.name|milestone.index|milestone.total) ;;
+      project|milestone.name|milestone.index|milestone.total|metadata_suggested) ;;
       *)
-        echo "ERROR: Cannot edit running entry $entry_id (only project and milestone.* can change while it runs)" >&2
+        echo "ERROR: Cannot edit running entry $entry_id (only project and milestone.*, and whether they are suggested, can change while it runs)" >&2
         return 1 ;;
     esac
   fi
@@ -3093,6 +3098,17 @@ queue_edit() {
         ''|*[!0-9]*) echo "ERROR: milestone.total must be a non-negative integer" >&2; return 1 ;;
       esac
       _QE_MILESTONE_TOTAL="$value" ;;
+    metadata_suggested)
+      case "$value" in
+        true|false) ;;
+        *) echo "ERROR: metadata_suggested must be true or false" >&2; return 1 ;;
+      esac
+      _QE_METADATA_SUGGESTED="$value" ;;
+  esac
+  # Changing project or milestone is the operator choosing it, so a value
+  # Prompt T suggested stops being a suggestion (t-0081).
+  case "$field" in
+    project|milestone.*) _QE_METADATA_SUGGESTED="false" ;;
   esac
 
   _QE_UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)

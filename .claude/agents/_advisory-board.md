@@ -134,9 +134,9 @@ This preserves the Critic's adversarial focus (problems only) while ensuring eve
 The operator reviews the refinement report and responds per-item:
 - **Accept** — integrate into spec or create follow-up task
 - **Reject** — document reason, proceed without
-- **Defer** — acknowledged, not blocking, revisit later
+- **Defer** — acknowledged, revisit later. This does not block a Recommendation or Idea, but does not resolve a Critical finding.
 
-No build begins until the operator has reviewed all Critical findings.
+No build begins until every Critical finding is accepted or rejected with a reason. Decisions are recorded in the findings file `docs/spec/review-findings/<version>.yaml`, through `.claude/tools/review-findings.sh`. The file is the record Massimo reads and writes, and `review-findings.sh check` enforces this rule (Decision t-0082).
 
 ---
 
@@ -185,6 +185,6 @@ When running Prompt A Phase 1 (advisory board review), the Orchestrator follows 
    c. Any Critic finding with no matching specialist suggestion → list under "Unresolved Critic Findings" in the report (operator must provide direction)
    d. If PM Advisory ran: preserve PM scope labels (IN-SCOPE / OUT-OF-SCOPE / DEFER) inline with PM findings — labels are informational and do not affect routing (findings still route by severity). Extract any spec-edit proposals into the "PM Spec-Edit Proposals" subsection
 7. **Present** report to operator for per-item review (accept / reject / defer)
-8. **Record** operator decisions — no build begins until all Critical findings are addressed
+8. **Record** operator decisions in the findings file (`review-findings.sh set`). No build begins until `review-findings.sh check` passes (Decision t-0082)
 
 For feature briefs: scan the feature brief's "What It Touches" checkboxes for activation signals. Default tier is Lite.

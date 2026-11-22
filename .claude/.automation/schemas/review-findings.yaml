@@ -1,0 +1,56 @@
+# Review Findings Schema — v1.0.0 (Decision t-0082)
+#
+# Path (repo-root relative): docs/spec/review-findings/<spec-version>.yaml, one
+# file per reviewed spec version. Owner: the repo. The template ships none and
+# template sync never writes or sweeps the directory (.templatesyncignore).
+#
+# Written only by .claude/tools/review-findings.sh:
+#   write <version> [--replace]   Prompt A writes the findings (on stdin) after the
+#                                 advisory review; refuses an existing file unless
+#                                 --replace (a new review round)
+#   set <version> <id> <status> [--reason TEXT]
+#                                 the operator's decision, from Massimo or the session
+#   check <version>               exit 0 only when every Blocking finding is applied,
+#                                 or dismissed with a reason
+#
+# Severity follows kind: critical is Blocking; recommendation and idea are
+# Advisory. The tool writes severity; `write` input must not contain it.
+# Status: open (no decision), applied (Accept, change made), dismissed (Reject;
+# a Blocking finding needs a reason), deferred (Defer; does not resolve a
+# Blocking finding). Advisory findings never block.
+#
+# Layout: readers parse this exact layout line by line (bash 3.2, no YAML
+# library). Two-space indentation, one key per line, every value one
+# double-quoted line with \" and \\ escaped and nothing after the closing quote.
+# Blank lines and # comment lines are ignored; anything else is an error, and an
+# unreadable file is an error, never treated as absent. A writer other than the
+# tool must keep this layout and replace the file atomically.
+#
+# Fields (comments on their own lines, so this block is itself a valid file):
+
+# string; major version 1 is the only one read
+schema_version: "1.0.0"
+# string: the spec version reviewed (the file name)
+spec_version: "v1"
+# list, in report order
+findings:
+    # string, unique in the file: F1, F2, ...
+  - id: "F1"
+      # Blocking | Advisory — written by the tool from kind
+    severity: "Blocking"
+      # critical | recommendation | idea
+    kind: "critical"
+      # string: the specialist that raised it (critic, architect, ...)
+    agent: "critic"
+      # string: repo-relative path of the spec file it targets
+    spec_file: "docs/spec/drafts/v1/data-contracts.md"
+      # string: the section (heading) within that file
+    section: "ProjectRegistry"
+      # string, one line: what is wrong
+    finding: "Example finding"
+      # string, one line: the concrete change suggested
+    suggested_fix: "Example fix"
+      # open | applied | dismissed | deferred
+    status: "open"
+      # string, one line: why it was dismissed (required to dismiss a Blocking finding)
+    reason: ""

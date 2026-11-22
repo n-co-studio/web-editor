@@ -72,6 +72,10 @@ docs/ai/knowledge-graph/coverage.yaml
 # this keeps the path out of the manifest and the sweep never touches it.
 docs/ai/project-registry.yaml
 
+# Advisory review findings (child-owned, Decision t-0082): one file per reviewed
+# spec version, with the operator's decisions in it. The template ships none.
+docs/spec/review-findings/
+
 # Workflow files (repo-specific; GITHUB_TOKEN cannot push workflow changes)
 #
 # GitHub refuses a push from a GitHub App / GITHUB_TOKEN that creates or

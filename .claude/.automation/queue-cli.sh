@@ -7,7 +7,7 @@
 #   queue-cli.sh <subcommand> [options]
 #
 # Subcommands:
-#   add --brief <path> [--branch NAME] [--session-type TYPE] [--auto-approve] [--solo] [--push] [--priority N] [--independent] [--work-order WO]
+#   add --brief <path> [--branch NAME] [--session-type TYPE] [--auto-approve] [--solo] [--push] [--priority N] [--independent] [--work-order WO] [--suggested]
 #   approve <id> [--mode review|auto]
 #   approve-wo <work-order-id> [--mode review|auto]
 #   draft-status <id>...
@@ -165,7 +165,7 @@ _usage() {
 Usage: queue-cli.sh [--json] <subcommand> [args]
 
 Subcommands:
-  add --brief <path> [--branch NAME] [--session-type TYPE] [--auto-approve] [--solo] [--push] [--priority N] [--independent] [--work-order WO]
+  add --brief <path> [--branch NAME] [--session-type TYPE] [--auto-approve] [--solo] [--push] [--priority N] [--independent] [--work-order WO] [--suggested]
   approve <id> [--mode review|auto]           approve a pending entry; --mode sets auto_mode first
   approve-wo <work-order-id> [--mode review|auto]
                                               approve every pending entry of a work order together
@@ -244,6 +244,12 @@ _json_kv_raw() {
 # Reads already-loaded _QE_* vars, loads the parent work order if present,
 # and applies resolution: entry wins → work order wins → empty/zero.
 # Sets: _RESOLVED_PROJECT _RESOLVED_MILESTONE_NAME _RESOLVED_MILESTONE_INDEX _RESOLVED_MILESTONE_TOTAL
+# metadata_suggested as a JSON boolean (t-0081). Anything but "true" is false,
+# so an older entry without the field, or a hand-edited value, stays valid JSON.
+_metadata_suggested_json() {
+  if [ "${_QE_METADATA_SUGGESTED:-}" = true ]; then printf 'true'; else printf 'false'; fi
+}
+
 _resolve_entry_metadata() {
   _RESOLVED_PROJECT="${_QE_PROJECT:-}"
   _RESOLVED_MILESTONE_NAME="${_QE_MILESTONE_NAME:-}"
@@ -511,6 +517,7 @@ case "$SUBCOMMAND" in
   add)
     ADD_BRIEF="" ADD_BRANCH="" ADD_SESSION_TYPE="standard"
     ADD_AUTO_APPROVE=false ADD_SOLO=false ADD_PUSH=false ADD_PRIORITY="0" ADD_INDEPENDENT=false
+    ADD_SUGGESTED=false
     ADD_PROJECT="" ADD_MILESTONE_NAME="" ADD_MILESTONE_INDEX="0" ADD_MILESTONE_TOTAL="0"
     ADD_WORK_ORDER=""
     SESSION_TYPE_EXPLICIT=false BRANCH_EXPLICIT=false
@@ -524,6 +531,7 @@ case "$SUBCOMMAND" in
         --solo)             ADD_SOLO=true; shift ;;
         --push)             ADD_PUSH=true; shift ;;
         --independent)      ADD_INDEPENDENT=true; shift ;;
+        --suggested)        ADD_SUGGESTED=true; shift ;;
         --work-order)       [ $# -ge 2 ] || { echo "ERROR: --work-order needs a work order id" >&2; exit 1; }
                             ADD_WORK_ORDER="$2"; shift 2 ;;
         --project)          ADD_PROJECT="$2"; shift 2 ;;
@@ -662,8 +670,44 @@ case "$SUBCOMMAND" in
     ADD_MILESTONE_INDEX="$_REG_MS_INDEX" ADD_MILESTONE_TOTAL="$_REG_MS_TOTAL"
     _ADD_REG_AUTOADD="$_REG_AUTOADD"
 
+    # --suggested (t-0081): a suggestion is only ever a registered project, so a
+    # guess can never auto-add a new one to the registry.
+    if [ "$ADD_SUGGESTED" = true ]; then
+      _add_sug_why=""
+      if [ ! -f "$(project_registry_file)" ]; then
+        _add_sug_why="there is no project registry"
+      elif [ -z "$ADD_PROJECT" ]; then
+        _add_sug_why="--suggested needs --project"
+      elif [ "$_ADD_REG_AUTOADD" = true ]; then
+        _add_sug_why="project '$ADD_PROJECT' is not registered (suggest only an existing project)"
+      fi
+      if [ -n "$_add_sug_why" ]; then
+        release_queue_lock
+        echo "ERROR: --suggested refused: $_add_sug_why; nothing was queued" >&2
+        exit 1
+      fi
+    fi
+
     _ensure_queue_dirs
-    ENTRY_ID=$(queue_enqueue "$ADD_BRIEF" "$ADD_SESSION_TYPE" "$ADD_AUTO_MODE" "$ADD_SOLO_STR" "$ADD_BRANCH" "$ADD_WORK_ORDER" "$ADD_PUSH_STR" "$ADD_PRIORITY" "build" "$ADD_PROJECT" "$ADD_MILESTONE_NAME" "$ADD_MILESTONE_INDEX" "$ADD_MILESTONE_TOTAL")
+    # queue_enqueue reports a brief that is already queued only on stderr
+    # (`duplicate:<id>`). For --suggested its stderr is kept to tell a new entry
+    # from that one; every other add streams it as before.
+    _ADD_DUPLICATE=false
+    if [ "$ADD_SUGGESTED" = true ]; then
+      if _add_enq_err=$(mktemp "${TMPDIR:-/tmp}/queue-add.XXXXXX"); then
+        ENTRY_ID=$(queue_enqueue "$ADD_BRIEF" "$ADD_SESSION_TYPE" "$ADD_AUTO_MODE" "$ADD_SOLO_STR" "$ADD_BRANCH" "$ADD_WORK_ORDER" "$ADD_PUSH_STR" "$ADD_PRIORITY" "build" "$ADD_PROJECT" "$ADD_MILESTONE_NAME" "$ADD_MILESTONE_INDEX" "$ADD_MILESTONE_TOTAL" 2>"$_add_enq_err") || true
+        grep -q '^duplicate:' "$_add_enq_err" && _ADD_DUPLICATE=true
+        cat "$_add_enq_err" >&2
+        rm -f "$_add_enq_err"
+      else
+        # Without the capture a duplicate cannot be told apart, so it fails
+        # closed: no mark rather than marking an entry this add did not write.
+        _ADD_DUPLICATE=unknown
+        ENTRY_ID=$(queue_enqueue "$ADD_BRIEF" "$ADD_SESSION_TYPE" "$ADD_AUTO_MODE" "$ADD_SOLO_STR" "$ADD_BRANCH" "$ADD_WORK_ORDER" "$ADD_PUSH_STR" "$ADD_PRIORITY" "build" "$ADD_PROJECT" "$ADD_MILESTONE_NAME" "$ADD_MILESTONE_INDEX" "$ADD_MILESTONE_TOTAL") || true
+      fi
+    else
+      ENTRY_ID=$(queue_enqueue "$ADD_BRIEF" "$ADD_SESSION_TYPE" "$ADD_AUTO_MODE" "$ADD_SOLO_STR" "$ADD_BRANCH" "$ADD_WORK_ORDER" "$ADD_PUSH_STR" "$ADD_PRIORITY" "build" "$ADD_PROJECT" "$ADD_MILESTONE_NAME" "$ADD_MILESTONE_INDEX" "$ADD_MILESTONE_TOTAL")
+    fi
 
     if [ -z "$ENTRY_ID" ]; then
       release_queue_lock
@@ -692,6 +736,17 @@ case "$SUBCOMMAND" in
       if ! queue_edit "$ENTRY_ID" independent true; then
         release_queue_lock
         echo "ERROR: Entry $ENTRY_ID was created but --independent could not be applied" >&2
+        exit 1
+      fi
+    fi
+    # Marked only when this add wrote the entry: for a brief already queued,
+    # queue_enqueue returns the existing entry, whose metadata is not this add's.
+    if [ "$ADD_SUGGESTED" = true ] && [ "$_ADD_DUPLICATE" = unknown ]; then
+      echo "WARNING: could not tell whether entry $ENTRY_ID is new, so it was not marked suggested" >&2
+    elif [ "$ADD_SUGGESTED" = true ] && [ "$_ADD_DUPLICATE" = false ]; then
+      if ! queue_edit "$ENTRY_ID" metadata_suggested true; then
+        release_queue_lock
+        echo "ERROR: Entry $ENTRY_ID was created but --suggested could not be applied" >&2
         exit 1
       fi
     fi
@@ -1243,7 +1298,7 @@ case "$SUBCOMMAND" in
         # follow_up_of is flat on the list row, not the follow_ups array: a
         # list is a view of many entries, and the reverse direction costs a
         # whole-queue scan per row. `show` is where the links are walked.
-        printf '{%s,%s,%s,%s,%s,%s,%s,%s,%s,%s}' \
+        printf '{%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s}' \
           "$(_json_kv "id" "$L_ID")" \
           "$(_json_kv "status" "$L_STATUS")" \
           "$(_json_kv "session_type" "$L_TYPE")" \
@@ -1253,7 +1308,8 @@ case "$SUBCOMMAND" in
           "$(_json_kv "project" "$_RESOLVED_PROJECT")" \
           "$(_json_kv "milestone_name" "$_RESOLVED_MILESTONE_NAME")" \
           "$(_json_kv_raw "milestone_index" "${_RESOLVED_MILESTONE_INDEX:-0}")" \
-          "$(_json_kv_raw "milestone_total" "${_RESOLVED_MILESTONE_TOTAL:-0}")"
+          "$(_json_kv_raw "milestone_total" "${_RESOLVED_MILESTONE_TOTAL:-0}")" \
+          "$(_json_kv_raw "metadata_suggested" "$(_metadata_suggested_json)")"
       done < <(queue_list "$LIST_FILTER")
       printf ']\n'
     else
@@ -1300,7 +1356,7 @@ EOF
       # safe here after the load; close_steps is already JSON, emitted verbatim.
       _SHOW_CLOSE_PATH=$(queue_close_path)
       _SHOW_CLOSE_STATE=$(queue_close_state)
-      printf '{%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"follow_ups":[%s],%s,%s,%s,%s,%s,%s,"close_steps":%s}\n' \
+      printf '{%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"follow_ups":[%s],%s,%s,%s,%s,%s,%s,"close_steps":%s}\n' \
         "$(_json_kv "id" "$_QE_ID")" \
         "$(_json_kv "status" "$_QE_STATUS")" \
         "$(_json_kv "priority" "${_QE_PRIORITY:-0}")" \
@@ -1319,6 +1375,7 @@ EOF
         "$(_json_kv "milestone_name" "$_RESOLVED_MILESTONE_NAME")" \
         "$(_json_kv_raw "milestone_index" "${_RESOLVED_MILESTONE_INDEX:-0}")" \
         "$(_json_kv_raw "milestone_total" "${_RESOLVED_MILESTONE_TOTAL:-0}")" \
+        "$(_json_kv_raw "metadata_suggested" "$(_metadata_suggested_json)")" \
         "$(_json_kv "created_at" "$_QE_CREATED_AT")" \
         "$(_json_kv "updated_at" "$_QE_UPDATED_AT")" \
         "$(_json_kv "completed_at" "$_QE_COMPLETED_AT")" \

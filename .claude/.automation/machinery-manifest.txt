@@ -68,6 +68,7 @@
 .claude/.automation/schemas/milestone-plan.yaml
 .claude/.automation/schemas/project-registry.yaml
 .claude/.automation/schemas/queue-entry.yaml
+.claude/.automation/schemas/review-findings.yaml
 .claude/.automation/schemas/review-log-entry.yaml
 .claude/.automation/schemas/runner-config.yaml
 .claude/.automation/schemas/work-order.yaml
@@ -103,9 +104,11 @@
 .claude/.automation/tests/test-question-park.sh
 .claude/.automation/tests/test-queue-manipulation.sh
 .claude/.automation/tests/test-reverify-merge.sh
+.claude/.automation/tests/test-review-findings.sh
 .claude/.automation/tests/test-runner.sh
 .claude/.automation/tests/test-smoke-continue-false.sh
 .claude/.automation/tests/test-state-corruption.sh
+.claude/.automation/tests/test-suggested-metadata.sh
 .claude/.automation/tests/test-taskdef-draft.sh
 .claude/.automation/tests/test-verify-pristine.sh
 .claude/.automation/tests/test-work-preserver.sh
@@ -225,6 +228,7 @@
 .claude/tools/kg-relevance.sh
 .claude/tools/kg-seed.sh
 .claude/tools/kg-validate.sh
+.claude/tools/review-findings.sh
 .claude/tools/smoke-claude-continue-false.sh
 .claude/tools/spec-digest.sh
 .claude/tools/sync-conformance.sh
@@ -320,6 +324,8 @@ docs/ai/decisions/t-0077-stop-denies-and-child-contract.md
 docs/ai/decisions/t-0078-queue-contract-and-gate-claims.md
 docs/ai/decisions/t-0079-project-registry.md
 docs/ai/decisions/t-0080-milestone-plan.md
+docs/ai/decisions/t-0081-suggested-metadata.md
+docs/ai/decisions/t-0082-review-findings.md
 docs/ai/decisions/t-manifest.txt
 docs/ai/eval/.gitkeep
 docs/ai/eval/_nomenclature.md
