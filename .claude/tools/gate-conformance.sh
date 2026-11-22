@@ -1421,6 +1421,70 @@ else
 fi
 
 # ============================================================
+# commit-msg git hook — scans the commit MESSAGE for secrets
+# ============================================================
+# A4 and the pre-commit hook scan staged files only; this hook covers the
+# message. It finds _secret-pattern.sh at the root of the working tree it runs
+# in, so each case runs inside a scratch git repo that carries its own copy.
+# Credentials are assembled from fragments so this file does not trip A4.
+_CM_SRC="$(cd "$REAL_HOOKS/../.automation/git-hooks" 2>/dev/null && pwd)/commit-msg"
+_CM=$(mktemp -d "${TMPDIR:-/tmp}/gate-conformance-cm.XXXXXX")
+git init -q "$_CM" 2>/dev/null
+mkdir -p "$_CM/.claude/hooks"
+cp "$_CM_SRC" "$_CM/.git/hooks/commit-msg" 2>/dev/null
+cp "$REAL_HOOKS/_secret-pattern.sh" "$_CM/.claude/hooks/"
+_CM_CRED="FAKE""CRED""0123456789"
+_CM_AT="@"
+_cm_run() {   # args: printf format and its arguments -> the hook's exit code
+  # shellcheck disable=SC2059
+  printf "$@" > "$_CM/msg"
+  _OUT_FILE="$_CM/out"
+  ( cd "$_CM" && bash .git/hooks/commit-msg "$_CM/msg" ) > "$_OUT_FILE" 2>&1
+  echo $?
+}
+
+expect_exit 1 "$(_cm_run 'fix: x\n\nSee https://x-access-token:%s%sgithub.com/o/r.git\n' "$_CM_CRED" "$_CM_AT")" \
+  "commit-msg: a user:token URL in the message blocks"
+if grep -q "$_CM_CRED" "$_CM/out" 2>/dev/null; then _cm_rc=1; else _cm_rc=0; fi
+expect_exit 0 "$_cm_rc" "commit-msg: the refusal does not print the secret"
+expect_exit 1 "$(_cm_run 'chore: x\n\n%s\n' "github""_pat_""11ABCDEFGHIJ")" \
+  "commit-msg: a GitHub token in the message blocks"
+expect_exit 0 "$(_cm_run 'fix: rotate the token handling\n\nGates-A: A1-pass A6-n/a\n')" \
+  "commit-msg: a plain message that mentions a token passes"
+# `git commit -m` keeps '#' lines (cleanup mode "whitespace"), so they are scanned.
+expect_exit 1 "$(_cm_run 'fix: x\n# https://u:%s%sexample.invalid/r\n' "$_CM_CRED" "$_CM_AT")" \
+  "commit-msg: a secret on a '#' line blocks too"
+
+# Through git itself, with core.hooksPath outside .git/hooks: the hook must still
+# find the pattern file (it asks git for the root) and stop the commit.
+_CMG=$(mktemp -d "${TMPDIR:-/tmp}/gate-conformance-cmg.XXXXXX")
+git init -q "$_CMG" 2>/dev/null
+mkdir -p "$_CMG/.githooks" "$_CMG/.claude/hooks"
+cp "$_CM_SRC" "$_CMG/.githooks/commit-msg" 2>/dev/null && chmod +x "$_CMG/.githooks/commit-msg"
+cp "$REAL_HOOKS/_secret-pattern.sh" "$_CMG/.claude/hooks/"
+git -C "$_CMG" config core.hooksPath .githooks
+_cmg_commit() {   # arg: second -m paragraph -> git's exit code
+  _OUT_FILE="$_CMG/out"
+  git -C "$_CMG" -c user.name=conformance -c user.email=conformance@example.invalid \
+    commit -q --allow-empty -m "fix: probe" -m "$1" > "$_OUT_FILE" 2>&1
+  echo $?
+}
+_cm_rc=$(_cmg_commit "# https://u:${_CM_CRED}${_CM_AT}example.invalid/r")
+[ "$_cm_rc" -ne 0 ] && _cm_rc=1
+expect_exit 1 "$_cm_rc" "commit-msg via git, hooksPath=.githooks: '#'-line secret refused"
+_cm_n=$(git -C "$_CMG" rev-list --count HEAD 2>/dev/null || echo 0)
+expect_exit 0 "$_cm_n" "commit-msg via git: ...and no commit was made"
+expect_exit 0 "$(_cmg_commit "a plain paragraph")" "commit-msg via git: a plain message commits"
+rm -rf "$_CMG"
+
+rm -f "$_CM/.claude/hooks/_secret-pattern.sh"
+expect_exit 0 "$(_cm_run 'fix: x\n\nhttps://u:%s%sh/r\n' "$_CM_CRED" "$_CM_AT")" \
+  "commit-msg: no pattern file -> passes (warns, does not block)"
+if grep -q "WARNING" "$_CM/out" 2>/dev/null; then _cm_rc=0; else _cm_rc=1; fi
+expect_exit 0 "$_cm_rc" "commit-msg: ...and says the scan is inactive"
+rm -rf "$_CM"
+
+# ============================================================
 printf '\n# ------------------------------------------------------------\n'
 printf '# passed: %d   failed: %d\n' "$PASS" "$FAIL"
 if [ "$FAIL" -ne 0 ]; then

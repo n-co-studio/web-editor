@@ -80,8 +80,12 @@ fi
 # --- Constants ---
 REMOTE_NAME="_template_upstream"
 SYNCIGNORE="$REPO_ROOT/.templatesyncignore"
-# Extract repo name from URL for safe logging (strip token, protocol, .git suffix)
-TEMPLATE_REPO_NAME=$(echo "$TEMPLATE_REPO" | sed -E 's|https?://[^@]*@github\.com/||; s|https?://github\.com/||; s|\.git$||')
+# Extract repo name from URL for safe logging (strip token, protocol, .git suffix).
+# The userinfo part goes first, for any scheme and host, so no form of the URL
+# logs a credential; it runs to the LAST '@' before the path, so a password
+# containing '@' does not leave its tail behind. Then the github.com prefix
+# leaves owner/name.
+TEMPLATE_REPO_NAME=$(echo "$TEMPLATE_REPO" | sed -E 's|^([a-zA-Z][a-zA-Z0-9+.-]*://)[^/]*@|\1|; s|https?://github\.com/||; s|\.git$||')
 BEGIN_MARKER="# BEGIN REPO-OS MANAGED — template-sync, see AI.md"
 END_MARKER="# END REPO-OS MANAGED"
 MANAGED_COMMENT="# DO NOT EDIT between these markers — managed by template-sync"
@@ -96,10 +100,10 @@ setup_template_remote() {
   # Remove stale remote if it exists
   git remote remove "$REMOTE_NAME" 2>/dev/null || true
 
-  log "Adding template remote: $TEMPLATE_REPO ($TEMPLATE_BRANCH)"
+  log "Adding template remote: $TEMPLATE_REPO_NAME ($TEMPLATE_BRANCH)"
   git remote add "$REMOTE_NAME" "$TEMPLATE_REPO"
   git fetch "$REMOTE_NAME" "$TEMPLATE_BRANCH" --depth=1 || {
-    echo "ERROR: Failed to fetch from template repo: $TEMPLATE_REPO" >&2
+    echo "ERROR: Failed to fetch from template repo: $TEMPLATE_REPO_NAME" >&2
     git remote remove "$REMOTE_NAME" 2>/dev/null || true
     exit 1
   }
@@ -541,13 +545,33 @@ commit_and_push() {
   fi
 
   # Commit
-  log "Committing changes..."
-  REPO_OS_RECOVER=1 git commit -m "chore(template): sync from upstream
+  _SYNC_MSG="chore(template): sync from upstream
 
 Synced from $TEMPLATE_REPO_NAME ($TEMPLATE_BRANCH).
 Direct-push sync via template-sync-engine.sh.
 
 Decisions: 0015, 0022"
+
+  # Refuse to commit a message that matches the shared secret pattern.
+  # This engine runs in CI, where no git hooks are installed, so the
+  # commit-msg hook never sees these commits. In March 2026 a token-bearing
+  # URL reached this message and was pushed to five repos.
+  _PATTERN_FILE="$REPO_ROOT/.claude/hooks/_secret-pattern.sh"
+  if [ -f "$_PATTERN_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$_PATTERN_FILE"
+    if [ -n "${_REPO_OS_SECRET_PATTERN:-}" ] && \
+       printf '%s\n' "$_SYNC_MSG" | grep -qiE "$_REPO_OS_SECRET_PATTERN"; then
+      echo "ERROR: sync commit message matches the secret pattern — refusing to commit." >&2
+      echo "       Check how TEMPLATE_REPO_NAME is derived from the template URL." >&2
+      exit 1
+    fi
+  else
+    log "WARNING: $_PATTERN_FILE not found — commit message not scanned"
+  fi
+
+  log "Committing changes..."
+  REPO_OS_RECOVER=1 git commit -m "$_SYNC_MSG"
 
   # Push to main (fail on non-fast-forward — NEVER force push)
   log "Pushing to main..."
@@ -572,7 +596,7 @@ cleanup_remote() {
 # --- Main ---
 main() {
   log "=== Template Sync Engine ==="
-  log "Template: $TEMPLATE_REPO"
+  log "Template: $TEMPLATE_REPO_NAME"
   log "Branch: $TEMPLATE_BRANCH"
   log "Repo root: $REPO_ROOT"
 
