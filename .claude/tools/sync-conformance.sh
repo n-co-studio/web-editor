@@ -66,6 +66,9 @@ build_sandbox() {
   printf 'withdrawn later\n'  > "$TPL/.claude/hooks/doomed-hook.sh"
   # The template's own README, and a hook the child will claim as its own.
   printf '# Repo OS\ntemplate readme\n' > "$TPL/README.md"
+  # A registry in the template's own tree must still never reach a child (t-0079).
+  mkdir -p "$TPL/docs/ai"
+  printf 'schema_version: "1.0.0"\n# template registry\nprojects: []\n' > "$TPL/docs/ai/project-registry.yaml"
   printf 'template version\n'           > "$TPL/.claude/hooks/claimed-hook.sh"
   printf 'agent\n'            > "$TPL/.claude/agents/critic.md"
   printf '# ignored by sync\n' > "$TPL/docs/ai/logs/session-log.md"
@@ -89,6 +92,7 @@ EOF
   cat > "$TPL/.templatesyncignore" <<'EOF'
 docs/ai/logs/
 docs/ai/decisions/.a1-trigger-index
+docs/ai/project-registry.yaml
 .gitignore
 README.md
 .templatesyncignore.local
@@ -124,6 +128,10 @@ EOF
 
   # The child's product README — the file both real children lost on 2026-09-25.
   printf '# Visual Web Editor\nproduct readme\n' > "$CHILD/README.md"
+
+  # The child's project registry (t-0079): child-owned, never written by sync.
+  mkdir -p "$CHILD/docs/ai"
+  printf 'schema_version: "1.0.0"\n# child registry\nprojects: []\n' > "$CHILD/docs/ai/project-registry.yaml"
 
   # A file the template ALSO ships, which the child has taken ownership of.
   # Exercises both halves of the claim: not overwritten by sync, and not
@@ -196,6 +204,10 @@ assert_grep    "child version" "$CHILD/.claude/hooks/claimed-hook.sh" \
                "child-claimed file is not overwritten by sync"
 assert_file    "$CHILD/.templatesyncignore.local" \
                "child's claims file is itself never synced away"
+assert_grep    "child registry" "$CHILD/docs/ai/project-registry.yaml" \
+               "child's project registry survives (t-0079)"
+assert_no_grep "template registry" "$CHILD/docs/ai/project-registry.yaml" \
+               "the template's registry did NOT overwrite the child's"
 if grep -qi "skipping withdrawn-file sweep" "$SANDBOX/engine.log"; then
   ok "skips sweep when no previous manifest (fail-safe)"
 else
@@ -381,6 +393,14 @@ else
 fi
 
 # === Branch guard ==========================================================
+printf '\n## the real template: child-owned registry (t-0079)\n'
+# The fixture above proves the engine honours the entry; these prove the real
+# template carries it, so no child ever receives or loses a registry.
+assert_grep '^docs/ai/project-registry\.yaml$' "$TEMPLATE_ROOT/.templatesyncignore" \
+            "the template's .templatesyncignore excludes docs/ai/project-registry.yaml"
+assert_no_grep '^docs/ai/project-registry\.yaml$' "$TEMPLATE_ROOT/.claude/.automation/machinery-manifest.txt" \
+               "the template's machinery manifest does not list it"
+
 printf '\n## branch guard\n'
 git_q "$CHILD" checkout -b not-main
 ( cd "$CHILD" && bash "$ENGINE" "file://$TPL" main ) > "$SANDBOX/engine-branch.log" 2>&1

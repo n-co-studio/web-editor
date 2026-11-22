@@ -85,6 +85,7 @@
 # Exit codes:
 #   0  Success
 #   1  Validation or operational error
+#   3  draft-wait timed out; projects add: the name is taken (NAME_TAKEN)
 
 set -euo pipefail
 
@@ -118,6 +119,8 @@ source "$LIB_DIR/review-log.sh"
 source "$LIB_DIR/file-lock.sh"
 # shellcheck source=lib/queue-validator.sh
 source "$LIB_DIR/queue-validator.sh"
+# shellcheck source=lib/project-registry.sh
+source "$LIB_DIR/project-registry.sh"
 # shellcheck source=lib/branch-manager.sh
 source "$LIB_DIR/branch-manager.sh"
 # shellcheck source=lib/cleanup.sh
@@ -168,6 +171,8 @@ Subcommands:
   draft-wait <id>... [--timeout S] [--interval S]
                                               block until no <id> is pending-review (exit 3 on timeout)
   remove <id>
+  projects list                               the project registry: projects and numbered milestones
+  projects add <name> [--milestone NAME]...   register a project (exit 3 + NAME_TAKEN if taken)
   edit <id> <field> <value>
   set-priority <id> <N>
   status
@@ -637,6 +642,20 @@ case "$SUBCOMMAND" in
       exit 1
     fi
 
+    # Project registry (t-0079): canonical spelling, milestone checks and fill.
+    # Read under the lock so the add below sees the same file.
+    _add_name_explicit=false; [ -n "$ADD_MILESTONE_NAME" ] && _add_name_explicit=true
+    _add_total_explicit=false; [ "$ADD_MILESTONE_TOTAL" != "0" ] && _add_total_explicit=true
+    if ! project_registry_resolve "$ADD_PROJECT" "$ADD_MILESTONE_NAME" "$ADD_MILESTONE_INDEX" \
+         "$ADD_MILESTONE_TOTAL" "$_add_name_explicit" "$_add_total_explicit"; then
+      release_queue_lock
+      echo "ERROR: nothing was queued" >&2
+      exit 1
+    fi
+    ADD_PROJECT="$_REG_PROJECT" ADD_MILESTONE_NAME="$_REG_MS_NAME"
+    ADD_MILESTONE_INDEX="$_REG_MS_INDEX" ADD_MILESTONE_TOTAL="$_REG_MS_TOTAL"
+    _ADD_REG_AUTOADD="$_REG_AUTOADD"
+
     _ensure_queue_dirs
     ENTRY_ID=$(queue_enqueue "$ADD_BRIEF" "$ADD_SESSION_TYPE" "$ADD_AUTO_MODE" "$ADD_SOLO_STR" "$ADD_BRANCH" "$ADD_WORK_ORDER" "$ADD_PUSH_STR" "$ADD_PRIORITY" "build" "$ADD_PROJECT" "$ADD_MILESTONE_NAME" "$ADD_MILESTONE_INDEX" "$ADD_MILESTONE_TOTAL")
 
@@ -675,6 +694,16 @@ case "$SUBCOMMAND" in
     if [ "$ADD_AUTO_APPROVE" = true ]; then
       queue_approve "$ENTRY_ID"
       ADD_STATUS="approved"
+    fi
+
+    # Only now that the entry exists, so a refused add registers nothing. And
+    # only if that entry carries the project: for a brief already queued,
+    # queue_enqueue returns the existing entry and writes nothing new.
+    if [ "$_ADD_REG_AUTOADD" = true ]; then
+      _add_ef=$(_find_entry_file "$ENTRY_ID") || _add_ef=""
+      if [ -n "$_add_ef" ] && _load_queue_entry "$_add_ef" && [ "$_QE_PROJECT" = "$ADD_PROJECT" ]; then
+        project_registry_autoadd "$ADD_PROJECT" || true
+      fi
     fi
 
     release_queue_lock
@@ -871,7 +900,73 @@ case "$SUBCOMMAND" in
       exit 1
     fi
 
-    if [ "$EDIT_WORK_ORDER" = true ]; then
+    # Project registry (t-0079): an edit of project or milestone.* is checked as
+    # the whole resulting tuple, and the fields the registry fills (canonical
+    # project spelling, milestone name and total) are written alongside it.
+    _EDIT_REG_DONE=false
+    case "$EDIT_FIELD" in
+      project|milestone.name|milestone.index|milestone.total)
+        if [ -f "$(project_registry_file)" ]; then
+          if [ "$EDIT_WORK_ORDER" = true ]; then
+            if ! _load_work_order "$(_wo_dir)/${EDIT_ID}.yaml"; then
+              release_queue_lock; echo "ERROR: Work order $EDIT_ID not found" >&2; exit 1
+            fi
+            _e_p="$_WO_PROJECT" _e_n="$_WO_MILESTONE_NAME" _e_i="${_WO_MILESTONE_INDEX:-0}" _e_t="${_WO_MILESTONE_TOTAL:-0}"
+          else
+            _e_file=$(_find_entry_file "$EDIT_ID") || _e_file=""
+            if [ -z "$_e_file" ]; then
+              release_queue_lock; echo "ERROR: Entry $EDIT_ID not found" >&2; exit 1
+            fi
+            _load_queue_entry "$_e_file"
+            _e_p="$_QE_PROJECT" _e_n="$_QE_MILESTONE_NAME" _e_i="${_QE_MILESTONE_INDEX:-0}" _e_t="${_QE_MILESTONE_TOTAL:-0}"
+          fi
+          _e_op="$_e_p" _e_on="$_e_n" _e_oi="$_e_i" _e_ot="$_e_t"
+          _e_ne=false _e_te=false
+          case "$EDIT_FIELD" in
+            project)         _e_p="$EDIT_VALUE" ;;
+            milestone.name)  _e_n="$EDIT_VALUE"; _e_ne=true ;;
+            milestone.index) _e_i="$EDIT_VALUE" ;;
+            milestone.total) _e_t="$EDIT_VALUE"; _e_te=true ;;
+          esac
+          case "$_e_i$_e_t" in *[!0-9]*)
+            release_queue_lock; echo "ERROR: milestone index and total must be non-negative integers" >&2; exit 1 ;;
+          esac
+          if ! project_registry_resolve "$_e_p" "$_e_n" "$_e_i" "$_e_t" "$_e_ne" "$_e_te"; then
+            release_queue_lock; echo "ERROR: nothing was changed" >&2; exit 1
+          fi
+          for _e_f in project milestone.name milestone.index milestone.total; do
+            case "$_e_f" in
+              project)         _e_v="$_REG_PROJECT"  _e_o="$_e_op" ;;
+              milestone.name)  _e_v="$_REG_MS_NAME"  _e_o="$_e_on" ;;
+              milestone.index) _e_v="$_REG_MS_INDEX" _e_o="$_e_oi" ;;
+              milestone.total) _e_v="$_REG_MS_TOTAL" _e_o="$_e_ot" ;;
+            esac
+            # Unchanged fields are left alone (each write would warn again on a
+            # review/blocked entry); the field asked for is always written.
+            [ "$_e_f" = "$EDIT_FIELD" ] || [ "$_e_v" != "$_e_o" ] || continue
+            if [ "$EDIT_WORK_ORDER" = true ]; then
+              wo_edit "$EDIT_ID" "$_e_f" "$_e_v" || { release_queue_lock; exit 1; }
+            else
+              queue_edit "$EDIT_ID" "$_e_f" "$_e_v" || { release_queue_lock; exit 1; }
+            fi
+          done
+          if [ "$_REG_AUTOADD" = true ]; then
+            project_registry_autoadd "$_REG_PROJECT" || true
+          fi
+          case "$EDIT_FIELD" in
+            project)         EDIT_VALUE="$_REG_PROJECT" ;;
+            milestone.name)  EDIT_VALUE="$_REG_MS_NAME" ;;
+            milestone.index) EDIT_VALUE="$_REG_MS_INDEX" ;;
+            milestone.total) EDIT_VALUE="$_REG_MS_TOTAL" ;;
+          esac
+          _EDIT_REG_DONE=true
+        fi
+        ;;
+    esac
+
+    if [ "$_EDIT_REG_DONE" = true ]; then
+      :
+    elif [ "$EDIT_WORK_ORDER" = true ]; then
       wo_edit "$EDIT_ID" "$EDIT_FIELD" "$EDIT_VALUE"
     else
       queue_edit "$EDIT_ID" "$EDIT_FIELD" "$EDIT_VALUE"
@@ -897,6 +992,69 @@ case "$SUBCOMMAND" in
         printf 'Updated %s: %s = %s\n' "$EDIT_ID" "$EDIT_FIELD" "$EDIT_VALUE"
       fi
     fi
+    ;;
+
+  # --- projects: the project registry (Decision t-0079) ---
+  # list prints the registry; add creates a project with its milestones. The
+  # file is docs/ai/project-registry.yaml and belongs to the repo. Milestone
+  # renames, reorders and deletes are not here (Massimo R2).
+  projects)
+    PJ_ACTION="${1:-}"
+    [ $# -gt 0 ] && shift
+    case "$PJ_ACTION" in
+      list)
+        [ $# -eq 0 ] || { echo "ERROR: projects list takes no arguments" >&2; exit 1; }
+        _pj_rc=0; project_registry_load || _pj_rc=$?
+        case "$_pj_rc" in
+          1) echo "No project registry ($(project_registry_file)) — create one with: queue-cli.sh projects add <name>"; exit 0 ;;
+          2) exit 1 ;;
+        esac
+        _pj_i=0
+        while [ "$_pj_i" -lt "$_PR_COUNT" ]; do
+          printf '%s\n' "${_PR_NAMES[_pj_i]}"
+          _pj_j=1
+          while [ "$_pj_j" -le "${_PR_MS_COUNT[_pj_i]}" ]; do
+            printf '  %s. %s\n' "$_pj_j" "$(_project_registry_ms_name "$_pj_i" "$_pj_j")"
+            _pj_j=$((_pj_j + 1))
+          done
+          _pj_i=$((_pj_i + 1))
+        done
+        ;;
+      add)
+        PJ_NAME="${1:-}"
+        [ $# -gt 0 ] && shift
+        case "$PJ_NAME" in
+          ''|--*) echo "ERROR: projects add requires <name>" >&2; exit 1 ;;
+        esac
+        if ! project_registry_valid_name "$PJ_NAME"; then
+          echo "ERROR: a project name must be one non-blank line" >&2; exit 1
+        fi
+        PJ_MS=()
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            --milestone)
+              [ $# -ge 2 ] && project_registry_valid_name "$2" || { echo "ERROR: --milestone requires a name of one non-blank line" >&2; exit 1; }
+              PJ_MS[${#PJ_MS[@]}]="$2"; shift 2 ;;
+            *) echo "ERROR: Unknown projects add option: $1" >&2; exit 1 ;;
+          esac
+        done
+        if ! acquire_queue_lock; then
+          echo "ERROR: Queue lock unavailable" >&2
+          exit 1
+        fi
+        _pj_rc=0
+        project_registry_add "$PJ_NAME" ${PJ_MS[@]+"${PJ_MS[@]}"} || _pj_rc=$?
+        release_queue_lock
+        case "$_pj_rc" in
+          0) printf 'Added project %s with %s milestone(s) to %s\n' "$PJ_NAME" "${#PJ_MS[@]}" "$(project_registry_file)" ;;
+          3) exit 3 ;;
+          *) exit 1 ;;
+        esac
+        ;;
+      *)
+        echo "ERROR: projects requires list or add" >&2
+        exit 1 ;;
+    esac
     ;;
 
   # --- set-priority: convenience wrapper for edit <id> priority <N> ---
@@ -3626,6 +3784,23 @@ EOF
       echo "Note: $FU_PARENT_ID is itself a follow-up of ${_QE_FOLLOW_UP_OF}; the new entry follows $FU_PARENT_ID, not the chain head" >&2
     fi
 
+    # Registry checks (t-0079) treat only what the operator typed as a claim to
+    # check; an inherited milestone name and total are refilled from the
+    # registry by index, so a rename since the parent does not refuse its
+    # follow-up.
+    _fu_name_explicit=false;  [ -n "$FU_MILESTONE_NAME" ]  && _fu_name_explicit=true
+    _fu_total_explicit=false; [ -n "$FU_MILESTONE_TOTAL" ] && _fu_total_explicit=true
+    # The parent's milestone is inherited only as a whole and only while the
+    # follow-up stays in the parent's project and names no milestone of its own:
+    # a new project, or a milestone named without an index, starts from no
+    # milestone so the registry can resolve it (t-0079).
+    _fu_inherit_ms=true
+    [ -n "$FU_PROJECT" ] && [ "$(project_registry_norm "$FU_PROJECT")" != "$(project_registry_norm "$FU_PARENT_PROJECT")" ] && _fu_inherit_ms=false
+    [ -n "$FU_MILESTONE_NAME" ] && [ -z "$FU_MILESTONE_INDEX" ] && _fu_inherit_ms=false
+    if [ "$_fu_inherit_ms" = false ]; then
+      FU_PARENT_MS_NAME="" FU_PARENT_MS_INDEX="0" FU_PARENT_MS_TOTAL="0"
+    fi
+
     # Inherit unless overridden.
     [ -n "$FU_SESSION_TYPE" ]    || FU_SESSION_TYPE="$FU_PARENT_TYPE"
     [ -n "$FU_PROJECT" ]         || FU_PROJECT="$FU_PARENT_PROJECT"
@@ -3692,6 +3867,17 @@ EOF
       exit 1
     fi
 
+    if ! project_registry_resolve "$FU_PROJECT" "$FU_MILESTONE_NAME" "$FU_MILESTONE_INDEX" \
+         "$FU_MILESTONE_TOTAL" "$_fu_name_explicit" "$_fu_total_explicit"; then
+      release_queue_lock
+      rm -f "$FU_BRIEF_DEST" 2>/dev/null || true
+      echo "ERROR: nothing was queued" >&2
+      exit 1
+    fi
+    FU_PROJECT="$_REG_PROJECT" FU_MILESTONE_NAME="$_REG_MS_NAME"
+    FU_MILESTONE_INDEX="$_REG_MS_INDEX" FU_MILESTONE_TOTAL="$_REG_MS_TOTAL"
+    _FU_REG_AUTOADD="$_REG_AUTOADD"
+
     _ensure_queue_dirs
     # Argument 5 (branch) is empty ON PURPOSE. Whether this entry continues the
     # parent's branch or starts a new one off main depends on whether that
@@ -3724,6 +3910,10 @@ EOF
     if [ "$FU_AUTO_APPROVE" = true ]; then
       queue_approve "$FU_ENTRY_ID"
       FU_STATUS="approved"
+    fi
+
+    if [ "$_FU_REG_AUTOADD" = true ]; then
+      project_registry_autoadd "$FU_PROJECT" || true
     fi
 
     release_queue_lock

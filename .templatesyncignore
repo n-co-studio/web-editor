@@ -67,6 +67,11 @@ docs/spec/prototypes/
 docs/ai/knowledge-graph/product-graph.yaml
 docs/ai/knowledge-graph/coverage.yaml
 
+# Project registry (child-owned, Decision t-0079): the repo's projects and their
+# milestones. Same reasoning as the two above: the template ships no copy, so
+# this keeps the path out of the manifest and the sweep never touches it.
+docs/ai/project-registry.yaml
+
 # Workflow files (repo-specific; GITHUB_TOKEN cannot push workflow changes)
 #
 # GitHub refuses a push from a GitHub App / GITHUB_TOKEN that creates or

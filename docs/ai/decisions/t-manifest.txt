@@ -86,3 +86,4 @@ t-0075-verdict-bound-to-approval.md
 t-0076-sandbox-boundary.md
 t-0077-stop-denies-and-child-contract.md
 t-0078-queue-contract-and-gate-claims.md
+t-0079-project-registry.md

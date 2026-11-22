@@ -10,6 +10,25 @@ Breaking changes (field removal, type change, required field addition) increment
 
 ---
 
+## v1.14.0 — Project Registry
+
+**Date:** 2026-11-22
+**Decision:** t-0079 (Massimo R1)
+
+### Changes
+
+**project-registry.yaml** (new schema, `schema_version: "1.0.0"`):
+- The repo's projects and their ordered milestones, at the fixed path `docs/ai/project-registry.yaml`. Child-owned: the template ships no copy and lists the path in `.templatesyncignore`.
+- `projects[].name` (string, required, unique ignoring case and whitespace) and `projects[].milestones[]` `{index, name}` (indexes 1..N in order; a milestone may have no tasks).
+- The layout is exact (readers are bash line matchers); see the schema file. An invalid file is an error, never treated as absent.
+
+**queue-entry.yaml / work-order.yaml** (no field change):
+- When the registry exists, `project` is written in the registry's spelling and, for a project with registered milestones, `milestone.name` and `milestone.total` are filled from the registry by `milestone.index`. Values that contradict the registry are refused at `add`, `follow-up-entry` and `edit`. Without a registry the fields stay free text, as before.
+
+**queue-cli.sh**: new `projects list` and `projects add <name> [--milestone NAME]...` (exit 3 and `NAME_TAKEN: <name>` when the name is registered).
+
+---
+
 ## v1.13.0 — Question Park
 
 **Date:** 2026-11-16

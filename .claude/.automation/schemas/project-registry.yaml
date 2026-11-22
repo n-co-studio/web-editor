@@ -1,0 +1,56 @@
+# Project Registry Schema — v1.0.0 (Decision t-0079)
+#
+# Path (fixed, repo-root relative): docs/ai/project-registry.yaml
+# Owner: the repo. The template ships no copy; template sync never writes or
+# sweeps it (.templatesyncignore). Absent until the first `queue-cli.sh projects
+# add`, or until a task names a project not yet registered (auto-add).
+#
+# Source of truth: the registry holds project names, milestone names, their
+# order, and milestones with no task yet. A task's own `project` and
+# `milestone` fields stay the source for which milestone the task is in.
+#
+# Names match ignoring case and all whitespace ("Massimo App" = "massimoapp");
+# the spelling stored here is canonical, and queue-cli writes it onto tasks.
+#
+# Layout: readers parse this exact layout, line by line (bash 3.2, no YAML
+# library). Two-space indentation, one key per line, names double-quoted with
+# \" and \\ escaped and nothing after the closing quote (no trailing comment).
+# A name is one line. Blank lines, lines starting with # (at any indentation)
+# and trailing whitespace (a CR included) are ignored. Anything else is an error.
+#
+#   schema_version: "1.0.0"
+#   projects:                     # `projects: []` when empty
+#     - name: "Massimo App"
+#       milestones:               # `milestones: []` when the project has none
+#         - index: 1
+#           name: "Foundations"
+#         - index: 2
+#           name: "Editor"
+#
+# Validity (a file that fails any of these is an error, never treated as absent:
+# queue-cli refuses the add or edit that read it):
+#   - schema_version present, major version 1
+#   - every project has a non-empty name; no two names match (case/spacing)
+#   - milestone indexes run 1..N, in order, each with a non-empty name
+#
+# Writers: queue-cli writes under the queue lock, re-reads the file first, and
+# replaces it atomically (temp file + rename in the same directory). It rewrites
+# the whole file in this layout: comments are not kept, and schema_version is
+# written as the version this Repo OS writes. Another writer should go through
+# queue-cli; one that writes the file directly must replace it atomically the
+# same way and keep this layout.
+#
+# Fields (comments on their own lines, so this block is itself readable):
+
+# string; major version 1 is the only one read
+schema_version: "1.0.0"
+# list, in display order
+projects:
+    # string, required, one line, unique ignoring case and whitespace
+  - name: "Example"
+      # list, ordered; may be empty (`milestones: []`); a milestone may have no tasks
+    milestones:
+        # integer, 1..N in order
+      - index: 1
+          # string, required, one line
+        name: "First"

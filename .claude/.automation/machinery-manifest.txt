@@ -37,6 +37,7 @@
 .claude/.automation/lib/overlap-report.sh
 .claude/.automation/lib/permission-profiles.sh
 .claude/.automation/lib/pr-manager.sh
+.claude/.automation/lib/project-registry.sh
 .claude/.automation/lib/prompt-assembler.sh
 .claude/.automation/lib/question-channel.sh
 .claude/.automation/lib/queue-manager.sh
@@ -63,6 +64,7 @@
 .claude/.automation/schemas/eval-cell.yaml
 .claude/.automation/schemas/eval-study.yaml
 .claude/.automation/schemas/eval-suite.yaml
+.claude/.automation/schemas/project-registry.yaml
 .claude/.automation/schemas/queue-entry.yaml
 .claude/.automation/schemas/review-log-entry.yaml
 .claude/.automation/schemas/runner-config.yaml
@@ -93,6 +95,7 @@
 .claude/.automation/tests/test-overlap-report.sh
 .claude/.automation/tests/test-phase-ordering.sh
 .claude/.automation/tests/test-pr-manager.sh
+.claude/.automation/tests/test-project-registry.sh
 .claude/.automation/tests/test-prompt-assembler.sh
 .claude/.automation/tests/test-question-park.sh
 .claude/.automation/tests/test-queue-manipulation.sh
@@ -312,6 +315,7 @@ docs/ai/decisions/t-0075-verdict-bound-to-approval.md
 docs/ai/decisions/t-0076-sandbox-boundary.md
 docs/ai/decisions/t-0077-stop-denies-and-child-contract.md
 docs/ai/decisions/t-0078-queue-contract-and-gate-claims.md
+docs/ai/decisions/t-0079-project-registry.md
 docs/ai/decisions/t-manifest.txt
 docs/ai/eval/.gitkeep
 docs/ai/eval/_nomenclature.md
