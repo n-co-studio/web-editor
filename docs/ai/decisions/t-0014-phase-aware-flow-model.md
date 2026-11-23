@@ -69,10 +69,10 @@ Add a phase-aware flow management system that tracks session progress through an
    Notes: No plan phase (operator's live edits are the plan). `commit:build` is a novel backward transition — the first from the `commit` phase. A4 safety per-loop commit; full gates (A5 + QA) at final review/verify before close. Child mode only. Cycle advisory at 50 iterations. `has_plan_gate` returns false (no approval phase).
 
    **Prompt 0 — Spec Builder (Fresh):**
-   `init[agent] → interview[both] → write[agent] → approval[operator] → governance[agent] → close[agent]`
+   `init[agent] → interview[both] → write[agent] → advisory-review[both] → approval[operator] → compile[agent] → governance[agent] → close[agent]` (advisory-review and compile added by Decision t-0083)
 
    **Prompt 0 — Spec Builder (Update):**
-   `init[agent] → interview[both] → write[agent] → approval[operator] → governance[agent] → close[agent]`
+   `init[agent] → interview[both] → write[agent] → advisory-review[both] → approval[operator] → compile[agent] → governance[agent] → close[agent]` (advisory-review and compile added by Decision t-0083)
 
    **Prompt 0.5 — Prototype (Napkin):**
    `init[agent] → build[agent] → close[agent]`

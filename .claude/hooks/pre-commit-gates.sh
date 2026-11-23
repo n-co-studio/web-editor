@@ -383,8 +383,8 @@ _manifest_active_version() {
 }
 
 # The advisory review's findings file (t-0082): docs/spec/review-findings/<v>.yaml,
-# one level deep and .yaml only. Prompt A writes it, and the spec sessions will
-# too once the review runs before compile (R6).
+# one level deep and .yaml only. Prompt A writes it, and so does a spec session,
+# which reviews its draft before compile (t-0083).
 _close_commit_review_findings() {
   case "$1" in
     docs/spec/review-findings/*/*) return 1 ;;
@@ -414,8 +414,10 @@ _close_commit_allowed() {
     spec-fresh|spec-update)
       # product-graph.yaml: the close sequence refreshes an existing graph in
       # every session type (workflow.md step 1); the KG gate still checks it.
+      # The session reviews its own draft before compile (t-0083), so it writes
+      # advisory-reviewed too, and the draft it compiled from.
       case "$1" in
-        docs/spec/compiled/*|docs/ai/governance/spec-compiled|docs/ai/knowledge-graph/product-graph.yaml) return 0 ;;
+        docs/spec/compiled/*|docs/spec/drafts/*|docs/ai/governance/spec-compiled|docs/ai/governance/advisory-reviewed|docs/ai/knowledge-graph/product-graph.yaml) return 0 ;;
       esac
       _close_commit_review_findings "$1" && return 0 ;;
     advisory-init|advisory-reinit)
@@ -430,10 +432,22 @@ _close_commit_allowed() {
   return 1
 }
 
+# The one deletion a governance-close commit may carry: a spec session's
+# compile removes the draft it compiled, which may have been committed before
+# (t-0083). Nothing else a close session writes is ever deleted.
+_close_commit_deletable() {
+  case "$CLOSE_STYPE" in
+    spec-fresh|spec-update)
+      case "$1" in docs/spec/drafts/?*) return 0 ;; esac ;;
+  esac
+  return 1
+}
+
 # Append every out-of-scope change in one `git diff` listing to the caller's
 # `bad`. Own list, not STAGED_FILES: --diff-filter=ACMR hides deletions, and
 # rename detection hides a rename's source. Only additions and modifications
-# pass. A listing that fails counts as out of scope (fail-closed).
+# pass, and a spec session's draft deletions. A listing that fails counts as
+# out of scope (fail-closed).
 _close_commit_scan() {  # <label> [git diff args...]
   local label="$1" tmp st p
   shift
@@ -442,7 +456,10 @@ _close_commit_scan() {  # <label> [git diff args...]
     bad="${bad:+$bad, }($label: git diff failed)"
   else
     while IFS= read -r -d '' st && IFS= read -r -d '' p; do
-      case "$st" in A|M) _close_commit_allowed "$p" && continue ;; esac
+      case "$st" in
+        A|M) _close_commit_allowed "$p" && continue ;;
+        D) _close_commit_deletable "$p" && continue ;;
+      esac
       bad="${bad:+$bad, }$label $st $p"
     done < "$tmp"
   fi

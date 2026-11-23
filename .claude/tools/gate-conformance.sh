@@ -651,6 +651,32 @@ expect_exit 2 "$rc" "an advisory session still cannot commit a compiled spec"
 expect_exit 0 "$(_rf_scope_block)" "...blocked by the close-commit scope"
 reset_worktree; clear_state
 
+printf '\n## governance-close scope: a spec session compiles its draft (t-0083)\n'
+# A spec session reviews its draft and compiles it, so its close commit carries
+# advisory-reviewed and the removal of a draft committed earlier. Deletions
+# anywhere else stay out of scope.
+_sc_active=$(jq -r '.active // ""' "$SB/docs/spec/compiled/manifest.json" 2>/dev/null || true)
+stage "docs/spec/drafts/v9/product.md" "a draft saved earlier"
+( cd "$SB" && git commit -q --no-verify -m "conformance: a committed draft" -- docs/spec/drafts/v9/product.md )
+_sc_close_case() {   # then the caller stages or removes what the case is about
+  reset_worktree; clear_state; write_phase_state "governance" "spec-fresh"
+  _put_state plan-approved "$(printf 'timestamp: t\nsession_id: %s\nmode: review' "$SID")"
+  stage "docs/ai/governance/spec-compiled" "$(printf 'spec_version: %s\nstatus: complete' "${_sc_active:-null}")"
+  stage "docs/ai/governance/advisory-reviewed" "$(printf 'spec_version: %s\nmode: spec-review\nstatus: complete' "${_sc_active:-null}")"
+  stage "docs/spec/compiled/v9/product.md" "compiled"
+}
+_sc_close_case
+( cd "$SB" && git rm -q docs/spec/drafts/v9/product.md )
+rc=$(run_gate "pre-commit-gates.sh" "git commit -m spec-close")
+expect_exit 0 "$rc" "a spec-fresh close commit may carry advisory-reviewed and remove its compiled draft"
+_sc_close_case
+_sc_other=$(cd "$SB" && git ls-files | grep -v '^docs/' | head -1)
+( cd "$SB" && git rm -q --cached "$_sc_other" )
+rc=$(run_gate "pre-commit-gates.sh" "git commit -m spec-close")
+expect_exit 2 "$rc" "a spec-fresh close commit still cannot delete a file outside docs/spec/drafts/"
+expect_exit 0 "$(_rf_scope_block)" "...blocked by the close-commit scope"
+reset_worktree; clear_state
+
 printf '\n## pre-push-gates.sh\n'
 
 # C11/C12 — B1 branch naming

@@ -90,3 +90,4 @@ t-0079-project-registry.md
 t-0080-milestone-plan.md
 t-0081-suggested-metadata.md
 t-0082-review-findings.md
+t-0083-spec-review-before-compile.md

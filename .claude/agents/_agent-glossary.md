@@ -192,7 +192,7 @@ Ordered phases tracked in `.claude/.state/phase-state` (Decision 0014). Tags: `a
 | contract-update | Task group: update at close |
 | cohesion | Taskgroup-merge: cross-brief cohesion |
 
-Session-type-specific phases (see sequences table): `interview`/`write` (Prompt 0), `tier-select`/`dispatch`/`synthesize`/`output`/`governance`/`validate` (advisory), `conversation` (ephemeral/queue-triage), `evaluate`/`document` (prototype), `scope` (Prompt C), `design`/`pre-register`/`launch`/`await`/`collect`/`judge`/`report` (eval).
+Session-type-specific phases (see sequences table): `interview`/`write`/`advisory-review`/`compile` (Prompt 0), `tier-select`/`dispatch`/`synthesize`/`output`/`governance`/`validate` (advisory), `conversation` (ephemeral/queue-triage), `evaluate`/`document` (prototype), `scope` (Prompt C), `design`/`pre-register`/`launch`/`await`/`collect`/`judge`/`report` (eval).
 
 | Session type | Phase sequence | Notes |
 |-------------|----------------|-------|
@@ -200,6 +200,7 @@ Session-type-specific phases (see sequences table): `interview`/`write` (Prompt 
 | hotfix | init→plan→approval→build→verify→commit→close | Loop: verify→build; A2 enforced (large-scope: true satisfies), A5 skip; max 3 cycles; bundle handling not applied |
 | editor-live | init→build→commit→review→verify→op-review→close | No plan gate; loop: commit→build; child mode only |
 | finish-loop | init→assess→fix→reassess→commit→close | Loop: reassess→fix; convergent quality assessment; cycle cap 5 |
+| spec-fresh / spec-update | init→interview→write→advisory-review→approval→compile→governance→close | Draft in `docs/spec/drafts/v{n}/`. advisory-review = the advisory board on the draft. approval = "Spec complete". compile = `spec-compile.sh`. Neither advisory-review nor compile is skippable (Decision t-0083) |
 | advisory-init | init→tier-select→dispatch→synthesize→op-review→validate→governance→close | Advisory only |
 | advisory-reinit | init→validate→governance→close | Lightweight re-review |
 | ephemeral | init→conversation→close | Skip gates; upgrade via `upgrade_session_type` |

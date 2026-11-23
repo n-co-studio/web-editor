@@ -904,8 +904,23 @@ for _l2_st in spec-fresh spec-update; do
   rm -f "$_l2_sd/phase-state" "$_l2_sd/pragmatist-signed"
   init_phase "$_l2_st" > /dev/null 2>&1 || true
   advance_phase interview 2>/dev/null || true; advance_phase write 2>/dev/null || true
+  # t-0083: the draft is reviewed before approval, and review is not skippable
+  _l2_rc=0; _l2_out=$(advance_phase approval 2>&1) || _l2_rc=$?
+  assert_fail "$_l2_rc" "$_l2_st cannot jump write -> approval past advisory-review (t-0083)"
+  assert_contains "$_l2_out" "intermediate phase 'advisory-review' is not skippable" "...the refusal names advisory-review"
+  advance_phase advisory-review 2>/dev/null || true
   _l2_rc=0; advance_phase approval 2>/dev/null || _l2_rc=$?
-  assert_ok "$_l2_rc" "$_l2_st advances write -> approval without pragmatist-signed"
+  assert_ok "$_l2_rc" "$_l2_st advances advisory-review -> approval without pragmatist-signed"
+  # ...and compiled before governance, even once approved
+  printf 'timestamp: test\nsession_id: %s\n' "$(get_session_id 2>/dev/null)" > "$_l2_sd/plan-approved"
+  _l2_rc=0; _l2_out=$(advance_phase governance 2>&1) || _l2_rc=$?
+  assert_fail "$_l2_rc" "$_l2_st cannot jump approval -> governance past compile (t-0083)"
+  assert_contains "$_l2_out" "intermediate phase 'compile' is not skippable" "...the refusal names compile"
+  _l2_rc=0; advance_phase compile 2>/dev/null || _l2_rc=$?
+  assert_ok "$_l2_rc" "$_l2_st advances approval -> compile on plan-approved"
+  _l2_rc=0; advance_phase governance 2>/dev/null || _l2_rc=$?
+  assert_ok "$_l2_rc" "$_l2_st advances compile -> governance"
+  rm -f "$_l2_sd/plan-approved"
 done
 
 rm -f "$_l2_sd/phase-state" "$_l2_sd/pragmatist-signed"

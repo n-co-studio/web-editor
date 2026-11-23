@@ -440,17 +440,27 @@ run_hook_rc "plan-approval.sh" \
 assert_file_exists "$STATE_DIR/plan-approved" "plan-approval writes state on bare 'Review' selection"
 assert_eq "$(get_phase_mode)" "review" "plan-approval sets review mode on bare 'Review' selection"
 
-# --- Spec session: approval advances to governance ---
+# --- Spec session: approval advances to compile (t-0083) ---
 reset_phase "spec-fresh"
 _advance "interview" 2>/dev/null
 _advance "write" 2>/dev/null
+_advance "advisory-review" 2>/dev/null
 rm -f "$STATE_DIR/plan-approved" "$STATE_DIR/pragmatist-signed"
 # No Pragmatist sign-off: spec approval is the operator's "Spec complete" and
 # Prompt 0 never dispatches the Pragmatist (Decision t-0069).
 run_hook_rc "plan-approval.sh" \
-  "$(fixture_posttooluse_ask "Do you approve this plan?" "Yes approve,No revise" "Yes approve")"
+  "$(fixture_posttooluse_ask "Spec complete: approve the plan to compile v1?" "Yes approve,No revise" "Yes approve")"
 phase_after=$(get_phase)
-assert_eq "$phase_after" "governance" "plan-approval advances spec-fresh to governance after approval"
+assert_eq "$phase_after" "compile" "plan-approval advances spec-fresh from advisory-review to compile after approval (t-0083)"
+
+# ...and an approval asked before the review leaves the session in write
+reset_phase "spec-fresh"
+_advance "interview" 2>/dev/null
+_advance "write" 2>/dev/null
+rm -f "$STATE_DIR/plan-approved"
+run_hook_rc "plan-approval.sh" \
+  "$(fixture_posttooluse_ask "Spec complete: approve the plan to compile v1?" "Yes approve,No revise" "Yes approve")"
+assert_eq "$(get_phase)" "write" "an approval asked before the review does not move a spec session past it (t-0083)"
 
 # --- R28: Gates 1+2 pass but answer not affirmative → WARNING, no state written ---
 # Before R28 this path exited 0 silently. The operator got a not_approved hook
@@ -1518,11 +1528,14 @@ _l3_close_reset() {  # <stype> <phase...>: fresh session walked to the last phas
   rm -f "$STATE_DIR/qa-verified" "$STATE_DIR/pragmatist-signed" "$STATE_DIR/cohesion-reviewed"
 }
 
-# spec-fresh: approval needs no Pragmatist; commit from governance on spec-compiled
-_l3_close_reset spec-fresh interview write approval
+# spec-fresh: approval needs no Pragmatist; commit from governance on spec-compiled.
+# The walk goes through advisory-review and compile (t-0083).
+_l3_close_reset spec-fresh interview write advisory-review approval
 assert_eq "$(get_phase)" "approval" "spec-fresh reaches approval without pragmatist-signed (t-0069)"
 printf 'timestamp: test\nsession_id: %s\nmode: auto\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
+advance_phase compile 2>/dev/null || true
 advance_phase governance 2>/dev/null || true
+assert_eq "$(get_phase)" "governance" "spec-fresh reaches governance through compile (t-0083)"
 printf 'timestamp: test\nspec_version: v3\nstatus: complete\n' > "$_l3_gov/spec-compiled"
 stage_sandbox_file "docs/spec/compiled/spec.md" "spec"
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "spec commit")"
@@ -1557,13 +1570,30 @@ run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_bash "git add src/late.t
 assert_hook_blocks "$_LAST_RC" "spec-fresh commit blocks when staging is chained into the same call"
 assert_contains "$_LAST_OUTPUT" "must not change the index in the same call" "the block says to stage separately"
 
+# t-0083: the session reviewed its own draft, so it commits advisory-reviewed too,
+# and compile's removal of a draft committed earlier. Other deletions stay out.
+stage_sandbox_file "docs/ai/governance/advisory-reviewed" "$(printf 'spec_version: v3\nmode: spec-review\nstatus: complete')"
+stage_sandbox_file "docs/spec/drafts/v3/product.md" "draft"
+( cd "$SB" && git commit -q -m "l3: a committed draft" --no-verify -- docs/spec/drafts/v3/product.md ) 2>/dev/null || true
+( cd "$SB" && git rm -q docs/spec/drafts/v3/product.md ) 2>/dev/null || true
+stage_sandbox_file "docs/spec/compiled/v3/product.md" "compiled"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "spec commit")"
+assert_ok "$_LAST_RC" "spec-fresh commits advisory-reviewed and the removal of its compiled draft (t-0083)"
+_l3_gone=$(cd "$SB" && git ls-files | grep -v '^docs/' | head -1)
+( cd "$SB" && git rm -q --cached "$_l3_gone" ) 2>/dev/null || true
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "spec commit")"
+assert_hook_blocks "$_LAST_RC" "spec-fresh commit still blocks a deletion outside docs/spec/drafts/"
+assert_contains "$_LAST_OUTPUT" "staged D $_l3_gone" "the block names the deletion"
+( cd "$SB" && git reset -q HEAD -- "$_l3_gone" docs/spec/drafts/v3/product.md && git checkout -q HEAD -- docs/spec/drafts/v3/product.md ) 2>/dev/null || true
+
 rm -f "$STATE_DIR/plan-approved"
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "spec commit")"
 assert_hook_blocks "$_LAST_RC" "spec-fresh commit still needs plan-approved"
 
 # spec-update shares the rules
-_l3_close_reset spec-update interview write approval
+_l3_close_reset spec-update interview write advisory-review approval
 printf 'timestamp: test\nsession_id: %s\nmode: auto\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
+advance_phase compile 2>/dev/null || true
 advance_phase governance 2>/dev/null || true
 stage_sandbox_file "docs/spec/compiled/v3/spec.md" "spec v3"
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "spec update commit")"

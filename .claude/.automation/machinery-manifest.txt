@@ -107,6 +107,7 @@
 .claude/.automation/tests/test-review-findings.sh
 .claude/.automation/tests/test-runner.sh
 .claude/.automation/tests/test-smoke-continue-false.sh
+.claude/.automation/tests/test-spec-compile.sh
 .claude/.automation/tests/test-state-corruption.sh
 .claude/.automation/tests/test-suggested-metadata.sh
 .claude/.automation/tests/test-taskdef-draft.sh
@@ -230,6 +231,7 @@
 .claude/tools/kg-validate.sh
 .claude/tools/review-findings.sh
 .claude/tools/smoke-claude-continue-false.sh
+.claude/tools/spec-compile.sh
 .claude/tools/spec-digest.sh
 .claude/tools/sync-conformance.sh
 .claude/tools/verify-pristine.sh
@@ -326,6 +328,7 @@ docs/ai/decisions/t-0079-project-registry.md
 docs/ai/decisions/t-0080-milestone-plan.md
 docs/ai/decisions/t-0081-suggested-metadata.md
 docs/ai/decisions/t-0082-review-findings.md
+docs/ai/decisions/t-0083-spec-review-before-compile.md
 docs/ai/decisions/t-manifest.txt
 docs/ai/eval/.gitkeep
 docs/ai/eval/_nomenclature.md

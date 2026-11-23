@@ -13,6 +13,10 @@ Present the two modes and wait for the operator to choose one. Do not begin any 
 
 REQUIRE: do not proceed to any phase before the operator selects a mode.
 
+**A spec session already runs this review (Decision t-0083).** Prompt 0 reviews its draft before the operator's "Spec complete", using Phases 1 and 2 below, and writes `advisory-reviewed` itself. After a Prompt 0 session, Initialize mode is needed only for a deliberate re-review. It is also needed for a spec compiled before t-0083, which was never reviewed this way.
+
+When Prompt 0 runs Phases 1 and 2, it reads the draft `docs/spec/drafts/v{n}/` in place of `docs/spec/compiled/{active}/`. It uses `v{n}` as the findings version. The "skip if `active` is null" rule does not apply to it.
+
 ### Phase Sequences
 
 Phase sequences are defined in `_agent-glossary.md` § Phase Model and enforced by `_phase-helper.sh`. See Decision 0014 for canonical definitions. Initialize: `init → tier-select → dispatch → synthesize → op-review → validate → governance → close`. Re-initialize: `init → validate → governance → close`.

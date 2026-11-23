@@ -1,6 +1,10 @@
 # Compiled specs — versioned locally, never overwritten
 docs/spec/compiled/
 
+# Spec drafts (child-owned, Decision t-0083): the next version before compile.
+# The template ships none.
+docs/spec/drafts/
+
 # Session logs and known issues
 docs/ai/logs/
 

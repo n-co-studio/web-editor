@@ -72,6 +72,9 @@ build_sandbox() {
   # Likewise review findings (t-0082).
   mkdir -p "$TPL/docs/spec/review-findings"
   printf '# template findings\nfindings: []\n' > "$TPL/docs/spec/review-findings/v1.yaml"
+  # ...and a spec draft (t-0083).
+  mkdir -p "$TPL/docs/spec/drafts/v2"
+  printf '# template draft\n' > "$TPL/docs/spec/drafts/v2/product.md"
   printf 'template version\n'           > "$TPL/.claude/hooks/claimed-hook.sh"
   printf 'agent\n'            > "$TPL/.claude/agents/critic.md"
   printf '# ignored by sync\n' > "$TPL/docs/ai/logs/session-log.md"
@@ -97,6 +100,7 @@ docs/ai/logs/
 docs/ai/decisions/.a1-trigger-index
 docs/ai/project-registry.yaml
 docs/spec/review-findings/
+docs/spec/drafts/
 .gitignore
 README.md
 .templatesyncignore.local
@@ -139,6 +143,9 @@ EOF
   # The child's review findings, with the operator's decisions (t-0082).
   mkdir -p "$CHILD/docs/spec/review-findings"
   printf '# child findings\nfindings: []\n' > "$CHILD/docs/spec/review-findings/v1.yaml"
+  # The child's spec draft, not yet compiled (t-0083).
+  mkdir -p "$CHILD/docs/spec/drafts/v2"
+  printf '# child draft\n' > "$CHILD/docs/spec/drafts/v2/product.md"
 
   # A file the template ALSO ships, which the child has taken ownership of.
   # Exercises both halves of the claim: not overwritten by sync, and not
@@ -219,6 +226,10 @@ assert_grep    "child findings" "$CHILD/docs/spec/review-findings/v1.yaml" \
                "child's review findings survive (t-0082)"
 assert_no_grep "template findings" "$CHILD/docs/spec/review-findings/v1.yaml" \
                "the template's findings did NOT overwrite the child's"
+assert_grep    "child draft" "$CHILD/docs/spec/drafts/v2/product.md" \
+               "child's spec draft survives (t-0083)"
+assert_no_grep "template draft" "$CHILD/docs/spec/drafts/v2/product.md" \
+               "the template's draft did NOT overwrite the child's"
 if grep -qi "skipping withdrawn-file sweep" "$SANDBOX/engine.log"; then
   ok "skips sweep when no previous manifest (fail-safe)"
 else
@@ -415,6 +426,10 @@ assert_grep '^docs/spec/review-findings/$' "$TEMPLATE_ROOT/.templatesyncignore" 
             "the template's .templatesyncignore excludes docs/spec/review-findings/ (t-0082)"
 assert_no_grep '^docs/spec/review-findings/' "$TEMPLATE_ROOT/.claude/.automation/machinery-manifest.txt" \
                "the template's machinery manifest lists no review findings"
+assert_grep '^docs/spec/drafts/$' "$TEMPLATE_ROOT/.templatesyncignore" \
+            "the template's .templatesyncignore excludes docs/spec/drafts/ (t-0083)"
+assert_no_grep '^docs/spec/drafts/' "$TEMPLATE_ROOT/.claude/.automation/machinery-manifest.txt" \
+               "the template's machinery manifest lists no spec drafts"
 
 printf '\n## branch guard\n'
 git_q "$CHILD" checkout -b not-main

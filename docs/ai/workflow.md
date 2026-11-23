@@ -29,7 +29,7 @@ The execution loop maps to phases in the standard build sequence:
 
 ## Advisory Board Review
 
-Runs after Prompt 0 completes, before Prompt B. Orchestrated by Prompt A Phase 1. Uses tiered activation to match review depth to scope. Re-initialization (after agent drift, decision conflicts, template sync, or mid-build spec changes) skips advisory review and goes directly to Phase 3 validation — operator selects the mode when Prompt A starts.
+Runs inside a Prompt 0 session, on the draft and before the operator's "Spec complete" (Decision t-0083). Prompt A runs it only for a deliberate re-review, or for a spec compiled without one. Orchestrated by Prompt A Phase 1. Uses tiered activation to match review depth to scope. Re-initialization (after agent drift, decision conflicts, template sync, or mid-build spec changes) skips advisory review and goes directly to Phase 3 validation — operator selects the mode when Prompt A starts.
 
 1. **Select tier** — Orchestrator picks Lite / Standard / Full based on scope (operator can override or skip)
 2. **Activate** — Dispatch agents for the selected tier; scan for conditional signals at Full tier

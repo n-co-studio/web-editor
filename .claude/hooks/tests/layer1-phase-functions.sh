@@ -54,12 +54,12 @@ assert_eq "$(get_phases_for_type experiment)" \
   "experiment phase sequence"
 
 assert_eq "$(get_phases_for_type spec-fresh)" \
-  "init interview write approval governance close" \
-  "spec-fresh phase sequence"
+  "init interview write advisory-review approval compile governance close" \
+  "spec-fresh phase sequence (t-0083)"
 
 assert_eq "$(get_phases_for_type spec-update)" \
-  "init interview write approval governance close" \
-  "spec-update phase sequence"
+  "init interview write advisory-review approval compile governance close" \
+  "spec-update phase sequence (t-0083)"
 
 assert_eq "$(get_phases_for_type prototype-napkin)" \
   "init build close" \
@@ -150,6 +150,13 @@ assert_eq "$(get_tag_for_phase editor-live commit)" "agent" "editor-live commit 
 # Both phases
 assert_eq "$(get_tag_for_phase spec-fresh interview)" "both" "spec-fresh interview = both"
 assert_eq "$(get_tag_for_phase spec-update interview)" "both" "spec-update interview = both"
+assert_eq "$(get_tag_for_phase spec-fresh advisory-review)" "both" "spec-fresh advisory-review = both (t-0083)"
+case " $(get_phases_for_type spec-fresh) " in
+  *" review "*) _l1_spec_review=present ;;
+  *) _l1_spec_review=absent ;;
+esac
+assert_eq "$_l1_spec_review" "absent" "spec sessions have no phase named 'review', which A5 reads as the code review (t-0083)"
+assert_eq "$(get_tag_for_phase spec-update compile)" "agent" "spec-update compile = agent (t-0083)"
 assert_eq "$(get_tag_for_phase prototype-spike evaluate)" "both" "prototype-spike evaluate = both"
 assert_eq "$(get_tag_for_phase prototype-poc evaluate)" "both" "prototype-poc evaluate = both"
 assert_eq "$(get_tag_for_phase advisory-init tier-select)" "both" "advisory-init tier-select = both"
@@ -183,8 +190,8 @@ tap_section "L1.6: get_post_approval_phase — correct next phase"
 assert_eq "$(get_post_approval_phase standard)" "build" "standard post-approval = build"
 assert_eq "$(get_post_approval_phase taskgroup)" "build" "taskgroup post-approval = build"
 assert_eq "$(get_post_approval_phase hotfix)" "build" "hotfix post-approval = build"
-assert_eq "$(get_post_approval_phase spec-fresh)" "governance" "spec-fresh post-approval = governance"
-assert_eq "$(get_post_approval_phase spec-update)" "governance" "spec-update post-approval = governance"
+assert_eq "$(get_post_approval_phase spec-fresh)" "compile" "spec-fresh post-approval = compile (t-0083)"
+assert_eq "$(get_post_approval_phase spec-update)" "compile" "spec-update post-approval = compile (t-0083)"
 assert_eq "$(get_post_approval_phase taskdef-brief)" "output" "taskdef-brief post-approval = output"
 
 # Types without approval return empty
@@ -344,12 +351,12 @@ assert_eq "$(get_write_phases_for_type experiment)" \
   "build commit" \
   "experiment write phases"
 
-# Spec sessions: write, governance
+# Spec sessions: write, advisory-review (accepted findings edit the draft), governance (t-0083)
 assert_eq "$(get_write_phases_for_type spec-fresh)" \
-  "write governance" \
+  "write advisory-review governance" \
   "spec-fresh write phases"
 assert_eq "$(get_write_phases_for_type spec-update)" \
-  "write governance" \
+  "write advisory-review governance" \
   "spec-update write phases"
 
 # Prototype and editor-live: all phases exempt

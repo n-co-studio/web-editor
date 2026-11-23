@@ -43,7 +43,11 @@ get_phases_for_type() {
     experiment)
       echo "init build commit close" ;;
     spec-fresh|spec-update)
-      echo "init interview write approval governance close" ;;
+      # Decision t-0083: the draft is reviewed before the operator approves it,
+      # and compiled only after. Neither advisory-review nor compile is
+      # skippable. Not named "review": A5 and state-writer read a phase of that
+      # name as the code review.
+      echo "init interview write advisory-review approval compile governance close" ;;
     prototype-napkin)
       echo "init build close" ;;
     prototype-spike)
@@ -111,7 +115,9 @@ get_write_phases_for_type() {
       echo "build commit" ;;
     spec-fresh|spec-update)
       # approval is intentionally excluded — operator-gated phase; no agent writes expected.
-      echo "write governance" ;;
+      # advisory-review edits the draft for accepted findings; compile writes
+      # only through spec-compile.sh (Decision t-0083).
+      echo "write advisory-review governance" ;;
     prototype-napkin|prototype-spike|prototype-poc|editor-live)
       # All phases permitted — exempt from write-phase restriction
       echo "all" ;;
@@ -201,7 +207,9 @@ get_tag_for_phase() {
       case "$phase" in
         interview)  echo "both" ;;
         write)      echo "agent" ;;
+        advisory-review) echo "both" ;;
         approval)   echo "operator" ;;
+        compile)    echo "agent" ;;
         governance) echo "agent" ;;
         *)          echo "agent" ;;
       esac
@@ -2168,7 +2176,7 @@ advance_phase() {
 
   # --- Substance check: plan-approved required before post-approval phase ---
   # When the session type has a plan gate and we're advancing to the post-approval
-  # phase (e.g., build for standard, governance for spec-*), verify that the
+  # phase (e.g., build for standard, compile for spec-*), verify that the
   # plan-approved state file exists and its session ID matches the current session.
   # This prevents force-advancing through approval without actual operator approval.
   # Ordering note (Critic C5): plan-approval.sh writes plan-approved (line 112)

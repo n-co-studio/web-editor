@@ -76,5 +76,6 @@ there, and needs Prompt A to read that decision back (Massimo request R5).
   this unlikely, and re-running the `set` restores it.
 - **`--replace` discards the previous round.** A new review of the same version starts again. The
   previous file stays in git history.
-- **R6 moves the review.** Request R6 runs the advisory review before compile. That review uses the
-  same file, keyed by the version under review.
+- **The review moved before compile (Decision t-0083).** A spec session reviews its draft and
+  writes this file, keyed by the draft's version. Prompt A writes it only on a deliberate
+  re-review.

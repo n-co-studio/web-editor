@@ -8,6 +8,8 @@ Shared context for all advisory board specialists. Read this before producing yo
 
 Review compiled specs or feature briefs before build begins. Identify gaps, risks, contradictions, and opportunities. All findings are advisory — the operator decides what to act on.
 
+A spec session (Prompt 0) runs this review on its draft, `docs/spec/drafts/v{n}/`, before compile (Decision t-0083). There, "compiled specs" below means that draft. The draft also counts as the compiled spec that PM Advisory requires.
+
 **Also used by Prompt T (Brief mode):** Architect, Exploration, Critic, and Pragmatist are dispatched for task-scoped analysis (feasibility, alternatives, risks, proportionality). Same agents and brief format, lighter scope — see `docs/ai/prompts/prompt-t-task-definition.md`.
 
 ---

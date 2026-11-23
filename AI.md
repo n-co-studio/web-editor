@@ -81,7 +81,8 @@ Automation layer (Decision 0017): optional headless runner in `.claude/.automati
 
 ## Spec Convention
 - **Templates** (`docs/spec/_templates/`): Blank spec files with placeholder fields. Synced from the upstream template repo. Do not fill these directly.
-- **Compiled** (`docs/spec/compiled/`): Operator-filled specs, organized by version. Created by Prompt 0.
+- **Drafts** (`docs/spec/drafts/v{n}/`): Prompt 0 writes the next version here. The advisory review then runs on the draft, and the operator approves it with "Spec complete". `.claude/tools/spec-compile.sh compile v{n}` turns it into a compiled version and removes it (Decision t-0083). Owned by the repo.
+- **Compiled** (`docs/spec/compiled/`): Approved specs, organized by version, written by `spec-compile.sh` and never changed afterwards.
 - **Feature Briefs** (`docs/spec/compiled/{active}/features/brief-{name}.md`): Lightweight feature specs for individual feature additions. Created via Prompt T significant feature path (two-brief task group). Template at `docs/spec/_templates/feature-brief.md`.
 - **Manifest** (`docs/spec/compiled/manifest.json`): Tracks the active version. Read `active` field to resolve the current spec path: `docs/spec/compiled/{active}/`.
 - If `manifest.json` has `"active": null`, specs have not been compiled yet. Run Prompt 0.
