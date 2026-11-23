@@ -3223,6 +3223,48 @@ assert_eq "$(_t0060_allowed "bash .claude/.automation/lib/../lib/rebuild-machine
   "t-0051: traversal in the rebuilder path is refused"
 
 # ============================================================
+# t-0085 — modules the repo turned off
+# ============================================================
+tap_section "t-0085: turned-off modules (pretooluse-permission, hvst-failure-tracker)"
+# A small kit in the sandbox: architect and the failure tracker are safe to turn
+# off; critic is marked safe too, as a tampered kit would, and must stay on.
+mkdir -p "$SB/.claude/.automation"
+cat > "$SB/.claude/.automation/governance-kit.json" <<'EOF'
+{"modules": [
+  {"id": "agent.architect", "turn_off_safe": true},
+  {"id": "agent.critic", "turn_off_safe": true},
+  {"id": "hook.hvst-failure-tracker", "turn_off_safe": true}
+]}
+EOF
+_t85_agent() { printf '{"tool_name":"Agent","tool_input":{"subagent_type":"%s","prompt":"x"}}' "$1"; }
+reset_phase "standard"
+
+rm -f "$SB/.claude/.automation/governance-overrides.json"
+run_hook_rc "pretooluse-permission.sh" "$(_t85_agent architect)" >/dev/null
+assert_eq "$(printf '%s' "$_LAST_OUTPUT" | grep -c 't-0085' || true)" "0" \
+  "t-0085: architect with no override is not blocked by this rule"
+
+printf '{"modules": {"agent.architect": "off", "agent.critic": "off", "hook.hvst-failure-tracker": "off"}}\n' \
+  > "$SB/.claude/.automation/governance-overrides.json"
+run_hook_rc "pretooluse-permission.sh" "$(_t85_agent architect)" >/dev/null
+assert_blocked "t-0085: an agent turned off is not dispatched"
+assert_contains "$_LAST_OUTPUT" "agent architect is turned off" "t-0085: the block names the agent and says to skip it"
+
+run_hook_rc "pretooluse-permission.sh" "$(_t85_agent critic)" >/dev/null
+assert_eq "$(printf '%s' "$_LAST_OUTPUT" | grep -c 't-0085' || true)" "0" \
+  "t-0085: critic stays on even when the kit and the override both say off"
+
+_reinit_close_sandbox
+rm -f "$SB/.claude/.hvst-fail-count"
+run_hook_rc "hvst-failure-tracker.sh" "$(fixture_hvst_event "PostToolUseFailure")" >/dev/null
+assert_ok "$_LAST_RC" "t-0085: the failure tracker turned off exits 0"
+assert_file_not_exists "$SB/.claude/.hvst-fail-count" "t-0085: the failure tracker turned off counts nothing"
+rm -f "$SB/.claude/.automation/governance-overrides.json"
+run_hook_rc "hvst-failure-tracker.sh" "$(fixture_hvst_event "PostToolUseFailure")" >/dev/null
+assert_file_exists "$SB/.claude/.hvst-fail-count" "t-0085: with no override the failure tracker counts again"
+rm -f "$SB/.claude/.hvst-fail-count" "$SB/.claude/.automation/governance-kit.json"
+
+# ============================================================
 # Summary
 # ============================================================
 finish_tests

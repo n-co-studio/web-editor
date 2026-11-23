@@ -1,0 +1,25 @@
+# Governance Overrides Schema — v1.0.0 (Decision t-0085)
+#
+# Path (fixed, repo-root relative): .claude/.automation/governance-overrides.json
+# (JSON, read with jq). Owner: the repo. The template ships no copy; template
+# sync never writes or sweeps it (.templatesyncignore). Absent means every
+# module is as the kit describes it. In a child repo the mode guard stops an
+# agent session writing it: Massimo or the operator does.
+#
+#   {
+#     "schema": "governance-overrides",
+#     "schema_version": "1.0.0",
+#     "modules": {"agent.architect": "off", "prompt.t": "customized"}
+#   }
+#
+# modules maps a module id from the kit to:
+#   off         the module is not used. Allowed only for a module the kit marks
+#               turn_off_safe and that is not on the never-off list. Repo OS
+#               honours it where it controls the module: an agent turned off is
+#               not dispatched (pretooluse-permission.sh), and the failure
+#               tracker hook stands down. Prompts and workflows are started by
+#               the operator or Massimo, which do not offer them.
+#   customized  the repo has its own version of the module's files. List each of
+#               those files in .templatesyncignore.local, or the next template
+#               sync overwrites them; validate warns about any that are not.
+schema_version: "1.0.0"

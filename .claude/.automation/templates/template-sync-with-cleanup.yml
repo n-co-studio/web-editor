@@ -15,8 +15,16 @@
 #     (no branch protection requiring reviews or status checks)
 #   - SOURCE_REPO_TOKEN secret must have read access to the template repo
 #
+# Hold mode: a child that wants to review template updates before they land
+# commits a file .claude/template-sync-mode containing `hold`. The engine then
+# pushes the update to the branch template-sync/held instead of main, lists the
+# changed files in the run's summary, and the operator applies it with
+# `bash .claude/tools/template-sync-held.sh apply`. No change to this workflow
+# is needed (Decision t-0084).
+#
 # Decision 0015 — Solo mode (PR-free, direct commit to main)
 # Decision 0022 — Template Decision Naming Convention
+# Decision t-0084 — Held template updates
 
 name: Template Sync
 

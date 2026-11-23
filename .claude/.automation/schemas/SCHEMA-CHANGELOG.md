@@ -10,6 +10,21 @@ Breaking changes (field removal, type change, required field addition) increment
 
 ---
 
+## v1.18.0 — Governance Kit
+
+**Date:** 2026-11-23
+**Decision:** t-0085 (Massimo R8)
+
+### Changes
+
+**governance-kit.yaml** (new schema, `schema_version: "1.0.0"`): the format of `.claude/.automation/governance-kit.json`, the default governance kit, and of a custom kit. `kit {id, name}`, `statuses` (kit status → one of the 8 queue statuses), `session_types` (type → phases), `gates[] {id, name, enforced_by}`, `agents[]`, `schema_set` (this changelog's version), `modules[] {id, category, name, files[], turn_off_safe, why}`.
+
+**governance-overrides.yaml** (new schema, `schema_version: "1.0.0"`): `.claude/.automation/governance-overrides.json`, child-owned (`.templatesyncignore`). `modules {<module id>: off | customized}`.
+
+**`.claude/tools/governance-kit.sh validate`** (new): checks a kit and, for the repo's own kit, its overrides.
+
+---
+
 ## v1.17.0 — Review Findings
 
 **Date:** 2026-11-22

@@ -80,6 +80,15 @@ docs/ai/project-registry.yaml
 # spec version, with the operator's decisions in it. The template ships none.
 docs/spec/review-findings/
 
+# Template sync mode (child-owned, Decision t-0084): direct or hold, the child's
+# choice of whether template updates land on main or wait on a branch. The
+# template ships none.
+.claude/template-sync-mode
+
+# Governance overrides (child-owned, Decision t-0085): the modules this repo has
+# turned off or customized. The template ships the kit, never the overrides.
+.claude/.automation/governance-overrides.json
+
 # Workflow files (repo-specific; GITHUB_TOKEN cannot push workflow changes)
 #
 # GitHub refuses a push from a GitHub App / GITHUB_TOKEN that creates or

@@ -1,0 +1,43 @@
+# Governance Kit Schema — v1.0.0 (Decision t-0085)
+#
+# Path of the default kit: .claude/.automation/governance-kit.json (JSON, read
+# with jq). Owner: the template; synced to every child. A custom kit (Massimo)
+# uses the same format in its own folder.
+# Check one with: bash .claude/tools/governance-kit.sh validate [--kit FILE] [--root DIR]
+#
+#   {
+#     "schema": "governance-kit",
+#     "schema_version": "1.0.0",
+#     "kit": {"id": "repo-os", "name": "Default governance"},
+#     "statuses": {"<kit status>": "<queue status>"},
+#     "session_types": {"<type>": ["<phase>", ...]},
+#     "gates": [{"id": "A1", "name": "...", "enforced_by": "<file>"}],
+#     "agents": ["<agent name>", ...],
+#     "schema_set": "1.18.0",
+#     "modules": [{"id": "agent.critic", "category": "agents", "name": "Critic",
+#                  "files": [".claude/agents/critic.md"], "turn_off_safe": false,
+#                  "why": "Gate A5 needs its verdicts."}]
+#   }
+#
+# Fields:
+#   kit.id, kit.name   required. The kit's version is not stored: for the
+#                      default kit it is the template commit the repo is on.
+#   statuses           each kit status maps to one of the 8 queue statuses:
+#                      pending-review approved running completed failed review
+#                      blocked stopped. The default kit maps each to itself.
+#   session_types      every session type and its ordered phases; the default
+#                      kit's equal get_phases_for_type in _phase-helper.sh.
+#   gates              at least one.
+#   agents             at least one.
+#   schema_set         the SCHEMA-CHANGELOG version whose schemas the kit
+#                      writes. Major version 1 is supported.
+#   modules[].category one of agents, skills-prompts, workflows, hooks, rules,
+#                      quality-gates, decisions, merge-close.
+#   modules[].files    paths relative to the kit's root; each must exist.
+#   turn_off_safe      true only when turning the module off removes advice or
+#                      a capability and no gate or other module depends on it.
+#                      Repo OS also keeps a never-off list of its own
+#                      (.claude/hooks/_governance-helper.sh) that no kit can
+#                      change: the gate-required agents and every guard hook.
+#   why                what depends on the module, or what turning it off loses.
+schema_version: "1.0.0"

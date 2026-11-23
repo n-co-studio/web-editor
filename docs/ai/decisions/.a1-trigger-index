@@ -1,7 +1,7 @@
 # A1 trigger index — generated artifact. Do not hand-edit.
 # Regenerate: bash .claude/.automation/lib/rebuild-trigger-index.sh
 # format: 2
-# digest: 570aa87902951fed84d51e06d4c127eb43f0151c601fa489b506d2e327977783
+# digest: 04e74357f73eb4f3acd8ea240d1473bde1c9b35b0f4369975d04e353d0b984fc
 0001AI\.mdprompt system, verification gate, session-based
 0001docs/ai/prompts/prompt-.*\.mdprompt system, verification gate, session-based
 0002docs/ai/decisions/.*\.mdmandatory, commit-blocking
@@ -166,6 +166,8 @@
 0081docs/ai/prompts/prompt-t-task-definition\.md|\.claude/\.automation/schemas/queue-entry\.yamlmetadata_suggested, --suggested
 0082\.claude/tools/review-findings\.sh|\.claude/\.automation/schemas/review-findings\.yaml|docs/spec/review-findings/review-findings, review_findings
 0083\.claude/tools/spec-compile\.sh|docs/spec/drafts/spec-compile, spec_compile
+0084\.claude/tools/template-sync-held\.sh|\.claude/template-sync-modetemplate-sync-held, template-sync-mode, template-sync/held, hold mode
+0085\.claude/\.automation/governance-(kit|overrides)\.json|\.claude/hooks/_governance-helper\.sh|\.claude/tools/governance-kit\.shgovernance-kit, governance-overrides, module_is_off, turn_off_safe
 0001AI\.mdprompt system, verification gate, session-based
 0001docs/ai/prompts/prompt-.*\.mdprompt system, verification gate, session-based
 0002docs/ai/decisions/.*\.mdmandatory, commit-blocking

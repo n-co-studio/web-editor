@@ -1,0 +1,1012 @@
+{
+  "schema": "governance-kit",
+  "schema_version": "1.0.0",
+  "kit": {
+    "id": "repo-os",
+    "name": "Default governance"
+  },
+  "statuses": {
+    "pending-review": "pending-review",
+    "approved": "approved",
+    "running": "running",
+    "completed": "completed",
+    "failed": "failed",
+    "review": "review",
+    "blocked": "blocked",
+    "stopped": "stopped"
+  },
+  "session_types": {
+    "standard": [
+      "init",
+      "drift-check",
+      "plan",
+      "approval",
+      "build",
+      "review",
+      "verify",
+      "user-review",
+      "commit",
+      "op-review",
+      "close"
+    ],
+    "taskgroup": [
+      "init",
+      "contract-init",
+      "drift-check",
+      "plan",
+      "approval",
+      "build",
+      "review",
+      "verify",
+      "user-review",
+      "commit",
+      "contract-update",
+      "op-review",
+      "close"
+    ],
+    "hotfix": [
+      "init",
+      "plan",
+      "approval",
+      "build",
+      "verify",
+      "commit",
+      "close"
+    ],
+    "experiment": [
+      "init",
+      "build",
+      "commit",
+      "close"
+    ],
+    "spec-fresh": [
+      "init",
+      "interview",
+      "write",
+      "advisory-review",
+      "approval",
+      "compile",
+      "governance",
+      "close"
+    ],
+    "spec-update": [
+      "init",
+      "interview",
+      "write",
+      "advisory-review",
+      "approval",
+      "compile",
+      "governance",
+      "close"
+    ],
+    "prototype-napkin": [
+      "init",
+      "build",
+      "close"
+    ],
+    "prototype-spike": [
+      "init",
+      "build",
+      "evaluate",
+      "close"
+    ],
+    "prototype-poc": [
+      "init",
+      "build",
+      "evaluate",
+      "document",
+      "close"
+    ],
+    "advisory-init": [
+      "init",
+      "tier-select",
+      "dispatch",
+      "synthesize",
+      "op-review",
+      "validate",
+      "governance",
+      "close"
+    ],
+    "advisory-reinit": [
+      "init",
+      "validate",
+      "governance",
+      "close"
+    ],
+    "audit": [
+      "init",
+      "scope",
+      "dispatch",
+      "synthesize",
+      "op-review",
+      "close"
+    ],
+    "ephemeral": [
+      "init",
+      "conversation",
+      "close"
+    ],
+    "taskdef-query": [
+      "init",
+      "conversation",
+      "close"
+    ],
+    "queue-triage": [
+      "init",
+      "conversation",
+      "close"
+    ],
+    "taskdef-brief": [
+      "init",
+      "dispatch",
+      "synthesize",
+      "approval",
+      "output",
+      "close"
+    ],
+    "taskgroup-merge": [
+      "init",
+      "contract-init",
+      "cohesion",
+      "verify",
+      "commit",
+      "op-review",
+      "close"
+    ],
+    "editor-live": [
+      "init",
+      "build",
+      "commit",
+      "review",
+      "verify",
+      "op-review",
+      "close"
+    ],
+    "finish-loop": [
+      "init",
+      "assess",
+      "fix",
+      "reassess",
+      "commit",
+      "close"
+    ],
+    "eval": [
+      "init",
+      "design",
+      "pre-register",
+      "launch",
+      "await",
+      "collect",
+      "judge",
+      "report",
+      "close"
+    ],
+    "eval-cell": [
+      "init",
+      "build",
+      "commit",
+      "close"
+    ]
+  },
+  "gates": [
+    {
+      "id": "A1",
+      "name": "A1 Decision compliance",
+      "enforced_by": ".claude/hooks/pre-commit-gates.sh"
+    },
+    {
+      "id": "A2",
+      "name": "A2 Process",
+      "enforced_by": ".claude/hooks/pre-commit-gates.sh"
+    },
+    {
+      "id": "A3",
+      "name": "A3 Quality",
+      "enforced_by": ".claude/hooks/pre-commit-gates.sh"
+    },
+    {
+      "id": "A4",
+      "name": "A4 Safety",
+      "enforced_by": ".claude/hooks/pre-commit-gates.sh"
+    },
+    {
+      "id": "A5",
+      "name": "A5 Cohesion",
+      "enforced_by": ".claude/hooks/pre-commit-gates.sh"
+    },
+    {
+      "id": "A6",
+      "name": "A6 Task group compliance",
+      "enforced_by": ".claude/hooks/pre-commit-gates.sh"
+    },
+    {
+      "id": "KG",
+      "name": "Product graph",
+      "enforced_by": ".claude/hooks/pre-commit-gates.sh"
+    },
+    {
+      "id": "B1",
+      "name": "B1 Process",
+      "enforced_by": ".claude/hooks/pre-push-gates.sh"
+    },
+    {
+      "id": "B2",
+      "name": "B2 Quality",
+      "enforced_by": ".claude/hooks/pre-push-gates.sh"
+    },
+    {
+      "id": "B3",
+      "name": "B3 Safety",
+      "enforced_by": ".claude/hooks/pre-push-gates.sh"
+    },
+    {
+      "id": "C1",
+      "name": "C1 Release checklist",
+      "enforced_by": "docs/ai/quality-gates.md"
+    },
+    {
+      "id": "C2",
+      "name": "C2 Full verification",
+      "enforced_by": "docs/ai/quality-gates.md"
+    },
+    {
+      "id": "C3",
+      "name": "C3 Sign-offs",
+      "enforced_by": "docs/ai/quality-gates.md"
+    }
+  ],
+  "agents": [
+    "accessibility",
+    "analytics",
+    "architect",
+    "auditor",
+    "build-planner",
+    "builder",
+    "critic",
+    "data-strategist",
+    "dev-orchestrator",
+    "exploration",
+    "orchestrator",
+    "performance-engineer",
+    "pm-advisor",
+    "pragmatist",
+    "qa-verifier",
+    "reviewer",
+    "security-analyst",
+    "security-hacker",
+    "security-privacy",
+    "user-review-tier-1",
+    "user-review-tier-2",
+    "user-review-tier-3",
+    "ux-designer",
+    "ux-strategist"
+  ],
+  "schema_set": "1.18.0",
+  "modules": [
+    {
+      "id": "agent.accessibility",
+      "category": "agents",
+      "name": "Accessibility",
+      "files": [
+        ".claude/agents/accessibility.md"
+      ],
+      "turn_off_safe": true,
+      "why": "Advisory WCAG review; no gate reads its verdict."
+    },
+    {
+      "id": "agent.analytics",
+      "category": "agents",
+      "name": "Analytics",
+      "files": [
+        ".claude/agents/analytics.md"
+      ],
+      "turn_off_safe": true,
+      "why": "On-demand telemetry reporting; nothing depends on it."
+    },
+    {
+      "id": "agent.architect",
+      "category": "agents",
+      "name": "Architect",
+      "files": [
+        ".claude/agents/architect.md"
+      ],
+      "turn_off_safe": true,
+      "why": "Advisory board member; the review runs with the rest of the board."
+    },
+    {
+      "id": "agent.auditor",
+      "category": "agents",
+      "name": "Auditor",
+      "files": [
+        ".claude/agents/auditor.md"
+      ],
+      "turn_off_safe": true,
+      "why": "On-demand health audit (Prompt C); nothing depends on it."
+    },
+    {
+      "id": "agent.build-planner",
+      "category": "agents",
+      "name": "Build planner",
+      "files": [
+        ".claude/agents/build-planner.md"
+      ],
+      "turn_off_safe": true,
+      "why": "Optional layer plan in Prompt T; briefs are written without it."
+    },
+    {
+      "id": "agent.builder",
+      "category": "agents",
+      "name": "Builder",
+      "files": [
+        ".claude/agents/builder.md"
+      ],
+      "turn_off_safe": false,
+      "why": "Implements approved plans; Prompt B and the queue runner depend on it."
+    },
+    {
+      "id": "agent.critic",
+      "category": "agents",
+      "name": "Critic",
+      "files": [
+        ".claude/agents/critic.md"
+      ],
+      "turn_off_safe": false,
+      "why": "Gate A5 needs its cohesion and diff-review verdicts."
+    },
+    {
+      "id": "agent.data-strategist",
+      "category": "agents",
+      "name": "Data strategist",
+      "files": [
+        ".claude/agents/data-strategist.md"
+      ],
+      "turn_off_safe": true,
+      "why": "Advisory board member; the review runs with the rest of the board."
+    },
+    {
+      "id": "agent.dev-orchestrator",
+      "category": "agents",
+      "name": "Dev orchestrator",
+      "files": [
+        ".claude/agents/dev-orchestrator.md"
+      ],
+      "turn_off_safe": false,
+      "why": "Task group oversight; task group briefs dispatch it."
+    },
+    {
+      "id": "agent.exploration",
+      "category": "agents",
+      "name": "Exploration",
+      "files": [
+        ".claude/agents/exploration.md"
+      ],
+      "turn_off_safe": true,
+      "why": "Advisory board member; the review runs with the rest of the board."
+    },
+    {
+      "id": "agent.orchestrator",
+      "category": "agents",
+      "name": "Orchestrator",
+      "files": [
+        ".claude/agents/orchestrator.md"
+      ],
+      "turn_off_safe": false,
+      "why": "Runs the session flow itself."
+    },
+    {
+      "id": "agent.performance-engineer",
+      "category": "agents",
+      "name": "Performance engineer",
+      "files": [
+        ".claude/agents/performance-engineer.md"
+      ],
+      "turn_off_safe": true,
+      "why": "Advisory board member; the review runs with the rest of the board."
+    },
+    {
+      "id": "agent.pm-advisor",
+      "category": "agents",
+      "name": "PM advisor",
+      "files": [
+        ".claude/agents/_pm-advisor.md"
+      ],
+      "turn_off_safe": true,
+      "why": "Advisory board member; the review runs with the rest of the board."
+    },
+    {
+      "id": "agent.pragmatist",
+      "category": "agents",
+      "name": "Pragmatist",
+      "files": [
+        ".claude/agents/pragmatist.md"
+      ],
+      "turn_off_safe": false,
+      "why": "Plan gating: the build cannot start without its verdict."
+    },
+    {
+      "id": "agent.qa-verifier",
+      "category": "agents",
+      "name": "QA verifier",
+      "files": [
+        ".claude/agents/qa-verifier.md"
+      ],
+      "turn_off_safe": false,
+      "why": "The commit gate needs its qa-verified verdict."
+    },
+    {
+      "id": "agent.reviewer",
+      "category": "agents",
+      "name": "Reviewer",
+      "files": [
+        ".claude/agents/reviewer.md"
+      ],
+      "turn_off_safe": false,
+      "why": "Gate A4 needs its sign-off on high-risk changes."
+    },
+    {
+      "id": "agent.security-analyst",
+      "category": "agents",
+      "name": "Security analyst",
+      "files": [
+        ".claude/agents/security-analyst.md"
+      ],
+      "turn_off_safe": true,
+      "why": "Advisory board member; the review runs with the rest of the board."
+    },
+    {
+      "id": "agent.security-hacker",
+      "category": "agents",
+      "name": "Security hacker",
+      "files": [
+        ".claude/agents/security-hacker.md"
+      ],
+      "turn_off_safe": true,
+      "why": "On-demand adversarial review; nothing depends on it."
+    },
+    {
+      "id": "agent.security-privacy",
+      "category": "agents",
+      "name": "Security and privacy",
+      "files": [
+        ".claude/agents/security-privacy.md"
+      ],
+      "turn_off_safe": false,
+      "why": "Gate A4 needs its sign-off on high-risk changes."
+    },
+    {
+      "id": "agent.user-review-tier-1",
+      "category": "agents",
+      "name": "User review: power user",
+      "files": [
+        ".claude/agents/_user-review-tier-1.md"
+      ],
+      "turn_off_safe": true,
+      "why": "Simulated user review is advisory."
+    },
+    {
+      "id": "agent.user-review-tier-2",
+      "category": "agents",
+      "name": "User review: everyday user",
+      "files": [
+        ".claude/agents/_user-review-tier-2.md"
+      ],
+      "turn_off_safe": true,
+      "why": "Simulated user review is advisory."
+    },
+    {
+      "id": "agent.user-review-tier-3",
+      "category": "agents",
+      "name": "User review: novice user",
+      "files": [
+        ".claude/agents/_user-review-tier-3.md"
+      ],
+      "turn_off_safe": true,
+      "why": "Simulated user review is advisory."
+    },
+    {
+      "id": "agent.ux-designer",
+      "category": "agents",
+      "name": "UX designer",
+      "files": [
+        ".claude/agents/ux-designer.md"
+      ],
+      "turn_off_safe": true,
+      "why": "Design briefs and reviews are advisory; no gate reads its verdict."
+    },
+    {
+      "id": "agent.ux-strategist",
+      "category": "agents",
+      "name": "UX strategist",
+      "files": [
+        ".claude/agents/ux-strategist.md"
+      ],
+      "turn_off_safe": true,
+      "why": "Advisory board member; the review runs with the rest of the board."
+    },
+    {
+      "id": "prompt.0",
+      "category": "skills-prompts",
+      "name": "Spec builder (Prompt 0)",
+      "files": [
+        "docs/ai/prompts/prompt-0-spec-builder.md"
+      ],
+      "turn_off_safe": false,
+      "why": "The only way a spec is written and compiled."
+    },
+    {
+      "id": "prompt.0.5",
+      "category": "skills-prompts",
+      "name": "Rapid prototype (Prompt 0.5)",
+      "files": [
+        "docs/ai/prompts/prompt-0.5-prototype.md"
+      ],
+      "turn_off_safe": true,
+      "why": "Optional prototyping path."
+    },
+    {
+      "id": "prompt.a",
+      "category": "skills-prompts",
+      "name": "Repo OS setup and advisory review (Prompt A)",
+      "files": [
+        "docs/ai/prompts/prompt-a-repo-os.md"
+      ],
+      "turn_off_safe": false,
+      "why": "Initialises and re-validates the repo's governance."
+    },
+    {
+      "id": "prompt.b",
+      "category": "skills-prompts",
+      "name": "Product build (Prompt B)",
+      "files": [
+        "docs/ai/prompts/prompt-b-product-build.md"
+      ],
+      "turn_off_safe": false,
+      "why": "The build session every task runs."
+    },
+    {
+      "id": "prompt.c",
+      "category": "skills-prompts",
+      "name": "Project audit (Prompt C)",
+      "files": [
+        "docs/ai/prompts/prompt-c-project-audit.md"
+      ],
+      "turn_off_safe": true,
+      "why": "On-demand audit."
+    },
+    {
+      "id": "prompt.d",
+      "category": "skills-prompts",
+      "name": "Daemon toggle (Prompt D)",
+      "files": [
+        "docs/ai/prompts/prompt-d-daemon-toggle.md"
+      ],
+      "turn_off_safe": false,
+      "why": "The way to stop and start the queue daemon."
+    },
+    {
+      "id": "prompt.e",
+      "category": "skills-prompts",
+      "name": "Editor live (Prompt E)",
+      "files": [
+        "docs/ai/prompts/prompt-e-editor-live.md"
+      ],
+      "turn_off_safe": true,
+      "why": "Optional live editing path."
+    },
+    {
+      "id": "prompt.eval-study",
+      "category": "skills-prompts",
+      "name": "Evaluation study",
+      "files": [
+        "docs/ai/prompts/prompt-eval-study.md"
+      ],
+      "turn_off_safe": true,
+      "why": "Research tooling; nothing depends on it."
+    },
+    {
+      "id": "prompt.f",
+      "category": "skills-prompts",
+      "name": "Finish loop (Prompt F)",
+      "files": [
+        "docs/ai/prompts/prompt-f-finish-loop.md"
+      ],
+      "turn_off_safe": true,
+      "why": "Optional repair loop."
+    },
+    {
+      "id": "prompt.h",
+      "category": "skills-prompts",
+      "name": "Hotfix and debug (Prompt H)",
+      "files": [
+        "docs/ai/prompts/prompt-h-hotfix-debug.md"
+      ],
+      "turn_off_safe": false,
+      "why": "The emergency fix path."
+    },
+    {
+      "id": "prompt.q",
+      "category": "skills-prompts",
+      "name": "Queue triage (Prompt Q)",
+      "files": [
+        "docs/ai/prompts/prompt-q-queue-triage.md"
+      ],
+      "turn_off_safe": true,
+      "why": "Read-only queue help."
+    },
+    {
+      "id": "prompt.t",
+      "category": "skills-prompts",
+      "name": "Task definition (Prompt T)",
+      "files": [
+        "docs/ai/prompts/prompt-t-task-definition.md"
+      ],
+      "turn_off_safe": false,
+      "why": "Every queued task is defined through it."
+    },
+    {
+      "id": "workflow.queue-runner",
+      "category": "workflows",
+      "name": "Queue runner",
+      "files": [
+        ".claude/.automation/runner.sh",
+        ".claude/.automation/queue-cli.sh"
+      ],
+      "turn_off_safe": false,
+      "why": "Runs every queued task."
+    },
+    {
+      "id": "workflow.template-sync",
+      "category": "workflows",
+      "name": "Template sync",
+      "files": [
+        ".claude/.automation/lib/template-sync-engine.sh",
+        ".claude/.automation/templates/template-sync-with-cleanup.yml"
+      ],
+      "turn_off_safe": false,
+      "why": "Delivers governance updates."
+    },
+    {
+      "id": "workflow.gate-conformance",
+      "category": "workflows",
+      "name": "Gate conformance check",
+      "files": [
+        ".claude/tools/gate-conformance.sh"
+      ],
+      "turn_off_safe": true,
+      "why": "A CI check of the gates; the gates run without it."
+    },
+    {
+      "id": "hook.ask-user-deny",
+      "category": "hooks",
+      "name": "Ask-user guard",
+      "files": [
+        ".claude/hooks/ask-user-deny.sh"
+      ],
+      "turn_off_safe": false,
+      "why": "Guard hook."
+    },
+    {
+      "id": "hook.bash-guard",
+      "category": "hooks",
+      "name": "Bash guard",
+      "files": [
+        ".claude/hooks/bash-guard.sh"
+      ],
+      "turn_off_safe": false,
+      "why": "Guard hook."
+    },
+    {
+      "id": "hook.hvst-failure-tracker",
+      "category": "hooks",
+      "name": "Failure tracker",
+      "files": [
+        ".claude/hooks/hvst-failure-tracker.sh"
+      ],
+      "turn_off_safe": true,
+      "why": "Only reminds the session to read known issues after repeated failures."
+    },
+    {
+      "id": "hook.permission-request",
+      "category": "hooks",
+      "name": "Permission request",
+      "files": [
+        ".claude/hooks/permission-request.sh"
+      ],
+      "turn_off_safe": false,
+      "why": "Guard hook."
+    },
+    {
+      "id": "hook.plan-approval",
+      "category": "hooks",
+      "name": "Plan approval",
+      "files": [
+        ".claude/hooks/plan-approval.sh"
+      ],
+      "turn_off_safe": false,
+      "why": "Records plan approval, which the gates require."
+    },
+    {
+      "id": "hook.pre-commit-gates",
+      "category": "hooks",
+      "name": "Commit gates",
+      "files": [
+        ".claude/hooks/pre-commit-gates.sh"
+      ],
+      "turn_off_safe": false,
+      "why": "Enforces the A gates."
+    },
+    {
+      "id": "hook.pre-push-gates",
+      "category": "hooks",
+      "name": "Push gates",
+      "files": [
+        ".claude/hooks/pre-push-gates.sh"
+      ],
+      "turn_off_safe": false,
+      "why": "Enforces the B gates."
+    },
+    {
+      "id": "hook.pretooluse-permission",
+      "category": "hooks",
+      "name": "Tool permissions",
+      "files": [
+        ".claude/hooks/pretooluse-permission.sh"
+      ],
+      "turn_off_safe": false,
+      "why": "Guard hook."
+    },
+    {
+      "id": "hook.session-close-check",
+      "category": "hooks",
+      "name": "Session close",
+      "files": [
+        ".claude/hooks/session-close-check.sh"
+      ],
+      "turn_off_safe": false,
+      "why": "Merges and seals the session branch."
+    },
+    {
+      "id": "hook.state-writer",
+      "category": "hooks",
+      "name": "Verdict capture",
+      "files": [
+        ".claude/hooks/state-writer.sh"
+      ],
+      "turn_off_safe": false,
+      "why": "Writes the verdicts the gates read."
+    },
+    {
+      "id": "hook.write-guard",
+      "category": "hooks",
+      "name": "Write guard",
+      "files": [
+        ".claude/hooks/write-guard.sh"
+      ],
+      "turn_off_safe": false,
+      "why": "Guard hook."
+    },
+    {
+      "id": "rule.non-negotiables",
+      "category": "rules",
+      "name": "Non-negotiables",
+      "files": [
+        "AI.md"
+      ],
+      "turn_off_safe": false,
+      "why": "The rules every session follows."
+    },
+    {
+      "id": "rule.mode-guard",
+      "category": "rules",
+      "name": "Repo mode guard",
+      "files": [
+        ".claude/hooks/_mode-guard-helper.sh"
+      ],
+      "turn_off_safe": false,
+      "why": "Keeps a child repo from rewriting its governance."
+    },
+    {
+      "id": "rule.tool-allowlist",
+      "category": "rules",
+      "name": "Tool and command allowlist",
+      "files": [
+        ".claude/hooks/_permission-allowlist.sh"
+      ],
+      "turn_off_safe": false,
+      "why": "Decides what a session may run."
+    },
+    {
+      "id": "rule.secret-pattern",
+      "category": "rules",
+      "name": "Secret scan pattern",
+      "files": [
+        ".claude/hooks/_secret-pattern.sh"
+      ],
+      "turn_off_safe": false,
+      "why": "Gate A4 and the commit-message scan use it."
+    },
+    {
+      "id": "gate.A1",
+      "category": "quality-gates",
+      "name": "A1 Decision compliance",
+      "files": [
+        ".claude/hooks/pre-commit-gates.sh",
+        "docs/ai/quality-gates.md"
+      ],
+      "turn_off_safe": false,
+      "why": "Quality gate."
+    },
+    {
+      "id": "gate.A2",
+      "category": "quality-gates",
+      "name": "A2 Process",
+      "files": [
+        ".claude/hooks/pre-commit-gates.sh",
+        "docs/ai/quality-gates.md"
+      ],
+      "turn_off_safe": false,
+      "why": "Quality gate."
+    },
+    {
+      "id": "gate.A3",
+      "category": "quality-gates",
+      "name": "A3 Quality",
+      "files": [
+        ".claude/hooks/pre-commit-gates.sh",
+        "docs/ai/quality-gates.md"
+      ],
+      "turn_off_safe": false,
+      "why": "Quality gate."
+    },
+    {
+      "id": "gate.A4",
+      "category": "quality-gates",
+      "name": "A4 Safety",
+      "files": [
+        ".claude/hooks/pre-commit-gates.sh",
+        "docs/ai/quality-gates.md"
+      ],
+      "turn_off_safe": false,
+      "why": "Quality gate."
+    },
+    {
+      "id": "gate.A5",
+      "category": "quality-gates",
+      "name": "A5 Cohesion",
+      "files": [
+        ".claude/hooks/pre-commit-gates.sh",
+        "docs/ai/quality-gates.md"
+      ],
+      "turn_off_safe": false,
+      "why": "Quality gate."
+    },
+    {
+      "id": "gate.A6",
+      "category": "quality-gates",
+      "name": "A6 Task group compliance",
+      "files": [
+        ".claude/hooks/pre-commit-gates.sh",
+        "docs/ai/quality-gates.md"
+      ],
+      "turn_off_safe": false,
+      "why": "Quality gate."
+    },
+    {
+      "id": "gate.KG",
+      "category": "quality-gates",
+      "name": "Product graph",
+      "files": [
+        ".claude/hooks/pre-commit-gates.sh",
+        "docs/ai/quality-gates.md"
+      ],
+      "turn_off_safe": false,
+      "why": "Quality gate."
+    },
+    {
+      "id": "gate.B1",
+      "category": "quality-gates",
+      "name": "B1 Process",
+      "files": [
+        ".claude/hooks/pre-push-gates.sh",
+        "docs/ai/quality-gates.md"
+      ],
+      "turn_off_safe": false,
+      "why": "Quality gate."
+    },
+    {
+      "id": "gate.B2",
+      "category": "quality-gates",
+      "name": "B2 Quality",
+      "files": [
+        ".claude/hooks/pre-push-gates.sh",
+        "docs/ai/quality-gates.md"
+      ],
+      "turn_off_safe": false,
+      "why": "Quality gate."
+    },
+    {
+      "id": "gate.B3",
+      "category": "quality-gates",
+      "name": "B3 Safety",
+      "files": [
+        ".claude/hooks/pre-push-gates.sh",
+        "docs/ai/quality-gates.md"
+      ],
+      "turn_off_safe": false,
+      "why": "Quality gate."
+    },
+    {
+      "id": "gate.C1",
+      "category": "quality-gates",
+      "name": "C1 Release checklist",
+      "files": [
+        "docs/ai/quality-gates.md"
+      ],
+      "turn_off_safe": false,
+      "why": "Quality gate."
+    },
+    {
+      "id": "gate.C2",
+      "category": "quality-gates",
+      "name": "C2 Full verification",
+      "files": [
+        "docs/ai/quality-gates.md"
+      ],
+      "turn_off_safe": false,
+      "why": "Quality gate."
+    },
+    {
+      "id": "gate.C3",
+      "category": "quality-gates",
+      "name": "C3 Sign-offs",
+      "files": [
+        "docs/ai/quality-gates.md"
+      ],
+      "turn_off_safe": false,
+      "why": "Quality gate."
+    },
+    {
+      "id": "decisions",
+      "category": "decisions",
+      "name": "Template decisions",
+      "files": [
+        "docs/ai/decisions/t-manifest.txt"
+      ],
+      "turn_off_safe": false,
+      "why": "Decisions are enforced by gate A1; the list names each one."
+    },
+    {
+      "id": "close.session-close",
+      "category": "merge-close",
+      "name": "Close sequence",
+      "files": [
+        "docs/ai/workflow.md",
+        ".claude/hooks/session-close-check.sh"
+      ],
+      "turn_off_safe": false,
+      "why": "Every session ends through it."
+    },
+    {
+      "id": "close.solo-merge",
+      "category": "merge-close",
+      "name": "Solo merge to main",
+      "files": [
+        "docs/ai/decisions/t-0015-solo-mode.md",
+        ".claude/hooks/session-close-check.sh"
+      ],
+      "turn_off_safe": false,
+      "why": "How finished work reaches main."
+    },
+    {
+      "id": "close.close-pipeline",
+      "category": "merge-close",
+      "name": "Queue close pipeline",
+      "files": [
+        ".claude/.automation/runner.sh",
+        "docs/ai/decisions/t-0057-close-pipeline-controls.md"
+      ],
+      "turn_off_safe": false,
+      "why": "How a queued task's work is merged."
+    }
+  ]
+}

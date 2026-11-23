@@ -123,5 +123,11 @@ The failure mode that makes this worth stating: below its introduction version, 
 
 **Verified floor vs. stated floor.** The suites are exercised on modern git (2.56 at time of writing) and were previously exercised on 2.19.2. The 2.5 floor is derived from the features the code actually calls, not from a test run on 2.5 — no such git is available here. Treat 2.5 as the intended contract and 2.19.2 as the lowest version with observed passing runs.
 
+## Template Sync Mode
+A child repo's Template Sync workflow (`.claude/.automation/lib/template-sync-engine.sh`) commits template updates straight to main by default. A child that wants to see an update first commits `.claude/template-sync-mode` containing `hold` (the file is child-owned and never synced). The sync then pushes the update to the branch `template-sync/held`, with the list of changed files in its commit message and in the workflow run's summary, and leaves main alone. `bash .claude/tools/template-sync-held.sh status` shows the held update; `apply` fast-forwards main to it, and the operator pushes. Decision t-0084.
+
+## Governance Kit
+`.claude/.automation/governance-kit.json` describes this governance as data: its modules (agents, skills & prompts, workflows, hooks, rules, quality gates, decisions, merge & close), each with its files and whether it is safe to turn off, plus its statuses, session types, gates, agents and schema set. A repo marks modules `off` or `customized` in its own `.claude/.automation/governance-overrides.json` (child-owned, never synced). Repo OS honours `off` where it controls the module: an agent turned off is not dispatched, and the failure tracker hook stands down. Gate-required agents and guard hooks can never be turned off (`.claude/hooks/_governance-helper.sh`). `bash .claude/tools/governance-kit.sh validate [--kit FILE] [--root DIR]` checks a kit, Massimo's custom kits included, and the repo's overrides. Decision t-0085.
+
 ## Versioning
 Template versions use CalVer git tags (e.g., `v2026.02.1`). Tags are auto-created on merge to `main` when Repo OS files change (`.github/workflows/auto-version-tag.yml`). See GitHub Releases for changelog.

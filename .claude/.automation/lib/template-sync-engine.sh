@@ -12,16 +12,25 @@
 #   $2 — Template branch to sync from (default: main)
 #
 # Requirements:
-#   - Git repository with write access to main
+#   - Git repository with write access to main (direct mode) or to the branch
+#     template-sync/held (hold mode)
 #   - .templatesyncignore in repo root (optional — if absent, all files synced)
 #   - child-sync-decisions.sh in .claude/.automation/lib/ (optional — skipped if absent)
 #
+# Modes (Decision t-0084), set by the child in .claude/template-sync-mode:
+#   direct  (default, also when the file is absent) commit the update to main
+#           and push main
+#   hold    commit the update to the branch template-sync/held instead, with
+#           the list of changed files, and leave main alone. The operator reads
+#           and applies it with .claude/tools/template-sync-held.sh
+#
 # Exit codes:
 #   0  Sync completed (with or without changes)
-#   1  Fatal error (bad args, fetch failure, push rejection)
+#   1  Fatal error (bad args, unknown mode, fetch failure, push rejection)
 #
 # Decision 0015 — solo mode: sync is PR-free, direct commit to main
 # Decision 0022 — template decision naming: integrates with child-sync-decisions.sh
+# Decision t-0084 — hold mode: the update waits on a branch for the operator
 
 set -euo pipefail
 
@@ -89,6 +98,9 @@ TEMPLATE_REPO_NAME=$(echo "$TEMPLATE_REPO" | sed -E 's|^([a-zA-Z][a-zA-Z0-9+.-]*
 BEGIN_MARKER="# BEGIN REPO-OS MANAGED — template-sync, see AI.md"
 END_MARKER="# END REPO-OS MANAGED"
 MANAGED_COMMENT="# DO NOT EDIT between these markers — managed by template-sync"
+SYNC_MODE_FILE="$REPO_ROOT/.claude/template-sync-mode"
+HELD_BRANCH="template-sync/held"
+SYNC_MODE="direct"
 
 # --- Logging ---
 log() {
@@ -531,31 +543,57 @@ run_decision_cleanup() {
   fi
 }
 
-# --- Commit and push ---
-commit_and_push() {
-  cd "$REPO_ROOT"
+# --- Sync mode (Decision t-0084) ---
+# The first line of .claude/template-sync-mode that is not blank or a comment.
+# Read before anything changes, so a mistyped mode stops the run with the
+# child's tree, main and the held branch exactly as they were.
+read_sync_mode() {
+  [ -f "$SYNC_MODE_FILE" ] || return 0
+  local mode
+  mode=$(sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$SYNC_MODE_FILE" \
+           | grep -v -e '^$' -e '^#' | head -n 1) || true
+  case "$mode" in
+    ""|direct) SYNC_MODE="direct" ;;
+    hold)      SYNC_MODE="hold" ;;
+    *)
+      echo "ERROR: .claude/template-sync-mode says '$mode'; it must be direct or hold." >&2
+      echo "       Nothing was changed." >&2
+      exit 1
+      ;;
+  esac
+}
 
-  # Stage all changes
-  git add -A
+# The held branch's commit on origin, or nothing when it does not exist. It is
+# the lease for the push that replaces or deletes the branch: if anything moved
+# the branch since this read, the push is refused rather than overwriting it.
+held_remote_sha() {
+  local out
+  out=$(git ls-remote origin "refs/heads/$HELD_BRANCH") || {
+    echo "ERROR: could not read $HELD_BRANCH from origin." >&2
+    exit 1
+  }
+  printf '%s' "$out" | cut -f1
+}
 
-  # Check if there are any changes to commit
-  if git diff --cached --quiet; then
-    log "No changes detected — working tree matches template. Nothing to commit."
-    return 0
-  fi
+# Hold mode found nothing to commit: main already matches the template, which
+# is what applying the held update leads to. A held branch left behind would
+# show an update that is no longer pending, so it goes.
+delete_stale_held() {
+  local expected
+  expected=$(held_remote_sha)
+  [ -n "$expected" ] || return 0
+  log "main matches the template — deleting $HELD_BRANCH"
+  git push --force-with-lease="refs/heads/$HELD_BRANCH:$expected" origin ":refs/heads/$HELD_BRANCH" || {
+    echo "ERROR: could not delete $HELD_BRANCH from origin." >&2
+    exit 1
+  }
+}
 
-  # Commit
-  _SYNC_MSG="chore(template): sync from upstream
-
-Synced from $TEMPLATE_REPO_NAME ($TEMPLATE_BRANCH).
-Direct-push sync via template-sync-engine.sh.
-
-Decisions: 0015, 0022"
-
-  # Refuse to commit a message that matches the shared secret pattern.
-  # This engine runs in CI, where no git hooks are installed, so the
-  # commit-msg hook never sees these commits. In March 2026 a token-bearing
-  # URL reached this message and was pushed to five repos.
+# Refuse to commit a message that matches the shared secret pattern.
+# This engine runs in CI, where no git hooks are installed, so the
+# commit-msg hook never sees these commits. In March 2026 a token-bearing
+# URL reached this message and was pushed to five repos.
+scan_sync_msg() {
   _PATTERN_FILE="$REPO_ROOT/.claude/hooks/_secret-pattern.sh"
   if [ -f "$_PATTERN_FILE" ]; then
     # shellcheck disable=SC1090
@@ -569,6 +607,79 @@ Decisions: 0015, 0022"
   else
     log "WARNING: $_PATTERN_FILE not found — commit message not scanned"
   fi
+}
+
+# Hold mode: commit the staged update to a held branch made fresh from main,
+# so it is always one commit on top of the main it was made from, and push
+# only that branch. main is neither committed nor pushed.
+commit_held() {
+  local changes expected
+  changes=$(git diff --cached --name-status --no-renames | tr '\t' ' ')
+
+  _SYNC_MSG="chore(template): held sync from upstream
+
+Synced from $TEMPLATE_REPO_NAME ($TEMPLATE_BRANCH).
+Held on $HELD_BRANCH; main is unchanged. To apply it:
+bash .claude/tools/template-sync-held.sh apply
+
+Changes:
+$changes
+
+Decisions: 0015, 0022, t-0084"
+  scan_sync_msg
+
+  expected=$(held_remote_sha)
+  log "Hold mode — committing the update to $HELD_BRANCH..."
+  git checkout -q -B "$HELD_BRANCH"
+  REPO_OS_RECOVER=1 git commit -q -m "$_SYNC_MSG" || {
+    git checkout -q main
+    echo "ERROR: Commit on $HELD_BRANCH failed; the update is left staged on main, uncommitted." >&2
+    exit 1
+  }
+
+  # Forced, because the branch is rebuilt on every run; the lease confines it
+  # to the commit read above. This is the only branch the engine ever forces.
+  git push --force-with-lease="refs/heads/$HELD_BRANCH:$expected" origin "HEAD:refs/heads/$HELD_BRANCH" || {
+    git checkout -q main
+    echo "ERROR: Push of $HELD_BRANCH failed (authentication, or the branch moved during the run)." >&2
+    exit 1
+  }
+  git checkout -q main
+
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    printf '## Template update held on %s\n\nApply it with `bash .claude/tools/template-sync-held.sh apply`.\n\n```\n%s\n```\n' \
+      "$HELD_BRANCH" "$changes" >> "$GITHUB_STEP_SUMMARY"
+  fi
+  log "Held update pushed to $HELD_BRANCH"
+}
+
+# --- Commit and push ---
+commit_and_push() {
+  cd "$REPO_ROOT"
+
+  # Stage all changes
+  git add -A
+
+  # Check if there are any changes to commit
+  if git diff --cached --quiet; then
+    log "No changes detected — working tree matches template. Nothing to commit."
+    if [ "$SYNC_MODE" = "hold" ]; then delete_stale_held; fi
+    return 0
+  fi
+
+  if [ "$SYNC_MODE" = "hold" ]; then
+    commit_held
+    return 0
+  fi
+
+  # Commit
+  _SYNC_MSG="chore(template): sync from upstream
+
+Synced from $TEMPLATE_REPO_NAME ($TEMPLATE_BRANCH).
+Direct-push sync via template-sync-engine.sh.
+
+Decisions: 0015, 0022"
+  scan_sync_msg
 
   log "Committing changes..."
   REPO_OS_RECOVER=1 git commit -m "$_SYNC_MSG"
@@ -613,6 +724,10 @@ main() {
     echo "ERROR: Must be on 'main' branch. Currently on: $current_branch" >&2
     exit 1
   fi
+
+  # Mode first: an unknown one stops the run before anything changes
+  read_sync_mode
+  log "Mode: $SYNC_MODE"
 
   # Set up template remote
   setup_template_remote

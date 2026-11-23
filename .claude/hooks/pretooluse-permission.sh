@@ -116,6 +116,13 @@ if [ "$TOOL_NAME" = "Agent" ]; then
   # Extract subagent_type once (used for both allowlist check and dispatch recording)
   AGENT_SUBTYPE=$(echo "$INPUT" | jq -r '.tool_input.subagent_type // empty' 2>/dev/null || true)
 
+  # An agent the repo has turned off is not dispatched (Decision t-0085).
+  # module_is_off never says so for a gate-required agent.
+  if [ -n "$AGENT_SUBTYPE" ] && [ -f "$SCRIPT_DIR/_governance-helper.sh" ] \
+     && source "$SCRIPT_DIR/_governance-helper.sh" && module_is_off "agent.$AGENT_SUBTYPE"; then
+    _ptl_block "GATE-RECOVERABLE: agent $AGENT_SUBTYPE is turned off in .claude/.automation/governance-overrides.json (Decision t-0085). NEXT: skip this agent and continue; this is not an error. (override: REPO_OS_ALLOW_AGENT=1)"
+  fi
+
   # Record dispatch-time phase for governance agents before allowing.
   # This binding is consumed by state-writer.sh on SubagentStop so verdict
   # validation uses the phase at dispatch, not the (possibly advanced) arrival phase.

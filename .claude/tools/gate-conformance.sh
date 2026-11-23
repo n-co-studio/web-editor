@@ -1489,6 +1489,31 @@ else
 fi
 
 # ============================================================
+# Turned-off agents are not dispatched (t-0085)
+# ============================================================
+# pretooluse-permission.sh blocks with exit 0 and a JSON decision:block, so the
+# probe reads the payload: 0 = blocked by the t-0085 rule, 1 = not.
+printf '\n## pretooluse-permission.sh: turned-off agents (t-0085)\n'
+write_phase_state build
+mkdir -p "$SB/.claude/.automation"
+printf '{"modules": [{"id": "agent.architect", "turn_off_safe": true}, {"id": "agent.critic", "turn_off_safe": true}]}\n' \
+  > "$SB/.claude/.automation/governance-kit.json"
+printf '{"modules": {"agent.architect": "off", "agent.critic": "off"}}\n' \
+  > "$SB/.claude/.automation/governance-overrides.json"
+_t85_probe() {   # subagent_type -> 0 if the t-0085 rule blocked it
+  _OUT_FILE="$SB/.last-gate-output"
+  printf '{"session_id":"%s","tool_name":"Agent","tool_input":{"subagent_type":"%s","prompt":"x"}}' "$SID" "$1" \
+    | (cd "$SB" && bash "$REAL_HOOKS/pretooluse-permission.sh") > "$_OUT_FILE" 2>&1
+  grep -q '"decision":"block".*t-0085' "$_OUT_FILE" && echo 0 || echo 1
+}
+expect_exit 0 "$(_t85_probe architect)" "t-0085: an agent turned off is not dispatched"
+expect_exit 1 "$(_t85_probe critic)" "t-0085: critic stays on though kit and override say off"
+rm -f "$SB/.claude/.automation/governance-overrides.json"
+expect_exit 1 "$(_t85_probe architect)" "t-0085: with no override the agent is dispatched"
+rm -f "$SB/.claude/.automation/governance-kit.json"
+clear_state
+
+# ============================================================
 # commit-msg git hook — scans the commit MESSAGE for secrets
 # ============================================================
 # A4 and the pre-commit hook scan staged files only; this hook covers the

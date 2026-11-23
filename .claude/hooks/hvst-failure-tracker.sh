@@ -16,6 +16,13 @@ START_MS=$(now_ms)
 REPO_ROOT="$_REPO_OS_ROOT"
 COUNTER_FILE="$REPO_ROOT/.claude/.hvst-fail-count"
 
+# Turned off by the repo (Decision t-0085): track nothing
+if [ -f "$SCRIPT_DIR/_governance-helper.sh" ] && source "$SCRIPT_DIR/_governance-helper.sh" \
+   && module_is_off "hook.hvst-failure-tracker"; then
+  cat >/dev/null
+  exit 0
+fi
+
 # Resolve known-issues path based on repo mode (template → .claude/local/, child/autonomous → docs/ai/logs/)
 if [ "$(get_mode)" = "template" ]; then
   KNOWN_ISSUES_PATH=".claude/local/known-issues.md"

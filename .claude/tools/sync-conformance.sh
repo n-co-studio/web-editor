@@ -430,6 +430,16 @@ assert_grep '^docs/spec/drafts/$' "$TEMPLATE_ROOT/.templatesyncignore" \
             "the template's .templatesyncignore excludes docs/spec/drafts/ (t-0083)"
 assert_no_grep '^docs/spec/drafts/' "$TEMPLATE_ROOT/.claude/.automation/machinery-manifest.txt" \
                "the template's machinery manifest lists no spec drafts"
+assert_grep '^\.claude/template-sync-mode$' "$TEMPLATE_ROOT/.templatesyncignore" \
+            "the template's .templatesyncignore excludes .claude/template-sync-mode (t-0084)"
+assert_no_grep '^\.claude/template-sync-mode$' "$TEMPLATE_ROOT/.claude/.automation/machinery-manifest.txt" \
+               "the template's machinery manifest does not list the sync mode file"
+assert_grep '^\.claude/\.automation/governance-overrides\.json$' "$TEMPLATE_ROOT/.templatesyncignore" \
+            "the template's .templatesyncignore excludes the governance overrides (t-0085)"
+assert_no_grep '^\.claude/\.automation/governance-overrides\.json$' "$TEMPLATE_ROOT/.claude/.automation/machinery-manifest.txt" \
+               "the template's machinery manifest does not list the overrides"
+assert_grep '^\.claude/\.automation/governance-kit\.json$' "$TEMPLATE_ROOT/.claude/.automation/machinery-manifest.txt" \
+            "the template ships the governance kit"
 
 printf '\n## branch guard\n'
 git_q "$CHILD" checkout -b not-main
