@@ -14,6 +14,7 @@
 #
 # check prints one line per problem, each starting with a code:
 #   DRAFT_MISSING          no docs/spec/drafts/<version>/
+#   SYMLINK_IN_DRAFT       a symbolic link inside the draft
 #   VERSION_EXISTS         <version> is already compiled or in manifest.json
 #   TBD_UNRESOLVED         a [TBD] outside an HTML comment (file:line)
 #   ASSUMPTIONS_NOT_EMPTY  boundaries.md's "Assumptions: NONE" section has text, or is missing
@@ -88,6 +89,13 @@ _sc_check() {
     printf 'DRAFT_MISSING: no draft directory docs/spec/drafts/%s/\n' "$v"
     return 1
   fi
+  # A link escapes the [TBD] scan (find -type f) and would point out of a
+  # compiled version that never changes.
+  while IFS= read -r f; do
+    [ -n "$f" ] && problems="${problems}SYMLINK_IN_DRAFT: ${f#$REPO_ROOT/} is a symbolic link; replace it with the file"$'\n'
+  done <<EOF
+$(find "$d" -type l | LC_ALL=C sort)
+EOF
   if [ -e "$COMPILED/$v" ]; then
     problems="${problems}VERSION_EXISTS: docs/spec/compiled/$v/ already exists; compiled versions are never changed"$'\n'
   elif [ -f "$MANIFEST" ] && command -v jq >/dev/null 2>&1 \
@@ -131,7 +139,7 @@ case "$cmd" in
     _sc_valid_version "$version" || _sc_die "version must look like v1, v2, ..."
     ;;
   *)
-    sed -n '11,21p' "$0" >&2
+    sed -n '11,22p' "$0" >&2
     exit 1 ;;
 esac
 
@@ -151,10 +159,35 @@ if ! _sc_check "$version"; then
 fi
 
 target="$COMPILED/$version"
-stage=$(mktemp -d "$COMPILED/.compile-$version.XXXXXX") || _sc_die "could not stage the compile"
-# mktemp -d makes the directory 0700; a compiled version is as readable as the rest.
-if ! chmod 755 "$stage" || ! cp -R "$DRAFTS/$version/." "$stage/" || ! mv "$stage" "$target"; then
-  rm -rf "$stage"
+owned=false mtmp=""
+# An interrupt before manifest.json lists the version undoes what this run wrote.
+# The run owns docs/spec/compiled/<v> only once its own mkdir created it, so a
+# directory another process made is never removed. Once the manifest lists the
+# version the compile has happened: what is left (digest, the draft's removal)
+# is what spec-digest.sh or rm repeats. A manifest that cannot be read removes
+# nothing.
+_sc_interrupted() {
+  local rc=0
+  [ -n "$mtmp" ] && rm -f "$mtmp"
+  jq -e --arg v "$version" '(.versions // []) | map(.version) | index($v)' "$MANIFEST" >/dev/null 2>&1 || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    echo "Interrupted after manifest.json listed $version: it is compiled; run spec-digest.sh and remove docs/spec/drafts/$version/ if still there." >&2
+  elif [ "$rc" -eq 1 ]; then
+    [ "$owned" = true ] && rm -rf "$target"
+    echo "Interrupted: nothing was changed." >&2
+  else
+    echo "Interrupted, and manifest.json could not be read: check docs/spec/compiled/$version/ and manifest.json by hand." >&2
+  fi
+  exit 1
+}
+trap _sc_interrupted INT TERM HUP
+# mkdir is the atomic claim: it fails if the version appeared since check. owned
+# is set only after it succeeds, so a signal in between leaves an empty directory
+# behind (VERSION_EXISTS on a re-run) rather than ever removing someone else's.
+mkdir "$target" 2>/dev/null || _sc_die "docs/spec/compiled/$version/ appeared since check; nothing was changed"
+owned=true
+if ! chmod 755 "$target" || ! cp -R "$DRAFTS/$version/." "$target/"; then
+  rm -rf "$target"
   _sc_die "could not copy the draft; nothing was changed"
 fi
 
@@ -172,6 +205,8 @@ if ! jq --arg v "$version" --arg c "$created" --arg t "$commit" \
   rm -rf "$target"
   _sc_die "could not update manifest.json; nothing was changed"
 fi
+mtmp=""
+trap - INT TERM HUP
 
 # Digest generation is advisory (Decision 0035): a failure is reported, not fatal.
 # spec-digest.sh works on the repo it lives in, so it runs only when that is the

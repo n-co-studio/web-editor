@@ -675,6 +675,21 @@ _sc_other=$(cd "$SB" && git ls-files | grep -v '^docs/' | head -1)
 rc=$(run_gate "pre-commit-gates.sh" "git commit -m spec-close")
 expect_exit 2 "$rc" "a spec-fresh close commit still cannot delete a file outside docs/spec/drafts/"
 expect_exit 0 "$(_rf_scope_block)" "...blocked by the close-commit scope"
+# A compiled version never changes; manifest.json does (t-0083 amendment).
+reset_worktree
+stage "docs/spec/compiled/v8/product.md" "v8 as compiled"
+( cd "$SB" && git add -f docs/spec/compiled/manifest.json && git commit -q --no-verify -m "conformance: a compiled v8" -- docs/spec/compiled/v8/product.md docs/spec/compiled/manifest.json )
+_sc_close_case
+stage "docs/spec/compiled/v8/product.md" "v8 edited after compile"
+rc=$(run_gate "pre-commit-gates.sh" "git commit -m spec-close")
+expect_exit 2 "$rc" "a spec-fresh close commit cannot modify a file inside a compiled version"
+grep -q "compiled versions never change" "$SB/.last-gate-output" && _sc_why=0 || _sc_why=1
+expect_exit 0 "$_sc_why" "...and the block says compiled versions never change"
+_sc_close_case
+stage "docs/spec/compiled/manifest.json" "$(cat "$SB/docs/spec/compiled/manifest.json")
+"
+rc=$(run_gate "pre-commit-gates.sh" "git commit -m spec-close")
+expect_exit 0 "$rc" "...while it may modify manifest.json"
 reset_worktree; clear_state
 
 printf '\n## pre-push-gates.sh\n'

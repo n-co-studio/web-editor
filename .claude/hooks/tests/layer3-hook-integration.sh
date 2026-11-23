@@ -1586,6 +1586,23 @@ assert_hook_blocks "$_LAST_RC" "spec-fresh commit still blocks a deletion outsid
 assert_contains "$_LAST_OUTPUT" "staged D $_l3_gone" "the block names the deletion"
 ( cd "$SB" && git reset -q HEAD -- "$_l3_gone" docs/spec/drafts/v3/product.md && git checkout -q HEAD -- docs/spec/drafts/v3/product.md ) 2>/dev/null || true
 
+# A compiled version never changes; manifest.json does (t-0083 amendment).
+stage_sandbox_file "docs/spec/compiled/v2/product.md" "v2 as compiled"
+( cd "$SB" && git add docs/spec/compiled/manifest.json && git commit -q --no-verify -m "l3: a compiled v2" -- docs/spec/compiled/v2/product.md docs/spec/compiled/manifest.json ) 2>/dev/null || true
+stage_sandbox_file "docs/spec/compiled/v2/product.md" "v2 edited after compile"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "spec commit")"
+assert_hook_blocks "$_LAST_RC" "spec-fresh close commit blocks a modification inside a compiled version (t-0083)"
+assert_contains "$_LAST_OUTPUT" "staged M docs/spec/compiled/v2/product.md (compiled versions never change, t-0083)" "the block names the file and why"
+( cd "$SB" && git reset -q HEAD -- docs/spec/compiled/v2/product.md && git checkout -q HEAD -- docs/spec/compiled/v2/product.md ) 2>/dev/null || true
+printf '\n# edited\n' >> "$SB/docs/spec/compiled/v2/product.md"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "spec commit")"
+assert_hook_blocks "$_LAST_RC" "...and the same modification left unstaged"
+( cd "$SB" && git checkout -q HEAD -- docs/spec/compiled/v2/product.md ) 2>/dev/null || true
+stage_sandbox_file "docs/spec/compiled/manifest.json" '{"active": "v3", "versions": []}'
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "spec commit")"
+assert_ok "$_LAST_RC" "...while modifying a committed manifest.json, with a new version added, is allowed"
+( cd "$SB" && git reset -q HEAD -- docs/spec/compiled/manifest.json && git checkout -q HEAD -- docs/spec/compiled/manifest.json ) 2>/dev/null || true
+
 rm -f "$STATE_DIR/plan-approved"
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "spec commit")"
 assert_hook_blocks "$_LAST_RC" "spec-fresh commit still needs plan-approved"

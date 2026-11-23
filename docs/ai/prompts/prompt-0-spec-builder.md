@@ -37,6 +37,7 @@ You must:
    - `TBD_UNRESOLVED`: a `[TBD]` outside an HTML comment, given as file:line;
    - `ASSUMPTIONS_NOT_EMPTY`: the "Assumptions: NONE" section in `boundaries.md` has text, or is missing;
    - `FINDINGS_UNRESOLVED`: a Blocking finding is still unresolved;
+   - `SYMLINK_IN_DRAFT`: a symbolic link inside the draft; replace it with the file itself;
    - `VERSION_EXISTS`, `DRAFT_MISSING`.
 
    Resolve each problem with the operator, then run the check again.

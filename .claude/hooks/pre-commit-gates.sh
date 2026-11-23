@@ -443,11 +443,22 @@ _close_commit_deletable() {
   return 1
 }
 
+# A file inside a compiled spec version. Compile adds a new version and updates
+# manifest.json; nothing modifies a version once written (t-0083 amendment).
+_close_commit_compiled() {
+  case "$1" in
+    docs/spec/compiled/manifest.json) return 1 ;;
+    docs/spec/compiled/?*) return 0 ;;
+  esac
+  return 1
+}
+
 # Append every out-of-scope change in one `git diff` listing to the caller's
 # `bad`. Own list, not STAGED_FILES: --diff-filter=ACMR hides deletions, and
 # rename detection hides a rename's source. Only additions and modifications
-# pass, and a spec session's draft deletions. A listing that fails counts as
-# out of scope (fail-closed).
+# pass (never a modification inside a compiled spec version), and a spec
+# session's draft deletions. A listing that fails counts as out of scope
+# (fail-closed).
 _close_commit_scan() {  # <label> [git diff args...]
   local label="$1" tmp st p
   shift
@@ -457,7 +468,13 @@ _close_commit_scan() {  # <label> [git diff args...]
   else
     while IFS= read -r -d '' st && IFS= read -r -d '' p; do
       case "$st" in
-        A|M) _close_commit_allowed "$p" && continue ;;
+        A) _close_commit_allowed "$p" && continue ;;
+        M)
+          if _close_commit_compiled "$p"; then
+            bad="${bad:+$bad, }$label $st $p (compiled versions never change, t-0083)"
+            continue
+          fi
+          _close_commit_allowed "$p" && continue ;;
         D) _close_commit_deletable "$p" && continue ;;
       esac
       bad="${bad:+$bad, }$label $st $p"

@@ -159,6 +159,37 @@ mkdraft v3; printf 'findings: []\n' | bash "$RF" write v3 >/dev/null 2>&1
 run check v3
 _tap_contains "$OUT" "VERSION_EXISTS: manifest.json already lists v3" "a version listed in manifest.json without a directory also exists"
 
+# --- a symbolic link in a draft (t-0083 amendment) ---
+fresh_repo
+mkdraft v1; nofindings v1
+printf 'outside\n' > "$WORK/outside.md"
+ln -s "$WORK/outside.md" "$REPO_ROOT/docs/spec/drafts/v1/features/feature-002-link.md"
+cp "$M" "$WORK/manifest.before"
+run check v1
+_tap_eq "$RC" "1" "a draft holding a symbolic link fails check"
+_tap_contains "$OUT" "SYMLINK_IN_DRAFT: docs/spec/drafts/v1/features/feature-002-link.md" "...named with SYMLINK_IN_DRAFT"
+run compile v1
+_tap_eq "$RC" "1" "compile refuses it"
+_tap_true "[ ! -e '$REPO_ROOT/docs/spec/compiled/v1' ] && cmp -s '$M' '$WORK/manifest.before'" "...and changes nothing"
+rm "$REPO_ROOT/docs/spec/drafts/v1/features/feature-002-link.md"
+
+# --- an interrupted compile changes nothing (t-0083 amendment) ---
+# A jq stand-in signals the tool while it writes the manifest; every other jq
+# call goes to the real one.
+REAL_JQ=$(command -v jq)
+mkdir -p "$WORK/fakebin"
+printf '#!/bin/bash\nfor a in "$@"; do case "$a" in *templateCommit*) kill -TERM "$PPID"; sleep 1; exit 1 ;; esac; done\nexec "%s" "$@"\n' "$REAL_JQ" > "$WORK/fakebin/jq"
+chmod +x "$WORK/fakebin/jq"
+OUT=$(PATH="$WORK/fakebin:$PATH" bash "$TOOL" compile v1 2>&1); RC=$?
+_tap_eq "$RC" "1" "a compile interrupted while writing the manifest exits 1"
+_tap_contains "$OUT" "Interrupted: nothing was changed." "...and says nothing was changed"
+_tap_true "[ ! -e '$REPO_ROOT/docs/spec/compiled/v1' ]" "...no compiled version is left"
+_tap_eq "$(ls -A "$REPO_ROOT/docs/spec/compiled" | tr '\n' ' ')" "manifest.json " "...nor any .compile-* or .manifest.* file"
+_tap_true "cmp -s '$M' '$WORK/manifest.before'" "...manifest.json is unchanged"
+_tap_true "[ -f '$REPO_ROOT/docs/spec/drafts/v1/product.md' ]" "...and the draft is intact"
+run compile v1
+_tap_eq "$RC" "0" "the same compile then succeeds"
+
 # --- the digest runs when the tool lives in the repo it compiles ---
 REPO_ROOT="$WORK/own"; export REPO_ROOT; M="$REPO_ROOT/docs/spec/compiled/manifest.json"
 fresh_repo

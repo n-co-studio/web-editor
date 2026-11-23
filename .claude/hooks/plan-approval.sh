@@ -197,7 +197,7 @@ record_agent_verdict "plan_hash" "$QUESTION_HASH" 2>/dev/null || true
 # --- Phase: set mode and advance through approval → next phase ---
 # If phase-state active, set mode then advance through approval to the
 # post-approval phase (queried dynamically from the phase sequence).
-# standard/taskgroup/hotfix → build. spec-fresh/spec-update → governance.
+# standard/taskgroup/hotfix → build. spec-fresh/spec-update → compile (t-0083).
 # Fail-silent if no phase-state or if session type lacks these phases.
 CURRENT_PHASE=$(get_phase)
 SESSION_TYPE=$(get_session_type)
