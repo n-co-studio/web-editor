@@ -103,6 +103,14 @@ else
   _tap_fail "the draft entry is in pending-review/" "no entry file for '$ID1'"
 fi
 _tap_eq "$(_field "$Q/pending-review/$ID1.yaml" auto_mode)" "false" "a draft starts in review mode"
+# t-0088: an agent session cannot choose auto mode for a draft; only approval does.
+OUT="$(CLAUDECODE=1 bash "$CLI" edit "$ID1" auto_mode true 2>&1)"; RC=$?
+_tap_eq "$RC" "1" "an agent session's edit of auto_mode is refused (t-0088)"
+_tap_contains "$OUT" "approve $ID1 --mode" "...pointing at approve --mode"
+_tap_eq "$(_field "$Q/pending-review/$ID1.yaml" auto_mode)" "false" "...and the draft stays in review mode"
+OUT="$(env -u CLAUDECODE bash "$CLI" edit "$ID1" auto_mode true 2>&1)"; RC=$?
+_tap_eq "$RC" "0" "the operator's own terminal can still edit auto_mode"
+env -u CLAUDECODE bash "$CLI" edit "$ID1" auto_mode false >/dev/null 2>&1
 if [ ! -f "$AUTOMATION_DIR/runner.pid" ] && ! grep -q 'enabled: true' "$AUTOMATION_DIR/config.local.yaml" 2>/dev/null; then
   _tap_pass "adding a draft starts no daemon and enables no runner"
 else

@@ -52,6 +52,8 @@ See: `.claude/agents/_agent-glossary.md` § User Review for the full system defi
 
 Work happens on categorized branches. BLOCK: never commit directly to `main` — enforced by bash-guard.sh / write-guard.sh (Section 3). In solo mode (Decision 0015), branches merge to main directly at session close. See `docs/ai/quality-gates.md` for branch types and gate mapping.
 
+Valid names are `feature/`, `fix/`, `hotfix/`, `release/`, `experiment/` and `live-editor-N`. bash-guard refuses creating a branch with any other name and says which name to use (`feat/x` → `feature/x`); the push gate's B1 checks the same list at push (Decision t-0088). On a work branch, a `git merge`, `cherry-pick` or `revert` that makes its own commit is refused, because the commit gate checks staged changes and would never see that content: run it with `--no-commit` (merge: `--no-commit --no-ff`) and commit the result normally. Merging `main` into the branch, `--abort`, and task-group merge sessions are not affected.
+
 ## Session Lifecycle
 
 **Worktree isolation (Decision 0033)**: Every session runs in its own git worktree by default, eliminating branch conflicts and state interference when multiple sessions run concurrently. Interactive sessions: `claude --worktree`. Headless sessions: `runner.sh` passes `--worktree` automatically. The main worktree stays on `main` — no branch switching in the primary working tree. State files are isolated per session via `get_session_state_dir()` (Decision 0030). Opt-out: `REPO_OS_WORKTREE_ISOLATE=0` for runner sessions; omit `--worktree` for interactive.

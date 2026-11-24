@@ -961,6 +961,13 @@ case "$SUBCOMMAND" in
     case "$EDIT_VALUE" in
       *$'\n'*|*$'\r'*) echo "ERROR: $EDIT_FIELD must be one line" >&2; exit 1 ;;
     esac
+    # Decision t-0088: whether a run skips review is the operator's choice, made
+    # when approving. An agent session (CLAUDECODE=1) may not set it, so a
+    # drafting session cannot pick auto mode for its own draft.
+    if [ "$EDIT_FIELD" = "auto_mode" ] && [ "${CLAUDECODE:-}" = "1" ]; then
+      echo "ERROR: auto_mode is the operator's choice, made when approving: queue-cli.sh approve $EDIT_ID --mode auto|review (Decision t-0088)" >&2
+      exit 1
+    fi
 
     if ! acquire_queue_lock; then
       echo "ERROR: Queue lock unavailable" >&2

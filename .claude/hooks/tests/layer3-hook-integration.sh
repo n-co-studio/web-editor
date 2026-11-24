@@ -2657,6 +2657,53 @@ for _l3_cmd in "git -C . status" "git log --grep commit"; do
   assert_ok "$_LAST_RC" "t-0087: agent-git-guard allows [$_l3_cmd]"
 done
 
+# --- t-0088: branch names at creation, and commits the commit gate can't see ---
+# Allowed cases may still meet later bash-guard gates (phase), so they assert
+# only that the t-0088 refusal did not fire.
+_l3_no88() { case "$_LAST_OUTPUT" in *"Decision t-0088"*) _tap_fail "$1" "t-0088 refusal fired: $_LAST_OUTPUT" ;; *) _tap_pass "$1" ;; esac; }
+switch_sandbox_branch "feature/test"
+run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "git checkout -b feat/x")"
+assert_hook_blocks "$_LAST_RC" "t-0088: bash-guard refuses creating feat/x"
+assert_contains "$_LAST_OUTPUT" "NEXT: use feature/x" "t-0088: ...and suggests feature/x"
+run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "git -C $SB switch -c spike/y")"
+assert_contains "$_LAST_OUTPUT" "NEXT: use experiment/y" "t-0088: switch -c spike/y through git -C suggests experiment/y"
+for _l3_cmd in "git checkout -b feature/x" "git checkout main" "git checkout feat/existing" 'git checkout -b "$b"'; do
+  run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "$_l3_cmd")"
+  _l3_no88 "t-0088: no branch-name refusal for [$_l3_cmd]"
+done
+REPO_OS_SKIP_BRANCH_NAME=1 run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "git checkout -b feat/x")"
+_l3_no88 "t-0088: REPO_OS_SKIP_BRANCH_NAME=1 lets the operator through"
+for _l3_cmd in "git merge feature/other" "git merge main-foo" "git cherry-pick abc123" "git revert abc123"; do
+  run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "$_l3_cmd")"
+  assert_hook_blocks "$_LAST_RC" "t-0088: on a work branch bash-guard refuses [$_l3_cmd]"
+  assert_contains "$_LAST_OUTPUT" "--no-commit" "t-0088: ...pointing at --no-commit"
+done
+for _l3_cmd in "git merge --no-commit --no-ff feature/other" "git merge main" "git merge origin/main" \
+               "git merge --abort" "git cherry-pick -n abc123" "git revert --no-commit abc123"; do
+  run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "$_l3_cmd")"
+  _l3_no88 "t-0088: no commit-bypass refusal for [$_l3_cmd]"
+done
+reset_phase "taskgroup-merge"
+run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "git merge feature/brief-1")"
+_l3_no88 "t-0088: a taskgroup-merge session may merge brief branches"
+reset_phase "standard"
+switch_sandbox_branch "main"
+run_hook_rc "bash-guard.sh" "$(fixture_pretooluse_bash "git cherry-pick abc123")"
+_l3_no88 "t-0088: on main the commit-bypass check does not apply (Gate 7 and the close sequence own it)"
+switch_sandbox_branch "invalid_no_category"
+run_hook_rc "pre-push-gates.sh" "$(fixture_pretooluse_bash "git push origin invalid_no_category")"
+assert_contains "$_LAST_OUTPUT" "git branch -m feature/invalid_no_category" "t-0088: B1 suggests the name to rename to"
+switch_sandbox_branch "feature/test"
+# A --no-commit merge leaves the result for a commit, and that commit is gated.
+_l3_git() { git -C "$SB" -c core.hooksPath=/dev/null -c user.name=t -c user.email=t@example.com "$@"; }
+{ _l3_git checkout -q -b feature/l3-merge-src && printf 'x\n' > "$SB/merged.txt" && _l3_git add merged.txt \
+    && _l3_git commit -q -m src && _l3_git checkout -q feature/test \
+    && _l3_git merge -q --no-commit --no-ff feature/l3-merge-src; } >/dev/null 2>&1 || true
+assert_file_exists "$SB/.git/MERGE_HEAD" "t-0088: setup: a --no-commit merge is in progress"
+SKIP_FUNC_CHECK=1 SKIP_BUILD_CHECK=1 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "merge feature/l3-merge-src")"
+assert_hook_blocks "$_LAST_RC" "t-0088: the commit after a --no-commit merge goes through the commit gate"
+{ _l3_git merge --abort; _l3_git branch -q -D feature/l3-merge-src; } >/dev/null 2>&1 || true
+
 # ============================================================
 # L3.13 — Agent frontmatter compliance (static analysis)
 # ============================================================

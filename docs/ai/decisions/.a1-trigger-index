@@ -1,7 +1,7 @@
 # A1 trigger index — generated artifact. Do not hand-edit.
 # Regenerate: bash .claude/.automation/lib/rebuild-trigger-index.sh
 # format: 2
-# digest: b7d001f10136fff9978b09ff8f54b2829a34478290f22b2e982d8bd0c124ae3a
+# digest: 865f4047928854e6e464dea24540fd6f9ee6698ec4a4ff2eb219ba3f365b71b1
 0001AI\.mdprompt system, verification gate, session-based
 0001docs/ai/prompts/prompt-.*\.mdprompt system, verification gate, session-based
 0002docs/ai/decisions/.*\.mdmandatory, commit-blocking
@@ -170,6 +170,7 @@
 0085\.claude/\.automation/governance-(kit|overrides)\.json|\.claude/hooks/_governance-helper\.sh|\.claude/tools/governance-kit\.shgovernance-kit, governance-overrides, module_is_off, turn_off_safe
 0086\.claude/\.automation/lib/gates-a-trailer\.sh|\.claude/\.automation/git-hooks/commit-msggates-a-result, gates-a-trailer, runner_install_brief_contract, queue_entry_contract_ok
 0087\.claude/hooks/_git-command-helper\.sh|\.claude/hooks/agent-git-guard\.shgit_invokes, _git-command-helper
+0088\.claude/hooks/_branch-name-helper\.shbranch_name_valid, branch_name_suggest, branch_created_name, git_commit_bypass
 0001AI\.mdprompt system, verification gate, session-based
 0001docs/ai/prompts/prompt-.*\.mdprompt system, verification gate, session-based
 0002docs/ai/decisions/.*\.mdmandatory, commit-blocking

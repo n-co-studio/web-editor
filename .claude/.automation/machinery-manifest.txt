@@ -86,6 +86,7 @@
 .claude/.automation/tests/sandbox-setup.sh
 .claude/.automation/tests/sandbox-teardown.sh
 .claude/.automation/tests/test-branch-manager.sh
+.claude/.automation/tests/test-branch-names.sh
 .claude/.automation/tests/test-brief-contract.sh
 .claude/.automation/tests/test-child-sync.sh
 .claude/.automation/tests/test-close-pipeline.sh
@@ -159,6 +160,7 @@
 .claude/hooks/_a3-design-token-check.sh
 .claude/hooks/_analytics-helper.sh
 .claude/hooks/_automation-bridge.sh
+.claude/hooks/_branch-name-helper.sh
 .claude/hooks/_cleanup-helper.sh
 .claude/hooks/_commit-message-helper.sh
 .claude/hooks/_cross-session-context.sh
@@ -346,6 +348,7 @@ docs/ai/decisions/t-0084-held-template-sync.md
 docs/ai/decisions/t-0085-governance-kit.md
 docs/ai/decisions/t-0086-hook-gates-line-and-brief-contracts.md
 docs/ai/decisions/t-0087-git-invocation-matching.md
+docs/ai/decisions/t-0088-branch-names-merges-auto-mode.md
 docs/ai/decisions/t-manifest.txt
 docs/ai/eval/.gitkeep
 docs/ai/eval/_nomenclature.md

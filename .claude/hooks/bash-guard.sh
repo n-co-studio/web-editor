@@ -515,8 +515,18 @@ fi
 # Saves ~14ms sourcing overhead for the majority of Bash calls (~56%).
 # queue-cli.sh calls go on to the Prompt T draft self-approval check (t-0067):
 # they write no files, so nothing else here would look at them.
+# Decision t-0088: git commands that create a branch or make a commit of their
+# own go on to the branch-name and commit-bypass checks after sourcing. This
+# test is only a cheap filter; the real matching is in _branch-name-helper.sh.
+_BG_GIT_CANDIDATE=false
+if [[ "$INPUT" == *git* ]]; then
+  case "$INPUT" in
+    *checkout*|*switch*|*branch*|*worktree*|*merge*|*cherry-pick*|*revert*) _BG_GIT_CANDIDATE=true ;;
+  esac
+fi
 if [ "$_TG_MERGE_BLOCK" = false ] && ! _bg_is_write_candidate "$INPUT" \
-   && [[ "$INPUT" != *'queue-cli.sh'* ]] && ! _bg_needs_state_check "$INPUT" raw; then
+   && [[ "$INPUT" != *'queue-cli.sh'* ]] && ! _bg_needs_state_check "$INPUT" raw \
+   && [ "$_BG_GIT_CANDIDATE" = false ]; then
   exit 0
 fi
 
@@ -533,6 +543,49 @@ START_MS=$(now_ms)
 _CACHED_BRANCH="$CURRENT_BRANCH"
 
 REPO_ROOT="$_REPO_OS_ROOT"
+
+# --- Gate 8: branch names and commits the commit gate cannot see (t-0088) ---
+# A branch an agent creates must follow the naming convention; the refusal
+# names the branch it should have been. On a work branch, a merge, cherry-pick
+# or revert that makes its own commit is refused: pre-commit-gates checks the
+# staged diff, which is empty before these run, so their content would land
+# unchecked. Their --no-commit forms leave it for a normal, gated commit.
+# Merges on main stay with Gate 7 and the close sequence.
+if [ "$_BG_GIT_CANDIDATE" = true ] && [ "${REPO_OS_RECOVER:-0}" != "1" ] && [ "$_RECOVER_VIA_SIGNAL" != true ] \
+   && [ -f "$SCRIPT_DIR/_git-command-helper.sh" ] && [ -f "$SCRIPT_DIR/_branch-name-helper.sh" ]; then
+  # shellcheck source=_git-command-helper.sh
+  source "$SCRIPT_DIR/_git-command-helper.sh"
+  # shellcheck source=_branch-name-helper.sh
+  source "$SCRIPT_DIR/_branch-name-helper.sh"
+  _BG_CMD=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null || true)
+  while IFS= read -r _BG_NEW_BRANCH; do
+    # A name built from a variable or substitution cannot be read here; B1
+    # checks it at push.
+    case "$_BG_NEW_BRANCH" in ''|*'$'*|*'`'*) continue ;; esac
+    branch_name_valid "$_BG_NEW_BRANCH" && continue
+    if [ "${REPO_OS_SKIP_BRANCH_NAME:-0}" = "1" ]; then
+      log_override "branch-guard" "REPO_OS_SKIP_BRANCH_NAME"
+      continue
+    fi
+    log_hook_event "branch-guard" "PreToolUse" "Bash" "block" "$START_MS" "branch_name_invalid" "branch:$_BG_NEW_BRANCH"
+    echo "GATE-RECOVERABLE: Branch name '$_BG_NEW_BRANCH' does not follow the convention ($BRANCH_NAME_PREFIXES). NEXT: use $(branch_name_suggest "$_BG_NEW_BRANCH") (Decision t-0088). (override: REPO_OS_SKIP_BRANCH_NAME=1)" >&2
+    exit 2
+  done <<_BG_EOF
+$(branch_created_name "$_BG_CMD")
+_BG_EOF
+  if [ "$CURRENT_BRANCH" != "main" ]; then
+    _BG_BYPASS=$(git_commit_bypass "$_BG_CMD")
+    if [ -n "$_BG_BYPASS" ] && [ "${REPO_OS_SKIP_MERGE_GUARD:-0}" = "1" ]; then
+      log_override "branch-guard" "REPO_OS_SKIP_MERGE_GUARD"
+      _BG_BYPASS=""
+    fi
+    if [ -n "$_BG_BYPASS" ] && [ "$(get_session_type 2>/dev/null || true)" != "taskgroup-merge" ]; then
+      log_hook_event "branch-guard" "PreToolUse" "Bash" "block" "$START_MS" "commit_bypass" "cmd:$_BG_BYPASS"
+      echo "GATE-RECOVERABLE: git $_BG_BYPASS would add a commit the commit gate never sees (it checks staged changes, and this commits them itself). NEXT: run it with --no-commit$( [ "$_BG_BYPASS" = merge ] && printf ' --no-ff'), then commit the result normally so the gates check it (Decision t-0088). (override: REPO_OS_SKIP_MERGE_GUARD=1)" >&2
+      exit 2
+    fi
+  fi
+fi
 
 # Log overrides that were detected pre-source
 if [ "${REPO_OS_SKIP_STATE_GUARD:-0}" = "1" ]; then

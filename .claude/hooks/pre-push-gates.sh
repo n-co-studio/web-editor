@@ -111,13 +111,28 @@ fi
 # B1: Process — Branch Naming Convention (blocking)
 # ============================================================
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-# live-editor-N uses anchored alternation (digits only) so 'live-editor-foo' is rejected.
-VALID_PATTERNS="^(main|feature/.+|fix/.+|hotfix/.+|release/.+|experiment/.+|live-editor-[0-9]+)$"
+# The list lives in _branch-name-helper.sh, shared with bash-guard's check at
+# branch creation (Decision t-0088). The inline pattern is the fallback for a
+# repo without the helper; live-editor-N is digits only.
+if [ -f "$SCRIPT_DIR/_branch-name-helper.sh" ]; then
+  # shellcheck source=_branch-name-helper.sh
+  source "$SCRIPT_DIR/_branch-name-helper.sh"
+fi
+_b1_valid() {
+  if command -v branch_name_valid >/dev/null 2>&1; then
+    branch_name_valid "$1"
+  else
+    [[ "$1" =~ ^(feature/.+|fix/.+|hotfix/.+|release/.+|experiment/.+|live-editor-[0-9]+)$ ]]
+  fi
+}
 
 if [ -n "$CURRENT_BRANCH" ] && [ "$CURRENT_BRANCH" != "main" ]; then
-  if [[ ! "$CURRENT_BRANCH" =~ $VALID_PATTERNS ]]; then
+  if ! _b1_valid "$CURRENT_BRANCH"; then
     echo "GATE B1 FAILED: Branch '$CURRENT_BRANCH' — expected: <category>/<description> or live-editor-N" >&2
     echo "  Valid categories: feature/, fix/, hotfix/, release/, experiment/, live-editor-N (digits only)" >&2
+    if command -v branch_name_suggest >/dev/null 2>&1; then
+      echo "  NEXT: rename it: git branch -m $(branch_name_suggest "$CURRENT_BRANCH") (Decision t-0088)" >&2
+    fi
     FAILED=1
   fi
 fi

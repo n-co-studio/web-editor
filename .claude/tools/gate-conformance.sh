@@ -729,6 +729,14 @@ _OUT_FILE="$SB/.last-gate-output"
 printf '{"session_id":"%s","tool_name":"Bash","tool_input":{"command":"cd %s && git -C . commit -m x"}}' "$SID" "$SB" \
   | (cd "$SB" && bash "$REAL_HOOKS/agent-git-guard.sh") > "$_OUT_FILE" 2>&1; rc=$?
 expect_exit 2 "$rc" "the subagent git guard blocks cd && git -C . commit (t-0087)"
+# C11n — Decision t-0088: bash-guard checks a new branch's name and refuses a
+# merge/cherry-pick/revert that would commit past the commit gate.
+rc=$(run_gate "bash-guard.sh" "git checkout -b feat/probe")
+expect_exit 2 "$rc" "bash-guard refuses creating a branch named feat/probe (t-0088)"
+if grep -q "NEXT: use feature/probe" "$_OUT_FILE" 2>/dev/null; then rc=0; else rc=1; fi
+expect_exit 0 "$rc" "...and suggests feature/probe (t-0088)"
+rc=$(run_gate "bash-guard.sh" "git cherry-pick abc123")
+expect_exit 2 "$rc" "bash-guard refuses a committing cherry-pick on a work branch (t-0088)"
 write_phase_state "commit"
 
 ( cd "$SB" && git checkout -q feature/conformance )

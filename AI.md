@@ -134,5 +134,7 @@ The commit hook, not the agent, writes a commit's `Gates-A:` trailer. When `pre-
 
 The commit gate, the push gate and the subagent git guard recognise a commit or push however git is called — `git -C <path>`, `git -c name=value`, `--git-dir`, after `cd`/`&&`/`;`/`env`, or a path to git — through `git_invokes` in `.claude/hooks/_git-command-helper.sh`. Before Decision t-0087 they matched only the literal text, so `git -C <path> commit` and `push` skipped them.
 
+Branch names follow one list in `.claude/hooks/_branch-name-helper.sh` (`feature/`, `fix/`, `hotfix/`, `release/`, `experiment/`, `live-editor-N`): bash-guard refuses creating a branch with any other name and suggests the right one, and the push gate's B1 uses the same list. On a work branch, a merge, cherry-pick or revert that makes its own commit is refused in favour of its `--no-commit` form and a normal, gated commit. An agent session cannot set `auto_mode` on a queue entry; the operator sets it with `queue-cli.sh approve <id> --mode`. Decision t-0088.
+
 ## Versioning
 Template versions use CalVer git tags (e.g., `v2026.02.1`). Tags are auto-created on merge to `main` when Repo OS files change (`.github/workflows/auto-version-tag.yml`). See GitHub Releases for changelog.

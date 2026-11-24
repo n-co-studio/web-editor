@@ -95,3 +95,4 @@ t-0084-held-template-sync.md
 t-0085-governance-kit.md
 t-0086-hook-gates-line-and-brief-contracts.md
 t-0087-git-invocation-matching.md
+t-0088-branch-names-merges-auto-mode.md

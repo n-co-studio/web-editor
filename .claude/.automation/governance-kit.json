@@ -690,7 +690,8 @@
       "category": "hooks",
       "name": "Bash guard",
       "files": [
-        ".claude/hooks/bash-guard.sh"
+        ".claude/hooks/bash-guard.sh",
+        ".claude/hooks/_branch-name-helper.sh"
       ],
       "turn_off_safe": false,
       "why": "Guard hook."
