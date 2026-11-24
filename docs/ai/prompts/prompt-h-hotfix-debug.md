@@ -148,7 +148,6 @@ After presenting the escalation report, wait for operator direction. The operato
 
    Session: <session_number>
    Decisions: <applicable decisions>
-   Gates-A: A1-pass A2-relaxed A3-n/a A4-pass A5-skip A6-n/a
    Gates-B: B1-pass B2-<result> B3-<result>
    ```
 

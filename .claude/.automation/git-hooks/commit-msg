@@ -32,6 +32,14 @@ MSG_FILE="${1:-}"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$(dirname "$0")/../.." && pwd))"
 PATTERN_FILE="$REPO_ROOT/.claude/hooks/_secret-pattern.sh"
 
+# Gates-A trailer (Decision t-0086): written from what the commit gate checked.
+# The logic lives in a synced script so later changes need no reinstall. It
+# never blocks; the secret scan below then covers the final message.
+GATES_A_SCRIPT="$REPO_ROOT/.claude/.automation/lib/gates-a-trailer.sh"
+if [ -f "$GATES_A_SCRIPT" ]; then
+  bash "$GATES_A_SCRIPT" "$MSG_FILE" || true
+fi
+
 if [ ! -f "$PATTERN_FILE" ]; then
   echo "WARNING: commit-msg secret scan inactive — pattern file not found at $PATTERN_FILE" >&2
   echo "         Reinstall with: .claude/.automation/lib/install-hooks.sh" >&2

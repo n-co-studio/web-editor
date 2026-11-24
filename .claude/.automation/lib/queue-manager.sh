@@ -938,7 +938,111 @@ queue_approve_with_mode() {
     review) auto="false" ;;
     *) echo "ERROR: --mode must be review or auto" >&2; return 1 ;;
   esac
+  # Decision t-0086: the operator is asked here, before the run, when the
+  # brief gives the run no file list. Missing entries fall through to
+  # _transition, which reports them.
+  local qdir; qdir=$(_queue_dir)
+  if [ -f "$qdir/pending-review/${entry_id}.yaml" ] \
+     && _load_queue_entry "$qdir/pending-review/${entry_id}.yaml" \
+     && ! queue_entry_contract_ok "$_QE_SESSION_TYPE" "$_QE_BRIEF_PATH"; then
+    echo "ERROR: $QUEUE_CONTRACT_MISSING_MSG" >&2
+    return 1
+  fi
   _transition "$entry_id" "pending-review" "approved" "$auto"
+}
+
+# --- A queue run's contract comes from its brief (Decision t-0086) ---
+# The brief's `### Task Contract` section holds the contract as one fenced YAML
+# block (Prompt T). The runner writes that block to the run's
+# .claude/local/task-contract.yaml before the agent starts, so the agent works
+# to the operator's file list and never writes its own.
+
+# Session types whose runs change files and so need a file list.
+queue_type_needs_contract() {
+  case "${1:-}" in standard|hotfix|taskgroup) return 0 ;; esac
+  return 1
+}
+
+# The brief file for a brief_path as entries store it (repo-relative or absolute).
+_queue_brief_file() {
+  local p="${1:-}"
+  [ -n "$p" ] || return 1
+  if [ -f "${REPO_ROOT:-.}/$p" ]; then printf '%s\n' "${REPO_ROOT:-.}/$p"
+  elif [ -f "$p" ]; then printf '%s\n' "$p"
+  else return 1; fi
+}
+
+# Prints the YAML inside the first fence of the brief's ### Task Contract section.
+# Returns 1 when the brief or the section's fenced block is missing.
+queue_brief_contract() {
+  local f
+  f=$(_queue_brief_file "${1:-}") || return 1
+  awk '
+    /^### Task Contract[[:space:]]*$/ { h = 1; next }
+    h && !f && /^#+ / { exit }
+    h && !f && /^```(yaml)?[[:space:]]*$/ { f = 1; next }
+    f && /^```[[:space:]]*$/ { done = 1; exit }
+    f { print }
+    END { exit !done }
+  ' "$f"
+}
+
+# Succeeds when the brief's contract lists at least one scope_files path.
+queue_brief_has_scope() {
+  local c
+  c=$(queue_brief_contract "${1:-}") || return 1
+  printf '%s\n' "$c" | awk '
+    /^scope_files:/ { s = 1; next }
+    s && /^  - / { v = $0; sub(/^  - *"?/, "", v); sub(/"?[[:space:]]*$/, "", v); if (v != "") { ok = 1; exit } next }
+    s { s = 0 }
+    END { exit !ok }
+  '
+}
+
+# Succeeds when an entry of this session type may run with this brief; sets
+# QUEUE_CONTRACT_MISSING_MSG to the operator-facing reason when it may not.
+QUEUE_CONTRACT_MISSING_MSG=""
+queue_entry_contract_ok() {
+  local stype="${1:-}" brief="${2:-}"
+  QUEUE_CONTRACT_MISSING_MSG=""
+  queue_type_needs_contract "$stype" || return 0
+  queue_brief_has_scope "$brief" && return 0
+  QUEUE_CONTRACT_MISSING_MSG="brief ${brief:-<none>} lists no scope_files in a ### Task Contract block (Decision t-0086). Add the files this $stype run may change, then approve again."
+  return 1
+}
+
+# Writes the brief's contract to <root>/.claude/local/task-contract.yaml and
+# binds it: contract_sha in the run's plan-approved is the digest
+# plan-approval.sh would record (t-0072), so the commit gate refuses a commit
+# once the contract no longer matches. Returns 1, writing nothing, when the
+# brief has no scope_files.
+# Arguments: $1 root (worktree or repo), $2 brief_path, $3 plan-approved file
+runner_install_brief_contract() {
+  local root="$1" brief="$2" approved="$3" body dest sha
+  queue_brief_has_scope "$brief" || return 1
+  # Unbound is not installed: without plan-approved there is nothing to bind to.
+  [ -f "$approved" ] || return 1
+  body=$(queue_brief_contract "$brief") || return 1
+  dest="$root/.claude/local/task-contract.yaml"
+  # .claude/local is agent-writable; a link left there must not redirect this write.
+  [ -L "$root/.claude/local" ] && return 1
+  mkdir -p "$root/.claude/local" 2>/dev/null || return 1
+  rm -f "$dest" 2>/dev/null || return 1
+  {
+    printf '# Written by the queue runner from %s (Decision t-0086).\n' "$brief"
+    printf '# The operator approved this file list; do not edit it.\n'
+    printf '%s\n' "$body"
+  } > "$dest" 2>/dev/null || return 1
+  sha=$(portable_hash < "$dest" 2>/dev/null | cut -c1-16)
+  [ -n "$sha" ] || return 1
+  if [ -f "$approved" ]; then
+    grep -v '^contract_sha:' "$approved" > "$approved.tmp.$$" 2>/dev/null || true
+    # An unreadable or empty plan-approved must not become one line.
+    [ -s "$approved.tmp.$$" ] || { rm -f "$approved.tmp.$$"; return 1; }
+    printf 'contract_sha: %s\n' "$sha" >> "$approved.tmp.$$" && mv "$approved.tmp.$$" "$approved" || {
+      rm -f "$approved.tmp.$$"; return 1; }
+  fi
+  return 0
 }
 
 # --- Approve every pending draft of a work order together (Decision t-0067) ---

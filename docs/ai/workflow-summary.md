@@ -36,6 +36,8 @@ Gates-A: A1-pass A2-pass A3-n/a A4-pass A5-pass A6-n/a
 Gates-B: B1-pass B2-n/a B3-n/a
 ```
 
+`Gates-A` is added by the commit hook from what the gates checked (Decision t-0086); do not write it.
+
 ## Session Lifecycle
 | Rule | Detail |
 |------|--------|

@@ -85,14 +85,11 @@ Cycle ≥ 5 with FAIL → Write `FINISH_LOOP_RESULT: INCOMPLETE` sentinel and es
 
    Session: <session_number>
    Decisions: {decision_list}
-   Gates-A: A1-pass A2-pass A3-<result> A4-pass A5-<result> A6-n/a
    Gates-B: B1-pass B2-<result> B3-<result>
    Automation: runner
    ```
-   `A6` checks task-group contracts only: outside a task group write `A6-n/a` — the commit gate refuses `A6-pass` there (Decision t-0078).
-   **IMPORTANT:** Every commit MUST include `Gates-A:` and `Gates-B:` trailers — including docs-only or session-log-only commits. For commits where gates were not exercised (no code changes), use `n/a`:
+   **Do not write a `Gates-A:` trailer.** The commit hook adds it from what the gates actually checked, replacing any you write (Decision t-0086). Every commit MUST still include a `Gates-B:` trailer — including docs-only or session-log-only commits. Where the push gates were not exercised, use `n/a`:
    ```
-   Gates-A: A1-pass A2-n/a A3-n/a A4-n/a A5-n/a A6-n/a
    Gates-B: B1-n/a B2-n/a B3-n/a
    ```
 3. The `pre-commit-gates.sh` hook will run gates A1–A6 automatically. Resolve any failures before retrying.

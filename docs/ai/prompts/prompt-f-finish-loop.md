@@ -269,17 +269,16 @@ The runner outcome-detector reads these sentinels (scoped to finish-loop session
 
    Session: <session_number>
    Decisions: <applicable decisions>
-   Gates-A: A1-pass A2-pass A3-<result> A4-pass A5-n/a A6-n/a
    Gates-B: B1-pass B2-pass B3-pass
    Automation: runner
    ```
-3. The pre-commit gates run automatically. Resolve any failures before retrying.
+3. The pre-commit gates run automatically. Resolve any failures before retrying. Do not write `Gates-A:` — the commit hook adds it (Decision t-0086).
 
 ### Close Phase
 
 1. `advance_phase "close"`
 2. Update session log
-3. Commit session log with `Gates-A: A1-pass A2-n/a A3-n/a A4-n/a A5-n/a A6-n/a`
+3. Commit session log (the commit hook adds its `Gates-A:` trailer)
 4. Solo merge via `session-close-check.sh` when `solo=true`
 
 ### Escalation Protocol

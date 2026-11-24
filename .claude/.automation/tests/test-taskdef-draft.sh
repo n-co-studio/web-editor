@@ -60,7 +60,9 @@ _CACHED_SESSION_STATE_DIR=""
 # A brief with its sidecar contract and bundle, as Prompt T writes them.
 _mk_draft() { # stem -> prints the repo-relative brief path
   local stem="$1"
-  printf '## Task Brief: %s\n\n### Goal\nDraft %s.\n' "$stem" "$stem" > "$BRIEFS/$stem.md"
+  # A Task Contract with scope_files: approve refuses a brief without one (t-0086).
+  printf '## Task Brief: %s\n\n### Goal\nDraft %s.\n\n### Task Contract\n\n```yaml\nscope_files:\n  - "src/%s.ts"\n```\n' \
+    "$stem" "$stem" "$stem" > "$BRIEFS/$stem.md"
   printf 'task: "%s"\n' "$stem" > "$BRIEFS/$stem.contract.yaml"
   printf 'brief_id: "%s"\nmode: "review"\n' "$stem" > "$BRIEFS/$stem.bundle.yaml"
   printf '.claude/.automation/briefs/%s.md' "$stem"

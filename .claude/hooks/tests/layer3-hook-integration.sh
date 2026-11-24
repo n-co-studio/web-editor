@@ -996,6 +996,19 @@ rm -rf "$_ESC_DIR"
 # ============================================================
 tap_section "L3.5: pre-commit-gates.sh — commit gate verification"
 
+# --- t-0087: a commit is recognised through git's global options ---
+# At a non-commit phase the gate blocks; before t-0087 `git -C` exited 0 unseen.
+reset_phase "standard"
+stage_sandbox_file "src/clean.ts" "export const x = 1;"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_bash "git -C $SB commit -q -F $SB/.git/MSG")"
+assert_hook_blocks "$_LAST_RC" "t-0087: git -C <repo> commit reaches the commit gate"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_bash "cd $SB && git -c user.name=x commit -m x")"
+assert_hook_blocks "$_LAST_RC" "t-0087: cd && git -c k=v commit reaches the commit gate"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_hook_blocks "$_LAST_RC" "t-0087: plain git commit still reaches it"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_bash "git -C $SB log --grep commit")"
+assert_ok "$_LAST_RC" "t-0087: git log --grep commit is not a commit"
+
 # --- Phase at commit + all state files → allows ---
 reset_phase "standard"
 _advance "plan" 2>/dev/null
@@ -1053,10 +1066,87 @@ assert_contains "$_LAST_OUTPUT" "lists no scope_files" "t-0078: the block says t
 printf 'task: "t"\nscope_files:\n  - "src/clean.ts"\n' > "$_l3_tc"
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
 assert_ok "$_LAST_RC" "t-0078: a queue-run commit with a scoped contract passes"
+# t-0086: hotfix and taskgroup queue runs also take a contract from the brief.
+rm -f "$_l3_tc"
+_l3_st=$(sed -n 's/^session_type: *//p' "$STATE_DIR/phase-state" 2>/dev/null | head -1)
+sed -i '' 's/^session_type: .*/session_type: hotfix/' "$STATE_DIR/phase-state" 2>/dev/null
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_contains "$_LAST_OUTPUT" "task-contract.yaml is missing" "t-0086: a hotfix queue run with no contract is refused too"
+sed -i '' "s/^session_type: .*/session_type: ${_l3_st:-standard}/" "$STATE_DIR/phase-state" 2>/dev/null
+printf 'task: "t"\nscope_files:\n  - "src/clean.ts"\n' > "$_l3_tc"
 unset CLAUDE_HEADLESS REPO_OS_AUTOMATION_ENTRY
 rm -f "$_l3_tc"
 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
 assert_ok "$_LAST_RC" "t-0078: an interactive commit with no contract is not blocked by the queue-run check"
+
+# --- t-0086: the gate saves each A check's outcome for the Gates-A trailer ---
+_l3_ga="$SB/.claude/.state/gates-a-result"
+_l3_ga_line() { sed -n 's/^line: //p' "$_l3_ga" 2>/dev/null; }
+rm -f "$_l3_ga"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_ok "$_LAST_RC" "t-0086: the baseline commit is allowed"
+assert_file_exists "$_l3_ga" "t-0086: an allowed commit saves gates-a-result"
+assert_eq "$(sed -n 's/^tree: //p' "$_l3_ga")" "$(git -C "$SB" write-tree)" "t-0086: the record names the staged tree it checked"
+assert_contains "$(_l3_ga_line)" "A2-pass" "t-0086: A2 ran: pass"
+assert_contains "$(_l3_ga_line)" "A3-skip" "t-0086: A3 with no tooling, tsconfig or package.json: skip"
+assert_contains "$(_l3_ga_line)" "A4-pass" "t-0086: A4: pass"
+assert_contains "$(_l3_ga_line)" "A5-pass" "t-0086: A5 for a session type with a review phase: pass"
+assert_contains "$(_l3_ga_line)" "A6-n/a" "t-0086: A6 outside a task group: n/a"
+REPO_OS_RECOVER=1 run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_contains "$(_l3_ga_line)" "A2-skip A3-skip A4-pass A5-skip A6-skip" "t-0086: under REPO_OS_RECOVER every state check is a skip"
+rm -f "$_l3_ga"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit $'test commit\n\nGates-A: A1-pass A6-pass')"
+assert_hook_blocks "$_LAST_RC" "t-0086: a blocked commit (the A6 claim) ..."
+[ -f "$_l3_ga" ] && _tap_fail "t-0086: ...saves no record" "gates-a-result written for a blocked commit" \
+                 || _tap_pass "t-0086: ...saves no record"
+_l3_br=$(git -C "$SB" rev-parse --abbrev-ref HEAD)
+git -C "$SB" checkout -q -b experiment/l3-ga 2>/dev/null
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_eq "$(_l3_ga_line)" "A1-skip A2-skip A3-skip A4-pass A5-skip A6-skip" "t-0086: an experiment branch: A4 pass, the rest skip"
+git -C "$SB" checkout -q -b hotfix/l3-ga 2>/dev/null
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_contains "$(_l3_ga_line)" "A5-n/a" "t-0086: a hotfix branch: A5 n/a"
+git -C "$SB" checkout -q "$_l3_br" 2>/dev/null
+git -C "$SB" branch -q -D experiment/l3-ga hotfix/l3-ga 2>/dev/null
+
+# --- t-0086: a queue run may not widen the contract the runner wrote ---
+_l3_esc="$SB/.claude/.automation/escalations"
+mkdir -p "$SB/.claude/local"
+printf 'task: "t"\nscope_files:\n  - "src/clean.ts"\n' > "$_l3_tc"
+stage_sandbox_file "other/extra.ts" "export const y = 2;"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_hook_blocks "$_LAST_RC" "t-0086: interactive: an out-of-scope file blocks"
+assert_contains "$_LAST_OUTPUT" "Add files to task contract scope_files" "t-0086: interactive: the message is unchanged"
+rm -rf "$_l3_esc"; mkdir -p "$_l3_esc"
+export CLAUDE_HEADLESS=1 REPO_OS_AUTOMATION_ENTRY=l3-entry
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_hook_blocks "$_LAST_RC" "t-0086: queue run: an out-of-scope file blocks"
+assert_contains "$_LAST_OUTPUT" "do not edit .claude/local/task-contract.yaml" "t-0086: queue run: the agent is told not to widen the contract"
+assert_contains "$(cat "$_l3_esc"/esc-scope-*.yaml 2>/dev/null)" 'queue_entry_id: "l3-entry"' "t-0086: queue run: the escalation names the entry, so the runner sends it to review"
+git -C "$SB" rm -q --cached other/extra.ts 2>/dev/null; rm -f "$SB/other/extra.ts"
+# A neighbour of a listed file is only advisory interactively; in a queue run it blocks too.
+stage_sandbox_file "src/sibling.ts" "export const z = 3;"
+rm -rf "$_l3_esc"; mkdir -p "$_l3_esc"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_hook_blocks "$_LAST_RC" "t-0086: queue run: a file next to a listed one is out of scope too"
+unset CLAUDE_HEADLESS REPO_OS_AUTOMATION_ENTRY
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_ok "$_LAST_RC" "t-0086: interactive: the same neighbour stays advisory"
+export CLAUDE_HEADLESS=1 REPO_OS_AUTOMATION_ENTRY=l3-entry
+git -C "$SB" rm -q --cached src/sibling.ts 2>/dev/null; rm -f "$SB/src/sibling.ts"
+# The runner binds the contract it wrote; an edit afterwards is refused.
+printf 'timestamp: test\nsession_id: %s\ncontract_sha: %s\n' "$TEST_SID" "$(portable_hash < "$_l3_tc" | cut -c1-16)" > "$STATE_DIR/plan-approved"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_ok "$_LAST_RC" "t-0086: queue run: the contract as written passes"
+printf '  - "other/extra.ts"\n' >> "$_l3_tc"
+rm -rf "$_l3_esc"; mkdir -p "$_l3_esc"
+run_hook_rc "pre-commit-gates.sh" "$(fixture_pretooluse_commit "test commit")"
+assert_hook_blocks "$_LAST_RC" "t-0086: queue run: a widened contract is refused"
+assert_contains "$_LAST_OUTPUT" "not the one the runner wrote" "t-0086: queue run: ...saying only the operator changes it"
+assert_contains "$(cat "$_l3_esc"/esc-contract-*.yaml 2>/dev/null)" 'queue_entry_id: "l3-entry"' "t-0086: queue run: ...with an escalation naming the entry"
+unset CLAUDE_HEADLESS REPO_OS_AUTOMATION_ENTRY
+rm -f "$_l3_tc"; rm -rf "$_l3_esc"
+printf 'timestamp: test\nsession_id: %s\n' "$TEST_SID" > "$STATE_DIR/plan-approved"
 
 # --- A staged RENAME is visible to the staged-file list (known-issue R30) ---
 # `--diff-filter=ACM` excluded `R`, so a renamed file reached none of the checks
@@ -2542,6 +2632,13 @@ switch_sandbox_branch "release"
 run_hook_rc "pre-push-gates.sh" "$(fixture_pretooluse_bash "git push origin release")"
 assert_hook_blocks "$_LAST_RC" "pre-push-gates blocks bare category without description"
 
+# --- t-0087: git's global options no longer hide a push from the gate ---
+switch_sandbox_branch "invalid_no_category"
+run_hook_rc "pre-push-gates.sh" "$(fixture_pretooluse_bash "git -C $SB push origin invalid_no_category")"
+assert_hook_blocks "$_LAST_RC" "t-0087: git -C <repo> push reaches the push gate (B1 blocks)"
+run_hook_rc "pre-push-gates.sh" "$(fixture_pretooluse_bash "git -C $SB status")"
+assert_ok "$_LAST_RC" "t-0087: git -C <repo> status is not a push"
+
 # --- REPO_OS_RECOVER=1 → bypass all checks ---
 switch_sandbox_branch "invalid_no_category"
 REPO_OS_RECOVER=1 run_hook_rc "pre-push-gates.sh" "$(fixture_stop)"
@@ -2549,6 +2646,16 @@ assert_ok "$_LAST_RC" "pre-push-gates allows invalid branch with REPO_OS_RECOVER
 
 # Restore to feature branch
 switch_sandbox_branch "feature/test"
+
+# --- t-0087: the subagent git guard sees commits and pushes anywhere ---
+for _l3_cmd in "git -C . commit -m x" "cd $SB && git commit -m x" "git -c a=b push origin x"; do
+  run_hook_rc "agent-git-guard.sh" "$(fixture_pretooluse_bash "$_l3_cmd")"
+  assert_hook_blocks "$_LAST_RC" "t-0087: agent-git-guard blocks [$_l3_cmd]"
+done
+for _l3_cmd in "git -C . status" "git log --grep commit"; do
+  run_hook_rc "agent-git-guard.sh" "$(fixture_pretooluse_bash "$_l3_cmd")"
+  assert_ok "$_LAST_RC" "t-0087: agent-git-guard allows [$_l3_cmd]"
+done
 
 # ============================================================
 # L3.13 — Agent frontmatter compliance (static analysis)

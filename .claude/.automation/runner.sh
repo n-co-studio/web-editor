@@ -2046,6 +2046,16 @@ _run_single_entry() {
     fi
   fi
 
+  # Decision t-0086: the contract is the brief's, written here before the agent
+  # starts and bound to the run's plan-approved, so a commit after the agent
+  # edits it is refused (the t-0072 check). Overwrites a previous brief's in a
+  # reused task-group worktree.
+  if queue_type_needs_contract "$session_type"; then
+    runner_install_brief_contract "$launch_dir" "$brief_path" \
+      "$launch_dir/.claude/.state/wt-sessions/${REPO_OS_SESSION_ID}/plan-approved" \
+      || echo "WARNING: no contract from brief '${brief_path:-<none>}' for entry $brief_id — its commits will be refused until the operator adds scope_files to the brief" >&2
+  fi
+
   # Launch headless session in background to enable FORCE-HALT child kill.
   # SIGTERM deferral: when the daemon receives SIGTERM, the trap sets
   # _SHUTDOWN_REQUESTED=true and `wait` is interrupted (returns 128+signum).
@@ -3839,6 +3849,25 @@ while true; do
       sleep 1
     done
     queue_block "$ENTRY_ID" "Invalid session type: $ENTRY_SESSION_TYPE"
+    release_queue_lock
+    continue
+  fi
+
+  # Decision t-0086: a run that changes files works to the brief's file list.
+  # Asked again here, not only at approve: an entry auto-approved, or approved
+  # before this rule, or whose brief changed since, must not start without one.
+  if ! queue_entry_contract_ok "$ENTRY_SESSION_TYPE" "$ENTRY_BRIEF_PATH"; then
+    echo "ERROR: entry $ENTRY_ID not started — $QUEUE_CONTRACT_MISSING_MSG" >&2
+    _block_lock_attempts=0
+    while ! acquire_queue_lock; do
+      _block_lock_attempts=$((_block_lock_attempts + 1))
+      if [ "$_block_lock_attempts" -ge 3 ]; then
+        echo "ERROR: Lock unavailable for queue_block — skipping transition" >&2
+        continue 2  # skip to next daemon cycle
+      fi
+      sleep 1
+    done
+    queue_block "$ENTRY_ID" "$QUEUE_CONTRACT_MISSING_MSG"
     release_queue_lock
     continue
   fi

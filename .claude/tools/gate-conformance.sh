@@ -425,6 +425,24 @@ printf 'chore: note\n\nGates-A: A1-pass A2-pass A6-n/a\n' > "$SB/.git/COMMIT_MSG
 rc=$(run_gate "pre-commit-gates.sh" "git commit -F $SB/.git/COMMIT_MSG_PROBE")
 expect_exit 0 "$rc" "A6 claim: the same commit saying A6-n/a passes (t-0078)"
 
+# C8g — Decision t-0086: the allowed commit above left the gate's record; the
+#       real commit-msg hook turns it into the Gates-A trailer, replacing the
+#       message's own line. Run the hook as git would, on the same index.
+mkdir -p "$SB/.claude/.automation/lib" "$SB/.claude/hooks"
+cp "$REAL_HOOKS/../.automation/lib/gates-a-trailer.sh" "$SB/.claude/.automation/lib/" 2>/dev/null
+cp "$REAL_HOOKS/_secret-pattern.sh" "$SB/.claude/hooks/" 2>/dev/null
+_ga_rec=$(sed -n 's/^line: //p' "$SB/.claude/.state/gates-a-result" 2>/dev/null)
+(cd "$SB" && CLAUDECODE=1 bash "$REAL_HOOKS/../.automation/git-hooks/commit-msg" "$SB/.git/COMMIT_MSG_PROBE") >/dev/null 2>&1
+_ga_got=$(git -C "$SB" interpret-trailers --parse < "$SB/.git/COMMIT_MSG_PROBE" | sed -n 's/^Gates-A: //p')
+if [ -n "$_ga_rec" ] && [ "$_ga_got" = "$_ga_rec" ]; then rc=0; else rc=1; fi
+expect_exit 0 "$rc" "Gates-A: the commit carries the gate's own line, not the message's (t-0086)"
+printf 'chore: note\n\nGates-A: A1-pass A2-pass A3-pass A4-pass A5-pass A6-pass\n' > "$SB/.git/COMMIT_MSG_PROBE"
+stage "docs/ai/logs/other.md" "staged after the gate ran"
+(cd "$SB" && CLAUDECODE=1 bash "$REAL_HOOKS/../.automation/git-hooks/commit-msg" "$SB/.git/COMMIT_MSG_PROBE") >/dev/null 2>&1
+_ga_got=$(git -C "$SB" interpret-trailers --parse < "$SB/.git/COMMIT_MSG_PROBE" | sed -n 's/^Gates-A: //p')
+if [ "$_ga_got" = "unchecked" ]; then rc=0; else rc=1; fi
+expect_exit 0 "$rc" "Gates-A: files staged after the gate ran make it 'unchecked' (t-0086)"
+
 # C8q — Decision t-0078 (R62): a queue run's standard commit with no task
 #       contract is blocked; with a scoped contract it passes.
 reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
@@ -699,6 +717,19 @@ reset_worktree; clear_state; write_phase_state "commit"; write_full_evidence
 ( cd "$SB" && git checkout -q -b nonconforming-branch-name 2>/dev/null || git checkout -q nonconforming-branch-name )
 rc=$(run_gate "pre-push-gates.sh" "git push origin HEAD")
 expect_exit 2 "$rc" "B1 blocks a push from a non-conforming branch name"
+# C11g — Decision t-0087: git's global options no longer hide the push.
+rc=$(run_gate "pre-push-gates.sh" "git -C $SB push origin HEAD")
+expect_exit 2 "$rc" "B1 also blocks git -C <repo> push (t-0087)"
+# ...nor a commit from the commit gate (the phase is not commit here: it blocks).
+( cd "$SB" && git checkout -q feature/conformance )
+write_phase_state "build"
+rc=$(run_gate "pre-commit-gates.sh" "git -C $SB commit -q -m probe")
+expect_exit 2 "$rc" "the commit gate checks git -C <repo> commit (t-0087)"
+_OUT_FILE="$SB/.last-gate-output"
+printf '{"session_id":"%s","tool_name":"Bash","tool_input":{"command":"cd %s && git -C . commit -m x"}}' "$SID" "$SB" \
+  | (cd "$SB" && bash "$REAL_HOOKS/agent-git-guard.sh") > "$_OUT_FILE" 2>&1; rc=$?
+expect_exit 2 "$rc" "the subagent git guard blocks cd && git -C . commit (t-0087)"
+write_phase_state "commit"
 
 ( cd "$SB" && git checkout -q feature/conformance )
 rc=$(run_gate "pre-push-gates.sh" "git push origin HEAD")

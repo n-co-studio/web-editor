@@ -41,12 +41,27 @@ fi
 
 # --- Self-filter: skip gate chain for non-push commands ---
 # The matcher is now "Bash" (fires on every Bash call); only run B1 when the
-# command is actually a git push. Permissive: cd ... && git push, git -C . push.
+# command is actually a git push. The literal 'git push' anywhere still counts;
+# until Decision t-0087 it was the only test, so `git -C <path> push` skipped
+# this gate. git_invokes also recognises git's global options and cd/&&/;/env
+# prefixes. With the helper missing, any text naming git and push runs it.
 if [ "$_PUSH_HAS_JQ" = true ]; then
+  _PPG_IS_PUSH=false
   case "$PUSH_CMD" in
-    *"git push"*) ;;
-    *) exit 0 ;;
+    *"git push"*) _PPG_IS_PUSH=true ;;
   esac
+  if [ "$_PPG_IS_PUSH" = false ]; then
+    if [ -f "$SCRIPT_DIR/_git-command-helper.sh" ]; then
+      # shellcheck source=_git-command-helper.sh
+      source "$SCRIPT_DIR/_git-command-helper.sh"
+      if git_invokes push "$PUSH_CMD"; then _PPG_IS_PUSH=true; fi
+    else
+      case "$PUSH_CMD" in *git*push*) _PPG_IS_PUSH=true ;; esac
+    fi
+  fi
+  if [ "$_PPG_IS_PUSH" = false ]; then
+    exit 0
+  fi
 fi
 
 FAILED=0

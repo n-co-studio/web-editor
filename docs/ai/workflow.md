@@ -97,6 +97,8 @@ Gates-A: A1-pass A2-pass A3-n/a A4-pass A5-pass A6-n/a
 Gates-B: B1-pass B2-n/a B3-n/a
 ```
 
+`Gates-A` is written by the commit hook, not by you (Decision t-0086). When the commit gate allows a commit it saves what each A check did — `pass`, `n/a` (does not apply here), `skip` (would apply but did not run), `advisory` (ran without blocking power) — and the git `commit-msg` hook writes that line, replacing any you wrote. It says `unchecked` when the staged files changed after the gate ran (a `git add` chained into the commit call, or `git commit -a`). `Gates-B` is still yours to write.
+
 Query session history: `git log --format="%(trailers:key=Session)"` or `git log --format="%(trailers)"` for all trailers.
 
 ### Prototype Sessions — See: `docs/ai/workflow-appendix/session-type-prototype.md`

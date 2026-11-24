@@ -30,6 +30,7 @@
 .claude/.automation/lib/eval-conductor.sh
 .claude/.automation/lib/eval-state-writer.sh
 .claude/.automation/lib/file-lock.sh
+.claude/.automation/lib/gates-a-trailer.sh
 .claude/.automation/lib/group-worktree-sweep.sh
 .claude/.automation/lib/health-check.sh
 .claude/.automation/lib/install-hooks.sh
@@ -85,6 +86,7 @@
 .claude/.automation/tests/sandbox-setup.sh
 .claude/.automation/tests/sandbox-teardown.sh
 .claude/.automation/tests/test-branch-manager.sh
+.claude/.automation/tests/test-brief-contract.sh
 .claude/.automation/tests/test-child-sync.sh
 .claude/.automation/tests/test-close-pipeline.sh
 .claude/.automation/tests/test-commit-msg-scan.sh
@@ -94,6 +96,8 @@
 .claude/.automation/tests/test-eval-model-routing.sh
 .claude/.automation/tests/test-followups.sh
 .claude/.automation/tests/test-gate-bypass.sh
+.claude/.automation/tests/test-gates-a-trailer.sh
+.claude/.automation/tests/test-git-command-match.sh
 .claude/.automation/tests/test-governance-kit.sh
 .claude/.automation/tests/test-group-worktree-lifecycle.sh
 .claude/.automation/tests/test-milestone-plan.sh
@@ -158,6 +162,7 @@
 .claude/hooks/_cleanup-helper.sh
 .claude/hooks/_commit-message-helper.sh
 .claude/hooks/_cross-session-context.sh
+.claude/hooks/_git-command-helper.sh
 .claude/hooks/_governance-helper.sh
 .claude/hooks/_mechanism-helper.sh
 .claude/hooks/_mode-guard-helper.sh
@@ -339,6 +344,8 @@ docs/ai/decisions/t-0082-review-findings.md
 docs/ai/decisions/t-0083-spec-review-before-compile.md
 docs/ai/decisions/t-0084-held-template-sync.md
 docs/ai/decisions/t-0085-governance-kit.md
+docs/ai/decisions/t-0086-hook-gates-line-and-brief-contracts.md
+docs/ai/decisions/t-0087-git-invocation-matching.md
 docs/ai/decisions/t-manifest.txt
 docs/ai/eval/.gitkeep
 docs/ai/eval/_nomenclature.md

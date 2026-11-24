@@ -730,10 +730,13 @@
       "category": "hooks",
       "name": "Commit gates",
       "files": [
-        ".claude/hooks/pre-commit-gates.sh"
+        ".claude/hooks/pre-commit-gates.sh",
+        ".claude/.automation/git-hooks/commit-msg",
+        ".claude/.automation/lib/gates-a-trailer.sh",
+        ".claude/hooks/_git-command-helper.sh"
       ],
       "turn_off_safe": false,
-      "why": "Enforces the A gates."
+      "why": "Enforces the A gates, and writes the Gates-A trailer from what they checked."
     },
     {
       "id": "hook.pre-push-gates",

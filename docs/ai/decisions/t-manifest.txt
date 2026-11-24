@@ -93,3 +93,5 @@ t-0082-review-findings.md
 t-0083-spec-review-before-compile.md
 t-0084-held-template-sync.md
 t-0085-governance-kit.md
+t-0086-hook-gates-line-and-brief-contracts.md
+t-0087-git-invocation-matching.md

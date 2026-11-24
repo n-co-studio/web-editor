@@ -457,7 +457,9 @@ lifecycle: task-scoped
 ```
 ~~~
 
-**For task groups (Narrow path):** Instead of embedding the task contract as a `### Task Contract` section, embed the contract content in each brief's `### Task Group` section as a `Contract:` field:
+**Every queued brief needs `scope_files` (Decision t-0086).** A standard, hotfix or task-group queue run takes its contract from the brief's `### Task Contract` block: the runner writes it before the agent starts, and the agent cannot widen it. `queue-cli.sh approve` refuses a brief whose block is missing or lists no `scope_files`, and the runner blocks one that gets past approval. List every file the run may create or edit; if you cannot, ask the operator before queuing. Task-group briefs therefore carry a `### Task Contract` block too, alongside the `Contract:` field below.
+
+**For task groups (Narrow path):** In addition to the `### Task Contract` block, embed the contract content in each brief's `### Task Group` section as a `Contract:` field:
 
 ```
 ### Task Group

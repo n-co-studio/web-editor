@@ -158,6 +158,28 @@ WARN_REASONS=""
 block() { BLOCKED_REASONS="${BLOCKED_REASONS:+$BLOCKED_REASONS }$1"; FAILED=1; }
 warn()  { WARN_REASONS="${WARN_REASONS:+$WARN_REASONS }$1"; }
 
+# --- Gates-A outcomes (Decision t-0086) ---
+# What each A check did for this commit: pass (ran and passed), n/a (does not
+# apply here), skip (would apply but did not run), advisory (ran without
+# blocking power, or failed where it only advises). _finish saves them for the
+# commit-msg hook, which writes the Gates-A trailer — the agent no longer does.
+GA_A1=n/a GA_A2=n/a GA_A3=n/a GA_A4=pass GA_A5=n/a GA_A6=n/a
+# A3 has three parts; advisory outranks pass, and pass needs one part to run.
+_ga_a3() {
+  case "$1" in
+    advisory) GA_A3=advisory ;;
+    pass) [ "$GA_A3" = advisory ] || GA_A3=pass ;;
+  esac
+}
+_write_gates_a_record() {
+  local tree
+  tree=$(git write-tree 2>/dev/null) || return 0
+  mkdir -p "$REPO_ROOT/.claude/.state" 2>/dev/null || true
+  printf 'tree: %s\nline: A1-%s A2-%s A3-%s A4-%s A5-%s A6-%s\n' "$tree" \
+    "$GA_A1" "$GA_A2" "$GA_A3" "$GA_A4" "$GA_A5" "$GA_A6" \
+    > "$REPO_ROOT/.claude/.state/gates-a-result" 2>/dev/null || true
+}
+
 # --- Read hook payload (PreToolUse JSON on stdin) ---
 INPUT=$(cat)
 
@@ -171,13 +193,28 @@ COMMIT_CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null ||
 # --- Self-filter: skip the full gate chain for non-commit commands ---
 # The matcher is now "Bash" (fires on every Bash call); guard against running
 # A1-A6 + secret scan on unrelated commands like 'ls' or 'echo'.
-# Permissive match: cd ... && git commit, git -C . commit, etc. all pass.
-# Edge case: 'git commit' in a -m message string is accepted as a false positive
-# (cheap to re-run and full message parsing adds fragility).
+# The literal 'git commit' anywhere still counts, so 'git commit' in a -m
+# message stays an accepted false positive. Until Decision t-0087 that was the
+# ONLY test, so `git -C <path> commit` skipped every gate in this file;
+# git_invokes also recognises git's global options, cd/&&/;/env prefixes and a
+# path to git. With the helper missing, any text naming git and commit runs the
+# gates (fail closed).
+_PCG_IS_COMMIT=false
 case "$COMMIT_CMD" in
-  *"git commit"*) ;;
-  *) exit 0 ;;
+  *"git commit"*) _PCG_IS_COMMIT=true ;;
 esac
+if [ "$_PCG_IS_COMMIT" = false ]; then
+  if [ -f "$SCRIPT_DIR/_git-command-helper.sh" ]; then
+    # shellcheck source=_git-command-helper.sh
+    source "$SCRIPT_DIR/_git-command-helper.sh"
+    if git_invokes commit "$COMMIT_CMD"; then _PCG_IS_COMMIT=true; fi
+  else
+    case "$COMMIT_CMD" in *git*commit*) _PCG_IS_COMMIT=true ;; esac
+  fi
+fi
+if [ "$_PCG_IS_COMMIT" = false ]; then
+  exit 0
+fi
 
 # Text the trailer gates search: the command string, plus a -F file when one is
 # readable. Strictly a superset of COMMIT_CMD, so no invocation that works today
@@ -233,6 +270,7 @@ _finish() {
     rm -f "$RECOVER_SIGNAL_FILE" 2>/dev/null || true
     echo "Recovery signal consumed — the commit proceeded." >&2
   fi
+  _write_gates_a_record
   log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "$reason"
   exit 0
 }
@@ -257,6 +295,9 @@ IS_HOTFIX=false
 # Experiment branches skip all state checks (Decision 0006)
 if [ "$IS_EXPERIMENT" = true ]; then
   SKIP_STATE=true
+fi
+if [ "$SKIP_STATE" = true ]; then
+  GA_A2=skip GA_A3=skip GA_A5=skip GA_A6=skip
 fi
 
 # --- Staged files (used by multiple checks) ---
@@ -314,6 +355,7 @@ if [ "$IS_EXPERIMENT" = true ]; then
   if [ "$FAILED" -ne 0 ]; then
     _blocked
   fi
+  GA_A1=skip
   _finish "experiment_branch"
 fi
 
@@ -341,6 +383,7 @@ if [ "$IS_EDITOR_LIVE_LOOP" = true ]; then
   if [ "$FAILED" -ne 0 ]; then
     _blocked
   fi
+  GA_A1=skip GA_A2=skip GA_A3=skip GA_A5=skip GA_A6=skip
   _finish "editor_live_loop"
 fi
 
@@ -775,7 +818,18 @@ if [ "$SKIP_STATE" = false ]; then
         [ -n "$_PCG_CONTRACT_NOW" ] || _PCG_CONTRACT_NOW=unreadable
       fi
       # `unreadable` on either side never counts as a match.
-      if [ "$_PCG_CONTRACT_NOW" != "$_PCG_APPROVED_CONTRACT" ] || [ "$_PCG_CONTRACT_NOW" = unreadable ]; then
+      if { [ "$_PCG_CONTRACT_NOW" != "$_PCG_APPROVED_CONTRACT" ] || [ "$_PCG_CONTRACT_NOW" = unreadable ]; } \
+         && [ "$IS_HEADLESS" = true ] && [ -n "${REPO_OS_AUTOMATION_ENTRY:-}" ]; then
+        # Decision t-0086: in a queue run the runner wrote the contract from the brief.
+        echo "GATE-RECOVERABLE: the task contract is not the one the runner wrote from this queue run's brief (approved $_PCG_APPROVED_CONTRACT, now $_PCG_CONTRACT_NOW). Only the operator changes a queue run's file list. NEXT: Stop and end the session — the entry goes to review, where the operator edits the brief and approves again. (override: REPO_OS_RECOVER=1)" >&2
+        _PCG_CC_ESC="$(get_escalations_dir)"
+        mkdir -p "$_PCG_CC_ESC" 2>/dev/null || true
+        printf 'escalation:\n  id: "esc-contract-%s"\n  queue_entry_id: "%s"\n  type: "governance-block"\n  severity: "blocking"\n  phase_at_exit: "commit"\n  tag_at_exit: "agent"\n  message: "task contract changed after the runner wrote it from the brief"\n  created_at: "%s"\n  resolved: false\n  resolution: ""\n' \
+          "$(date -u +%Y%m%d-%H%M%S)" "$REPO_OS_AUTOMATION_ENTRY" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          > "$_PCG_CC_ESC/esc-contract-$(date -u +%Y%m%d-%H%M%S).yaml" 2>/dev/null || true
+        block "contract_changed_since_approval"
+        log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "contract_changed_since_approval" "$_PCG_APPROVED_CONTRACT:$_PCG_CONTRACT_NOW"
+      elif [ "$_PCG_CONTRACT_NOW" != "$_PCG_APPROVED_CONTRACT" ] || [ "$_PCG_CONTRACT_NOW" = unreadable ]; then
         echo "GATE-RECOVERABLE: the task contract changed since the operator approved the plan (approved $_PCG_APPROVED_CONTRACT, now $_PCG_CONTRACT_NOW). NEXT: Show the operator the amended contract (scope_files and verification) in a plan question and get it re-approved — that re-binds it. The approval resets the phase, so Critic and QA must be earned again. (override: REPO_OS_RECOVER=1)" >&2
         block "contract_changed_since_approval"
         log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "contract_changed_since_approval" "$_PCG_APPROVED_CONTRACT:$_PCG_CONTRACT_NOW"
@@ -800,6 +854,7 @@ if [ "$SKIP_STATE" = false ]; then
         block "A3.3_type_error"
         log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A3.3_type_error"
       else
+        _ga_a3 pass
         log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "A3.3_pass"
       fi
     else
@@ -921,6 +976,7 @@ if [ "$SKIP_STATE" = false ]; then
           # kept only for consistency with the two sibling writes. mkdir -p is
           # what actually keeps the normal path quiet.
           mkdir -p "$STATE_DIR" 2>/dev/null || true
+          _ga_a3 pass
           printf 'timestamp: %s\nsession_id: %s\nresult: PASSED\n' \
             "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_A34_CURRENT_SID" \
             > "$STATE_DIR/functional-verified" 2>/dev/null || true
@@ -941,6 +997,7 @@ if [ "$SKIP_STATE" = false ]; then
           else
             echo "Advisory: A3.4 functional verification — build/pack/test scripts failed (human review backstop active; not blocking in interactive mode). Fix before merging to main." >&2
             printf '%b' "$_A34_FAIL_DETAIL" >&2
+            _ga_a3 advisory
             warn "A3.4_func_verification_advisory"
             log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "warn" "$START_MS" "A3.4_func_verification_advisory"
           fi
@@ -963,6 +1020,7 @@ if [ "$SKIP_STATE" = false ]; then
       *) _A5_SKIP=true ;; # no review phase — skip A5 silently
     esac
   fi
+  if [ "$_A5_SKIP" = false ]; then GA_A5=pass; fi
 
   # cohesion-reviewed: required when A5 applies
   if [ "$_A5_SKIP" = false ] && [ ! -f "$STATE_DIR/cohesion-reviewed" ]; then
@@ -1279,6 +1337,7 @@ if [ "$SKIP_STATE" = false ] && [ -n "$STAGED_FILES" ]; then
   LINES_CHANGED=$(git diff --cached --numstat | awk '{s+=$1+$2} END {print s+0}')
   # Emit scope metric event for trend analysis (even for passing commits)
   log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "allow" "$START_MS" "A2_scope_check" "lines:$LINES_CHANGED"
+  GA_A2=pass
   if [ "$LINES_CHANGED" -gt 100 ]; then
     # Check large-scope flag in plan-approved state file
     LARGE_SCOPE=false
@@ -1304,6 +1363,7 @@ fi
 # ============================================================
 if [ "${SKIP_CONTRACT_CHECK:-0}" = "1" ]; then
   log_override "pre-commit-gates" "SKIP_CONTRACT_CHECK"
+  GA_A6=skip
 fi
 if [ "$SKIP_STATE" = false ] && [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
   # Three-tier resolution: REPO_OS_MODE env var > .claude/repo-mode file > default "child"
@@ -1348,6 +1408,7 @@ if [ "$SKIP_STATE" = false ] && [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
   A6_SESSION_TYPE=$(get_session_type)
   A6_CONTRACT_PATH=""  # set when in_progress contract is found — used by A6.3
   if [ "$A6_SESSION_TYPE" = "taskgroup" ] || [ "$A6_SESSION_TYPE" = "taskgroup-merge" ]; then
+    GA_A6=pass
     CONTRACT_FOUND=false
     # Both roots. An unmatched glob stays literal, so the -f test is what filters
     # a missing directory — no -d guard needed per directory.
@@ -1373,7 +1434,7 @@ if [ "$SKIP_STATE" = false ] && [ "${SKIP_CONTRACT_CHECK:-0}" != "1" ]; then
     # Unanchored, so `-m "Gates-A: …"` on the command line is seen too.
     _A6_CLAIM=$(extract_trailer "$COMMIT_TEXT" 'Gates-A')
     if printf '%s' "$_A6_CLAIM" | grep -qE '(^|[^[:alnum:]])A6-pass([^[:alnum:]]|$)'; then
-      echo "GATE-RECOVERABLE: A6 — the Gates-A trailer says A6-pass, but A6 runs only for task group sessions and this is '${A6_SESSION_TYPE:-unknown}'. NEXT: Write A6-n/a in the Gates-A trailer." >&2
+      echo "GATE-RECOVERABLE: A6 — the Gates-A trailer says A6-pass, but A6 runs only for task group sessions and this is '${A6_SESSION_TYPE:-unknown}'. NEXT: Remove the Gates-A trailer — the commit hook writes it from what the gates checked (Decision t-0086)." >&2
       block "A6_claim_not_run"
       log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "A6_claim_not_run" "session_type:${A6_SESSION_TYPE:-unknown}"
     fi
@@ -1619,6 +1680,11 @@ $_sp_parent
           fi
         done <<< "$SCOPE_PARENTS"
 
+        # A queue run's list is the operator's exact list (Decision t-0086), so
+        # a neighbour of a listed file is out of scope there, not advisory.
+        if [ "$_parent_match" = true ] && [ "$IS_HEADLESS" = true ] && [ -n "${REPO_OS_AUTOMATION_ENTRY:-}" ]; then
+          _parent_match=false
+        fi
         if [ "$_parent_match" = true ]; then
           UNBRIEFED_IN_SCOPE_FILES="${UNBRIEFED_IN_SCOPE_FILES:+$UNBRIEFED_IN_SCOPE_FILES
 }$_staged"
@@ -1630,9 +1696,20 @@ $_sp_parent
 
       # Out-of-scope files: block commit and write escalation
       if [ -n "$OUT_OF_SCOPE_FILES" ]; then
-        _oos_first=$(echo "$OUT_OF_SCOPE_FILES" | head -1)
+        # The name is written into an escalation's quoted YAML (t-0086): drop
+        # quotes, backslashes and control characters so it cannot add keys.
+        _oos_first=$(echo "$OUT_OF_SCOPE_FILES" | head -1 | tr -d '"\\' | tr -d '[:cntrl:]')
         _oos_count=$(echo "$OUT_OF_SCOPE_FILES" | wc -l | tr -d ' ')
-        echo "GATE-RECOVERABLE: Scope — $_oos_count file(s) out of scope: $_oos_first. NEXT: Add files to task contract scope_files or remove from staging." >&2
+        # Decision t-0086: a queue run's contract is the runner's copy of the
+        # brief, so the agent may not widen it. The escalation carries the entry
+        # id, which is what lets the runner move the entry to review.
+        _oos_entry=""
+        if [ "$IS_HEADLESS" = true ] && [ -n "${REPO_OS_AUTOMATION_ENTRY:-}" ]; then
+          _oos_entry="$REPO_OS_AUTOMATION_ENTRY"
+          echo "GATE-RECOVERABLE: Scope — $_oos_count file(s) out of scope: $_oos_first. This queue run's contract comes from its brief, so do not edit .claude/local/task-contract.yaml. NEXT: Unstage the file(s) if they are not needed; otherwise stop and end the session — the entry goes to review, where the operator decides whether to add them to the brief." >&2
+        else
+          echo "GATE-RECOVERABLE: Scope — $_oos_count file(s) out of scope: $_oos_first. NEXT: Add files to task contract scope_files or remove from staging." >&2
+        fi
         block "scope_out_of_scope"
         log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "scope_out_of_scope" "count:$_oos_count" "$_oos_first"
 
@@ -1643,7 +1720,7 @@ $_sp_parent
         {
           printf 'escalation:\n'
           printf '  id: "%s"\n' "$_esc_id"
-          printf '  queue_entry_id: ""\n'
+          printf '  queue_entry_id: "%s"\n' "$_oos_entry"
           printf '  type: "scope-deviation"\n'
           printf '  severity: "blocking"\n'
           printf '  phase_at_exit: "commit"\n'
@@ -1662,7 +1739,7 @@ $_sp_parent
 
       # Unbriefed-in-scope files: advisory escalation
       if [ -n "$UNBRIEFED_IN_SCOPE_FILES" ]; then
-        _uis_first=$(echo "$UNBRIEFED_IN_SCOPE_FILES" | head -1)
+        _uis_first=$(echo "$UNBRIEFED_IN_SCOPE_FILES" | head -1 | tr -d '"\\' | tr -d '[:cntrl:]')
         _uis_count=$(echo "$UNBRIEFED_IN_SCOPE_FILES" | wc -l | tr -d ' ')
         echo "Advisory: $_uis_count file(s) unbriefed-in-scope — in related directories but not in task contract scope_files: $_uis_first" >&2
         warn "scope_unbriefed_in_scope"
@@ -1710,9 +1787,11 @@ $_sp_parent
   if [ -z "$SCOPE_FILES" ] && [ "$IS_HEADLESS" = true ] && [ -n "${REPO_OS_AUTOMATION_ENTRY:-}" ]; then
     _SCM_STYPE=$(get_session_type 2>/dev/null || echo "unknown")
     _SCM_PHASE=$(get_phase 2>/dev/null || echo "")
-    if [ "$_SCM_STYPE" = "standard" ] && [ "$_SCM_PHASE" != "close" ]; then
+    # t-0086: every session type whose queue runs take a contract from the brief.
+    case "$_SCM_STYPE" in standard|hotfix|taskgroup) _scm_needs=true ;; *) _scm_needs=false ;; esac
+    if [ "$_scm_needs" = true ] && [ "$_SCM_PHASE" != "close" ]; then
       if [ -f "$CONTRACT_FILE" ]; then _scm_why="lists no scope_files (read as '  - path' items under scope_files:)"; else _scm_why="is missing"; fi
-      echo "GATE-RECOVERABLE: Scope — queue run (entry $REPO_OS_AUTOMATION_ENTRY) but .claude/local/task-contract.yaml $_scm_why, so scope and completeness cannot be checked. NEXT: Write the contract with scope_files and verification items (Prompt B), have the Critic score it, then commit." >&2
+      echo "GATE-RECOVERABLE: Scope — queue run (entry $REPO_OS_AUTOMATION_ENTRY) but .claude/local/task-contract.yaml $_scm_why, so scope and completeness cannot be checked. The runner writes a queue run's contract from its brief (Decision t-0086); do not write one yourself. NEXT: Stop and end the session — the operator adds scope_files to the brief and approves again." >&2
       block "scope_contract_missing"
       log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "block" "$START_MS" "scope_contract_missing" "entry:$REPO_OS_AUTOMATION_ENTRY" "$_scm_why"
     fi
@@ -1977,6 +2056,7 @@ _grep_or_warn() {
 if [ -n "$STAGED_FILES" ] && [ -d "$DECISIONS_DIR" ]; then
   A1_BLOCKING=false
   [ -f "$DECISIONS_DIR/.a1-triggers-enforced" ] && A1_BLOCKING=true
+  if [ "$A1_BLOCKING" = true ]; then GA_A1=pass; else GA_A1=advisory; fi
 
   if [ "$A1_BLOCKING" = false ]; then
     warn "A1_advisory_mode"
@@ -2315,6 +2395,9 @@ if [ "$SKIP_STATE" = false ] && [ -n "$STAGED_FILES" ]; then
   # --- Stage 1: Tooling detection ---
   A3_HAS_TOOLING=false
   check_design_token_tooling && A3_HAS_TOOLING=true
+  # Nothing staged still leaves A3 n/a; something staged that no A3 part ran on is a skip.
+  [ "$GA_A3" = n/a ] && GA_A3=skip
+  [ "$A3_HAS_TOOLING" = true ] && _ga_a3 pass
 
   if [ "$A3_HAS_TOOLING" = false ]; then
     # Neither ESLint token rules nor .tokens-manifest.json present — inert / advisory
@@ -2352,6 +2435,7 @@ if [ "$SKIP_STATE" = false ] && [ -n "$STAGED_FILES" ]; then
       # No ESLint — advisory only
       echo "A3 ADVISORY: Possible hardcoded design values detected (grep fallback — install ESLint token rules to enforce blocking):" >&2
       printf '%s\n' "$A3_GREP_FINDINGS" | head -5 >&2
+      _ga_a3 advisory
       warn "A3_grep_advisory"
       log_hook_event "pre-commit-gates" "PreToolUse" "Bash" "warn" "$START_MS" "A3_grep_advisory"
     fi

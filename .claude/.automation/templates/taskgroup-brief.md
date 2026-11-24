@@ -16,6 +16,7 @@ This is a headless automation session (runner-invoked via `claude -p`).
 - `WebSearch` and `WebFetch` are available for documentation lookup and research
 - Destructive git operations (`git reset --hard`, `git push --force`) are mechanically blocked
 - Plan-approved state has been pre-written by the runner (no operator approval prompt needed)
+- Your task contract, `.claude/local/task-contract.yaml`, was written by the runner from the brief's `### Task Contract` and is bound to this run (Decision t-0086). The operator approved that file list. Do not write, edit or delete the contract — the commit gate refuses a commit once it changes. If the work needs a file the contract does not list, do not stage it: stop and end the session, and the entry goes to review for the operator to decide
 - All commits MUST include an `Automation: runner` trailer
 - The operator may send notes mid-session; they arrive as "Operator note" context. Follow them within the brief's scope; if one conflicts with the brief or a gate, escalate rather than guess
 
@@ -85,13 +86,11 @@ For parallel task groups: restrict edits to files within declared boundaries. Sh
 
    Session: <session_number>
    Decisions: {decision_list}
-   Gates-A: A1-pass A2-pass A3-<result> A4-pass A5-<result> A6-pass
    Gates-B: B1-pass B2-<result> B3-<result>
    Automation: runner
    ```
-   **IMPORTANT:** Every commit MUST include `Gates-A:` and `Gates-B:` trailers — including docs-only or session-log-only commits. For commits where gates were not exercised (no code changes), use `n/a`:
+   **Do not write a `Gates-A:` trailer.** The commit hook adds it from what the gates actually checked, replacing any you write (Decision t-0086). Every commit MUST still include a `Gates-B:` trailer — including docs-only or session-log-only commits. Where the push gates were not exercised, use `n/a`:
    ```
-   Gates-A: A1-pass A2-n/a A3-n/a A4-n/a A5-n/a A6-n/a
    Gates-B: B1-n/a B2-n/a B3-n/a
    ```
 3. The `pre-commit-gates.sh` hook will run gates A1–A6 automatically. Resolve any failures before retrying.
